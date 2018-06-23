@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>pulsifer.ca</title>
+    <link>https://pulsifer.ca/</link>
+    <description>Recent content on pulsifer.ca</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Sun, 31 Dec 2017 00:00:00 +0000</lastBuildDate>
+    
+	<atom:link href="https://pulsifer.ca/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>Blog on Kubernetes with Hugo</title>
+      <link>https://pulsifer.ca/post/hugoblog/</link>
+      <pubDate>Sun, 31 Dec 2017 00:00:00 +0000</pubDate>
+      
+      <guid>https://pulsifer.ca/post/hugoblog/</guid>
+      <description>Hugo FROMalpine:latestLABEL maintainer=&amp;#34;jonathan@pulsifer.ca&amp;#34;ENVHUGO_VERSION 0.29RUN addgroup -S hugo &amp;amp;&amp;amp; adduser -S -g hugo hugo ADDhttps://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_${HUGO_VERSION}_Linux-64bit.tar.gz /tmpADDhttps://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_${HUGO_VERSION}_checksums.txt /tmpRUN apk upgrade &amp;amp;&amp;amp; apk add --no-cache tini \  &amp;amp;&amp;amp; cd /tmp \  &amp;amp;&amp;amp; grep hugo_${HUGO_VERSION}_Linux-64bit.tar.gz hugo_${HUGO_VERSION}_checksums.txt | sha256sum -c - \  &amp;amp;&amp;amp; tar -xvf /tmp/hugo_${HUGO_VERSION}_Linux-64bit.tar.gz -C /tmp/ \  &amp;amp;&amp;amp; mv -v /tmp/hugo /usr/bin/hugo \  &amp;amp;&amp;amp; chmod +x /usr/bin/hugo \  &amp;amp;&amp;amp; rm -vf /tmp/hugo_${HUGO_VERSION}_Linux-64bit.tar.gz \  &amp;amp;&amp;amp; mkdir -vp /var/www \  &amp;amp;&amp;amp; chown -R hugo:hugo /var/wwwUSER hugoENTRYPOINT[&amp;#34;/sbin/tini&amp;#34;, &amp;#34;--&amp;#34;]CMD[&amp;#34;/usr/bin/hugo&amp;#34;, &amp;#34;server&amp;#34;, &amp;#34;--disableLiveReload&amp;#34;, &amp;#34;--watch=false&amp;#34;, &amp;#34;--bind=0.</description>
+    </item>
+    
+  </channel>
+</rss>
