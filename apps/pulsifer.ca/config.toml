@@ -13,7 +13,7 @@ publishDir = "docs"
     githubUsername = "jonpulsifer"
     accent = "#3371e3"
     showBorder = true
-    profilePic = "https://en.gravatar.com/userimage/136908375/955c6f10d657a65f5af05fe36d7e8f5c.jpg?size=500"
+    profilePic = "//gravatar.com/avatar/74de7279f174084ab1d4616e507ba90e?s=500"
     backgroundColor = "#e7e7e7"
     font = "Lato" # should match the name on Google Fonts!
     highlight = true
