@@ -9,11 +9,11 @@ googleAnalytics = "UA-73387370-3"
 publishDir = "docs"
 [params]
     author = "Jonathan Pulsifer"
-    description = "hi, i'm <a href=\"https://twitter.com/JonPulsifer\">@jonpulsifer</a> and i push str8 to master"
+    description = "hi, i'm <a href=\"https://twitter.com/JonPulsifer\">@jonpulsifer</a>"
     githubUsername = "jonpulsifer"
     accent = "#3371e3"
     showBorder = true
-    profilePic = "https://gravatar.com/avatar/74de7279f174084ab1d4616e507ba90e?s=500"
+    profilePic = "https://gravatar.com/avatar/74de7279f174084ab1d4616e507ba90e?s=400"
     backgroundColor = "#e7e7e7"
     font = "Lato" # should match the name on Google Fonts!
     highlight = true
