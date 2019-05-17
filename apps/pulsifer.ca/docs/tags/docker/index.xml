@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Docker on pulsifer.ca</title>
+    <title>docker on pulsifer.ca</title>
     <link>https://pulsifer.ca/tags/docker/</link>
-    <description>Recent content in Docker on pulsifer.ca</description>
+    <description>Recent content in docker on pulsifer.ca</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Sun, 31 Dec 2017 00:00:00 +0000</lastBuildDate>

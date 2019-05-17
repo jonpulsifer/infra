@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Blog on pulsifer.ca</title>
+    <title>blog on pulsifer.ca</title>
     <link>https://pulsifer.ca/tags/blog/</link>
-    <description>Recent content in Blog on pulsifer.ca</description>
+    <description>Recent content in blog on pulsifer.ca</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Sun, 31 Dec 2017 00:00:00 +0000</lastBuildDate>

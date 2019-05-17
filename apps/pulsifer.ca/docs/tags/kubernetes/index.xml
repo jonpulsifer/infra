@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Kubernetes on pulsifer.ca</title>
+    <title>kubernetes on pulsifer.ca</title>
     <link>https://pulsifer.ca/tags/kubernetes/</link>
-    <description>Recent content in Kubernetes on pulsifer.ca</description>
+    <description>Recent content in kubernetes on pulsifer.ca</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Sun, 31 Dec 2017 00:00:00 +0000</lastBuildDate>
