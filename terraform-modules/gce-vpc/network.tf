@@ -12,7 +12,6 @@ resource "google_compute_subnetwork" "vms" {
   network                  = google_compute_network.network.self_link
   private_ip_google_access = var.private_api_access
 
-  enable_flow_logs = var.enable_flow_logs
   # log_config {
   #   aggregation_interval = "INTERVAL_10_MIN"
   #   flow_sampling        = 0.5

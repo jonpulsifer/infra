@@ -12,13 +12,7 @@ variable "vm_cidr" {
 }
 
 variable "private_api_access" {
+  type        = bool
   description = "Access to Google APIs over RFC1918 networks"
-  type        = bool
   default     = true
-}
-
-variable "enable_flow_logs" {
-  description = "Collect flow logs on the VPC"
-  type        = bool
-  default     = false
 }
