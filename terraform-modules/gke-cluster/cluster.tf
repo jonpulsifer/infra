@@ -28,7 +28,6 @@ resource "google_container_cluster" "lab" {
   }
 
   # use the latest GKE release for the master and worker nodes and set the release channel
-  min_master_version = var.kubernetes_version
   release_channel {
     channel = var.release_channel
   }
