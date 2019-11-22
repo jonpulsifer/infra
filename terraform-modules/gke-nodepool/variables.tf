@@ -52,12 +52,12 @@ variable "metadata" {
 }
 
 variable "taints" {
-  type    = "list"
+  type    = list
   default = []
 }
 
 variable "labels" {
-  type    = "map"
+  type    = map
   default = {}
 }
 variable "shielded" {

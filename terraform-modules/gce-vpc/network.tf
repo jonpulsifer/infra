@@ -6,7 +6,7 @@ resource "google_compute_network" "network" {
 }
 
 resource "google_compute_subnetwork" "vms" {
-  provider                 = "google-beta"
+  provider                 = google-beta
   name                     = "vms"
   ip_cidr_range            = var.vm_cidr
   network                  = google_compute_network.network.self_link

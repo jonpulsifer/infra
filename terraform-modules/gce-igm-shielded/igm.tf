@@ -4,10 +4,10 @@ data "google_compute_image" "trusted-image" {
 }
 
 resource "google_compute_instance_template" "shielded_vm" {
-  provider = "google-beta"
+  provider = google-beta
 
   depends_on = [
-    "google_kms_crypto_key.igm",
+    google_kms_crypto_key.igm,
   ]
 
   name_prefix = var.name
@@ -77,7 +77,7 @@ resource "google_compute_instance_group_manager" "igm" {
   name = "${var.name}-igm"
 
   depends_on = [
-    "google_compute_instance_template.shielded_vm",
+    google_compute_instance_template.shielded_vm,
   ]
 
   instance_template  = google_compute_instance_template.shielded_vm.self_link

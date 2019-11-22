@@ -2,15 +2,15 @@
 resource "google_container_cluster" "lab" {
   # https://github.com/hashicorp/terraform/issues/18682
   # provider = "${var.beta ? "google-beta" : "google" }"
-  provider = "google-beta"
+  provider = google-beta
 
   /* GKE requires the API, a  network, subnet, and service account */
   depends_on = [
-    "google_project_service.container",
-    "google_service_account.nodes",
-    "google_compute_network.gke",
-    "google_compute_subnetwork.nodes",
-    "google_kms_crypto_key.gke",
+    google_project_service.container,
+    google_service_account.nodes,
+    google_compute_network.gke,
+    google_compute_subnetwork.nodes,
+    google_kms_crypto_key.gke,
   ]
 
   # GKE Cluster name

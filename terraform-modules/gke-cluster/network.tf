@@ -4,7 +4,7 @@ resource "google_compute_network" "gke" {
 }
 
 resource "google_compute_subnetwork" "nodes" {
-  depends_on               = ["google_compute_network.gke"]
+  depends_on               = [google_compute_network.gke]
   name                     = "${var.name}-nodes"
   network                  = google_compute_network.gke.self_link
   ip_cidr_range            = var.network_config["node_cidr"]
