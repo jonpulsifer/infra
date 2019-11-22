@@ -117,11 +117,6 @@ resource "google_container_cluster" "lab" {
       disabled = var.google_cloud_load_balancer ? false : true
     }
 
-    # explicitly disable kubernetes dashboard
-    kubernetes_dashboard {
-      disabled = true
-    }
-
     horizontal_pod_autoscaling {
       disabled = var.hpa ? false : true
     }
