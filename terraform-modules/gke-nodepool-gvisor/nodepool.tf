@@ -1,7 +1,7 @@
 resource "google_container_node_pool" "lab" {
   # https://github.com/hashicorp/terraform/issues/18682
   # provider = "${var.beta ? "google-beta" : "google" }"
-  provider = "google-beta"
+  provider = google-beta
 
   count      = var.online ? 1 : 0
   name       = var.name

@@ -43,11 +43,11 @@ variable "node_metadata" {
 }
 
 variable "taints" {
-  type    = "list"
+  type    = list
   default = []
 }
 
 variable "labels" {
-  type    = "map"
+  type    = map
   default = {}
 }

@@ -33,10 +33,3 @@ resource "google_project_service" "resourceviews" {
   depends_on                 = [google_project_service.container]
   disable_dependent_services = true
 }
-
-/* idk if this is a thing yet */
-resource "google_project_service" "bigquery-json" {
-  service                    = "bigquery-json.googleapis.com"
-  depends_on                 = [google_project_service.container]
-  disable_dependent_services = true
-}

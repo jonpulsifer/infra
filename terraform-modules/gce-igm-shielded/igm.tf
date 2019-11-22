@@ -80,9 +80,16 @@ resource "google_compute_instance_group_manager" "igm" {
     google_compute_instance_template.shielded_vm,
   ]
 
-  instance_template  = google_compute_instance_template.shielded_vm.self_link
+  version {
+    name              = var.name
+    instance_template = google_compute_instance_template.shielded_vm.self_link
+  }
+
   base_instance_name = var.name
   target_size        = var.target_size
   target_pools       = var.enable_lb ? google_compute_target_pool.lb[*].self_link : []
-  update_strategy    = "RESTART"
+  update_policy {
+    minimal_action = "REPLACE"
+    type           = "PROACTIVE"
+  }
 }
