@@ -40,7 +40,7 @@ variable "node_metadata" {
   default     = "GKE_METADATA_SERVER"
 }
 
-variable "metadata" {
+variable "metadata_cos" {
   description = "GCE instance metadata pairs assigned to the instances in the group"
   type        = map
   default = {
@@ -51,7 +51,23 @@ variable "metadata" {
   }
 }
 
+variable "metadata_ubuntu" {
+  description = "GCE instance metadata pairs assigned to the instances in the group"
+  type        = map
+  default = {
+    disable-legacy-endpoints = "true"
+    enable-guest-attributes  = "true"
+    enable-os-inventory      = "true"
+    # enable-oslogin           = "false"
+  }
+}
+
 variable "taints" {
+  type    = list
+  default = []
+}
+
+variable "tags" {
   type    = list
   default = []
 }
@@ -60,6 +76,7 @@ variable "labels" {
   type    = map
   default = {}
 }
+
 variable "shielded" {
   description = "Forces the nodes to use shielded (uefi) images and enables secure boot"
   type        = bool

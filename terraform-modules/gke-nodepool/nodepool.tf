@@ -26,7 +26,7 @@ resource "google_container_node_pool" "lab" {
       node_metadata = var.node_metadata
     }
 
-    metadata = var.metadata
+    metadata = (var.image_type == "UBUNTU" ? var.metadata_ubuntu : var.metadata_cos)
 
     shielded_instance_config {
       enable_secure_boot          = var.shielded
