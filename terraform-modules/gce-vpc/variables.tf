@@ -5,6 +5,12 @@ variable "name" {
   default     = "lab"
 }
 
+variable "enable_logging" {
+  type        = bool
+  description = "Enables flow logs (INTERVAL_10_MIN, 0.5 sample, INCLUDE_ALL_METADATA)"
+  default     = false
+}
+
 variable "vm_cidr" {
   type        = string
   description = "The default CIDR for the cloudlab VMs"

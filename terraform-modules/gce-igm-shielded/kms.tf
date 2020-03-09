@@ -1,11 +1,13 @@
 resource "google_kms_key_ring" "igm" {
-  name     = var.name
-  location = data.google_client_config.current.region
+  for_each = var.encrypt_disk ? toset([var.name]) : []
+  name     = each.key
+  location = var.location
 }
 
 resource "google_kms_crypto_key" "igm" {
-  name     = var.name
-  key_ring = google_kms_key_ring.igm.self_link
+  for_each = var.encrypt_disk ? toset([var.name]) : []
+  name     = each.key
+  key_ring = google_kms_key_ring.igm[each.key].self_link
 
   // 30 days
   rotation_period = "2592000s"
@@ -16,10 +18,11 @@ resource "google_kms_crypto_key" "igm" {
 }
 
 resource "google_kms_key_ring_iam_binding" "igm" {
-  key_ring_id = google_kms_key_ring.igm.id
+  for_each    = var.encrypt_disk ? toset([var.name]) : []
+  key_ring_id = google_kms_key_ring.igm[each.key].id
   role        = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
   members = [
-    "serviceAccount:${google_service_account.igm.email}",
-    "serviceAccount:service-${data.google_project.current.number}@compute-system.iam.gserviceaccount.com",
+    format("serviceAccount:%s", google_service_account.igm.email),
+    format("serviceAccount:service-%s@compute-system.iam.gserviceaccount.com", data.google_project.current.number)
   ]
 }

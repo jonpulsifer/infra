@@ -12,11 +12,14 @@ resource "google_compute_subnetwork" "vms" {
   network                  = google_compute_network.network.self_link
   private_ip_google_access = var.private_api_access
 
-  # log_config {
-  #   aggregation_interval = "INTERVAL_10_MIN"
-  #   flow_sampling        = 0.5
-  #   metadata             = "INCLUDE_ALL_METADATA"
-  # }
+  dynamic "log_config" {
+    for_each = var.enable_logging ? [1] : []
+    content {
+      aggregation_interval = "INTERVAL_10_MIN"
+      flow_sampling        = 0.5
+      metadata             = "INCLUDE_ALL_METADATA"
+    }
+  }
 }
 
 output "network" {

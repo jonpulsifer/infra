@@ -1,6 +1,10 @@
-data "google_client_config" "current" {}
+locals {
+  device_name = var.encrypt_disk ? "encrypted-boot" : "boot"
+  project     = var.project
+}
+
 data "google_project" "current" {
-  project_id = data.google_client_config.current.project
+  project_id = local.project
 }
 
 variable "name" {
@@ -9,16 +13,32 @@ variable "name" {
   default     = "lab"
 }
 
-variable "image_family" {
+variable "project" {
   type        = string
-  description = "GCE Image Family e.g. cos-beta, ubuntu-1804-lts"
-  default     = "cos-beta"
+  description = "The project that will contain the resources"
+  default     = ""
 }
 
-variable "image_project" {
+variable "location" {
   type        = string
-  description = "GCE Image Project e.g. gce-uefi-images, trusted-builds"
-  default     = "gce-uefi-images"
+  description = "The location, usually a region e.g. northamerica-northeast1"
+  default     = ""
+}
+
+variable "external_ip" {
+  type        = bool
+  description = "Create an external IP address for the instance"
+  default     = false
+}
+
+
+variable "image" {
+  type        = map(string)
+  description = "Map that holds the GCE image family and project"
+  default = {
+    project = "gce-uefi-images"
+    family  = "cos-beta"
+  }
 }
 
 variable "machine_type" {
@@ -75,4 +95,16 @@ variable "target_pools" {
   type        = list
   description = "List of the target pools this igm belongs to"
   default     = []
+}
+
+variable "encrypt_disk" {
+  type        = bool
+  description = "Whether or not to encrypt the disk with KMS"
+  default     = true
+}
+
+variable "enable_stackdriver" {
+  type        = bool
+  description = "Enable Stackdriver logging, monitoring, etc for the instance service account"
+  default     = true
 }
