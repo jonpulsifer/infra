@@ -1,8 +1,19 @@
-data "google_client_config" "current" {}
 variable "name" {
   type        = string
   description = "The name for the network"
-  default     = "lab"
+  default     = "vpc"
+}
+
+variable "subnet_name" {
+  type        = string
+  description = "The name for the subnetwork"
+  default     = "subnet"
+}
+
+variable "auto_create_subnetworks" {
+  type        = bool
+  description = "Enables the automatic creation of default subnets, the easy button in a pinch"
+  default     = false
 }
 
 variable "enable_logging" {
@@ -11,9 +22,9 @@ variable "enable_logging" {
   default     = false
 }
 
-variable "vm_cidr" {
+variable "ip_cidr_range" {
   type        = string
-  description = "The default CIDR for the cloudlab VMs"
+  description = "The default CIDR for the subnet"
   default     = "10.13.37.0/28"
 }
 
