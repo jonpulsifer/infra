@@ -1,14 +1,12 @@
 resource "google_compute_network" "network" {
-  name = var.name
-
-  # we dont like defaults around here
-  auto_create_subnetworks = false
+  name                    = var.name
+  auto_create_subnetworks = var.auto_create_subnetworks
 }
 
-resource "google_compute_subnetwork" "vms" {
+resource "google_compute_subnetwork" "subnet" {
   provider                 = google-beta
-  name                     = "vms"
-  ip_cidr_range            = var.vm_cidr
+  name                     = var.subnet_name
+  ip_cidr_range            = var.ip_cidr_range
   network                  = google_compute_network.network.self_link
   private_ip_google_access = var.private_api_access
 
@@ -27,12 +25,12 @@ output "network" {
 }
 
 output "subnet" {
-  value = google_compute_subnetwork.vms.self_link
+  value = google_compute_subnetwork.subnet.self_link
 }
 
 output "self_links" {
   value = {
     "network" = google_compute_network.network.self_link
-    "subnet"  = google_compute_subnetwork.vms.self_link
+    "subnet"  = google_compute_subnetwork.subnet.self_link
   }
 }
