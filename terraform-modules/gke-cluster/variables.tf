@@ -1,6 +1,14 @@
-data "google_client_config" "current" {}
+locals {
+  master_cidr = coalesce(var.network_config.master_cidr, null)
+}
+
 data "google_project" "current" {
-  project_id = data.google_client_config.current.project
+  project_id = var.project
+}
+
+variable "project" {
+  description = "The GCP project to use"
+  type        = string
 }
 
 variable "name" {
@@ -12,7 +20,6 @@ variable "name" {
 variable "location" {
   description = "Location of the cluster (region or zone)"
   type        = string
-  default     = ""
 }
 
 variable "network_policy" {

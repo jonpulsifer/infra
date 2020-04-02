@@ -60,7 +60,7 @@ resource "google_container_cluster" "lab" {
   private_cluster_config {
     enable_private_endpoint = var.network_config["private_master"]
     enable_private_nodes    = var.network_config["private_nodes"]
-    master_ipv4_cidr_block  = var.network_config["private_master"] == true ? var.network_config["master_cidr"] : ""
+    master_ipv4_cidr_block  = local.master_cidr
   }
 
   master_authorized_networks_config {
@@ -109,7 +109,7 @@ resource "google_container_cluster" "lab" {
 
   /* workload identity */
   workload_identity_config {
-    identity_namespace = join(".", [data.google_client_config.current.project, "svc.id.goog"])
+    identity_namespace = join(".", [var.project, "svc.id.goog"])
   }
 
   addons_config {

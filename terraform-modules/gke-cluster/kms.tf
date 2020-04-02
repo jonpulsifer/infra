@@ -1,6 +1,6 @@
 resource "google_kms_key_ring" "gke" {
   name     = var.name
-  location = data.google_client_config.current.region
+  location = var.location
 }
 
 resource "google_kms_crypto_key" "gke" {

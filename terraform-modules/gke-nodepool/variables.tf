@@ -1,5 +1,10 @@
 variable "name" {
+  type    = string
   default = "labpool"
+}
+
+variable "location" {
+  type = string
 }
 
 variable "node_count" {
@@ -7,6 +12,7 @@ variable "node_count" {
 }
 
 variable "image_type" {
+  type    = string
   default = "COS_CONTAINERD"
 }
 
@@ -16,21 +22,26 @@ variable "disk_size_gb" {
 
 variable "kubernetes_version" {
   default = "1.11.6-gke.0"
+  type    = string
 }
 
 variable "cluster" {
+  type    = string
   default = "yourcluster"
 }
 
 variable "machine_type" {
+  type    = string
   default = "custom-1-1"
 }
 
 variable "service_account" {
+  type    = string
   default = "foo@your-project.iam.gserviceaccount.com"
 }
 
 variable "preemptible" {
+  type    = bool
   default = true
 }
 

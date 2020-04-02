@@ -5,6 +5,7 @@ resource "google_container_node_pool" "lab" {
 
   name       = var.name
   cluster    = var.cluster
+  location   = var.location
   node_count = var.node_count
 
   management {
@@ -12,7 +13,7 @@ resource "google_container_node_pool" "lab" {
     auto_repair  = true
   }
 
-  max_pods_per_node = 32
+  max_pods_per_node = 64
 
   node_config {
     image_type   = var.image_type
@@ -26,7 +27,7 @@ resource "google_container_node_pool" "lab" {
       node_metadata = var.node_metadata
     }
 
-    metadata = (var.image_type == "UBUNTU" ? var.metadata_ubuntu : var.metadata_cos)
+    metadata = (var.image_type == "UBUNTU_CONTAINERD" ? var.metadata_ubuntu : var.metadata_cos)
 
     shielded_instance_config {
       enable_secure_boot          = var.shielded
