@@ -1,6 +1,7 @@
 locals {
   device_name = var.encrypt_disk ? "encrypted-boot" : "boot"
   project     = var.project
+  cloudlab    = var.cloudlab
 }
 
 data "google_project" "current" {
@@ -30,7 +31,6 @@ variable "external_ip" {
   description = "Create an external IP address for the instance"
   default     = false
 }
-
 
 variable "image" {
   type        = map(string)
@@ -106,5 +106,11 @@ variable "encrypt_disk" {
 variable "enable_stackdriver" {
   type        = bool
   description = "Enable Stackdriver logging, monitoring, etc for the instance service account"
+  default     = true
+}
+
+variable "cloudlab" {
+  type        = bool
+  description = "Enable access to the gs://cloud-lab bucket. Caller must have permission to set the IAM policy"
   default     = true
 }

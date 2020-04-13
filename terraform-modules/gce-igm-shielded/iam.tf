@@ -17,9 +17,17 @@ resource "google_project_iam_member" "sd" {
 }
 
 output "service_account" {
-  value = google_service_account.igm.email
+  value = {
+    email = google_service_account.igm.email,
+    name  = google_service_account.igm.name
+  }
 }
 
-output "service_account_name" {
-  value = google_service_account.igm.name
+resource "google_storage_bucket_iam_member" "cloudlab" {
+  for_each = var.cloudlab ? toset([
+    format("serviceAccount:%s", google_service_account.igm.email),
+  ]) : []
+  bucket = "cloud-lab"
+  role   = "roles/storage.objectViewer"
+  member = each.key
 }
