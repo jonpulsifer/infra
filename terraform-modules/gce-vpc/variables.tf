@@ -33,3 +33,9 @@ variable "private_api_access" {
   description = "Access to Google APIs over RFC1918 networks"
   default     = true
 }
+
+variable "external_ssh" {
+  type        = bool
+  description = "Enable the IAP ssh firewall rules, if true, allow all inbound SSH"
+  default     = false
+}
