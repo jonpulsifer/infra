@@ -120,3 +120,9 @@ variable "can_ip_forward" {
   description = "Whether or not the instance can forward packets (eg wireguard needs this)"
   default     = false
 }
+
+variable "enable_secure_boot" {
+  type        = bool
+  description = "Enable UEFI etc"
+  default     = true
+}
