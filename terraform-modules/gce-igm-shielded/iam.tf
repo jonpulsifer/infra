@@ -24,10 +24,11 @@ output "service_account" {
 }
 
 resource "google_storage_bucket_iam_member" "cloudlab" {
-  for_each = var.cloudlab ? toset([
-    format("serviceAccount:%s", google_service_account.igm.email),
-  ]) : []
-  bucket = "cloud-lab"
-  role   = "roles/storage.objectViewer"
-  member = each.key
+  for_each = var.cloudlab ? toset(["cheatcodes"]) : []
+  bucket   = "cloud-lab"
+  role     = "roles/storage.objectViewer"
+  member   = format("serviceAccount:%s", google_service_account.igm.email)
+  depends_on = [
+    google_service_account.igm
+  ]
 }
