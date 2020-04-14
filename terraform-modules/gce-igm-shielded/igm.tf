@@ -65,10 +65,6 @@ resource "google_compute_instance_template" "shielded_vm" {
   metadata = {
     user-data                = var.cloud_init
     disable-legacy-endpoints = "TRUE"
-    enable-oslogin           = "TRUE"
-    enable-oslogin-2fa       = "TRUE"
-    enable-osconfig          = "TRUE"
-    enable-guest-attributes  = "TRUE"
   }
 
   service_account {
