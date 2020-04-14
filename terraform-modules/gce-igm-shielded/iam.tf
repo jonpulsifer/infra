@@ -10,7 +10,7 @@ resource "google_project_iam_member" "sd" {
     "roles/clouddebugger.agent",
     "roles/cloudprofiler.agent",
     "roles/errorreporting.writer",
-    "roles/monitoring.metricWriter",
+    # "roles/monitoring.metricWriter",
   ]) : []
   role   = format("%s", each.key)
   member = format("serviceAccount:%s", google_service_account.igm.email)
