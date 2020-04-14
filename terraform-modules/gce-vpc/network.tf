@@ -21,16 +21,14 @@ resource "google_compute_subnetwork" "subnet" {
 }
 
 output "network" {
-  value = google_compute_network.network.name
-}
-
-output "subnet" {
-  value = google_compute_subnetwork.subnet.self_link
-}
-
-output "self_links" {
   value = {
-    "network" = google_compute_network.network.self_link
-    "subnet"  = google_compute_subnetwork.subnet.self_link
+    "name"      = google_compute_network.network.name
+    "self_link" = google_compute_network.network.self_link
+  }
+}
+output "subnet" {
+  value = {
+    "name"      = google_compute_subnetwork.subnet.name
+    "self_link" = google_compute_subnetwork.subnet.self_link
   }
 }
