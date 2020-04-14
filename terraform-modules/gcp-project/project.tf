@@ -12,7 +12,7 @@ resource "google_project" "project" {
 }
 
 resource "google_resource_manager_lien" "project_deletion" {
-  parent       = format("projects/%s", google_project.project.id)
+  parent       = google_project.project.id
   restrictions = ["resourcemanager.projects.delete"]
   origin       = "managed-by-terraform"
   reason       = "This project is managed by terraform"
