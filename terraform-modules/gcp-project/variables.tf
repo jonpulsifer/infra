@@ -1,7 +1,7 @@
 variable "project_id" {
   type        = string
   description = "Required. The project id, 6 to 30 lowercase letters, digits, or hyphens."
-  default     = null
+  default     = ""
 }
 
 variable "folder_id" {
@@ -13,18 +13,18 @@ variable "folder_id" {
 variable "billing_account" {
   type        = string
   description = "The billing account for the project"
-  default     = null
+  default     = ""
 }
 
 variable "labels" {
-  type        = set(any)
+  default     = {}
   description = "The labels for the project"
 }
 
 variable "name" {
   type        = string
   description = "Optional. The name for the project (human readable)"
-  default     = null
+  default     = ""
 }
 
 variable "compute" {
