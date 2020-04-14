@@ -114,3 +114,9 @@ variable "cloudlab" {
   description = "Enable access to the gs://cloud-lab bucket. Caller must have permission to set the IAM policy"
   default     = true
 }
+
+variable "can_ip_forward" {
+  type        = bool
+  description = "Whether or not the instance can forward packets (eg wireguard needs this)"
+  default     = false
+}

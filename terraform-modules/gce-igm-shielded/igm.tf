@@ -17,7 +17,7 @@ resource "google_compute_instance_template" "shielded_vm" {
 
   instance_description = "Shielded VM"
   machine_type         = var.machine_type
-  can_ip_forward       = false
+  can_ip_forward       = var.can_ip_forward
 
   scheduling {
     automatic_restart   = var.preemptible ? false : true
