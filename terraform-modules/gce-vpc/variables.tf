@@ -1,13 +1,11 @@
 variable "name" {
   type        = string
   description = "The name for the network"
-  default     = "vpc"
 }
 
 variable "subnet_name" {
   type        = string
   description = "The name for the subnetwork"
-  default     = "subnet"
 }
 
 variable "auto_create_subnetworks" {

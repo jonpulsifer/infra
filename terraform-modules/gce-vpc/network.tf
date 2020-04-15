@@ -1,11 +1,11 @@
 resource "google_compute_network" "network" {
-  name                    = var.name
+  name                    = coalesce(var.name, join("-", var.name, "network"))
   auto_create_subnetworks = var.auto_create_subnetworks
 }
 
 resource "google_compute_subnetwork" "subnet" {
   provider                 = google-beta
-  name                     = var.subnet_name
+  name                     = coalesce(var.subnet_name, join("-", var.name, "subnet"))
   ip_cidr_range            = var.ip_cidr_range
   network                  = google_compute_network.network.self_link
   private_ip_google_access = var.private_api_access
