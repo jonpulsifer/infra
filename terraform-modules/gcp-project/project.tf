@@ -11,13 +11,22 @@ resource "google_project" "project" {
   billing_account     = var.billing_account
 }
 
+
+resource "google_project_service" "compute" {
+  for_each           = var.compute ? toset([var.project_id]) : []
+  project            = each.key
+  service            = "compute.googleapis.com"
+  disable_on_destroy = true
+}
+
 resource "google_resource_manager_lien" "project_deletion" {
   parent       = google_project.project.id
   restrictions = ["resourcemanager.projects.delete"]
   origin       = "managed-by-terraform"
   reason       = "This project is managed by terraform"
   depends_on = [
-    google_project.project
+    google_project.project,
+    google_project_service.compute
   ]
 }
 
@@ -27,7 +36,8 @@ resource "google_compute_project_metadata_item" "oslogin" {
   key      = "enable-oslogin"
   value    = "TRUE"
   depends_on = [
-    google_project.project
+    google_project.project,
+    google_project_service.compute
   ]
 }
 
@@ -37,7 +47,8 @@ resource "google_compute_project_metadata_item" "oslogin_2fa" {
   key      = "enable-oslogin-2fa"
   value    = "TRUE"
   depends_on = [
-    google_project.project
+    google_project.project,
+    google_project_service.compute
   ]
 }
 
@@ -47,7 +58,8 @@ resource "google_compute_project_metadata_item" "guest_attributes" {
   key      = "enable-guest-attributes"
   value    = "TRUE"
   depends_on = [
-    google_project.project
+    google_project.project,
+    google_project_service.compute
   ]
 }
 
@@ -57,7 +69,8 @@ resource "google_compute_project_metadata_item" "os_inventory" {
   key      = "enable-os-inventory"
   value    = "TRUE"
   depends_on = [
-    google_project.project
+    google_project.project,
+    google_project_service.compute
   ]
 }
 
@@ -67,6 +80,7 @@ resource "google_compute_project_metadata_item" "os_config" {
   key      = "enable-os-config"
   value    = "TRUE"
   depends_on = [
-    google_project.project
+    google_project.project,
+    google_project_service.compute
   ]
 }
