@@ -66,7 +66,7 @@ resource "google_compute_instance_template" "shielded_vm" {
     dynamic "access_config" {
       for_each = var.external_ip ? [1] : []
       content {
-        network_tier = "STANDARD"
+        nat_ip = google_compute_address.static.address
       }
     }
   }
@@ -109,4 +109,11 @@ resource "google_compute_disk" "pd" {
   name     = format("%s-pd", each.key)
   size     = var.persistent_disk_size
   type     = var.persistent_disk_type
+}
+
+resource "google_compute_address" "static" {
+  for_each     = var.external_ip ? toset([var.name]) : []
+  name         = format("%s-pd", each.key)
+  address_type = "EXTERNAL"
+  description  = format("terraform managed ip address for %s", var.name)
 }
