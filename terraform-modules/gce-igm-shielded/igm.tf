@@ -66,7 +66,7 @@ resource "google_compute_instance_template" "shielded_vm" {
     dynamic "access_config" {
       for_each = var.external_ip ? [1] : []
       content {
-        nat_ip = google_compute_address.static.address
+        nat_ip = google_compute_address.static[var.name].address
       }
     }
   }
@@ -83,7 +83,7 @@ resource "google_compute_instance_template" "shielded_vm" {
 }
 
 resource "google_compute_instance_group_manager" "igm" {
-  name = "${var.name}-igm"
+  name = format("%s-igm", var.name)
 
   depends_on = [
     google_compute_instance_template.shielded_vm,
