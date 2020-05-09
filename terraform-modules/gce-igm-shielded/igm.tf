@@ -47,7 +47,7 @@ resource "google_compute_instance_template" "shielded_vm" {
   dynamic "disk" {
     for_each = var.persistent_disk ? [1] : []
     content {
-      source      = google_compute_disk.pd.name
+      source      = google_compute_disk.pd[var.name].name
       auto_delete = false
       boot        = false
     }
