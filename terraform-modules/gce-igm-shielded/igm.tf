@@ -105,8 +105,8 @@ resource "google_compute_instance_group_manager" "igm" {
 }
 
 resource "google_compute_disk" "pd" {
-  for_each = var.persistent_disk ? toset([1]) : []
-  name     = format("%s-pd", var.name)
+  for_each = var.persistent_disk ? toset([var.name]) : []
+  name     = format("%s-pd", each.key)
   size     = var.persistent_disk_size
   type     = var.persistent_disk_type
 }
