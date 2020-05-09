@@ -44,6 +44,15 @@ resource "google_compute_instance_template" "shielded_vm" {
     type         = "PERSISTENT"
   }
 
+  dynamic "disk" {
+    for_each = var.persistent_disk ? [1] : []
+    content {
+      source      = google_compute_disk.pd.name
+      auto_delete = false
+      boot        = false
+    }
+  }
+
   // enable shielded vm
   shielded_instance_config {
     enable_secure_boot          = var.enable_secure_boot
@@ -93,4 +102,11 @@ resource "google_compute_instance_group_manager" "igm" {
     type                  = "PROACTIVE"
     max_unavailable_fixed = (var.target_size > 1 ? 0 : 1)
   }
+}
+
+resource "google_compute_disk" "pd" {
+  for_each = var.persistent_disk ? [1] : []
+  name     = format("%s-pd", var.name)
+  size     = var.persistent_disk_size
+  type     = var.persistent_disk_type
 }

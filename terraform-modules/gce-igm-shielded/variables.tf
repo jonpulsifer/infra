@@ -126,3 +126,21 @@ variable "enable_secure_boot" {
   description = "Enable UEFI etc"
   default     = true
 }
+
+variable "persistent_disk" {
+  type        = bool
+  description = "Whether or not to add a persistent disk to the VM"
+  default     = false
+}
+
+variable "persistent_disk_size" {
+  type        = number
+  description = "The size in GB of the persistent disk"
+  default     = 10
+}
+
+variable "persistent_disk_type" {
+  type        = string
+  description = "The type of persistent disk to add to the VM"
+  default     = "pd-standard"
+}
