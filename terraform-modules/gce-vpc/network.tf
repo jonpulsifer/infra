@@ -18,6 +18,12 @@ resource "google_compute_subnetwork" "subnet" {
       metadata             = "INCLUDE_ALL_METADATA"
     }
   }
+
+  lifecycle {
+    depends_on = [
+      google_compute_network.network
+    ]
+  }
 }
 
 output "network" {
