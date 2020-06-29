@@ -19,11 +19,9 @@ resource "google_compute_subnetwork" "subnet" {
     }
   }
 
-  lifecycle {
-    depends_on = [
-      google_compute_network.network
-    ]
-  }
+  depends_on = [
+    google_compute_network.network
+  ]
 }
 
 output "network" {
