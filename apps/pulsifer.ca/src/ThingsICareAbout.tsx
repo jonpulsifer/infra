@@ -6,12 +6,13 @@ import {
 } from '@shopify/polaris';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
-  faShopify,
-  faGithub,
-  faTwitter,
-  faInstagram,
-  faSteam,
   faDiscord,
+  faGithub,
+  faInstagram,
+  faLinkedin,
+  faShopify,
+  faSteam,
+  faTwitter,
   IconDefinition,
 } from "@fortawesome/free-brands-svg-icons";
 
@@ -26,7 +27,7 @@ const items : ThingICareAbout[] = [
   {
     url: 'https://shopify.ca',
     icon: faShopify,
-    name: 'Shopify',
+    name: 'Security Incident Response',
     description: 'This is where I work',
   },
   {
@@ -40,6 +41,12 @@ const items : ThingICareAbout[] = [
     icon: faTwitter,
     name: '@jonpulsifer',
     description: 'This is where I chirp',
+  },
+  {
+    url: 'https://www.linkedin.com/in/jonpulsifer/',
+    icon: faLinkedin,
+    name: '@jonpulsifer',
+    description: 'This is where I network',
   },
   {
     url: 'https://steamcommunity.com/id/jawn',
@@ -67,8 +74,8 @@ const renderItems = (item: ThingICareAbout, index: string) => {
     <ResourceItem
       id={index}
       url={url}
-      media={<FontAwesomeIcon icon={icon} size="3x" />}
-      accessibilityLabel={`View details for ${name}`}
+      media={<FontAwesomeIcon fixedWidth icon={icon} size="3x" />}
+      accessibilityLabel={`Visit me at ${url}`}
       name={name}
     >
       <h3>

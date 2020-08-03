@@ -2,8 +2,10 @@ import React, { useState, useCallback } from 'react';
 import {
   Card,
   DisplayText,
+  FooterHelp,
   Frame,
   Layout,
+  Link,
   Page,
   TextContainer,
   ThemeProvider,
@@ -22,7 +24,7 @@ export default function App() {
   );
 
   const darkModeActions: BaseAction[] = [{
-    content: isDarkTheme ? '🌙' : '☀️',
+    content: isDarkTheme ? '☀️' : '🌙',
     onAction: handleThemeChange
   }];
 
@@ -32,11 +34,11 @@ export default function App() {
         <Page narrowWidth>
           <Layout>
             <Layout.Section>
-              <div style={{margin: 'auto', textAlign: 'center'}}>
-              <TextContainer spacing="loose">
-                <img src={Avatar} alt="Avatar" />
-                <DisplayText size="large">hi, i'm @jonpulsifer</DisplayText>
-              </TextContainer>
+              <div style={{ margin: 'auto', textAlign: 'center' }}>
+                <TextContainer spacing="loose">
+                  <img src={Avatar} alt="Avatar" />
+                  <DisplayText size="large">hi, i'm @jonpulsifer</DisplayText>
+                </TextContainer>
               </div>
             </Layout.Section>
             <Layout.Section>
@@ -47,6 +49,16 @@ export default function App() {
               </Card>
             </Layout.Section>
           </Layout>
+          <FooterHelp>
+            Built with{' '}
+            <Link url="https://polaris.shopify.com/">
+              Polaris
+            </Link>
+            .{' '}Hosted on{' '}
+            <Link url="https://github.com/homelab-ng/pulsifer.ca">
+              GitHub
+            </Link>.
+          </FooterHelp>
         </Page>
       </Frame>
     </ThemeProvider>
