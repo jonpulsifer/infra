@@ -1,5 +1,10 @@
 locals {
-  labels = merge(var.labels, { managed-by = "terraform" })
+  labels = merge(
+    var.labels, {
+      managed-by = "terraform"
+      billable   = var.billing_account != "" ? "true" : "false"
+    }
+  )
 }
 
 resource "google_project" "project" {
