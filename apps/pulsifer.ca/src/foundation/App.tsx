@@ -9,21 +9,20 @@ import {
   Page,
   TextContainer,
   ThemeProvider,
-  BaseAction,
 } from '@shopify/polaris';
 
-import Avatar from './avatar-250.png';
-import ThingsICareAbout from './ThingsICareAbout';
+import {Avatar} from './images';
+import {ThingsICareAbout} from '../components';
 
-export default function App() {
-  const [isDarkTheme, setIsDarkTheme] = useState(false);
+export function App() {
+  const [isDarkTheme, setIsDarkTheme] = useState(true);
 
   const handleThemeChange = useCallback(
     () => setIsDarkTheme((isDarkTheme) => !isDarkTheme),
     [],
   );
 
-  const darkModeActions: BaseAction[] = [{
+  const darkModeActions = [{
     content: isDarkTheme ? '☀️' : '🌙',
     onAction: handleThemeChange
   }];
