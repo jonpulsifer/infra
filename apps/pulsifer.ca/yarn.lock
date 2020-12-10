@@ -1243,10 +1243,10 @@
     hsluv "^0.1.0"
     tslib "^1.10.0"
 
-"@shopify/polaris@^5.10.2":
-  version "5.10.2"
-  resolved "https://registry.yarnpkg.com/@shopify/polaris/-/polaris-5.10.2.tgz#b5c7bf16354a3f8592f1d3cd3a50e349e6c96eb8"
-  integrity sha512-WKlubCrtDNlcsaV/7pGdTd2I/hcsgUneGY5GTsFTDmjJKmOt2oklt+uKpOlCZbf0ZTOMeM8Nipn+Ci5T00w5xw==
+"@shopify/polaris@^5.12.0":
+  version "5.12.0"
+  resolved "https://registry.yarnpkg.com/@shopify/polaris/-/polaris-5.12.0.tgz#a2ae40017c6c13a8d37f1e431001a58a3f87e6d5"
+  integrity sha512-yNKDbOdlEVjszcuEyix5euV/YkrZpwoQaKEKPhzLRq5vJ4efCQeLh5l5le0czQ3bwJnF7xkoyehELi5gUv2FSw==
   dependencies:
     "@shopify/polaris-icons" "^4.1.0"
     "@shopify/polaris-tokens" "^2.15.0"

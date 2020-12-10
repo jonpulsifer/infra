@@ -8,7 +8,7 @@
     "@fortawesome/fontawesome-svg-core": "^1.2.32",
     "@fortawesome/free-brands-svg-icons": "^5.15.1",
     "@fortawesome/react-fontawesome": "^0.1.13",
-    "@shopify/polaris": "^5.10.2",
+    "@shopify/polaris": "^5.12.0",
     "@shopify/typescript-configs": "^3.0.2",
     "react": "^16.14.0",
     "react-dom": "^16.14.0",
