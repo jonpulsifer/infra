@@ -38,12 +38,17 @@ module.exports = {
     port: 8080,
     allowedHosts: [
       'pulsifer.myshopify.io',
+      'nuc',
+      'localhost',
     ],
     hot: true,
     watchContentBase: true,
     historyApiFallback: true
   },
   plugins: [
+      new webpack.ProvidePlugin({
+        process: 'process/browser',
+      }),
       new webpack.HotModuleReplacementPlugin(),
       new HtmlWebpackPlugin({
           template: path.join(__dirname, 'public', 'index.html'),

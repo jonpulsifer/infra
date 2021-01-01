@@ -23,12 +23,12 @@ export function App() {
   );
 
   const darkModeActions = [{
-    content: isDarkTheme ? '☀️' : '🌙',
+    content: isDarkTheme ? '🌙' : '☀️',
     onAction: handleThemeChange
   }];
 
   return (
-    <ThemeProvider theme={{ colorScheme: isDarkTheme ? 'dark' : 'light' }}>
+    <ThemeProvider theme={{ colorScheme: isDarkTheme ? 'light' : 'dark' }}>
       <Frame>
         <Page narrowWidth>
           <Layout>
