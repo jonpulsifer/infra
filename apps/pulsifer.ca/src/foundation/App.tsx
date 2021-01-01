@@ -11,7 +11,7 @@ import {
   ThemeProvider,
 } from '@shopify/polaris';
 
-import {Avatar} from './images';
+import {Avatar, Nyan} from './images';
 import {ThingsICareAbout} from '../components';
 
 export function App() {
@@ -46,6 +46,11 @@ export function App() {
                   <ThingsICareAbout />
                 </Card.Section>
               </Card>
+            </Layout.Section>
+            <Layout.Section>
+              <div style={{ margin: 'auto', textAlign: 'center' }}>
+                <img src={Nyan} alt="Nyan Cat" style={{ width: '100%' }} />
+              </div>
             </Layout.Section>
           </Layout>
           <FooterHelp>

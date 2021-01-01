@@ -1,8 +1,8 @@
-name: pulsifer
+name: hub
 
 vm:
   image: /opt/dev/misc/railgun-images/default
-  ip_address: 192.168.64.231
+  ip_address: 192.168.64.232
   memory: 2G
   cores: 2
 
@@ -13,4 +13,4 @@ services:
   - nginx
 
 hostnames:
-  - pulsifer.myshopify.io: {proxy_to_host_port: 8080}
+  - hub.myshopify.io: {proxy_to_host_port: 8080}
