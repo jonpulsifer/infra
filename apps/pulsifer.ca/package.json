@@ -31,7 +31,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.12.10",
-    "@babel/preset-env": "^7.12.10",
+    "@babel/preset-env": "^7.12.11",
     "@babel/preset-react": "^7.12.10",
     "@shopify/react-testing": "^2.2.0",
     "@types/jest": "^26.0.19",
