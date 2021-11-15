@@ -12,14 +12,14 @@ jobs:
       - name: 'Terraform Init'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'init'
           tf_actions_working_dir: 'gke-cluster'
           tf_actions_comment: false
       - name: 'Terraform Validate'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'validate'
           tf_actions_working_dir: 'gke-cluster'
           tf_actions_comment: false
@@ -32,14 +32,14 @@ jobs:
       - name: 'Terraform Init'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'init'
           tf_actions_working_dir: 'gke-nodepool'
           tf_actions_comment: false
       - name: 'Terraform Validate'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'validate'
           tf_actions_working_dir: 'gke-nodepool'
           tf_actions_comment: false
@@ -52,14 +52,14 @@ jobs:
       - name: 'Terraform Init'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'init'
           tf_actions_working_dir: 'gke-igm-shielded'
           tf_actions_comment: false
       - name: 'Terraform Validate'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'validate'
           tf_actions_working_dir: 'gke-igm-shielded'
           tf_actions_comment: false
@@ -72,14 +72,14 @@ jobs:
       - name: 'Terraform Init'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'init'
           tf_actions_working_dir: 'gcp-project'
           tf_actions_comment: false
       - name: 'Terraform Validate'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'validate'
           tf_actions_working_dir: 'gcp-project'
           tf_actions_comment: false
@@ -92,14 +92,14 @@ jobs:
       - name: 'Terraform Init'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'init'
           tf_actions_working_dir: 'gce-vpc'
           tf_actions_comment: false
       - name: 'Terraform Validate'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'validate'
           tf_actions_working_dir: 'gce-vpc'
           tf_actions_comment: false
@@ -112,14 +112,14 @@ jobs:
       - name: 'Terraform Init'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'init'
           tf_actions_working_dir: 'appengine-flex'
           tf_actions_comment: false
       - name: 'Terraform Validate'
         uses: hashicorp/terraform-github-actions@master
         with:
-          tf_actions_version: 0.13.0
+          tf_actions_version: 1.0.11
           tf_actions_subcommand: 'validate'
           tf_actions_working_dir: 'appengine-flex'
           tf_actions_comment: false
