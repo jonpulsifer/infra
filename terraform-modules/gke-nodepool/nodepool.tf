@@ -24,7 +24,7 @@ resource "google_container_node_pool" "lab" {
     labels = var.labels
 
     workload_metadata_config {
-      node_metadata = var.node_metadata
+      mode = var.node_metadata
     }
 
     metadata = (var.image_type == "UBUNTU_CONTAINERD" ? var.metadata_ubuntu : var.metadata_cos)

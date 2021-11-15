@@ -46,9 +46,9 @@ variable "preemptible" {
 }
 
 variable "node_metadata" {
-  description = "Adjusts the node metadata service, one of: GKE_METADATA_SERVER, SECURE, or EXPOSE"
+  description = "Adjusts the node metadata service, one of: GCE_METADATA, GKE_METADATA"
   type        = string
-  default     = "GKE_METADATA_SERVER"
+  default     = "GKE_METADATA"
 }
 
 variable "metadata_cos" {

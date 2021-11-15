@@ -85,11 +85,7 @@ resource "google_container_cluster" "lab" {
     provider = var.network_policy ? "CALICO" : "PROVIDER_UNSPECIFIED"
   }
 
-  /* disable basic authentication */
   master_auth {
-    username = ""
-    password = ""
-
     /* disable client certificate */
     client_certificate_config {
       issue_client_certificate = false
@@ -109,7 +105,7 @@ resource "google_container_cluster" "lab" {
 
   /* workload identity */
   workload_identity_config {
-    identity_namespace = join(".", [var.project, "svc.id.goog"])
+    workload_pool = join(".", [var.project, "svc.id.goog"])
   }
 
   addons_config {
