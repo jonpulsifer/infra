@@ -7,6 +7,6 @@ author = "jonpulsifer"
 your best bet is probably email, but i'm also terrible at that since i'm a millenial and am socially avoidant while stressed
 
 - email: `jonathan [at] pulsifer.ca`
-- [GitHub](https://github.com/jonpulsifer) &nbsp;&nbsp;# github.com/jonpulsifer
-- [LinkedIn](https://ca.linkedin.com/in/jonpulsifer) # linkedin.com/jonpulsifer
-- [Twitter](https://twitter.com/jonpulsifer) &nbsp;# twitter.com/jonpulsifer
+- [github.com/jonpulsifer](https://github.com/jonpulsifer)
+- [linkedin.com/in/jonpulsifer](https://ca.linkedin.com/in/jonpulsifer)
+- [twitter.com/jonpulsifer](https://twitter.com/jonpulsifer)
