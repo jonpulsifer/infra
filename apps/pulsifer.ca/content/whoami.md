@@ -4,7 +4,7 @@ date = "2022-03-07"
 author = "jonpulsifer"
 +++
 
-# greetings
+## greetings
 
 hi, i'm **@jonpulsifer** and i like computers ^__^
 

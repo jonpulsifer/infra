@@ -1,91 +1,176 @@
-baseurl = "/"
+baseURL = "/"
+title   = "pulsifer.ca"
 languageCode = "en-us"
-theme = "terminal"
-paginate = 5
+theme = "hello-friend-ng"
+
+PygmentsCodeFences = true
+PygmentsStyle = "dracula"
+
+paginate  = 10
+rssLimit  = 10  # Maximum number of items in the RSS feed.
+copyright = "This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License."
+
+# googleAnalytics = ""
+# disqusShortname = ""
+
+archetypeDir = "archetypes"
+contentDir   = "content"
+dataDir      = "data"
+layoutDir    = "layouts"
+publishDir   = "public"
+
+buildDrafts  = false
+buildFuture  = false
+buildExpired = false
+canonifyURLs = true
+
+enableRobotsTXT = true
+enableGitInfo   = false
+enableEmoji     = true
+enableMissingTranslationPlaceholders = false
+disableRSS     = false
+disableSitemap = false
+disable404     = false
+disableHugoGeneratorInject = false
+
+[permalinks]
+  posts = "/posts/:year/:month/:title/"
+
+[author]
+  name = "jonpulsifer"
+
+[taxonomies]
+  tag      = "tags"
+  category = "categories"
+  series   = "series"
 
 [params]
-  # dir name of your main content (default is `content/posts`).
-  # the list of set content will show up on your index page (baseurl).
-  contentTypeName = "posts"
+  dateform        = "Jan 2, 2006"
+  dateformShort   = "Jan 2"
+  dateformNum     = "2006-01-02"
+  dateformNumTime = "2006-01-02 15:04"
 
-  # ["orange", "blue", "red", "green", "pink"]
-  themeColor = "orange"
+  # Metadata mostly used in document's head
+  # 
+  description = "personal website and internet chicanery"
+  keywords = ""
+  images = [""]
 
-  # if you set this to 0, only submenu trigger will be visible
-  showMenuItems = 2
+  # Home subtitle of the index page.
+  #
+  homeSubtitle = "🔐 secure the cloud ☁️"
 
-  # show selector to switch language
-  showLanguageSelector = false
+  # Set a background for the homepage
+  # backgroundImage = "assets/images/background.jpg"
 
-  # set theme to full screen width
-  fullWidthTheme = false
+  # Prefix of link to the git commit detail page. GitInfo must be enabled.
+  #
+  # gitUrl = ""
 
-  # center theme with default width
-  centerTheme = true
+  # Set disableReadOtherPosts to true in order to hide the links to other posts.
+  #
+  disableReadOtherPosts = false
 
-  # if your resource directory contains an image called `cover.(jpg|png|webp)`,
-  # then the file will be used as a cover automatically.
-  # With this option you don't have to put the `cover` param in a front-matter.
-  autoCover = true
+  # Enable theme toggle
+  # 
+  # This options enables the theme toggle for the theme. 
+  # Per default, this option is off. 
+  # The theme is respecting the prefers-color-scheme of the operating systeme. 
+  # With this option on, the page user is able to set the scheme he wants. 
+  enableThemeToggle = true
+  defaultTheme = "dark"
 
-  # set post to show the last updated
-  # If you use git, you can set `enableGitInfo` to `true` and then post will automatically get the last updated
-  showLastUpdated = false
+  # Sharing buttons
+  #
+  # There are a lot of buttons preconfigured. If you want to change them,
+  # generate the buttons here: https://sharingbuttons.io
+  # and add them into your own `layouts/partials/sharing-buttons.html`
+  #
+  enableSharingButtons = true
 
-  # set a custom favicon (default is a `themeColor` square)
-  favicon = "favicon.ico"
+  # Global language menu
+  #
+  # Enables the global language menu.
+  #
+  enableGlobalLanguageMenu = false
 
-  # Provide a string as a prefix for the last update date. By default, it looks like this: 2020-xx-xx [Updated: 2020-xx-xx] :: Author
-  # updatedDatePrefix = "Updated"
+  # Integrate Javascript files or stylesheets by adding the url to the external assets or by
+  # linking local files with their path relative to the static folder, e.g. "css/styles.css"
+  #
+  customCSS = []
+  customJS  = []
 
-  # set all headings to their default size (depending on browser settings)
-  # oneHeadingSize = true # default
+  # Toggle this option need to rebuild SCSS, requires extended version of Hugo
+  #
+  justifyContent = false  # Set "text-align: justify" to .post-content.
 
-  # whether to show a page's estimated reading time
-  readingTime = true
+  # Custom footer 
+  # If you want, you can easily override the default footer with your own content. 
+  #
+  [params.footer]
+    trademark = true
+    rss = true
+    copyright = false
+    author = true
 
-  # whether to show a table of contents
-  # can be overridden in a page's front-matter
-  # Toc = false # default
+    topText = []
+    bottomText = []
 
-  # set title for the table of contents
-  # can be overridden in a page's front-matter
-  # TocTitle = "Table of Contents" # default
+  # Colors for favicons
+  #
+  [params.favicon.color]
+    mask = "#1b1c1d"
+    msapplication = "#1b1c1d"
+    theme = "#1b1c1d"
 
+  [params.logo]
+    logoMark     = ">"
+    logoText     = "pulsifer.ca"
+    logoHomeLink = "/"
+    # Set true to remove the logo cursor entirely.
+    # logoCursorDisabled = false
+    # Set to a valid CSS color to change the cursor in the logo.
+    # logoCursorColor    = "#67a2c9"
+    # Set to a valid CSS time value to change the animation duration, "0s" to disable.
+    # logoCursorAnimate  = "2s"
 
-[params.twitter]
-  # set Twitter handles for Twitter cards
-  # see https://developer.twitter.com/en/docs/tweets/optimize-with-cards/guides/getting-started#card-and-content-attribution
-  # do not include @
-  creator = "jonpulsifer"
-  site = "jonpulsifer"
+  # Commento is more than just a comments widget you can embed — 
+  # it’s a return to the roots of the internet. 
+  # An internet without the tracking and invasions of privacy. 
+  # An internet that is simple and lightweight. 
+  # An internet that is focused on interesting discussions, not ads. 
+  # A better internet.
+  # Uncomment this to enable Commento.
+  #
+  # [params.commento]
+  #   url = ""
 
-[languages]
-  [languages.en]
-    languageName = "English"
-    title = "pulsifer.ca"
-    subtitle = "a personal website"
-    owner = "jonpulsifer"
-    keywords = "jonathan pulsifer, cloudsec"
-    copyright = "© 2022 Jonathan Pulsifer"
-    menuMore = "Show more"
-    readMore = "Read more"
-    readOtherPosts = "Read other posts"
-    newerPosts = "Newer posts"
-    olderPosts = "Older posts"
-    missingContentMessage = "Page not found..."
-    missingBackButtonLabel = "Back to home page"
+  # Uncomment this if you want a portrait on your start page
+  #
+  [params.portrait]
+    path     = "/avatar.png"
+    alt      = "Portrait"
+    maxWidth = "350px"
 
-    [languages.en.params.logo]
-      logoText = "pulsifer.ca"
-      logoHomeLink = "/"
+  # Social icons
+  [[params.social]]
+    name = "twitter"
+    url  = "https://twitter.com/jonpulsifer"
 
-    [languages.en.menu]
-      [[languages.en.menu.main]]
-        identifier = "whoami"
-        name = "whoami"
-        url = "/whoami"
-      [[languages.en.menu.main]]
-        identifier = "contact"
-        name = "contact"
-        url = "/contact"
+  [[params.social]]
+    name = "email"
+    url  = "mailto:jonathan@pulsifer.ca"
+
+  [[params.social]]
+    name = "github"
+    url  = "https://github.com/jonpulsifer"
+
+  [[params.social]]
+    name = "linkedin"
+    url  = "https://ca.linkedin.com/in/jonpulsifer"
+
+[menu]
+  [[menu.main]]
+    identifier = "whoami"
+    name       = "whoami"
+    url        = "whoami"
