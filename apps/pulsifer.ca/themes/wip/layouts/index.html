@@ -2,7 +2,7 @@
   <main class="landing">
     <article>
       {{ with .Site.Params.Portrait }}
-	<img src="{{ .Path }}" width="{{ .Width }}" alt="{{ .AltText }}" />
+	<img src="{{ .Path }}" height="{{ .Height }}" width="{{ .Width }}" alt="{{ .AltText }}" />
       {{ end }}
     </article>
   </main>

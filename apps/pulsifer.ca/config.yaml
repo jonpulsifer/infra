@@ -7,6 +7,7 @@ params:
   portrait:
     path: "avatar-icons.svg"
     width: 75%
+    height: 75%
     altText: "Avatar with floating icons"
   social:
     instagram: jonpulsifer.ca
@@ -29,3 +30,5 @@ markup:
     style: dracula
 
 enableEmoji: true
+enableGitInto: true
+enableRobotsTXT: true
