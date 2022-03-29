@@ -1,12 +1,11 @@
-<header>
-  <div class="header-inner">
+<header class="page-header">
+  <div class="page-header-inner">
     <div class="logo">
       <span class="prompt">❯</span>
       <a href="{{ .Site.BaseURL }}">{{ .Site.Title }}</a>
-      <span class="cursor">_</span>
     </div>
     {{- with .Site.Menus.main }}
-      <nav>
+      <nav class="site-nav">
 	<ul>
 	  {{- range . }}
 	    <li><a href="{{ .URL | relURL }}">{{ .Name }}</a></li>

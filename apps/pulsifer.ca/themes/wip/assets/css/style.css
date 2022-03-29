@@ -7,7 +7,7 @@
   --background-light: rgba(50, 50, 55, 1);
   --content: rgb(195, 195, 196);
   --header: rgba(20, 20, 25,1);
-  --headings: rgba(195, 195, 196, 1);
+  --headings: rgba(215, 215, 218, 1);
   --max-width: 800px;
   --primary: rgba(139, 233, 253, 1);
   --secondary: rgba(189, 147, 249, 1);
@@ -40,7 +40,13 @@ body {
   line-height: 1.54;
 }
 
-header {
+.container {
+    display: flex;
+    flex-direction: column;
+    text-align: center;
+}
+
+header.page-header {
     background: var(--header);
     border-bottom: 1px dotted var(--border);
     display: flex;
@@ -49,28 +55,28 @@ header {
     position: relative;
 }
 
-header > .header-inner {
+header.page-header > .page-header-inner {
     display: flex;
     justify-content: space-between;
     max-width: var(--max-width);
     width: 100%;
 }
 
-header > .header-inner .logo a {
+header.page-header > .page-header-inner .logo a {
     font-size: 1.5rem;
 }
 
-header > .header-inner .logo .prompt {
+header.page-header > .page-header-inner .logo .prompt {
     color: var(--primary);
-    font-size: 1.25rem;
+    font-size: 1rem;
 }
 
-nav {
+nav.site-nav {
     display: flex;
     flex-direction: row-reverse;
 }
 
-nav>ul {
+nav.site-nav>ul {
     display: flex;
     align-items: center;
     justify-content: flex-end;
@@ -80,18 +86,12 @@ nav>ul {
     padding: 0;
 }
 
-nav>ul li {
+nav.site-nav>ul li {
     display: list-item;
     font-size: 1.2rem;
 }
-nav>ul li:not(:last-child) {
+nav.site-nav>ul li:not(:last-child) {
     margin-right: 1rem;
-}
-
-.container {
-    display: flex;
-    flex-direction: column;
-    text-align: center;
 }
 
 .content {
@@ -189,8 +189,43 @@ h1, h2, h3, h4, h5, h6 {
     font-family: "Product Sans Bold", "Google Sans", Helvetica, sans-serif;
 }
 
-article > h1.title {
+header > h1.title {
     margin: 0;
+}
+
+.toc {
+    background: var(--background-light);
+    padding: 0.5rem;
+    margin-top: 1rem;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+}
+.toc > h3 {
+    margin: 0.5rem;
+}
+
+#TableOfContents {
+    margin: 0;
+}
+
+#TableOfContents ul {
+    list-style: none;
+    margin: 0;
+}
+
+#TableOfContents ul li::before {
+    content: '\2055';
+    color: transparent;
+    font-size: 0.8rem;
+    background-clip: text;
+    -webkit-background-clip: text;
+    background-image: linear-gradient(90deg, var(--primary), var(--secondary), var(--tertiary));
+    margin-right: 0.3rem;
+    vertical-align: middle;
+}
+
+#TableOfContents ul li > a {
+    font-family: "Product Sans Light Regular";
 }
 
 .meta {

@@ -1,7 +1,9 @@
 ---
 title: "About Me"
+description: "A little bit about me"
 date: "2022-03-07"
 author: "jonpulsifer"
+draft: false
 ---
 
 Greetings. I'm **@jonpulsifer**, welcome to my personal website -- I built it myself! :joy:

@@ -16,6 +16,11 @@ params:
     steam: jawn
     twitter: jonpulsifer
 
+taxonomies:
+  category: categories
+  series: series
+  tag: tags
+    
 menus:
   main:
     - identifier: about
@@ -30,5 +35,5 @@ markup:
     style: dracula
 
 enableEmoji: true
-enableGitInto: true
+enableGitInfo: true
 enableRobotsTXT: true

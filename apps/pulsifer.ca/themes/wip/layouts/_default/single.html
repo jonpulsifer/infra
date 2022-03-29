@@ -1,16 +1,18 @@
 {{ define "main" }}
   <main>
     <article>
-      <h1 class="title">{{ .Title }}</h1>
-      <div class="meta">
-	<span class="date" title="{{ .PublishDate }}">{{ .PublishDate.Format "January 2, 2006" }}</span>
-	<span class="colored-separator">&#8277;</span>
-	<span class="reading-time">{{ .ReadingTime }} minute read</span>
-	{{ with .Params.Author }}
-	  <span class="colored-separator">&#8277;</span>
-	  <span class="author">{{ . }}</span>
+      <header class="article-header">
+	<h1 class="title">{{ .Title }}</h1>
+	{{ partial "post-meta" . }}
+      </header>
+      {{ if (gt .WordCount 400) }}
+        {{ with .TableOfContents }}
+        <div class="toc">
+	  <h3>Table of Contents</h3>
+	  {{ . }}
+        </div>
 	{{ end }}
-      </div>
+      {{ end }}
       <div>
 	{{ .Content }}
       </div>
