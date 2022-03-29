@@ -5,6 +5,7 @@ theme: "wip"
 
 params:
   portrait:
+    link: about/
     path: "avatar-icons.svg"
     width: 75%
     height: 75%
