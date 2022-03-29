@@ -1,0 +1,234 @@
+@import "fonts.css";
+
+:root {
+    --anchors: rgba(255, 255, 255, 1);
+    --border: rgba(255, 255, 255, 0.4);
+    --background: rgba(25, 25, 30, 1);
+    --background-light: rgba(50, 50, 55, 1);
+    --content: rgb(195, 195, 196);
+    --header: rgba(20, 20, 25,1);
+    --headings: rgba(195, 195, 196, 1);
+    --max-width: 800px;
+    --primary: rgba(139, 233, 253, 1);
+    --secondary: rgba(189, 147, 249, 1);
+    --tertiary: rgba(255, 121, 198, 1);
+    --quaternary: rgba(80, 250, 123, 1);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    font-size: 100%;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: var(--background);
+    color: var(--content);
+    font-family: "Product Sans Light Regular";
+    font-size: 1.2rem;
+    line-height: 1.54;
+}
+
+header {
+    background: var(--header);
+    border-bottom: 1px dotted var(--border);
+    display: flex;
+    justify-content: center;
+    padding: 0.5rem;
+    position: relative;
+}
+
+header > .header-inner {
+    display: flex;
+    justify-content: space-between;
+    max-width: var(--max-width);
+    width: 100%;
+}
+
+header > .header-inner .logo a {
+    font-size: 2rem;
+}
+
+header > .header-inner .logo .prompt {
+    color: var(--primary);
+    font-size: 1.75rem;
+}
+
+nav {
+    display: flex;
+    flex-direction: row-reverse;
+}
+
+nav>ul {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+nav>ul li {
+    display: list-item;
+    font-size: 1.2rem;
+}
+nav>ul li:not(:last-child) {
+    margin-right: 1rem;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    text-align: center;
+}
+
+.content {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    padding: 0 1rem;
+}
+
+main {
+    width: 100%;
+    max-width: var(--max-width);
+    margin: 2rem auto;
+    display: flex;
+    flex-direction: column;
+}
+
+main.landing {
+    text-align: center;
+}
+
+footer {
+    display: flex;
+    flex-direction: column;
+    padding: 2rem;
+}
+
+.social {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.social > .social-header {
+    font-size: 1rem;
+    margin: 0;
+}
+
+.social > ul {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+    margin: 0;
+    padding: 0;
+}
+
+.social > ul li {
+    font-size: 3.5rem;
+    margin: 0;
+}
+
+.social > ul li:not(:first-child){
+    margin-right: 1rem;
+}
+.social > ul li:not(:last-child){
+    margin-right: 1rem;
+}
+
+a {
+    color: var(--anchors);
+    font-family: "Product Sans Bold";
+    text-decoration: none;
+}
+
+a:hover, .logo:hover, .colored-separator {
+    background: linear-gradient(90deg, #8be9fd, #bd93f9, #ff79c6);
+    color: transparent;
+    background-clip: text;
+    -webkit-background-clip: text;
+}
+
+b, strong {
+    color: var(--secondary);
+    font-family: "Product Sans Bold";
+}
+
+code:not(.highlight, pre *) {
+    background-color: var(--background-light);
+    color: var(--tertiary);
+    font-size: 1.1rem;
+
+    border-radius: 0.2rem;
+    padding: 0.3rem 0.4rem 0.2rem 0.4rem;
+    margin: auto 0.2rem;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: var(--headings);
+    font-family: "Product Sans Bold";
+}
+
+article > h1.title {
+    margin: 0;
+}
+
+.meta {
+    font-size: 0.8rem;
+}
+
+.archive-year {
+    display: flex;
+    flex-direction: column;
+}
+
+.archive-year:not(:last-of-type) {
+    border-bottom: 1px dashed var(--border);
+}
+
+.archive-month {
+    display: flex;
+}
+
+.archive-month .month-name {
+    width: 25%;
+}
+
+.archive-entry {
+    margin-bottom: 2rem;
+}
+
+.archive-month h3 {
+    margin: 0;
+}
+
+.archive-year h2 sup, .archive-month h3 sup {
+    font-size: 0.8rem;
+    padding-left: 0.25rem;
+}
+
+.archive-year h2 sup {
+    color: var(--primary);
+}
+
+.archive-month h3 sup {
+    color: var(--secondary);
+}
+
+.emoji {
+    font-family: Apple Color Emoji, Segoe UI Emoji, NotoColorEmoji, Segoe UI Symbol, Android Emoji, EmojiSymbols;
+}

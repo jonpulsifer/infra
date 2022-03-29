@@ -1,0 +1,28 @@
+{{ define "main" }}
+  <main>
+    <article>
+      <h1 class="title">{{ .Title }}</h1>
+      <div class="meta">
+	<span class="date" title="{{ .PublishDate }}">{{ .PublishDate.Format "January 2, 2006" }}</span>
+	<span class="colored-separator">&#8277;</span>
+	<span class="reading-time">{{ .ReadingTime }} minute read</span>
+	{{ with .Params.Author }}
+	  <span class="colored-separator">&#8277;</span>
+	  <span class="author">{{ . }}</span>
+	{{ end }}
+      </div>
+      <div>
+	{{ .Content }}
+      </div>
+      {{ with .Params.tags }}
+      <div>
+	<ul id="tags">
+	  {{ range . }}
+	    <li><a href="{{ "/tags/" | relLangURL}}{{ . | urlize }}">{{ . }}</a></li>
+	  {{ end }}
+	</ul>
+      </div>
+      {{ end }}
+    </article>
+  </main>
+{{ end }}

@@ -1,0 +1,28 @@
+<footer>
+  {{ with .Site.Params.social }}
+    <div class="social">
+      <p class="social-header">Find me on the internet</p>
+      <ul class="icons">
+
+	{{ with .github }}
+	  <li><a href="https://github.com/{{ . }}" target="_blank"><i class="lab la-github"></i></a></li>
+	{{ end }}
+	{{ with .instagram }}
+	  <li><a href="https://instagr.am/{{ . }}" target="_blank"><i class="lab la-instagram"></i></a></li>
+	{{ end }}
+	{{ with .linkedin }}
+	  <li><a href="https://linkedin.com/in/{{ . }}" target="_blank"><i class="lab la-linkedin"></i></a></li>
+	{{ end }}
+	{{ with .steam }}
+	  <li><a href="https://steamcommunity.com/id/{{ . }}" target="_blank"><i class="lab la-steam"></i></a></li>
+	{{ end }}
+	{{ with .twitter }}
+	  <li><a href="https://twitter.com/{{ . }}" target="_blank"><i class="lab la-twitter"></i></a></li>
+	{{ end }}
+      </ul>
+    </div>
+  {{ end }}
+  <div class="powered-by">
+    <span class="colored-separator">&copy;</span> {{ now.Year }} <a href="{{ .Site.BaseURL }}">{{ .Site.Title }}</a> <span class="colored-separator">&#8277;</span> Powered by <a href="https://gohugo.io" target="_blank">Hugo</a>
+  </div>
+</footer>

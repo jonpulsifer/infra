@@ -1,0 +1,18 @@
+<header>
+  <div class="header-inner">
+    <div class="logo">
+      <span class="prompt">❯</span>
+      <a href="{{ .Site.BaseURL }}">{{ .Site.Title }}</a>
+      <span class="cursor">_</span>
+    </div>
+    {{- with .Site.Menus.main }}
+      <nav>
+	<ul>
+	  {{- range . }}
+	    <li><a href="{{ .URL | relURL }}">{{ .Name }}</a></li>
+	  {{- end }}
+	</ul>
+      </nav>
+    {{- end }}
+  </div>
+</header>

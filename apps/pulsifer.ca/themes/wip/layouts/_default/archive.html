@@ -1,0 +1,38 @@
+{{ define "main" }}
+  <main>
+    <article>
+      <h1 class="title">Archive</h1>
+      {{- $pages := .Site.RegularPages -}}
+      {{- range $pages.GroupByPublishDate "2006" }}
+	{{- if (ne .Key "0001") }}
+	  <div class="archive-year">
+    	    <h2>{{ .Key }}<sup>{{ len .Pages }}</sup></h2>
+	    {{- range .Pages.GroupByPublishDate "January" }}
+	      <div class="archive-month">
+		<h3 class="month-name">{{ .Key }}<sup>{{ len .Pages }}</sup></h3>
+		<div class="archive-entries">
+		  {{- range .Pages}}
+		    <div class="archive-entry">
+		      <a href="{{ .Permalink }}">{{ .Title | markdownify }}</a>
+		      <div class="meta">
+			<span class="date" title="{{ .PublishDate }}">{{ .PublishDate.Format "January 2, 2006" }}</span>
+			<span class="colored-separator">&#8277;</span>
+			<span class="reading-time">{{ .ReadingTime }} minute read</span>
+			{{ with .Params.Author }}
+			  <span class="colored-separator">&#8277;</span>
+			  <span class="author">{{ . }}</span>
+			{{ end }}
+		      </div>
+		    </div>
+		  {{ end}}
+		</div>
+	      </div>
+	    {{ end }}
+	  </div>
+	{{ end }}
+      {{ end }}
+    </article>
+  </main>
+{{ end }}
+
+
