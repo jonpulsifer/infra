@@ -288,10 +288,16 @@ details[open] summary::before {
 
 .archive-month {
     display: flex;
+    flex-wrap: wrap;
+    width: 100%;
 }
 
-.archive-month .month-name {
-    width: 25%;
+.archive-month-name {
+    width: 30%;
+    float: left;
+}
+
+.archive-entries {
 }
 
 .archive-entry {
@@ -300,6 +306,10 @@ details[open] summary::before {
 
 .archive-month h3 {
     margin: 0;
+}
+
+.archive-year h2 h3 {
+    margin: 1rem 0;
 }
 
 .archive-year h2 sup, .archive-month h3 sup {
