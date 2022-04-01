@@ -3,89 +3,48 @@ title: Curriculum Vitae
 description: An account of my qualifications and experience
 author: jonpulsifer
 date: 2022-03-29
-draft: true
+draft: false
 ---
 
 ## Summary
 
-With over 15 years on the keyboard, and seven of those in an information security setting, my experience ranges from the home network, through small businesses and into multi-gigabit government production environments. I am a GIAC Certified Professional and hold both the GSEC and GCIA certifications. I am a junior SANS instructor and am a member of the GIAC Advisory Board.
-
-## Information Security Skills
-
-- Packet Analysis (tcpdump, Wireshark)
-- TCP/IP (OSI Layers 1-4)
-- Upper Layer Protocols (DNS, DHCP, SMB,
-SMTP, HTTP, NFS, TLS, FTP, TELNET)
-- Log Correlation and Analysis
-- Network Forensics
-- Web Technologies
-- PHP, JavaScript, HTML, MySQL, MariaDB
-- VMware ESXi Virtualization
-- OpenBSD 5.x, FreeBSD 10.x deployment
-- RHEL6, RHEL7 (CentOS 6, CentOS 7)
-deployment
-
-- Network Monitoring
-- Xymon Network Monitor
-- Intrusion Detection Systems Engineering
-- Snort 2.x, 3++
-- Suricata
-- Metadata Generation
-- Network Design and TAP Placement
-- Python Programming
-- Bash Scripting
-- Security Information & Event Management
-- HP ArcSight Logger / ESM
-- Splunk 6
-
-## Education and Experience
-
-- 2015 2nd Place, BSides Ottawa, Capture the Flag Competition
-- 2nd Place, SANS Institute, SANS Canadian CyberTalent Competition
-- Instructor, SANS Institute, SEC503: Intrusion Detection In-Depth
-- Instructor, SANS Institute, SEC401: Security Essentials: Bootcamp Style
-- Course, SANS Institute, SEC401: Security Essentials: Bootcamp Style
-- Certificate, GIAC, GIAC Security Essentials Certification (GSEC), Honours
-- Training, SANS Institute, Mentor Training (live webcast presentation delivery)
-- 2014 Course, SANS Institute, SEC503: Intrusion Detection In-Depth
-- Certificate, GIAC, GIAC Certified Intrusion Analyst (GCIA), Honours
-- Course, Royal Military College of Canada, Intrusion Detection and Extrusion Analysis Skills
-- Instructor, Canadian Forces School of Communications & Electronics, Network Defence Analyst
-- Prior Course, Royal Military College of Canada, Short Course in Networks and Security
-- Course, Canadian Forces Training and Education System, Instructor Supervisor
-- Course, Canadian Forces Training and Education System, Advanced Instructional Techniques
-- Course, Canadian Forces Training and Education System, Basic Instructional Techniques
-- PLAR, Canadian Forces School of Communications and Electronics, Network Defence Analyst
-
-## Professional Memberships
-
-- Canadian Internet Registration Authority
-
-- GIAC Advisory Board
-
-- SANS Mentor
-
-## Publications
-
-### CEVO Client Information Disclosure Vulnerability
-
-CEVO was a global eSports company built around North America’s largest competitive online PC gaming league. Founded in December of 2004 with the intention to transform competitive online gaming into a professional sport, CEVO has been hosting both free and pay-to-pay tournaments across a variety of AAA titles for over 10 years. The CEVO client is software that is mandatory to be run during online play. The client was transmitting user authentication details (usernames and passwords) in clear text which made them susceptible to eavesdropping attacks.
+SIGINT Cyber Sailor :anchor:
 
 ## Employment History
 
-### SANS Institute 2015 - 2016
+### [Shopify][shop], 2016-2021
 
-#### Instructor (Community/Mentor) for SEC401 and SEC503
+#### Staff Infrastructure Security Engineer
 
-Community SANS offers our most popular security courses in a small classroom setting in your own community - most courses have fewer than 25 students. The course material is delivered over a six-day period, just like it is at a larger SANS event, by instructors trained by SANS very best authors and instructors.
+I spent the majority of my time at Shopify on the **Infrastructure Security** team, where I was the engineering lead. My teams were responsible for reducing the blast radius of Shopify's applications and services in production and cared about things like:
 
-### Canadian Forces Network Operations Centre, Ottawa ON 2012 - 2015
+- :lock: Multi-tenancy Security
+- :package: Secure Software Supply Chains
+- :whale: Containers and Kubernetes
+- :busts_in_silhouette: Identity and Access Management
 
-#### Senior Information Security Analyst - Team Lead
+##### Positional Achievements:
 
-Team lead to multiple tier 1 and tier 2 analysts — providing focus and direction on InfoSec incidents and analysis, incident response, and incident handling on one of the largest computer networks in Canada.
+- Engineering lead for **Cloud Security** during the :cloud: migration
+- [kubeaudit](https://github.com/Shopify/kubeaudit/commit/f920d0c97d00e0746a8023bf510c7ec9d30be491)
+- 1st place in **Production Engineering Hackdays 2018** with HashiCorp Vault! :trophy:
+- Powered Shopify's Support Quality Assurance system with [Google Workspace Add-ons](https://developers.google.com/apps-script/add-ons/overview) and a little bit of BigQuery :sparkles:
+- [Quoted in the Google Cloud Blog][gcp-quote] when Grafeas launched
+- Artisanal just-in-time permissions management with `sudo` for the :cloud:
+- .. and more I'm sure.
 
-Responsible for anomaly detection, NIDS alert triage, escalation of malware, botnet, and rookit behaviour. Engineered custom tools to increase the unit’s capability and assist in the generation of metadata. Produced end product reports, briefings, and incident reports.
+### [Canadian Armed Forces](https://forces.ca), 2008-2015
+
+I retired from the Canadian Armed Forces a [Master Sailor][ms] working as what's now called a [Cyber Operator][cyberop]. I was a course developer for and the instructor of a computer network defence course, as well as a Senior Surveillance Analyst -- I would describe this as being a team lead at a super spoopy :ghost: SOC.
+
+{{< detail "Expand for more details" >}}
+### Canadian Forces Network Operations Centre
+
+#### Senior Surveillance Analyst, 2012-2015
+
+Technical lead for a group of surveillance analysts — providing focus and direction on computer security incident response, and incident handling on one of the largest computer networks in Canada.
+
+Responsible for anomaly detection, network intrusion detection systems, alert triage, escalation of malware, botnet, and rookit behaviour. Engineered custom tools to increase the unit’s capability and assist in the generation of metadata. Produced end product reports, briefings, and incident reports.
 
 ##### Positional Achievements:
 
@@ -93,56 +52,146 @@ Responsible for anomaly detection, NIDS alert triage, escalation of malware, bot
   "[...] His initiative, professionalism, and the ongoing benefits that have arisen from his leadership within Op ENVELOPE have brought great credit upon himself, his Unit, and the Formation."
 
 - CFNOC Member of the Year (2014-2015)
-  "Presented on behalf of the Canadian Forces Network Operations Centre for exceptional dedication, fellowship and professionalism to both the Unit and the Canadian Armed Forces from 1st Jul 2014 to 30th Jun 2015. All of these highly respected attributes have been witnessed on a daily basis and serve to motivate those around him. He epitomizes the highest standards that CFNOC adheres to
-and strives to help his peers achieve these same standards. Jonathan Pulsifer has been a true representative of CAF values and ethics and is held in the highest regard by co-workers and supervisors alike."
+  "Presented on behalf of the Canadian Forces Network Operations Centre for exceptional dedication, fellowship and professionalism to both the Unit and the Canadian Armed Forces from 1st Jul 2014 to 30th Jun 2015. All of these highly respected attributes have been witnessed on a daily basis and serve to motivate those around him. He epitomizes the highest standards that CFNOC adheres to and strives to help his peers achieve these same standards. Jonathan Pulsifer has been a true representative of CAF values and ethics and is held in the highest regard by co-workers and supervisors alike."
 
 - Commanding Officer's Coin
   Received for dedication to the unit and professional development during personal hours.
 
-### Canadian Forces School of Communications and Electronics, Kingston ON 2012 - 2015
+### [Canadian Forces School of Communications and Electronics](https://en.wikipedia.org/wiki/Communications_and_Electronics_Branch#Canadian_Forces_School_of_Communications_and_Electronics)
 
-#### Lead Instructor - Computer Network Defence Analyst
+#### Lead Instructor - Computer Network Defence Analyst, 2012-2015
 
 Employed as lead developer and instructor for the Computer Network Defence Analyst (CNDA) course. The four week CNDA course was created in order to provide basic level knowledge and skills required to be employed as a network analyst in the conduct of Defensive Cyber Operations (DCO). The CNDA course is comprised of two main sections.
 
-The first section is intended to provide a fundamental understanding of the cyber environment in which the analyst operates and tools of the trade. The second section shifts focus to introduce students to the tradecraft of traffic analysis that enables the analyst to understand and identify when and how a given
-security posture has been compromised.
+The first section is intended to provide a fundamental understanding of the cyber environment in which the analyst operates and tools of the trade. The second section shifts focus to introduce students to the tradecraft of traffic analysis that enables the analyst to understand and identify when and how a given security posture has been compromised.
 
-### Canadian Armed Forces 2008 - Present
+### [Canadian Forces School of Communications and Electronics](https://en.wikipedia.org/wiki/Communications_and_Electronics_Branch#Canadian_Forces_School_of_Communications_and_Electronics)
 
-#### Master Sailor - Communicator Research Operator
-
-The rank, formally an appointment as a senior leading seaman, gives the Master Seaman authority over all privates and corporals. As such, a Master Seaman is a first level supervisor who will be assessed on his/her ability to manage and develop subordinates.
-
-Communicator Research Operators intercept and analyze electronic transmissions, including foreign communications. They also protect Government of Canada computer networks.
-
-A Communications Research Operator has the following responsibilities:
-
-- Collect, process, analyze and report on electromagnetic activity on radio frequency, using highly sophisticated equipment
-- Manage and protect computer networks
-- Ensure information technology is secure
-- Use and maintain classified publications
-
-## Prior Employment:
-
-### Canadian Forces School of Communications and Electronics, Kingston ON 2010-2011
-
-#### Building Security NCM
+#### Building Security NCM, 2010-2011
 
 Responsible to the Building Security NCO, duties included physical security and access control for a secure building and multiple SCIFS, classified publication accessibility, pass control and access control list management.
 
-### Land Force Doctrine and Training System HQ, Kingston ON 2009-2010
+### [Canadian Army Doctrine and Training Centre HQ](https://army.gc.ca/en/canadian-army-doctrine-and-training-centre/index.page)
 
-#### Database Administrator
+#### Database Administrator, 2009-2010
 
-Responsible for the creation and maintenance of a secure, distributed, relational database and front end which assisted in the management of over 100 personnel at the Directorate of Army Training. The database included functions such as mail merge, report generation, historical vacation day tracking, and updated positional information from other intranet websites.
+Responsible for the creation and maintenance of a secure, distributed, relational database and front end which assisted in the management of over 100 personnel at the Directorate of Army Training. The database included functions such as mail merge, report generation, historical vacation day tracking, and updated positional information sourced from other intranet APIs.
+{{< /detail >}}
 
-## Volunteering:
+### [SANS Institute][sans], 2015
 
-### Taing Jewellers, Ottawa ON 2015
+While still in the Navy, in 2015 I started to get involved with the [SANS Institute][sans] as a mentor and co-instructor for [SEC401][sec401] and [SEC503][sec503]. I also proctored exams for candidates in the National Capital Region, but fell off after joining [Shopify][shop] :rocket:
 
-#### Information Security Consultant
+## Courses, Competitions, Training, and Education
 
-Provided reports and guidance on vulnerabilities found during a site survey, the handling of PCI data,
-network segmentation, and network access control. The services were provided free of charge and
-acted in the hopes of increasing the community’s information security posture.
+|                                                            |
+|------------------------------------------------------------|
+| [Certified Kubernetes Administrator (CKA)][cka]            |
+| [LFS258: Kubernetes Fundamentals][lfs258]                  |
+| [LFS158x: Introduction to Kubernetes][lfs158]              |
+| BSides Ottawa 2015 Capture the Flag Competition            |
+| [SANS Canadian CyberTalent Competition][cybertalent]       |
+| [SEC401: Security Essentials: Bootcamp Style][giac]        |
+| [SEC503: Intrusion Detection In-Depth][giac]               |
+| SANS Mentor Training                                       |
+| [Intrusion Detection and Extrusion Analysis Skills][ideas] |
+| Computer Network Defence Analyst                           |
+| [Short Course in Networks and Security][scins]             |
+| Instructor Supervisor                                      |
+| Advanced Instructional Techniques                          |
+| Basic Instructional Techniques                             |
+
+## Presentations and Publications
+
+### [How Shopify Governs Containers at Scale with Grafeas and Kritis][shop-engineering-blog]
+
+### CEVO Client Information Disclosure Vulnerability
+
+CEVO was a global eSports company built around North America’s largest competitive online PC gaming league. Founded in December of 2004 with the intention to transform competitive online gaming into a professional sport, CEVO has been hosting both free and pay-to-pay tournaments across a variety of AAA titles for over 10 years. The CEVO client is software that is mandatory to be run during online play. The client was transmitting user authentication details (usernames and passwords) in clear text which made them susceptible to eavesdropping attacks.
+
+### Container Security Summit 2018 Keynote
+
+Everything's different, nothing's changed!
+
+### Compliant Infrastructure as Code
+
+Maintaining SOC 2 compliance standards across production
+
+{{< youtube id="u_qVU3q9-iA" title="Compliant Infrastructure as Code" >}}
+
+### Keyless Entry: Securely Access GCP Services From Kubernetes
+
+Workload Identity: using short lived access tokens instead of long lived credentials
+
+{{< youtube id="s4NYEJDFc0M" title="Keyless Entry: Securely Access GCP Services from Kubernetes" >}}
+
+### Securing the Software Supply Chain
+
+Binary Authorization: cryptographically signing points in CI with business logic
+
+{{< youtube id="hOzH3mOApjs" title="Securing the Software Supply Chain" >}}
+
+### Securing Shopify's PaaS on GKE
+
+How we think about security at Shopify
+
+{{< youtube id="ZrweAu9T24A" title="Securing Shopify's PaaS on GKE" >}}
+
+### Infrastructure Security 2.0
+
+How containers work and some protips
+
+{{< youtube id="FUkThjw1X5Y" title="Infrastructure Security 2.0" >}}
+
+## Community, Memberships, &amp; Volunteering
+
+Whenever I have enough spoons :spoon: left I like to give back to the community. Right now, I identify as a:
+
+- [Google Developer Expert][gde]
+- [Kubernetes Product Security Committee][k8s] emeritus member
+- [GIAC Advisory Board][giac-advisory-board] member
+
+As a [Google Developer Expert][gde-profile] and [Kubernetes][k8s] community person, I host and partipate in [Google Developer Group][gdg] chapters and Cloud Native Computing Foundation meetups.
+
+- [CNCF Ottawa][cncf-ottawa]
+- [GDG Cloud Ottawa][gdg-cloud-ottawa]
+- [GDG Cloud Montreal][gdg-cloud-montreal]
+
+Here are some places where I've "kept the lights on" during times of digital transformation :smile:
+
+- [Law Needs Feminism Because][lnfb]
+- [National Association of Women and the Law][nawl]
+- [Taing Jewellers](https://taingjewellers.com/)
+
+[cfs-leitrim]: https://en.wikipedia.org/wiki/CFS_Leitrim
+[cka]: https://training.linuxfoundation.org/certification/certified-kubernetes-administrator-cka/
+[cncf-montreal]: https://community.cncf.io/montreal/
+[cncf-ottawa]: https://community.cncf.io/ottawa/
+[cyberop]: https://forces.ca/en/career/cyber-operator/
+[cybertalent]: https://www.sans.org/cybertalent
+[gcp-quote]: https://cloud.google.com/blog/products/gcp/introducing-grafeas-open-source-api-
+[gdg]: https://developers.google.com/community/gdg
+[gdg-cloud-montreal]: https://gdg.community.dev/gdg-cloud-montreal/
+[gdg-cloud-ottawa]: https://gdg.community.dev/gdg-cloud-ottawa/
+[gde]: https://developers.google.com/community/experts
+[gde-profile]: https://developers.google.com/community/experts/directory/profile/profile-jonathan-pulsifer
+[giac]: https://www.giac.org/certified-professional/Jonathan-Pulsifer/142718
+[giac-advisory-board]: https://www.giac.org/about/community/
+[ideas]: http://csl.segfaults.net/#IDEAS
+[talk-compliant-infra]: https://www.youtube.com/watch?v=u_qVU3q9-iA
+[talk-infrasec2-0]: https://www.youtube.com/watch?v=FUkThjw1X5Y
+[talk-keyless-entry]: https://www.youtube.com/watch?v=s4NYEJDFc0M
+[talk-secure-the-paas]: https://www.youtube.com/watch?v=ZrweAu9T24A
+[talk-securing-the-software-supply-chain]: https://www.youtube.com/watch?v=hOzH3mOApjs
+[k8s]: https://github.com/kubernetes/committee-security-response/blob/main/README.md
+[lfs158]: https://training.linuxfoundation.org/training/introduction-to-kubernetes/
+[lfs258]: https://training.linuxfoundation.org/training/kubernetes-fundamentals/
+[ms]: https://en.wikipedia.org/wiki/Master_sailor
+[lnfb]: https://lawneedsfeminismbecause.ca
+[nawl]: https://nawl.ca
+[sans]: https://sans.org
+[scins]: http://csl.segfaults.net/#SCINS
+[shop]: https://shopify.ca
+[shop-engineering-blog]: https://shopify.engineering/how-shopify-governs-containers-at-scale-with-grafeas-and-kritis
+[sec401]: https://www.sans.org/cyber-security-courses/security-essentials-network-endpoint-cloud/
+[sec503]: https://www.sans.org/cyber-security-courses/intrusion-detection-in-depth/
