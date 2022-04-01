@@ -33,7 +33,7 @@ menus:
 
 markup:
   highlight:
-    style: dracula
+    style: xcode-dark
 
 enableEmoji: true
 enableGitInfo: true

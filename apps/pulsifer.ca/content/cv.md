@@ -4,11 +4,12 @@ description: An account of my qualifications and experience
 author: jonpulsifer
 date: 2022-03-29
 draft: false
+toc: true
 ---
 
 ## Summary
 
-SIGINT Cyber Sailor :anchor:
+:wave: Hi, I'm Jonathan Pulsifer, a **security engineer** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
 
 ## Employment History
 
@@ -18,20 +19,21 @@ SIGINT Cyber Sailor :anchor:
 
 I spent the majority of my time at Shopify on the **Infrastructure Security** team, where I was the engineering lead. My teams were responsible for reducing the blast radius of Shopify's applications and services in production and cared about things like:
 
-- :lock: Multi-tenancy Security
-- :package: Secure Software Supply Chains
 - :whale: Containers and Kubernetes
 - :busts_in_silhouette: Identity and Access Management
+- :memo: Infrastructure as Code
+- :lock: Multi-tenancy Security
+- :package: Secure Software Supply Chains
 
 ##### Positional Achievements:
 
 - Engineering lead for **Cloud Security** during the :cloud: migration
-- [kubeaudit](https://github.com/Shopify/kubeaudit/commit/f920d0c97d00e0746a8023bf510c7ec9d30be491)
-- 1st place in **Production Engineering Hackdays 2018** with HashiCorp Vault! :trophy:
-- Powered Shopify's Support Quality Assurance system with [Google Workspace Add-ons](https://developers.google.com/apps-script/add-ons/overview) and a little bit of BigQuery :sparkles:
+- [kubeaudit](https://github.com/Shopify/kubeaudit) inventor
+- **Production Engineering Hackdays 2018** :1st_place_medal: :trophy:
 - [Quoted in the Google Cloud Blog][gcp-quote] when Grafeas launched
 - Artisanal just-in-time permissions management with `sudo` for the :cloud:
-- .. and more I'm sure.
+- Powered Shopify's Support Quality Assurance system with [Google Workspace Add-ons](https://developers.google.com/apps-script/add-ons/overview) and a little bit of BigQuery :sparkles:
+- ... and many more!
 
 ### [Canadian Armed Forces](https://forces.ca), 2008-2015
 
@@ -82,67 +84,6 @@ Responsible for the creation and maintenance of a secure, distributed, relationa
 
 While still in the Navy, in 2015 I started to get involved with the [SANS Institute][sans] as a mentor and co-instructor for [SEC401][sec401] and [SEC503][sec503]. I also proctored exams for candidates in the National Capital Region, but fell off after joining [Shopify][shop] :rocket:
 
-## Courses, Competitions, Training, and Education
-
-|                                                            |
-|------------------------------------------------------------|
-| [Certified Kubernetes Administrator (CKA)][cka]            |
-| [LFS258: Kubernetes Fundamentals][lfs258]                  |
-| [LFS158x: Introduction to Kubernetes][lfs158]              |
-| BSides Ottawa 2015 Capture the Flag Competition            |
-| [SANS Canadian CyberTalent Competition][cybertalent]       |
-| [SEC401: Security Essentials: Bootcamp Style][giac]        |
-| [SEC503: Intrusion Detection In-Depth][giac]               |
-| SANS Mentor Training                                       |
-| [Intrusion Detection and Extrusion Analysis Skills][ideas] |
-| Computer Network Defence Analyst                           |
-| [Short Course in Networks and Security][scins]             |
-| Instructor Supervisor                                      |
-| Advanced Instructional Techniques                          |
-| Basic Instructional Techniques                             |
-
-## Presentations and Publications
-
-### [How Shopify Governs Containers at Scale with Grafeas and Kritis][shop-engineering-blog]
-
-### CEVO Client Information Disclosure Vulnerability
-
-CEVO was a global eSports company built around North America’s largest competitive online PC gaming league. Founded in December of 2004 with the intention to transform competitive online gaming into a professional sport, CEVO has been hosting both free and pay-to-pay tournaments across a variety of AAA titles for over 10 years. The CEVO client is software that is mandatory to be run during online play. The client was transmitting user authentication details (usernames and passwords) in clear text which made them susceptible to eavesdropping attacks.
-
-### Container Security Summit 2018 Keynote
-
-Everything's different, nothing's changed!
-
-### Compliant Infrastructure as Code
-
-Maintaining SOC 2 compliance standards across production
-
-{{< youtube id="u_qVU3q9-iA" title="Compliant Infrastructure as Code" >}}
-
-### Keyless Entry: Securely Access GCP Services From Kubernetes
-
-Workload Identity: using short lived access tokens instead of long lived credentials
-
-{{< youtube id="s4NYEJDFc0M" title="Keyless Entry: Securely Access GCP Services from Kubernetes" >}}
-
-### Securing the Software Supply Chain
-
-Binary Authorization: cryptographically signing points in CI with business logic
-
-{{< youtube id="hOzH3mOApjs" title="Securing the Software Supply Chain" >}}
-
-### Securing Shopify's PaaS on GKE
-
-How we think about security at Shopify
-
-{{< youtube id="ZrweAu9T24A" title="Securing Shopify's PaaS on GKE" >}}
-
-### Infrastructure Security 2.0
-
-How containers work and some protips
-
-{{< youtube id="FUkThjw1X5Y" title="Infrastructure Security 2.0" >}}
-
 ## Community, Memberships, &amp; Volunteering
 
 Whenever I have enough spoons :spoon: left I like to give back to the community. Right now, I identify as a:
@@ -151,7 +92,7 @@ Whenever I have enough spoons :spoon: left I like to give back to the community.
 - [Kubernetes Product Security Committee][k8s] emeritus member
 - [GIAC Advisory Board][giac-advisory-board] member
 
-As a [Google Developer Expert][gde-profile] and [Kubernetes][k8s] community person, I host and partipate in [Google Developer Group][gdg] chapters and Cloud Native Computing Foundation meetups.
+As a [Google Developer Expert][gde-profile] and [Kubernetes][k8s] community person, I host and partipate in [Google Developer Group][gdg] chapters and Cloud Native Computing Foundation meetups:
 
 - [CNCF Ottawa][cncf-ottawa]
 - [GDG Cloud Ottawa][gdg-cloud-ottawa]
@@ -162,6 +103,43 @@ Here are some places where I've "kept the lights on" during times of digital tra
 - [Law Needs Feminism Because][lnfb]
 - [National Association of Women and the Law][nawl]
 - [Taing Jewellers](https://taingjewellers.com/)
+
+## Courses, Competitions, Training, and Education
+
+|                                                                        |
+|------------------------------------------------------------------------|
+| [Certified Kubernetes Administrator (CKA)][cka]                        |
+| [LFS258: Kubernetes Fundamentals][lfs258]                              |
+| [LFS158x: Introduction to Kubernetes][lfs158]                          |
+| [SANS Canadian CyberTalent Competition][cybertalent] :1st_place_medal: |
+| BSides Ottawa 2015 Capture the Flag Competition :2nd_place_medal:      |
+| [SEC401: Security Essentials: Bootcamp Style][giac]                    |
+| [SEC503: Intrusion Detection In-Depth][giac]                           |
+| SANS Mentor Training                                                   |
+| [Intrusion Detection and Extrusion Analysis Skills][ideas]             |
+| Computer Network Defence Analyst                                       |
+| [Short Course in Networks and Security][scins]                         |
+| Instructor Supervisor                                                  |
+| Advanced Instructional Techniques                                      |
+| Basic Instructional Techniques                                         |
+
+## Talks
+
+|                                                                                                                        |
+|------------------------------------------------------------------------------------------------------------------------|
+| [Compliant Infrastructure as Code]({{< relref "/talks/compliant-infrastructure-as-code" >}})                            |
+| Container Security Summit 2018 Keynote                                                                                 |
+| [Infrastructure Security 2.0]({{< relref "/talks/infrastructure-security-2-0" >}})                                     |
+| [Keyless Entry: Securely Access GCP Services From Kubernetes]({{< relref "/talks/keyless-entry-workload-identity" >}}) |
+| [Securing Shopify’s PaaS on GKE]({{< relref "/talks/securing-the-paas" >}})                                            |
+| [Securing the Software Supply Chain]({{< relref "/talks/secure-software-supply-chain-binauthz" >}})                    |
+
+## Publications
+
+|                                                                                           |
+|-------------------------------------------------------------------------------------------|
+| [How Shopify Governs Containers at Scale with Grafeas and Kritis][shop-engineering-blog]  |
+| [CEVO Client Information Disclosure]({{< relref "/posts/cevo-information-disclosure" >}}) |
 
 [cfs-leitrim]: https://en.wikipedia.org/wiki/CFS_Leitrim
 [cka]: https://training.linuxfoundation.org/certification/certified-kubernetes-administrator-cka/

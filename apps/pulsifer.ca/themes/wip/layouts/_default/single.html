@@ -5,7 +5,7 @@
 	<h1 class="title">{{ .Title }}</h1>
 	{{ partial "post-meta" . }}
       </header>
-      {{ if (gt .WordCount 400) }}
+      {{ if and (.Params.toc) (gt .WordCount 400) }}
         {{ with .TableOfContents }}
         <div class="toc">
 	  <h3>Table of Contents</h3>
