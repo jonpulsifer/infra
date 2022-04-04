@@ -9,7 +9,7 @@ toc: true
 
 ## Summary
 
-:wave: Hi, I'm Jonathan Pulsifer, a **security engineer** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
+:wave: Hi, I'm Jonathan Pulsifer, a **security engineer** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with [Open Source][github], **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
 
 ## Employment History
 
@@ -155,6 +155,7 @@ Here are some places where I've "kept the lights on" during times of digital tra
 [gde-profile]: https://developers.google.com/community/experts/directory/profile/profile-jonathan-pulsifer
 [giac]: https://www.giac.org/certified-professional/Jonathan-Pulsifer/142718
 [giac-advisory-board]: https://www.giac.org/about/community/
+[github]: https://github.com/jonpulsifer
 [ideas]: http://csl.segfaults.net/#IDEAS
 [talk-compliant-infra]: https://www.youtube.com/watch?v=u_qVU3q9-iA
 [talk-infrasec2-0]: https://www.youtube.com/watch?v=FUkThjw1X5Y
