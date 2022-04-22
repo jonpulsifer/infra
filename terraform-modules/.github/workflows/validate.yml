@@ -4,7 +4,7 @@ on:
   - pull_request
 jobs:
   validate:
-    name: ':robot: brrrr'
+    name: 'fmt, init, validate'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,7 +19,7 @@ jobs:
       run:
         working-directory: ${{ matrix.modules }}
     steps:
-      - name: 'Checkout'
+      - name: Checkout
         uses: actions/checkout@v3
       - uses: hashicorp/setup-terraform@v2
       - name: Terraform fmt
