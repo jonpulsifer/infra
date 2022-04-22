@@ -3,123 +3,32 @@ on:
   - push
   - pull_request
 jobs:
-  gke-cluster:
-    name: 'GKE Cluster'
+  validate:
+    name: ':robot: brrrr'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        modules:
+        - appengine-flex
+        - gce-igm-shielded
+        - gce-vpc
+        - gcp-project
+        - gke-cluster
+        - gke-nodepool
+    defaults:
+      run:
+        working-directory: ${{ matrix.modules }}
     steps:
       - name: 'Checkout'
-        uses: actions/checkout@master
-      - name: 'Terraform Init'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'init'
-          tf_actions_working_dir: 'gke-cluster'
-          tf_actions_comment: false
-      - name: 'Terraform Validate'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'validate'
-          tf_actions_working_dir: 'gke-cluster'
-          tf_actions_comment: false
-  gke-nodepool:
-    name: 'GKE Node Pool'
-    runs-on: ubuntu-latest
-    steps:
-      - name: 'Checkout'
-        uses: actions/checkout@master
-      - name: 'Terraform Init'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'init'
-          tf_actions_working_dir: 'gke-nodepool'
-          tf_actions_comment: false
-      - name: 'Terraform Validate'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'validate'
-          tf_actions_working_dir: 'gke-nodepool'
-          tf_actions_comment: false
-  gce-igm-shielded:
-    name: 'GCE Shielded VM'
-    runs-on: ubuntu-latest
-    steps:
-      - name: 'Checkout'
-        uses: actions/checkout@master
-      - name: 'Terraform Init'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'init'
-          tf_actions_working_dir: 'gke-igm-shielded'
-          tf_actions_comment: false
-      - name: 'Terraform Validate'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'validate'
-          tf_actions_working_dir: 'gke-igm-shielded'
-          tf_actions_comment: false
-  gcp-project:
-    name: 'GCP Project'
-    runs-on: ubuntu-latest
-    steps:
-      - name: 'Checkout'
-        uses: actions/checkout@master
-      - name: 'Terraform Init'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'init'
-          tf_actions_working_dir: 'gcp-project'
-          tf_actions_comment: false
-      - name: 'Terraform Validate'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'validate'
-          tf_actions_working_dir: 'gcp-project'
-          tf_actions_comment: false
-  gce-vpc:
-    name: 'GCE VPC'
-    runs-on: ubuntu-latest
-    steps:
-      - name: 'Checkout'
-        uses: actions/checkout@master
-      - name: 'Terraform Init'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'init'
-          tf_actions_working_dir: 'gce-vpc'
-          tf_actions_comment: false
-      - name: 'Terraform Validate'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'validate'
-          tf_actions_working_dir: 'gce-vpc'
-          tf_actions_comment: false
-  appengine-flex:
-    name: 'AppEngine Flex'
-    runs-on: ubuntu-latest
-    steps:
-      - name: 'Checkout'
-        uses: actions/checkout@master
-      - name: 'Terraform Init'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'init'
-          tf_actions_working_dir: 'appengine-flex'
-          tf_actions_comment: false
-      - name: 'Terraform Validate'
-        uses: hashicorp/terraform-github-actions@master
-        with:
-          tf_actions_version: 1.0.11
-          tf_actions_subcommand: 'validate'
-          tf_actions_working_dir: 'appengine-flex'
-          tf_actions_comment: false
+        uses: actions/checkout@v3
+      - uses: hashicorp/setup-terraform@v2
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check
+        continue-on-error: true
+      - name: Terraform Init
+        id: init
+        run: terraform init
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
