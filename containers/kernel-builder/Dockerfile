@@ -1,4 +1,4 @@
-FROM gcr.io/trusted-builds/ubuntu-1804-base
+FROM ubuntu:jammy
 
 ENV PACKAGES build-essential libncurses-dev bison flex libssl-dev libelf-dev
 

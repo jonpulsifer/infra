@@ -1,4 +1,4 @@
-FROM ubuntu
+FROM ubuntu:jammy
 LABEL maintainer=jonathan@pulsifer.ca \
       ca.pulsifer.os=linux \
       ca.pulsifer.distro=ubuntu \
