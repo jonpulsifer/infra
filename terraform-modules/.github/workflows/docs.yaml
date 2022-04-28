@@ -1,7 +1,6 @@
 name: 'Terraform Docs'
 on:
   - push
-  - pull_request
 jobs:
   validate:
     name: generate
