@@ -22,7 +22,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Generate Docker Meta
-        uses: crazy-max/ghaction-docker-meta@v3
+        uses: crazy-max/ghaction-docker-meta@v4
         id: meta
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.container }}
