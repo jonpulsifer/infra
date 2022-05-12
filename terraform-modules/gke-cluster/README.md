@@ -4,14 +4,14 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.1.9 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 4.19.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 4.20.0 |
 | <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 4.19.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 4.19.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 4.20.0 |
 | <a name="provider_google-beta"></a> [google-beta](#provider\_google-beta) | 4.19.0 |
 
 ## Modules
