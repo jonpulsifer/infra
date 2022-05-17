@@ -1,6 +1,8 @@
 name: 'Terraform Docs'
 on:
-  - push
+  push:
+    branches:
+      - main
 jobs:
   validate:
     name: generate
