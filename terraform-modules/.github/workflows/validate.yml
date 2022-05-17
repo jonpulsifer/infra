@@ -1,7 +1,9 @@
 name: 'Terraform Module CI'
 on:
-  - push
-  - pull_request
+  push:
+    branches:
+      - main
+  pull_request:
 jobs:
   validate:
     name: 'fmt, init, validate'
