@@ -2,7 +2,6 @@ package view_counter
 
 import (
 	"net/http/httptest"
-	"os"
 	"regexp"
 	"testing"
 )
