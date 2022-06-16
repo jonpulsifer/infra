@@ -1,6 +1,6 @@
-# https://github.com/tianon/docker-brew-ubuntu-core/blob/dist-amd64/jammy/Dockerfile
+# https://github.com/tianon/docker-brew-ubuntu-core
 FROM scratch
-ADD ubuntu-jammy-core-cloudimg-amd64-root.tar.gz /
+ADD ubuntu-jammy-oci-amd64-root.tar.gz /
 # a few minor docker-specific tweaks
 # see https://github.com/docker/docker/blob/9a9fc01af8fb5d98b8eec0740716226fadb3735c/contrib/mkimage/debootstrap
 RUN set -xe \
@@ -32,10 +32,9 @@ RUN set -xe \
 # https://github.com/docker/docker/blob/9a9fc01af8fb5d98b8eec0740716226fadb3735c/contrib/mkimage/debootstrap#L134-L151
 	&& echo 'Apt::AutoRemove::SuggestsImportant "false";' > /etc/apt/apt.conf.d/docker-autoremove-suggests
 
-# delete all the apt list files since they're big and get stale quickly
-RUN rm -rf /var/lib/apt/lists/*
-# this forces "apt-get update" in dependent images, which is also good
-# (see also https://bugs.launchpad.net/cloud-images/+bug/1699913)
+# verify that the APT lists files do not exist
+RUN [ -z "$(apt-get indextargets)" ]
+# (see https://bugs.launchpad.net/cloud-images/+bug/1699913)
 
 # make systemd-detect-virt return "docker"
 # See: https://github.com/systemd/systemd/blob/aa0c34279ee40bce2f9681b496922dedbadfca19/src/basic/virt.c#L434

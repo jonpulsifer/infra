@@ -1,1 +1,3 @@
-ubuntu-2204-base/build/
+**/build/
+.vscode
+*.tar.gz
