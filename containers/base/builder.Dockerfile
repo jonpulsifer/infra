@@ -1,10 +1,9 @@
-FROM northamerica-northeast1-docker.pkg.dev/trusted-builds/i/base
+FROM alpine:edge
 
 ENV WORKDIR /workspace
-ENV PACKAGES gnupg2 make wget
+ENV PACKAGES gnupg make wget
 
-RUN apt-get -qqy update && apt-get -qqy upgrade && \
-    apt-get -qy install ${PACKAGES} && \
+RUN apk add --no-cache gnupg make wget && \
     mkdir -p ${WORKDIR}
 
 WORKDIR ${WORKDIR}
