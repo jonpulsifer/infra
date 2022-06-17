@@ -46,7 +46,7 @@ verify-rootfs:
 	gpg2 -q --keyserver hkps://keyserver.ubuntu.com --recv-keys $(UBUNTU_SIGNING_KEY)
 	cd $(BUILD_DIR) && \
 	gpg2 --batch --verify SHA256SUMS.gpg SHA256SUMS && \
-	sha256sum -c SHA256SUMS
+	grep $(BASE_TARBALL) SHA256SUMS | sha256sum -c -
 
 .PHONY: push
 push: rootfs container
