@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bullseye
+  namespace: bullseye
+  labels:
+    app.kubernetes.io/name: bullseye
+    app.kubernetes.io/part-of: bullseye
+automountServiceAccountToken: false
+---

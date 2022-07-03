@@ -1,0 +1,125 @@
+locals {
+  fml_cidr = "10.1.0.0/24"
+  fml_wlan = "fml"
+  clients  = yamldecode(file("./clients.yaml"))
+}
+
+resource "unifi_network" "fml" {
+  name          = "Folly Mountain Laboratories"
+  domain_name   = "fml.pulsifer.ca"
+  network_group = "LAN"
+  purpose       = "corporate"
+  subnet        = local.fml_cidr
+  # wan_gateway   = "0.0.0.0"
+
+  dhcp_enabled = true
+  dhcp_lease   = 86400
+  dhcp_start   = cidrhost(local.fml_cidr, 100)
+  dhcp_stop    = cidrhost(local.fml_cidr, 199)
+}
+
+resource "unifi_firewall_rule" "allow_fml_to_any" {
+  name       = "Allow fml.pulsifer.ca to ANY"
+  action     = "accept"
+  ruleset    = "LAN_IN"
+  rule_index = "2000"
+
+  protocol = "all"
+
+  src_network_type = "NETv4"
+  src_network_id   = unifi_network.fml.id
+}
+
+data "unifi_ap_group" "all_aps" {
+  name = "All APs"
+}
+
+data "vault_generic_secret" "wifi" {
+  path = "home/wifi"
+}
+
+resource "unifi_wlan" "fml" {
+  name       = local.fml_wlan
+  security   = "wpapsk"
+  passphrase = data.vault_generic_secret.wifi.data[local.fml_wlan]
+
+  ap_group_ids = [
+    data.unifi_ap_group.all_aps.id,
+  ]
+
+  network_id    = unifi_network.fml.id
+  user_group_id = unifi_user_group.unmetered.id
+
+  multicast_enhance = true
+  wlan_band         = "both"
+}
+
+resource "unifi_user" "personal_devices" {
+  for_each               = local.clients.personal-devices
+  name                   = each.key
+  mac                    = each.value.mac
+  blocked                = lookup(each.value, "blocked", false)
+  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
+  note                   = lookup(each.value, "note", "Managed by terraform")
+  allow_existing         = lookup(each.value, "allow_existing", true)
+  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
+  dev_id_override        = lookup(each.value, "dev-id", 0)
+  network_id             = unifi_network.fml.id
+  user_group_id          = unifi_user_group.unmetered.id
+}
+
+resource "unifi_user" "computers" {
+  for_each               = merge(local.clients.desktops, local.clients.laptops)
+  name                   = each.key
+  mac                    = each.value.mac
+  blocked                = lookup(each.value, "blocked", false)
+  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
+  note                   = lookup(each.value, "note", "Managed by terraform")
+  allow_existing         = lookup(each.value, "allow_existing", true)
+  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
+  dev_id_override        = lookup(each.value, "dev-id", 0)
+  network_id             = unifi_network.fml.id
+  user_group_id          = unifi_user_group.unmetered.id
+}
+
+resource "unifi_user" "lab" {
+  for_each               = merge(local.clients.lab, local.clients.rpis)
+  name                   = each.key
+  mac                    = each.value.mac
+  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
+  blocked                = lookup(each.value, "blocked", false)
+  note                   = lookup(each.value, "note", "Managed by terraform")
+  allow_existing         = lookup(each.value, "allow_existing", true)
+  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
+  dev_id_override        = lookup(each.value, "dev-id", 0)
+  network_id             = unifi_network.fml.id
+  user_group_id          = unifi_user_group.unmetered.id
+}
+
+resource "unifi_user" "iot" {
+  for_each               = local.clients.iot
+  name                   = each.key
+  mac                    = each.value.mac
+  blocked                = lookup(each.value, "blocked", false)
+  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
+  note                   = lookup(each.value, "note", "Managed by terraform")
+  allow_existing         = lookup(each.value, "allow_existing", true)
+  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
+  network_id             = unifi_network.fml.id
+  user_group_id          = lookup(each.value, "streaming", false) == false ? unifi_user_group.iot.id : unifi_user_group.streaming.id
+  dev_id_override        = lookup(each.value, "dev-id", 0)
+}
+
+resource "unifi_user" "cameras" {
+  for_each               = local.clients.cameras
+  name                   = each.key
+  mac                    = each.value.mac
+  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
+  blocked                = lookup(each.value, "blocked", false)
+  note                   = lookup(each.value, "note", "Managed by terraform")
+  allow_existing         = lookup(each.value, "allow_existing", true)
+  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
+  dev_id_override        = lookup(each.value, "dev-id", 0)
+  network_id             = unifi_network.fml.id
+  user_group_id          = unifi_user_group.streaming.id
+}

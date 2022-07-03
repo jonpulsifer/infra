@@ -1,0 +1,107 @@
+resource "google_project_iam_member" "cert_manager" {
+  project = "homelab-ng"
+  role    = "roles/dns.admin"
+  member  = join(":", ["serviceAccount", google_service_account.cert_manager.email])
+}
+
+resource "google_project_iam_member" "external_dns" {
+  project = "homelab-ng"
+  role    = "roles/dns.admin"
+  member  = join(":", ["serviceAccount", google_service_account.external_dns.email])
+}
+
+resource "google_project_iam_member" "ddnsbot" {
+  project = "homelab-ng"
+  role    = "roles/dns.admin"
+  member  = join(":", ["serviceAccount", google_service_account.ddns.email])
+}
+
+resource "google_project_iam_member" "ddnsd" {
+  project = "homelab-ng"
+  role    = "roles/dns.admin"
+  member  = join(":", ["serviceAccount", google_service_account.ddnsd.email])
+}
+
+resource "google_project_iam_member" "certbot" {
+  project = "homelab-ng"
+  role    = "roles/dns.admin"
+  member  = join(":", ["serviceAccount", google_service_account.certbot.email])
+}
+
+resource "google_project_iam_member" "vault" {
+  project = "homelab-ng"
+  role    = "organizations/5046617773/roles/readOnlyVault"
+  member  = format("serviceAccount:%s", google_service_account.vault.email)
+}
+
+resource "google_service_account" "ddnsd" {
+  account_id = "ddnsd-id"
+}
+
+data "google_iam_policy" "ddnsd_token_creator" {
+  binding {
+    role    = "roles/iam.serviceAccountTokenCreator"
+    members = [format("serviceAccount:%s", google_service_account.ddnsd.email)]
+  }
+}
+
+resource "google_service_account_iam_policy" "ddnsd_token_creator" {
+  service_account_id = google_service_account.ddnsd.name
+  policy_data        = data.google_iam_policy.ddnsd_token_creator.policy_data
+}
+
+resource "google_service_account" "ddns" {
+  account_id = "ddns-function"
+}
+
+resource "google_service_account" "external_dns" {
+  account_id = "external-dns"
+}
+
+resource "google_service_account" "vault" {
+  account_id = "vault-id"
+}
+
+resource "google_service_account" "cert_manager" {
+  account_id = "cert-manager"
+}
+
+resource "google_service_account" "certbot" {
+  account_id = "certbot"
+}
+
+data "google_iam_policy" "github_actions" {
+  binding {
+    role = "roles/iam.workloadIdentityUser"
+    members = [
+      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.repository_owner/jonpulsifer"
+    ]
+  }
+}
+
+resource "google_service_account" "github_actions" {
+  account_id   = "github-actions"
+  display_name = "GitHub Actions Robot"
+}
+
+resource "google_service_account_iam_policy" "github_actions" {
+  service_account_id = google_service_account.github_actions.name
+  policy_data        = data.google_iam_policy.github_actions.policy_data
+}
+
+resource "google_project_iam_member" "github_actions_function_developer" {
+  project = "homelab-ng"
+  role    = "roles/cloudfunctions.developer"
+  member  = join(":", ["serviceAccount", google_service_account.github_actions.email])
+}
+
+resource "google_service_account" "view_counter" {
+  account_id   = "view-counter"
+  display_name = "View Counter Cloud Function"
+}
+
+resource "google_project_iam_member" "view_counter_firestore" {
+  project = "homelab-ng"
+  role    = "roles/datastore.user"
+  member  = join(":", ["serviceAccount", google_service_account.view_counter.email])
+}

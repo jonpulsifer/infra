@@ -1,0 +1,10 @@
+[Unit]
+Description=Runs the radiopi0 flask service that listens for cloudevents and does things
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/cloudevents-receiver
+
+[Install]
+WantedBy=multi-user.target
+

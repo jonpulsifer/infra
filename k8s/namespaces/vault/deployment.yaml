@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  namespace: vault
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/part-of: vault
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+      app.kubernetes.io/part-of: vault
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/part-of: vault
+    spec:
+      automountServiceAccountToken: true
+      serviceAccountName: vault
+      containers:
+      - name: vault
+        image: vault:1.10.0
+        imagePullPolicy: IfNotPresent
+        args: ['server']
+        securityContext:
+          capabilities:
+            add: ['IPC_LOCK']
+        ports:
+        - containerPort: 8200
+          name: api
+          protocol: TCP
+        - containerPort: 8201
+          name: cluster
+          protocol: TCP
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /var/run/secrets/gcp/credentials.json
+        - name: POD_IP_ADDR
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: VAULT_LOCAL_CONFIG
+          value: |
+            api_addr     = "https://0.0.0.0:8200"
+            cluster_addr = "https://0.0.0.0:8201"
+            ui = true
+
+            seal "gcpckms" {
+              project     = "homelab-ng"
+              region      = "northamerica-northeast1"
+              key_ring    = "vault"
+              crypto_key  = "vault"
+            }
+
+            storage "gcs" {
+              bucket     = "homelab-ng-vault"
+              ha_enabled = "false"
+            }
+
+            listener "tcp" {
+              address       = "0.0.0.0:8200"
+              tls_cert_file = "/etc/vault/tls/tls.crt"
+              tls_key_file  = "/etc/vault/tls/tls.key"
+              tls_disable_client_certs = true
+            }
+        readinessProbe:
+          httpGet:
+            path: /v1/sys/health?standbyok=true
+            port: 8200
+            scheme: HTTPS
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: vault-tls
+          mountPath: /etc/vault/tls
+        - name: gcp-service-account
+          mountPath: /var/run/secrets/gcp
+          readOnly: true
+      volumes:
+      - name: vault-tls
+        secret:
+          secretName: vault.home.pulsifer.ca
+      - name: gcp-service-account
+        secret:
+          secretName: gcp-service-account

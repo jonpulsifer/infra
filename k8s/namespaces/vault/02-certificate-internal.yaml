@@ -1,0 +1,15 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vault.home.pulsifer.ca
+  namespace: vault
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/part-of: vault
+spec:
+  secretName: vault.home.pulsifer.ca
+  dnsNames:
+  - vault.home.pulsifer.ca
+  issuerRef:
+    name: letsencrypt-dns
+    kind: ClusterIssuer
