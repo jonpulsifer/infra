@@ -11,7 +11,7 @@ terraform {
     }
     vault = {
       source  = "hashicorp/vault"
-      version = "~> 3.5"
+      version = "~> 3.7"
     }
   }
 }

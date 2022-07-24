@@ -15,13 +15,28 @@ unmanaged-infra:
     model: Cisco SG300-10PP-K9 V03
 
 lab:
-  caldigit:
-    mac: 64:4b:f0:10:0f:0c
-    ip: 3
   tinytower:
     mac: 78:24:af:3c:a4:67
     dev-id: 2663
-    ip: 4
+  nuc:
+    mac: 1c:69:7a:01:2a:ef
+    dev-id: 3592
+    ip: 20
+  nuc-wifi:
+    mac: d0:c6:37:4d:c2:fe
+    dev-id: 3592
+  800g2:
+    dev-id: 2847
+    mac: ec:8e:b5:72:35:24
+    ip: 21
+  800g3-1:
+    dev-id: 2847
+    mac: ac:e2:d3:0d:90:66
+    ip: 22
+  800g3-2:
+    dev-id: 2847
+    mac: ac:e2:d3:0c:fb:b5
+    ip: 23
 
 rpis:
   cloudpi4:
@@ -62,6 +77,12 @@ rpis:
     ip: 18
 
 desktops:
+  caldigit:
+    mac: 64:4b:f0:10:0f:0c
+    ip: 3
+  caldigit ts4:
+    mac: 64:4b:f0:37:15:69
+    ip: 4
   atomic:
     mac: a8:a1:59:42:16:1c
     dev-id: 2663
@@ -77,12 +98,6 @@ desktops:
   mini:
     mac: a8:20:66:03:f5:05
     ip: 8
-  nuc:
-    mac: 1c:69:7a:01:2a:ef
-    dev-id: 3592
-  nuc-wifi:
-    mac: d0:c6:37:4d:c2:fe
-    dev-id: 3592
 
 laptops:
   Constance's Macbook Pro:
