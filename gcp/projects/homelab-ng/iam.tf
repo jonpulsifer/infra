@@ -27,7 +27,6 @@ resource "google_project_iam_member" "certbot" {
   role    = "roles/dns.admin"
   member  = join(":", ["serviceAccount", google_service_account.certbot.email])
 }
-
 resource "google_project_iam_member" "vault" {
   project = "homelab-ng"
   role    = "organizations/5046617773/roles/readOnlyVault"
@@ -104,4 +103,26 @@ resource "google_project_iam_member" "view_counter_firestore" {
   project = "homelab-ng"
   role    = "roles/datastore.user"
   member  = join(":", ["serviceAccount", google_service_account.view_counter.email])
+}
+
+resource "google_service_account" "terraform" {
+  account_id = "terraform"
+  display_name = "Terraform Robot"
+}
+
+data "google_iam_policy" "terraform_token_creator" {
+  binding {
+    role    = "roles/iam.serviceAccountTokenCreator"
+    members = [format("serviceAccount:%s", google_service_account.terraform.email), format("group:%s", "cloud@pulsifer.ca")]
+  }
+
+  binding {
+    role = "roles/iam.serviceAccountUser"
+    members = [format("group:%s", "cloud@pulsifer.ca")]
+  }
+}
+
+resource "google_service_account_iam_policy" "terraform_token_creator" {
+  service_account_id = google_service_account.terraform.name
+  policy_data        = data.google_iam_policy.terraform_token_creator.policy_data
 }

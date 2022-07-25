@@ -7,9 +7,10 @@ locals {
 data "google_client_config" "current" {}
 
 provider "google" {
-  project = local.project
-  region  = local.region
-  zone    = local.zone
+  project                     = local.project
+  region                      = local.region
+  zone                        = local.zone
+  impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
 }
 
 terraform {
@@ -20,8 +21,8 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "~> 4.27.0"
+      version = "~> 4.29.0"
     }
   }
-  required_version = ">= 1.1.9"
+  required_version = ">= 1.2.5"
 }

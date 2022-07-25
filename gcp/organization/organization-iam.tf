@@ -6,11 +6,11 @@ resource "google_organization_iam_policy" "organization" {
 data "google_iam_policy" "org" {
   binding {
     role    = "roles/owner"
-    members = ["group:cloud@pulsifer.ca", "user:jonathan@pulsifer.ca", ]
+    members = ["group:cloud@pulsifer.ca" ]
   }
   binding {
     role    = "roles/orgpolicy.policyAdmin"
-    members = ["group:cloud@pulsifer.ca", "user:jonathan@pulsifer.ca", ]
+    members = ["group:cloud@pulsifer.ca" ]
   }
   binding {
     role    = "roles/resourcemanager.folderAdmin"
@@ -18,7 +18,7 @@ data "google_iam_policy" "org" {
   }
   binding {
     role    = "roles/resourcemanager.organizationAdmin"
-    members = ["group:cloud@pulsifer.ca", "user:jonathan@pulsifer.ca"]
+    members = ["group:cloud@pulsifer.ca"]
   }
   binding {
     role    = "roles/cloudfunctions.serviceAgent"
