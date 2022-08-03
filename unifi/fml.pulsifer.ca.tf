@@ -2,6 +2,7 @@ locals {
   fml_cidr = "10.1.0.0/24"
   fml_wlan = "fml"
   clients  = yamldecode(file("./clients.yaml"))
+  one_day = 86400
 }
 
 resource "unifi_network" "fml" {
@@ -13,9 +14,9 @@ resource "unifi_network" "fml" {
   # wan_gateway   = "0.0.0.0"
 
   dhcp_enabled = true
-  dhcp_lease   = 86400
-  dhcp_start   = cidrhost(local.fml_cidr, 100)
-  dhcp_stop    = cidrhost(local.fml_cidr, 199)
+  dhcp_lease   = local.one_day
+  dhcp_start   = cidrhost(local.fml_cidr, 200)
+  dhcp_stop    = cidrhost(local.fml_cidr, 254)
 }
 
 resource "unifi_firewall_rule" "allow_fml_to_any" {
