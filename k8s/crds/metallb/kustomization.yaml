@@ -1,0 +1,6 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # renovate: datasource=docker image=quay.io/metallb/controller
+  - https://github.com/metallb/metallb/blob/v0.13.4/charts/metallb/charts/crds/templates/crds.yaml
