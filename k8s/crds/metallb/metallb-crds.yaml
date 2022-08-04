@@ -30,4 +30,4 @@ spec:
         kind: GitRepository
         name: metallb-crds
         namespace: flux-system
-      interval: 10mm
+      interval: 10m
