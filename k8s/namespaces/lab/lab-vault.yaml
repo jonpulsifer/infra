@@ -45,7 +45,7 @@ spec:
           mountPath: /vault/config
       containers:
       - name: echoserver
-        image: k8s.gcr.io/echoserver:1.8
+        image: k8s.gcr.io/echoserver:1.10
         imagePullPolicy: IfNotPresent
        # command: ["tail", "-f", "/dev/null"]
         env:
