@@ -22,7 +22,7 @@ spec:
       serviceAccountName: cassandra
       containers:
       - name: cassandra
-        image: cassandra:3.11.9
+        image: cassandra:4.0.5
         imagePullPolicy: IfNotPresent
         env:
         - name: CASSANDRA_CLUSTER_NAME
