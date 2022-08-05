@@ -5,7 +5,6 @@
   "dependencyDashboardTitle": "Renovate Dashboard",
   "suppressNotifications": ["prIgnoreNotification"],
   "rebaseWhen": "conflicted",
-  "schedule": ["every weekend"],
   "pre-commit": {
     "enabled": true
   },
@@ -65,6 +64,14 @@
       "description": "Group Cert-Manager image (for CRDs) and chart",
       "groupName": "Cert-Manager",
       "matchPackagePatterns": ["cert-manager"],
+      "matchDatasources": ["docker", "helm"],
+      "group": { "commitMessageTopic": "{{{groupName}}} group" },
+      "separateMinorPatch": true
+    },
+    {
+      "description": "Group Metallb image (for CRDs) and chart",
+      "groupName": "Metallb",
+      "matchPackagePatterns": ["metallb"],
       "matchDatasources": ["docker", "helm"],
       "group": { "commitMessageTopic": "{{{groupName}}} group" },
       "separateMinorPatch": true
