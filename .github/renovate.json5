@@ -35,7 +35,6 @@
     {
       "description": "Process various other dependencies",
       "fileMatch": [
-        "provision/ansible/.+\\.ya?ml$",
         "k8s/.+\\.ya?ml$"
       ],
       "matchStrings": [
@@ -72,7 +71,7 @@
       "description": "Group Metallb image (for CRDs) and chart",
       "groupName": "Metallb",
       "matchPackagePatterns": ["metallb"],
-      "matchDatasources": ["docker", "helm"],
+      "matchDatasources": ["docker", "helm", "github-releases"],
       "group": { "commitMessageTopic": "{{{groupName}}} group" },
       "separateMinorPatch": true
     },
