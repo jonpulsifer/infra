@@ -28,6 +28,8 @@ spec:
       ingress:
         enabled: true
         ingressClassName: nginx
+        hosts:
+        - vault.fml.pulsifer.ca
       extraEnvironmentVars:
         GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
       dataStorage:
