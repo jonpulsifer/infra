@@ -30,6 +30,8 @@ spec:
         ingressClassName: nginx
       extraEnvironmentVars:
         GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
+      dataStorage:
+        enabled: false
       standalone:
         enabled: true
         config: |
