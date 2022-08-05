@@ -29,7 +29,7 @@ spec:
         enabled: true
         ingressClassName: nginx
         hosts:
-          host: vault.lolwtf.ca
+          - host: vault.lolwtf.ca
       extraEnvironmentVars:
         GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
       dataStorage:
