@@ -23,7 +23,7 @@ spec:
       terminationGracePeriodSeconds: 60
       serviceAccountName: atlantis
       containers:
-      - image: runatlantis/atlantis:v0.4.13
+      - image: runatlantis/atlantis:v0.18.4
         args: ["server", "--allow-repo-config"]
         name: atlantis
         env:
