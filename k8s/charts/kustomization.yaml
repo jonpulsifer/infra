@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - external-dns.yaml
   - hajimari.yaml
+  - hashicorp.yaml
   - ingress-nginx.yaml
   - jetstack.yaml
   - k8s-at-home.yaml

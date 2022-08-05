@@ -10,3 +10,4 @@ resources:
   - ingress-nginx
   - metallb
   - metrics-server
+  - vault
