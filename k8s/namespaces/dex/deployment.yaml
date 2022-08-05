@@ -22,7 +22,7 @@ spec:
     spec:
       serviceAccountName: dex
       containers:
-      - image: quay.io/dexidp/dex:v2.16.0
+      - image: quay.io/dexidp/dex:v2.28.1
         name: dex
         command: ["/usr/local/bin/dex", "serve", "/etc/dex/cfg/config.yaml"]
         ports:
