@@ -22,7 +22,7 @@ spec:
       serviceAccountName: elasticsearch
       containers:
       - name: elasticsearch
-        image: elasticsearch:7.10.1
+        image: elasticsearch:8.3.3
         imagePullPolicy: IfNotPresent
         env:
         - name: http.host
