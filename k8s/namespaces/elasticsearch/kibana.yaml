@@ -26,7 +26,7 @@ spec:
       serviceAccountName: elasticsearch
       containers:
       - name: kibana
-        image: kibana:7.10.1
+        image: kibana:7.17.5
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5601
