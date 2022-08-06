@@ -28,8 +28,14 @@ spec:
       ingress:
         enabled: true
         ingressClassName: nginx
+        annotations: |
+          cert-manager.io/cluster-issuer: "letsencrypt-staging"
         hosts:
           - host: vault.lolwtf.ca
+        tls:
+          - hosts:
+            - vault.lolwtf.ca
+            secretName: "vault-tls"
       extraEnvironmentVars:
         GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
       dataStorage:
