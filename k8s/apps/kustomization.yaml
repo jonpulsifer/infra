@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - cert-manager
   - cloudflare-ddns
+  - datadog
   - default
   - external-dns
   - flux-system
