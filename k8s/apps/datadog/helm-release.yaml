@@ -25,6 +25,8 @@ spec:
   values:
     datadog:
       apiKeyExistingSecret: datadog-api-key
+      kubelet:
+        tlsVerify: false
     agents:
       tolerations:
       - key: node-role.kubernetes.io/master
