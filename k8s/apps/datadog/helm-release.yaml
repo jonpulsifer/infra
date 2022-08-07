@@ -25,3 +25,7 @@ spec:
   values:
     datadog:
       apiKeyExistingSecret: datadog-api-key
+    agent:
+      tolerations:
+      - node-role.kubernetes.io/master
+      - node-role.kubernetes.io/control-plane
