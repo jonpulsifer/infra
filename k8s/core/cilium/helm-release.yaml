@@ -8,7 +8,7 @@ spec:
   interval: 15m
   chart:
     spec:
-      chart: cilium/cilium
+      chart: cilium
       version: 1.20.0
       sourceRef:
         kind: HelmRepository
