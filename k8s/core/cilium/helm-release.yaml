@@ -1,0 +1,33 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: cilium
+  namespace: kube-system
+spec:
+  interval: 15m
+  chart:
+    spec:
+      chart: cilium
+      version: 1.20.0
+      sourceRef:
+        kind: HelmRepository
+        name: cilium
+        namespace: flux-system
+      interval: 15m
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    ipam:
+      operator:
+        clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
+    operator.prometheus.enabled: true
+    prometheus.enabled: true
+    hubble.metrics.enabled: true
+    hubble.relay.enabled: true
+    hubble.ui.enabled: true
