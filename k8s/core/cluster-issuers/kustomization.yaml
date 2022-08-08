@@ -4,6 +4,4 @@ resources:
   - namespace.yaml
   - letsencrypt-production.yaml
   - letsencrypt-staging.yaml
-  # - vault.yaml
   - cloudflare-secret.sops.yaml
-  - vault-secret.sops.yaml
