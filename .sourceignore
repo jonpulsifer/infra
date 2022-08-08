@@ -2,11 +2,11 @@
 .github/
 .gitignore
 .sops.yaml
-cloudflare/
-gcp/
-rpi/
-unifi/
-vault/
-workspace/
+/cloudflare/
+/gcp/
+/rpi/
+/unifi/
+/vault/
+/workspace/
 LICENSE
 README.md
