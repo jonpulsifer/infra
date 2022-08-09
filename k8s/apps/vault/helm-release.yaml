@@ -31,11 +31,11 @@ spec:
         annotations: |
           cert-manager.io/cluster-issuer: "letsencrypt-production"
         hosts:
-          - host: vault.lolwtf.ca
+          - host: &host "vault.${SECRET_DOMAIN}"
         tls:
           - hosts:
-            - vault.lolwtf.ca
-            secretName: "vault-tls"
+            - *host
+            secretName: *host
       extraEnvironmentVars:
         GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
       dataStorage:
