@@ -28,6 +28,7 @@ spec:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
     operator.prometheus.enabled: true
     prometheus.enabled: true
+    hubble.enabled: true
     hubble.metrics.enabled: true
     hubble.relay.enabled: true
     hubble.ui.enabled: true
