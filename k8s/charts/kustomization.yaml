@@ -10,5 +10,6 @@ resources:
   - ingress-nginx.yaml
   - jetstack.yaml
   - k8s-at-home.yaml
+  - kubernetes-dashboard.yaml
   - metallb.yaml
   - metrics-server.yaml

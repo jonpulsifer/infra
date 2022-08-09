@@ -9,5 +9,6 @@ resources:
   - external-dns
   - flux-system
   - ingress-nginx
+  - kubernetes-dashboard
   - metrics-server
   - vault
