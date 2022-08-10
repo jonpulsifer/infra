@@ -23,6 +23,17 @@ spec:
     remediation:
       retries: 5
   values:
+    cleanPrometheusOperatorObjectNames: true
+    prometheus:
+      prometheusSpec:
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: longhorn
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 5Gi
     grafana:
       adminPassword: ${GRAFANA_ADMIN_PASSWORD}
       ingress:
