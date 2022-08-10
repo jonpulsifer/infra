@@ -21,3 +21,12 @@ spec:
   upgrade:
     remediation:
       retries: 5
+  values:
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      host: longhorn.${SECRET_DOMAIN}
+      tls: true
+      tlsSecret: longhorn.${SECRET_DOMAIN}
+      annotations:
+        cert-manager.io/cluster-issuer: production

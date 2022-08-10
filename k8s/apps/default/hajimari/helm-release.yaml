@@ -33,6 +33,7 @@ spec:
           - default
           - vault
           - kube-system
+          - longhorn
       name: "overlord"
       customApps:
         - name: ingress (should 404)
