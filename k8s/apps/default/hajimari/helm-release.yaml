@@ -34,6 +34,7 @@ spec:
           - vault
           - kube-system
           - longhorn
+          - prometheus
       name: "overlord"
       customApps:
         - name: ingress (should 404)
