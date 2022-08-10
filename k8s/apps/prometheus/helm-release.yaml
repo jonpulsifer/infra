@@ -27,7 +27,7 @@ spec:
       adminPassword: ${GRAFANA_ADMIN_PASSWORD}
       ingress:
         enabled: true
-        annotations: &annotations
+        annotations:
           cert-manager.io/cluster-issuer: letsencrypt-production
         hosts:
           - host: &grafana grafana.${SECRET_DOMAIN}
@@ -38,10 +38,11 @@ spec:
     alertmanager:
       ingress:
         enabled: true
-        annotations: *annotations
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-production
         hosts:
-        - host: &am am.${SECRET_DOMAIN}
+          - host: &am am.${SECRET_DOMAIN}
         tls:
-          - secretName: &am
+          - secretName: *am
             hosts:
               - *am
