@@ -30,7 +30,7 @@ spec:
         annotations:
           cert-manager.io/cluster-issuer: letsencrypt-production
         hosts:
-          - host: &grafana grafana.${SECRET_DOMAIN}
+          - &grafana grafana.${SECRET_DOMAIN}
         tls:
           - secretName: *grafana
             hosts:
@@ -41,7 +41,7 @@ spec:
         annotations:
           cert-manager.io/cluster-issuer: letsencrypt-production
         hosts:
-          - host: &am am.${SECRET_DOMAIN}
+          - &am am.${SECRET_DOMAIN}
         tls:
           - secretName: *am
             hosts:
