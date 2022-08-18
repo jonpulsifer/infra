@@ -5,6 +5,7 @@ resources:
   - cilium.yaml
   # - datadog.yaml
   - external-dns.yaml
+  - grafana.yaml
   - hajimari.yaml
   - hashicorp.yaml
   - ingress-nginx.yaml

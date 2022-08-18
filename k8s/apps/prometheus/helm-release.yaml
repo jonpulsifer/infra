@@ -36,6 +36,13 @@ spec:
                   storage: 5Gi
     grafana:
       adminPassword: ${GRAFANA_ADMIN_PASSWORD}
+      additionalDatasources:
+        - name: Loki
+          type: loki
+          isDefault: false
+          access: proxy
+          url: http://loki.loki.svc.cluster.local:3100
+          version: 1
       ingress:
         enabled: true
         annotations:

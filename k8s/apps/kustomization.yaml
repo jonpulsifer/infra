@@ -10,6 +10,7 @@ resources:
   - flux-system
   - ingress-nginx
   - kubernetes-dashboard
+  - loki
   - metrics-server
   - prometheus
   - vault
