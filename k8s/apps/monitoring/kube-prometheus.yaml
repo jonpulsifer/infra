@@ -33,7 +33,7 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  storage: 5Gi
+                  storage: 10Gi
     grafana:
       adminPassword: ${GRAFANA_ADMIN_PASSWORD}
       additionalDatasources:
