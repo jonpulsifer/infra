@@ -6,3 +6,4 @@ resources:
   - kube-prometheus.yaml
   - loki.yaml
   - metrics-server.yaml
+  - promtail.yaml
