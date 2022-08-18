@@ -34,11 +34,11 @@ spec:
           - vault
           - kube-system
           - longhorn
-          - prometheus
+          - monitoring
       name: "overlord"
       customApps:
         - name: ingress (should 404)
-          url: http://10.1.0.100
+          url: http://${METALLB_INGRESS_ADDR}
           icon: test-tube
       groups:
         - name: Cloud
@@ -55,15 +55,15 @@ spec:
           cert-manager.io/cluster-issuer: "letsencrypt-production"
           hajimari.io/enable: "true"
           hajimari.io/icon: "weather-sunset"
-          nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+          nginx.ingress.kubernetes.io/whitelist-source-range: "10.1.0.0/24"
         hosts:
-          - host: "hajimari.${SECRET_DOMAIN}"
+          - host: &hajimari "hajimari.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
         tls:
           - hosts:
-              - "hajimari.${SECRET_DOMAIN}"
+              - *hajimari
             secretName: "hajimari-tls"
     persistence:
       data:
