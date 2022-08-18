@@ -5,7 +5,7 @@ metadata:
   name: vault
   namespace: vault
 spec:
-  interval: 15m
+  interval: 24h
   chart:
     spec:
       chart: vault
@@ -14,7 +14,7 @@ spec:
         kind: HelmRepository
         name: hashicorp
         namespace: flux-system
-      interval: 15m
+      interval: 24h
   install:
     createNamespace: true
     remediation:

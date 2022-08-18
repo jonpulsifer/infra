@@ -5,7 +5,7 @@ metadata:
   name: loki
   namespace: loki
 spec:
-  interval: 15m
+  interval: 24h
   chart:
     spec:
       chart: loki-stack

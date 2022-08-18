@@ -5,7 +5,7 @@ metadata:
   name: kube-prometheus
   namespace: prometheus
 spec:
-  interval: 15m
+  interval: 24h
   chart:
     spec:
       chart: kube-prometheus-stack
@@ -14,7 +14,7 @@ spec:
         kind: HelmRepository
         name: prometheus
         namespace: flux-system
-      interval: 15m
+      interval: 24h
   install:
     createNamespace: true
     remediation:

@@ -5,7 +5,7 @@ metadata:
   name: kubernetes-dashboard
   namespace: kube-system
 spec:
-  interval: 15m
+  interval: 24h
   chart:
     spec:
       chart: kubernetes-dashboard
@@ -14,7 +14,7 @@ spec:
         kind: HelmRepository
         name: kubernetes-dashboard
         namespace: flux-system
-      interval: 15m
+      interval: 24h
   install:
     createNamespace: true
     remediation:

@@ -5,7 +5,7 @@ metadata:
   name: cilium
   namespace: kube-system
 spec:
-  interval: 15m
+  interval: 24h
   chart:
     spec:
       chart: cilium
@@ -14,7 +14,7 @@ spec:
         kind: HelmRepository
         name: cilium
         namespace: flux-system
-      interval: 15m
+      interval: 24h
   install:
     createNamespace: true
     remediation:
