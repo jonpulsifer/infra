@@ -8,8 +8,8 @@ spec:
   interval: 24h
   chart:
     spec:
-      chart: grafana/loki
-      version: 2.14.1
+      chart: loki
+      version: 2.14.0
       sourceRef:
         kind: HelmRepository
         name: grafana
