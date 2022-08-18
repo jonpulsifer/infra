@@ -29,6 +29,7 @@ spec:
         cert-manager.io/cluster-issuer: letsencrypt-production
       hosts:
         - host: &loki loki.${SECRET_DOMAIN}
+          paths: ["/"]
       tls:
         - secretName: *loki
           hosts:
