@@ -23,5 +23,8 @@ spec:
     remediation:
       retries: 5
   values:
+    config:
+      clients:
+        - url: http://loki:3100/loki/api/v1/push
     serviceMonitor:
       enabled: true
