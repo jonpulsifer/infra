@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: ./assemblyline
-      version: ''
+      version: 4.2.0
       sourceRef:
         kind: GitRepository
         name: assemblyline
@@ -59,7 +59,7 @@ spec:
       submission:
         max_file_size: 104857600
       ui:
-        fqdn: "localhost"
+        fqdn: al.${SECRET_DOMAIN}
 
       # 3. Decide where you want files stored
       #filestore:
