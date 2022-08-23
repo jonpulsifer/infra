@@ -22,6 +22,8 @@ spec:
     remediation:
       retries: 5
   values:
+    persistence:
+      defaultClassReplicaCount: 2
     ingress:
       enabled: true
       ingressClassName: nginx
