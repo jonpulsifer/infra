@@ -41,7 +41,6 @@ spec:
         size: 2Gi
         StorageClass: longhorn
 
-
     # 4. Enable/disable/configure logging features
     enableLogging: false
     enableMetrics: false
@@ -66,6 +65,18 @@ spec:
       #  cache: ["s3://${INTERNAL_FILESTORE_ACCESS}:${INTERNAL_FILESTORE_KEY}@filestore:9000?s3_bucket=al-cache&use_ssl=False"]
       #  storage: ["s3://${INTERNAL_FILESTORE_ACCESS}:${INTERNAL_FILESTORE_KEY}@filestore:9000?s3_bucket=al-storage&use_ssl=False"]
 
+      datastore:
+        replicas: 1
+        volumeClaimTemplate:
+          resources:
+            requests:
+              storage: 2Gi
+
       # 4. Enable/disable/configure logging features
+      log-storage:
+        volumeClaimTemplate:
+          resources:
+            requests:
+              storage: 2Gi
       logging:
         log_level: WARNING
