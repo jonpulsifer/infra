@@ -15,13 +15,12 @@ spec:
         name: assemblyline
         namespace: flux-system
       interval: 24h
-  values:
+  values: 
+    ingressClassName: nginx
     ingressAnnotations:
-      kubernetes.io/ingress.class: "nginx"
       nginx.ingress.kubernetes.io/proxy-body-size: 100M
       cert-manager.io/issuer: letsencrypt-production
     tlsSecretName: al.${SECRET_DOMAIN}
-
 
     # 2. Setup the storage classes according to your Kubernetes cluster
     redisStorageClass: longhorn
