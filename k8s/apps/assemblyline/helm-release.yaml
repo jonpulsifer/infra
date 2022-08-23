@@ -1,0 +1,71 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: assemblyline
+  namespace: assemblyline
+spec:
+  interval: 24h
+  chart:
+    spec:
+      chart: ./assemblyline
+      version: ''
+      sourceRef:
+        kind: GitRepository
+        name: assemblyline
+        namespace: flux-system
+      interval: 24h
+  values:
+    ingressAnnotations:
+      kubernetes.io/ingress.class: "nginx"
+      nginx.ingress.kubernetes.io/proxy-body-size: 100M
+      cert-manager.io/issuer: letsencrypt-production
+    tlsSecretName: al.${SECRET_DOMAIN}
+
+
+    # 2. Setup the storage classes according to your Kubernetes cluster
+    redisStorageClass: longhorn
+    datastore:
+      volumeClaimTemplate:
+        storageClassName: longhorn
+    log-storage:
+      volumeClaimTemplate:
+        storageClassName: longhorn
+    persistantStorageClass: longhorn
+
+    # 3. Decide where you want files stored
+    internalFilestore: true
+    # Un-comment and setup if internal filestore used
+    filestore:
+      persistence:
+        size: 2Gi
+        StorageClass: longhorn
+
+
+    # 4. Enable/disable/configure logging features
+    enableLogging: false
+    enableMetrics: false
+    enableAPM: false
+    internalELKStack: false
+    seperateInternalELKStack: false
+    loggingUsername: elastic
+    loggingTLSVerify: "none"
+
+    # Internal configuration for assemblyline components. See the assemblyline
+    # administration documentation for more details.
+    # https://cybercentrecanada.github.io/assemblyline4_docs/configuration/config_file/
+    configuration:
+      # 1. Setup the ingress controller
+      submission:
+        max_file_size: 104857600
+      ui:
+        fqdn: "localhost"
+
+      # 3. Decide where you want files stored
+      #filestore:
+      #  cache: ["s3://${INTERNAL_FILESTORE_ACCESS}:${INTERNAL_FILESTORE_KEY}@filestore:9000?s3_bucket=al-cache&use_ssl=False"]
+      #  storage: ["s3://${INTERNAL_FILESTORE_ACCESS}:${INTERNAL_FILESTORE_KEY}@filestore:9000?s3_bucket=al-storage&use_ssl=False"]
+
+      # 4. Enable/disable/configure logging features
+      logging:
+        log_level: WARNING
