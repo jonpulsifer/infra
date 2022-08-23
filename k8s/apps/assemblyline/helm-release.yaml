@@ -45,6 +45,7 @@ spec:
     # 4. Enable/disable/configure logging features
     enableLogging: false
     enableMetrics: false
+    enableMetricbeat: false
     enableAPM: false
     internalELKStack: false
     seperateInternalELKStack: false
