@@ -25,6 +25,7 @@ spec:
 
     # 2. Setup the storage classes according to your Kubernetes cluster
     redisStorageClass: longhorn
+    redisStorageSize: 1Gi
     datastore:
       volumeClaimTemplate:
         storageClassName: longhorn
