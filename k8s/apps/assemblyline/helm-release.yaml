@@ -26,11 +26,18 @@ spec:
     redisStorageClass: longhorn
     redisStorageSize: 1Gi
     datastore:
+      replicas: 1
       volumeClaimTemplate:
         storageClassName: longhorn
+        resources:
+          requests:
+            storage: 2Gi
     log-storage:
       volumeClaimTemplate:
         storageClassName: longhorn
+        resources:
+          requests:
+            storage: 2Gi
     persistantStorageClass: longhorn
 
     # 3. Decide where you want files stored
@@ -40,17 +47,7 @@ spec:
       persistence:
         size: 2Gi
         StorageClass: longhorn
-    datastore:
-      replicas: 1
-      volumeClaimTemplate:
-        resources:
-          requests:
-            storage: 2Gi
-    log-storage:
-      volumeClaimTemplate:
-        resources:
-          requests:
-            storage: 2Gi
+
     # 4. Enable/disable/configure logging features
     enableLogging: false
     enableMetrics: false
