@@ -70,3 +70,14 @@ module "lolcorp" {
     environment = "production"
   }
 }
+
+module "wishlist" {
+  source          = "github.com/jonpulsifer/terraform-modules//gcp-project"
+  project_id      = "firebees"
+  name            = "firebees"
+  folder_id       = google_folder.production.name
+  billing_account = data.google_billing_account.cloudlab.id
+  labels = {
+    environment = "production"
+  }
+}

@@ -24,9 +24,9 @@ provider "google" {
 }
 
 provider "googleworkspace" {
-  customer_id             = "C042vfhik"
-  service_account         = local.terraform_service_account
-  access_token            = data.google_service_account_access_token.terraform.access_token
+  customer_id     = "C042vfhik"
+  service_account = local.terraform_service_account
+  access_token    = data.google_service_account_access_token.terraform.access_token
 }
 
 terraform {

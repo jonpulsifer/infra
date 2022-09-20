@@ -2,7 +2,7 @@ locals {
   fml_cidr = "10.1.0.0/24"
   fml_wlan = "fml"
   clients  = yamldecode(file("./clients.yaml"))
-  one_day = 86400
+  one_day  = 86400
 }
 
 resource "unifi_network" "fml" {

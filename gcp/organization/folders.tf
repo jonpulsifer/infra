@@ -16,6 +16,7 @@ resource "google_org_policy_policy" "gcp_restrictCmekCryptoKeyProjects_productio
   }
 }
 
+
 resource "google_folder" "dev" {
   display_name = "Development"
   parent       = data.google_organization.org.name

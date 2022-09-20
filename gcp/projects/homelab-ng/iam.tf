@@ -77,7 +77,7 @@ resource "google_project_iam_member" "view_counter_firestore" {
 }
 
 resource "google_service_account" "terraform" {
-  account_id = "terraform"
+  account_id   = "terraform"
   display_name = "Terraform Robot"
 }
 
@@ -88,7 +88,7 @@ data "google_iam_policy" "terraform_token_creator" {
   }
 
   binding {
-    role = "roles/iam.serviceAccountUser"
+    role    = "roles/iam.serviceAccountUser"
     members = [format("group:%s", "cloud@pulsifer.ca")]
   }
 }
