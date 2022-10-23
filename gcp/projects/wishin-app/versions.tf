@@ -1,6 +1,6 @@
 locals {
-  project = "homelab-ng"
-  region  = "northamerica-northeast1"
+  project = "wishin-app"
+  region  = "northamerica-northeast2"
   zone    = join("-", [local.region, "a"])
 }
 
@@ -8,20 +8,20 @@ provider "google" {
   project                     = local.project
   region                      = local.region
   zone                        = local.zone
-  impersonate_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
+  impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
 }
 
 provider "google-beta" {
   project                     = local.project
   region                      = local.region
   zone                        = local.zone
-  impersonate_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
+  impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
 }
 
 terraform {
   backend "gcs" {
     bucket = "homelab-ng"
-    prefix = "terraform/resource-manager"
+    prefix = "terraform/wishin-app"
   }
   required_providers {
     google = {
