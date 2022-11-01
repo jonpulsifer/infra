@@ -71,10 +71,21 @@ module "lolcorp" {
   }
 }
 
-module "wishlist" {
+module "firebees" {
   source          = "github.com/jonpulsifer/terraform-modules//gcp-project"
   project_id      = "firebees"
   name            = "firebees"
+  folder_id       = google_folder.production.name
+  billing_account = data.google_billing_account.cloudlab.id
+  labels = {
+    environment = "production"
+  }
+}
+
+module "wishin_app" {
+  source          = "github.com/jonpulsifer/terraform-modules//gcp-project"
+  project_id      = "wishin-app"
+  name            = "wishin-app"
   folder_id       = google_folder.production.name
   billing_account = data.google_billing_account.cloudlab.id
   labels = {
