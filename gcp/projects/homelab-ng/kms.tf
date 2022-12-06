@@ -12,28 +12,14 @@ resource "google_kms_crypto_key" "vault" {
   }
 }
 
-resource "google_kms_crypto_key_iam_member" "vault" {
+resource "google_kms_crypto_key_iam_member" "vault_encrypt_decrypt" {
   crypto_key_id = google_kms_crypto_key.vault.id
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
   member        = format("serviceAccount:%s", google_service_account.vault.email)
 }
 
-resource "google_kms_key_ring" "storage" {
-  name     = "storage"
-  location = local.region
-}
-
-resource "google_kms_crypto_key" "storage" {
-  name     = "storage"
-  key_ring = google_kms_key_ring.storage.id
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "google_kms_crypto_key_iam_member" "storage" {
-  crypto_key_id = google_kms_crypto_key.storage.id
-  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  member        = "group:cloud@pulsifer.ca"
+resource "google_kms_crypto_key_iam_member" "vault_viewer" {
+  crypto_key_id = google_kms_crypto_key.vault.id
+  role          = "roles/cloudkms.viewer"
+  member        = format("serviceAccount:%s", google_service_account.vault.email)
 }
