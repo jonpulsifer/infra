@@ -4,7 +4,11 @@ resource "unifi_network" "starlink" {
 
   wan_networkgroup = "WAN"
   wan_type         = "dhcp"
+  wan_type_v6      = "disabled"
   wan_dns          = []
+
+  internet_access_enabled      = true
+  intra_network_access_enabled = false
 }
 
 data "vault_generic_secret" "ddns_edge_pulsifer_ca" {

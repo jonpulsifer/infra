@@ -6,8 +6,10 @@ cameras:
     mac: 74:83:c2:3f:ea:21
   Garage Door Camera 1:
     mac: d4:12:43:5e:f3:80
+    dev-id: 2051
   Garage Door Camera 2:
     mac: d4:12:43:3c:c6:55
+    dev-id: 2051
 
 unmanaged-infra:
   Wall Unit PoE Switch:
@@ -118,11 +120,15 @@ personal-devices:
     mac: 10:2c:6b:de:b1:b0
   iPhone:
     mac: d0:d2:b0:35:62:09
+  Apple iPhone X:
+    mac: ee:4f:95:c9:64:2f
   Pixel 3:
     mac: 3c:28:6d:d4:d7:8e
     dev-id: 2822
   Pixel 5:
     mac: f8:1a:2b:34:81:87
+  Jonathan's iPhone:
+    mac: b6:2e:ca:fd:4d:40
 
 iot:
   Constance's Office Google Home Mini:
@@ -138,8 +144,10 @@ iot:
     mac: 00:24:e4:37:b2:da
   Garage Door Opener 1:
     mac: cc:6a:10:19:5d:b1
+    dev-id: 2051
   Garage Door Opener 2:
     mac: cc:6a:10:19:63:02
+    dev-id: 2051
   Hue Bridge:
     mac: 00:17:88:2c:a0:59
   Jon's Office Chromecast:
@@ -173,6 +181,21 @@ iot:
   Downstairs Thermostat:
     mac: 18:b4:30:bd:fc:b5
     dev-id: 2044
-  Living Room TV:
+  Lab TV:
     mac: e4:e0:c5:03:f0:81
     model: Samsung UNC5500
+  LG DualCool Lab:
+    mac: 1c:39:29:5c:5d:2a
+    dev-id: 4816
+  LG DualCool Garage:
+    mac: 1c:39:29:5c:5f:03
+    dev-id: 4816
+  Living Room TV:
+    mac: 80:5b:65:89:fd:a4
+    model: LG OLED65C2PUA
+  WeatherFlow Hub:
+    mac: c0:ee:40:72:76:33
+  Sonos Arc:
+    mac: 38:42:0b:48:e2:1b
+  Sonos Sub:
+    mac: f0:f6:c1:e2:85:c4

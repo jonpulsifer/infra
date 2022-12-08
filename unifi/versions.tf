@@ -11,19 +11,22 @@ terraform {
     }
     vault = {
       source  = "hashicorp/vault"
-      version = "~> 3.8"
+      version = "~> 3.11"
     }
   }
 }
 
 provider "vault" {
-  address         = "https://vault-x2fp5oyaaa-nn.a.run.app"
-  skip_tls_verify = false
+  # vault login -method=userpass username=lol password=$(op item get vault --fields=password --account=pulsifer)
+  address            = "https://vault.lolwtf.ca"
+  add_address_to_env = true
+  skip_tls_verify    = false
 }
 
 provider "unifi" {
   username = "terraform"
   # password = "" or UNIFI_PASSWORD env
+  # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer)
   api_url        = "https://10.1.0.1"
   allow_insecure = true
   # site = "default"
