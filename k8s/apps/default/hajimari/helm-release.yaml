@@ -55,6 +55,8 @@ spec:
           hajimari.io/enable: "true"
           hajimari.io/icon: "weather-sunset"
           nginx.ingress.kubernetes.io/whitelist-source-range: "10.1.0.0/24"
+          nginx.ingress.kubernetes.io/enable-cors: "true"
+          nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS"
         hosts:
           - host: &hajimari "hajimari.${SECRET_DOMAIN}"
             paths:
