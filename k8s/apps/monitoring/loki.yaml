@@ -34,7 +34,7 @@ spec:
         - secretName: *loki
           hosts:
             - *loki
-    config:
+    loki:
       limits_config:
         enforce_metric_name: false
         reject_old_samples: true
