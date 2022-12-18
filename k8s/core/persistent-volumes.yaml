@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: 800g2
+  labels:
+    app.kubernetes.io/name: 800g2
+    app.kubernetes.io/part-of: worker-nodes
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local
+  local:
+    path: /mnt/disks/nodes/800g2
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - 800g2
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: 800g3-1
+  labels:
+    app.kubernetes.io/name: 800g3-1
+    app.kubernetes.io/part-of: worker-nodes
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local
+  local:
+    path: /mnt/disks/nodes/800g3-1
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - 800g3-1
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: 800g3-2
+  labels:
+    app.kubernetes.io/name: 800g3-2
+    app.kubernetes.io/part-of: worker-nodes
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local
+  local:
+    path: /mnt/disks/nodes/800g3-2
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - 800g3-2
