@@ -8,10 +8,10 @@ spec:
   interval: 24h
   chart:
     spec:
-      chart: loki
+      chart: ./production/helm/loki
       version: 3.8.0
       sourceRef:
-        kind: HelmRepository
+        kind: GitRepository
         name: loki
         namespace: flux-system
       interval: 24h
