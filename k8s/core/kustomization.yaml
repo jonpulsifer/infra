@@ -6,4 +6,5 @@ resources:
   - cluster-issuers
   #  - longhorn
   - metallb
+  - persistent-volumes.yaml
   - storage-classes.yaml
