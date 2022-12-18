@@ -12,7 +12,7 @@ spec:
       version: 3.8.0
       sourceRef:
         kind: HelmRepository
-        name: grafana
+        name: loki
         namespace: flux-system
       interval: 24h
   install:
