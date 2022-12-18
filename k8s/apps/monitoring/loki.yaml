@@ -43,6 +43,6 @@ spec:
     persistence:
       enabled: true
       size: 10Gi
-      storageClassName: longhorn
+      storageClassName: local
     serviceMonitor:
       enabled: true

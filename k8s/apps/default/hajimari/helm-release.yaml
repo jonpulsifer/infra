@@ -33,7 +33,6 @@ spec:
           - default
           - vault
           - kube-system
-          - longhorn
           - monitoring
       name: "overlord"
       customApps:
