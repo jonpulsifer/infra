@@ -23,6 +23,8 @@ spec:
     remediation:
       retries: 5
   values:
+    gateway:
+      enabled: false
     ingress:
       enabled: true
       annotations:
