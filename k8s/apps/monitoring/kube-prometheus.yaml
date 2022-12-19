@@ -43,6 +43,10 @@ spec:
           access: proxy
           url: http://loki-read:3100
           version: 1
+          jsonData:
+            httpHeaderName1: "X-Scope-OrgID"
+          secureJsonData:
+            httpHeaderValue1: "1"
       ingress:
         enabled: true
         annotations:
