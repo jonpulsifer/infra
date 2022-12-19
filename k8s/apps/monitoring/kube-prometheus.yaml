@@ -41,7 +41,7 @@ spec:
           type: loki
           isDefault: false
           access: proxy
-          url: http://loki-read-headless:3100
+          url: http://loki-read:3100
           version: 1
       ingress:
         enabled: true
