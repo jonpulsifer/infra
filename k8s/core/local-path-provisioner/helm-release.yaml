@@ -22,6 +22,10 @@ spec:
     remediation:
       retries: 5
   values:
+    storageClass:
+      create: true
+      defaultClass: true
+      name: local-path
     nodePathMap:
       - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
         paths:
