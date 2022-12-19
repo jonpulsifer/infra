@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/part-of: worker-nodes
 spec:
   capacity:
-    storage: 10Gi
+    storage: 1Gi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
@@ -32,7 +32,7 @@ metadata:
     app.kubernetes.io/part-of: worker-nodes
 spec:
   capacity:
-    storage: 10Gi
+    storage: 1Gi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
@@ -57,7 +57,7 @@ metadata:
     app.kubernetes.io/part-of: worker-nodes
 spec:
   capacity:
-    storage: 10Gi
+    storage: 1Gi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
