@@ -29,8 +29,6 @@ spec:
       enabled: true
       annotations:
         cert-manager.io/cluster-issuer: letsencrypt-production
-        nginx.ingress.kubernetes.io/enable-cors: "true"
-        nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS"
         nginx.ingress.kubernetes.io/configuration-snippet: |
           proxy_pass_header X-Scope-OrgID;
       hosts:
@@ -40,6 +38,7 @@ spec:
           hosts:
             - *loki
     loki:
+      auth_enabled: false
       limits_config:
         enforce_metric_name: false
         reject_old_samples: true
