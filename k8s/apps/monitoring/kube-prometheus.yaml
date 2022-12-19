@@ -23,6 +23,12 @@ spec:
     remediation:
       retries: 5
   values:
+    defaultRules:
+      rules:
+        etcd: false
+        kubeControllerManager: false
+        kubeProxy: false
+        kubeSchedulerAlerting: false
     cleanPrometheusOperatorObjectNames: true
     prometheus:
       prometheusSpec:
@@ -36,12 +42,16 @@ spec:
                   storage: 25Gi
     grafana:
       adminPassword: ${GRAFANA_ADMIN_PASSWORD}
+      deleteDatasources:
+        - name: Loki
+          orgId: 1
       additionalDatasources:
         - name: Loki
           type: loki
           isDefault: false
           access: proxy
           url: https://loki.lolwtf.ca
+          orgId: 1
           version: 1
           jsonData:
             httpHeaderName1: "X-Scope-OrgID"
