@@ -1,0 +1,16 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: GitRepository
+metadata:
+  name: loki
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://github.com/rancher/local-path-provisioner
+  ref:
+    tag: "v0.0.23"
+  ignore: |
+    # exclude all
+    /*
+    # include assemblyline directory
+    !/deploy/chart/local-path-provisioner

@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - cilium
   - cluster-issuers
+  - local-path-provisioner
   #  - longhorn
   - metallb
   - persistent-volumes.yaml

@@ -13,6 +13,7 @@ resources:
   - jetstack.yaml
   - k8s-at-home.yaml
   - kubernetes-dashboard.yaml
+  - local-path-provisioner.yaml
   - loki.yaml
   # - longhorn.yaml
   - metallb.yaml
