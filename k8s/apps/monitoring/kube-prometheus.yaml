@@ -45,7 +45,7 @@ spec:
       deleteDatasources:
         - name: Loki
           orgId: 1
-      additionalDatasources:
+      additionalDataSources:
         - name: Loki
           type: loki
           isDefault: false
