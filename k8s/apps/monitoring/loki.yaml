@@ -44,6 +44,6 @@ spec:
     persistence:
       enabled: true
       size: 10Gi
-      storageClassName: local
+      storageClassName: local-path
     serviceMonitor:
       enabled: true
