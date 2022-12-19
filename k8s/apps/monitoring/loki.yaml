@@ -24,11 +24,13 @@ spec:
       retries: 5
   values:
     gateway:
-      enabled: false
+      enabled: true
     ingress:
       enabled: true
       annotations:
         cert-manager.io/cluster-issuer: letsencrypt-production
+        nginx.ingress.kubernetes.io/configuration-snippet: |
+          proxy_set_header X-Scope-OrgID $remote_user;
       hosts:
         - &loki loki.${SECRET_DOMAIN}
       tls:
