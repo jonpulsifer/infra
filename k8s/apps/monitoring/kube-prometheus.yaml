@@ -41,7 +41,7 @@ spec:
           type: loki
           isDefault: false
           access: proxy
-          url: http://loki-read:3100
+          url: https://loki.lolwtf.ca
           version: 1
           jsonData:
             httpHeaderName1: "X-Scope-OrgID"
