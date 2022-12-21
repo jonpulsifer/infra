@@ -4,6 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - kube-prometheus.yaml
-  # - loki.yaml
+  - loki.yaml
   - metrics-server.yaml
   - promtail.yaml
