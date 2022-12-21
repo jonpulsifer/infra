@@ -25,7 +25,7 @@ spec:
   values:
     config:
       clients:
-        - url: http://loki-write:3100/loki/api/v1/push
+        - url: https://loki.${SECRET_DOMAIN}/loki/api/v1/push
           tenant_id: "1"
     serviceMonitor:
       enabled: true

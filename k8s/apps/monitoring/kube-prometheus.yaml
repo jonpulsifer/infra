@@ -50,7 +50,7 @@ spec:
           type: loki
           isDefault: false
           access: proxy
-          url: https://loki.lolwtf.ca
+          url: https://loki.${SECRET_DOMAIN}
           orgId: 1
           version: 1
           jsonData:
