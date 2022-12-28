@@ -9,9 +9,15 @@ toc: true
 
 ## Summary
 
-:wave: Hi, I'm Jonathan Pulsifer, a **security engineer** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with [Open Source][github], **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
+:wave: Hi, I'm Jonathan Pulsifer, an **engineering manager** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with [Open Source][github], **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **security engineer** or **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
 
 ## Employment History
+
+### [MoonPay][moonpay], 2021-current
+
+#### Engineering Manager
+
+I'm currently the Engineering Manager for MoonPay's **Site Reliability Engineering** and **Cloud Security** teams. I'm responsible for the hiring, onboarding, and development of the teams, as well as the day-to-day operations of the teams. I'm also responsible for the technical direction of the teams, and the overall security posture of MoonPay's infrastructure.
 
 ### [Shopify][shop], 2016-2021
 
@@ -88,11 +94,11 @@ While still in the Navy, in 2015 I started to get involved with the [SANS Instit
 
 Whenever I have enough spoons :spoon: left I like to give back to the community. Right now, I identify as a:
 
-- [Google Developer Expert][gde]
+- [Google Cloud Champion Innovator][gcp-champion-innovator]
 - [Kubernetes Product Security Committee][k8s] emeritus member
 - [GIAC Advisory Board][giac-advisory-board] member
 
-As a [Google Developer Expert][gde-profile] and [Kubernetes][k8s] community person, I host and partipate in [Google Developer Group][gdg] chapters and Cloud Native Computing Foundation meetups:
+Previously, as a [Google Developer Expert][gde-profile] and [Kubernetes][k8s] community person, I hosted and partipated in [Google Developer Group][gdg] chapters and Cloud Native Computing Foundation meetups:
 
 - [CNCF Ottawa][cncf-ottawa]
 - [GDG Cloud Ottawa][gdg-cloud-ottawa]
@@ -127,7 +133,7 @@ Here are some places where I've "kept the lights on" during times of digital tra
 
 |                                                                                                                        |
 |------------------------------------------------------------------------------------------------------------------------|
-| [Compliant Infrastructure as Code]({{< relref "/talks/compliant-infrastructure-as-code" >}})                            |
+| [Compliant Infrastructure as Code]({{< relref "/talks/compliant-infrastructure-as-code" >}})                           |
 | Container Security Summit 2018 Keynote                                                                                 |
 | [Infrastructure Security 2.0]({{< relref "/talks/infrastructure-security-2-0" >}})                                     |
 | [Keyless Entry: Securely Access GCP Services From Kubernetes]({{< relref "/talks/keyless-entry-workload-identity" >}}) |
@@ -147,6 +153,8 @@ Here are some places where I've "kept the lights on" during times of digital tra
 [cncf-ottawa]: https://community.cncf.io/ottawa/
 [cyberop]: https://forces.ca/en/career/cyber-operator/
 [cybertalent]: https://www.sans.org/cybertalent
+[google-developer-profile]: https://developers.google.com/profile/u/jonpulsifer
+[gcp-champion-innovator]: https://cloud.google.com/innovators/champions
 [gcp-quote]: https://cloud.google.com/blog/products/gcp/introducing-grafeas-open-source-api-
 [gdg]: https://developers.google.com/community/gdg
 [gdg-cloud-montreal]: https://gdg.community.dev/gdg-cloud-montreal/
@@ -165,6 +173,7 @@ Here are some places where I've "kept the lights on" during times of digital tra
 [k8s]: https://github.com/kubernetes/committee-security-response/blob/main/README.md
 [lfs158]: https://training.linuxfoundation.org/training/introduction-to-kubernetes/
 [lfs258]: https://training.linuxfoundation.org/training/kubernetes-fundamentals/
+[moonpay]: https://moonpay.com
 [ms]: https://en.wikipedia.org/wiki/Master_sailor
 [lnfb]: https://lawneedsfeminismbecause.ca
 [nawl]: https://nawl.ca
