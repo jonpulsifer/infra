@@ -6,11 +6,11 @@ terraform {
   required_providers {
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = "~> 3.19"
+      version = "~> 3.31.0"
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.1"
+      version = "~> 3.2.1"
     }
   }
 }
