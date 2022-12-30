@@ -1,4 +1,3 @@
-
 resource "cloudflare_zone" "wishin_app" {
   account_id = cloudflare_account.fml.id
   zone       = "wishin.app"
