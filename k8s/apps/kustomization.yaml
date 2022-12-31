@@ -12,4 +12,5 @@ resources:
   - ingress-nginx
   - kubernetes-dashboard
   - monitoring
+  - satisfactory
   - vault
