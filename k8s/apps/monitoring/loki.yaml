@@ -43,6 +43,11 @@ spec:
         type: filesystem
       commonConfig:
         replication_factor: 1
+    monitoring:
+      dashboards:
+        enabled: true
+      rules:
+        enabled: true
     persistence:
       enabled: true
       size: 10Gi
