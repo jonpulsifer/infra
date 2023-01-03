@@ -12,7 +12,6 @@ resources:
   - ingress-nginx.yaml
   - jetstack.yaml
   - jonpulsifer.yaml
-  - k8s-at-home.yaml
   - kubernetes-dashboard.yaml
   - local-path-provisioner.yaml
   - loki.yaml
