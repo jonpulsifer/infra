@@ -9,6 +9,7 @@ The applications are written in [Starlark][starlark] and compiled with [Pixlet][
 | App | Description | Preview |
 |:---|:-----------|:----|
 | wishin | stats from wishin.app | ![wishin](./wishin/wishin.webp) |
+| tempest | weather from tempest.app | ![tempest](./tempest/tempest.webp) |
 
 [tidbyt]: https://tidbyt.com/
 [pixlet]: https://github.com/tidbyt/pixlet
