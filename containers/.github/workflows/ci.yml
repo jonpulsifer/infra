@@ -31,11 +31,12 @@ jobs:
             ${{ matrix.container }}/**
       - name: Generate Docker Meta
         if: steps.changed-files.outputs.any_modified == 'true'
-        uses: crazy-max/ghaction-docker-meta@v4
+        uses: docker/metadata-action@v4
         id: meta
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.container }}
-          tag-sha: true
+          flavor: |
+            latest=true
       - name: Build and push ${{ matrix.container }}
         if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/build-push-action@v3
