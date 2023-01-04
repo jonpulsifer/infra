@@ -40,7 +40,7 @@ spec:
         hajimari.io/enable: "true"
         hajimari.io/icon: "video-input-antenna"
       hosts:
-        - host: &host "{{ .Release.Name }}.${SECRET_DOMAIN}"
+        - host: &host "echo-server.${SECRET_DOMAIN}"
           paths:
             - path: /
               pathType: Prefix
