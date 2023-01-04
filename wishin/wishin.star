@@ -7,7 +7,7 @@ load("encoding/json.star", "json")
 WISHLIST_API_URL = "https://www.wishin.app/api/stats"
 
 def main():
-    """ This is a sample Starlark script that displays the number of gifts and people on the wishlist.
+    """ This is a Starlark script that displays the number of gifts and people on the wishlist.
 
     It uses the Wishlist API to fetch the data.
     It also uses the cache module to cache the data for 4 minutes.

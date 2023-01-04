@@ -8,7 +8,7 @@ The applications are written in [Starlark][starlark] and compiled with [Pixlet][
 
 | App | Description | Preview |
 |:---|:-----------|:----|
-| wishin | status from wishin.app | ![wishin](./wishin/wishin.webp) |
+| wishin | stats from wishin.app | ![wishin](./wishin/wishin.webp) |
 
 [tidbyt]: https://tidbyt.com/
 [pixlet]: https://github.com/tidbyt/pixlet
