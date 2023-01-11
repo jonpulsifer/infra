@@ -7,16 +7,12 @@ metadata:
     pulsifer.dev/service: node-exporter
 subsets:
 - addresses:
-  - ip: 100.89.114.72
+  - ip: 10.1.0.14
     nodeName: radiopi0
-  - ip: 100.72.227.28
+  - ip: 10.1.0.15
     nodeName: blinkypi0
-  - ip: 192.168.1.127
+  - ip: 10.1.0.17
     nodeName: screenpi4
-  - ip: 100.100.34.88
-    nodeName: cloudpi4
-  - ip: 100.82.71.4
-    nodeName: homepi4
   ports:
   - name: metrics
     port: 9100
