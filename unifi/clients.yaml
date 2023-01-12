@@ -69,12 +69,12 @@ rpis:
     mac: b8:27:eb:70:45:f6
     dev-id: 2813
     ip: 16
-  screenpi4-wifi:
-    mac: e4:5f:01:17:61:69
-    dev-id: 4134
-    ip: 17
   screenpi4:
     mac: e4:5f:01:17:61:68
+    dev-id: 4134
+    ip: 17
+  screenpi4-wifi:
+    mac: e4:5f:01:17:61:69
     dev-id: 4134
     ip: 18
 

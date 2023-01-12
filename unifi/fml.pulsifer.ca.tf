@@ -1,13 +1,14 @@
 locals {
-  fml_cidr = "10.1.0.0/24"
-  fml_wlan = "fml"
-  clients  = yamldecode(file("./clients.yaml"))
-  one_day  = 86400
+  fml_cidr   = "10.1.0.0/24"
+  fml_domain = "fml.pulsifer.ca"
+  fml_wlan   = "fml"
+  clients    = yamldecode(file("./clients.yaml"))
+  one_day    = 86400
 }
 
 resource "unifi_network" "fml" {
   name          = "Folly Mountain Laboratories"
-  domain_name   = "fml.pulsifer.ca"
+  domain_name   = local.fml_domain
   network_group = "LAN"
   purpose       = "corporate"
   subnet        = local.fml_cidr
@@ -59,6 +60,7 @@ resource "unifi_user" "personal_devices" {
   for_each               = local.clients.personal-devices
   name                   = each.key
   mac                    = each.value.mac
+  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
   blocked                = lookup(each.value, "blocked", false)
   fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
   note                   = lookup(each.value, "note", "Managed by terraform")
@@ -73,6 +75,7 @@ resource "unifi_user" "computers" {
   for_each               = merge(local.clients.desktops, local.clients.laptops)
   name                   = each.key
   mac                    = each.value.mac
+  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
   blocked                = lookup(each.value, "blocked", false)
   fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
   note                   = lookup(each.value, "note", "Managed by terraform")
@@ -87,6 +90,7 @@ resource "unifi_user" "lab" {
   for_each               = merge(local.clients.lab, local.clients.rpis)
   name                   = each.key
   mac                    = each.value.mac
+  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
   fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
   blocked                = lookup(each.value, "blocked", false)
   note                   = lookup(each.value, "note", "Managed by terraform")
@@ -101,6 +105,7 @@ resource "unifi_user" "iot" {
   for_each               = local.clients.iot
   name                   = each.key
   mac                    = each.value.mac
+  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
   blocked                = lookup(each.value, "blocked", false)
   fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
   note                   = lookup(each.value, "note", "Managed by terraform")
@@ -115,6 +120,7 @@ resource "unifi_user" "cameras" {
   for_each               = local.clients.cameras
   name                   = each.key
   mac                    = each.value.mac
+  local_dns_record       = lookup(each.value, "ip", false) == false ? "" : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
   fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
   blocked                = lookup(each.value, "blocked", false)
   note                   = lookup(each.value, "note", "Managed by terraform")

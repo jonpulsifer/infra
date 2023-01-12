@@ -2,10 +2,11 @@ resource "unifi_network" "starlink" {
   name    = "starlink"
   purpose = "wan"
 
-  wan_networkgroup = "WAN"
-  wan_type         = "dhcp"
-  wan_type_v6      = "disabled"
-  wan_dns          = []
+  wan_networkgroup    = "WAN"
+  wan_type            = "dhcp"
+  wan_type_v6         = "dhcpv6"
+  wan_dhcp_v6_pd_size = 56
+  wan_dns             = []
 
   internet_access_enabled      = true
   intra_network_access_enabled = false

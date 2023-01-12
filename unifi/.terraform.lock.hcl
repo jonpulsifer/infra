@@ -2,22 +2,22 @@
 # Manual edits may be lost in future updates.
 
 provider "registry.terraform.io/hashicorp/vault" {
-  version     = "3.11.0"
+  version     = "3.12.0"
   constraints = "~> 3.11"
   hashes = [
-    "h1:iyYj8XDHPFe036T6xV4xDxfCvzQJHpJ1SAPViprjFpg=",
-    "zh:18cb684852f1b40b2a329ba07ece3363430d69bffdcafea48ed29f954481e39e",
-    "zh:1b96968a8de6849a237cc945cbe247ccd6ec98b4023548b1c0af5d6c6affe4ef",
-    "zh:3e0a0741ba12aa0cf1a2b8b80928450bb329343f4b41f35b0eddbeb52aa6284b",
-    "zh:4a8f0ee5ac4e8a0705d9f38b3d549223fe1142486d71f0b6f24f64ae0d7dd5ca",
-    "zh:4cc6705dcd111e6ad47ab4cfd2d8a99b2b241967abd50add6ac8c27025f4128b",
+    "h1:nHcRBANlGyak8p/7Z1CRkHQC39DTt1tq4Ds8L3M1mM8=",
+    "zh:0b5baf094a016fcf9afd6082339bea688e514c877ec045e58c8a44b9ea220c71",
+    "zh:4a8158499cea5928d9c32cb3e51b3846a954afca30442ec75cc07ea947d0d2a9",
+    "zh:639fb232009a8401af2ef08583c8d94708d6dd9a491501e5198f40c5cce38af2",
+    "zh:6d862eb03dc404193f7c1b7a50b4aa92c849680d611f6e5aa60b89cc239d64fc",
+    "zh:70288e1e1fd0ad9be264d07b2c69a6b5e910ecb568e9fdda5f40bc7691082958",
+    "zh:768f42b06322eae6aec44dddc354bb8a0b74f63d8a0f0535fdec7209ba5f7412",
     "zh:78d5eefdd9e494defcb3c68d282b8f96630502cac21d1ea161f53cfe9bb483b3",
-    "zh:8e106e840a963b9ae32dc24b50fa1ceecb09753e6db10ab134009d59d170686b",
-    "zh:8f9c4ccf4da8555b11375d2a09a022d7a8f5ecf701f0bb89a4f07ad0b720bb98",
-    "zh:a6fda115017b42f71f4b7917ae4860354920f0653cb8906ce627129dbabb252b",
-    "zh:c01666362b293b6af8cd556b2c5ffe9014ae8640ec3621c1cfa772fa1a6b335d",
-    "zh:e9be58b1211da0219a5bf6bfd81b8bf474256519426df10672e6dfce3086af60",
-    "zh:fd2272083e90b38c28cd18b1b9d3ae14b6a0ebf08985468d010d2bee8df816e0",
+    "zh:8dfdee127acd1f4fb8adbb0e2bb6116de560a201ab1c295c5ba19d4b73134cc4",
+    "zh:ac47d49a6220ab0427e2e1366f4ed4d798bd51fcf82d672dc79ef7e9f19d4f41",
+    "zh:b85512dfdc8dcff4209a2b22352a733dfb99783668c21afc2909db2af7139982",
+    "zh:be29511d26056665249fabe88cd9981d237efc9d2bb4d16dfc1998786317c06f",
+    "zh:cccd873b931a88a880af15fb3306df4cfb5d601082b8ab40c3b7cd84b82fefa5",
   ]
 }
 
@@ -39,5 +39,19 @@ provider "registry.terraform.io/paultyng/unifi" {
     "h1:vDyGVYCFMzwBUbOe0k7xub8XDcsfH7Q/ZSHAJf+nQkU=",
     "h1:xsujRqolUcWwBgCu2O6d6bKVh3N2Oc9IslGzZE3H1YE=",
     "h1:yp8hP/T5yTlKkk2m+gePsJTJgOQJlovIBYREGZFkCTU=",
+    "zh:32b784a77021eb789ff1c25c9845bf78e479729447ecdc4d0ca646e12bc62394",
+    "zh:356fa769d80dac4e05f455f8adc8e6490457c35a2f814b7fc19c8b389f0ed23c",
+    "zh:5e230873f2075cee957d705db824f3d15b94dfa95fb08ea39e53c9645e815c50",
+    "zh:83ddbb485f93cfd71350d5fe95275f97ce680ae5586054e8d40aed59864e4bfa",
+    "zh:950128885522285471a5bb7bdc78a08b1dca48aad163472e41327fa061a60b6d",
+    "zh:9fc3aa4b25ee7376c634dce554a49b275d589eabd6a7211f284ac08cd15f9a2c",
+    "zh:ae26ec75bd2c977859ad651220eb6e6800ba5eeb8bed89af1d338a34cbe91547",
+    "zh:b264c6b518f17a0e6178a3578705a1c0eab3cdf6f55ea8895f17130c06e29cdf",
+    "zh:bea770d1640612d54cb8dadc23a529a31dfed3af924be03a9677f163d1a204a6",
+    "zh:befb1fb37a731e54fed87b7075115793688667f5166cd7856a0cb2cb21c4b825",
+    "zh:c0f687d245f4be2f1eac78fc9b20a713271ea2b821e961e2cd45e4db5c7fae8d",
+    "zh:c38c0ac81248aa92de70c5037969660ea15391da6ed9a40aad77036a627a6c68",
+    "zh:dd718e79b2ef8b25314e94ab01f3f8de5dd38e08f65e67d33e357167d8ea746c",
+    "zh:e84cffc25404af668e6b023bec3941f20eb6f1380e4143a8c57019fe55b052bc",
   ]
 }
