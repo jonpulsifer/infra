@@ -37,6 +37,7 @@ metadata:
   namespace: monitoring
   labels:
     pulsifer.dev/service: dht22
+    release: prom-stack
 spec:
   endpoints:
     - port: metrics
@@ -66,6 +67,7 @@ metadata:
   namespace: monitoring
   labels:
     pulsifer.dev/service: dht22
+    release: prom-stack
 spec:
   groups:
     - name: screenpi4
