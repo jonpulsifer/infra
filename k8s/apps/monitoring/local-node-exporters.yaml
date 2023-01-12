@@ -2,23 +2,22 @@ apiVersion: v1
 kind: Endpoints
 metadata:
   name: local-node-exporters
-  namespace: monitoring
   labels:
     pulsifer.dev/service: node-exporter
 subsets:
-  - addresses:
-    - ip: 10.1.0.10
-      nodeName: cloudpi4
-    - ip: 10.1.0.14
-      nodeName: radiopi0
-    - ip: 10.1.0.15
-      nodeName: blinkypi0
-    - ip: 10.1.0.17
-      nodeName: screenpi4
+- addresses:
+  - ip: 10.1.0.10
+    nodeName: cloudpi4
+  - ip: 10.1.0.14
+    nodeName: radiopi0
+  - ip: 10.1.0.15
+    nodeName: blinkypi0
+  - ip: 10.1.0.17
+    nodeName: screenpi4
   ports:
-    - name: metrics
-      port: 9100
-      protocol: TCP
+  - name: metrics
+    port: 9100
+    protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -30,10 +29,10 @@ spec:
   type: ExternalName
   externalName: local-node-exporters
   ports:
-    - name: metrics
-      port: 9100
-      protocol: TCP
-      targetPort: 9100
+  - name: metrics
+    port: 9100
+    protocol: TCP
+    targetPort: 9100
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -44,25 +43,25 @@ metadata:
     release: prom-stack
 spec:
   endpoints:
-    - port: metrics
-      interval: 30s
-      honorLabels: true
-      scheme: http
-      path: /metrics
-      tlsConfig:
-        insecureSkipVerify: true
-      relabelings:
-        - sourceLabels: [__meta_kubernetes_pod_node_name]
-          targetLabel: instance
-          regex: (.*)
-          replacement: "$1"
-          action: replace
+  - port: metrics
+    interval: 30s
+    honorLabels: true
+    scheme: http
+    path: /metrics
+    tlsConfig:
+      insecureSkipVerify: true
+    relabelings:
+      - sourceLabels: [__meta_kubernetes_pod_node_name]
+        targetLabel: instance
+        regex: (.*)
+        replacement: "$1"
+        action: replace
   selector:
     matchLabels:
       pulsifer.dev/service: node-exporter
   namespaceSelector:
     matchNames:
-      - monitoring
+    - monitoring
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
