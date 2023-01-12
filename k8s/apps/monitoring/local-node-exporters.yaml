@@ -16,7 +16,7 @@ subsets:
   - ip: 10.1.0.17
     nodeName: screenpi4
   ports:
-  - name: metrics
+  - name: http-metrics
     port: 9100
     protocol: TCP
 ---
@@ -32,7 +32,7 @@ spec:
   type: ExternalName
   externalName: local-node-exporters
   ports:
-  - name: metrics
+  - name: http-metrics
     port: 9100
     protocol: TCP
     targetPort: 9100
@@ -48,7 +48,7 @@ metadata:
 spec:
   jobLabel: jobLabel
   endpoints:
-  - port: metrics
+  - port: http-metrics
     interval: 30s
     honorLabels: true
     scheme: http
@@ -81,7 +81,7 @@ spec:
     - name: local-node-exporters
       rules:
         - alert: PrometheusTargetMissing
-          expr: up {endpoint="metrics",  namespace="monitoring", service="local-node-exporters"} == 0
+          expr: up {endpoint="http-metrics",  namespace="monitoring", service="local-node-exporters"} == 0
           for: 1m
           labels:
             severity: critical

@@ -10,7 +10,7 @@ subsets:
   - ip: 10.1.0.17
     nodeName: screenpi4
   ports:
-  - name: metrics
+  - name: http-metrics
     port: 8000
     protocol: TCP
 ---
@@ -25,7 +25,7 @@ spec:
   type: ExternalName
   externalName: screenpi4.localdomain
   ports:
-  - name: metrics
+  - name: http-metrics
     port: 8000
     protocol: TCP
     targetPort: 8000
@@ -39,8 +39,9 @@ metadata:
     pulsifer.dev/service: dht22
     release: prom-stack
 spec:
+  jobLabel: pulsifer.dev/service
   endpoints:
-  - port: metrics
+  - port: http-metrics
     interval: 30s
     honorLabels: true
     scheme: http
@@ -73,7 +74,7 @@ spec:
     - name: screenpi4
       rules:
         - alert: PrometheusTargetMissing
-          expr: up {endpoint="metrics",  namespace="monitoring", service="screenpi4"} == 0
+          expr: up {endpoint="http-metrics",  namespace="monitoring", service="screenpi4"} == 0
           for: 1m
           labels:
             severity: critical
