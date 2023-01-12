@@ -44,7 +44,9 @@ metadata:
   labels:
     pulsifer.dev/service: node-exporter
     release: prom-stack
+    jobLabel: node-exporter
 spec:
+  jobLabel: jobLabel
   endpoints:
   - port: metrics
     interval: 30s
