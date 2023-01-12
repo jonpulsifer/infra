@@ -27,6 +27,7 @@ metadata:
   namespace: monitoring
   labels:
     pulsifer.dev/service: node-exporter
+    jobLabel: node-exporter
 spec:
   type: ExternalName
   externalName: local-node-exporters
@@ -44,7 +45,6 @@ metadata:
   labels:
     pulsifer.dev/service: node-exporter
     release: prom-stack
-    jobLabel: node-exporter
 spec:
   jobLabel: jobLabel
   endpoints:
