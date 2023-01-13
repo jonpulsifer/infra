@@ -23,6 +23,9 @@ spec:
     remediation:
       retries: 5
   values:
+    kubeProxyReplacement: strict
+    k8sServiceHost: ${API_SERVER_IP}
+    k8sServicePort: ${API_SERVER_PORT}
     ipam:
       operator:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
