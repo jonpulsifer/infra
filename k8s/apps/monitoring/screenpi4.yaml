@@ -7,7 +7,7 @@ metadata:
     pulsifer.dev/service: dht22
 subsets:
 - addresses:
-  - ip: 10.1.0.17
+  - ip: 10.2.0.27
     nodeName: screenpi4
   ports:
   - name: http-metrics
