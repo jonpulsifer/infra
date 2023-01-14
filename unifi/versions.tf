@@ -27,7 +27,7 @@ provider "unifi" {
   username = "terraform"
   # password = "" or UNIFI_PASSWORD env
   # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer)
-  api_url        = "https://10.1.0.1"
+  api_url        = "https://unifi"
   allow_insecure = true
   # site = "default"
 }

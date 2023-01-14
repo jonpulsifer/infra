@@ -115,18 +115,3 @@ resource "unifi_user" "cameras" {
   network_id             = unifi_network.fml.id
   user_group_id          = unifi_user_group.streaming.id
 }
-
-resource "unifi_user" "migration" {
-  for_each               = merge(local.clients.migration)
-  name                   = each.key
-  mac                    = each.value.mac
-  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
-  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
-  blocked                = lookup(each.value, "blocked", false)
-  note                   = lookup(each.value, "note", "Managed by terraform")
-  allow_existing         = lookup(each.value, "allow_existing", true)
-  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  dev_id_override        = lookup(each.value, "dev-id", 0)
-  network_id             = unifi_network.fml.id
-  user_group_id          = unifi_user_group.unmetered.id
-}

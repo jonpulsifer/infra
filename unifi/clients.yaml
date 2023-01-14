@@ -16,23 +16,6 @@ unmanaged-infra:
     mac: 18:8b:45:3a:ea:4b
     model: Cisco SG300-10PP-K9 V03
 
-migration:
-  nuc-wifi:
-    mac: d0:c6:37:4d:c2:fe
-    dev-id: 3592
-  cloudpi4-wifi:
-    mac: dc:a6:32:35:e8:b5
-    ip: 11
-    dev-id: 4134
-  homepi4-wifi:
-    mac: dc:a6:32:d9:90:08
-    ip: 13
-    dev-id: 4134
-  screenpi4-wifi:
-    mac: e4:5f:01:17:61:69
-    dev-id: 4134
-    ip: 18
-
 lab:
   tinytower:
     mac: 78:24:af:3c:a4:67
@@ -41,6 +24,9 @@ lab:
     mac: 1c:69:7a:01:2a:ef
     dev-id: 3592
     ip: 10
+  nuc-wifi:
+    mac: d0:c6:37:4d:c2:fe
+    dev-id: 3592
   800g2:
     dev-id: 2847
     mac: ec:8e:b5:72:35:24
@@ -59,9 +45,17 @@ rpis:
     mac: dc:a6:32:35:e8:b4
     ip: 20
     dev-id: 4134
+  cloudpi4-wifi:
+    mac: dc:a6:32:35:e8:b5
+    ip: 21
+    dev-id: 4134
   homepi4:
     mac: dc:a6:32:d9:90:07
     ip: 22
+    dev-id: 4134
+  homepi4-wifi:
+    mac: dc:a6:32:d9:90:08
+    ip: 23
     dev-id: 4134
   radiopi0:
     mac: b8:27:eb:ad:f3:aa
@@ -79,6 +73,10 @@ rpis:
     mac: e4:5f:01:17:61:68
     dev-id: 4134
     ip: 27
+  screenpi4-wifi:
+    mac: e4:5f:01:17:61:69
+    dev-id: 4134
+    ip: 28
 
 desktops:
   caldigit:
