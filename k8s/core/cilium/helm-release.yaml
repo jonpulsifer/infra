@@ -43,3 +43,9 @@ spec:
             cert-manager.io/cluster-issuer: "letsencrypt-production"
             hajimari.io/enable: "true"
             hajimari.io/icon: "network"
+          hosts:
+            - host: &host hubble.${SECRET_DOMAIN}
+          tls:
+            - hosts:
+                - *host
+              secretName: *host

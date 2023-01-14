@@ -1,9 +1,11 @@
+# kubeadm init --config kubeadm.yaml --skip-phases=addon/kube-proxy
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
 apiServer:
   timeoutForControlPlane: 4m0s
 certificatesDir: /etc/kubernetes/pki
 clusterName: kubernetes
+controlPlaneEndpoint: nuc
 kubernetesVersion: 1.26.0
 networking:
   dnsDomain: cluster.local
