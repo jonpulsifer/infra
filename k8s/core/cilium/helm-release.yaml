@@ -44,7 +44,7 @@ spec:
             hajimari.io/enable: "true"
             hajimari.io/icon: "network"
           hosts:
-            - host: &host hubble.${SECRET_DOMAIN}
+            - &host hubble.${SECRET_DOMAIN}
           tls:
             - hosts:
                 - *host
