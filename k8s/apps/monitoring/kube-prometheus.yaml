@@ -64,6 +64,8 @@ spec:
         enabled: true
         annotations:
           cert-manager.io/cluster-issuer: letsencrypt-production
+          hajimari.io/appName: "Grafana"
+          hajimari.io/group: "Monitoring"
         hosts:
           - &grafana grafana.${SECRET_DOMAIN}
         tls:
@@ -75,6 +77,8 @@ spec:
         enabled: true
         annotations:
           cert-manager.io/cluster-issuer: letsencrypt-production
+          hajimari.io/appName: "Alert Manager"
+          hajimari.io/group: "Monitoring"
         hosts:
           - &am am.${SECRET_DOMAIN}
         tls:

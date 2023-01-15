@@ -34,7 +34,7 @@ spec:
           - host: &host "vault.${SECRET_DOMAIN}"
         tls:
           - hosts:
-            - *host
+              - *host
             secretName: *host
       extraEnvironmentVars:
         GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
@@ -69,8 +69,8 @@ spec:
           mountPath: /var/run/secrets/vault
           readOnly: true
       volumes:
-      - name: secrets
-        secret:
-          secretName: vault
+        - name: secrets
+          secret:
+            secretName: vault
     ui:
       enabled: true

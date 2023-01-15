@@ -29,8 +29,9 @@ spec:
       enabled: true
       annotations:
         cert-manager.io/cluster-issuer: letsencrypt-production
-        #nginx.ingress.kubernetes.io/configuration-snippet: |
-        #  proxy_pass_header X-Scope-OrgID;
+        hajimari.io/enable: false
+        hajimari.io/appName: "Loki"
+        hajimari.io/group: "Monitoring"
       hosts:
         - &loki loki.${SECRET_DOMAIN}
       tls:

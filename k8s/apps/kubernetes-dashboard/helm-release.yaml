@@ -27,9 +27,10 @@ spec:
       enabled: true
       annotations:
         cert-manager.io/cluster-issuer: "letsencrypt-production"
+        hajimari.io/group: "Monitoring"
       hosts:
         - &host "dash.${SECRET_DOMAIN}"
       tls:
         - hosts:
-          - *host
+            - *host
           secretName: *host
