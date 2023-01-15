@@ -34,7 +34,7 @@ data:
       "fiscalYearStartMonth": 0,
       "graphTooltip": 0,
       "links": [],
-      "liveNow": false,
+      "liveNow": true,
       "panels": [
         {
           "collapsed": false,
