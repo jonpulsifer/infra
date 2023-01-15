@@ -35,8 +35,6 @@ spec:
       enabled: true
       relay:
         enabled: true
-      metrics:
-        enabled: true
       ui:
         enabled: true
         ingress:
