@@ -33,7 +33,6 @@ data:
       "editable": true,
       "fiscalYearStartMonth": 0,
       "graphTooltip": 0,
-      "id": 27,
       "links": [],
       "liveNow": false,
       "panels": [
@@ -114,8 +113,8 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 10,
-            "w": 5,
+            "h": 15,
+            "w": 12,
             "x": 0,
             "y": 1
           },
@@ -222,9 +221,9 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 10,
-            "w": 6,
-            "x": 5,
+            "h": 15,
+            "w": 12,
+            "x": 12,
             "y": 1
           },
           "id": 2,
