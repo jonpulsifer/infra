@@ -15,6 +15,8 @@ subsets:
     nodeName: blinkypi0
   - ip: 10.2.0.27
     nodeName: screenpi4
+  - ip: 10.2.0.28
+    nodeName: homepi4-wifi
   ports:
   - name: http-metrics
     port: 9100
