@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - kube-prometheus.yaml
+  - local-grafana-dashboards.yaml
   - local-node-exporters.yaml
   - loki.yaml
   - metrics-server.yaml

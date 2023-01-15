@@ -20,17 +20,6 @@ resource "unifi_network" "fml" {
   dhcp_stop    = cidrhost(local.fml_cidr, 254)
 }
 
-resource "unifi_firewall_rule" "allow_fml_to_any" {
-  name       = "Allow fml.pulsifer.ca to ANY"
-  action     = "accept"
-  ruleset    = "LAN_IN"
-  rule_index = "2000"
-
-  protocol = "all"
-
-  src_network_type = "NETv4"
-  src_network_id   = unifi_network.fml.id
-}
 
 data "unifi_ap_group" "all_aps" {
   name = "All APs"

@@ -33,34 +33,6 @@ resource "unifi_wlan" "lab" {
   wlan_band         = "both"
 }
 
-resource "unifi_firewall_rule" "allow_lab_to_any" {
-  name       = "Allow ${unifi_network.lab.name} to ANY"
-  action     = "accept"
-  ruleset    = "LAN_IN"
-  rule_index = "2001"
-
-  protocol = "all"
-
-  src_network_type = "NETv4"
-  src_network_id   = unifi_network.lab.id
-}
-
-resource "unifi_firewall_rule" "allow_fml_to_lab" {
-  name       = "Allow ${unifi_network.fml.name} to ANY"
-  action     = "accept"
-  ruleset    = "LAN_OUT"
-  rule_index = "2002"
-
-  protocol = "all"
-
-  src_network_type = "NETv4"
-  src_network_id   = unifi_network.fml.id
-
-  dst_network_id   = unifi_network.lab.id
-  dst_network_type = "NETv4"
-}
-
-
 resource "unifi_user" "lab" {
   for_each               = merge(local.clients.lab, local.clients.rpis)
   name                   = each.key

@@ -1,0 +1,47 @@
+resource "unifi_firewall_group" "rfc1918" {
+  name    = "RFC1918"
+  type    = "address-group"
+  members = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+}
+
+resource "unifi_firewall_rule" "allow_established" {
+  name              = "Allow Established/Related Sessions"
+  action            = "accept"
+  ruleset           = "LAN_IN"
+  rule_index        = "2000"
+  protocol          = "all"
+  state_established = true
+  state_related     = true
+}
+
+resource "unifi_firewall_rule" "drop_invalid" {
+  name          = "Drop Invalid State"
+  action        = "drop"
+  ruleset       = "LAN_IN"
+  rule_index    = 2001
+  protocol      = "all"
+  state_invalid = true
+}
+
+resource "unifi_firewall_rule" "allow_fml_to_any" {
+  name       = "Allow ${unifi_network.fml.name} to ANY"
+  action     = "accept"
+  ruleset    = "LAN_IN"
+  rule_index = "2002"
+
+  protocol = "all"
+
+  src_network_type = "NETv4"
+  src_network_id   = unifi_network.fml.id
+}
+
+resource "unifi_firewall_rule" "drop_all_rfc1918" {
+  name    = "Drop RFC1918"
+  action  = "drop"
+  ruleset = "LAN_IN"
+
+  rule_index = 4001
+
+  protocol               = "all"
+  dst_firewall_group_ids = [unifi_firewall_group.rfc1918.id]
+}
