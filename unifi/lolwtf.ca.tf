@@ -13,7 +13,7 @@ resource "unifi_network" "lab" {
   vlan_id       = 2
 
   dhcp_enabled = true
-  dhcp_lease   = local.one_day
+  dhcp_lease   = local.one_week
   dhcp_start   = cidrhost(local.lab_cidr, 200)
   dhcp_stop    = cidrhost(local.lab_cidr, 254)
 }

@@ -4,6 +4,7 @@ locals {
   fml_wlan   = "fml"
   clients    = yamldecode(file("./clients.yaml"))
   one_day    = 86400
+  one_week   = local.one_day * 7
 }
 
 resource "unifi_network" "fml" {
