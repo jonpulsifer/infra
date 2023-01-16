@@ -4,6 +4,10 @@ terraform {
     prefix = "terraform/unifi"
   }
   required_providers {
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 3.32"
+    }
     unifi = {
       # overridden in ~/.terraformrc
       source  = "paultyng/unifi"
@@ -16,12 +20,10 @@ terraform {
   }
 }
 
-provider "vault" {
-  # vault login -method=userpass username=lol password=$(op item get vault --fields=password --account=pulsifer)
-  address            = "https://vault.lolwtf.ca"
-  add_address_to_env = true
-  skip_tls_verify    = false
+provider "cloudflare" {
+  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer)
 }
+
 
 provider "unifi" {
   username = "terraform"
@@ -30,4 +32,11 @@ provider "unifi" {
   api_url        = "https://unifi"
   allow_insecure = true
   # site = "default"
+}
+
+provider "vault" {
+  # vault login -method=userpass username=lol password=$(op item get vault --fields=password --account=pulsifer)
+  address            = "https://vault.lolwtf.ca"
+  add_address_to_env = true
+  skip_tls_verify    = false
 }

@@ -16,5 +16,5 @@ terraform {
 }
 
 provider "cloudflare" {
-  # CLOUDFLARE_API_TOKEN enviroment variable is required
+  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer)
 }

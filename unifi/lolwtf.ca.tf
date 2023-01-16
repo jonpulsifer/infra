@@ -1,7 +1,30 @@
 locals {
-  lab_cidr   = "10.2.0.0/24"
-  lab_domain = "lolwtf.ca"
-  lab_wlan   = "lab"
+  lab_cidr    = "10.2.0.0/24"
+  lab_domain  = "lolwtf.ca"
+  lab_wlan    = "lab"
+  lab_clients = merge(local.clients.lab, local.clients.rpis)
+}
+
+data "unifi_ap_group" "lab" {
+  name = "Lab"
+}
+
+data "cloudflare_zone" "lab" {
+  name = local.lab_domain
+}
+
+resource "cloudflare_record" "lab_remote_dns" {
+  for_each = {
+    for name, client in local.lab_clients : name => client
+    if can(client.ip == true)
+  }
+  zone_id = data.cloudflare_zone.lab.id
+  name    = each.key
+  value   = cidrhost(local.lab_cidr, each.value.ip)
+  type    = "A"
+  ttl     = 1
+  comment = "terraform managed"
+  tags    = ["terraform-managed"]
 }
 
 resource "unifi_network" "lab" {
@@ -18,10 +41,6 @@ resource "unifi_network" "lab" {
   dhcp_stop    = cidrhost(local.lab_cidr, 254)
 }
 
-data "unifi_ap_group" "lab" {
-  name = "Lab"
-}
-
 resource "unifi_wlan" "lab" {
   name              = local.lab_wlan
   security          = "open"
@@ -34,7 +53,7 @@ resource "unifi_wlan" "lab" {
 }
 
 resource "unifi_user" "lab" {
-  for_each               = merge(local.clients.lab, local.clients.rpis)
+  for_each               = local.lab_clients
   name                   = each.key
   mac                    = each.value.mac
   local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.lab_domain)
