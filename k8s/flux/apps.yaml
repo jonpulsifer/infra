@@ -12,7 +12,7 @@ spec:
     kind: GitRepository
     name: infra
   dependsOn:
-    - name: core
+    - name: config
   decryption:
     provider: sops
     secretRef:
