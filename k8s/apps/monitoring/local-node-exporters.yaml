@@ -17,6 +17,8 @@ subsets:
     nodeName: screenpi4
   - ip: 10.2.0.28
     nodeName: homepi4-wifi
+  - ip: 100.85.218.119
+    nodeName: 800g3-2.pulsifer.ca.beta.tailscale.net
   ports:
   - name: http-metrics
     port: 9100
