@@ -23,11 +23,17 @@ spec:
     remediation:
       retries: 5
   values:
+    extraArgs:
+      - --enable-skip-login
+      - --disable-settings-authorizer
+      - --enable-insecure-login
+      - --token-ttl=43200
     ingress:
       enabled: true
       annotations:
         cert-manager.io/cluster-issuer: "letsencrypt-production"
         hajimari.io/group: "Monitoring"
+        hajimari.io/icon: mdi:kubernetes
       hosts:
         - &host "dash.${SECRET_DOMAIN}"
       tls:

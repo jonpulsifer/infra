@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   # - assemblyline
   - cert-manager
+  - cilium
   - cloudflare-ddns
   # - datadog
   - default
@@ -11,6 +12,11 @@ resources:
   - flux-system
   - ingress-nginx
   - kubernetes-dashboard
+  - local-path-provisioner
+  # - longhorn
+  - metallb
   - monitoring
   - satisfactory
   - vault
+  - persistent-volumes.yaml
+  - storage-classes.yaml

@@ -1,20 +1,14 @@
 ---
 apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: GitRepository
+kind: OCIRepository
 metadata:
-  name: flux
+  name: flux-manifests
   namespace: flux-system
 spec:
-  interval: 24h
+  interval: 10m
+  url: oci://ghcr.io/fluxcd/flux-manifests
   ref:
-    # renovate: datasource=github-releases depName=fluxcd/flux2
-    tag: "v0.38.3"
-  url: https://github.com/fluxcd/flux2
-  ignore: |
-    # exclude all
-    /*
-    # path to manifests
-    !/manifests
+    tag: v0.38.3
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
 kind: Kustomization
@@ -23,12 +17,12 @@ metadata:
   namespace: flux-system
 spec:
   interval: 24h
-  path: ./manifests/install
+  path: ./
   prune: true
   wait: true
   sourceRef:
-    kind: GitRepository
-    name: flux
+    kind: OCIRepository
+    name: flux-manifests
   images:
     - name: fluxcd/helm-controller
       newName: ghcr.io/fluxcd/helm-controller
