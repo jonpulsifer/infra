@@ -4,4 +4,5 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helm-release.yaml
+  - service-monitor.yaml
 namespace: unpoller
