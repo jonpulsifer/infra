@@ -6,23 +6,23 @@ metadata:
   labels:
     pulsifer.dev/service: node-exporter
 subsets:
-- addresses:
-  - ip: 10.2.0.20
-    nodeName: cloudpi4
-  - ip: 10.2.0.24
-    nodeName: radiopi0
-  - ip: 10.2.0.25
-    nodeName: blinkypi0
-  - ip: 10.2.0.27
-    nodeName: screenpi4
-  - ip: 10.2.0.28
-    nodeName: homepi4-wifi
-  - ip: 100.85.218.119
-    nodeName: 800g3-2.pulsifer.ca.beta.tailscale.net
-  ports:
-  - name: http-metrics
-    port: 9100
-    protocol: TCP
+  - addresses:
+      - ip: 10.2.0.20
+        nodeName: cloudpi4
+      - ip: 10.2.0.24
+        nodeName: radiopi0
+      - ip: 10.2.0.25
+        nodeName: blinkypi0
+      - ip: 10.2.0.27
+        nodeName: screenpi4
+      - ip: 10.2.0.28
+        nodeName: homepi4-wifi
+      - ip: 100.85.218.119
+        nodeName: 800g3-2.pulsifer.ca.beta.tailscale.net
+    ports:
+      - name: http-metrics
+        port: 9100
+        protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -36,10 +36,10 @@ spec:
   type: ExternalName
   externalName: local-node-exporters
   ports:
-  - name: http-metrics
-    port: 9100
-    protocol: TCP
-    targetPort: 9100
+    - name: http-metrics
+      port: 9100
+      protocol: TCP
+      targetPort: 9100
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -52,25 +52,25 @@ metadata:
 spec:
   jobLabel: jobLabel
   endpoints:
-  - port: http-metrics
-    interval: 30s
-    honorLabels: true
-    scheme: http
-    path: /metrics
-    tlsConfig:
-      insecureSkipVerify: true
-    relabelings:
-      - sourceLabels: [__meta_kubernetes_pod_node_name]
-        targetLabel: instance
-        regex: (.*)
-        replacement: "$1"
-        action: replace
+    - port: http-metrics
+      interval: 30s
+      honorLabels: true
+      scheme: http
+      path: /metrics
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: instance
+          regex: (.*)
+          replacement: "$1"
+          action: replace
   selector:
     matchLabels:
       pulsifer.dev/service: node-exporter
   namespaceSelector:
     matchNames:
-    - monitoring
+      - monitoring
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
