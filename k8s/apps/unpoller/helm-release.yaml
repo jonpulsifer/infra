@@ -26,7 +26,7 @@ spec:
   values:
     env:
       UP_UNIFI_DEFAULT_URL: "https://10.2.0.1"
-      UP_UNIFI_DEFAULT_USER: "unifipoller"
+      UP_UNIFI_DEFAULT_USER: "unpoller"
       UP_UNIFI_DEFAULT_PASS: "unpollerLOL1!"
       UP_PROMETHEUS_DISABLE: false
       UP_INFLUXDB_DISABLE: true
