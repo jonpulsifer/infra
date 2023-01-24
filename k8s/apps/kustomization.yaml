@@ -20,3 +20,4 @@ resources:
   - vault
   - persistent-volumes.yaml
   - storage-classes.yaml
+  - unpoller
