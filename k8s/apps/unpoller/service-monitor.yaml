@@ -10,7 +10,7 @@ spec:
   jobLabel: jobLabel
   endpoints:
     - port: metrics
-      interval: 10s
+      interval: 30s
       honorLabels: true
       scheme: http
       path: /metrics
