@@ -30,4 +30,4 @@ spec:
       UP_UNIFI_DEFAULT_PASS: "unpollerLOL1!"
       UP_PROMETHEUS_DISABLE: false
       UP_INFLUXDB_DISABLE: true
-      UP_LOKI_URL: https://loki.lolwtf.ca
+      UP_LOKI_URL: https://loki.${SECRET_DOMAIN}
