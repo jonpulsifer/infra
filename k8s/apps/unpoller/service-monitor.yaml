@@ -9,16 +9,16 @@ metadata:
 spec:
   jobLabel: jobLabel
   endpoints:
-  - port: metrics
-    interval: 30s
-    honorLabels: true
-    scheme: http
-    path: /metrics
-    tlsConfig:
-      insecureSkipVerify: true
+    - port: metrics
+      interval: 10s
+      honorLabels: true
+      scheme: http
+      path: /metrics
+      tlsConfig:
+        insecureSkipVerify: true
   selector:
     matchLabels:
       app.kubernetes.io/name: unifi-poller
   namespaceSelector:
     matchNames:
-    - unpoller
+      - unpoller
