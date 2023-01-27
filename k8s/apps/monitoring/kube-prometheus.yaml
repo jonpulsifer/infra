@@ -42,7 +42,6 @@ spec:
                   storage: 25Gi
     grafana:
       admin:
-        ## Name of the secret. Can be templated.
         existingSecret: grafana-admin-user
         userKey: user
         passwordKey: password
@@ -84,27 +83,27 @@ spec:
             datasource: Prometheus
           client-dpi:
             gnetId: 11310
-            revision: 1
+            revision: 5
             datasource: Prometheus
           network-sites:
             gnetId: 11311
-            revision: 1
+            revision: 5
             datasource: Prometheus
           usw-insights:
             gnetId: 11312
-            revision: 1
+            revision: 9
             datasource: Prometheus
           usg-insights:
             gnetId: 11313
-            revision: 1
+            revision: 9
             datasource: Prometheus
           uap-insights:
             gnetId: 11314
-            revision: 1
+            revision: 10
             datasource: Prometheus
           client-insights:
             gnetId: 11315
-            revision: 1
+            revision: 9
             datasource: Prometheus
       ingress:
         enabled: true
