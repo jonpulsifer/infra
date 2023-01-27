@@ -10,3 +10,4 @@ resources:
   - metrics-server.yaml
   - promtail.yaml
   - screenpi4.yaml
+  - secret.sops.yaml
