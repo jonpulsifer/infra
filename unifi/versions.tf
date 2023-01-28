@@ -31,12 +31,21 @@ provider "unifi" {
   # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer)
   api_url        = "https://unifi"
   allow_insecure = true
-  # site = "default"
+  site           = "default"
 }
 
 provider "vault" {
-  # vault login -method=userpass username=lol password=$(op item get vault --fields=password --account=pulsifer)
+  # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer)
   address            = "https://vault.lolwtf.ca"
   add_address_to_env = true
   skip_tls_verify    = false
 }
+
+# terraform apply -target=unifi_user.import
+# data "unifi_user" "import" {
+#   mac = "b4:8a:0a:27:07:f4"
+# }
+
+# output "import" {
+#   value = data.unifi_user.import.id
+# }

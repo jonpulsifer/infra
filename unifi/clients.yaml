@@ -39,6 +39,10 @@ lab:
     dev-id: 2847
     mac: ac:e2:d3:0c:fb:b5
     ip: 13
+  800g2-2:
+    dev-id: 2847
+    mac: 40:b0:34:f3:90:bd
+    ip: 14
 
 rpis:
   cloudpi4:
@@ -199,3 +203,5 @@ iot:
     mac: 38:42:0b:48:e2:1b
   Sonos Sub:
     mac: f0:f6:c1:e2:85:c4
+  Tidbyt:
+    mac: b4:8a:0a:27:07:f4
