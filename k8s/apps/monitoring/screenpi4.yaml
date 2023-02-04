@@ -6,13 +6,13 @@ metadata:
   labels:
     pulsifer.dev/service: dht22
 subsets:
-- addresses:
-  - ip: 10.2.0.28
-    nodeName: screenpi4
-  ports:
-  - name: http-metrics
-    port: 8000
-    protocol: TCP
+  - addresses:
+      - ip: 10.2.0.28
+        nodeName: screenpi4
+    ports:
+      - name: http-metrics
+        port: 8000
+        protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -25,10 +25,10 @@ spec:
   type: ExternalName
   externalName: screenpi4.localdomain
   ports:
-  - name: http-metrics
-    port: 8000
-    protocol: TCP
-    targetPort: 8000
+    - name: http-metrics
+      port: 8000
+      protocol: TCP
+      targetPort: 8000
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -41,25 +41,25 @@ metadata:
 spec:
   jobLabel: pulsifer.dev/service
   endpoints:
-  - port: http-metrics
-    interval: 30s
-    honorLabels: true
-    scheme: http
-    path: /
-    tlsConfig:
-      insecureSkipVerify: true
-    relabelings:
-      - sourceLabels: [__address__]
-        targetLabel: __address__
-        regex: (.*)
-        replacement: "screenpi4:8000"
-        action: replace
+    - port: http-metrics
+      interval: 30s
+      honorLabels: true
+      scheme: http
+      path: /
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - sourceLabels: [__address__]
+          targetLabel: __address__
+          regex: (.*)
+          replacement: "screenpi4-wifi:8000"
+          action: replace
   selector:
     matchLabels:
       pulsifer.dev/service: dht22
   namespaceSelector:
     matchNames:
-    - monitoring
+      - monitoring
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
