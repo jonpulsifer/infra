@@ -31,6 +31,18 @@ spec:
         kubeSchedulerAlerting: false
     cleanPrometheusOperatorObjectNames: true
     prometheus:
+      ingress:
+        enabled: true
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-production
+          hajimari.io/appName: "Prometheus"
+          hajimari.io/group: "Monitoring"
+        hosts:
+          - &prom prom.${SECRET_DOMAIN}
+        tls:
+          - secretName: *prom
+            hosts:
+              - *prom
       prometheusSpec:
         storageSpec:
           volumeClaimTemplate:
