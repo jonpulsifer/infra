@@ -30,6 +30,7 @@ spec:
       defaultEnable: true
       namespaceSelector:
         matchNames:
+          - argo
           - default
           - vault
           - kube-system
