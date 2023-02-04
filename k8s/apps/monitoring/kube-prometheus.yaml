@@ -41,6 +41,7 @@ spec:
           cert-manager.io/cluster-issuer: letsencrypt-production
           hajimari.io/appName: "Prometheus"
           hajimari.io/group: "Monitoring"
+          hajimari.io/icon: torch
         hosts:
           - &prom prom.${SECRET_DOMAIN}
         tls:
@@ -127,6 +128,7 @@ spec:
           cert-manager.io/cluster-issuer: letsencrypt-production
           hajimari.io/appName: "Grafana"
           hajimari.io/group: "Monitoring"
+          hajimari.io/icon: chart-line
         hosts:
           - &grafana grafana.${SECRET_DOMAIN}
         tls:
@@ -140,6 +142,7 @@ spec:
           cert-manager.io/cluster-issuer: letsencrypt-production
           hajimari.io/appName: "Alert Manager"
           hajimari.io/group: "Monitoring"
+          hajimari.io/icon: alert-circle
         hosts:
           - &am am.${SECRET_DOMAIN}
         tls:
