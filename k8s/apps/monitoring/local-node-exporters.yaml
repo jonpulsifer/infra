@@ -9,14 +9,16 @@ subsets:
   - addresses:
       - ip: 10.2.0.20
         nodeName: cloudpi4
+      - ip: 10.2.0.23
+        nodeName: homepi4-wifi
       - ip: 10.2.0.24
         nodeName: radiopi0
       - ip: 10.2.0.25
         nodeName: blinkypi0
-      - ip: 10.2.0.27
-        nodeName: screenpi4
+      # - ip: 10.2.0.27
+      #   nodeName: screenpi4
       - ip: 10.2.0.28
-        nodeName: homepi4-wifi
+        nodeName: screenpi4-wifi
       - ip: 100.85.218.119
         nodeName: 800g3-2.pulsifer.ca.beta.tailscale.net
     ports:
