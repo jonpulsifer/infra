@@ -12,5 +12,5 @@ spec:
   ignore: |
     # exclude all
     /*
-    # include assemblyline directory
+    # include chart directory
     !/deploy/chart/local-path-provisioner
