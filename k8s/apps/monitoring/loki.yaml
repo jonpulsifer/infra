@@ -29,9 +29,10 @@ spec:
       enabled: true
       annotations:
         cert-manager.io/cluster-issuer: letsencrypt-production
-        hajimari.io/enable: false
+        hajimari.io/enable: "false"
         hajimari.io/appName: "Loki"
         hajimari.io/group: "Monitoring"
+        hajimari.io/icon: math-log
       hosts:
         - &loki loki.${SECRET_DOMAIN}
       tls:
