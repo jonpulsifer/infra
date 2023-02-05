@@ -33,6 +33,8 @@ spec:
         annotations:
           hajimari.io/icon: sync
           cert-manager.io/cluster-issuer: letsencrypt-production
+          nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+          nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
         hosts:
           - &argo "argo.${SECRET_DOMAIN}"
         https: true
