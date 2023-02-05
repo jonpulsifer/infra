@@ -31,6 +31,15 @@ spec:
       tag: 0.3.4
     service:
       port: &port 8080
+    probes:
+      liveness:
+        httpGet:
+          path: /
+          port: *port
+      readiness:
+        httpGet:
+          path: /
+          port: *port
     ingress:
       enabled: true
       ingressClassName: nginx
