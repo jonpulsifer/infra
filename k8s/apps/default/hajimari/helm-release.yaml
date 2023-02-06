@@ -40,7 +40,7 @@ spec:
         - group: Monitoring
           apps:
             - name: ingress (should 404)
-              url: http://${METALLB_INGRESS_ADDR}
+              url: http://${CILIUM_LB_NGINX}
               icon: test-tube
       globalBookmarks:
         - group: Cloud

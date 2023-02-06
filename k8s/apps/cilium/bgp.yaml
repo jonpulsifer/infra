@@ -1,0 +1,20 @@
+---
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumBGPPeeringPolicy
+metadata:
+  name: k8s
+spec:
+  nodeSelector:
+    matchLabels:
+      bgp-policy: fml
+  virtualRouters:
+    - localASN: 64512
+      exportPodCIDR: true
+---
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: fml
+spec:
+  cidrs:
+    - cidr: ${CILIUM_LB_RANGE}

@@ -27,8 +27,10 @@ spec:
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
     ipam:
+      mode: cluster-pool
       operator:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
+    bgpControlPlane: true
     operator.prometheus.enabled: true
     prometheus.enabled: true
     hubble:

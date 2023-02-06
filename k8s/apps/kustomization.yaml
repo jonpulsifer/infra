@@ -15,7 +15,6 @@ resources:
   - kubernetes-dashboard
   - local-path-provisioner
   # - longhorn
-  - metallb
   - monitoring
   - satisfactory
   - vault
