@@ -10,6 +10,7 @@ spec:
   virtualRouters:
     - localASN: 64512
       exportPodCIDR: true
+      neighbors: []
 ---
 apiVersion: "cilium.io/v2alpha1"
 kind: CiliumLoadBalancerIPPool
