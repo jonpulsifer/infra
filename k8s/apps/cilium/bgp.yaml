@@ -12,16 +12,16 @@ spec:
       exportPodCIDR: true
       neighbors:
         - peerASN: 64512
-          peerAddress: 10.2.0.10
+          peerAddress: 10.2.0.10/32
         - peerASN: 64512
-          peerAddress: 10.2.0.11
+          peerAddress: 10.2.0.11/32
         - peerASN: 64512
-          peerAddress: 10.2.0.12
+          peerAddress: 10.2.0.12/32
 ---
 apiVersion: "cilium.io/v2alpha1"
-kind: CiliumLoadBalancerIPPool
+kind: CiliumBGPLoadBalancerIPPool
 metadata:
   name: fml
+  namespace: kube-system
 spec:
-  cidrs:
-    - cidr: ${CILIUM_LB_RANGE}
+  prefix: ${CILIUM_LB_RANGE}
