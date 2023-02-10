@@ -4,4 +4,4 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helm-release.yaml
-  # - lab.yaml # this needs the helm release to be created first
+  - lab.yaml # this needs the helm release to be created first
