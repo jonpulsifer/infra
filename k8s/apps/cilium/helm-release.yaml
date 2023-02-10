@@ -30,7 +30,11 @@ spec:
       mode: cluster-pool
       operator:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
+    bpf:
+      masquerade: true
     bgpControlPlane:
+      enabled: false
+    ingressController:
       enabled: true
     operator.prometheus.enabled: true
     prometheus.enabled: true

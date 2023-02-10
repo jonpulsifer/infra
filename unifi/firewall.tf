@@ -23,8 +23,8 @@ resource "unifi_firewall_rule" "drop_invalid" {
   state_invalid = true
 }
 
-resource "unifi_firewall_rule" "allow_fml_to_any" {
-  name       = "Allow ${unifi_network.fml.name} to ANY"
+resource "unifi_firewall_rule" "allow_fml_to_lab" {
+  name       = "Allow ${unifi_network.fml.name} to ${unifi_network.lab.name}"
   action     = "accept"
   ruleset    = "LAN_IN"
   rule_index = "2002"
@@ -33,6 +33,9 @@ resource "unifi_firewall_rule" "allow_fml_to_any" {
 
   src_network_type = "NETv4"
   src_network_id   = unifi_network.fml.id
+
+  dst_network_type = "NETv4"
+  dst_network_id   = unifi.network.lab.id
 }
 
 resource "unifi_firewall_rule" "drop_all_rfc1918" {

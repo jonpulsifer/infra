@@ -24,4 +24,4 @@ metadata:
   name: fml
   namespace: kube-system
 spec:
-  prefix: ${CILIUM_LB_RANGE}
+  prefix: ${LB_RANGE}

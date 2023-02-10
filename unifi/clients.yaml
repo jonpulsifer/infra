@@ -4,10 +4,10 @@ cameras:
   Outside:
     dev-id: 2636
     mac: 74:83:c2:3f:ea:21
-  Garage Door Camera 1:
+  Garage Door Camera Old:
     mac: d4:12:43:5e:f3:80
     dev-id: 2051
-  Garage Door Camera 2:
+  Garage Door Camera 1:
     mac: d4:12:43:3c:c6:55
     dev-id: 2051
 
@@ -146,10 +146,10 @@ iot:
     mac: 7c:2e:bd:56:db:88
   Bedroom Scale:
     mac: 00:24:e4:37:b2:da
-  Garage Door Opener 1:
+  Garage Door Opener Old:
     mac: cc:6a:10:19:5d:b1
     dev-id: 2051
-  Garage Door Opener 2:
+  Garage Door Opener 1:
     mac: cc:6a:10:19:63:02
     dev-id: 2051
   Hue Bridge:

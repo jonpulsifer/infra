@@ -1,5 +1,5 @@
 provider "vault" {
-  address         = "https://vault-x2fp5oyaaa-nn.a.run.app"
+  address         = "https://vault.lolwtf.ca"
   skip_tls_verify = false
 }
 
@@ -11,7 +11,7 @@ terraform {
   required_providers {
     vault = {
       source  = "hashicorp/vault"
-      version = "~> 3.5"
+      version = "~> 3.12"
     }
   }
 }
