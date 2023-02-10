@@ -23,6 +23,9 @@ spec:
     remediation:
       retries: 5
   values:
+    rbac:
+      create: true
+      clusterAdminRole: true
     extraArgs:
       - --enable-skip-login
       - --disable-settings-authorizer
