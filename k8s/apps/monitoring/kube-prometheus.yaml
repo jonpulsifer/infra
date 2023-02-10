@@ -49,6 +49,7 @@ spec:
             hosts:
               - *prom
       prometheusSpec:
+        retention: 90d
         storageSpec:
           volumeClaimTemplate:
             spec:
