@@ -11,7 +11,7 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2beta1
 kind: HelmRelease
 metadata:
-  name: weaveworks-gitops
+  name: weave-gitops
   namespace: flux-system
 spec:
   interval: 24h
@@ -41,7 +41,7 @@ spec:
     ingress:
       enabled: true
       annotations:
-        hajimari.io/icon: sync
+        hajimari.io/icon: git
         cert-manager.io/cluster-issuer: letsencrypt-production
         # nginx.ingress.kubernetes.io/ssl-passthrough: "true"
         # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
