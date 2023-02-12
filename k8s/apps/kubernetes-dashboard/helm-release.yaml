@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: kubernetes-dashboard
-      version: 6.0.0
+      version: 6.0.3
       sourceRef:
         kind: HelmRepository
         name: kubernetes-dashboard
@@ -20,12 +20,13 @@ spec:
     remediation:
       retries: 5
   upgrade:
+    cleanupOnFail: true
     remediation:
       retries: 5
   values:
     rbac:
       create: true
-      clusterAdminRole: true
+      clusterReadOnlyRole: true
     extraArgs:
       - --enable-skip-login
       - --disable-settings-authorizer
