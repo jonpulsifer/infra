@@ -46,7 +46,10 @@ spec:
         # nginx.ingress.kubernetes.io/ssl-passthrough: "true"
         # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
       hosts:
-        - &gitops "gitops.${SECRET_DOMAIN}"
+        - host: &gitops "gitops.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: Prefix
       https: true
       tls:
         - hosts:
