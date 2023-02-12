@@ -17,3 +17,4 @@ resources:
   - metallb.yaml
   - metrics-server.yaml
   - prometheus.yaml
+  - weaveworks.yaml

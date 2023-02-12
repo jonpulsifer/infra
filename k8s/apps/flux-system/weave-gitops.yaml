@@ -1,13 +1,4 @@
 ---
-apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: HelmRepository
-metadata:
-  name: weaveworks
-  namespace: flux-system
-spec:
-  interval: 24h
-  url: https://helm.gitops.weave.works
----
 apiVersion: helm.toolkit.fluxcd.io/v2beta1
 kind: HelmRelease
 metadata:
