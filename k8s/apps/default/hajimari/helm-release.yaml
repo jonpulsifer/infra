@@ -32,9 +32,10 @@ spec:
         matchNames:
           - argo
           - default
-          - vault
+          - flux-system
           - kube-system
           - monitoring
+          - vault
       name: "overlord"
       customApps:
         - group: Monitoring
