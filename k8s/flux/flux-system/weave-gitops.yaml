@@ -38,6 +38,7 @@ spec:
     adminUser:
       create: true
       username: admin
+      passwordHash: $2y$10$zTRdq9bLcEmGF27exGcKZ.LnSNIOpwV.n5H7tLP4/oyuSRGjTk7Ai
     ingress:
       enabled: true
       annotations:
