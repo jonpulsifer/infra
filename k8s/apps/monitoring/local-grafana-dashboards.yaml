@@ -54,6 +54,7 @@ data:
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "description": "Temperature captured from the DH22 Sensor on screenpi4",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -64,32 +65,34 @@ data:
                 "axisColorMode": "text",
                 "axisLabel": "",
                 "axisPlacement": "auto",
+                "axisSoftMax": 20,
+                "axisSoftMin": 10,
                 "barAlignment": 0,
                 "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
+                "fillOpacity": 30,
+                "gradientMode": "opacity",
                 "hideFrom": {
                   "legend": false,
                   "tooltip": false,
                   "viz": false
                 },
-                "lineInterpolation": "linear",
+                "lineInterpolation": "smooth",
                 "lineStyle": {
                   "fill": "solid"
                 },
                 "lineWidth": 1,
-                "pointSize": 5,
+                "pointSize": 1,
                 "scaleDistribution": {
                   "type": "linear"
                 },
-                "showPoints": "auto",
+                "showPoints": "never",
                 "spanNulls": false,
                 "stacking": {
                   "group": "A",
-                  "mode": "none"
+                  "mode": "normal"
                 },
                 "thresholdsStyle": {
-                  "mode": "dashed+area"
+                  "mode": "area"
                 }
               },
               "decimals": 1,
@@ -145,11 +148,11 @@ data:
               },
               "editorMode": "builder",
               "exemplar": false,
-              "expr": "dht22_temp",
+              "expr": "avg_over_time(dht22_temp[$__interval])",
               "format": "time_series",
               "hide": false,
               "instant": false,
-              "interval": "",
+              "interval": "1h",
               "legendFormat": "__auto",
               "range": true,
               "refId": "A"
@@ -173,6 +176,8 @@ data:
                 "axisColorMode": "text",
                 "axisLabel": "",
                 "axisPlacement": "auto",
+                "axisSoftMax": 60,
+                "axisSoftMin": 30,
                 "barAlignment": -1,
                 "drawStyle": "line",
                 "fillOpacity": 0,
@@ -187,18 +192,18 @@ data:
                   "fill": "solid"
                 },
                 "lineWidth": 1,
-                "pointSize": 5,
+                "pointSize": 1,
                 "scaleDistribution": {
                   "type": "linear"
                 },
-                "showPoints": "auto",
+                "showPoints": "never",
                 "spanNulls": false,
                 "stacking": {
                   "group": "A",
                   "mode": "none"
                 },
                 "thresholdsStyle": {
-                  "mode": "line+area"
+                  "mode": "area"
                 }
               },
               "displayName": "Humidity",
@@ -252,9 +257,10 @@ data:
               },
               "editorMode": "builder",
               "exemplar": false,
-              "expr": "avg_over_time(dht22_humi{job=\"dht22\"}[10m])",
+              "expr": "avg_over_time(dht22_humi[$__interval])",
               "format": "time_series",
               "instant": false,
+              "interval": "1h",
               "legendFormat": "__auto",
               "range": true,
               "refId": "A"
@@ -264,6 +270,7 @@ data:
           "type": "timeseries"
         }
       ],
+      "refresh": true,
       "schemaVersion": 37,
       "style": "dark",
       "tags": [],
