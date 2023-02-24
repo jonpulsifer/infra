@@ -29,7 +29,7 @@ jobs:
         continue-on-error: true
       - name: Terraform Init
         id: init
-        run: terraform init
+        run: terraform init -backend=false
       - name: Terraform Validate
         id: validate
-        run: terraform validate -no-color
+        run: terraform validate
