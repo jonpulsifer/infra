@@ -4,21 +4,38 @@ on:
     branches:
       - main
   pull_request:
-jobs:
+jobs: 
+
+  changed-directories:
+    name: Get changes
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Get Directories with Changes
+        id: changed-directories
+        uses: tj-actions/changed-files@v35
+        with:
+          dir_names: true
+          json: true
+      - name: List all changed directories
+        run: echo '${{ steps.changed-directories.outputs.all_changed_files }}'
+      - id: set-matrix
+        run: echo "matrix={\"dir\":${{ steps.changed-directories.outputs.all_changed_files }}}" >> "$GITHUB_OUTPUT"
+
   validate:
     name: 'fmt, init, validate'
-    runs-on: ubuntu-latest
+    needs: [changed-directories]
     strategy:
-      matrix:
-        modules:
-        - cloudflare
-        - gcp/organization
-        - unifi
-        - vault
-        - workspace
+      matrix: ${{ fromJSON(needs.changed-files.outputs.matrix) }}
+    runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ${{ matrix.modules }}
+        working-directory: ${{ matrix.dir }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
