@@ -32,7 +32,7 @@ jobs:
   validate:
     name: 'fmt, init, validate'
     needs: [changed-directories]
-    if: ${{ needs.changed-directories.outputs.matrix != "" }}
+    if: ${{ needs.changed-directories.outputs.matrix != '' }}
     strategy:
       matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
     runs-on: ubuntu-latest
