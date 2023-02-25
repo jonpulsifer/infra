@@ -7,7 +7,7 @@ on:
 jobs: 
 
   changed-directories:
-    name: Changed Directories
+    name: Get Changed Files
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
