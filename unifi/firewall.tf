@@ -35,7 +35,7 @@ resource "unifi_firewall_rule" "allow_fml_to_lab" {
   src_network_id   = unifi_network.fml.id
 
   dst_network_type = "NETv4"
-  dst_network_id   = unifi.network.lab.id
+  dst_network_id   = unifi_network.lab.id
 }
 
 resource "unifi_firewall_rule" "drop_all_rfc1918" {
