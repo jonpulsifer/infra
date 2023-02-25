@@ -1,4 +1,4 @@
-name: 'Terraform CI'
+name: 'Terraform'
 on:
   push:
     branches:
@@ -30,7 +30,7 @@ jobs:
         run: echo "matrix={\"dir\":${{ steps.changed-directories.outputs.all_changed_files }}}" >> "$GITHUB_OUTPUT"
 
   validate:
-    name: 'fmt, init, validate'
+    # name: 'fmt, init, validate'
     needs: [changed-directories]
     if: ${{ needs.changed-directories.outputs.matrix != '' && needs.changed-directories.outputs.matrix.dir != '[]' }}
     strategy:
