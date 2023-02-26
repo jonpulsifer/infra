@@ -1,17 +1,17 @@
 <header class="page-header">
   <div class="page-header-inner">
     <div class="logo">
-      <span class="prompt">❯</span>
+      <span class="prompt">{{ string .Site.Params.prompt }}</span>
       <a href="{{ .Site.BaseURL }}">{{ .Site.Title }}</a>
     </div>
     {{- with .Site.Menus.main }}
-      <nav class="site-nav">
-	<ul>
-	  {{- range . }}
-	    <li><a href="{{ .URL | relURL }}">{{ .Name }}</a></li>
-	  {{- end }}
-	</ul>
-      </nav>
+    <nav class="site-nav">
+      <ul>
+        {{- range . }}
+        <li><a href="{{ .URL | relURL }}">{{ .Name }}</a></li>
+        {{- end }}
+      </ul>
+    </nav>
     {{- end }}
   </div>
 </header>

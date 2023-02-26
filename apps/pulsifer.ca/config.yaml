@@ -4,6 +4,7 @@ languageCode: "en-us"
 theme: "wip"
 
 params:
+  prompt: ❯
   portrait:
     link: about/
     path: "avatar-icons.svg"
@@ -21,7 +22,7 @@ taxonomies:
   category: categories
   series: series
   tag: tags
-    
+
 menus:
   main:
     - identifier: about

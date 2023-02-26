@@ -1,43 +1,33 @@
-@import "fonts.css";
-
 :root {
-  --anchors: rgba(255, 255, 255, 1);
-  --border: rgba(255, 255, 255, 0.4);
-  --background: rgba(25, 25, 30, 1);
-  --background-light: rgba(50, 50, 55, 1);
-  --content: rgb(195, 195, 196);
-  --header: rgba(20, 20, 25,1);
-  --headings: rgba(215, 215, 218, 1);
-  --max-width: 800px;
-  --primary: rgba(139, 233, 253, 1);
-  --secondary: rgba(189, 147, 249, 1);
-  --tertiary: rgba(255, 121, 198, 1);
-  --quaternary: rgba(80, 250, 123, 1);
+    --anchors: rgba(255, 255, 255, 1);
+    --border: rgba(139, 233, 253, 0.4);
+    --background: rgba(25, 25, 30, 1);
+    --background-light: rgba(50, 50, 55, 1);
+    --content: rgb(195, 195, 196);
+    --header: rgba(20, 20, 25, 1);
+    --headings: rgba(240, 240, 245, 1);
+    --max-width: 800px;
+    --primary: rgba(139, 233, 253, 1);
+    --secondary: rgba(189, 147, 249, 1);
+    --tertiary: rgba(255, 121, 198, 1);
+    --quaternary: rgba(80, 250, 123, 1);
+    font-family: 'Inter', sans-serif;
 }
 
 * {
-  box-sizing: border-box;
-}
-
-html {
-  font-size: 100%;
-}
-
-html, body {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-
+    box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
-  color: var(--content);
-  font-display: swap;
-  font-family: "Product Sans Light Regular", "Google Sans", Arimo, Helvetica, sans-serif;
-  font-size: 1.2rem;
-  line-height: 1.54;
+    background: var(--background);
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    color: var(--content);
+    font-size: 100%;
+    font-display: swap;
+    line-height: 1.54;
 }
 
 .container {
@@ -48,27 +38,27 @@ body {
 
 header.page-header {
     background: var(--header);
-    border-bottom: 1px dotted var(--border);
+    border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: center;
-    padding: 0.5rem;
+    padding: 0.1rem;
     position: relative;
 }
 
-header.page-header > .page-header-inner {
+header.page-header>.page-header-inner {
     display: flex;
     justify-content: space-between;
     max-width: var(--max-width);
     width: 100%;
 }
 
-header.page-header > .page-header-inner .logo a {
+header.page-header>.page-header-inner .logo a {
     font-size: 1.5rem;
+    font-weight: bold;
 }
 
-header.page-header > .page-header-inner .logo .prompt {
+header.page-header>.page-header-inner .logo .prompt {
     color: var(--primary);
-    font-size: 1rem;
 }
 
 nav.site-nav {
@@ -88,8 +78,8 @@ nav.site-nav>ul {
 
 nav.site-nav>ul li {
     display: list-item;
-    font-size: 1.2rem;
 }
+
 nav.site-nav>ul li:not(:last-child) {
     margin-right: 1rem;
 }
@@ -114,9 +104,13 @@ main.landing {
 }
 
 footer {
+    background-color: var(--background);
+    position: fixed;
+    bottom: 0;
+    width: 100%;
     display: flex;
     flex-direction: column;
-    padding: 2rem;
+    font-size: 0.8rem;
 }
 
 .social {
@@ -126,12 +120,12 @@ footer {
     justify-content: center;
 }
 
-.social > .social-header {
-    font-size: 1rem;
+.social>.social-header {
     margin: 0;
+    font-size: 1rem;
 }
 
-.social > ul {
+.social>ul {
     list-style: none;
     display: flex;
     flex-wrap: wrap;
@@ -140,26 +134,31 @@ footer {
     padding: 0;
 }
 
-.social > ul li {
-    font-size: 2.5rem;
-    margin: 0;
+
+.social>ul li:not(:first-child) {
+    margin-right: 1rem;
 }
 
-.social > ul li:not(:first-child){
+.social>ul li:not(:last-child) {
     margin-right: 1rem;
 }
-.social > ul li:not(:last-child){
-    margin-right: 1rem;
+
+.social>ul li a {
+    font-size: 2.2rem;
+    margin: 0;
+    font-weight: normal;
 }
 
 a {
     color: var(--anchors);
     font-display: swap;
-    font-family: "Product Sans Bold", "Google Sans", Helvetica, sans-serif;
     text-decoration: none;
+    font-weight: bold;
 }
 
-a:hover, .logo:hover, .colored-separator {
+a:hover,
+.logo:hover,
+.colored-separator {
     background: linear-gradient(90deg, var(--primary), var(--secondary), var(--tertiary));
     color: transparent;
     background-clip: text;
@@ -167,16 +166,15 @@ a:hover, .logo:hover, .colored-separator {
     transition: 0.3s;
 }
 
-b, strong {
+b,
+strong {
     color: var(--secondary);
     font-display: swap;
-    font-family: "Product Sans Bold", "Google Sans", Helvetica, sans-serif;
 }
 
 code:not(.highlight, pre *) {
     background-color: var(--background-light);
     color: var(--tertiary);
-    font-size: 1.1rem;
 
     border-radius: 0.2rem;
     padding: 0.3rem 0.4rem 0.2rem 0.4rem;
@@ -188,21 +186,25 @@ code:not(.highlight, pre *) {
     border-radius: 0.5rem;
 }
 
-.highlight > div {
+.highlight>div {
     overflow: scroll;
-    font-size: 0.8em;
     margin: 0;
     border-radius: 0.5rem;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
     color: var(--headings);
     font-display: swap;
-    font-family: "Product Sans Bold", "Google Sans", Helvetica, sans-serif;
 }
 
-header > h1.title {
+header>h1.title {
     margin: 0;
+    color: var(--headings);
 }
 
 .toc {
@@ -210,9 +212,9 @@ header > h1.title {
     padding: 0.5rem;
     margin-top: 1rem;
     border-radius: 0.5rem;
-    font-size: 1rem;
 }
-.toc > h3 {
+
+.toc>h3 {
     margin: 0.5rem;
 }
 
@@ -228,7 +230,6 @@ header > h1.title {
 #TableOfContents ul li::before {
     content: '\2055';
     color: transparent;
-    font-size: 0.8rem;
     background-clip: text;
     -webkit-background-clip: text;
     background-image: linear-gradient(90deg, var(--primary), var(--secondary), var(--tertiary));
@@ -236,9 +237,7 @@ header > h1.title {
     vertical-align: middle;
 }
 
-#TableOfContents ul li > a {
-    font-family: "Product Sans Light Regular";
-}
+#TableOfContents ul li>a {}
 
 .meta {
     font-size: 0.8rem;
@@ -250,7 +249,6 @@ summary {
     display: flex;
     flex-direction: row;
     align-items: center;
-    font-weight: bold;
 }
 
 summary::-webkit-details-marker {
@@ -298,6 +296,7 @@ details[open] summary::before {
 }
 
 .archive-entries {
+    flex: 1;
 }
 
 .archive-entry {
@@ -312,8 +311,8 @@ details[open] summary::before {
     margin: 1rem 0;
 }
 
-.archive-year h2 sup, .archive-month h3 sup {
-    font-size: 0.8rem;
+.archive-year h2 sup,
+.archive-month h3 sup {
     padding-left: 0.25rem;
 }
 

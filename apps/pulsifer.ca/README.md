@@ -10,7 +10,7 @@ this site is built using https://gohugo.io and published to GitHub pages
 
 1. install https://gohugo.io
 1. clone this repository
-1. run the development server `hugo serve -t terminal`
+1. run the development server `hugo serve`
 1. make some changes
 1. view your changes at http://localhost:1313
 1. commit your changes

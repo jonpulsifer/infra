@@ -1,11 +1,12 @@
 {{ define "main" }}
-  <main class="landing">
-    <article>
-      {{ with .Site.Params.Portrait }}
-	<a href="{{ .Link }}">
-	  <img src="{{ .Path }}" height="{{ .Height }}" width="{{ .Width }}" alt="{{ .AltText }}" />
-	</a>
-      {{ end }}
-    </article>
-  </main>
+<main class="landing">
+  <article>
+    {{ with .Site.Params.Portrait }}
+    <a href="{{ .Link }}">
+      <img src="{{ .Path }}" height="{{ .Height }}" width="{{ .Width }}" alt="{{ .AltText }}" />
+    </a>
+    {{ end }}
+  </article>
+  {{ partial "social" . }}
+</main>
 {{ end }}

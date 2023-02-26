@@ -1,34 +1,32 @@
 {{ define "main" }}
-  <main>
-    <article>
-      <header class="article-header">
-	<h1 class="title">Archive</h1>
-      </header>
-      {{- $pages := .Site.RegularPages -}}
-      {{- range $pages.GroupByPublishDate "2006" }}
-	{{- if (ne .Key "0001") }}
-	  <div class="archive-year">
-    	    <h2>{{ .Key }}<sup>{{ len .Pages }}</sup></h2>
-	    {{- range .Pages.GroupByPublishDate "January" }}
-	    <div class="archive-month">
-	      <div class="archive-month-name">
-		<h3 class="month-name">{{ .Key }}<sup>{{ len .Pages }}</sup></h3>
-	      </div>
-	      <div class="archive-entries">
-		{{- range .Pages}}
-		<div class="archive-entry">
-		  <a href="{{ .Permalink }}">{{ .Title | markdownify }}</a>
-		  {{ partial "post-meta" . }}
+<main>
+	<article>
+		<header class="article-header">
+			<h1 class="title"><a href="{{ .Page.RelPermalink }}">Archive</a></h1>
+		</header>
+		{{- $pages := .Site.RegularPages -}}
+		{{- range $pages.GroupByPublishDate "2006" }}
+		{{- if (ne .Key "0001") }}
+		<div class="archive-year">
+			<h2>{{ .Key }}<sup>{{ len .Pages }}</sup></h2>
+			{{- range .Pages.GroupByPublishDate "January" }}
+			<div class="archive-month">
+				<div class="archive-month-name">
+					<h3 class="month-name">{{ .Key }}<sup>{{ len .Pages }}</sup></h3>
+				</div>
+				<div class="archive-entries">
+					{{- range .Pages}}
+					<div class="archive-entry">
+						<a href="{{ .Permalink }}">{{ .Title | markdownify }}</a>
+						{{ partial "post-meta" . }}
+					</div>
+					{{ end}}
+				</div>
+			</div>
+			{{ end }}
 		</div>
-		{{ end}}
-	      </div>
-	    </div>
-	    {{ end }}
-	  </div>
-	{{ end }}
-      {{ end }}
-    </article>
-  </main>
+		{{ end }}
+		{{ end }}
+	</article>
+</main>
 {{ end }}
-
-
