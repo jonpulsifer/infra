@@ -1,4 +1,4 @@
-FROM nixos/nix:2.13.2
+FROM nixos/nix:2.13.3
 LABEL maintainer=jonathan@pulsifer.ca \
       ca.lolwtf.os=linux \
       ca.lolwtf.distro=nixos
