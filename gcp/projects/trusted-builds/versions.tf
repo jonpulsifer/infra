@@ -33,7 +33,7 @@ terraform {
     }
     google-beta = {
       source  = "hashicorp/google-beta"
-      version = "~> 4.55.0"
+      version = "~> 4.56.0"
     }
   }
   required_version = ">= 1.2.0"
