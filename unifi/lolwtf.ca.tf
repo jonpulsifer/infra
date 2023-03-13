@@ -24,7 +24,7 @@ resource "cloudflare_record" "lab_remote_dns" {
   type    = "A"
   ttl     = 1
   comment = "terraform managed"
-  tags    = ["terraform-managed"]
+  # tags    = ["terraform-managed"]
 }
 
 resource "unifi_network" "lab" {
@@ -35,10 +35,12 @@ resource "unifi_network" "lab" {
   subnet        = local.lab_cidr
   vlan_id       = 2
 
-  dhcp_enabled = true
-  dhcp_lease   = local.one_week
-  dhcp_start   = cidrhost(local.lab_cidr, 200)
-  dhcp_stop    = cidrhost(local.lab_cidr, 254)
+  dhcp_enabled  = true
+  dhcp_lease    = local.one_week
+  dhcp_start    = cidrhost(local.lab_cidr, 200)
+  dhcp_stop     = cidrhost(local.lab_cidr, 254)
+  multicast_dns = false
+  igmp_snooping = false
 }
 
 resource "unifi_wlan" "lab" {
@@ -49,6 +51,7 @@ resource "unifi_wlan" "lab" {
   network_id        = unifi_network.lab.id
   user_group_id     = unifi_user_group.unmetered.id
   multicast_enhance = true
+  bss_transition    = false
   wlan_band         = "both"
 }
 

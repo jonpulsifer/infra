@@ -15,10 +15,12 @@ resource "unifi_network" "fml" {
   subnet        = local.fml_cidr
   # wan_gateway   = "0.0.0.0"
 
-  dhcp_enabled = true
-  dhcp_lease   = local.one_day
-  dhcp_start   = cidrhost(local.fml_cidr, 151)
-  dhcp_stop    = cidrhost(local.fml_cidr, 254)
+  dhcp_enabled  = true
+  dhcp_lease    = local.one_day
+  dhcp_start    = cidrhost(local.fml_cidr, 151)
+  dhcp_stop     = cidrhost(local.fml_cidr, 254)
+  multicast_dns = true
+  igmp_snooping = true
 }
 
 
@@ -42,8 +44,10 @@ resource "unifi_wlan" "fml" {
   network_id    = unifi_network.fml.id
   user_group_id = unifi_user_group.unmetered.id
 
-  multicast_enhance = true
-  wlan_band         = "both"
+  multicast_enhance    = true
+  wlan_band            = "both"
+  bss_transition       = true
+  fast_roaming_enabled = true
 }
 
 resource "unifi_user" "personal_devices" {

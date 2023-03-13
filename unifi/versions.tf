@@ -11,7 +11,7 @@ terraform {
     unifi = {
       # overridden in ~/.terraformrc
       source  = "paultyng/unifi"
-      version = "~> 0.40"
+      version = "~> 0.41"
     }
     vault = {
       source  = "hashicorp/vault"

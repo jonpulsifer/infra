@@ -38,6 +38,21 @@ resource "unifi_firewall_rule" "allow_fml_to_lab" {
   dst_network_id   = unifi_network.lab.id
 }
 
+# resource "unifi_firewall_rule" "allow_lab_to_fml" {
+#   name       = "Allow ${unifi_network.lab.name} to ${unifi_network.fml.name}"
+#   action     = "accept"
+#   ruleset    = "LAN_IN"
+#   rule_index = "2003"
+
+#   protocol = "all"
+
+#   src_network_type = "NETv4"
+#   src_network_id   = unifi_network.lab.id
+
+#   dst_network_type = "NETv4"
+#   dst_network_id   = unifi_network.fml.id
+# }
+
 resource "unifi_firewall_rule" "drop_all_rfc1918" {
   name    = "Drop RFC1918"
   action  = "drop"

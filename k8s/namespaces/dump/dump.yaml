@@ -19,7 +19,6 @@ spec:
         app.kubernetes.io/name: dump
         app.kubernetes.io/part-of: dump
     spec:
-      serviceAccountName: dump
       containers:
       - name: dump
         image: nginx:alpine
@@ -42,7 +41,7 @@ spec:
       name: dump-data
     spec:
       accessModes: [ "ReadWriteOnce" ]
-      storageClassName: local
+      storageClassName: local-path
       resources:
         requests:
           storage: 1Gi
