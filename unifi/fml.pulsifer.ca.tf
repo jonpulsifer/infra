@@ -107,5 +107,5 @@ resource "unifi_user" "cameras" {
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
   dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.fml.id
-  user_group_id          = unifi_user_group.streaming.id
+  user_group_id          = unifi_user_group.unmetered.id
 }
