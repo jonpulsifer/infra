@@ -24,6 +24,7 @@ spec:
     remediation:
       retries: 5
   values:
+    replicaCount: 0
     env:
       AUTOPAUSE: false
     service:
