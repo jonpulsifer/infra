@@ -15,20 +15,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Login to DockerHub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: changed-files
         uses: tj-actions/changed-files@v35
         with:
           files: |
             ${{ matrix.container }}/**
+      - name: Set up QEMU
+        if: steps.changed-files.outputs.any_modified == 'true'
+        uses: docker/setup-qemu-action@v2
+      - name: Set up Docker Buildx
+        if: steps.changed-files.outputs.any_modified == 'true'
+        uses: docker/setup-buildx-action@v2
+      - name: Login to DockerHub
+        if: steps.changed-files.outputs.any_modified == 'true'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Generate Docker Meta
         if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/metadata-action@v4
