@@ -1,5 +1,5 @@
 FROM alpine:3.17
-LABEL maintainer "Jonathan Pulsifer <jonathan@pulsifer.ca>"
+LABEL org.opencontainers.image.authors "Jonathan Pulsifer <jonathan@pulsifer.ca>"
 
 RUN addgroup -S passivedns && adduser -S -g passivedns passivedns  
 RUN apk add --no-cache -t .build-deps build-base automake autoconf git \
