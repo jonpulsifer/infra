@@ -12,18 +12,21 @@ spec:
       exportPodCIDR: true
       neighbors:
         - peerASN: 64512
-          peerAddress: 10.3.0.10/32
-        - peerASN: 64512
-          peerAddress: 10.3.0.11/32
-        - peerASN: 64512
-          peerAddress: 10.3.0.12/32
-        - peerASN: 64512
-          peerAddress: 10.3.0.13/32
+          peerAddress: ${BGP_ROUTER_IP}
+      serviceSelector:
+        matchExpressions:
+            # announce all services on the node
+            - {key: debug, operator: NotIn, values: [lol]}
 ---
 apiVersion: "cilium.io/v2alpha1"
-kind: CiliumBGPLoadBalancerIPPool
+kind: CiliumLoadBalancerIPPool
 metadata:
   name: fml
   namespace: kube-system
 spec:
-  prefix: ${LB_RANGE}
+  cidrs:
+  - cidr: ${LB_RANGE}
+  serviceSelector:
+    # give all services a load balancer IP
+    matchExpressions:
+      - {key: debug, operator: NotIn, values: [lol]}
