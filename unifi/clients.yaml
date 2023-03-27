@@ -17,6 +17,9 @@ unmanaged-infra:
     model: Cisco SG300-10PP-K9 V03
 
 lab:
+  erx-eth0:
+    mac: 74:83:c2:6e:80:6a
+    ip: 5
   tinytower:
     mac: 78:24:af:3c:a4:67
     dev-id: 2663

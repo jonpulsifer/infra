@@ -12,11 +12,13 @@ spec:
       exportPodCIDR: true
       neighbors:
         - peerASN: 64512
-          peerAddress: 10.2.0.10/32
+          peerAddress: 10.3.0.10/32
         - peerASN: 64512
-          peerAddress: 10.2.0.11/32
+          peerAddress: 10.3.0.11/32
         - peerASN: 64512
-          peerAddress: 10.2.0.12/32
+          peerAddress: 10.3.0.12/32
+        - peerASN: 64512
+          peerAddress: 10.3.0.13/32
 ---
 apiVersion: "cilium.io/v2alpha1"
 kind: CiliumBGPLoadBalancerIPPool
