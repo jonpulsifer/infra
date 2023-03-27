@@ -33,7 +33,7 @@ spec:
     bpf:
       masquerade: true
     bgpControlPlane:
-      enabled: false
+      enabled: true
     ingressController:
       enabled: true
     operator.prometheus.enabled: true
