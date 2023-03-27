@@ -3,16 +3,28 @@ locals {
   pod_cidr  = "10.100.0.0/16"
 }
 
-resource "unifi_static_route" "k8s" {
+resource "unifi_static_route" "k8s_nodes" {
   type     = "nexthop-route"
   network  = local.node_cidr
-  name     = "k8s"
+  name     = "Kubernetes Nodes"
   distance = 1
   next_hop = "10.2.0.5"
 }
 
+
+
+resource "unifi_static_route" "k8s_pods" {
+  type     = "nexthop-route"
+  network  = local.pod_cidr
+  name     = "Kubernetes Pods"
+  distance = 2
+  next_hop = "10.2.0.5"
+}
+
+
+
 resource "unifi_firewall_group" "k8s" {
-  name = "k8s"
+  name = "Kubernetes Network"
   type = "address-group"
   members = [
     local.node_cidr,
@@ -26,7 +38,7 @@ resource "unifi_firewall_group" "k8s" {
 }
 
 resource "unifi_firewall_rule" "allow_fml_to_k8s" {
-  name       = "Allow ${unifi_network.fml.name} to k8s nodes"
+  name       = "Allow ${unifi_network.fml.name} to Kubernetes Network"
   action     = "accept"
   ruleset    = "LAN_IN"
   rule_index = "2100"
