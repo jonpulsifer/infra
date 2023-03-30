@@ -1,8 +1,8 @@
 {
   "enabled": true,
+  "automerge": true,
   "semanticCommits": "enabled",
   "dependencyDashboard": true,
-  "dependencyDashboardTitle": "Renovate Dashboard",
   "suppressNotifications": ["prIgnoreNotification"],
   "rebaseWhen": "conflicted",
   "pre-commit": {
