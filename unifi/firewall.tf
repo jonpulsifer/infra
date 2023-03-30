@@ -24,7 +24,7 @@ resource "unifi_firewall_rule" "drop_invalid" {
 }
 
 resource "unifi_firewall_rule" "allow_fml_to_lab" {
-  name       = "Allow ${unifi_network.fml.name} to ${unifi_network.lab.name}"
+  name       = "Allow ${local.fml_cidr} to ${local.lab_cidr}"
   action     = "accept"
   ruleset    = "LAN_IN"
   rule_index = "2002"
@@ -54,7 +54,7 @@ resource "unifi_firewall_rule" "allow_fml_to_lab" {
 # }
 
 resource "unifi_firewall_rule" "drop_all_rfc1918" {
-  name    = "Drop RFC1918"
+  name    = "Drop all other inter RFC1918 traffic"
   action  = "drop"
   ruleset = "LAN_IN"
 
@@ -63,3 +63,11 @@ resource "unifi_firewall_rule" "drop_all_rfc1918" {
   protocol               = "all"
   dst_firewall_group_ids = [unifi_firewall_group.rfc1918.id]
 }
+
+# resource "unifi_firewall_rule" "drop_all" {
+#   name       = "Drop All"
+#   action     = "drop"
+#   ruleset    = "LAN_IN"
+#   rule_index = 4001
+#   protocol   = "all"
+# }

@@ -26,26 +26,22 @@ lab:
   nuc:
     mac: 1c:69:7a:01:2a:ef
     dev-id: 3592
-    ip: 10
   nuc-wifi:
     mac: d0:c6:37:4d:c2:fe
     dev-id: 3592
   800g2:
     dev-id: 2847
     mac: ec:8e:b5:72:35:24
-    ip: 11
-  800g3-1:
-    dev-id: 2847
-    mac: ac:e2:d3:0d:90:66
-    ip: 12
-  800g3-2:
-    dev-id: 2847
-    mac: ac:e2:d3:0c:fb:b5
-    ip: 13
   800g2-2:
     dev-id: 2847
     mac: 40:b0:34:f3:90:bd
-    ip: 14
+  800g3-1:
+    dev-id: 2847
+    mac: ac:e2:d3:0d:90:66
+  800g3-2:
+    dev-id: 2847
+    mac: ac:e2:d3:0c:fb:b5
+
 
 rpis:
   cloudpi4:
