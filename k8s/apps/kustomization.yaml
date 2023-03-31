@@ -12,11 +12,12 @@ resources:
   - default
   - external-dns
   - flux-system
+  - headerz
   - ingress-nginx
   - kubernetes-dashboard
   - local-path-provisioner
   # - longhorn
-  - metallb
+  # - metallb
   - monitoring
   - satisfactory
   - vault

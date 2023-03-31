@@ -1,0 +1,17 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: headerz
+  namespace: headerz
+  labels:
+    app.kubernetes.io/name: headerz
+    app.kubernetes.io/part-of: headerz
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 3000
+  selector:
+    app.kubernetes.io/name: headerz
+    app.kubernetes.io/part-of: headerz

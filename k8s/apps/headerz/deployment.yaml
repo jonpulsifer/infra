@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: headerz
+  namespace: headerz
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: headerz
+      app.kubernetes.io/part-of: headerz
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: headerz
+        app.kubernetes.io/part-of: headerz
+    spec:
+      containers:
+      - name: headerz
+        image: jonpulsifer/headerz:latest
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
