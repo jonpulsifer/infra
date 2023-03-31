@@ -20,19 +20,19 @@ spec:
       - name: headerz
         image: jonpulsifer/headerz:latest
         env:
+        - name: NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         - name: NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
         - name: POD_IP
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
-        - name: NODE_NAME
+        - name: POD_NAME
           valueFrom:
             fieldRef:
-              fieldPath: status.hostIP
+              fieldPath: metadata.name
