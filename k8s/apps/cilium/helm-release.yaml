@@ -30,6 +30,7 @@ spec:
       mode: cluster-pool
       operator:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
+    tunnel: disabled
     bpf:
       masquerade: true
     bgpControlPlane:
@@ -66,14 +67,14 @@ spec:
           enabled: true
         enableOpenMetrics: true
         enabled:
-        - dns
-        - drop
-        - tcp
-        - flow
-        - port-distribution
-        - icmp
-        - httpV2:exemplars=true
-        - labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction
+          - dns
+          - drop
+          - tcp
+          - flow
+          - port-distribution
+          - icmp
+          - httpV2:exemplars=true
+          - labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction
       ui:
         enabled: true
         ingress:
