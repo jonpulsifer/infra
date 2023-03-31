@@ -3,13 +3,18 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
-  - cron-job.yaml
-  - secret.sops.yaml
-namespace: cloudflare-ddns
+  - ddns.yaml
+  - ddns.sops.yaml
+  - cloudflared.yaml
+  - cloudflared.sops.yaml
+namespace: cloudflare
 configMapGenerator:
-  - name: cloudflare-ddns
+  - name: ddns
     files:
-      - cloudflare-ddns.sh
+      - ddns.sh
+  - name: cloudflared
+    files:
+      - cloudflared-config.yaml
 generatorOptions:
   disableNameSuffixHash: true
   annotations:

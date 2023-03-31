@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: cloudflared
+    namespace: cloudflare
+data:
+    credentials.json: ENC[AES256_GCM,data:597z/+lQT8ZR3d4QzEG2a5omwCPSUci47hgJ/wKvM6u//BAHtyvf+yZssX8Ao5Iwe4W3qqKY0/CGTTyWSeGj5G+b/TWwIB1XlIhCe7UT4XhSEDUc4l3BMG5ECQjsSpT3JiiGjC9efPFdtnn5r94G/ROMbcV/AhkRPY2jMuWiTU7F/LpBl9xg3Lpau59LEuN+wf6ZAxixU9Mm5+RDyPxsDfgOgf+PNuA1dx2B2dOMDYZIJe63x5kLjKLQyuUVZGCpiCoJtw3PcUQJbKTd3Hwzey3Y6arZPbUS,iv:2ZyPjrFFygCj4h6Um7mzNQuRXqVokwGr0okwfNHn/P0=,tag:XVEsmJ5igAFATpSiAJDiUQ==,type:str]
+sops:
+    kms: []
+    gcp_kms: []
+    azure_kv: []
+    hc_vault: []
+    age:
+        - recipient: age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBkYVJTMWNLd0tpK01xK3NJ
+            QU9BTTBSaHFvTXFnOFZ6dytVZU1jUHhTS0RRCnoyMzNpRG5vZzJVZHQ0RXJRMEJk
+            elBwdmRYS0tKWExrYnNEcDVNM1ViUDAKLS0tIFF4eU1hdEFOUTlyYlpiNVdlTG94
+            TWc0cU53TnFSWFJKUWpzNVhsaEtDNTgKVR2XcCLXOKsWdTi/S+BwOYlaCLZ7CrbR
+            CLgpsNPcUVeURZMpCt42XFvHka6cFYdjgCezsgw08MWWGEiu03P+Ng==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2023-03-31T02:21:44Z"
+    mac: ENC[AES256_GCM,data:lwYjCA0sU3xytMaNsQqbZK6feWx+d9qeAtruB3Siu1WPK7svuBDqKFQnskJU3r6Gq0iPlGV5YWHUYzStuRHAn/kAZl6vAu+8uoAddr9OU0qstCaqOmM8H39i8ABhjmMoOxgFFJ6sDm1k1GFvr+5uMOXH1uJmavNvI+YxzUwMf64=,iv:/S9ARgUX2+Dv+xQpQlvVo5FE0wvf4500v3Yi5JY6HFM=,tag:5DgZ8jJQyvf5P/3YAtnHvQ==,type:str]
+    pgp: []
+    encrypted_regex: ^(data|stringData)$
+    version: 3.7.3

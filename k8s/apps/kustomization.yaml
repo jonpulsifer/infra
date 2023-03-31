@@ -6,7 +6,7 @@ resources:
   # - assemblyline
   - cert-manager
   - cilium
-  - cloudflare-ddns
+  - cloudflare
   - csgo
   # - datadog
   - default
