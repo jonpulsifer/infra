@@ -20,28 +20,33 @@ lab:
   erx-eth0:
     mac: 74:83:c2:6e:80:6a
     ip: 5
-  tinytower:
-    mac: 78:24:af:3c:a4:67
-    dev-id: 2663
+
+
+k8s:
   nuc:
     mac: 1c:69:7a:01:2a:ef
     dev-id: 3592
+    skip_forget_on_destroy: false
   nuc-wifi:
     mac: d0:c6:37:4d:c2:fe
     dev-id: 3592
+    skip_forget_on_destroy: false
   800g2:
     dev-id: 2847
+    skip_forget_on_destroy: false
     mac: ec:8e:b5:72:35:24
   800g2-2:
     dev-id: 2847
+    skip_forget_on_destroy: false
     mac: 40:b0:34:f3:90:bd
   800g3-1:
     dev-id: 2847
+    skip_forget_on_destroy: false
     mac: ac:e2:d3:0d:90:66
   800g3-2:
     dev-id: 2847
+    skip_forget_on_destroy: false
     mac: ac:e2:d3:0c:fb:b5
-
 
 rpis:
   cloudpi4:
@@ -103,6 +108,9 @@ desktops:
   mini:
     mac: a8:20:66:03:f5:05
     ip: 8
+  tinytower:
+    mac: 78:24:af:3c:a4:67
+    dev-id: 2663
 
 laptops:
   Constance's Macbook Pro:
