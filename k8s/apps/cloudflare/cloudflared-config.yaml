@@ -1,6 +1,6 @@
 # Name of the tunnel you want to run
 tunnel: lab
-credentials-file: /etc/cloudflared/creds/credentials.json
+credentials-file: /etc/cloudflared/credentials.json
 # Serves the metrics server under /metrics and the readiness server under /ready
 metrics: 0.0.0.0:2000
 no-autoupdate: true
@@ -13,11 +13,11 @@ no-autoupdate: true
 # E.g. `cloudflared tunnel route dns example-tunnel tunnel.example.com`.
 ingress:
 # The first rule proxies traffic to the httpbin sample Service defined in app.yaml
-- hostname: tunnel.example.com
-  service: http://web-service:80
+- hostname: cf.lolwtf.ca
+  service: http://hajimari.default:3000
 # This rule sends traffic to the built-in hello-world HTTP server. This can help debug connectivity
 # issues. If hello.example.com resolves and tunnel.example.com does not, then the problem is
 # in the connection from cloudflared to your local service, not from the internet to cloudflared.
-- hostname: hello.example.com
+- hostname: cf2.lolwtf.ca
   service: hello_world
 - service: http_status:404

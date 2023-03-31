@@ -22,7 +22,7 @@ spec:
         args:
         - tunnel
         - --config
-        - /etc/cloudflared/config/cloudflared-config.yaml
+        - /etc/cloudflared/config.yaml
         - run
         livenessProbe:
           httpGet:
@@ -32,12 +32,18 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
         volumeMounts:
-        - name: config
-          mountPath: /etc/cloudflared/config
-          readOnly: true
-        - name: credentials
-          mountPath: /etc/cloudflared/credentials
-          readOnly: true
+          - name: credentials
+            mountPath: /etc/cloudflared/credentials.json
+            subPath: credentials.json
+            readOnly: true
+          - name: credentials
+            mountPath: /etc/cloudflared/cert.pem
+            subPath: cert.pem
+            readOnly: true
+          - name: config
+            mountPath: /etc/cloudflared/config.yaml
+            subPath: cloudflared-config.yaml
+            readOnly: true
       volumes:
       - name: credentials
         secret:
