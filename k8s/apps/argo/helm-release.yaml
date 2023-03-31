@@ -35,6 +35,7 @@ spec:
           cert-manager.io/cluster-issuer: letsencrypt-production
           nginx.ingress.kubernetes.io/ssl-passthrough: "true"
           nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+          nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS"
         hosts:
           - &argo "argo.${SECRET_DOMAIN}"
         https: true
