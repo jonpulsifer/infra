@@ -4,4 +4,4 @@ kind: Namespace
 metadata:
   name: local-path-provisioner
   labels:
-    kustomize.toolkit.fluxcd.io/prune: disabled
+    kustomize.toolkit.fluxcd.io/prune: true
