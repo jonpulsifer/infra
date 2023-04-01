@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/name: headerz
     app.kubernetes.io/part-of: headerz
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-production
+    cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
     hajimari.io/enable: "true"
     hajimari.io/icon: mdi:access-point-check
 spec:

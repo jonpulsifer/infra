@@ -38,7 +38,7 @@ spec:
       ingress:
         enabled: true
         annotations:
-          cert-manager.io/cluster-issuer: letsencrypt-production
+          cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
           hajimari.io/appName: "Prometheus"
           hajimari.io/group: "Monitoring"
           hajimari.io/icon: torch
@@ -126,7 +126,7 @@ spec:
       ingress:
         enabled: true
         annotations:
-          cert-manager.io/cluster-issuer: letsencrypt-production
+          cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
           hajimari.io/appName: "Grafana"
           hajimari.io/group: "Monitoring"
           hajimari.io/icon: chart-line
@@ -140,7 +140,7 @@ spec:
       ingress:
         enabled: true
         annotations:
-          cert-manager.io/cluster-issuer: letsencrypt-production
+          cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
           hajimari.io/appName: "Alert Manager"
           hajimari.io/group: "Monitoring"
           hajimari.io/icon: alert-circle

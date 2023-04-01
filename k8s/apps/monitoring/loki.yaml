@@ -28,7 +28,7 @@ spec:
     ingress:
       enabled: true
       annotations:
-        cert-manager.io/cluster-issuer: letsencrypt-production
+        cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
         hajimari.io/enable: "false"
         hajimari.io/appName: "Loki"
         hajimari.io/group: "Monitoring"

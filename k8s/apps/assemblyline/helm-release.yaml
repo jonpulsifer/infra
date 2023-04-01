@@ -19,7 +19,7 @@ spec:
     ingressClassName: nginx
     ingressAnnotations:
       nginx.ingress.kubernetes.io/proxy-body-size: 100M
-      cert-manager.io/cluster-issuer: letsencrypt-production
+      cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
     tlsSecretName: al.${SECRET_DOMAIN}
 
     # 2. Setup the storage classes according to your Kubernetes cluster

@@ -29,7 +29,7 @@ spec:
         enabled: true
         ingressClassName: nginx
         annotations:
-          cert-manager.io/cluster-issuer: letsencrypt-production
+          cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
           hajimari.io/icon: safe
         hosts:
           - host: &host "vault.${SECRET_DOMAIN}"

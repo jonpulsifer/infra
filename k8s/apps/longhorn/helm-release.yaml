@@ -31,4 +31,4 @@ spec:
       tls: true
       tlsSecret: longhorn.${SECRET_DOMAIN}
       annotations:
-        cert-manager.io/cluster-issuer: letsencrypt-production
+        cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}

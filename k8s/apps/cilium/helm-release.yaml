@@ -27,9 +27,10 @@ spec:
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
     ipam:
-      mode: cluster-pool
+      mode: cluster-pool-v2beta
       operator:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
+    ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     tunnel: disabled
     bpf:
       masquerade: true
@@ -80,7 +81,7 @@ spec:
         ingress:
           enabled: true
           annotations:
-            cert-manager.io/cluster-issuer: "letsencrypt-production"
+            cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
             hajimari.io/enable: "true"
             hajimari.io/icon: "network"
           hosts:
