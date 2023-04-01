@@ -5,7 +5,7 @@ metadata:
   name: infra
   namespace: flux-system
 spec:
-  interval: 24h
+  interval: 10m0s
   ref:
     branch: main
   secretRef:
@@ -18,7 +18,7 @@ metadata:
   name: infra
   namespace: flux-system
 spec:
-  interval: 24h
+  interval: 1h0m0s
   path: ./k8s/flux
   prune: true
   sourceRef:

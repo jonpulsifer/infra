@@ -5,7 +5,7 @@ metadata:
   name: longhorn
   namespace: longhorn
 spec:
-  interval: 24h
+  interval: 1h0m0s
   chart:
     spec:
       chart: longhorn

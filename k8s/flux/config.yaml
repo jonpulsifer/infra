@@ -5,7 +5,7 @@ metadata:
   name: config
   namespace: flux-system
 spec:
-  interval: 24h
+  interval: 1h0m0s
   path: ./k8s/config
   prune: true
   sourceRef:

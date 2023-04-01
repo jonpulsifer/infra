@@ -5,7 +5,7 @@ metadata:
   name: unpoller
   namespace: unpoller
 spec:
-  interval: 24h
+  interval: 1h0m0s
   chart:
     spec:
       chart: unifi-poller
@@ -14,7 +14,7 @@ spec:
         kind: HelmRepository
         name: jonpulsifer
         namespace: flux-system
-      interval: 24h
+      interval: 1h0m0s
   install:
     createNamespace: true
     remediation:
