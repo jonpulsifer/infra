@@ -23,6 +23,9 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 5
+  dependsOn:
+    - name: cilium
+      namespace: kube-system
   values:
     installCRDs: true
     webhook:

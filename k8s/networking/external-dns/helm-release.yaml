@@ -22,8 +22,11 @@ spec:
   upgrade:
     remediation:
       retries: 5
+  dependsOn:
+    - name: cilium
+      namespace: kube-system
   values:
-    interval: 10m
+    interval: 5m
     logLevel: debug
     provider: cloudflare
     env:
