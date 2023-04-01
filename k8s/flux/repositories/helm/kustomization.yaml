@@ -14,7 +14,7 @@ resources:
   - jonpulsifer.yaml
   - kubernetes-dashboard.yaml
   # - longhorn.yaml
-  - metallb.yaml
+  # - metallb.yaml
   - metrics-server.yaml
   - prometheus.yaml
   - weaveworks.yaml

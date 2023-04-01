@@ -4,7 +4,7 @@ resources:
   - storage-classes.yaml
   - persistent-volumes.yaml
   - local-path-provisioner
-  - longhorn
+  # - longhorn
 patches:
 - target:
     group: helm.toolkit.fluxcd.io
