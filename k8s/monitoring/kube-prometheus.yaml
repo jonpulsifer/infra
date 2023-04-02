@@ -151,7 +151,9 @@ spec:
             hosts:
               - *am
     prometheus-node-exporter:
-      prometheus.monitor.relabelings:
-        - action: replace
-          sourceLabels: [__meta_kubernetes_endpoint_node_name]
-          targetLabel: instance # same with kube_pod_info etc.
+      prometheus:
+        monitor:
+          relabelings:
+            - action: replace
+              sourceLabels: [__meta_kubernetes_endpoint_node_name]
+              targetLabel: instance
