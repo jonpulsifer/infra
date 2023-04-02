@@ -54,21 +54,21 @@ metadata:
 spec:
   jobLabel: jobLabel
   endpoints:
-  - port: http-metrics
-    interval: 30s
-    honorLabels: true
-    scheme: http
-    path: /metrics
-    tlsConfig:
-      insecureSkipVerify: true
-    relabelings:
-      - action: replace
-        sourceLabels: [__address__] # or__meta_kubernetes_pod_ip
-        targetLabel: instance
-      - action: replace
-        sourceLabels: [__meta_kubernetes_pod_node_name]
-        targetLabel: node # same with kube_pod_info etc.
-selector:
+    - port: http-metrics
+      interval: 30s
+      honorLabels: true
+      scheme: http
+      path: /metrics
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - action: replace
+          sourceLabels: [__address__] # or__meta_kubernetes_pod_ip
+          targetLabel: instance
+        - action: replace
+          sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node # same with kube_pod_info etc.
+  selector:
     matchLabels:
       pulsifer.dev/service: node-exporter
   namespaceSelector:
