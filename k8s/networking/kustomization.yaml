@@ -9,17 +9,17 @@ resources:
   - cert-manager
   - ingress-nginx
 patches:
-- target:
-    group: helm.toolkit.fluxcd.io
-    version: v2beta1
-    kind: HelmRelease
-  patch: |-
-    - op: replace
-      path: /spec/interval
-      value: 1m0s
-    - op: replace
-      path: /spec/chart/spec/interval
-      value: 5m0s
-    - op: replace
-      path: /spec/maxHistory
-      value: 2
+  - target:
+      group: helm.toolkit.fluxcd.io
+      version: v2beta1
+      kind: HelmRelease
+    patch: |-
+      - op: replace
+        path: /spec/interval
+        value: 1m0s
+      - op: replace
+        path: /spec/chart/spec/interval
+        value: 5m0s
+      - op: replace
+        path: /spec/maxHistory
+        value: 2

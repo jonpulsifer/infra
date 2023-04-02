@@ -27,6 +27,18 @@ spec:
       namespace: kube-system
     - name: cert-manager
       namespace: cert-manager
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              group: core
+              version: v1
+              kind: Service
+              name: ingress-nginx-controller
+            patch: |-
+              - op: add
+                path: /spec/loadBalancerClass
+                value: io.cilium/bgp-control-plane
   values:
     controller:
       replicaCount: 1
