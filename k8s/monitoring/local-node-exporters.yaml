@@ -62,11 +62,15 @@ spec:
       tlsConfig:
         insecureSkipVerify: true
       relabelings:
-        - sourceLabels: [__meta_kubernetes_pod_node_name]
-          targetLabel: instance
-          regex: (.*)
-          replacement: "$1"
-          action: replace
+    relabelings:
+      - action: replace
+        sourceLabels:
+        - __address__ # or__meta_kubernetes_pod_ip
+        targetLabel: instance
+      - action: replace
+        sourceLabels:
+        - __meta_kubernetes_pod_node_name
+        targetLabel: node # same with kube_pod_info etc.
   selector:
     matchLabels:
       pulsifer.dev/service: node-exporter
