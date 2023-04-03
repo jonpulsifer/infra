@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: dump
     app.kubernetes.io/part-of: dump
 spec:
-  ingressClassName: nginx
+  ingressClassName: cilium
   rules:
   - host: dump.lolwtf.ca
     http:

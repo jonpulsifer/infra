@@ -50,7 +50,7 @@ spec:
           external-dns.alpha.kubernetes.io/hostname: "lb.${SECRET_DOMAIN}"
           io.cilium/lb-ipam-ips: |-
             ${LB_NGINX}
-        externalTrafficPolicy: Local
+        externalTrafficPolicy: Cluster
       publishService:
         enabled: true
       ingressClassResource:
