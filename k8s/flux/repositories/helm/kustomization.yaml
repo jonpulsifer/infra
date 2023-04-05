@@ -6,6 +6,7 @@ resources:
   - cilium.yaml
   # - datadog.yaml
   - external-dns.yaml
+  - falco.yaml
   - grafana.yaml
   - hajimari.yaml
   - hashicorp.yaml
