@@ -28,7 +28,7 @@ spec:
       enabled: true
     driver:
       enabled: true
-      kind: modern-bpf
+      kind: module
     grpc:
       enabled: true
     grpc_output:
