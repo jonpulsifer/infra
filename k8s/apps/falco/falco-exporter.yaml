@@ -24,10 +24,9 @@ spec:
     remediation:
       retries: 5
   values:
-    daemonset:
-      tolerations:
-        - effect: NoSchedule
-          key: node-role.kubernetes.io/control-plane
+    tolerations:
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/control-plane
     serviceMonitor:
       enabled: true
       additionalLabels:
