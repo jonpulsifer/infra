@@ -32,7 +32,10 @@ spec:
         matchNames:
           - argo
           - default
+          - dump
+          - falco
           - flux-system
+          - headerz
           - kube-system
           - monitoring
           - vault

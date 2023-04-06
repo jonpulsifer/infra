@@ -28,21 +28,21 @@ spec:
       enabled: true
       webui:
         enabled: true
-          ingress:
-            enabled: true
-            annotations:
-              cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
-              hajimari.io/enable: "true"
-              hajimari.io/icon: "mdi:bird"
-            hosts:
-              - host: &host "falco.${SECRET_DOMAIN}"
-                paths:
-                  - path: /
-                    pathType: Prefix
-            tls:
-              - hosts:
-                  - *host
-                secretName: *host
+        ingress:
+          enabled: true
+          annotations:
+            cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+            hajimari.io/enable: "true"
+            hajimari.io/icon: "mdi:bird"
+          hosts:
+            - host: &host "falco.${SECRET_DOMAIN}"
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - hosts:
+                - *host
+              secretName: *host
     driver:
       enabled: true
       kind: modern-bpf
