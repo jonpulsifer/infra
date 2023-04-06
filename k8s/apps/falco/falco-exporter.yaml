@@ -33,5 +33,4 @@ spec:
         release: prom-stack
     grafanaDashboard:
       enabled: true
-      additionalLabels:
-        grafana_dashboard: "1"
+      namespace: monitoring
