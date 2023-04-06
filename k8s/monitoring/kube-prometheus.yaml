@@ -93,6 +93,9 @@ spec:
               editable: true
               options:
                 path: /var/lib/grafana/dashboards/default
+      downloadDashboardsImage:
+        repository: jonpulsifer/bashcurljq
+        tag: latest
       dashboards:
         default:
           nginx-ingress:
