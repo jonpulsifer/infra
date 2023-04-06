@@ -9,16 +9,16 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-  - name: sip-control
-    port: 5060
-    targetPort: 5060
-  - name: sip-data
-    port: 5061
-    targetPort: 5061
-  - name: sip-data-udp
-    port: 5060
-    targetPort: 5061
-    protocol: UDP
+    - name: sip-control
+      port: 5060
+      targetPort: 5060
+    - name: sip-data
+      port: 5061
+      targetPort: 5061
+    - name: sip-data-udp
+      port: 5060
+      targetPort: 5061
+      protocol: UDP
   selector:
     app.kubernetes.io/name: pbx
     app.kubernetes.io/part-of: pbx

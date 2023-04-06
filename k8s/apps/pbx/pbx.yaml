@@ -23,40 +23,42 @@ spec:
         app.kubernetes.io/part-of: pbx
     spec:
       initContainers:
-      - image: jonpulsifer/asterisk
-        imagePullPolicy: Always
-        command: ["/usr/bin/gen-sip-config", "/tmp/asterisk/sip.conf"]
-        name: config-gen
-        volumeMounts:
-        - name: config
-          mountPath: /tmp/asterisk
+        - image: jonpulsifer/asterisk
+          imagePullPolicy: Always
+          command: ["/usr/bin/gen-sip-config", "/tmp/asterisk/sip.conf"]
+          name: config-gen
+          volumeMounts:
+            - name: config
+              mountPath: /tmp/asterisk
       containers:
-      - image: jonpulsifer/asterisk
-        imagePullPolicy: IfNotPresent
-        name: asterisk
-        env:
-        - name: DID_OTTAWA
-          value: ""
-        ports:
-        - containerPort: 5060
-          hostPort: 5060
-          protocol: TCP
-        - containerPort: 5060
-          hostPort: 5060
-          protocol: UDP
-        - containerPort: 5061
-          hostPort: 5061
-          protocol: TCP
-        - containerPort: 5061
-          hostPort: 5061
-          protocol: UDP
-        volumeMounts:
-        - name: config
-          mountPath: /etc/asterisk/sip.conf
-          subPath: sip.conf
+        - image: jonpulsifer/asterisk
+          imagePullPolicy: IfNotPresent
+          name: asterisk
+          env:
+            - name: DID_OTTAWA
+              value: ${DID_OTTAWA}
+            - name: DID_HALIFAX
+              value: ${DID_HALIFAX}
+          ports:
+            - containerPort: 5060
+              hostPort: 5060
+              protocol: TCP
+            - containerPort: 5060
+              hostPort: 5060
+              protocol: UDP
+            - containerPort: 5061
+              hostPort: 5061
+              protocol: TCP
+            - containerPort: 5061
+              hostPort: 5061
+              protocol: UDP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/asterisk/sip.conf
+              subPath: sip.conf
       volumes:
-      - name: config
-        emptyDir: {}
-      - name: sip-conf
-        configMap:
-          name: sip-conf
+        - name: config
+          emptyDir: {}
+        - name: sip-conf
+          configMap:
+            name: sip-conf
