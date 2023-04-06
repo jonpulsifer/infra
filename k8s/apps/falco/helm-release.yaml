@@ -24,6 +24,14 @@ spec:
     remediation:
       retries: 5
   values:
+    driver:
+      enabled: true
+      kind: modern-bpf
+    falco:
+      grpc:
+        enabled: true
+      grpc_output:
+        enabled: true
     falcosidekick:
       enabled: true
       webui:
@@ -43,10 +51,3 @@ spec:
             - hosts:
                 - *host
               secretName: *host
-    driver:
-      enabled: true
-      kind: modern-bpf
-    grpc:
-      enabled: true
-    grpc_output:
-      enabled: true
