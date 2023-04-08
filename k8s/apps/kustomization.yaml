@@ -6,12 +6,12 @@ resources:
   # - assemblyline
   - csgo
   - default
-  # - dump
+  - dump
   - falco
   - flux-system
   - headerz
   # - minecraft
-  - satisfactory
+  # - satisfactory
   - vault
 patches:
   - target:

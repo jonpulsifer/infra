@@ -7,20 +7,15 @@ metadata:
     app.kubernetes.io/name: dump
     app.kubernetes.io/part-of: dump
 spec:
-  ingressClassName: cilium
+  ingressClassName: nginx
   rules:
-  - host: dump.lolwtf.ca
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: dump
-            port:
-              number: 8080
-  defaultBackend:
-    service:
-      name: dump
-      port:
-        number: 8080
+    - host: dump.lolwtf.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dump
+                port:
+                  number: 8080

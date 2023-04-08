@@ -7,10 +7,10 @@ metadata:
     app.kubernetes.io/name: dump
     app.kubernetes.io/part-of: dump
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
-  - port: 8080
-    targetPort: 8080
+    - port: 8080
+      targetPort: 8080
   selector:
     app.kubernetes.io/name: dump
     app.kubernetes.io/part-of: dump
