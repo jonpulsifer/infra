@@ -47,5 +47,7 @@ spec:
         - hosts:
             - *gitops
           secretName: *gitops
+    networkPolicy:
+      create: true
     metrics:
       enabled: true
