@@ -1,15 +1,27 @@
+locals {
+  dishy_cidr = "192.168.100.0/24"
+}
+
 resource "unifi_network" "starlink" {
-  name    = "starlink"
+  name    = "Starlink"
   purpose = "wan"
 
   wan_networkgroup    = "WAN"
   wan_type            = "dhcp"
   wan_type_v6         = "dhcpv6"
   wan_dhcp_v6_pd_size = 56
-  wan_dns             = []
+  wan_dns             = ["1.1.1.1", "1.0.0.1"]
 
   internet_access_enabled      = true
   intra_network_access_enabled = false
+}
+
+resource "unifi_static_route" "starlink" {
+  type      = "interface-route"
+  interface = "WAN"
+  network   = local.dishy_cidr
+  name      = "Starlink"
+  distance  = 1
 }
 
 data "vault_generic_secret" "ddns_edge_pulsifer_ca" {
