@@ -6,7 +6,7 @@ resources:
   # - assemblyline
   - csgo
   - default
-  - dump
+  # - dump
   - falco
   - flux-system
   - headerz
