@@ -50,6 +50,15 @@
         { system.configurationRevision = mkIf (self ? rev) self.rev; }
       ];
 
+      mkRPi = { hostName ? "nixos", modules ? [ ] }: nixos.lib.nixosSystem {
+        system = "aarch64-linux";
+        modules = nixosModules ++ [
+          nixos-hardware.nixosModules.raspberry-pi-4
+          ./systems/rpi.nix
+        ];
+        specialArgs = { inherit keys hostName; };
+      };
+
       mkSystem = { hostName ? "nixos", modules ? [ ] }: nixos.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
@@ -75,15 +84,13 @@
         };
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
-        rpi = nixos.lib.nixosSystem {
-          system = "aarch64-linux";
-          modules = nixosModules ++ [
-            nixos-hardware.nixosModules.raspberry-pi-4
+        rpi = mkRPi {
+          modules = [
             "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
-            ./systems/rpi.nix
             { config.sdImage.compressImage = nixpkgs.lib.mkDefault false; }
             {
               nixpkgs.overlays = [
+                # https://github.com/NixOS/nixpkgs/issues/154163
                 (final: super: {
                   makeModulesClosure = x:
                     super.makeModulesClosure (x // { allowMissing = true; });
@@ -91,8 +98,11 @@
               ];
             }
           ];
-          specialArgs = { inherit keys; };
         };
+        cloudpi4 = mkRPi { hostName = "cloudpi4"; };
+        homepi4 = mkRPi { hostName = "homepi4"; };
+        screenpi4 = mkRPi { hostName = "screenpi4"; };
+
         nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
         "800g2-1" = mkSystem { hostName = "800g2-1"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
         "800g2-2" = mkSystem { hostName = "800g2-2"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };

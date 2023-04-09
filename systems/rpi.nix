@@ -34,6 +34,17 @@ in
     };
   };
 
+  fileSystems."/" =
+    {
+      device = "/dev/disk/by-label/NIXOS_SD";
+      fsType = "ext4";
+    };
+  fileSystems."/boot" =
+    {
+      device = "/dev/disk/by-label/FIRMWARE";
+      fsType = "vfat";
+    };
+
   networking = {
     hostName = mkDefault "nixos";
     # nameservers = mkDefault [ "1.1.1.1" "1.0.0.1" ];
