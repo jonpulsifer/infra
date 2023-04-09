@@ -61,9 +61,9 @@
 
       mkSystem = { hostName ? "nixos", modules ? [ ] }: nixos.lib.nixosSystem {
         system = "x86_64-linux";
-        modules = [
+        modules = modules ++ [
           ./systems/nixos.nix
-        ] ++ nixosModules ++ modules;
+        ] ++ nixosModules;
         specialArgs = { inherit keys hostName; };
       };
     in
