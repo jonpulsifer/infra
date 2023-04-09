@@ -52,7 +52,7 @@
 
       mkRPi = { hostName ? "nixos", modules ? [ ] }: nixos.lib.nixosSystem {
         system = "aarch64-linux";
-        modules = nixosModules ++ [
+        modules = nixosModules ++ modules ++ [
           nixos-hardware.nixosModules.raspberry-pi-4
           ./systems/rpi.nix
         ];
@@ -61,9 +61,9 @@
 
       mkSystem = { hostName ? "nixos", modules ? [ ] }: nixos.lib.nixosSystem {
         system = "x86_64-linux";
-        modules = modules ++ [
+        modules = nixosModules ++ modules ++ [
           ./systems/nixos.nix
-        ] ++ nixosModules;
+        ];
         specialArgs = { inherit keys hostName; };
       };
     in
