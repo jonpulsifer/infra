@@ -128,7 +128,7 @@ in
     stateVersion = "22.11";
     autoUpgrade = {
       enable = true;
-      flake = "github.com:jonpulsifer/dotfiles";
+      flake = "github.com:jonpulsifer/infra";
     };
   };
 }
