@@ -17,6 +17,7 @@ in
       "cgroup_memory=1"
       "cgroup_enable=memory"
     ];
+    supportedFilesystems = [ "ext4" "vfat" ];
 
     tmpOnTmpfs = true;
 
