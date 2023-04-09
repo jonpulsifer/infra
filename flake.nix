@@ -49,12 +49,12 @@
         { system.configurationRevision = mkIf (self ? rev) self.rev; }
       ];
 
-      mkSystem = { modules ? [ ] }: nixos.lib.nixosSystem {
+      mkSystem = { hostname, modules ? [ ] }: nixos.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
           ./systems/nixos.nix
         ] ++ nixosModules ++ modules;
-        specialArgs = { inherit keys; };
+        specialArgs = { inherit keys hostname; };
       };
     in
     {
@@ -74,10 +74,11 @@
         };
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
-        nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
-        "800g2-1" = mkSystem { modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
-        "800g2-2" = mkSystem { modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
+        nuc = mkSystem { hostname = "nuc"; modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
+        "800g2-1" = mkSystem { hostname = "800g2-1"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
+        "800g2-2" = mkSystem { hostname = "800g2-2"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
         "800g3-1" = mkSystem {
+          hostname = "800g3-1";
           modules = [
             ./systems/800g3
             ./systems/kubeadm.nix
@@ -85,6 +86,7 @@
           ];
         };
         "800g3-2" = mkSystem {
+          hostname = "800g3-2";
           modules = [
             ./systems/800g3
             { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
