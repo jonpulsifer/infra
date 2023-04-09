@@ -3,18 +3,31 @@ let
   inherit (lib) mkDefault mkForce;
 in
 {
-  imports = [
-    # Include the results of the hardware scan.
-    # ./hardware-configuration.nix
-  ];
-
+  # Required for the Wireless firmware
+  hardware.enableRedistributableFirmware = true;
+  nixpkgs.buildPlatform.system = "x86_64-linux";
+  nixpkgs.hostPlatform.system = "aarch64-linux";
   boot = {
-    kernelPackages = pkgs.linuxPackages_5_15;
-    consoleLogLevel = 0;
+    kernelPackages = pkgs.linuxPackages_rpi4;
+    kernelParams = [
+      "cma=128M"
+      "cgroup_enable=cpuset"
+      "cgroup_memory=1"
+      "cgroup_enable=memory"
+    ];
+
+    tmpOnTmpfs = true;
+
+    consoleLogLevel = 7;
     loader = {
+      grub.enable = mkDefault false;
+      #raspberryPi = {
+      #  enable = mkDefault true;
+      #  version = 4;
+      #};
       # Use the systemd-boot EFI boot loader.
-      systemd-boot.enable = true;
-      efi.canTouchEfiVariables = true;
+      # systemd-boot.enable = true;
+      # efi.canTouchEfiVariables = true;
       timeout = mkForce 0;
     };
   };
@@ -24,11 +37,21 @@ in
     # nameservers = mkDefault [ "1.1.1.1" "1.0.0.1" ];
     # useNetworkd = false;
     # useDHCP = true;
-    # interfaces.eno1.useDHCP = true;
+    interfaces.eth0.useDHCP = true;
   };
 
   nix = {
     package = pkgs.nixFlakes;
+    gc = {
+      automatic = true;
+      dates = "weekly";
+      options = "--delete-older-than 30d";
+    };
+    # Free up to 1GiB whenever there is less than 100MiB left.
+    extraOptions = ''
+      min-free = ${toString (100 * 1024 * 1024)}
+      max-free = ${toString (1024 * 1024 * 1024)}
+    '';
     settings = {
       auto-optimise-store = true;
       experimental-features = "nix-command flakes";
@@ -125,7 +148,7 @@ in
   };
 
   system = {
-    stateVersion = "22.11";
+    stateVersion = "23.05";
     autoUpgrade = {
       enable = true;
       flake = "github.com:jonpulsifer/infra";

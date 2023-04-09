@@ -12,9 +12,10 @@
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
     nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
     nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
+    nixos-hardware = { url = "github:nixos/nixos-hardware"; };
     wsl = { url = "github:nix-community/NixOS-WSL"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, dotfiles, home-manager, keys, nixos, nixpkgs, wsl, ... }:
+  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, nixpkgs, wsl, ... }:
     let
       inherit (nixpkgs.lib) mkIf attrValues;
 
@@ -74,6 +75,16 @@
         };
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
+        rpi = nixos.lib.nixosSystem {
+          system = "aarch64-linux";
+          modules = nixosModules ++ [
+            nixos-hardware.nixosModules.raspberry-pi-4
+            "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
+            ./systems/rpi.nix
+            { config.sdImage.compressImage = nixpkgs.lib.mkDefault false; }
+          ];
+          specialArgs = { inherit keys; };
+        };
         nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
         "800g2-1" = mkSystem { hostName = "800g2-1"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
         "800g2-2" = mkSystem { hostName = "800g2-2"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
