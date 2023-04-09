@@ -1,4 +1,4 @@
-{ config, lib, ... }:
+{ config, hostName, lib, ... }:
 {
   imports = [
     ./hardware-configuration.nix
@@ -6,7 +6,7 @@
   ];
 
   networking = {
-    # hostName = config.hostname;
+    inherit hostName;
     firewall.enable = false;
 
     # networkd does not support useDHCP globally

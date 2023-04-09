@@ -1,5 +1,5 @@
 { config, pkgs, ... }:
-
+let hostName = "nuc"; in
 {
   imports = [
     # Include the results of the hardware scan.
@@ -8,7 +8,7 @@
   ];
 
   networking = {
-    # hostName = config.hostname;
+    inherit hostName;
 
     # networkd does not support useDHCP globally
     useNetworkd = true;

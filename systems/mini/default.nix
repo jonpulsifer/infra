@@ -1,10 +1,10 @@
 { pkgs, ... }:
-let hostname = "mini";
+let hostName = "mini";
 in {
-  networking = {
-    computerName = hostname;
-    hostName = hostname;
-    localHostName = hostname;
+  networking = rec {
+    inherit hostName;
+    computerName = hostName;
+    localHostName = hostName;
   };
 
   system.defaults.alf.globalstate = 1; # enabled
