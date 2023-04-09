@@ -5,8 +5,10 @@ in
 {
   # Required for the Wireless firmware
   hardware.enableRedistributableFirmware = true;
-  nixpkgs.buildPlatform.system = "x86_64-linux";
-  nixpkgs.hostPlatform.system = "aarch64-linux";
+  # nixpkgs = { 
+  #   buildPlatform.system = "x86_64-linux";
+  #   hostPlatform.system = "aarch64-linux";
+  # };
   boot = {
     kernelPackages = pkgs.linuxPackages_rpi4;
     kernelParams = [

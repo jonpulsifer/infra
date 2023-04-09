@@ -82,6 +82,14 @@
             "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
             ./systems/rpi.nix
             { config.sdImage.compressImage = nixpkgs.lib.mkDefault false; }
+            {
+              nixpkgs.overlays = [
+                (final: super: {
+                  makeModulesClosure = x:
+                    super.makeModulesClosure (x // { allowMissing = true; });
+                })
+              ];
+            }
           ];
           specialArgs = { inherit keys; };
         };
