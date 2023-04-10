@@ -23,7 +23,7 @@ in
       kubectl
       kubecolor
       kubernetes-helm
-    ] ++ optionals (stdenv.isLinux) nerdctl;
+    ] ++ optionals (stdenv.isLinux) [ nerdctl ];
     sessionPath = mkIf shellIntegration [ "${k8s-workflow-utils}/kubectl-plugins" ];
     sessionVariables = {
       KUBECONFIG = "${config.home.homeDirectory}/.kube/config";

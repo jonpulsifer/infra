@@ -21,10 +21,7 @@ install_nix() {
 ensure_dependencies
 install_nix
 
-if [ -d /etc/nixos ]; then
-  nixos-rebuild build --flake .
-  sudo nixos-rebuild switch --flake .
-elif [ "$(uname -s)" == "Darwin" ]; then
+if [ "$(uname -s)" == "Darwin" ]; then
   nix build ".#darwinConfigurations.$(hostname).system"
   ./result/sw/bin/darwin-rebuild switch --flake .
 else
