@@ -125,7 +125,7 @@ in
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
         "jonpulsifer.cachix.org-1:Rwya0JXhlZXczd5v3JVBgY0pU5tUbiaqw5RfFdxBakQ="
       ];
-      trusted-users = [ "root" config.users.user.jawn ];
+      trusted-users = [ "root" config.users.users.jawn ];
     };
   };
 
