@@ -50,22 +50,44 @@
         { system.configurationRevision = mkIf (self ? rev) self.rev; }
       ];
 
-      mkRPi = { hostName ? "nixos", modules ? [ ] }: nixos.lib.nixosSystem {
-        system = "aarch64-linux";
-        modules = nixosModules ++ modules ++ [
-          nixos-hardware.nixosModules.raspberry-pi-4
-          ./systems/rpi/rpi.nix
-        ];
-        specialArgs = { inherit keys hostName; };
-      };
+      mkRPi = hostName: modules:
+        nixos.lib.nixosSystem {
+          system = "aarch64-linux";
+          modules = nixosModules ++ modules ++ [
+            nixos-hardware.nixosModules.raspberry-pi-4
+            ./systems/rpi/rpi.nix
+            "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
+            { config.sdImage.compressImage = nixpkgs.lib.mkDefault false; }
+            {
+              nixpkgs.overlays = [
+                # https://github.com/NixOS/nixpkgs/issues/154163
+                (final: super: {
+                  makeModulesClosure = x:
+                    super.makeModulesClosure (x // { allowMissing = true; });
+                })
+                (final: super: {
+                  ubootRaspberryPi4_64bit = super.ubootRaspberryPi4_64bit.override rec {
+                    version = "2023.01";
+                    src = super.fetchurl {
+                      url = "ftp://ftp.denx.de/pub/u-boot/u-boot-${version}.tar.bz2";
+                      hash = "sha256-aUI7rTgPiaCRZjbonm3L0uRRLVhDCNki0QOdHkMxlQ8=";
+                    };
+                  };
+                })
+              ];
+            }
+          ];
+          specialArgs = { inherit keys hostName; };
+        };
 
-      mkSystem = { hostName ? "nixos", modules ? [ ] }: nixos.lib.nixosSystem {
-        system = "x86_64-linux";
-        modules = nixosModules ++ modules ++ [
-          ./systems/nixos.nix
-        ];
-        specialArgs = { inherit keys hostName; };
-      };
+      mkSystem = { hostName ? null, modules ? [ ] }:
+        nixos.lib.nixosSystem {
+          system = "x86_64-linux";
+          modules = nixosModules ++ modules ++ [
+            ./systems/nixos.nix
+          ];
+          specialArgs = { inherit keys hostName; };
+        };
     in
     {
       formatter.x86_64-linux = nixpkgs.legacyPackages.x86_64-linux.nixpkgs-fmt;
@@ -89,33 +111,9 @@
         };
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
-        rpi = mkRPi {
-          modules = [
-            "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
-            { config.sdImage.compressImage = nixpkgs.lib.mkDefault false; }
-            {
-              nixpkgs.overlays = [
-                # https://github.com/NixOS/nixpkgs/issues/154163
-                (final: super: {
-                  makeModulesClosure = x:
-                    super.makeModulesClosure (x // { allowMissing = true; });
-                })
-                (final: super: {
-                  ubootRaspberryPi4_64bit = super.ubootRaspberryPi4_64bit.override rec {
-                    version = "2023.01";
-                    src = super.fetchurl {
-                      url = "ftp://ftp.denx.de/pub/u-boot/u-boot-${version}.tar.bz2";
-                      hash = "sha256-aUI7rTgPiaCRZjbonm3L0uRRLVhDCNki0QOdHkMxlQ8=";
-                    };
-                  };
-                })
-              ];
-            }
-          ];
-        };
-        cloudpi4 = mkRPi { hostName = "cloudpi4"; };
-        homepi4 = mkRPi { hostName = "homepi4"; };
-        screenpi4 = mkRPi { hostName = "screenpi4"; };
+        cloudpi4 = mkRPi "cloudpi4" [ ];
+        homepi4 = mkRPi "homepi4" [ ];
+        screenpi4 = mkRPi "screenpi4" [ ];
 
         nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
         "800g2-1" = mkSystem { hostName = "800g2-1"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
