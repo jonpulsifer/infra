@@ -54,7 +54,7 @@
         system = "aarch64-linux";
         modules = nixosModules ++ modules ++ [
           nixos-hardware.nixosModules.raspberry-pi-4
-          ./systems/rpi.nix
+          ./systems/rpi/rpi.nix
         ];
         specialArgs = { inherit keys hostName; };
       };
@@ -68,8 +68,13 @@
       };
     in
     {
-      formatter.x86_64-linux = nixpkgs.legacyPackages."x86_64-linux".nixpkgs-fmt;
-      devShells.x86_64-linux.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.x86_64-linux; };
+      formatter.x86_64-linux = nixpkgs.legacyPackages.x86_64-linux.nixpkgs-fmt;
+      formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixpkgs-fmt;
+      devShells = {
+        x86_64-linux.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.x86_64-linux; };
+        aarch64-darwin.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.aarch64-darwin; };
+      };
+
       nixosConfigurations = rec {
         # wsl on atomic
         atomic = nixos.lib.nixosSystem {
