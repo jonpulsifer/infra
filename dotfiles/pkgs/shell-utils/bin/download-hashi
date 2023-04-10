@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+download-hashi() {
+  local OS=linux
+  local dir
+  dir=$(pwd)
+  local arch
+  arch=$(uname -m)
+
+  # usage
+  [[ -z "$1" ]] && { echo "usage: download-hashi <app> <version>" >&2; return 1; }
+
+  # switch out for macOS if we have to
+  [ "$(uname -s)" == "Darwin" ] && { OS=darwin; }
+
+  wget -O /tmp/hashi.zip https://releases.hashicorp.com/"${1}"/"${2}"/"${1}"_"${2}"_"${OS}"_"${arch}".zip && \
+  unzip /tmp/hashi.zip -d /tmp && \
+  rm -v /tmp/hashi.zip && \
+  mv -v /tmp/"${1}" "${dir}"
+}
+
+download-hashi "$@"

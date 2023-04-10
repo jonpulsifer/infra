@@ -1,0 +1,17 @@
+#!/usr/bin/env/bash
+# if not running interactively, don't do anything
+case $- in
+    *i*)
+    # put us in tmux
+    if command -v tmux > /dev/null; then
+      if [[ -z $TMUX ]]; then
+        if tmux ls 2> /dev/null | grep -q -v attached; then
+          tmux -u attach -t "$(tmux ls 2> /dev/null | grep -v attached | head -1 | cut -d : -f 1)"
+        else
+          tmux -u
+        fi
+      fi
+    fi
+    ;;
+    *) return;;
+esac

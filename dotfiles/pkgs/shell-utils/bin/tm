@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+tm() {
+  (tmux has -t "$1" && tmux attach -d -t "$1") || tmux new -s "$1"
+}
+
+tm "$@"

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+add_apt_key() {
+  curl -fsSL "${1}" | apt-key add -
+}
+
+add_apt_key "$@"

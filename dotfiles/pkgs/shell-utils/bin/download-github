@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+download-github() {
+  local OS=linux
+  local repo=${1}
+  local thing=${2}
+  local version=${3}
+
+  # usage
+  [[ -z "${repo}" ]] && { echo "usage: download-github <repo/name> <thing> <version>" >&2; return 1; }
+
+  # switch out for macOS if we have to
+  [ "$(uname -s)" == "Darwin" ] && { OS=darwin; }
+  wget -O /tmp/"${thing}".tgz https://github.com/"${repo}"/releases/download/"${version}"/"${thing}"-"${version}"-"${OS}".tgz && \
+  tar -xzvf /tmp/"${thing}".tgz && \
+  rm -v /tmp/"${thing}".tgz
+}
+
+download-github "$@"

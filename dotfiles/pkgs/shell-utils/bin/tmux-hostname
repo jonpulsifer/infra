@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+function getHostname(){
+  local -r os=$(uname -s)
+  declare -l hostname
+  declare -l domainname
+  if [[ ${os} == "Darwin" ]]; then
+    local -r default_iface=$(netstat -rnf inet | awk '/^default/{print $NF}' | head -n1)
+    hostname=$(hostname | cut -d. -f1)
+    domainname=$(ipconfig getoption "${default_iface}" domain_name)
+  else
+    hostname=$(hostname)
+    domainname=$(domainname)
+  fi
+
+  case ${hostname} in
+    cs-*-devshell*) printf "☁️ cloudshell" && exit ;;
+  esac
+  case ${domainname} in
+    home.pulsifer.ca) printf '🏠 %s' "${hostname}" ;;
+    *) printf '🌎 %s' "${hostname}" ;;
+  esac
+}
+
+getHostname

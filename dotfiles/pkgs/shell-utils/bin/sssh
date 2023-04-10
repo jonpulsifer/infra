@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# try to ssh to a host, if it fails, try again until it does
+sssh() {
+  [[ -z "$1" ]] && { echo "usage: sssh <host>" >&2; return 1; }
+  while ! ssh "$@"; do
+    echo "ssh failed, trying again in 2 seconds..."
+    sleep 2
+  done
+}
+
+sssh "$@"

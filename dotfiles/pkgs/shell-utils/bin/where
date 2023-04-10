@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+where() {
+  [[ -z "$1" ]] && { echo "usage: where <command>" >&2; return 1; }
+  ls -l "$(which "${1}")"
+}
+
+where "$@"

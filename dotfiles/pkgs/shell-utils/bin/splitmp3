@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+splitmp3(){
+  ffmpeg -i "$1" -ss "$2" -to "$3" -c copy "$4.mp3"
+}
+
+splitmp3 "$@"

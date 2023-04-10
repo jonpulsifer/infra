@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+fuckpaths(){
+  # remove duplicates
+  PATH=$(echo -n "$PATH" | awk -v RS=: '!($0 in a) {a[$0];printf "%s%s",!ln++?"":":",$0}')
+  export PATH
+  # remove remote paths
+  PATH=$(echo -n "$PATH" | awk -v RS=: '!($0 ~ /sshfs/) {printf "%s%s",!ln++?"":":",$0}')
+  export PATH
+}
+
+fuckpaths

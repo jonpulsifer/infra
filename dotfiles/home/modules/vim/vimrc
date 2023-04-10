@@ -1,0 +1,57 @@
+set nocompatible
+set encoding=utf-8
+filetype plugin indent on
+
+set background=dark
+syntax on
+" colorscheme PaperColor
+
+set autoindent                    " set auto indent
+set ts=4                          " set indent to 2 spaces
+set shiftwidth=2
+set expandtab                     " use spaces, not tab characters
+set relativenumber                " show relative line numbers
+set number                        " show line numbers
+set showmatch                     " show bracket matches
+set ignorecase                    " ignore case in search
+set hlsearch                      " highlight all search matches
+set cursorline                    " highlight current line
+set smartcase                     " pay attention to case when caps are used
+set incsearch                     " show search results as I type
+set ttimeoutlen=100               " decrease timeout for faster insert with 'O'
+set vb                              " enable visual bell (disable audio bell)
+set ruler                           " show row and column in footer
+set scrolloff=2                     " minimum lines above/below cursor
+" set ttymouse=xterm2
+set mouse=a                         " enable mouse scrolling
+set laststatus=2                    " always show status bar
+set list listchars=tab:\|\ ,trail:_ " show extra space characters
+set nofoldenable                    " disable code folding
+
+set backspace=indent,eol,start
+
+
+" i got 99 problems so i used tmux now i have 100 problems
+if $TMUX == ''
+    set clipboard+=unnamed
+endif
+
+let g:terraform_fmt_on_save = 1
+let g:go_version_warning = 0
+
+" Wrap gitcommit file types at the appropriate length
+set indentexpr=
+
+" Strip trailing whitespace
+function! <SID>StripTrailingWhitespaces()
+    " Preparation: save last search, and cursor position.
+    let _s=@/
+    let l = line(".")
+    let c = col(".")
+    " Do the business:
+    %s/\s\+$//e
+    " Clean up: restore previous search history, and cursor position
+    let @/=_s
+    call cursor(l, c)
+endfunction
+autocmd BufWritePre * :call <SID>StripTrailingWhitespaces()

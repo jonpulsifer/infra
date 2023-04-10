@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -xu
+
+# we need curl to go brr
+ensure_dependencies() {
+  local -r deps="curl"
+  for file in ${deps}; do
+    command -v "${file}" || { echo -e "${file} not found.\nEnsure ${file} is installed and in your PATH">&2; exit 1; } ;
+  done
+}
+
+# sudo pipe bash for the win + initalize nixpkgs
+install_nix() {
+  command -v nix || {
+    # https://zero-to-nix.com/start/install
+    curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+  };
+}
+
+# brrr
+ensure_dependencies
+install_nix
+
+if [ -d /etc/nixos ]; then
+  nixos-rebuild build --flake .
+  sudo nixos-rebuild switch --flake .
+elif [ "$(uname -s)" == "Darwin" ]; then
+  nix build ".#darwinConfigurations.$(hostname).system"
+  ./result/sw/bin/darwin-rebuild switch --flake .
+else
+  source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+  nix run
+fi

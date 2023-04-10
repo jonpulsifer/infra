@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+hash kubectl 2>/dev/null || exit 1
+
+kubectl config view --minify --output="jsonpath=#[fg=colour33]⎈ #[fg=colour1]{..current-context}#[fg=colour15]:#[fg=colour39]{..namespace}"

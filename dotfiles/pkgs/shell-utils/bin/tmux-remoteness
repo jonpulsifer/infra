@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+remoteness(){
+  if ping -c 1 1.0.0.1 >/dev/null; then
+    icon='🛰️'
+    ip=$(wget -qO - icanhazip.com 2>/dev/null)
+  else
+    icon='📡'
+    ip=$(ifconfig | sed -En 's/127.0.0.1//;s/.*inet (addr:)?(([0-9]*\.){3}[0-9]*).*/\2/p' | head -n 1)
+  fi
+}
+
+remoteness
+
+echo "${icon} ${ip}"

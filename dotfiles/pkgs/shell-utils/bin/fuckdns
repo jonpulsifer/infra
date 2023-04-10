@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# this script clears the dns cache on both linux and macos, depending on which one you're on
+# it's a simple wrapper around the commands that do the actual clearing
+
+# clear dns cache on linux
+clear_dns_cache_linux(){
+  sudo systemd-resolve --flush-caches
+}
+
+# clear dns cache on macos
+clear_dns_cache_macos(){
+  sudo killall -HUP mDNSResponder
+}
+
+# if linux, run the linux command
+if [[ "$OSTYPE" == "linux-gnu" ]]; then
+  clear_dns_cache_linux
+# if macos, run the macos command
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+  clear_dns_cache_macos
+# if neither, print an error
+else
+  echo "fuckdns: error: unsupported operating system: $OSTYPE"
+fi

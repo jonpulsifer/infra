@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+download-go(){
+  local OS=linux
+  local dir="/usr/local"
+  local arch
+  arch=$(uname -m)
+
+  # usage
+  [[ -z "$1" ]] && { echo "usage: download-go <version>" >&2; return 1; }
+
+  # switch out for macOS if we have to
+  [ "$(uname -s)" == "Darwin" ] && { OS=darwin; }
+
+  echo "Attempting to download go ${1} and extract it to ${dir}..."
+  wget -qO - https://dl.google.com/go/go"${1}"."${OS}"-"${arch}".tar.gz | tar -C ${dir} -xzf -
+}
+
+download-go "$@"

@@ -1,0 +1,5 @@
+result
+ergodox/build
+nix/config.dev.nix
+secrets/**
+config.nix
