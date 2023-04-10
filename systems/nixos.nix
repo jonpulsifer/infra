@@ -10,11 +10,11 @@ in
 
   boot = {
     kernelPackages = mkDefault pkgs.linuxPackages_5_15;
-    consoleLogLevel = 0;
+    consoleLogLevel = mkDefault 0;
     loader = {
       # Use the systemd-boot EFI boot loader.
-      systemd-boot.enable = true;
-      efi.canTouchEfiVariables = true;
+      systemd-boot.enable = mkDefault true;
+      efi.canTouchEfiVariables = mkDefault true;
       timeout = mkForce 0;
     };
   };
@@ -125,7 +125,7 @@ in
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
         "jonpulsifer.cachix.org-1:Rwya0JXhlZXczd5v3JVBgY0pU5tUbiaqw5RfFdxBakQ="
       ];
-      trusted-users = [ "root" "jawn" ];
+      trusted-users = [ "root" config.users.user.jawn ];
     };
   };
 

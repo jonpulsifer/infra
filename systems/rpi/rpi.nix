@@ -25,14 +25,14 @@ in
 
     consoleLogLevel = 7;
     loader = {
-      grub.enable = mkDefault false;
+      grub.enable = false;
       #raspberryPi = {
       #  enable = mkDefault true;
       #  version = 4;
       #};
       # Use the systemd-boot EFI boot loader.
-      # systemd-boot.enable = true;
-      # efi.canTouchEfiVariables = true;
+      systemd-boot.enable = false;
+      efi.canTouchEfiVariables = false;
       timeout = mkForce 0;
     };
   };
