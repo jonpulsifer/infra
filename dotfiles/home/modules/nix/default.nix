@@ -16,7 +16,7 @@ in
       switch = rebuild + " && " +
         (if isDarwin
         then "./result/sw/bin/darwin-rebuild switch --flake ${dotfiles}; unlink result"
-        else "sudo nixos-rebuild -v boot && echo 'Rebooting...' && sudo reboot"
+        else "sudo nixos-rebuild -v boot --upgrade && echo 'Rebooting...' && sudo reboot"
         );
     };
   };

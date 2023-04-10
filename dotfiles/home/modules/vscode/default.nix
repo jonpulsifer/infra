@@ -24,6 +24,7 @@
           "markdown" = true;
         };
         "go.survey.prompt" = false;
+        "nixfmt.path" = "nix fmt";
         "redhat.telemetry.enabled" = false;
         "telemetry.telemetryLevel" = "off";
         "terminal.integrated.fontSize" = fontSize;
@@ -35,7 +36,9 @@
         "workbench.colorTheme" = "Material Theme Ocean";
         "workbench.iconTheme" = "material-icon-theme";
         "workbench.productIconTheme" = "material-product-icons";
-        "[nix]" = { "editor.defaultFormatter" = "jnoortheen.nix-ide"; };
+        "[nix]" = {
+          "editor.defaultFormatter" = "jnoortheen.nix-ide";
+        };
         "[typescript]" = {
           "editor.defaultFormatter" = "vscode.typescript-language-features";
         };
