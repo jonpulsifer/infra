@@ -51,6 +51,7 @@ in
       age
       dnstwist
       gh
+      gptcommit
       sops
       vault
 

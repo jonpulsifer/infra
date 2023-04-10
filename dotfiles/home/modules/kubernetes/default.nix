@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 let
-  inherit (lib) mkIf;
-  inherit (pkgs) fetchFromGitHub;
+  inherit (lib) mkIf optionals;
+  inherit (pkgs) fetchFromGitHub stdenv;
   shellIntegration = config.programs.zsh.enable;
   k8s-workflow-utils = fetchFromGitHub {
     owner = "jonpulsifer";
@@ -23,7 +23,7 @@ in
       kubectl
       kubecolor
       kubernetes-helm
-    ];
+    ] ++ optionals (stdenv.isLinux) nerdctl;
     sessionPath = mkIf shellIntegration [ "${k8s-workflow-utils}/kubectl-plugins" ];
     sessionVariables = {
       KUBECONFIG = "${config.home.homeDirectory}/.kube/config";
