@@ -22,7 +22,6 @@ in
     supportedFilesystems = [ "ext4" "vfat" ];
 
     tmpOnTmpfs = true;
-
     consoleLogLevel = 7;
     loader = {
       grub.enable = false;
@@ -53,6 +52,7 @@ in
     # useNetworkd = false;
     # useDHCP = true;
     interfaces.eth0.useDHCP = true;
+    wireless.networks.lab = { hidden = true; };
   };
 
   # nixpkgs = { 
