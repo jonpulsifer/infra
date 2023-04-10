@@ -3,6 +3,8 @@ let
   inherit (lib) mkDefault mkForce;
 in
 {
+  config.sdImage.compressImage = mkDefault false;
+
   imports = [
     # Include the results of the hardware scan.
     ../nixos.nix
@@ -12,7 +14,7 @@ in
   hardware.enableRedistributableFirmware = true;
 
   boot = {
-    kernelPackages = mkForce pkgs.linuxPackages_rpi4;
+    kernelPackages = pkgs.linuxPackages_rpi4;
     kernelParams = [
       "cma=128M"
       "cgroup_enable=cpuset"
@@ -21,14 +23,15 @@ in
     ];
     supportedFilesystems = [ "ext4" "vfat" ];
 
-    tmpOnTmpfs = true;
+    # tmpOnTmpfs = true;
     consoleLogLevel = 7;
     loader = {
-      grub.enable = false;
-      #raspberryPi = {
-      #  enable = mkDefault true;
-      #  version = 4;
-      #};
+      generic-extlinux-compatible.enable = true;
+      raspberryPi = {
+       enable = true;
+       version = 4;
+      };
+
       # Use the systemd-boot EFI boot loader.
       systemd-boot.enable = false;
       efi.canTouchEfiVariables = false;
@@ -48,15 +51,16 @@ in
     };
 
   networking = {
-    # nameservers = mkDefault [ "1.1.1.1" "1.0.0.1" ];
-    # useNetworkd = false;
-    # useDHCP = true;
     interfaces.eth0.useDHCP = true;
+    interfaces.wlan0.useDHCP = true;
     wireless.networks.lab = { hidden = true; };
+    networkmanager.enable = true;
   };
 
-  # nixpkgs = { 
-  #   buildPlatform.system = "x86_64-linux";
-  #   hostPlatform.system = "aarch64-linux";
-  # };
+  nixpkgs = { 
+    # buildPlatform.system = "x86_64-linux";
+    hostPlatform.system = "aarch64-linux";
+  };
+
+  powerManagement.cpuFreqGovernor = mkDefault "ondemand";
 }
