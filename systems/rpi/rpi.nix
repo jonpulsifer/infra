@@ -26,8 +26,8 @@ in
     loader = {
       generic-extlinux-compatible.enable = true;
       raspberryPi = {
-       enable = true;
-       version = 4;
+        enable = true;
+        version = 4;
       };
 
       # Use the systemd-boot EFI boot loader.
@@ -56,7 +56,7 @@ in
     networkmanager.enable = true;
   };
 
-  nixpkgs = { 
+  nixpkgs = {
     # buildPlatform.system = "x86_64-linux";
     hostPlatform.system = "aarch64-linux";
   };
