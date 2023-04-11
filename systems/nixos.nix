@@ -20,12 +20,17 @@ in
   };
 
   systemd.network.enable = true;
+  services.resolved = {
+    enable = true;
+    dnssec = false;
+  } 
   networking = {
     hostName = mkDefault "nixos";
-    # nameservers = mkDefault [ "1.1.1.1" "1.0.0.1" ];
-    # useNetworkd = false;
-    # useDHCP = false;
+    # networkd does not support useDHCP globally
+    useNetworkd = true;
+    useDHCP = false;
     # interfaces.eno1.useDHCP = true;
+    firewall.enable = false;
   };
 
   console.keyMap = "us";

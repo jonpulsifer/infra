@@ -7,15 +7,14 @@
 
   networking = {
     inherit hostName;
-
-    # networkd does not support useDHCP globally
-    useNetworkd = true;
-    firewall.enable = false;
-    wireless.enable = true;
-
-    useDHCP = false;
     interfaces.eno1.useDHCP = true;
     interfaces.wlp0s20f0u2.useDHCP = true;
+    wireless = {
+      enable = false;
+      networks = {
+        lab = { hidden = true; };
+      };
+    };
   };
 
   services.prometheus.exporters.node.enable = lib.mkDefault true;

@@ -44,11 +44,9 @@ in
 
   networking = {
     inherit hostName;
-    useNetworkd = true;
-    firewall.enable = false;
-    wireless.enable = true;
     interfaces.eth0.useDHCP = true;
     interfaces.wlan0.useDHCP = true;
+    wireless.enable = true;
     wireless.networks.lab = { hidden = true; };
   };
 

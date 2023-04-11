@@ -7,11 +7,7 @@
 
   networking = {
     inherit hostName;
-    firewall.enable = false;
 
-    # networkd does not support useDHCP globally
-    useNetworkd = true;
-    useDHCP = false;
     interfaces.eno1.useDHCP = true;
     # interfaces.wlp0s20f0u2.useDHCP = true;
     wireless = {

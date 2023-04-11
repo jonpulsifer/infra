@@ -9,10 +9,6 @@ let hostName = "nuc"; in
 
   networking = {
     inherit hostName;
-
-    # networkd does not support useDHCP globally
-    useNetworkd = true;
-    useDHCP = false;
     interfaces.eno1.useDHCP = true;
     # wireless
     interfaces.wlp0s20f3.useDHCP = true;
