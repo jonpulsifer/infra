@@ -15,7 +15,7 @@ in
       # Use the systemd-boot EFI boot loader.
       systemd-boot.enable = mkDefault true;
       efi.canTouchEfiVariables = mkDefault true;
-      timeout = mkForce 0;
+      timeout = mkDefault 0;
     };
   };
 
