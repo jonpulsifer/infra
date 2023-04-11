@@ -34,7 +34,6 @@
   powerManagement.cpuFreqGovernor = lib.mkDefault "performance";
 
   hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
-  # High-DPI console
   console.font =
     lib.mkDefault "${pkgs.terminus_font}/share/consolefonts/ter-u28n.psf.gz";
 }
