@@ -19,11 +19,6 @@ in
     };
   };
 
-  systemd.network.enable = true;
-  services.resolved = {
-    enable = true;
-    dnssec = false;
-  } 
   networking = {
     hostName = mkDefault "nixos";
     # networkd does not support useDHCP globally
@@ -32,6 +27,11 @@ in
     # interfaces.eno1.useDHCP = true;
     firewall.enable = false;
   };
+  services.resolved = {
+    enable = true;
+    dnssec = false;
+  };
+  systemd.network.enable = true;
 
   console.keyMap = "us";
   i18n.defaultLocale = "en_US.UTF-8";
