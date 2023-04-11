@@ -29,7 +29,7 @@ in
   };
   services.resolved = {
     enable = true;
-    dnssec = false;
+    dnssec = "false";
   };
   systemd.network.enable = true;
 
