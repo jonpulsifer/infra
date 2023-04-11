@@ -13,6 +13,7 @@ in
     modules/git
     modules/nix
     modules/node_exporter
+    modules/tmux
     modules/zsh
   ];
 
@@ -23,7 +24,7 @@ in
       mkOutOfStoreSymlink "${homeDirectory}/src/github.com/jonpulsifer/dotfiles";
 
     sessionVariables = rec {
-      EDITOR = "code --wait";
+      EDITOR = mkDefault "code --wait";
       GIT_EDITOR = EDITOR;
       LANG = "en_US.UTF-8";
       LC_ALL = LANG;

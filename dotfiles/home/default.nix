@@ -16,7 +16,6 @@ in
     modules/go
     modules/kubernetes
     modules/node
-    modules/tmux
   ];
 
   home.sessionVariables = {
