@@ -47,7 +47,6 @@ in
     interfaces.eth0.useDHCP = true;
     interfaces.wlan0.useDHCP = true;
     wireless.networks.lab = { hidden = true; };
-    networkmanager.enable = true;
   };
 
   nixpkgs = {
