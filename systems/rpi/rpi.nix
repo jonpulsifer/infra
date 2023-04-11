@@ -24,18 +24,10 @@ in
     # tmpOnTmpfs = true;
     consoleLogLevel = 7;
     loader = {
-      generic-extlinux-compatible.enable = true;
-      raspberryPi = {
-        enable = true;
-        version = 4;
-        uboot.enable = false;
-      };
-
       # we legacy boot
-      grub.enable = false;
       systemd-boot.enable = false;
       efi.canTouchEfiVariables = false;
-      timeout = mkForce 0;
+      timeout = mkForce 10;
     };
   };
 
