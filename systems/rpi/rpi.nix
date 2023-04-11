@@ -21,7 +21,7 @@ in
     ];
     supportedFilesystems = [ "ext4" "vfat" ];
 
-    # tmpOnTmpfs = true;
+    tmpOnTmpfs = true;
     consoleLogLevel = 7;
     loader = {
       # we legacy boot
