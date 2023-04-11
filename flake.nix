@@ -57,6 +57,7 @@
             nixos-hardware.nixosModules.raspberry-pi-4
             ./systems/rpi/rpi.nix
             "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
+            { config.sdImage.compressImage = false; }
             {
               nixpkgs.overlays = [
                 # https://github.com/NixOS/nixpkgs/issues/154163
@@ -104,9 +105,6 @@
             ./systems/wsl
             { home-manager.users.jawn = dotfiles.nixosModules.full; }
           ];
-          specialArgs = {
-            isGui = false;
-          };
         };
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };

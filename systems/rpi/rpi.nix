@@ -1,10 +1,8 @@
-{ config, lib, pkgs, keys, ... }:
+{ config, lib, pkgs, keys, hostName, ... }:
 let
   inherit (lib) mkDefault mkForce;
 in
 {
-  config.sdImage.compressImage = mkDefault false;
-
   imports = [
     # Include the results of the hardware scan.
     ../nixos.nix
@@ -51,6 +49,7 @@ in
     };
 
   networking = {
+    inherit hostName;
     interfaces.eth0.useDHCP = true;
     interfaces.wlan0.useDHCP = true;
     wireless.networks.lab = { hidden = true; };
