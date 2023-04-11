@@ -24,7 +24,7 @@ in
     hostName = mkDefault "nixos";
     # nameservers = mkDefault [ "1.1.1.1" "1.0.0.1" ];
     # useNetworkd = false;
-    # useDHCP = true;
+    # useDHCP = false;
     # interfaces.eno1.useDHCP = true;
   };
 
