@@ -65,15 +65,15 @@
                   makeModulesClosure = x:
                     super.makeModulesClosure (x // { allowMissing = true; });
                 })
-                (final: super: {
-                  ubootRaspberryPi4_64bit = super.ubootRaspberryPi4_64bit.override rec {
-                    version = "2023.01";
-                    src = super.fetchurl {
-                      url = "ftp://ftp.denx.de/pub/u-boot/u-boot-${version}.tar.bz2";
-                      hash = "sha256-aUI7rTgPiaCRZjbonm3L0uRRLVhDCNki0QOdHkMxlQ8=";
-                    };
-                  };
-                })
+                # (final: super: {
+                #   ubootRaspberryPi4_64bit = super.ubootRaspberryPi4_64bit.override rec {
+                #     version = "2023.01";
+                #     src = super.fetchurl {
+                #       url = "ftp://ftp.denx.de/pub/u-boot/u-boot-${version}.tar.bz2";
+                #       hash = "sha256-aUI7rTgPiaCRZjbonm3L0uRRLVhDCNki0QOdHkMxlQ8=";
+                #     };
+                #   };
+                # })
               ];
             }
           ];
