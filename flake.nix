@@ -57,7 +57,7 @@
             nixos-hardware.nixosModules.raspberry-pi-4
             ./systems/rpi/rpi.nix
             "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
-            { config.sdImage.compressImage = false; sdImage.firmwareSize = 512; }
+            { config.sdImage.compressImage = false; config.sdImage.firmwareSize = 512; }
             {
               nixpkgs.overlays = [
                 # https://github.com/NixOS/nixpkgs/issues/154163
