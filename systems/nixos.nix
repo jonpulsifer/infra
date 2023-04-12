@@ -21,7 +21,6 @@ in
 
   networking = {
     hostName = mkDefault "nixos";
-    useNetworkd = true;
     useDHCP = false;
     firewall.enable = false;
   };
