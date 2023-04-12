@@ -1,6 +1,6 @@
 { stdenv, fetchurl, installShellFiles }:
 let
-  version = "1.26.1";
+  version = "1.26.3";
   sources = {
     aarch64-linux = [
       (fetchurl {
@@ -9,7 +9,7 @@ let
       })
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubeadm";
-        hash = "sha256-ZShEyVGHhic+CUglt0oZiMhxVS3GzPcTZlWOZ0CYWdE=";
+        hash = "sha256-2xAcS7jjO9aSQd4iftMX/u5tRNvWdIkeG54Rxuizabs=";
       })
     ];
     x86_64-linux = [
