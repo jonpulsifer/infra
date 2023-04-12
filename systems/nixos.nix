@@ -100,7 +100,7 @@ in
   users.users.jawn = {
     uid = 1337;
     isNormalUser = true;
-    extraGroups = [ "wheel" ];
+    extraGroups = [ "wheel" "tty" ];
     openssh.authorizedKeys.keys = pkgs.lib.splitString "\n" (builtins.readFile keys);
     shell = pkgs.zsh;
   };
