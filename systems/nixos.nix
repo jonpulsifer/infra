@@ -29,7 +29,7 @@ in
   # dnssec = false is required for tailscale to work
   services.resolved = { enable = true; dnssec = "false"; };
   systemd.network =
-    let networkConfig = { DHCP = "yes"; DNSSEC = "false"; DNSOverTLS = "opportunistic"; }; in
+    let networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; }; in
     {
       enable = true;
       networks."10-wired" = { inherit networkConfig; matchConfig.Name = "en* eth*"; };
