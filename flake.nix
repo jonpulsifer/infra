@@ -109,7 +109,7 @@
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
         cloudpi4 = mkRPi "cloudpi4" [ ];
-        homepi4 = mkRPi "homepi4" [ ];
+        homepi4 = mkRPi "homepi4" [ ./systems/kubeadm.nix ];
         screenpi4 = mkRPi "screenpi4" [ ];
 
         nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
