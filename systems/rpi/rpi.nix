@@ -32,6 +32,12 @@ in
     };
   };
 
+  systemd.mounts = [{
+    where = "/tmp";
+    what = "tmpfs";
+    options = "1777,strictatime,nosuid,nodev,size=30%";
+  }];
+
   fileSystems."/" =
     {
       device = "/dev/disk/by-label/NIXOS_SD";
@@ -45,8 +51,6 @@ in
 
   networking = {
     inherit hostName;
-    interfaces.end0.useDHCP = true;
-    interfaces.wlan0.useDHCP = true;
     wireless.enable = true;
     wireless.networks.lab = { hidden = true; };
   };

@@ -21,17 +21,20 @@ in
 
   networking = {
     hostName = mkDefault "nixos";
-    # networkd does not support useDHCP globally
     useNetworkd = true;
     useDHCP = false;
-    # interfaces.eno1.useDHCP = true;
     firewall.enable = false;
   };
-  services.resolved = {
-    enable = true;
-    dnssec = "false";
-  };
-  systemd.network.enable = true;
+
+  # dnssec = false is required for tailscale to work
+  services.resolved = { enable = true; dnssec = "false"; };
+  systemd.network =
+    let networkConfig = { DHCP = "yes"; DNSSEC = "false"; DNSOverTLS = "opportunistic"; }; in
+    {
+      enable = true;
+      networks."10-wired" = { inherit networkConfig; matchConfig.Name = "en* eth*"; };
+      networks."11-wlan" = { inherit networkConfig; matchConfig.Name = "wl*"; };
+    };
 
   console.keyMap = "us";
   i18n.defaultLocale = "en_US.UTF-8";
