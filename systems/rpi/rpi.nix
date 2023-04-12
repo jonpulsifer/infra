@@ -35,7 +35,7 @@ in
   systemd.mounts = [{
     where = "/tmp";
     what = "tmpfs";
-    options = "1777,strictatime,nosuid,nodev,size=30%";
+    options = "mode=700,strictatime,nosuid,nodev,size=30%";
   }];
 
   fileSystems."/" =
