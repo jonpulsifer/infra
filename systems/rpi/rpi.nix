@@ -21,7 +21,8 @@ in
     ];
     supportedFilesystems = [ "ext4" "vfat" ];
 
-    tmpOnTmpfs = true;
+    # this runs out of space sometimes
+    tmpOnTmpfs = false;
     consoleLogLevel = 7;
     loader = {
       # we legacy boot
