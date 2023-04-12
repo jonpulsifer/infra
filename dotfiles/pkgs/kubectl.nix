@@ -5,7 +5,7 @@ let
     aarch64-linux = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubectl";
-        hash = "sha256-ebFOTdranoHSmJ82qJ+qnlb4q+bgJG573DBck8NzHqQ=";
+        hash = "sha256-D2LLtvr6EJ8jWgg0jXRJmle7KUwqLm7jS+H6g0Mv7B0=";
       })
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubeadm";
