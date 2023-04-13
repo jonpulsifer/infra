@@ -34,17 +34,17 @@ in
   systemd.network =
     let
       networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
-      dhcpv4Config = { UseRoutes = true; };
+      dhcpV4Config = { UseRoutes = true; };
       routes = [{ Metric = 100; }];
     in
     {
       enable = true;
       networks."10-wired" = {
-        inherit dhcpv4Config networkConfig routes;
+        inherit dhcpV4Config networkConfig routes;
         matchConfig.Name = "en* eth*";
       };
       networks."11-wlan" = {
-        inherit dhcpv4Config networkConfig;
+        inherit dhcpV4Config networkConfig;
         matchConfig.Name = "wl*";
         routes = [{ Metric = 200; }];
       };
