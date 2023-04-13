@@ -39,8 +39,7 @@ spec:
       enabled: true
     ingressController:
       enabled: false
-    l7Proxy:
-      enabled: false
+    l7Proxy: false
     operator.prometheus.enabled: true
     dashboards:
       enabled: true
