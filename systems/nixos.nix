@@ -40,11 +40,11 @@ in
     {
       enable = true;
       networks."10-wired" = {
-        inherit dhcpv4config networkConfig routes;
+        inherit dhcpv4Config networkConfig routes;
         matchConfig.Name = "en* eth*";
       };
       networks."11-wlan" = {
-        inherit dhcpv4config networkConfig;
+        inherit dhcpv4Config networkConfig;
         matchConfig.Name = "wl*";
         routes = [{ Metric = 200; }];
       };
