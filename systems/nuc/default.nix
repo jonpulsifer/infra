@@ -1,27 +1,39 @@
-{ config, pkgs, ... }:
-let hostName = "nuc"; in
+{ config, lib, pkgs, modulesPath, ... }:
+
 {
   imports = [
-    # Include the results of the hardware scan.
-    ./hardware-configuration.nix
-    ../nixos.nix
+    (modulesPath + "/installer/scan/not-detected.nix")
+  ];
+  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+  boot.initrd.availableKernelModules = [
+    "xhci_pci"
+    "ahci"
+    "nvme"
+    "usbhid"
+    "usb_storage"
+    "sd_mod"
+    "rtsx_pci_sdmmc"
   ];
 
-  networking = {
-    inherit hostName;
-    interfaces.eno1.useDHCP = true;
-    # wireless
-    interfaces.wlp0s20f3.useDHCP = true;
-    wireless = {
-      enable = true;
-      networks = {
-        lab = { hidden = true; };
-      };
-    };
+  boot.initrd.kernelModules = [ ];
+  boot.kernelModules = [ "kvm-intel" ];
+  boot.extraModulePackages = [ ];
+
+  fileSystems."/" = {
+    device = "/dev/disk/by-label/nixos";
+    fsType = "ext4";
   };
 
-  virtualisation.docker.enable = false;
-  users.users.jawn = {
-    extraGroups = pkgs.lib.mkIf (config.virtualisation.docker.enable) [ "docker" ];
+  fileSystems."/boot" = {
+    device = "/dev/disk/by-label/boot";
+    fsType = "vfat";
   };
+
+  swapDevices = [ ];
+
+  powerManagement.cpuFreqGovernor = lib.mkDefault "performance";
+
+  hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+  console.font =
+    lib.mkDefault "${pkgs.terminus_font}/share/consolefonts/ter-u28n.psf.gz";
 }

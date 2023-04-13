@@ -83,11 +83,12 @@
       mkSystem = { hostName ? null, modules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
-          modules = nixosModules ++ modules ++ [
-            ./systems/nixos.nix
-          ];
+          modules = nixosModules ++ modules ++ [ ./systems/nixos.nix ];
           specialArgs = { inherit keys hostName; };
         };
+
+      mkEliteDesk = hostName: modules:
+        mkSystem { inherit hostName; modules = [ ./systems/elitedesks ] ++ modules; };
     in
     {
       formatter.x86_64-linux = nixpkgs.legacyPackages.x86_64-linux.nixpkgs-fmt;
@@ -99,8 +100,8 @@
 
       nixosConfigurations = rec {
         # wsl on atomic
-        atomic = nixos.lib.nixosSystem {
-          modules = nixosModules ++ [
+        atomic = mkSystem {
+          modules = [
             wsl.nixosModules.wsl
             ./systems/wsl
             { home-manager.users.jawn = dotfiles.nixosModules.full; }
@@ -113,23 +114,15 @@
         screenpi4 = mkRPi "screenpi4" [ ];
 
         nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
-        "800g2-1" = mkSystem { hostName = "800g2-1"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
-        "800g2-2" = mkSystem { hostName = "800g2-2"; modules = [ ./systems/800g2 ./systems/kubeadm.nix ]; };
-        "800g3-1" = mkSystem {
-          hostName = "800g3-1";
-          modules = [
-            ./systems/800g3
-            ./systems/kubeadm.nix
-            # { networking.wireless.networks.lab = { hidden = true; }; }
-          ];
-        };
-        "800g3-2" = mkSystem {
-          hostName = "800g3-2";
-          modules = [
-            ./systems/800g3
-            { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
-          ];
-        };
+        "800g2-1" = mkEliteDesk "800g2-1" [ ./systems/kubeadm.nix ];
+        "800g2-2" = mkEliteDesk "800g2-2" [ ./systems/kubeadm.nix ];
+        "800g3-1" = mkEliteDesk "800g3-1" [
+          ./systems/kubeadm.nix
+          # { networking.wireless.networks.lab = { hidden = true; }; }
+        ];
+        "800g3-2" = mkEliteDesk "800g3-2" [
+          { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
+        ];
       };
     };
 }

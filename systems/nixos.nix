@@ -21,8 +21,12 @@ in
 
   networking = {
     hostName = mkDefault "nixos";
-    useDHCP = false;
     firewall.enable = false;
+    useDHCP = false;
+    wireless = {
+      enable = false;
+      networks = mkDefault { lab = { hidden = true; }; };
+    };
   };
 
   # dnssec = false is required for tailscale to work
@@ -99,11 +103,12 @@ in
     '';
   };
 
+  virtualisation.docker.enable = false;
   users.users.jawn = {
     uid = 1337;
     isNormalUser = true;
-    extraGroups = [ "wheel" "tty" ];
-    openssh.authorizedKeys.keys = pkgs.lib.splitString "\n" (builtins.readFile keys);
+    extraGroups = [ "wheel" "tty" ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
+    openssh.authorizedKeys.keys = lib.splitString "\n" (builtins.readFile keys);
     shell = pkgs.zsh;
   };
 

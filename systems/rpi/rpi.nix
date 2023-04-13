@@ -51,7 +51,7 @@ in
 
   networking = {
     inherit hostName;
-    wireless.enable = true;
+    wireless.enable = mkForce true;
     wireless.networks.lab = { hidden = true; };
   };
 
