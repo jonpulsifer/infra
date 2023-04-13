@@ -33,11 +33,11 @@ in
   services.resolved = { enable = true; dnssec = "false"; };
   systemd.network =
     let
-      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
+      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; linkConfig.RequiredForOnline = false; };
       dhcpV4Config = { UseRoutes = true; };
       routes = [ ] ++ lib.optionals (needsRoutes) [
-        { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }
-        { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }
+        { routeConfig = { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }; }
+        { routeConfig = { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }; }
       ];
     in
     {
@@ -45,12 +45,12 @@ in
       networks."10-wired" = {
         inherit dhcpV4Config networkConfig;
         matchConfig.Name = "en* eth*";
-        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }];
+        routes = routes ++ [{ routeConfig = { Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }; }];
       };
       networks."11-wlan" = {
         inherit dhcpV4Config networkConfig;
         matchConfig.Name = "wl*";
-        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }];
+        routes = routes ++ [{ routeConfig = { Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }; }];
       };
     };
 
