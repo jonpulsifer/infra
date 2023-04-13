@@ -1,4 +1,4 @@
-{ config, lib, pkgs, keys, ... }:
+{ config, lib, pkgs, keys, lab ... }:
 let
   inherit (lib) mkDefault mkForce;
 in
@@ -32,11 +32,17 @@ in
   # dnssec = false is required for tailscale to work
   services.resolved = { enable = true; dnssec = "false"; };
   systemd.network =
-    let networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; }; in
+    let
+      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
+      routes = [
+        { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }
+        { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }
+      ];
+    in
     {
       enable = true;
-      networks."10-wired" = { inherit networkConfig; matchConfig.Name = "en* eth*"; };
-      networks."11-wlan" = { inherit networkConfig; matchConfig.Name = "wl*"; };
+      networks."10-wired" = { inherit networkConfig routes; matchConfig.Name = "en* eth*"; };
+      networks."11-wlan" = { inherit networkConfig routes; matchConfig.Name = "wl*"; };
     };
 
   console.keyMap = "us";
