@@ -52,8 +52,8 @@ in
       ];
     in
     {
-      networks."10-wired" = { inherit routes; };
-      networks."11-wlan" = { inherit routes; };
+      networks."10-wired".routes = routes;
+      networks."11-wlan".routes = routes;
     };
 
 
