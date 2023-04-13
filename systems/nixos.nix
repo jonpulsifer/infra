@@ -45,12 +45,12 @@ in
       networks."10-wired" = {
         inherit dhcpV4Config networkConfig;
         matchConfig.Name = "en* eth*";
-        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0"; }];
+        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }];
       };
       networks."11-wlan" = {
         inherit dhcpV4Config networkConfig;
         matchConfig.Name = "wl*";
-        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0"; }];
+        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }];
       };
     };
 
