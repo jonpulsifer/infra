@@ -4,20 +4,20 @@
     dotfiles = {
       url = "github:jonpulsifer/dotfiles";
       inputs = {
-        nixpkgs.follows = "nixpkgs";
+        nixpkgs.follows = "unstable";
         home-manager.follows = "home-manager";
       };
     };
-    home-manager = { url = "github:nix-community/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
+    home-manager = { url = "github:nix-community/home-manager"; inputs.nixpkgs.follows = "unstable"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
     nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
-    nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
     nixos-hardware = { url = "github:nixos/nixos-hardware"; };
-    wsl = { url = "github:nix-community/NixOS-WSL"; inputs.nixpkgs.follows = "nixpkgs"; };
+    unstable = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
+    wsl = { url = "github:nix-community/NixOS-WSL"; inputs.nixpkgs.follows = "unstable"; };
   };
-  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, nixpkgs, wsl, ... }:
+  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, wsl, ... }:
     let
-      inherit (nixpkgs.lib) mkIf attrValues;
+      inherit (nixos.lib) mkIf attrValues;
 
       kubernetesOnlyBuildKubeletOverlay = final: prev: {
         kubernetes = (prev.kubernetes.override {
@@ -91,11 +91,11 @@
         mkSystem { inherit hostName; modules = [ ./systems/elitedesks ] ++ modules; };
     in
     {
-      formatter.x86_64-linux = nixpkgs.legacyPackages.x86_64-linux.nixpkgs-fmt;
-      formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixpkgs-fmt;
+      formatter.x86_64-linux = nixos.legacyPackages.x86_64-linux.nixpkgs-fmt;
+      formatter.aarch64-darwin = nixos.legacyPackages.aarch64-darwin.nixpkgs-fmt;
       devShells = {
-        x86_64-linux.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.x86_64-linux; };
-        aarch64-darwin.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.aarch64-darwin; };
+        x86_64-linux.default = import ./shell.nix { pkgs = nixos.legacyPackages.x86_64-linux; };
+        aarch64-darwin.default = import ./shell.nix { pkgs = nixos.legacyPackages.aarch64-darwin; };
       };
 
       nixosConfigurations = rec {
