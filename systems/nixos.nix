@@ -35,7 +35,7 @@ in
     let
       networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
       dhcpV4Config = { UseRoutes = true; };
-      routes = [{ Metric = 100; }] ++ lib.optionals (needsRoutes) [
+      routes = [ ] ++ lib.optionals (needsRoutes) [
         { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }
         { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }
       ];
@@ -43,13 +43,14 @@ in
     {
       enable = true;
       networks."10-wired" = {
-        inherit dhcpV4Config networkConfig routes;
+        inherit dhcpV4Config networkConfig;
         matchConfig.Name = "en* eth*";
+        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 100; }];
       };
       networks."11-wlan" = {
         inherit dhcpV4Config networkConfig;
         matchConfig.Name = "wl*";
-        routes = [{ Metric = 200; }];
+        routes = routes ++ [{ Gateway = "_dhcp4"; Metric = 200; }];
       };
     };
 
