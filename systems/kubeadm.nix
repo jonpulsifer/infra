@@ -39,7 +39,7 @@
 
         containerd = {
           snapshotter = "";
-          runtime_type = "io.containerd.runc.v2";
+          runtimes.runc.runtime_type = "io.containerd.runc.v2";
           options.SystemdCgroup = true;
         };
       };
