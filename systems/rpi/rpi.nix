@@ -20,6 +20,7 @@ in
       "cgroup_enable=memory"
     ];
     supportedFilesystems = [ "ext4" "vfat" ];
+    zfs.enabled = false;
 
     # this runs out of space sometimes
     tmpOnTmpfs = false;
