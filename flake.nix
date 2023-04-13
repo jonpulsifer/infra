@@ -68,14 +68,14 @@
               ];
             }
           ];
-          specialArgs = { inherit keys hostName; };
+          specialArgs = { inherit keys hostName; needsRoutes = true; };
         };
 
       mkSystem = { hostName ? null, modules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
           modules = nixosModules ++ modules ++ [ ./systems/nixos.nix ];
-          specialArgs = { inherit keys hostName; };
+          specialArgs = { inherit keys hostName; needsRoutes = false; };
         };
 
       mkEliteDesk = hostName: modules:

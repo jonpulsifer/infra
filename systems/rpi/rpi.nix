@@ -44,18 +44,6 @@ in
     wireless.enable = mkForce true;
     wireless.networks.lab = { hidden = true; };
   };
-  systemd.network =
-    let
-      routes = [
-        { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }
-        { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }
-      ];
-    in
-    {
-      networks."10-wired".routes = routes;
-      networks."11-wlan".routes = routes;
-    };
-
 
   nixpkgs = {
     # buildPlatform.system = "x86_64-linux";

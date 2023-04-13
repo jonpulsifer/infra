@@ -1,4 +1,4 @@
-{ config, lib, pkgs, keys, ... }:
+{ config, lib, pkgs, keys, needsRoutes, ... }:
 let
   inherit (lib) mkDefault mkForce;
 in
@@ -35,7 +35,10 @@ in
     let
       networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
       dhcpV4Config = { UseRoutes = true; };
-      routes = [{ Metric = 100; }];
+      routes = [{ Metric = 100; }] ++ lib.optionals (needsRoutes) [
+        { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }
+        { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }
+      ];
     in
     {
       enable = true;
