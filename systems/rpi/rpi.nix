@@ -28,25 +28,15 @@ in
       # we legacy boot
       systemd-boot.enable = false;
       efi.canTouchEfiVariables = false;
-      timeout = mkForce 10;
+      timeout = mkForce 1;
     };
   };
-
-  systemd.mounts = [{
-    where = "/tmp";
-    what = "tmpfs";
-    options = "mode=700,strictatime,nosuid,nodev,size=30%";
-  }];
 
   fileSystems."/" =
     {
       device = "/dev/disk/by-label/NIXOS_SD";
       fsType = "ext4";
-    };
-  fileSystems."/boot" =
-    {
-      device = "/dev/disk/by-label/FIRMWARE";
-      fsType = "vfat";
+      options = [ "noatime" ];
     };
 
   networking = {

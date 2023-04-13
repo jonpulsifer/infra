@@ -44,6 +44,9 @@ in
   time.timeZone = "Canada/Atlantic";
 
   environment.systemPackages = with pkgs; [ bash bash-completion tailscale ];
+  services.prometheus.exporters.node.enable = mkDefault true;
+  programs.zsh.enable = true;
+
   security.sudo = {
     enable = true;
     wheelNeedsPassword = false;
@@ -55,7 +58,6 @@ in
     enableExtraSocket = true;
     enableSSHSupport = true;
   };
-  programs.zsh.enable = true;
 
   services.cron.enable = true;
   services.openssh = {
@@ -73,7 +75,6 @@ in
       path = "/etc/ssh/ssh_host_ed25519_key";
     }];
   };
-  services.prometheus.exporters.node.enable = mkDefault true;
   services.sshguard.enable = true;
   services.tailscale.enable = true;
   systemd.services.tailscale-autoconnect = {
