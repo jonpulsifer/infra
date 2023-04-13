@@ -33,7 +33,7 @@ in
   services.resolved = { enable = true; dnssec = "false"; };
   systemd.network =
     let
-      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; linkConfig.RequiredForOnline = false; };
+      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; RequiredForOnline = false; };
       dhcpV4Config = { UseRoutes = true; };
       routes = [ ] ++ lib.optionals (needsRoutes) [
         { routeConfig = { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }; }
