@@ -33,9 +33,10 @@ in
   services.resolved = { enable = true; dnssec = "false"; };
   systemd.network =
     let
-      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; RequiredForOnline = false; };
+      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
+      linkConfig = { RequiredForOnline = false; };
       dhcpV4Config = { UseRoutes = true; };
-      routes = [ ] ++ lib.optionals (needsRoutes) [
+      k8s-routes = [
         { routeConfig = { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }; }
         { routeConfig = { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }; }
       ];
@@ -43,14 +44,14 @@ in
     {
       enable = true;
       networks."10-wired" = {
-        inherit dhcpV4Config networkConfig;
+        inherit dhcpV4Config linkConfig networkConfig;
         matchConfig.Name = "en* eth*";
-        routes = routes ++ [{ routeConfig = { Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }; }];
+        routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }; }] ++ lib.optionals needsRoutes k8s-routes;
       };
       networks."11-wlan" = {
-        inherit dhcpV4Config networkConfig;
+        inherit dhcpV4Config linkConfig networkConfig;
         matchConfig.Name = "wl*";
-        routes = routes ++ [{ routeConfig = { Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }; }];
+        routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }; }] ++ lib.optionals needsRoutes k8s-routes;
       };
     };
 
