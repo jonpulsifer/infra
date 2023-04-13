@@ -38,7 +38,9 @@ spec:
     bgpControlPlane:
       enabled: true
     ingressController:
-      enabled: true
+      enabled: false
+    l7Proxy:
+      enabled: false
     operator.prometheus.enabled: true
     dashboards:
       enabled: true
