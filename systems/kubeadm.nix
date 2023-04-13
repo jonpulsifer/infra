@@ -37,7 +37,8 @@
           max_conf_num = 0;
         };
 
-        containerd.runtimes.runc = {
+        containerd = {
+          snapshotter = "";
           runtime_type = "io.containerd.runc.v2";
           options.SystemdCgroup = true;
         };
