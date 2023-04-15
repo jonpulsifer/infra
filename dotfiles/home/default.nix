@@ -11,7 +11,6 @@ in
 {
   imports = [
     ./basic.nix
-
     modules/gcloud
     modules/go
     modules/kubernetes
@@ -24,36 +23,13 @@ in
 
   home.packages = with pkgs;
     [
-
-      # cloudflare
-      # flarectl
-      # wrangler
-
-      # cloud things
-      # conftest
-      # cosign
-      # hadolint
-      # infracost
-      # open-policy-agent
-      # rekor-cli
-      # trivy
-
-      # hashicorp
-      terraform
-      # terraform-docs
-      # terraformer
-      # tflint
-      # tfsec
-
-      # things i use
       _1password
       age
-      dnstwist
       gh
       gptcommit
       sops
+      terraform
       vault
-
     ] ++ optionals isDarwin [ reattach-to-user-namespace ];
 
   fonts.fontconfig.enable = true;

@@ -10,7 +10,6 @@ let
 in
 {
   imports = [
-    modules/emacs
     modules/git
     modules/nix
     modules/node_exporter
