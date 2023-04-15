@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-add_apt_repo() {
-  add-apt-repository "deb [arch=amd64] ${1}"
-}
-
-add_apt_repo "$@"

@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-add_gpg_key() {
-    gpg --keyserver hkps://keys.openpgp.org --recv-keys "${1}"
-}
-
-add_gpg_key "$@"

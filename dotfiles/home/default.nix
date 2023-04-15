@@ -12,7 +12,6 @@ in
   imports = [
     ./basic.nix
     modules/gcloud
-    modules/go
     modules/kubernetes
     modules/node
   ];

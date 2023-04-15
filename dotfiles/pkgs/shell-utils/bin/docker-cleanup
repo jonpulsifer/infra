@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-
-hash docker 2>/dev/null || exit 1
-
-docker system prune "${@}"
