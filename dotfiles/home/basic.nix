@@ -54,6 +54,7 @@ in
       # gnumake
       jq
       mtr
+      nano
       # neofetch
       # nmap
       # shellcheck
@@ -136,6 +137,4 @@ in
       throw-keyids = true;
     };
   };
-
-  programs.nano.enabled = true;
 }
