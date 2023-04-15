@@ -8,7 +8,6 @@ in
   imports = [
     ./default.nix
     modules/ssh
-    modules/tidbyt
   ];
 
   home = {
@@ -17,6 +16,10 @@ in
         # cloudevents
         asciinema
         hugo
+
+        # pixlet
+        pixlet
+        bazel-buildtools
       ] ++ optionals isLinux [ wol ];
 
     shellAliases = {
