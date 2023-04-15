@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 let
   inherit (pkgs.stdenv) isDarwin;
-  package = if isDarwin then pkgs.emacsMacport else pkgs.emacs;
+  package = if isDarwin then pkgs.emacsMacport else pkgs.emacs-nox;
 in
 {
   home = {

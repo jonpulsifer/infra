@@ -50,7 +50,7 @@
       (ansi-term "zsh" term-buffer-name))))
 
 ;; start emacs daemon
-(server-start)
+;; (server-start)
 
 (set-frame-font "FiraCode Nerd Font 14" nil t)
 
