@@ -10,6 +10,7 @@ let
 in
 {
   imports = [
+    modules/emacs
     modules/git
     modules/nix
     modules/node_exporter
@@ -24,12 +25,12 @@ in
       mkOutOfStoreSymlink "${homeDirectory}/src/github.com/jonpulsifer/dotfiles";
 
     sessionVariables = rec {
-      EDITOR = mkDefault "code --wait";
-      GIT_EDITOR = EDITOR;
+      # EDITOR = mkDefault "code --wait";
+      # GIT_EDITOR = EDITOR;
       LANG = "en_US.UTF-8";
       LC_ALL = LANG;
       MANPAGER = "sh -c 'col -bx | ${pkgs.bat}/bin/bat -l man -p'";
-      VISUAL = EDITOR;
+      # VISUAL = EDITOR;
     };
 
     shellAliases = rec {
@@ -135,4 +136,6 @@ in
       throw-keyids = true;
     };
   };
+
+  programs.nano.enabled = true;
 }
