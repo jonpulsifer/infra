@@ -1,10 +1,9 @@
 {
   description = "jonpulsifer/dotfiles lol";
   inputs = {
-    infra = { url = "github:jonpulsifer/infra"; };
-    darwin = { url = "github:LnL7/nix-darwin"; inputs.nixpkgs.follows = "infra/unstable"; };
-    home-manager = { follows = "infra/home-manager"; };
-    nixpkgs = { follows = "infra/unstable"; };
+    darwin = { url = "github:LnL7/nix-darwin"; inputs.nixpkgs.follows = "nixpkgs"; };
+    home-manager = { url = "github:nix-community/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
+    nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
   };
 
   outputs = { self, darwin, home-manager, nixpkgs, ... }:
