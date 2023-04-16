@@ -1,13 +1,13 @@
 {
   description = "the homelab";
   inputs = {
-    dotfiles = { url = "github:jonpulsifer/dotfiles"; };
-    home-manager = { url = "github:nix-community/home-manager"; inputs.nixpkgs.follows = "unstable"; };
+    dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
+    home-manager = { url = "github:nix-community/home-manager"; follows = "dotfiles/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
     nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
     nixos-hardware = { url = "github:nixos/nixos-hardware"; };
-    unstable = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
-    wsl = { url = "github:nix-community/NixOS-WSL"; inputs.nixpkgs.follows = "unstable"; };
+    nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
+    wsl = { url = "github:nix-community/NixOS-WSL"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
   outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, wsl, ... }:
     let
