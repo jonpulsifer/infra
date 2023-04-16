@@ -4,8 +4,8 @@
     dotfiles = {
       url = "github:jonpulsifer/dotfiles";
       inputs = {
-        nixpkgs.follows = "unstable";
-        home-manager.follows = "home-manager";
+        home-manager = { follows = "home-manager"; };
+        nixpkgs = { follows = "unstable"; };
       };
     };
     home-manager = { url = "github:nix-community/home-manager"; inputs.nixpkgs.follows = "unstable"; };
@@ -101,7 +101,7 @@
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
         cloudpi4 = mkRPi "cloudpi4" [ ];
-        homepi4 = mkRPi "homepi4" [ ./systems/kubeadm.nix ];
+        homepi4 = mkRPi "homepi4" [ ];
         screenpi4 = mkRPi "screenpi4" [ ];
 
         nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
