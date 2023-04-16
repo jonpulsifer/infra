@@ -1,13 +1,7 @@
 {
   description = "the homelab";
   inputs = {
-    dotfiles = {
-      url = "github:jonpulsifer/dotfiles";
-      inputs = {
-        home-manager = { follows = "home-manager"; };
-        nixpkgs = { follows = "unstable"; };
-      };
-    };
+    dotfiles = { url = "github:jonpulsifer/dotfiles"; };
     home-manager = { url = "github:nix-community/home-manager"; inputs.nixpkgs.follows = "unstable"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
     nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
