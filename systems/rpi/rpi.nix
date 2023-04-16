@@ -22,7 +22,7 @@ in
     supportedFilesystems = [ "ext4" "vfat" "zfs" ];
 
     # this runs out of space sometimes
-    tmpOnTmpfs = false;
+    tmp.useTmpfs = false;
     consoleLogLevel = 7;
     loader = {
       # we legacy boot
