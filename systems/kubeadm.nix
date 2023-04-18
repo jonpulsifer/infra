@@ -9,6 +9,13 @@
     };
   };
 
+  systemd.network.config = {
+    networkConfig = {
+      ManageForeignRoutes = false;
+      ManageForeignRoutingPolicyRules = false;
+    };
+  };
+
   environment.systemPackages = with pkgs; [ cri-tools kubernetes ] ++ [ ethtool conntrack-tools iptables socat ];
   services.prometheus.exporters.node.enable = lib.mkForce false;
   services.kubernetes = {
