@@ -33,7 +33,7 @@ in
   services.resolved = { enable = true; dnssec = "false"; };
   systemd.network =
     let
-      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
+      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; ManageForeignRoutes = "no"; ManageForeignRoutingPolicyRules = "no"; };
       linkConfig = { RequiredForOnline = false; };
       dhcpV4Config = { UseRoutes = true; };
       k8s-routes = [
