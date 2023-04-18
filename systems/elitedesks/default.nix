@@ -11,7 +11,7 @@
 
   boot.initrd.availableKernelModules = [ "xhci_pci" "ahci" "sd_mod" ];
   boot.initrd.kernelModules = [ ];
-  boot.kernelModules = [ ] ++ lib.optionals (config.networking.hostName == = "800g2-2") [ "kvm-intel" ];
+  boot.kernelModules = [ ] ++ lib.optionals (config.networking.hostName == "800g2-2") [ "kvm-intel" ];
   boot.extraModulePackages = [ ];
 
   fileSystems."/" =
