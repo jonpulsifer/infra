@@ -1,4 +1,4 @@
-FROM alpine:3.17
+FROM alpine:3.18
 LABEL org.opencontainers.image.authors "Jonathan Pulsifer <jonathan@pulsifer.ca>"
 
 RUN addgroup -S passivedns && adduser -S -g passivedns passivedns  
