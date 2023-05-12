@@ -1,12 +1,12 @@
 { lib, stdenv, fetchurl, undmg }:
 stdenv.mkDerivation rec {
   pname = "sonos";
-  version = "15.2";
+  version = "15.3";
   name = "${pname}-${version}";
   src = fetchurl {
     name = "sonos-s2-${version}.dmg";
     url = "https://www.sonos.com/redir/controller_software_mac2";
-    sha256 = "sha256-zW7Bk0M3GQfiaDrqRbhPnms+S619gB9bTrL4Zj+fuww=";
+    sha256 = "sha256-V3iUPVUX0fDaB4CMxD+H/UXZnQpleRKsJKHefknLC/I=";
     # curlOpts = " - O - J - L ";
   };
   nativeBuildInputs = [ undmg ];
