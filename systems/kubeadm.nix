@@ -45,7 +45,7 @@
         };
 
         containerd = {
-          # snapshotter = "overlayfs";
+          snapshotter = "overlayfs";
           runtimes.runc.runtime_type = "io.containerd.runc.v2";
           options.SystemdCgroup = true;
         };
