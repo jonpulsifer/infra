@@ -41,12 +41,12 @@
 
         cni = {
           bin_dir = "/opt/cni/bin";
-          max_conf_num = 0;
+          max_conf_num = 1;
         };
 
         containerd = {
           runtimes.runc.runtime_type = "io.containerd.runc.v2";
-          options.SystemdCgroup = true;
+          runtimes.runc.options.SystemdCgroup = true;
         };
       };
     };
