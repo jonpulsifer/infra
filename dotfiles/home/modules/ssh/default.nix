@@ -5,6 +5,9 @@ let
 in
 {
   home.sessionVariables = { SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent.sock"; };
+  programs.zsh.shellAliases = {
+    sshpw = "SSH_ASKPASS=${pkgs.shell-utils}/bin/sshpw DISPLAY=1 ssh-add ${config.programs.git.signing.key} < /dev/null";
+  };
   programs.ssh = {
     enable = true;
     compression = true;
