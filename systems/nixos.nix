@@ -9,7 +9,7 @@ in
   ];
 
   boot = {
-    kernelPackages = mkDefault pkgs.linuxPackages_5_15;
+    kernelPackages = mkDefault pkgs.linuxPackages_latest;
     consoleLogLevel = mkDefault 0;
     loader = {
       # Use the systemd-boot EFI boot loader.
