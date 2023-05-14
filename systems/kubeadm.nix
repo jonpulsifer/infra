@@ -9,7 +9,7 @@
     };
   };
 
-  networking.firewall.enabled = lib.mkForce false;
+  networking.firewall.enable = lib.mkForce false;
   systemd.network.config = {
     networkConfig = {
       ManageForeignRoutes = false;
