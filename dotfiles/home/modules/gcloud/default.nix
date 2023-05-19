@@ -30,6 +30,8 @@ in
   };
   home.packages = with pkgs; [
     # cloud-sql-proxy
+    # nodePackages.firebase-tools
+    openjdk19
     (google-cloud-sdk.withExtraComponents components)
   ];
 }
