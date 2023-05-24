@@ -56,6 +56,7 @@ resource "unifi_firewall_rule" "allow_fml_to_lab" {
 resource "unifi_firewall_rule" "drop_all_rfc1918" {
   name    = "Drop all other inter RFC1918 traffic"
   action  = "drop"
+  enabled = false
   ruleset = "LAN_IN"
 
   rule_index = 4001

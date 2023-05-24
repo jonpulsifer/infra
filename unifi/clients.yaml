@@ -31,6 +31,7 @@ k8s:
     mac: d0:c6:37:4d:c2:fe
     dev-id: 3592
     skip_forget_on_destroy: false
+    hostname: nuc-wifi
   800g2:
     dev-id: 2847
     skip_forget_on_destroy: false
@@ -57,6 +58,7 @@ rpis:
     mac: dc:a6:32:35:e8:b5
     ip: 21
     dev-id: 4134
+    hostname: cloudpi4-wifi
   homepi4:
     mac: dc:a6:32:d9:90:07
     ip: 22
@@ -117,8 +119,10 @@ laptops:
     mac: f0:18:98:54:4b:32
   Hackbook Pro:
     mac: 00:00:00:00:00:00
+    dev-id: 4664
   Hackbook Pro Wifi:
     mac: f8:4d:89:81:c0:2d
+    dev-id: 4664
   Pixelbook:
     mac: 28:c6:3f:30:2a:c3
     dev-id: 44
@@ -151,6 +155,7 @@ iot:
     mac: 7c:2e:bd:56:db:88
   Bedroom Scale:
     mac: 00:24:e4:37:b2:da
+    dev-id: 2850
   Garage Door Opener Current:
     mac: cc:6a:10:19:63:02
     dev-id: 2051
@@ -170,11 +175,16 @@ iot:
   Jon's Office Nest Mini:
     color: Charcoal
     mac: d4:f5:47:2e:de:48
+    dev-id: 3418
   Jon's Office Phone:
     mac: ec:e1:a9:cc:ee:fc
     model: Cisco SPA504G
     dev-id: 4420
     hostname: cathy
+  Laboratory:
+    mac: 68:b6:b3:51:d4:5c
+    model: "69 Pro"
+    hostname: laboratory
   Living Room Chromecast:
     mac: 14:ae:85:70:4d:d8
     streaming: true
