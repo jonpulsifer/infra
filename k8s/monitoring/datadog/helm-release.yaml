@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: datadog
-      version: 3.30.7
+      version: 3.30.8
       sourceRef:
         kind: HelmRepository
         name: datadog
