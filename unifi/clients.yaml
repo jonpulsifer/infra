@@ -223,5 +223,7 @@ iot:
   Sonos Sub Office:
     mac: f0:f6:c1:e2:85:32
     dev-id: 294
-  Tidbyt:
+  Tidbyt House:
     mac: b4:8a:0a:27:07:f4
+  Tidbyt Office:
+    mac: cc:db:a7:1e:14:88
