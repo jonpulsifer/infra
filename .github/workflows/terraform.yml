@@ -1,11 +1,18 @@
-name: 'Terraform'
+name: "Terraform"
 on:
   push:
     branches:
       - main
+    paths: &terraform_paths
+      - cloudflare/**
+      - gcp/**
+      - unifi/**
+      - vault/**
+      - workspace/**
   pull_request:
-jobs: 
+    paths: *terraform_paths
 
+jobs:
   changed-directories:
     name: Get Changed Files
     runs-on: ubuntu-latest

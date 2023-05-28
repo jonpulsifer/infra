@@ -1,6 +1,11 @@
 name: cachix
 on:
   push:
+    paths:
+      - systems/**
+      - ./flake.nix
+      - ./flake.lock
+      - ./shell.nix
 jobs:
   cachix:
     runs-on: ubuntu-latest
