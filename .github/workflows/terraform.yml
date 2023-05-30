@@ -35,6 +35,7 @@ jobs:
           json: true
           files: |
             **/*.tf
+            **/*.lock.hcl
       - name: List all changed directories
         run: echo '${{ steps.changed-directories.outputs.all_changed_files }}'
       - id: set-matrix
