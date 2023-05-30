@@ -3,15 +3,19 @@ on:
   push:
     branches:
       - main
-    paths: &terraform_paths
+    paths:
       - cloudflare/**
       - gcp/**
       - unifi/**
       - vault/**
       - workspace/**
   pull_request:
-    paths: *terraform_paths
-
+    paths: 
+      - cloudflare/**
+      - gcp/**
+      - unifi/**
+      - vault/**
+      - workspace/**
 jobs:
   changed-directories:
     name: Get Changed Files
