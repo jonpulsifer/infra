@@ -42,6 +42,11 @@ in
         port = 22;
         extraOptions = { "PasswordAuthentication" = "yes"; };
       };
+      "pikvm" = {
+        user = "root";
+        port = 22;
+        extraOptions = { "PasswordAuthentication" = "yes"; };
+      };
       "unifi" = {
         user = "root";
         port = 22;
