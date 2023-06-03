@@ -26,6 +26,10 @@ lab:
     skip_forget_on_destroy: false
     hostname: nuc-wifi
     ip: 30
+  pikvm:
+    mac: e4:5f:01:e4:6d:1c
+    ip: 2
+    hostname: pikvm
 
 k8s:
   nuc:

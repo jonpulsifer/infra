@@ -1,110 +1,105 @@
 {
-  "enabled": true,
-  "automerge": true,
-  "semanticCommits": "enabled",
-  "dependencyDashboard": true,
-  "suppressNotifications": ["prIgnoreNotification"],
-  "rebaseWhen": "conflicted",
+  enabled: true,
+  automerge: true,
+  semanticCommits: "enabled",
+  dependencyDashboard: true,
+  suppressNotifications: ["prIgnoreNotification"],
+  rebaseWhen: "conflicted",
   "pre-commit": {
-    "enabled": true
+    enabled: true,
   },
-  "flux": {
-    "fileMatch": ["k8s/.+\\.ya?ml$"]
+  flux: {
+    fileMatch: ["k8s/.+\\.ya?ml$"],
   },
   "helm-values": {
-    "fileMatch": ["k8s/.+\\.ya?ml$"]
+    fileMatch: ["k8s/.+\\.ya?ml$"],
   },
-  "kubernetes": {
-    "fileMatch": [
-      "k8s/.+\\.ya?ml$",
-      "provision/ansible/.+\\.ya?ml.j2$"
-    ]
+  kubernetes: {
+    fileMatch: ["k8s/.+\\.ya?ml$"],
   },
-  "regexManagers": [
+  regexManagers: [
     {
-      "description": "Process CRD dependencies",
-      "fileMatch": ["k8s/crds/.+\\.ya?ml$"],
-      "matchStrings": [
+      description: "Process CRD dependencies",
+      fileMatch: ["k8s/crds/.+\\.ya?ml$"],
+      matchStrings: [
         // GitRepository and Flux Kustomization where 'Git release/tag' matches 'Helm' version
         "registryUrl=(?<registryUrl>\\S+) chart=(?<depName>\\S+)\n.*?(?<currentValue>[^-\\s]*)\n",
         // Kustomization where 'GitHub release artifact URL' matches 'Docker image' version
-        "datasource=(?<datasource>\\S+) image=(?<depName>\\S+)\n.*?-\\s(.*?)\/(?<currentValue>[^/]+)\/[^/]+\n"
+        "datasource=(?<datasource>\\S+) image=(?<depName>\\S+)\n.*?-\\s(.*?)/(?<currentValue>[^/]+)/[^/]+\n",
       ],
-      "datasourceTemplate": "{{#if datasource}}{{{datasource}}}{{else}}helm{{/if}}"
+      datasourceTemplate: "{{#if datasource}}{{{datasource}}}{{else}}helm{{/if}}",
     },
     {
-      "description": "Process various other dependencies",
-      "fileMatch": [
-        "k8s/.+\\.ya?ml$"
+      description: "Process various other dependencies",
+      fileMatch: ["k8s/.+\\.ya?ml$"],
+      matchStrings: [
+        'datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\n.*?"(?<currentValue>.*)"\n',
       ],
-      "matchStrings": [
-        "datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\n.*?\"(?<currentValue>.*)\"\n"
-      ],
-      "datasourceTemplate": "{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}",
-      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
-    }
+      datasourceTemplate: "{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}",
+      versioningTemplate: "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}",
+    },
   ],
-  "packageRules": [
+  packageRules: [
     // setup datasources
     {
-      "matchDatasources": ["helm"],
-      "separateMinorPatch": true,
-      "ignoreDeprecated": true
+      matchDatasources: ["helm"],
+      separateMinorPatch: true,
+      ignoreDeprecated: true,
     },
     // global docker datasource settings
     {
-      "matchDatasources": ["docker"],
-      "enabled": true,
-      "commitMessageTopic": "container image {{depName}}",
-      "commitMessageExtra": "to {{#if isSingleVersion}}v{{{newVersion}}}{{else}}{{{newValue}}}{{/if}}",
-      "matchUpdateTypes": ["major", "minor", "patch"]
+      matchDatasources: ["docker"],
+      enabled: true,
+      commitMessageTopic: "container image {{depName}}",
+      commitMessageExtra: "to {{#if isSingleVersion}}v{{{newVersion}}}{{else}}{{{newValue}}}{{/if}}",
+      matchUpdateTypes: ["major", "minor", "patch"],
     },
     {
-      "description": "Group Cert-Manager image (for CRDs) and chart",
-      "groupName": "Cert-Manager",
-      "matchPackagePatterns": ["cert-manager"],
-      "matchDatasources": ["docker", "helm"],
-      "group": { "commitMessageTopic": "{{{groupName}}} group" },
-      "separateMinorPatch": true
+      description: "Group Cert-Manager image (for CRDs) and chart",
+      groupName: "Cert-Manager",
+      matchPackagePatterns: ["cert-manager"],
+      matchDatasources: ["docker", "helm"],
+      group: { commitMessageTopic: "{{{groupName}}} group" },
+      separateMinorPatch: true,
     },
     {
-      "description": "Group Metallb image (for CRDs) and chart",
-      "groupName": "Metallb",
-      "matchPackagePatterns": ["metallb"],
-      "matchDatasources": ["docker", "helm", "github-releases"],
-      "group": { "commitMessageTopic": "{{{groupName}}} group" },
-      "separateMinorPatch": true
+      description: "Group Metallb image (for CRDs) and chart",
+      groupName: "Metallb",
+      matchPackagePatterns: ["metallb"],
+      matchDatasources: ["docker", "helm", "github-releases"],
+      group: { commitMessageTopic: "{{{groupName}}} group" },
+      separateMinorPatch: true,
     },
     // add labels according to package and update types
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["major"],
-      "labels": ["renovate/image", "dep/major"]
+      matchDatasources: ["docker"],
+      matchUpdateTypes: ["major"],
+      labels: ["renovate/image", "dep/major"],
     },
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["minor"],
-      "labels": ["renovate/image", "dep/minor"]
+      matchDatasources: ["docker"],
+      matchUpdateTypes: ["minor"],
+      labels: ["renovate/image", "dep/minor"],
     },
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["patch"],
-      "labels": ["renovate/image", "dep/patch"]
+      matchDatasources: ["docker"],
+      matchUpdateTypes: ["patch"],
+      labels: ["renovate/image", "dep/patch"],
     },
     {
-      "matchDatasources": ["helm"],
-      "matchUpdateTypes": ["major"],
-      "labels": ["renovate/helm", "dep/major"]
+      matchDatasources: ["helm"],
+      matchUpdateTypes: ["major"],
+      labels: ["renovate/helm", "dep/major"],
     },
     {
-      "matchDatasources": ["helm"],
-      "matchUpdateTypes": ["minor"],
-      "labels": ["renovate/helm", "dep/minor"]
+      matchDatasources: ["helm"],
+      matchUpdateTypes: ["minor"],
+      labels: ["renovate/helm", "dep/minor"],
     },
     {
-      "matchDatasources": ["helm"],
-      "matchUpdateTypes": ["patch"],
-      "labels": ["renovate/helm", "dep/patch"]
-    }
-  ]
+      matchDatasources: ["helm"],
+      matchUpdateTypes: ["patch"],
+      labels: ["renovate/helm", "dep/patch"],
+    },
+  ],
 }
