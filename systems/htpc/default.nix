@@ -1,4 +1,4 @@
-{ config, lib, pkgs, modulesPath, hostName ? "htpc", ... }:
+{ config, lib, pkgs, modulesPath, ... }:
 
 {
   imports = [
@@ -15,7 +15,7 @@
   ];
 
   boot.initrd.kernelModules = [ ];
-  boot.kernelModules = [ ];
+  boot.kernelModules = [ "kvm-intel" ];
   boot.extraModulePackages = [ ];
 
   fileSystems."/" = {
@@ -30,7 +30,7 @@
 
   swapDevices = [ ];
 
-  networking.hostName = hostName;
+  networking.hostName = "htpc";
 
   powerManagement.cpuFreqGovernor = lib.mkDefault "performance";
   hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;

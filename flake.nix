@@ -65,7 +65,7 @@
           specialArgs = { inherit keys hostName; needsRoutes = true; };
         };
 
-      mkSystem = { hostName ? "nixos", modules ? [ ] }:
+      mkSystem = { hostName ? null, modules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
           modules = nixosModules ++ modules ++ [ ./systems/nixos.nix ];
@@ -94,12 +94,13 @@
         };
 
         iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
+        nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
+        htpc = mkSystem { modules = [ ./systems/htpc ]; };
+
         cloudpi4 = mkRPi "cloudpi4" [ ];
         homepi4 = mkRPi "homepi4" [ ];
         screenpi4 = mkRPi "screenpi4" [ ];
 
-        nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
-        htpc = mkSystem { modules = [ ./systems/htpc ]; };
         "800g2-1" = mkEliteDesk "800g2-1" [ ./systems/kubeadm.nix ];
         "800g2-2" = mkEliteDesk "800g2-2" [ ./systems/kubeadm.nix ];
         "800g3-1" = mkEliteDesk "800g3-1" [
