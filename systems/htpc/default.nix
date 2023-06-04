@@ -1,4 +1,4 @@
-{ config, lib, pkgs, modulesPath, hostName ? "elitedesk", ... }:
+{ config, lib, pkgs, modulesPath, hostName ? "htpc", ... }:
 
 {
   imports = [

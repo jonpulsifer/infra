@@ -65,7 +65,7 @@
           specialArgs = { inherit keys hostName; needsRoutes = true; };
         };
 
-      mkSystem = { hostName ? null, modules ? [ ] }:
+      mkSystem = { hostName ? "nixos", modules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
           modules = nixosModules ++ modules ++ [ ./systems/nixos.nix ];
