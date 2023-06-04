@@ -6,13 +6,12 @@
   ];
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
   boot.initrd.availableKernelModules = [
-    "xhci_pci"
-    "ahci"
-    "nvme"
+    "ata_piix"
+    "ehci_pci"
     "usbhid"
     "usb_storage"
+    "sr_mod"
     "sd_mod"
-    "rtsx_pci_sdmmc"
   ];
 
   boot.initrd.kernelModules = [ ];
