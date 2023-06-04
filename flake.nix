@@ -99,6 +99,7 @@
         screenpi4 = mkRPi "screenpi4" [ ];
 
         nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
+        htpc = mkSystem { modules = [ ./systems/htpc ]; };
         "800g2-1" = mkEliteDesk "800g2-1" [ ./systems/kubeadm.nix ];
         "800g2-2" = mkEliteDesk "800g2-2" [ ./systems/kubeadm.nix ];
         "800g3-1" = mkEliteDesk "800g3-1" [
