@@ -9,9 +9,9 @@
       (modulesPath + "/installer/scan/not-detected.nix")
     ];
 
-  boot.initrd.availableKernelModules = [ "xhci_pci" "ahci" "sd_mod" ];
+  boot.initrd.availableKernelModules = [ "xhci_pci" "ahci" "sd_mod" "sr_mod" "usbhid" "usb_storage" ];
   boot.initrd.kernelModules = [ ];
-  boot.kernelModules = [ ] ++ lib.optionals (config.networking.hostName == "800g2-2") [ "kvm-intel" ];
+  boot.kernelModules = [ ] ++ lib.optionals (builtins.elem config.networking.hostName [ "800g2" "800g2-2" ]) [ "kvm-intel" ];
   boot.kernelPackages = pkgs.linuxPackages_5_15;
   boot.extraModulePackages = [ ];
 
@@ -27,7 +27,7 @@
       fsType = "vfat";
     };
 
-  fileSystems."/mnt/disks" = lib.mkIf (config.networking.hostName != "800g3-2")
+  fileSystems."/mnt/disks" = lib.mkIf (! builtins.elem config.networking.hostName [ "800g2" "800g3-2" ])
     {
       device = "/dev/disk/by-label/storage";
       fsType = "ext4";

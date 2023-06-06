@@ -101,6 +101,7 @@
         homepi4 = mkRPi "homepi4" [ ];
         screenpi4 = mkRPi "screenpi4" [ ];
 
+        "800g2" = mkEliteDesk "800g2" [ ./systems/kubeadm.nix ];
         "800g2-1" = mkEliteDesk "800g2-1" [ ./systems/kubeadm.nix ];
         "800g2-2" = mkEliteDesk "800g2-2" [ ./systems/kubeadm.nix ];
         "800g3-1" = mkEliteDesk "800g3-1" [
