@@ -27,7 +27,7 @@
       fsType = "vfat";
     };
 
-  fileSystems."/mnt/disks" = lib.mkIf (! builtins.elem config.networking.hostName [ "800g2" "800g3-2" ])
+  fileSystems."/mnt/disks" = lib.mkIf (! builtins.elem config.networking.hostName [ "800g3-2" ])
     {
       device = "/dev/disk/by-label/storage";
       fsType = "ext4";
