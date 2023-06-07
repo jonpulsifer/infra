@@ -7,8 +7,12 @@ metadata:
     pulsifer.dev/service: node-exporter
 subsets:
   - addresses:
+      - ip: 10.2.0.9
+        nodeName: htpc
       - ip: 10.2.0.20
         nodeName: cloudpi4
+      # - ip: 10.2.0.22
+      #   nodeName: homepi4
       - ip: 10.2.0.23
         nodeName: homepi4-wifi
       - ip: 10.2.0.24
