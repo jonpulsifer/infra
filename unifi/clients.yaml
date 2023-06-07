@@ -17,6 +17,10 @@ unmanaged-infra:
     model: Cisco SG300-10PP-K9 V03
 
 lab:
+  htpc:
+    mac: bc:ae:c5:6b:43:8f
+    ip: 9
+    hostname: htpc
   erx-eth0:
     mac: 74:83:c2:6e:80:6a
     ip: 5
@@ -26,10 +30,6 @@ lab:
     skip_forget_on_destroy: false
     hostname: nuc-wifi
     ip: 30
-  pikvm:
-    mac: e4:5f:01:e4:6d:1c
-    ip: 2
-    hostname: pikvm
 
 k8s:
   nuc:
@@ -54,6 +54,11 @@ k8s:
     mac: ac:e2:d3:0c:fb:b5
 
 rpis:
+  pikvm:
+    mac: e4:5f:01:e4:6d:1c
+    ip: 2
+    hostname: pikvm
+    dev-id: 4134
   cloudpi4:
     mac: dc:a6:32:35:e8:b4
     ip: 20
