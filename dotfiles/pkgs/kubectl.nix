@@ -19,7 +19,7 @@ let
       })
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubeadm";
-        hash = "sha256-FTGr/pbi6divkhkZLGXQTfhQekagga4eEBR46V0rY9o=";
+        hash = "sha256-x9MtaY6ZuQ+HcCUQTLSp8/jHB+meaBeUDyYBNbbRrQo=";
       })
     ];
     aarch64-darwin = [
