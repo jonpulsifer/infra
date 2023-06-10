@@ -63,7 +63,7 @@ in
   services.prometheus.exporters.node.enable = mkDefault true;
   programs.zsh.enable = true;
 
-  services.mingetty.autologinUser = "root";
+  services.getty.autologinUser = "root";
   security.sudo = {
     enable = true;
     wheelNeedsPassword = false;
