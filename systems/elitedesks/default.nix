@@ -12,7 +12,7 @@
   boot.initrd.availableKernelModules = [ "xhci_pci" "ahci" "sd_mod" "sr_mod" "usbhid" "usb_storage" ];
   boot.initrd.kernelModules = [ ];
   boot.kernelModules = [ ] ++ lib.optionals (builtins.elem config.networking.hostName [ "800g2" "800g2-2" ]) [ "kvm-intel" ];
-  boot.kernelPackages = pkgs.linuxPackages_5_15;
+  # boot.kernelPackages = pkgs.linuxPackages_5_15;
   boot.extraModulePackages = [ ];
 
   fileSystems."/" =

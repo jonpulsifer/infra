@@ -63,6 +63,7 @@ in
   services.prometheus.exporters.node.enable = mkDefault true;
   programs.zsh.enable = true;
 
+  services.mingetty.autologinUser = "root";
   security.sudo = {
     enable = true;
     wheelNeedsPassword = false;
@@ -121,6 +122,7 @@ in
   };
 
   virtualisation.docker.enable = false;
+  users.mutableUsers = false;
   users.users.jawn = {
     uid = 1337;
     isNormalUser = true;
@@ -159,7 +161,7 @@ in
   };
 
   system = {
-    stateVersion = "22.11";
+    stateVersion = "23.05";
     autoUpgrade = {
       enable = true;
       flake = "github.com:jonpulsifer/infra";
