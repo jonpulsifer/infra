@@ -45,7 +45,7 @@ spec:
     #   type: wireguard
     ingressController:
       enabled: true
-      loadbalancerMode: shared
+      # loadbalancerMode: shared
       enforceHttps: true
     l7Proxy: true
     loadBalancer.backend: envoy
