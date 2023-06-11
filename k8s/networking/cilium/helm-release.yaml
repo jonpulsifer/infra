@@ -24,6 +24,8 @@ spec:
     remediation:
       retries: 5
   values:
+    autoDirectNodeRoutes: true
+    devices: "eth+ eno+ eno1"
     kubeProxyReplacement: strict
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
