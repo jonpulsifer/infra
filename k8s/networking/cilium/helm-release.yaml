@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: cilium
-      version: 1.13.3
+      version: 1.14.0-snapshot.3
       sourceRef:
         kind: HelmRepository
         name: cilium
@@ -25,7 +25,7 @@ spec:
       retries: 5
   values:
     autoDirectNodeRoutes: true
-    devices: "eth+ eno+ eno1"
+    devices: eno+
     kubeProxyReplacement: strict
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
