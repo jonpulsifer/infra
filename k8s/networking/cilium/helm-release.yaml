@@ -42,6 +42,7 @@ spec:
     ingressController:
       enabled: true
     l7Proxy: true
+    loadBalancer.backend: envoy
     operator.prometheus.enabled: true
     dashboards:
       enabled: true
