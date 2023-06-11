@@ -35,12 +35,18 @@ spec:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     tunnel: disabled
+    enableXTSocketFallback: false
     bpf:
       masquerade: true
     bgpControlPlane:
       enabled: true
+    # encryption:
+    #   enabled: true
+    #   type: wireguard
     ingressController:
       enabled: true
+      loadbalancerMode: shared
+      enforceHttps: true
     l7Proxy: true
     loadBalancer.backend: envoy
     operator.prometheus.enabled: true
