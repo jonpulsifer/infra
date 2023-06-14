@@ -24,7 +24,7 @@
   # boot.kernelParams = [ "zfs.zfs_arc_max=17179860388" ];
   boot.zfs.extraPools = [ "pool" ];
   services.zfs.autoScrub.enable = true;
-  networking.hostid = "0xdeadbeef";
+  networking.hostId = "deadbeef";
   fileSystems."/pool" = {
     device = "/dev/disk/by-id/ata-WDC_WD10EALX-009BA0_WD-WCATR8566053-part3";
     fsType = "zfs";
