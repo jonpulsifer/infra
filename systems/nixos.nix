@@ -61,7 +61,10 @@ in
   time.timeZone = "Canada/Atlantic";
 
   environment.systemPackages = with pkgs; [ bash bash-completion zsh git tailscale ];
-  services.prometheus.exporters.node.enable = mkDefault true;
+  services.prometheus.exporters.node = {
+    enable = mkDefault true;
+    openFirewall = mkDefault true;
+  };
   programs.zsh.enable = true;
 
   services.getty.autologinUser = "root";
