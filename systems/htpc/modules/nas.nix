@@ -3,6 +3,7 @@
 {
   services.avahi = {
     enable = true;
+    openFirewall = true;
     nssmdns = true;
     publish = {
       enable = true;
@@ -35,6 +36,7 @@
   services.samba = {
     enable = true;
     securityType = "user";
+    openFirewall = true;
     extraConfig = ''
       workgroup = WORKGROUP
       server string = NixOS Samba Server

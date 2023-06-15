@@ -43,7 +43,7 @@
   fileSystems."/storage" = {
     device = "/dev/disk/by-label/storage";
     fsType = "ext4";
-    options = [ "nofail" ];
+    options = [ "nofail" "relatime" ];
   };
 
   swapDevices = [ ];
