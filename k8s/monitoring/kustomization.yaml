@@ -12,7 +12,7 @@ resources:
   - screenpi4.yaml
   - secret.sops.yaml
   - unpoller
-  # - datadog
+  - datadog
   - kubernetes-dashboard
 patches:
 - target:
