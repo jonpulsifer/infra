@@ -99,7 +99,7 @@
 
     shares = {
       "Time Capsule" = {
-        path = "/pool/samba/timemachine";
+        path = "/storage/samba/timemachine";
         browseable = "no";
         "read only" = "no";
         "inherit acls" = "yes";
@@ -108,7 +108,7 @@
         "force group" = "nogroup";
       };
       public = {
-        path = "/pool/samba/public";
+        path = "/storage/samba/public";
         browseable = "yes";
         "guest ok" = "yes";
         "read only" = "no";
