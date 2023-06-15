@@ -19,16 +19,16 @@
   boot.extraModulePackages = [ ];
 
   # zfs
-  boot.supportedFilesystems = [ "zfs" ];
-  boot.kernelPackages = config.boot.zfs.package.latestCompatibleLinuxPackages;
-  # boot.kernelParams = [ "zfs.zfs_arc_max=17179860388" ];
-  boot.zfs.devNodes = "/dev/disk/by-uuid";
-  services.zfs.autoScrub.enable = true;
-  networking.hostId = "deadbeef";
-  fileSystems."/pool" = {
-    device = "/dev/disk/by-id/ata-WDC_WD10EALX-009BA0_WD-WCATR8566053-part3";
-    fsType = "zfs";
-  };
+  # boot.supportedFilesystems = [ "zfs" ];
+  # boot.kernelPackages = config.boot.zfs.package.latestCompatibleLinuxPackages;
+  # # boot.kernelParams = [ "zfs.zfs_arc_max=17179860388" ];
+  # boot.zfs.devNodes = "/dev/disk/by-uuid";
+  # services.zfs.autoScrub.enable = true;
+  # networking.hostId = "deadbeef";
+  # fileSystems."/pool" = {
+  #   device = "/dev/disk/by-id/ata-WDC_WD10EALX-009BA0_WD-WCATR8566053-part3";
+  #   fsType = "zfs";
+  # };
 
   fileSystems."/" = {
     device = "/dev/disk/by-label/nixos";
@@ -38,6 +38,11 @@
   fileSystems."/boot" = {
     device = "/dev/disk/by-label/boot";
     fsType = "vfat";
+  };
+
+  fileSystems."/storage" = {
+    device = "/dev/disk/by-label/storage";
+    fsType = "ext4";
   };
 
   swapDevices = [ ];
