@@ -5,7 +5,7 @@ resources:
   - actions-runner-controller.yaml
   - argo.yaml
   - cilium.yaml
-  # - datadog.yaml
+  - datadog.yaml
   - external-dns.yaml
   - falco.yaml
   - grafana.yaml
