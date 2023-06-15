@@ -22,7 +22,7 @@
   boot.supportedFilesystems = [ "zfs" ];
   boot.kernelPackages = config.boot.zfs.package.latestCompatibleLinuxPackages;
   # boot.kernelParams = [ "zfs.zfs_arc_max=17179860388" ];
-  boot.zfs.extraPools = [ "pool" ];
+  boot.zfs.devNodes = "/dev/disk/by-uuid";
   services.zfs.autoScrub.enable = true;
   networking.hostId = "deadbeef";
   fileSystems."/pool" = {
