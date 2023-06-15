@@ -1,6 +1,7 @@
 { config, lib, pkgs, keys, needsRoutes, ... }:
 let
   inherit (lib) mkDefault mkForce;
+  sshKeys = lib.splitString "\n" (builtins.readFile keys);
 in
 {
   imports = [
@@ -59,7 +60,7 @@ in
   i18n.defaultLocale = "en_US.UTF-8";
   time.timeZone = "Canada/Atlantic";
 
-  environment.systemPackages = with pkgs; [ bash bash-completion tailscale ];
+  environment.systemPackages = with pkgs; [ bash bash-completion zsh git tailscale ];
   services.prometheus.exporters.node.enable = mkDefault true;
   programs.zsh.enable = true;
 
@@ -127,7 +128,7 @@ in
     uid = 1337;
     isNormalUser = true;
     extraGroups = [ "wheel" "tty" ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
-    openssh.authorizedKeys.keys = lib.splitString "\n" (builtins.readFile keys);
+    openssh.authorizedKeys.keys = sshKeys;
     shell = pkgs.zsh;
   };
 
