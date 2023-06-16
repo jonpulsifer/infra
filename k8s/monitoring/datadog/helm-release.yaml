@@ -24,6 +24,7 @@ spec:
       retries: 5
   values:
     datadog:
+      clusterName: lab
       apiKeyExistingSecret: datadog-api-key
       kubelet:
         tlsVerify: false
