@@ -29,6 +29,9 @@ spec:
         tlsVerify: false
       processAgent:
         enabled: true
+        processCollection: true
+      orchestratorExplorer:
+        enabled: true
     agents:
       tolerations:
       - key: node-role.kubernetes.io/master
