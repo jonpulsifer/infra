@@ -19,8 +19,8 @@
             (optionalAttrs (prev.stdenv.system == "aarch64-darwin") {
               inherit (final.pkgs-x86) emacsMacport nerdctl;
             }))
-          (import ./overlays/httpie) # 2022-12-18 httpie tests are broken
-          (import ./overlays/opa) # 2023-02-04 opa tests are broken
+          # (import ./overlays/httpie) # 2022-12-18 httpie tests are broken
+          # (import ./overlays/opa) # 2023-02-04 opa tests are broken
           (import ./pkgs)
         ];
       };
@@ -43,7 +43,6 @@
       ];
     in
     {
-
       devShells.x86_64-linux.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.x86_64-linux; };
       devShells.aarch64-darwin.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.aarch64-darwin; };
 
@@ -81,13 +80,14 @@
           modules = common ++ [
             ./systems/macbookpro.nix
             { home-manager.users.jawn = import ./home/work.nix; }
+            { documentation.enable = false; } # 2023-06-20 docs are broken
           ];
         };
         JTWV573RHQ = hackbookpro;
       };
 
-      # export nixos modules for use in other systems
-      nixosModules = {
+      # export home-manager modules for use in other systems
+      home = {
         basic = import ./home/basic.nix;
         full = import ./home/home.nix;
       };

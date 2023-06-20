@@ -31,10 +31,19 @@ in
     };
 
     aliases = {
+      yeet = "!git commit -sm \"$(curl -s https://whatthecommit.com/index.txt)\" && git push";
+      lol = "log --graph --decorate --pretty=oneline --abbrev-commit --all";
+      stash-pull-pop = "!git stash && git pull --rebase && git stash pop";
+      letsgo = "!{ git checkout main || git checkout master; } && git pull --rebase";
       co = "checkout";
       d = "diff";
       s = "status";
       f = "fetch";
+      del = "branch -D";
+      br = "branch --format='%(HEAD) %(color:yellow)%(refname:short)%(color:reset) - %(contents:subject) %(color:green)(%(committerdate:relative)) [%(authorname)]' --sort=-committerdate";
+      save = "!git add -A && git commit -m 'chore: savepoint'";
+      undo = "reset HEAD~1 --mixed";
+      lg = "!git log --pretty=format:\"%C(dim blue)%h%Creset -%C(red)%d%Creset %s %C(dim cyan)(%cr) [%an]\" --abbrev-commit -30";
     };
 
     ignores = [
