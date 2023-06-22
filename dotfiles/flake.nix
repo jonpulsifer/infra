@@ -80,7 +80,6 @@
           modules = common ++ [
             ./systems/macbookpro.nix
             { home-manager.users.jawn = import ./home/work.nix; }
-            { documentation.enable = false; } # 2023-06-20 docs are broken
           ];
         };
         JTWV573RHQ = hackbookpro;
