@@ -40,7 +40,7 @@
         { home-manager.useUserPackages = true; }
         { home-manager.useGlobalPkgs = true; }
         home-manager.nixosModules.home-manager
-        { home-manager.users.jawn = dotfiles.nixosModules.basic; }
+        { home-manager.users.jawn = dotfiles.home.basic; }
         { system.configurationRevision = mkIf (self ? rev) self.rev; }
       ];
 
@@ -77,10 +77,8 @@
     in
     {
       formatter.x86_64-linux = nixos.legacyPackages.x86_64-linux.nixpkgs-fmt;
-      formatter.aarch64-darwin = nixos.legacyPackages.aarch64-darwin.nixpkgs-fmt;
       devShells = {
         x86_64-linux.default = import ./shell.nix { pkgs = nixos.legacyPackages.x86_64-linux; };
-        aarch64-darwin.default = import ./shell.nix { pkgs = nixos.legacyPackages.aarch64-darwin; };
       };
 
       nixosConfigurations = rec {
@@ -89,7 +87,7 @@
           modules = [
             wsl.nixosModules.wsl
             ./systems/wsl
-            { home-manager.users.jawn = dotfiles.nixosModules.full; }
+            { home-manager.users.jawn = dotfiles.home.full; }
           ];
         };
 
