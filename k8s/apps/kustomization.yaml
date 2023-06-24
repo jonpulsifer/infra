@@ -11,6 +11,7 @@ resources:
   # - falco
   - flux-system
   - headerz
+  - postgres
   # - minecraft
   # - satisfactory
   - vault
