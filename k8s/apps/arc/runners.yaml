@@ -9,3 +9,14 @@ spec:
   template:
     spec:
       repository: jonpulsifer/infra
+---
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: infra
+  namespace: arc
+spec:
+  replicas: 1
+  template:
+    spec:
+      repository: jonpulsifer/ts
