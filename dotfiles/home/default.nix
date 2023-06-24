@@ -26,6 +26,7 @@ in
       age
       gh
       gptcommit
+      postgresql_15
       sops
       terraform
       vault
