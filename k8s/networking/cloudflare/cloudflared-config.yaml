@@ -21,5 +21,5 @@ ingress:
 - hostname: cf2.lolwtf.ca
   service: hello_world
 - hostname: db.lolwtf.ca
-  service: tcp://postgres-0.postgres.postgres:5432
+  service: tcp://postgres-0.postgres.postgres.svc.cluster.local:5432
 - service: http_status:404
