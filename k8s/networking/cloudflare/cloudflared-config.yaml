@@ -1,25 +1,10 @@
-# Name of the tunnel you want to run
 tunnel: lab
 credentials-file: /etc/cloudflared/credentials.json
-# Serves the metrics server under /metrics and the readiness server under /ready
 metrics: 0.0.0.0:2000
 no-autoupdate: true
-# The `ingress` block tells cloudflared which local service to route incoming
-# requests to. For more about ingress rules, see
-# https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/configuration/ingress
-#
-# Remember, these rules route traffic from cloudflared to a local service. To route traffic
-# from the internet to cloudflared, run `cloudflared tunnel route dns <tunnel> <hostname>`.
-# E.g. `cloudflared tunnel route dns example-tunnel tunnel.example.com`.
 ingress:
-# The first rule proxies traffic to the httpbin sample Service defined in app.yaml
 - hostname: cf.lolwtf.ca
   service: http://headerz.headerz:8080
-# This rule sends traffic to the built-in hello-world HTTP server. This can help debug connectivity
-# issues. If hello.example.com resolves and tunnel.example.com does not, then the problem is
-# in the connection from cloudflared to your local service, not from the internet to cloudflared.
-- hostname: cf2.lolwtf.ca
-  service: hello_world
-- hostname: db.lolwtf.ca
-  service: tcp://postgres-external.postgres:5432
 - service: http_status:404
+# - hostname: wishin.lolwtf.ca
+#   service: http://wishin.wishin:8080
