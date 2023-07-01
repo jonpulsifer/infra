@@ -20,4 +20,6 @@ ingress:
 # in the connection from cloudflared to your local service, not from the internet to cloudflared.
 - hostname: cf2.lolwtf.ca
   service: hello_world
+- hostname: db.lolwtf.ca
+  service: tcp://postgres.postgres:5432
 - service: http_status:404
