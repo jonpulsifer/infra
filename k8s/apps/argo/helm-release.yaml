@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: argo-cd
-      version: 5.36.11
+      version: 5.36.13
       sourceRef:
         kind: HelmRepository
         name: argo
