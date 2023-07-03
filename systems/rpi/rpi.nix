@@ -27,7 +27,7 @@ in
     consoleLogLevel = 7;
     loader = {
       # we legacy boot
-      systemd-boot.enable = true;
+      systemd-boot.enable = false;
       efi.canTouchEfiVariables = false;
       timeout = mkForce 1;
     };
