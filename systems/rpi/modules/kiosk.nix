@@ -23,6 +23,4 @@
     extraArguments = [ "-d" ];
     program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
   };
-  systemd.services."getty@tty1".enable = false;
-  systemd.services."autovt@".enable = false;
 }
