@@ -27,8 +27,8 @@
   '';
   services.xserver.displayManager.autoLogin.enable = true;
   services.xserver.displayManager.autoLogin.user = "kiosk";
+  services.xserver.displayManager.defaultSession = "none+i3";
   services.xserver.desktopManager.xterm.enable = false;
-  services.xserver.windowManager.default = "i3";
   services.xserver.windowManager.i3.enable = true;
   services.xserver.windowManager.i3.configFile = pkgs.writeText "config" ''
     set $mod Mod4
