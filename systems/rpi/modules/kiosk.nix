@@ -4,7 +4,7 @@ let
     #!${pkgs.bash}/bin/bash
     # End all lines with '&' to not halt startup script execution
 
-    firefox --kiosk https://headerz.lolwtf.ca/ &
+    ${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca/ &
   '';
 
   inherit (pkgs) writeScript;
