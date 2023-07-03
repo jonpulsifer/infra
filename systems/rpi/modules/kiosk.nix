@@ -28,7 +28,7 @@ in
     displayManager = {
       defaultSession = "none+openbox";
       autoLogin = {
-        inherit user;
+        user = "kiosk";
         enable = true;
       };
     };
