@@ -1,10 +1,6 @@
 { config, pkgs, ... }:
 
 {
-  boot.initrd = {
-    kernelModules = [ "vc4" ];
-    availableKernelModules = [ "usbhid" "usb_storage" "vc4" "bcm2835_dma" "i2c_bcm2835" ];
-  };
   users.users.kiosk = {
     isNormalUser = true;
     openssh.authorizedKeys.keys = config.users.users.jawn.openssh.authorizedKeys.keys;
@@ -16,4 +12,6 @@
     user = "kiosk";
     program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
   };
+  systemd.services."getty@tty1".enable = false;
+  systemd.services."autovt@".enable = false;
 }
