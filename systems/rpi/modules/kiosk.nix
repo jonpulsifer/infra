@@ -1,7 +1,7 @@
 { config, pkgs, ... }:
 
 {
-  boot = {
+  boot.initrd = {
     kernelModules = [ "vc4" ];
     availableKernelModules = [ "usbhid" "usb_storage" "vc4" "bcm2835_dma" "i2c_bcm2835" ];
   };
