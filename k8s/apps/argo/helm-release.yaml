@@ -5,7 +5,6 @@ metadata:
   name: argo
   namespace: argo
 spec:
-  interval: 1h0m0s
   chart:
     spec:
       chart: argo-cd
@@ -14,15 +13,6 @@ spec:
         kind: HelmRepository
         name: argo
         namespace: flux-system
-      interval: 1h0m0s
-  install:
-    createNamespace: true
-    remediation:
-      retries: 5
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 5
   values:
     configs:
       redis.exporter.enabled: true
