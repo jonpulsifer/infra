@@ -13,7 +13,7 @@ resources:
   - headerz
   - postgres
   # - minecraft
-  # - satisfactory
+  - satisfactory
   - vault
 patches:
   - target:
@@ -30,3 +30,15 @@ patches:
       - op: replace
         path: /spec/maxHistory
         value: 2
+      - op: replace
+        path: /spec/install/createNamespace
+        value: true
+      - op: replace
+        path: /spec/install/remediation/retries
+        value: 5
+      - op: replace
+        path: /spec/upgrade/cleanupOnFail
+        value: true
+      - op: replace
+        path: /spec/upgrade/remediation/retries
+        value: 5

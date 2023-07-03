@@ -5,28 +5,23 @@ metadata:
   name: satisfactory
   namespace: satisfactory
 spec:
-  interval: 1h0m0s
   chart:
     spec:
       chart: satisfactory
-      version: 0.1.9
+      version: 0.1.10
       sourceRef:
         kind: HelmRepository
         name: jonpulsifer
         namespace: flux-system
-      interval: 1h0m0s
-  install:
-    createNamespace: true
-    remediation:
-      retries: 5
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 5
   values:
-    replicaCount: 0
+    replicaCount: 1
     env:
       AUTOPAUSE: false
     service:
       annotations:
         external-dns.alpha.kubernetes.io/hostname: "satisfactory.${SECRET_DOMAIN}"
+    resources:
+      limits:
+        memory: 16Gi
+      requests:
+        memory: 8Gi
