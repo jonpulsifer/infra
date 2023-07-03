@@ -5,7 +5,6 @@ metadata:
   name: falco
   namespace: falco
 spec:
-  interval: 1h0m0s
   chart:
     spec:
       chart: falco
@@ -14,15 +13,6 @@ spec:
         kind: HelmRepository
         name: falco
         namespace: flux-system
-      interval: 1h0m0s
-  install:
-    createNamespace: true
-    remediation:
-      retries: 5
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 5
   values:
     driver:
       enabled: true

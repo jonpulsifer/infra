@@ -5,7 +5,6 @@ metadata:
   name: actions-runner-controller
   namespace: arc
 spec:
-  interval: 24h
   chart:
     spec:
       chart: actions-runner-controller
@@ -14,15 +13,8 @@ spec:
         kind: HelmRepository
         name: actions-runner-controller
         namespace: flux-system
-      interval: 24h
   install:
     createNamespace: false
-    remediation:
-      retries: 5
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 5
   values:
     authSecret:
       enabled: true

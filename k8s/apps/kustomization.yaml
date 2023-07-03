@@ -31,8 +31,8 @@ patches:
         path: /spec/maxHistory
         value: 2
       - op: replace
-        path: /spec/install/-
+        path: /spec/install
         value: { createNamespace: true, remediation: { retries: 5 } }
       - op: replace
-        path: /spec/upgrade/-
+        path: /spec/upgrade
         value: { cleanupOnFail: true, remediation: { retries: 5 } }
