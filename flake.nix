@@ -96,7 +96,7 @@
         htpc = mkSystem { modules = [ ./systems/htpc ]; };
 
         cloudpi4 = mkRPi "cloudpi4" [ ];
-        homepi4 = mkRPi "homepi4" [ ];
+        homepi4 = mkRPi "homepi4" [ ./systems/rpi/modules/kiosk.nix ];
         screenpi4 = mkRPi "screenpi4" [ ];
 
         "800g2" = mkEliteDesk "800g2" [ ./systems/kubeadm.nix ];
