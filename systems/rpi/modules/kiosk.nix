@@ -1,6 +1,10 @@
 { config, pkgs, ... }:
 
 {
+  boot = {
+    kernelModules = [ "vc4" ];
+    availableKernelModules = [ "usbhid" "usb_storage" "vc4" "bcm2835_dma" "i2c_bcm2835" ];
+  };
   users.users.kiosk = {
     isNormalUser = true;
     openssh.authorizedKeys.keys = config.users.users.jawn.openssh.authorizedKeys.keys;
@@ -12,12 +16,4 @@
     user = "kiosk";
     program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
   };
-
-  systemd.services."cage-tty1".environment = {
-    "DISPLAY" = ":0.0";
-  };
-  systemd.services."cage-tty1".after = [
-    "network-online.target"
-    "systemd-resolved.service"
-  ];
 }
