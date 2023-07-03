@@ -1,7 +1,7 @@
 { config, pkgs, ... }:
 
 {
-  config.hardware.raspberry-pi."4".touch-ft5406.enable = true;
+  hardware.raspberry-pi."4".touch-ft5406.enable = true;
 
   users.users.kiosk = {
     isNormalUser = true;
