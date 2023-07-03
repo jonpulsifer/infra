@@ -1,26 +1,47 @@
 { config, pkgs, ... }:
 
 {
-  boot.plymouth.enable = true;
-
-  services.dbus.enable = true;
-
-  environment.systemPackages = [ pkgs.hicolor-icon-theme ];
-
-  fonts.enableDefaultFonts = true;
-  xdg.icons.enable = true;
-  gtk.iconCache.enable = true;
-
   users.users.kiosk = {
     isNormalUser = true;
     openssh.authorizedKeys.keys = config.users.users.jawn.openssh.authorizedKeys.keys;
-    extraGroups = [ "tty" ];
+    extraGroups = [
+      "audio"
+      "input"
+      "networkmanager"
+      "tty"
+      "video"
+    ];
     shell = pkgs.zsh;
   };
   services.cage = {
-    enable = true;
+    enable = false;
     user = "kiosk";
-    extraArguments = [ "-d" ];
+    # extraArguments = [ "-d" ];
     program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
   };
+  services.xserver.enable = true;
+  services.xserver.config = ''
+    Section "ServerFlags"
+      Option  "DontVTSwitch"  "True"
+    EndSection
+  '';
+  services.xserver.synaptics.enable = true;
+  services.xserver.displayManager.auto.enable = true;
+  services.xserver.displayManager.auto.user = "user";
+  services.xserver.desktopManager.xterm.enable = false;
+  services.xserver.windowManager.default = "i3";
+  services.xserver.windowManager.i3.enable = true;
+  services.xserver.windowManager.i3.configFile = pkgs.writeText "config" ''
+    set $mod Mod4
+    new_window 1pixel
+    for_window [class="Surf"] fullscreen
+    exec --no-startup-id nm-applet
+    exec surf -k "https://headerz.lolwtf.ca/"
+  '';
+
+  environment.systemPackages = with pkgs; [
+    surf
+    i3status
+    networkmanagerapplet
+  ];
 }
