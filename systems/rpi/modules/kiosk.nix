@@ -25,7 +25,6 @@
       Option  "DontVTSwitch"  "True"
     EndSection
   '';
-  services.xserver.synaptics.enable = true;
   services.xserver.displayManager.autoLogin.enable = true;
   services.xserver.displayManager.autoLogin.user = "kiosk";
   services.xserver.desktopManager.xterm.enable = false;
