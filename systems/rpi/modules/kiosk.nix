@@ -14,7 +14,7 @@
   };
 
   systemd.services."cage-tty1".environment = {
-    "DISPLAY" = ":0";
+    "DISPLAY" = ":0.0";
   };
   systemd.services."cage-tty1".after = [
     "network-online.target"
