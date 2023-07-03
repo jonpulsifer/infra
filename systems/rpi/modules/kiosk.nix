@@ -9,6 +9,6 @@
   services.cage = {
     enable = true;
     user = "kiosk";
-    program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
+    program = "DISPLAY=0:0 ${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
   };
 }
