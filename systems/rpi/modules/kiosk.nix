@@ -9,6 +9,6 @@
   services.cage = {
     enable = true;
     user = "kiosk";
-    program = "${pkgs.firefox}/bin/firefox -kiosk -private-window file:///home/solene/monitoring.html";
+    program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
   };
 }

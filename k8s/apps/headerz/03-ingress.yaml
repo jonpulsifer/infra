@@ -12,7 +12,7 @@ metadata:
     hajimari.io/enable: "true"
     hajimari.io/icon: mdi:access-point-check
 spec:
-  ingressClassName: cilium
+  ingressClassName: nginx
   rules:
   - host: headerz.lolwtf.ca
     http:
