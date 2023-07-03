@@ -68,7 +68,6 @@ in
   };
   programs.zsh.enable = true;
 
-  services.getty.autologinUser = mkDefault "root";
   security.sudo = {
     enable = true;
     wheelNeedsPassword = false;
