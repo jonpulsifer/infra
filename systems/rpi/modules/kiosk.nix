@@ -1,15 +1,16 @@
 { config, pkgs, ... }:
-
+let
+  kioskUser = "kiosk";
+  kioskUrl = "https://headerz.lolwtf.ca";
+in
 {
   hardware.raspberry-pi."4".touch-ft5406.enable = true;
-
-  users.users.kiosk = {
+  users.users.${kioskUser} = {
     isNormalUser = true;
     openssh.authorizedKeys.keys = config.users.users.jawn.openssh.authorizedKeys.keys;
     extraGroups = [
       "audio"
       "input"
-      "networkmanager"
       "tty"
       "video"
     ];
@@ -17,8 +18,8 @@
   };
   services.cage = {
     enable = true;
-    user = "kiosk";
+    user = kioskUser;
     # extraArguments = [ "-d" ];
-    program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
+    program = "${pkgs.firefox}/bin/firefox -kiosk -private-window ${kioskUrl}";
   };
 }
