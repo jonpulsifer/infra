@@ -9,6 +9,14 @@
   services.cage = {
     enable = true;
     user = "kiosk";
-    program = "DISPLAY=0:0 ${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
+    program = "${pkgs.firefox}/bin/firefox -kiosk -private-window https://headerz.lolwtf.ca";
   };
+
+  systemd.services."cage-tty1".environment = {
+    "DISPLAY" = ":0";
+  };
+  systemd.services."cage-tty1".after = [
+    "network-online.target"
+    "systemd-resolved.service"
+  ];
 }
