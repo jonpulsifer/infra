@@ -42,6 +42,5 @@
   environment.systemPackages = with pkgs; [
     surf
     i3status
-    networkmanagerapplet
   ];
 }
