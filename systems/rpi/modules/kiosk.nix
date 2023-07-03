@@ -4,6 +4,7 @@
   users.users.kiosk = {
     isNormalUser = true;
     openssh.authorizedKeys.keys = config.users.users.jawn.openssh.authorizedKeys.keys;
+    extraGroups = [ "tty" ];
     shell = pkgs.zsh;
   };
   services.cage = {
