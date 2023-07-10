@@ -20,9 +20,17 @@ in
   };
   services.xserver = {
     enable = true;
-    displayManager.lightdm.enable = true;
-    displayManager.autoLogin.enable = true;
-    displayManager.autoLogin.user = kioskUser;
-    displayManager.defaultSession = "none+i3";
+    windowManager.i3.enable = true;
+    displayManager = {
+      defaultSession = "none+i3";
+      lightdm = {
+        enable = true;
+        autoLogin = {
+          enable = true;
+          user = kioskUser;
+        };
+      };
+    };
   };
+
 }
