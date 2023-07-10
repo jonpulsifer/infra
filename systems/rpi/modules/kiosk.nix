@@ -4,6 +4,7 @@ let
   kioskUrl = "https://headerz.lolwtf.ca";
 in
 {
+  boot.kernelParams = [ "nomodeset" ];
   hardware.raspberry-pi."4".touch-ft5406.enable = true;
 
   users.users.${kioskUser} = {
