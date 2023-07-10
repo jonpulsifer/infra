@@ -25,6 +25,7 @@ in
     hostName = mkDefault "nixos";
     firewall.enable = true;
     useDHCP = false;
+    networkmanager.enable = mkDefault false;
     wireless = {
       enable = false;
       networks = mkDefault { lab = { hidden = true; }; };
