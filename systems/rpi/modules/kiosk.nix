@@ -25,10 +25,10 @@ in
       defaultSession = "none+i3";
       lightdm = {
         enable = true;
-        autoLogin = {
-          enable = true;
-          user = kioskUser;
-        };
+      };
+      autoLogin = {
+        enable = true;
+        user = kioskUser;
       };
     };
   };
