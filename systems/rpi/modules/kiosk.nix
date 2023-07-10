@@ -5,6 +5,8 @@ let
 in
 {
   hardware.raspberry-pi."4".touch-ft5406.enable = true;
+  hardware.raspberry-pi."4".fkms-3d.enable = true;
+
   users.users.${kioskUser} = {
     isNormalUser = true;
     openssh.authorizedKeys.keys = config.users.users.jawn.openssh.authorizedKeys.keys;
@@ -16,10 +18,9 @@ in
     ];
     shell = pkgs.zsh;
   };
-  services.cage = {
+  services.xserver = {
     enable = true;
-    user = kioskUser;
-    # extraArguments = [ "-d" ];
-    program = "${pkgs.firefox}/bin/firefox -kiosk -private-window ${kioskUrl}";
+    displayManager.lightdm.enable = true;
+    desktopManager.gnome3.enable = true;
   };
 }
