@@ -23,5 +23,6 @@ in
     displayManager.lightdm.enable = true;
     displayManager.autoLogin.enable = true;
     displayManager.autoLogin.user = kioskUser;
+    displayManager.defaultSession = "none+i3";
   };
 }
