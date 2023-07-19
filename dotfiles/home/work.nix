@@ -10,7 +10,7 @@ let
 in
 {
   imports = [ ./default.nix ./gui.nix ];
-  home.packages = with pkgs; [ awscli2 argocd postgresql python3 terraform-docs ];
+  home.packages = with pkgs; [ awscli2 python3 terraform-docs ];
   programs.git = {
     userEmail = mkForce email;
     signing.key = mkForce "~/.ssh/${toLower company}_ed25519";
