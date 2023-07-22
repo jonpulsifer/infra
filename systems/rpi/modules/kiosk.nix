@@ -4,8 +4,10 @@ let
   kioskUrl = "https://headerz.lolwtf.ca";
   autostart = ''
     #!${pkgs.bash}/bin/bash
-    # End all lines with '&' to not halt startup script execution
-
+    xset dpms force on
+    xset -dpms &
+    xset s noblank &
+    xset s off &
     # https://developer.mozilla.org/en-US/docs/Mozilla/Command_Line_Options
     ${pkgs.firefox}/bin/firefox --kiosk ${kioskUrl} &
   '';
@@ -28,6 +30,13 @@ in
 
   services.xserver = {
     enable = true;
+    monitorSection = ''
+      Option   "NODPMS"
+    '';
+    serverLayoutSection = ''
+      Option   "BlankTime" "0"
+      Option   "DPMS" "false"
+    '';
     config = ''
       Section "ServerFlags"
         Option  "DontVTSwitch"  "True"
