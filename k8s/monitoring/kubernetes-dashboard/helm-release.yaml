@@ -24,6 +24,8 @@ spec:
     remediation:
       retries: 5
   values:
+    cert-manager.enabled: false
+    nginx.enabled: false
     rbac:
       create: true
       clusterReadOnlyRole: true
