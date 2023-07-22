@@ -14,7 +14,7 @@ in
   boot = {
     kernelPackages = pkgs.linuxPackages_rpi4;
     kernelParams = [
-      "console=tty0"
+      "console=tty1"
       "cma=256M"
       "cgroup_enable=cpuset"
       "cgroup_enable=memory"
