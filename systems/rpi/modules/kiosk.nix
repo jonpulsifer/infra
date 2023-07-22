@@ -28,8 +28,6 @@ in
 
   hardware.opengl.enable = true;
   hardware.bluetooth.enable = true;
-  sound.enable = true;
-  hardware.pulseaudio.enable = true;
   services.dbus.enable = true;
 
   systemd.services."cage@" = {
