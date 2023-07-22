@@ -59,15 +59,6 @@ in
   hardware.bluetooth.enable = true;
   services.dbus.enable = true;
 
-  systemd.services."cage@" = {
-    serviceConfig.Restart = "always";
-    environment = {
-      WLR_LIBINPUT_NO_DEVICES = "1";
-      NO_AT_BRIDGE = "1";
-      COG_URL = "https://duckduckgo.com"; # used if no url is specified
-    };
-  };
-
   systemd.enableEmergencyMode = false;
   systemd.services."serial-getty@ttyS0".enable = false;
   systemd.services."serial-getty@hvc0".enable = false;
