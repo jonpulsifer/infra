@@ -4,7 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - kube-prometheus.yaml
-  - local-grafana-dashboards.yaml
+  - dashboards
   - local-node-exporters.yaml
   - loki.yaml
   - metrics-server.yaml
@@ -12,7 +12,6 @@ resources:
   - screenpi4.yaml
   - secret.sops.yaml
   - unpoller
-  - datadog
   - kubernetes-dashboard
 patches:
 - target:
