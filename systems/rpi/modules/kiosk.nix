@@ -18,28 +18,42 @@ in
     ];
     shell = pkgs.zsh;
   };
+
   environment.systemPackages = with pkgs; [
     surf
     i3status
   ];
-  services.xserver.enable = true;
-  services.xserver.config = ''
-    Section "ServerFlags"
-      Option  "DontVTSwitch"  "True"
-    EndSection
-  '';
-  services.xserver.synaptics.enable = true;
-  services.xserver.displayManager.auto.enable = true;
-  services.xserver.displayManager.auto.user = "user";
-  services.xserver.desktopManager.xterm.enable = false;
-  services.xserver.windowManager.default = "i3";
-  services.xserver.windowManager.i3.enable = true;
-  services.xserver.windowManager.i3.configFile = pkgs.writeText "config" ''
-    set $mod Mod4
-    new_window 1pixel
-    for_window [class="Surf"] fullscreen
-    exec surf -k "https://www.google.com/"
-  '';
+
+  services.xserver = {
+    enable = true;
+    config = ''
+      Section "ServerFlags"
+        Option  "DontVTSwitch"  "True"
+      EndSection
+    '';
+    desktopManager = {
+      default = "none";
+      xterm.enable = false;
+    };
+    displayManager = {
+      lightdm = {
+        enable = true;
+        greeter.enable = false;
+        autoLogin.enable = true;
+        autoLogin.user = "mudrii";
+      };
+    };
+    windowManager = {
+      default = "i3";
+      i3.enable = true;
+      i3.configFile = pkgs.writeText "config" ''
+        set $mod Mod4
+        new_window 1pixel
+        for_window [class="Surf"] fullscreen
+        exec surf -k "https://www.google.com/"
+      '';
+    };
+  };
 
   hardware.opengl.enable = true;
   hardware.bluetooth.enable = true;
