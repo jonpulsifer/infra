@@ -20,7 +20,6 @@ in
   };
 
   environment.systemPackages = with pkgs; [
-    surf
     i3status
   ];
 
@@ -51,7 +50,7 @@ in
         set $mod Mod4
         new_window 1pixel
         for_window [class="Surf"] fullscreen
-        exec surf -k "https://hajimari.lolwtf.ca"
+        exec ${pkgs.firefox}/bin/firefox -kiosk "https://hajimari.lolwtf.ca"
       '';
     };
   };
@@ -61,6 +60,11 @@ in
   services.dbus.enable = true;
 
   systemd.enableEmergencyMode = false;
+  systemd.services."serial-getty@ttyS0".enable = false;
+  systemd.services."serial-getty@hvc0".enable = false;
+  systemd.services."getty@tty1".enable = false;
+  systemd.services."autovt@".enable = false;
+
   documentation.enable = false;
   programs.command-not-found.enable = false;
 
