@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 let
   kioskUser = "kiosk";
   kioskUrl = "https://headerz.lolwtf.ca";
