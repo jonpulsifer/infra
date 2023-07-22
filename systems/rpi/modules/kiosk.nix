@@ -53,7 +53,7 @@ in
     };
     windowManager.openbox.enable = true;
   };
-  environment.etc."openbox/autostart".source = writeScript "autostart" autostart;
+  environment.etc."openbox/autostart".source = pkgs.writeScript "autostart" autostart;
   nixpkgs.overlays = with pkgs; [
     (self: super: {
       openbox = super.openbox.overrideAttrs (oldAttrs: rec {
