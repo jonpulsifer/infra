@@ -25,11 +25,11 @@ in
 
   services.xserver = {
     enable = true;
-    # config = ''
-    #   Section "ServerFlags"
-    #     Option  "DontVTSwitch"  "True"
-    #   EndSection
-    # '';
+    config = ''
+      Section "ServerFlags"
+        Option  "DontVTSwitch"  "True"
+      EndSection
+    '';
     desktopManager = {
       xterm.enable = false;
     };
