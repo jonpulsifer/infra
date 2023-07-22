@@ -108,59 +108,6 @@ in
 
   nixpkgs = {
     overlays = [
-
-      # Disable some things that don’t cross compile
-      (self: super: lib.optionalAttrs (super.stdenv.hostPlatform != super.stdenv.buildPlatform) {
-        gtk3 = super.gtk3.override { cupsSupport = false; };
-        webkitgtk = super.webkitgtk.override {
-          enableGeoLocation = false;
-          stdenv = super.stdenv;
-        };
-        gst_all_1 = super.gst_all_1 // {
-          gst-plugins-good = null;
-          gst-plugins-bad = null;
-          gst-plugins-ugly = null;
-          gst-libav = null;
-        };
-
-        # cython pulls in target-specific gdb
-        python37 = super.python37.override {
-          packageOverrides = self: super: { cython = super.cython.override { gdb = null; }; };
-        };
-
-        # doesn’t cross compile
-        libass = super.libass.override { encaSupport = false; };
-        libproxy = super.libproxy.override { networkmanager = null; };
-        enchant2 = super.enchant2.override { hspell = null; };
-        cage = super.cage.override { xwayland = null; };
-
-        alsaPlugins = super.alsaPlugins.override { libjack2 = null; };
-        fluidsynth = super.fluidsynth.override { libjack2 = null; };
-        portaudio = super.portaudio.override { libjack2 = null; };
-
-        ffmpeg_4 = super.ffmpeg_4.override ({
-          sdlSupport = false;
-          # some ffmpeg libs are compiled with neon which rpi0 doesn’t support
-        } // lib.optionalAttrs (super.stdenv.hostPlatform.parsed.cpu.name == "armv6l") {
-          libopus = null;
-          x264 = null;
-          x265 = null;
-          soxr = null;
-        });
-        ffmpeg = super.ffmpeg.override ({
-          sdlSupport = false;
-        } // lib.optionalAttrs (super.stdenv.hostPlatform.parsed.cpu.name == "armv6l") {
-          libopus = null;
-          x264 = null;
-          x265 = null;
-          soxr = null;
-        });
-
-        mesa = super.mesa.override { eglPlatforms = [ "wayland" ]; };
-
-        busybox-sandbox-shell = super.busybox-sandbox-shell.override { inherit (super) busybox; };
-
-      })
       (self: super: {
         grub2 = super.grub2.override { zfsSupport = false; };
 
