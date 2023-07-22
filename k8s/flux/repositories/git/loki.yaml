@@ -12,5 +12,5 @@ spec:
   ignore: |
     # exclude all
     /*
-    # include assemblyline directory
+    # include loki directory
     !/production/helm/loki
