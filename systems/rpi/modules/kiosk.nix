@@ -18,7 +18,9 @@ in
     ];
     shell = pkgs.zsh;
   };
-
+  programs.sway = {
+    enable = true;
+  };
   services.cage = {
     enable = true;
     user = kioskUser;
