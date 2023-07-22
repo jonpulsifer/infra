@@ -25,18 +25,4 @@ in
     # extraArguments = [ "-d" ];
     program = "${pkgs.firefox}/bin/firefox -kiosk -private-window ${kioskUrl}";
   };
-
-  systemd.services."cage@" = {
-    serviceConfig.Restart = "always";
-    environment = {
-      WLR_LIBINPUT_NO_DEVICES = "1";
-      NO_AT_BRIDGE = "1";
-    };
-  };
-
-  systemd.enableEmergencyMode = false;
-  systemd.services."serial-getty@ttyS0".enable = false;
-  systemd.services."serial-getty@hvc0".enable = false;
-  systemd.services."getty@tty1".enable = false;
-  systemd.services."autovt@".enable = false;
 }

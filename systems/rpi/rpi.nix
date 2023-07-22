@@ -17,10 +17,9 @@ in
       "console=tty0"
       "cma=256M"
       "cgroup_enable=cpuset"
-      "cgroup_memory=1"
       "cgroup_enable=memory"
     ];
-    supportedFilesystems = [ "ext4" "vfat" "zfs" ];
+    supportedFilesystems = [ "ext4" "vfat" ];
 
     # this runs out of space sometimes
     tmp = { useTmpfs = false; };
