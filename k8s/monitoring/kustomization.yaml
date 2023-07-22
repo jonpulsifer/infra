@@ -12,7 +12,6 @@ resources:
   - screenpi4.yaml
   - secret.sops.yaml
   - unpoller
-  - kubernetes-dashboard
 patches:
 - target:
     group: helm.toolkit.fluxcd.io
