@@ -2,9 +2,16 @@
 let
   kioskUser = "kiosk";
   kioskUrl = "https://headerz.lolwtf.ca";
+  autostart = ''
+    #!${pkgs.bash}/bin/bash
+    # End all lines with '&' to not halt startup script execution
+
+    # https://developer.mozilla.org/en-US/docs/Mozilla/Command_Line_Options
+    ${pkgs.firefox}/bin/firefox --kiosk ${kioskUrl} &
+  '';
 in
 {
-  # boot.kernelParams = [ "nomodeset" ];
+  boot.kernelParams = [ "nomodeset" ];
   hardware.raspberry-pi."4".touch-ft5406.enable = true;
 
   users.users.${kioskUser} = {
@@ -38,36 +45,29 @@ in
         enable = true;
         user = kioskUser;
       };
-      defaultSession = "none+i3";
+      defaultSession = "none+openbox";
       lightdm = {
         enable = true;
         greeter.enable = false;
       };
     };
-    windowManager = {
-      i3.enable = true;
-      i3.configFile = pkgs.writeText "config" ''
-        set $mod Mod4
-        new_window 1pixel
-        for_window [class="Surf"] fullscreen
-        exec ${pkgs.firefox}/bin/firefox -kiosk "https://hajimari.lolwtf.ca"
-      '';
-    };
+    windowManager.openbox.enable = true;
   };
-
+  environment.etc."openbox/autostart".source = writeScript "autostart" autostart;
+  nixpkgs.overlays = with pkgs; [
+    (self: super: {
+      openbox = super.openbox.overrideAttrs (oldAttrs: rec {
+        postFixup = ''
+          ln -sf /etc/openbox/autostart $out/etc/xdg/openbox/autostart
+        '';
+      });
+    })
+  ];
   hardware.opengl.enable = true;
   hardware.bluetooth.enable = true;
   services.dbus.enable = true;
 
   systemd.enableEmergencyMode = false;
-  systemd.services."serial-getty@ttyS0".enable = false;
-  systemd.services."serial-getty@hvc0".enable = false;
-  systemd.services."getty@tty1".enable = false;
-  systemd.services."autovt@".enable = false;
-
   documentation.enable = false;
   programs.command-not-found.enable = false;
-
-  boot.plymouth.enable = true;
-  boot.kernelParams = [ "rd.udev.log_priority=3" "vt.global_cursor_default=0" ];
 }
