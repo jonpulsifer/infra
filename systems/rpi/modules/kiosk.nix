@@ -32,7 +32,6 @@ in
       EndSection
     '';
     desktopManager = {
-      default = "none";
       xterm.enable = false;
     };
     displayManager = {
@@ -40,13 +39,13 @@ in
         enable = true;
         user = kioskUser;
       };
+      defaultSession = "none+i3";
       lightdm = {
         enable = true;
         greeter.enable = false;
       };
     };
     windowManager = {
-      default = "i3";
       i3.enable = true;
       i3.configFile = pkgs.writeText "config" ''
         set $mod Mod4
