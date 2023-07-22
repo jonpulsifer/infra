@@ -26,11 +26,11 @@ in
 
   services.xserver = {
     enable = true;
-    config = ''
-      Section "ServerFlags"
-        Option  "DontVTSwitch"  "True"
-      EndSection
-    '';
+    # config = ''
+    #   Section "ServerFlags"
+    #     Option  "DontVTSwitch"  "True"
+    #   EndSection
+    # '';
     desktopManager = {
       xterm.enable = false;
     };
@@ -51,7 +51,7 @@ in
         set $mod Mod4
         new_window 1pixel
         for_window [class="Surf"] fullscreen
-        exec surf -k "https://www.google.com/"
+        exec surf -k "https://hajimari.lolwtf.ca"
       '';
     };
   };
@@ -61,14 +61,7 @@ in
   services.dbus.enable = true;
 
   systemd.enableEmergencyMode = false;
-  systemd.services."serial-getty@ttyS0".enable = false;
-  systemd.services."serial-getty@hvc0".enable = false;
-  systemd.services."getty@tty1".enable = false;
-  systemd.services."autovt@".enable = false;
-
-  services.udisks2.enable = false;
   documentation.enable = false;
-  powerManagement.enable = false;
   programs.command-not-found.enable = false;
 
   boot.plymouth.enable = true;
