@@ -36,11 +36,13 @@ in
       xterm.enable = false;
     };
     displayManager = {
+      autoLogin = {
+        enable = true;
+        user = kioskUser;
+      };
       lightdm = {
         enable = true;
         greeter.enable = false;
-        autoLogin.enable = true;
-        autoLogin.user = "mudrii";
       };
     };
     windowManager = {
