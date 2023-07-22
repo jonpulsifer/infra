@@ -26,10 +26,6 @@ in
     shell = pkgs.zsh;
   };
 
-  environment.systemPackages = with pkgs; [
-    i3status
-  ];
-
   services.xserver = {
     enable = true;
     config = ''
@@ -55,8 +51,8 @@ in
   };
   environment.etc."openbox/autostart".source = pkgs.writeScript "autostart" autostart;
   nixpkgs.overlays = with pkgs; [
-    (self: super: {
-      openbox = super.openbox.overrideAttrs (oldAttrs: rec {
+    (final: prev: {
+      openbox = prev.openbox.overrideAttrs (oldAttrs: rec {
         postFixup = ''
           ln -sf /etc/openbox/autostart $out/etc/xdg/openbox/autostart
         '';
@@ -64,10 +60,5 @@ in
     })
   ];
   hardware.opengl.enable = true;
-  hardware.bluetooth.enable = true;
   services.dbus.enable = true;
-
-  systemd.enableEmergencyMode = false;
-  documentation.enable = false;
-  programs.command-not-found.enable = false;
 }

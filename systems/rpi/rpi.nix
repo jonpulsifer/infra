@@ -32,6 +32,8 @@ in
     };
   };
 
+  documentation.enable = false;
+
   fileSystems."/" =
     {
       device = "/dev/disk/by-label/NIXOS_SD";
