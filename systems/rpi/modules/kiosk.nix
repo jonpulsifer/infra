@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 let
   kioskUser = "kiosk";
-  kioskUrl = "http://grafana.lolwtf.ca/public-dashboards/3b8f687e2f14401b8cec93ce8c7e2d2f";
+  kioskUrl = "https://grafana.lolwtf.ca/public-dashboards/3b8f687e2f14401b8cec93ce8c7e2d2f";
   autostart = ''
     #!${pkgs.bash}/bin/bash
     xset dpms force on
