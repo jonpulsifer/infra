@@ -57,7 +57,7 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  storage: 25Gi
+                  storage: 75Gi
     grafana:
       admin:
         existingSecret: grafana-admin-user
@@ -139,6 +139,10 @@ spec:
           - secretName: *grafana
             hosts:
               - *grafana
+      persistence:
+        enabled: true
+        storageClassName: local-path
+        size: 1Gi
     alertmanager:
       ingress:
         enabled: true
