@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: picow
+  namespace: monitoring
+  labels:
+    pulsifer.dev/service: picow
+subsets:
+  - addresses:
+      - ip: 10.2.0.216
+        nodeName: picow
+    ports:
+      - name: http-metrics
+        port: 8080
+        protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: picow
+  namespace: monitoring
+  labels:
+    pulsifer.dev/service: picow
+    jobLabel: picow
+spec:
+  type: ExternalName
+  externalName: picow
+  ports:
+    - name: http-metrics
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: picow
+  namespace: monitoring
+  labels:
+    pulsifer.dev/service: picow
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      honorLabels: false
+      scheme: http
+      path: /metrics
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpoint_node_name]
+          targetLabel: instance # same with kube_pod_info etc.
+  selector:
+    matchLabels:
+      pulsifer.dev/service: picow
+  namespaceSelector:
+    matchNames:
+      - monitoring
