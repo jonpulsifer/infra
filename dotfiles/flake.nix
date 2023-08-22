@@ -17,7 +17,7 @@
           # Sub in x86 version of packages that don't build on Apple Silicon yet
           (final: prev:
             (optionalAttrs (prev.stdenv.system == "aarch64-darwin") {
-              inherit (final.pkgs-x86) emacsMacport nerdctl;
+              inherit (final.pkgs-x86) emacsMacport dig nerdctl;
             }))
           # (import ./overlays/httpie) # 2022-12-18 httpie tests are broken
           # (import ./overlays/opa) # 2023-02-04 opa tests are broken
