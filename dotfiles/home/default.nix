@@ -16,10 +16,6 @@ in
     modules/node
   ];
 
-  home.sessionVariables = {
-    VAULT_ADDR = "https://vault.lolwtf.ca";
-  };
-
   home.packages = with pkgs;
     [
       _1password
@@ -31,6 +27,8 @@ in
       terraform
       vault
     ] ++ optionals isDarwin [ reattach-to-user-namespace ];
+
+  programs.atuin.enable = true;
 
   fonts.fontconfig.enable = true;
 

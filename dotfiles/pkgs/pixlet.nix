@@ -3,7 +3,7 @@ let
   owner = "tidbyt";
   repo = "pixlet";
   pname = "pixlet";
-  version = "0.25.2";
+  version = "0.28.1";
   sources = {
     aarch64-linux = (fetchurl {
       url = "https://github.com/${owner}/${repo}/releases/download/v${version}/${pname}_${version}_linux_arm64.tar.gz";
@@ -11,11 +11,11 @@ let
     });
     x86_64-linux = (fetchurl {
       url = "https://github.com/${owner}/${repo}/releases/download/v${version}/${pname}_${version}_linux_amd64.tar.gz";
-      hash = "sha256-hIfSpqbYiEeBUem2mo17i2I5VTZG9o2bzRgYfmPYN2Y=";
+      hash = "";
     });
     aarch64-darwin = (fetchurl {
       url = "https://github.com/${owner}/${repo}/releases/download/v${version}/${pname}_${version}_darwin_arm64.tar.gz";
-      hash = "sha256-bD9IkY8NHZptj9tTAUyaHcK77HK1bMuuHpKFXfNr5Ec=";
+      hash = "";
     });
     x86_64-darwin = (fetchurl {
       url = "https://github.com/${owner}/${repo}/releases/download/v${version}/${pname}_${version}_darwin_amd64.tar.gz";
