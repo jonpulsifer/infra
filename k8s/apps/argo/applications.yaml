@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: node-apps
+  namespace: argo
+spec:
+  generators:
+  - list:
+      elements:
+      - app: request-headers
+        server: in-cluster
+  template:
+    metadata:
+      name: "{{app}}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/jonpulsifer/ts.git
+        targetRevision: HEAD
+        path: "charts/nextjs"
+        helm:
+          # Release name override (defaults to application name)
+          releaseName: "{{app}}"
+          valuesObject:
+            fullnameOverride: "{{app}}"
+            image:
+              repository: "jonpulsifer/headerz"
+              tag: "latest"
+            ingress:
+              hosts:
+                - host: &host "headerz.lolwtf.ca"
+                  paths:
+                    - path: /
+                      pathType: Prefix
+              tls:
+                - secretName: *host
+                  hosts:
+                    - *host
+          valueFiles:
+          - "values.yaml"
+      destination:
+        name: "{{server}}"
+        namespace: "{{app}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+        retry:
+          limit: 2
