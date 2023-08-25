@@ -11,7 +11,7 @@ let
     });
     x86_64-linux = (fetchurl {
       url = "https://github.com/${owner}/${repo}/releases/download/v${version}/${pname}_${version}_linux_amd64.tar.gz";
-      hash = "";
+      hash = "sha256-xidHnpLlkqJeAaJ0S+0UjtrMQxWfl/CGkfffuwAD7XA=";
     });
     aarch64-darwin = (fetchurl {
       url = "https://github.com/${owner}/${repo}/releases/download/v${version}/${pname}_${version}_darwin_arm64.tar.gz";
