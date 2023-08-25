@@ -10,7 +10,7 @@ resources:
   # - dump
   # - falco
   - flux-system
-  - headerz
+  # - headerz
   - postgres
   # - minecraft
   - satisfactory
