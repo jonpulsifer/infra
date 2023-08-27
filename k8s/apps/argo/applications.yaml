@@ -20,7 +20,7 @@ spec:
         targetRevision: 0.0.1
         helm:
           valueFiles:
-          - $values/apps/{{app}}/values.yaml
+          - $values/apps/{{app}}/helm/values.yaml
       - repoURL: https://github.com/jonpulsifer/ts.git
         targetRevision: HEAD
         ref: values
