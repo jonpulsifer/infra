@@ -35,7 +35,7 @@ spec:
           - dump
           - falco
           - flux-system
-          - headerz
+          - request-headers
           - kube-system
           - monitoring
           - vault

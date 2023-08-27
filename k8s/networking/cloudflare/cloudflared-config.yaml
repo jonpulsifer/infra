@@ -4,7 +4,7 @@ metrics: 0.0.0.0:2000
 no-autoupdate: true
 ingress:
 - hostname: cf.lolwtf.ca
-  service: http://headerz.headerz:8080
+  service: http://request-headers.request-headers:8080
 - service: http_status:404
 # - hostname: wishin.lolwtf.ca
 #   service: http://wishin.wishin:8080
