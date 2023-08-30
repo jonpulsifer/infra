@@ -28,9 +28,6 @@ spec:
         name: "{{server}}"
         namespace: "{{app}}"
       syncPolicy:
-        automated:
-          prune: true
-          selfHeal: false
         syncOptions:
           - CreateNamespace=true
         retry:
