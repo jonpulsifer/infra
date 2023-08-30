@@ -6,4 +6,4 @@ resources:
   - helm-release.yaml
   - secret.sops.yaml
   - rbac.yaml
-  - applications.yaml
+  # - applications.yaml
