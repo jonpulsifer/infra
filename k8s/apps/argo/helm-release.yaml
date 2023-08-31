@@ -16,7 +16,8 @@ spec:
   values:
     configs:
       redis.exporter.enabled: true
-      params.server.insecure: true
+      params:
+        server.insecure: true
     server:
       ingress:
         enabled: true
