@@ -28,7 +28,7 @@ in
       vault
     ] ++ optionals isDarwin [ reattach-to-user-namespace ];
 
-  programs.atuin.enable = true;
+  programs.atuin.enable = false;
 
   fonts.fontconfig.enable = true;
 
