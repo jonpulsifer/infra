@@ -5,8 +5,8 @@ no-autoupdate: true
 ingress:
 - hostname: cf.lolwtf.ca
   service: http://request-headers.request-headers:8080
-- hostname: request-headers.lolwtf.ca
-  service: http://request-headers.request-headers:8080
+- hostname: cf2.lolwtf.ca
+  service: http://request-headers-gitops.request-headers-gitops:8080
 - hostname: request-headers-gitops.lolwtf.ca
   service: http://request-headers-gitops.request-headers-gitops:8080
 - service: http_status:404
