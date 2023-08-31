@@ -26,7 +26,7 @@ spec:
         ref: values
       destination:
         name: "{{server}}"
-        namespace: "{{app}}"
+        namespace: "{{app}}-gitops"
       syncPolicy:
         automated:
           prune: true
