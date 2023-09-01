@@ -54,6 +54,7 @@
         full = mkHomeConfiguration "x86_64-linux" [ ./home/home.nix ];
         basic = mkHomeConfiguration "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHomeConfiguration "aarch64-linux" [ ./home/basic.nix ];
+        pixelbook = mkHomeConfiguration "x86_64-linux" [ ./home/pixelbook.nix ];
       };
 
       # nix run .#basic
@@ -61,6 +62,7 @@
         x86_64-linux = {
           default = self.homeConfigurations.full.activationPackage;
           basic = self.homeConfigurations.basic.activationPackage;
+          pixelbook = self.homeConfigurations.pixelbook.activationPackage;
         };
         aarch64-linux.default = self.homeConfigurations.arm.activationPackage;
       };
