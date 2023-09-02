@@ -43,13 +43,16 @@ metadata:
   namespace: argo
 spec:
   project: default
-  source:
-    repoURL: 'https://jonpulsifer.github.io/charts'
+  sources:
+  - repoURL: 'https://jonpulsifer.github.io/charts'
     chart: nextjs
     targetRevision: 0.0.1
     helm:
       valueFiles:
-      - $values/apps/request-headers/helm/values.yaml
+      - $values/apps/request-headers/helm/values-gitops.yaml
+  - repoURL: https://github.com/jonpulsifer/ts.git
+    targetRevision: HEAD
+    ref: values
   destination:
     server: in-cluster
     namespace: request-headers
