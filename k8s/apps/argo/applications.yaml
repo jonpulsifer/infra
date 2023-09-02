@@ -35,3 +35,29 @@ spec:
           - CreateNamespace=true
         retry:
           limit: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: request-headers
+  namespace: argo
+spec:
+  project: default
+  source:
+    repoURL: 'https://jonpulsifer.github.io/charts'
+    chart: nextjs
+    targetRevision: 0.0.1
+    helm:
+      valueFiles:
+      - $values/apps/request-headers/helm/values.yaml
+  destination:
+    server: in-cluster
+    namespace: request-headers
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 2
