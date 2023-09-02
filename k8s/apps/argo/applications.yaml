@@ -49,7 +49,7 @@ spec:
     targetRevision: 0.0.1
     helm:
       valueFiles:
-      - $values/apps/request-headers/helm/values-gitops.yaml
+      - $values/apps/request-headers/helm/values.yaml
   - repoURL: https://github.com/jonpulsifer/ts.git
     targetRevision: HEAD
     ref: values
