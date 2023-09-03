@@ -19,6 +19,7 @@ resources:
   # - metallb.yaml
   - metrics-server.yaml
   - prometheus.yaml
+  - stakater.yaml
   - weaveworks.yaml
 patches:
   - target:

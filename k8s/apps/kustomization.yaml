@@ -10,8 +10,9 @@ resources:
   # - dump
   # - falco
   - flux-system
-  - postgres
   # - minecraft
+  - postgres
+  - reloader
   - satisfactory
   - vault
 patches:
@@ -22,10 +23,10 @@ patches:
     patch: |-
       - op: replace
         path: /spec/interval
-        value: 1m0s
+        value: 5m0s
       - op: replace
         path: /spec/chart/spec/interval
-        value: 5m0s
+        value: 10m0s
       - op: replace
         path: /spec/maxHistory
         value: 2
