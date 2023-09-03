@@ -7,7 +7,7 @@ in
   programs.zsh = {
     enable = true;
     autocd = true;
-    enableCompletion = true;
+    enableCompletion = false;
     enableAutosuggestions = true;
     syntaxHighlighting.enable = true;
 
@@ -42,7 +42,7 @@ in
       [[ -n "''${key[Insert]}"    ]] && bindkey -- "''${key[Insert]}"     overwrite-mode
       [[ -n "''${key[Backspace]}" ]] && bindkey -- "''${key[Backspace]}"  backward-delete-char
       [[ -n "''${key[Delete]}"    ]] && bindkey -- "''${key[Delete]}"     delete-char
-      [[ -n "''${key[Up]}"        ]] && bindkey -- "''${key[Up]}"         up-line-or-history
+      [[ -n "''${key[Up]}"        ]] && bindkey -- "''${key[Up]}"         up-line-or-search
       [[ -n "''${key[Down]}"      ]] && bindkey -- "''${key[Down]}"       down-line-or-history
       [[ -n "''${key[Left]}"      ]] && bindkey -- "''${key[Left]}"       backward-char
       [[ -n "''${key[Right]}"     ]] && bindkey -- "''${key[Right]}"      forward-char
@@ -85,12 +85,21 @@ in
     '';
     plugins = [
       {
+        name = "zsh-autocomplete";
+        src = fetchFromGitHub {
+          owner = "marlonrichert";
+          repo = "zsh-autocomplete";
+          rev = "23.07.13";
+          sha256 = "sha256-0NW0TI//qFpUA2Hdx6NaYdQIIUpRSd0Y4NhwBbdssCs=";
+        };
+      }
+      {
         name = "pure";
         src = fetchFromGitHub {
           owner = "sindresorhus";
           repo = "pure";
-          rev = "v1.20.4";
-          sha256 = "sha256-e1D+9EejlVZxOyErg6eRgawth5gAhv6KpgjhK06ErZc=";
+          rev = "v1.22.0";
+          sha256 = "sha256-TR4CyBZ+KoZRs9XDmWE5lJuUXXU1J8E2Z63nt+FS+5w=";
         };
       }
     ];
