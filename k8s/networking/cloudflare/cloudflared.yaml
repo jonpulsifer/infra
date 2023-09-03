@@ -4,6 +4,8 @@ kind: Deployment
 metadata:
   name: cloudflared
   namespace: cloudflared
+annotations:
+  configmap.reloader.stakater.com/reload: cloudflared
 spec:
   selector:
     matchLabels:
