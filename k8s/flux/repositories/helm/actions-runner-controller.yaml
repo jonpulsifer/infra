@@ -6,4 +6,5 @@ metadata:
   namespace: flux-system
 spec:
   interval: 24h
+  type: oci
   url: oci://ghcr.io/actions/actions-runner-controller-charts
