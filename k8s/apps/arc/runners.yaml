@@ -25,7 +25,7 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: runner-ts
+    runnerScaleSetName: home-cluster
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
     minRunners: 1
@@ -57,7 +57,7 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: runner-infra
+    runnerScaleSetName: home-cluster
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
     minRunners: 1
