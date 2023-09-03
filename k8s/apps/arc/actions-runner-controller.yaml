@@ -7,36 +7,13 @@ metadata:
 spec:
   chart:
     spec:
-      chart: actions-runner-controller
-      version: 0.23.5
+      chart: gha-runner-scale-set-controller
+      version: 0.5.0
       sourceRef:
         kind: HelmRepository
         name: actions-runner-controller
         namespace: flux-system
   install:
-    createNamespace: false
-  values:
-    authSecret:
-      enabled: true
-      name: arc
-    ingress:
-      enabled: true
-      annotations:
-        hajimari.io/icon: git
-        cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
-        # nginx.ingress.kubernetes.io/ssl-passthrough: "true"
-        # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-      hosts:
-        - host: &gitops "gitops.${SECRET_DOMAIN}"
-          paths:
-            - path: /
-              pathType: Prefix
-      https: true
-      tls:
-        - hosts:
-            - *gitops
-          secretName: *gitops
-    networkPolicy:
-      create: true
-    metrics:
-      serviceMonitor: true
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace

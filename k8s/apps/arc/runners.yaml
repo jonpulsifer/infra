@@ -1,22 +1,32 @@
 ---
-apiVersion: actions.summerwind.dev/v1alpha1
-kind: RunnerDeployment
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
 metadata:
-  name: infra
+  name: arc-ts
   namespace: arc
 spec:
-  replicas: 1
-  template:
+  interval: 24h
+  chart:
     spec:
-      repository: jonpulsifer/infra
----
-apiVersion: actions.summerwind.dev/v1alpha1
-kind: RunnerDeployment
-metadata:
-  name: ts
-  namespace: arc
-spec:
-  replicas: 1
-  template:
-    spec:
-      repository: jonpulsifer/ts
+      chart: gha-runner-scale-set
+      version: 0.5.0
+      sourceRef:
+        kind: HelmRepository
+        name: actions-runner-controller
+        namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    runnerScaleSetName: arc-runner-ts
+    githubConfigUrl: https://github.com/jonpulsifer/ts
+    githubConfigSecret: arc
+    minRunners: 1
+    maxRunners: 2
