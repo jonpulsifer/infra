@@ -2,7 +2,7 @@
 apiVersion: helm.toolkit.fluxcd.io/v2beta1
 kind: HelmRelease
 metadata:
-  name: arc-ts
+  name: ts
   namespace: arc
 spec:
   interval: 24h
@@ -25,8 +25,40 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: arc-runner-ts
+    runnerScaleSetName: runner-ts
     githubConfigUrl: https://github.com/jonpulsifer/ts
+    githubConfigSecret: arc
+    minRunners: 1
+    maxRunners: 2
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: infra
+  namespace: arc
+spec:
+  interval: 24h
+  chart:
+    spec:
+      chart: gha-runner-scale-set
+      version: 0.5.0
+      sourceRef:
+        kind: HelmRepository
+        name: actions-runner-controller
+        namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    runnerScaleSetName: runner-infra
+    githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
     minRunners: 1
     maxRunners: 2
