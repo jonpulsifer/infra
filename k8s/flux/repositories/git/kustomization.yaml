@@ -5,3 +5,12 @@ resources:
   # - assemblyline.yaml
   - local-path-provisioner.yaml
   - loki.yaml
+patches:
+  - target:
+      group: source.toolkit.fluxcd.io
+      version: v1
+      kind: GitRepository
+    patch: |-
+      - op: replace
+        path: /spec/interval
+        value: 24h

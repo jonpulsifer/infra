@@ -5,7 +5,7 @@ metadata:
   name: local-path-provisioner
   namespace: local-path-provisioner
 spec:
-  interval: 1h0m0s
+  interval: 24h
   chart:
     spec:
       chart: ./deploy/chart/local-path-provisioner

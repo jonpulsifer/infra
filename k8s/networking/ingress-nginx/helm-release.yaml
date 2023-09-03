@@ -5,7 +5,7 @@ metadata:
   name: ingress-nginx
   namespace: ingress-nginx
 spec:
-  interval: 1h0m0s
+  interval: 24h
   chart:
     spec:
       chart: ingress-nginx
@@ -14,7 +14,7 @@ spec:
         kind: HelmRepository
         name: ingress-nginx
         namespace: flux-system
-      interval: 1h0m0s
+      interval: 24h
   install:
     createNamespace: true
     remediation:

@@ -20,3 +20,12 @@ resources:
   - metrics-server.yaml
   - prometheus.yaml
   - weaveworks.yaml
+patches:
+  - target:
+      group: source.toolkit.fluxcd.io
+      version: v1beta2
+      kind: HelmRepository
+    patch: |-
+      - op: replace
+        path: /spec/interval
+        value: 24h

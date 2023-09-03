@@ -5,7 +5,7 @@ metadata:
   name: datadog
   namespace: datadog
 spec:
-  interval: 1h0m0s
+  interval: 24h
   chart:
     spec:
       chart: datadog
@@ -14,7 +14,7 @@ spec:
         kind: HelmRepository
         name: datadog
         namespace: flux-system
-      interval: 1h0m0s
+      interval: 24h
   install:
     createNamespace: true
     remediation:
