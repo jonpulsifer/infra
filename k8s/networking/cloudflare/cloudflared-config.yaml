@@ -7,8 +7,8 @@ ingress:
   service: http://request-headers.request-headers:8080
 - hostname: cf2.lolwtf.ca
   service: http://request-headers-gitops.request-headers-gitops:8080
-- hostname: request-headers-gitops.lolwtf.ca
-  service: http://request-headers-gitops.request-headers-gitops:8080
+- hostname: cf3.lolwtf.ca
+  service: http://request-headers-tf.request-headers-tf:8080
 - service: http_status:404
 # - hostname: wishin.lolwtf.ca
 #   service: http://wishin.wishin:8080
