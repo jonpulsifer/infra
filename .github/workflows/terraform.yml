@@ -24,7 +24,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Directories with Changes
@@ -53,7 +53,7 @@ jobs:
         working-directory: ${{ matrix.dir }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v2
       - name: Terraform fmt
         id: fmt
