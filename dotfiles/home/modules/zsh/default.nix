@@ -54,6 +54,7 @@ in
 
     initExtra = ''
       setopt TRANSIENT_RPROMPT
+      zstyle ':autocomplete:tab:*' fzf-completion
       zstyle :prompt:pure:prompt:success color cyan
 
       typeset -g -A ZSH_HIGHLIGHT_STYLES
@@ -100,6 +101,15 @@ in
           repo = "pure";
           rev = "v1.22.0";
           sha256 = "sha256-TR4CyBZ+KoZRs9XDmWE5lJuUXXU1J8E2Z63nt+FS+5w=";
+        };
+      }
+      {
+        name = "fzf-tab";
+        src = fetchFromGitHub {
+          owner = "Aloxaf";
+          repo = "fzf-tab";
+          rev = "c2b4aa5ad2532cca91f23908ac7f00efb7ff09c9";
+          sha256 = "sha256-gvZp8P3quOtcy1Xtt1LAW1cfZ/zCtnAmnWqcwrKel6w=";
         };
       }
     ];
