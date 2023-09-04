@@ -18,9 +18,7 @@ spec:
     fullnameOverride: reloader
     reloader:
       podMonitor:
-        enabled: true
+        enabled: false
         namespace: reloader
-        labels:
-          release: prom-stack
         netpol:
           enabled: true
