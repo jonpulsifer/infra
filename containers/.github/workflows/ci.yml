@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        container: ["bashcurljq", "kubectl", "passivedns"]
+        container: ["bashcurljq", "kubectl", "actions-runner"]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
