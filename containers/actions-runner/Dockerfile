@@ -3,7 +3,7 @@
 # TODO stop stealing onedr0p's and make my own, do we even need docker?
 FROM mcr.microsoft.com/dotnet/runtime-deps:7.0-jammy@sha256:5e419d42a062f28746e08e00fcddba5f89cc3ce19707ea0ef0bb81147458bc53
 
-ARG VERSION
+ARG VERSION=2.308.0
 # renovate: datasource=github-releases depName=actions/runner-container-hooks
 ARG RUNNER_CONTAINER_HOOKS_VERSION=0.3.2
 ARG DOCKER_VERSION=20.10.23
