@@ -30,6 +30,13 @@ spec:
     githubConfigSecret: arc
     minRunners: 1
     maxRunners: 2
+    template:
+      spec:
+        containers:
+          - name: runner
+            image: jonpulsifer/actions-runner:latest
+            command: ["/home/runner/run.sh"]
+
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2beta1
 kind: HelmRelease
