@@ -8,7 +8,7 @@ spec:
   interval: 24h
   url: https://github.com/grafana/loki
   ref:
-    tag: v2.8.4
+    tag: v2.9.0
   ignore: |
     # exclude all
     /*
