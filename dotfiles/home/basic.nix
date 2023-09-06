@@ -39,6 +39,7 @@ in
       la = ls + " -lag";
       ls = "${pkgs.exa}/bin/exa";
       tree = ls + " --tree";
+      diff = "${pkgs.delta}/bin/delta";
     };
     stateVersion = "22.11";
   };
@@ -64,6 +65,7 @@ in
 
       # hipster tools
       # exa
+      delta
       fd
       # hexyl
       httpie
