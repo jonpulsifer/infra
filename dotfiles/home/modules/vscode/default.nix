@@ -39,11 +39,14 @@
         "[nix]" = {
           "editor.defaultFormatter" = "jnoortheen.nix-ide";
         };
-        "[typescript]" = {
-          "editor.defaultFormatter" = "vscode.typescript-language-features";
-        };
         "[html]" = {
           "editor.defaultFormatter" = "esbenp.prettier-vscode";
+        };
+        "[javascript]" = {
+          "editor.defaultFormatter" = "esbenp.prettier-vscode";
+        };
+        "[typescript]" = {
+          "editor.defaultFormatter" = "vscode.typescript-language-features";
         };
         "[typescriptreact]" = {
           "editor.defaultFormatter" = "esbenp.prettier-vscode";
