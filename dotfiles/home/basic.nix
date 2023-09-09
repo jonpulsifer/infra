@@ -37,7 +37,7 @@ in
       l = ll;
       ll = ls + " -lg";
       la = ls + " -lag";
-      ls = "${pkgs.exa}/bin/exa";
+      ls = "${pkgs.eza}/bin/eza";
       tree = ls + " --tree";
       diff = "${pkgs.delta}/bin/delta";
     };
@@ -64,7 +64,7 @@ in
       whois
 
       # hipster tools
-      # exa
+      eza
       delta
       fd
       # hexyl

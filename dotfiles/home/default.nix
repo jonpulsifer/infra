@@ -12,8 +12,8 @@ in
   imports = [
     ./basic.nix
     modules/gcloud
+    modules/javascript
     modules/kubernetes
-    modules/node
   ];
 
   home.packages = with pkgs;
@@ -27,8 +27,6 @@ in
       terraform
       vault
     ] ++ optionals isDarwin [ reattach-to-user-namespace ];
-
-  programs.atuin.enable = false;
 
   fonts.fontconfig.enable = true;
 

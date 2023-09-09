@@ -14,6 +14,7 @@ in
     PNPM_HOME = paths.pnpm;
   }];
   home.packages = with pkgs; [
+    bun
     nodejs-18_x
     nodePackages.pnpm
     nodePackages.ts-node
