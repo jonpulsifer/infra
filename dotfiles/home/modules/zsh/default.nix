@@ -42,7 +42,7 @@ in
       [[ -n "''${key[Insert]}"    ]] && bindkey -- "''${key[Insert]}"     overwrite-mode
       [[ -n "''${key[Backspace]}" ]] && bindkey -- "''${key[Backspace]}"  backward-delete-char
       [[ -n "''${key[Delete]}"    ]] && bindkey -- "''${key[Delete]}"     delete-char
-      [[ -n "''${key[Up]}"        ]] && bindkey -- "''${key[Up]}"         up-line-or-search
+      [[ -n "''${key[Up]}"        ]] && bindkey -- "''${key[Up]}"         fzf-history-widget
       [[ -n "''${key[Down]}"      ]] && bindkey -- "''${key[Down]}"       down-line-or-history
       [[ -n "''${key[Left]}"      ]] && bindkey -- "''${key[Left]}"       backward-char
       [[ -n "''${key[Right]}"     ]] && bindkey -- "''${key[Right]}"      forward-char
@@ -95,21 +95,21 @@ in
         };
       }
       {
-        name = "pure";
-        src = fetchFromGitHub {
-          owner = "sindresorhus";
-          repo = "pure";
-          rev = "v1.22.0";
-          sha256 = "sha256-TR4CyBZ+KoZRs9XDmWE5lJuUXXU1J8E2Z63nt+FS+5w=";
-        };
-      }
-      {
         name = "fzf-tab";
         src = fetchFromGitHub {
           owner = "Aloxaf";
           repo = "fzf-tab";
           rev = "c2b4aa5ad2532cca91f23908ac7f00efb7ff09c9";
           sha256 = "sha256-gvZp8P3quOtcy1Xtt1LAW1cfZ/zCtnAmnWqcwrKel6w=";
+        };
+      }
+      {
+        name = "pure";
+        src = fetchFromGitHub {
+          owner = "sindresorhus";
+          repo = "pure";
+          rev = "v1.22.0";
+          sha256 = "sha256-TR4CyBZ+KoZRs9XDmWE5lJuUXXU1J8E2Z63nt+FS+5w=";
         };
       }
     ];
