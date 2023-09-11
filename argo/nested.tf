@@ -1,9 +1,9 @@
 locals {
-  request_headers_hostname = "request-headers-tf.lolwtf.ca"
+  nested_hostname = "nested.lolwtf.ca"
 }
-resource "argocd_application" "request_headers_tf" {
+resource "argocd_application" "nested" {
   metadata {
-    name      = "request-headers-tf"
+    name      = "nested"
     namespace = "argo"
   }
 
@@ -12,22 +12,22 @@ resource "argocd_application" "request_headers_tf" {
 
     source {
       repo_url        = "https://jonpulsifer.github.io/charts"
-      chart           = "nextjs"
+      chart           = "application"
       target_revision = "0.0.1"
       helm {
-        value_files = ["$values/apps/request-headers/helm/values.yaml"]
+        value_files = ["$values/apps/nested/helm/values.yaml"]
         values = yamlencode({
           ingress = {
             hosts = [{
-              host = local.request_headers_hostname
+              host = local.nested_hostname
               paths = [{
                 path     = "/"
                 pathType = "Prefix"
               }]
             }]
             tls = [{
-              hosts      = [local.request_headers_hostname]
-              secretName = local.request_headers_hostname
+              hosts      = [local.nested_hostname]
+              secretName = local.nested_hostname
             }]
           }
         })
@@ -38,12 +38,12 @@ resource "argocd_application" "request_headers_tf" {
       repo_url        = "https://github.com/jonpulsifer/ts.git"
       target_revision = "HEAD"
       ref             = "values"
-      path            = "apps/request-headers/helm"
+      path            = "apps/nested/helm"
     }
 
     destination {
       server    = "https://kubernetes.default.svc"
-      namespace = "request-headers-tf"
+      namespace = "nested"
     }
 
     sync_policy {
