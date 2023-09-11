@@ -28,8 +28,8 @@ spec:
     runnerScaleSetName: home-cluster
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
-    minRunners: 1
-    maxRunners: 2
+    minRunners: 2
+    maxRunners: 4
     template:
       spec:
         containers:
@@ -67,8 +67,8 @@ spec:
     runnerScaleSetName: home-cluster
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
-    minRunners: 1
-    maxRunners: 2
+    minRunners: 2
+    maxRunners: 3
     template:
       spec:
         containers:
