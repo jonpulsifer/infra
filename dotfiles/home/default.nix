@@ -23,9 +23,7 @@ in
       gh
       gptcommit
       postgresql_15
-      sops
       terraform
-      vault
     ] ++ optionals isDarwin [ reattach-to-user-namespace ];
 
   fonts.fontconfig.enable = true;

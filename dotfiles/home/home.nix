@@ -16,6 +16,8 @@ in
         # cloudevents
         asciinema
         hugo
+        sops
+        vault
 
         # pixlet
         pixlet
