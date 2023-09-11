@@ -1,9 +1,9 @@
 locals {
-  request_headers_hostname = "request-headers-tf.lolwtf.ca"
+  request_headers_hostname = "request-headers.lolwtf.ca"
 }
-resource "argocd_application" "request_headers_tf" {
+resource "argocd_application" "request_headers" {
   metadata {
-    name      = "request-headers-tf"
+    name      = "request-headers"
     namespace = "argo"
   }
 
@@ -43,7 +43,7 @@ resource "argocd_application" "request_headers_tf" {
 
     destination {
       server    = "https://kubernetes.default.svc"
-      namespace = "request-headers-tf"
+      namespace = "request-headers"
     }
 
     sync_policy {
