@@ -80,7 +80,6 @@
         hackbookpro = darwinSystem {
           system = "aarch64-darwin";
           modules = common ++ [
-            ./systems/macbookpro.nix
             { home-manager.users.jawn = import ./home/work.nix; }
           ];
         };

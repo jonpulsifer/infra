@@ -23,6 +23,7 @@
           "plaintext" = true;
           "markdown" = true;
         };
+        "cSpell.diagnosticLevel" = "Hint";
         "go.survey.prompt" = false;
         "nixfmt.path" = "nix fmt";
         "redhat.telemetry.enabled" = false;
