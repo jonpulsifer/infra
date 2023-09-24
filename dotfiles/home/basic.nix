@@ -73,7 +73,7 @@ in
       sd
       # silver-searcher
       # tokei
-      # xsv
+      xsv
     ];
 
   programs.home-manager.enable = true;
