@@ -11,6 +11,7 @@ in
 {
   imports = [
     ./basic.nix
+    modules/go
     modules/gcloud
     modules/javascript
     modules/kubernetes
