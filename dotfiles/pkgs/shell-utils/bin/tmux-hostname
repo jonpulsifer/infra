@@ -17,7 +17,7 @@ function getHostname(){
     cs-*-devshell*) printf "☁️ cloudshell" && exit ;;
   esac
   case ${domainname} in
-    home.pulsifer.ca) printf '🏠 %s' "${hostname}" ;;
+    lolwtf.ca | pirate-musical.ts.net) printf '🏠 %s' "${hostname}" ;;
     *) printf '🌎 %s' "${hostname}" ;;
   esac
 }
