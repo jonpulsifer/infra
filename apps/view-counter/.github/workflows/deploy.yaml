@@ -1,0 +1,33 @@
+name: Deploy Cloud Function
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  job_id:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/my-provider
+          service_account: github-actions@homelab-ng.iam.gserviceaccount.com
+
+      - id: deploy
+        uses: google-github-actions/deploy-cloud-functions@v1
+        with:
+          name: view-counter
+          runtime: go121
+          region: northamerica-northeast1
+          https_trigger_security_level: secure_always
+          entry_point: ViewCounter
+          project_id: homelab-ng
+          service_account_email: view-counter@homelab-ng.iam.gserviceaccount.com
+          env_vars: GCP_PROJECT=homelab-ng
