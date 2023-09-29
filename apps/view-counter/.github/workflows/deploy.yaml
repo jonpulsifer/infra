@@ -5,7 +5,7 @@ on:
       - main
 
 jobs:
-  job_id:
+  deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -17,7 +17,7 @@ jobs:
       - id: auth
         uses: google-github-actions/auth@v1
         with:
-          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/my-provider
+          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
           service_account: github-actions@homelab-ng.iam.gserviceaccount.com
 
       - id: deploy
