@@ -28,8 +28,8 @@ spec:
     runnerScaleSetName: ts
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
-    minRunners: 2
-    maxRunners: 4
+    minRunners: 1
+    maxRunners: 10
     template:
       spec:
         containers:
@@ -67,8 +67,8 @@ spec:
     runnerScaleSetName: infra
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
-    minRunners: 2
-    maxRunners: 3
+    minRunners: 1
+    maxRunners: 10
     template:
       spec:
         containers:
