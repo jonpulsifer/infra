@@ -67,6 +67,8 @@ RUN \
   && install -o root -g root -m 755 docker/* /usr/bin/ \
   && rm -rf docker \
   && \
+  # Install Node
+  && curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s current \
   # Cleanup
   apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
   && apt-get autoremove -y \
@@ -77,6 +79,7 @@ RUN \
   /var/lib/apt/lists/* \
   /var/cache/apt/* \
   /var/tmp/*
+
 
 WORKDIR /home/runner
 USER runner
