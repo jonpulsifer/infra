@@ -29,7 +29,7 @@ spec:
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
     minRunners: 1
-    maxRunners: 10
+    maxRunners: 20
     template:
       spec:
         containers:
@@ -68,7 +68,7 @@ spec:
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
     minRunners: 1
-    maxRunners: 10
+    maxRunners: 20
     template:
       spec:
         containers:
