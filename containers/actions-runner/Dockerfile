@@ -3,10 +3,10 @@
 # TODO stop stealing onedr0p's and make my own, do we even need docker?
 FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-jammy@sha256:25704ff93c1536dbc5f9120ead2343e8318a22fde06f103c394414a755853e84
 
-ARG VERSION=2.308.0
+ARG VERSION=2.309.0
 # renovate: datasource=github-releases depName=actions/runner-container-hooks
-ARG RUNNER_CONTAINER_HOOKS_VERSION=0.3.2
-ARG DOCKER_VERSION=20.10.23
+ARG RUNNER_CONTAINER_HOOKS_VERSION=0.4.0
+ARG DOCKER_VERSION=23.0.6
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -68,7 +68,8 @@ RUN \
   && rm -rf docker \
   && \
   # Install Node
-  && curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s current \
+  curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s current \
+  && \
   # Cleanup
   apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
   && apt-get autoremove -y \
