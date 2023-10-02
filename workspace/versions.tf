@@ -37,7 +37,7 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "~> 4.29"
+      version = "~> 5.0"
     }
     googleworkspace = {
       source  = "hashicorp/googleworkspace"
