@@ -31,10 +31,12 @@ in
     };
 
     aliases = {
+      ad = "add";
       yeet = "!git commit -sm \"$(curl -s https://whatthecommit.com/index.txt)\" && git push";
+      letsgo = "!git lfg";
+      lfg = "!{ git checkout main || git checkout master; } && git pull --rebase";
       lol = "log --graph --decorate --pretty=oneline --abbrev-commit --all";
       stash-pull-pop = "!git stash && git pull --rebase && git stash pop";
-      letsgo = "!{ git checkout main || git checkout master; } && git pull --rebase";
       co = "checkout";
       d = "diff";
       s = "status";
