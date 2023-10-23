@@ -1,6 +1,3 @@
-locals {
-  rosie_hostname = "rosie.lolwtf.ca"
-}
 resource "argocd_application" "rosie" {
   metadata {
     name      = "rosie"
@@ -13,7 +10,7 @@ resource "argocd_application" "rosie" {
     source {
       repo_url        = "https://jonpulsifer.github.io/charts"
       chart           = "application"
-      target_revision = "0.0.9"
+      target_revision = "0.0.10"
       helm {
         value_files = ["$values/apps/rosie/helm/values.yaml"]
         values = yamlencode({
@@ -34,6 +31,12 @@ resource "argocd_application" "rosie" {
     destination {
       server    = "https://kubernetes.default.svc"
       namespace = "rosie"
+    }
+
+    ignore_difference {
+      group         = "apps"
+      kind          = "Deployment"
+      json_pointers = ["/spec/template/spec/securityContext"]
     }
 
     sync_policy {
