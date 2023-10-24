@@ -26,7 +26,7 @@
   time.timeZone = "America/Halifax";
   services.nix-daemon.enable = true;
   programs.zsh.enable = true;
-  environment.systemPackages = with pkgs; [ alacritty vscode ];
+  environment.systemPackages = with pkgs; [ alacritty ];
 
   fonts = {
     fontDir.enable = true;

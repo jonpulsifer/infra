@@ -29,7 +29,7 @@ in
     USE_GKE_GCLOUD_AUTH_PLUGIN = "True";
   };
   home.packages = with pkgs; [
-    cloud-sql-proxy
+    # cloud-sql-proxy
     # nodePackages.firebase-tools
     openjdk19
     (google-cloud-sdk.withExtraComponents components)

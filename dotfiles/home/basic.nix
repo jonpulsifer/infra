@@ -28,7 +28,7 @@ in
       # GIT_EDITOR = EDITOR;
       LANG = "en_US.UTF-8";
       LC_ALL = LANG;
-      MANROFFOPT="-c";
+      MANROFFOPT = "-c";
       MANPAGER = "sh -c 'col -bx | ${pkgs.bat}/bin/bat -l man -p'";
       # VISUAL = EDITOR;
     };
@@ -62,7 +62,7 @@ in
       tcpdump
       # unzip
       wget
-      whois
+      # whois
 
       # hipster tools
       eza
