@@ -9,7 +9,7 @@
     nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
     wsl = { url = "github:nix-community/NixOS-WSL"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, wsl, ... }:
+  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, wsl, ... }@inputs:
     let
       inherit (nixos.lib) mkIf attrValues;
 
@@ -75,10 +75,19 @@
       mkEliteDesk = hostName: modules:
         mkSystem { inherit hostName; modules = [ ./systems/elitedesks ] ++ modules; };
     in
-    {
-      formatter.x86_64-linux = nixos.legacyPackages.x86_64-linux.nixpkgs-fmt;
+    rec {
+      legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" ] (system:
+        import inputs.nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        }
+      );
+      formatter.x86_64-linux = legacyPackages.x86_64-linux.nixpkgs-fmt;
+
       devShells = {
-        x86_64-linux.default = import ./shell.nix { pkgs = nixos.legacyPackages.x86_64-linux; };
+        x86_64-linux.default = import ./shell.nix {
+          pkgs = legacyPackages.x86_64-linux;
+        };
       };
 
       nixosConfigurations = rec {

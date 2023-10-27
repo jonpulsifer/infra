@@ -26,4 +26,5 @@ with lib;
 
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
   system.stateVersion = lib.mkDefault "22.11";
+  system.build.installBootLoader = lib.mkForce "${pkgs.coreutils}/bin/true";
 }
