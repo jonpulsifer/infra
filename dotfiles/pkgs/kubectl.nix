@@ -1,31 +1,31 @@
 { stdenv, fetchurl, installShellFiles }:
 let
-  version = "1.27.1";
+  version = "1.28.3";
   sources = {
     aarch64-linux = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubectl";
-        hash = "sha256-D2LLtvr6EJ8jWgg0jXRJmle7KUwqLm7jS+H6g0Mv7B0=";
+        hash = "";
       })
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubeadm";
-        hash = "sha256-2xAcS7jjO9aSQd4iftMX/u5tRNvWdIkeG54Rxuizabs=";
+        hash = "";
       })
     ];
     x86_64-linux = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl";
-        hash = "sha256-f+OnYtkm+waLrjLDmYgOlG6Mrz2QMHi+qbFp3NXBf20=";
+        hash = "sha256-DGgMkIksQ+XOcI6RiCH5JEXR0kT5s9dRMCO8rppiRtE=";
       })
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubeadm";
-        hash = "sha256-x9MtaY6ZuQ+HcCUQTLSp8/jHB+meaBeUDyYBNbbRrQo=";
+        hash = "sha256-zjhIsd+lYuD6L5EaPY47sHugQO6nZlTWjiEzFciEasA=";
       })
     ];
     aarch64-darwin = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/darwin/arm64/kubectl";
-        hash = "sha256-qj4P2FYRrfu8caRq2/EgRrtUQzwGt93f9A8FaTgrVAo=";
+        hash = "";
       })
     ];
     x86_64-darwin = [
