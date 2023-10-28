@@ -5,6 +5,7 @@ resources:
   - arc
   - argo
   # - assemblyline
+  - atlantis
   - cloudnative-pg
   - csgo
   - default
