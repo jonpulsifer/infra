@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: vault
     app.kubernetes.io/part-of: vault
-    kustomize.toolkit.fluxcd.io/prune: "true"
+    kustomize.toolkit.fluxcd.io/prune: enabled
     pod-security.kubernetes.io/audit: baseline
     pod-security.kubernetes.io/audit-version: latest
     pod-security.kubernetes.io/enforce: privileged

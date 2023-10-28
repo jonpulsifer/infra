@@ -5,6 +5,7 @@ resources:
   - arc
   - argo
   # - assemblyline
+  - cloudnative-pg
   - csgo
   - default
   - descheduler
@@ -12,7 +13,6 @@ resources:
   # - falco
   - flux-system
   # - minecraft
-  - postgres
   - reloader
   - rosie
   - satisfactory
