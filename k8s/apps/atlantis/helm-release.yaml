@@ -28,10 +28,10 @@ spec:
       hosts:
         - host: &host "atlantis.${SECRET_DOMAIN}"
           paths:
-            - path: /
+            - path: /*
               pathType: Prefix
       paths:
-        - path: /
+        - path: /*
           pathType: Prefix
       tls:
         - hosts:
