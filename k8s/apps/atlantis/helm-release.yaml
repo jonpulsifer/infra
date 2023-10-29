@@ -24,7 +24,7 @@ spec:
         secretKeyRef:
           name: atlantis-github
           key: github_app_slug
-      - name: ATLANTIS_GH_APP_KEY_FILE
+      - name: ATLANTIS_GH_APP_KEY
         secretKeyRef:
           name: atlantis-github
           key: github_app_private_key
