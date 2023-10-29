@@ -15,7 +15,19 @@ spec:
         namespace: flux-system
   values:
     orgAllowlist: jonpulsifer
-    gitconfigSecretName: atlantis-github
+    environmentSecrets:
+      - name: ATLANTIS_GH_APP_ID
+        secretKeyRef:
+          name: atlantis-github
+          key: github_app_id
+      - name: ATLANTIS_GH_APP_SLUG
+        secretKeyRef:
+          name: atlantis-github
+          key: github_app_slug
+      - name: ATLANTIS_GH_APP_KEY_FILE
+        secretKeyRef:
+          name: atlantis-github
+          key: github_app_private_key
     hidePrevPlanComments: true
     hideUnchangedPlanComments: true
     ingress:
