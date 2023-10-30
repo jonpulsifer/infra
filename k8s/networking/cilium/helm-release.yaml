@@ -43,6 +43,8 @@ spec:
     # encryption:
     #   enabled: true
     #   type: wireguard
+    gatewayAPI:
+      enabled: false
     ingressController:
       enabled: true
       # loadbalancerMode: shared
