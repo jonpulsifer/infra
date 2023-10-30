@@ -14,7 +14,7 @@ spec:
         name: atlantis
         namespace: flux-system
   values:
-    orgAllowlist: jonpulsifer
+    orgAllowlist: github.com/jonpulsifer/*
     environment:
       ATLANTIS_WRITE_GIT_CREDS: "true"
     environmentSecrets:
@@ -30,6 +30,21 @@ spec:
         secretKeyRef:
           name: atlantis-github
           key: github_app_private_key
+    repoConfig: |
+      ---
+      repos:
+      - id: /^github.com/jonpulsifer/.*$/
+        branch: /^main$/
+        apply_requirements: []
+        workflow: default
+        allowed_overrides: []
+        allow_custom_workflows: false
+      workflows:
+        default:
+          plan:
+            steps: [init, plan]
+          apply:
+            steps: [apply]
     hidePrevPlanComments: true
     hideUnchangedPlanComments: true
     ingress:
