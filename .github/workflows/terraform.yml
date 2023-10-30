@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v2
+      - uses: hashicorp/setup-terraform@v3
       - name: Terraform fmt
         id: fmt
         run: terraform fmt -check
