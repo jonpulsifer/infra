@@ -14,4 +14,3 @@ spec:
   selector:
     app.kubernetes.io/name: dump
     app.kubernetes.io/part-of: dump
----
