@@ -10,7 +10,7 @@ resources:
   - csgo
   - default
   - descheduler
-  # - dump
+  - dump
   # - falco
   - flux-system
   # - minecraft
