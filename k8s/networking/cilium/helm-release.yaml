@@ -47,10 +47,8 @@ spec:
       enabled: true
     ingressController:
       enabled: true
-      # loadbalancerMode: shared
-      enforceHttps: true
     l7Proxy: true
-    loadBalancer.backend: envoy
+    loadBalancer.l7.backend: envoy
     operator.prometheus.enabled: true
     dashboards:
       enabled: true
