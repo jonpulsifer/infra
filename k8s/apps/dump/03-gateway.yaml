@@ -3,6 +3,8 @@ kind: Gateway
 metadata:
   name: dump-gateway
   namespace: dump
+  annotations:
+    cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
 spec:
   gatewayClassName: cilium
   listeners:
