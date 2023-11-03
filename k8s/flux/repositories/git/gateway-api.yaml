@@ -16,3 +16,5 @@ spec:
     !/config/crd/standard
     !/config/crd/experimental/gateway.networking.k8s.io_grpcroutes.yaml
     !/config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml
+    !/config/crd/experimental/gateway.networking.k8s.io_tcproutes.yaml
+    !/config/crd/experimental/gateway.networking.k8s.io_udproutes.yaml

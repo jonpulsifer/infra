@@ -22,8 +22,6 @@ kind: HTTPRoute
 metadata:
   name: dump-http-route
   namespace: dump
-  annotations:
-    cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
 spec:
   parentRefs:
     - name: dump-gateway
