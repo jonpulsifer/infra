@@ -8,10 +8,14 @@ metadata:
 spec:
   gatewayClassName: cilium
   listeners:
+    - name: http-gateway
+      protocol: HTTP
+      port: 80
+      hostname: &hostname "dump.${SECRET_DOMAIN}"
     - name: tls-gateway
       protocol: HTTPS
       port: 443
-      hostname: &hostname "dump.${SECRET_DOMAIN}"
+      hostname: *hostname
       tls:
         certificateRefs:
           - kind: Secret
@@ -33,5 +37,8 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
+        - name: dump
+          port: 8080
+    - backendRefs:
         - name: dump
           port: 8080
