@@ -49,7 +49,6 @@ spec:
     hideUnchangedPlanComments: true
     ingress:
       enabled: true
-      ingressClassName: nginx
       annotations:
         cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
         hajimari.io/enable: "true"

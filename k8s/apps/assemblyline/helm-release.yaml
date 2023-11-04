@@ -13,10 +13,8 @@ spec:
         kind: GitRepository
         name: assemblyline
         namespace: flux-system
-  values: 
-    ingressClassName: nginx
+  values:
     ingressAnnotations:
-      nginx.ingress.kubernetes.io/proxy-body-size: 100M
       cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
     tlsSecretName: al.${SECRET_DOMAIN}
 

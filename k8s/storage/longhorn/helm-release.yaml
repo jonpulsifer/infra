@@ -26,7 +26,6 @@ spec:
       defaultClassReplicaCount: 2
     ingress:
       enabled: true
-      ingressClassName: nginx
       host: longhorn.${SECRET_DOMAIN}
       tls: true
       tlsSecret: longhorn.${SECRET_DOMAIN}
