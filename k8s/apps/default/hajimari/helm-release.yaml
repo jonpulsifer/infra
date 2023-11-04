@@ -56,14 +56,10 @@ spec:
     ingress:
       main:
         enabled: true
-        ingressClassName: "nginx"
         annotations:
           cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
           hajimari.io/enable: "true"
           hajimari.io/icon: weather-sunset
-          nginx.ingress.kubernetes.io/whitelist-source-range: "10.1.0.0/24,10.2.0.0/24,10.3.0.0/24,10.100.0.0/16"
-          nginx.ingress.kubernetes.io/enable-cors: "true"
-          nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS"
         hosts:
           - host: &hajimari "hajimari.${SECRET_DOMAIN}"
             paths:

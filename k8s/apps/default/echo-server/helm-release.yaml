@@ -42,7 +42,6 @@ spec:
           port: *port
     ingress:
       enabled: true
-      ingressClassName: nginx
       annotations:
         cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
         # external-dns.alpha.kubernetes.io/target: "ipv4.${SECRET_DOMAIN}"

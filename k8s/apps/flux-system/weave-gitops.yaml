@@ -29,8 +29,6 @@ spec:
       annotations:
         hajimari.io/icon: git
         cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
-        # nginx.ingress.kubernetes.io/ssl-passthrough: "true"
-        # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
       hosts:
         - host: &gitops "gitops.${SECRET_DOMAIN}"
           paths:
