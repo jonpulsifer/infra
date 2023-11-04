@@ -47,6 +47,7 @@ spec:
       enabled: true
     ingressController:
       enabled: true
+      default: true
     l7Proxy: true
     loadBalancer:
       l7:
