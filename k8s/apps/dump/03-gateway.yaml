@@ -30,15 +30,8 @@ spec:
   parentRefs:
     - name: dump-gateway
   hostnames:
-    - &hostname "dump.${SECRET_DOMAIN}"
+    - "dump.${SECRET_DOMAIN}"
   rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - name: dump
-          port: 8080
     - backendRefs:
         - name: dump
           port: 8080
