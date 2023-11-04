@@ -26,7 +26,7 @@ spec:
   values:
     autoDirectNodeRoutes: true
     devices: eno+
-    kubeProxyReplacement: strict
+    kubeProxyReplacement: true
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
     ipam:
@@ -90,7 +90,6 @@ spec:
           - port-distribution
           - icmp
           - httpV2:exemplars=true
-          - labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction
       ui:
         enabled: true
         ingress:

@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 {
   boot = {
-    kernelModules = [ "br_netfilter" "overlay" ];
+    kernelModules = [ "br_netfilter" "overlay" "iptable_raw" "xt_socket" ];
     kernel.sysctl = {
       "net.ipv4.ip_forward" = 1;
       "net.bridge.bridge-nf-call-iptables" = 1;
