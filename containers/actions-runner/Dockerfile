@@ -3,10 +3,11 @@
 # TODO stop stealing onedr0p's and make my own, do we even need docker?
 FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-jammy@sha256:91f1f69fcd7a40f03b9a012e0510994b2d1d7c05b6459fe34be28eada9d3b76c
 
-ARG VERSION=2.309.0
+ARG VERSION=2.311.0
 # renovate: datasource=github-releases depName=actions/runner-container-hooks
 ARG RUNNER_CONTAINER_HOOKS_VERSION=0.4.0
-ARG DOCKER_VERSION=23.0.6
+ARG DOCKER_VERSION=24.0.6
+ARG BUILDX_VERSION=0.11.2
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -66,6 +67,10 @@ RUN \
   && chown -R runner:docker . \
   && install -o root -g root -m 755 docker/* /usr/bin/ \
   && rm -rf docker \
+  && mkdir -p /usr/local/lib/docker/cli-plugins \
+  && curl -fLo /usr/local/lib/docker/cli-plugins/docker-buildx \
+      "https://github.com/docker/buildx/releases/download/v${BUILDX_VERSION}/buildx-v${BUILDX_VERSION}.linux-${TARGETARCH}" \
+  && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx \
   && \
   # Install Node
   curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s current \
@@ -80,7 +85,6 @@ RUN \
   /var/lib/apt/lists/* \
   /var/cache/apt/* \
   /var/tmp/*
-
 
 WORKDIR /home/runner
 USER runner
