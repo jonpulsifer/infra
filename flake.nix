@@ -72,8 +72,8 @@
           specialArgs = { inherit keys hostName; needsRoutes = false; };
         };
 
-      mkEliteDesk = hostName: modules:
-        mkSystem { inherit hostName; modules = [ ./systems/elitedesks ] ++ modules; };
+      mkSff = hostName: modules:
+        mkSystem { inherit hostName; modules = [ ./systems/sff ] ++ modules; };
     in
     rec {
       legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" ] (system:
@@ -100,22 +100,21 @@
           ];
         };
 
-        iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
-        nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
-        htpc = mkSystem { modules = [ ./systems/htpc ]; };
-
         cloudpi4 = mkRPi "cloudpi4" [ ];
         homepi4 = mkRPi "homepi4" [ ./systems/rpi/modules/kiosk.nix ];
         screenpi4 = mkRPi "screenpi4" [ ./systems/rpi/modules/kiosk.nix ];
 
-        "800g2" = mkEliteDesk "800g2" [ ./systems/kubeadm.nix ];
-        "800g2-1" = mkEliteDesk "800g2-1" [ ./systems/kubeadm.nix ];
-        "800g2-2" = mkEliteDesk "800g2-2" [ ./systems/kubeadm.nix ];
-        "800g3-1" = mkEliteDesk "800g3-1" [
-          ./systems/kubeadm.nix
-          # { networking.wireless.networks.lab = { hidden = true; }; }
+        iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
+        nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
+        htpc = mkSystem { modules = [ ./systems/htpc ]; };
+        optiplex = mkSff "optiplex" [ ./systems/kubeadm.nix ];
+
+        "800g2" = mkSff "800g2" [ ./systems/kubeadm.nix ];
+        "800g2-2" = mkSff "800g2-2" [ ./systems/kubeadm.nix ];
+        "800g3-1" = mkSff "800g3-1" [
+          { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
         ];
-        "800g3-2" = mkEliteDesk "800g3-2" [
+        "800g3-2" = mkSff "800g3-2" [
           { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
         ];
       };
