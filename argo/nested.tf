@@ -11,34 +11,10 @@ resource "argocd_application" "nested" {
     project = "default"
 
     source {
-      repo_url        = "https://jonpulsifer.github.io/charts"
-      chart           = "application"
-      target_revision = "0.0.1"
-      helm {
-        value_files = ["$values/apps/nested/helm/values.yaml"]
-        values = yamlencode({
-          ingress = {
-            hosts = [{
-              host = local.nested_hostname
-              paths = [{
-                path     = "/"
-                pathType = "Prefix"
-              }]
-            }]
-            tls = [{
-              hosts      = [local.nested_hostname]
-              secretName = local.nested_hostname
-            }]
-          }
-        })
-      }
-    }
-
-    source {
       repo_url        = "https://github.com/jonpulsifer/ts.git"
       target_revision = "HEAD"
       ref             = "values"
-      path            = "apps/nested/helm"
+      path            = "apps/nested/k8s"
     }
 
     destination {
@@ -46,11 +22,15 @@ resource "argocd_application" "nested" {
       namespace = "nested"
     }
 
+    ignore_difference {
+      group = "apps"
+      kind  = "Deployment"
+      json_pointers = [
+        "/spec/replicas",
+      ]
+    }
+
     sync_policy {
-      automated {
-        prune     = true
-        self_heal = true
-      }
       sync_options = ["CreateNamespace=true"]
     }
   }

@@ -31,10 +31,6 @@ resource "argocd_application" "request_headers" {
     }
 
     sync_policy {
-      automated {
-        prune     = true
-        self_heal = true
-      }
       sync_options = ["CreateNamespace=true"]
     }
   }
