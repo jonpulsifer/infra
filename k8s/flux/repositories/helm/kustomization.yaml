@@ -23,6 +23,7 @@ resources:
   - metrics-server.yaml
   - prometheus.yaml
   - stakater.yaml
+  - stefanprodan.yaml
   - weaveworks.yaml
 patches:
   - target:
