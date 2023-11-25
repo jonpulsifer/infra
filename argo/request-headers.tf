@@ -22,6 +22,14 @@ resource "argocd_application" "request_headers" {
       namespace = "request-headers"
     }
 
+    ignore_difference {
+      group = "apps"
+      kind  = "Deployment"
+      json_pointers = [
+        "/spec/replicas",
+      ]
+    }
+
     sync_policy {
       automated {
         prune     = true
