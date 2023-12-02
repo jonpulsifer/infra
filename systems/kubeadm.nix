@@ -70,6 +70,10 @@
       iptables
       socat
       openiscsi
+    ] ++ [
+      "/run/wrappers/bin"
+      "/nix/var/nix/profiles/default/bin"
+      "/run/current-system/sw/bin"
     ];
 
     serviceConfig = {
