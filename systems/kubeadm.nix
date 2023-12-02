@@ -69,6 +69,7 @@
       thin-provisioning-tools
       iptables
       socat
+      openiscsi
     ];
 
     serviceConfig = {
