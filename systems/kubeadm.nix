@@ -1,7 +1,13 @@
 { config, lib, pkgs, ... }:
 {
+
+  # this section is only required for longhorn
   disabledModules = [ "virtualisation/containerd.nix" ];
   imports = [ ./containerd.nix ];
+  systemd.tmpfiles.rules = [
+    "L+ /usr/local/bin - - - - /run/current-system/sw/bin/"
+  ];
+
   boot = {
     kernelModules = [ "br_netfilter" "overlay" "iptable_raw" "xt_socket" ];
     kernel.sysctl = {

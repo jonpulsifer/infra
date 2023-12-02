@@ -74,7 +74,7 @@ in
         containerd
         runc
         iptables
-      ] ++ [ openiscsi "/run/wrappers/bin" ];
+      ] ++ [ openiscsi "/run/wrappers/bin" "/run/current-system/sw/bin/" ];
       serviceConfig = {
         ExecStart = ''${pkgs.containerd}/bin/containerd ${lib.concatStringsSep " " (lib.cli.toGNUCommandLine {} cfg.args)}'';
         Delegate = "yes";
