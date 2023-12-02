@@ -22,8 +22,12 @@ spec:
     remediation:
       retries: 5
   values:
+    defaultSettings:
+      defaultDataPath: /mnt/disks/longhorn
+    networkPolicies:
+      enabled: true
     persistence:
-      defaultClassReplicaCount: 2
+      defaultClassReplicaCount: 1
     ingress:
       enabled: true
       host: longhorn.${SECRET_DOMAIN}

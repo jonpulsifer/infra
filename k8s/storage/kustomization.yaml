@@ -1,22 +1,20 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - storage-classes.yaml
-  - persistent-volumes.yaml
   - local-path-provisioner
-  # - longhorn
+  - longhorn
 patches:
-- target:
-    group: helm.toolkit.fluxcd.io
-    version: v2beta1
-    kind: HelmRelease
-  patch: |-
-    - op: replace
-      path: /spec/interval
-      value: 1m0s
-    - op: replace
-      path: /spec/chart/spec/interval
-      value: 5m0s
-    - op: replace
-      path: /spec/maxHistory
-      value: 2
+  - target:
+      group: helm.toolkit.fluxcd.io
+      version: v2beta1
+      kind: HelmRelease
+    patch: |-
+      - op: replace
+        path: /spec/interval
+        value: 1m0s
+      - op: replace
+        path: /spec/chart/spec/interval
+        value: 5m0s
+      - op: replace
+        path: /spec/maxHistory
+        value: 2

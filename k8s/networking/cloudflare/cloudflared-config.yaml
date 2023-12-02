@@ -3,12 +3,12 @@ credentials-file: /etc/cloudflared/credentials.json
 metrics: 0.0.0.0:2000
 no-autoupdate: true
 ingress:
-- hostname: cf.lolwtf.ca
-  service: http://request-headers.request-headers:8080
-- hostname: cf2.lolwtf.ca
-  service: hello_world
-- hostname: cf3.lolwtf.ca
-  service: http_status:518
-- service: http_status:404
+  - hostname: cf.lolwtf.ca
+    service: http://request-headers-app.request-headers:8080
+  - hostname: cf2.lolwtf.ca
+    service: hello_world
+  - hostname: cf3.lolwtf.ca
+    service: http_status:518
+  - service: http_status:404
 # - hostname: wishin.lolwtf.ca
 #   service: http://wishin.wishin:8080

@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - gateway-api.yaml
   - cilium
-  # - metallb
   - cloudflare
   - external-dns
   - cert-manager

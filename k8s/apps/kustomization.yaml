@@ -11,7 +11,7 @@ resources:
   - default
   - descheduler
   - dump.yaml
-  # - falco
+  - falco
   - flux-system
   # - minecraft
   - reloader
