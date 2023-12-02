@@ -11,35 +11,6 @@ metadata:
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/warn-version: latest
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: allowed-psps
-  namespace: minecraft
-rules:
-- apiGroups: ['policy']
-  resources: ['podsecuritypolicies']
-  verbs: ['use']
-  resourceNames: ['minecraft']
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: allowed-psps
-  namespace: minecraft
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: allowed-psps
-subjects:
-- kind: Group
-  name: system:serviceaccounts
-  apiGroup: rbac.authorization.k8s.io
-- kind: ServiceAccount
-  name: minecraft
-  namespace: minecraft
 
 ---
 apiVersion: networking.k8s.io/v1
@@ -50,5 +21,5 @@ metadata:
 spec:
   podSelector: {}
   policyTypes:
-  - Ingress
-  - Egress
+    - Ingress
+    - Egress
