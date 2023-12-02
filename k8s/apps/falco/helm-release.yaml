@@ -16,6 +16,11 @@ spec:
   values:
     driver:
       kind: modern-bpf
+    falco:
+      grpc:
+        enabled: true
+      grpc_output:
+        enabled: true
     falcosidekick:
       enabled: true
       webui:
