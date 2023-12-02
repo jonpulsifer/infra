@@ -17,7 +17,9 @@
     };
   };
 
-  environment.systemPackages = with pkgs; [ cri-tools kubernetes ] ++ [ ethtool conntrack-tools iptables socat ];
+  environment.systemPackages = with pkgs; [ cri-tools kubernetes ] ++ [ ethtool conntrack-tools iptables socat ]
+    ++ # for longhorn
+    [ openiscsi ];
   services.prometheus.exporters.node.enable = lib.mkForce false;
   services.kubernetes = {
     masterAddress = "nuc";
@@ -45,9 +47,9 @@
           max_conf_num = 1;
         };
 
-        containerd = {
-          runtimes.runc.runtime_type = "io.containerd.runc.v2";
-          runtimes.runc.options.SystemdCgroup = true;
+        containerd.runtimes.runc = {
+          runtime_type = "io.containerd.runc.v2";
+          options.SystemdCgroup = true;
         };
       };
     };
