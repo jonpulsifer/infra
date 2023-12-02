@@ -7,9 +7,8 @@
     nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
     nixos-hardware = { url = "github:nixos/nixos-hardware"; };
     nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
-    wsl = { url = "github:nix-community/NixOS-WSL"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, wsl, ... }@inputs:
+  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
     let
       inherit (nixos.lib) mkIf attrValues;
 
@@ -91,15 +90,6 @@
       };
 
       nixosConfigurations = rec {
-        # wsl on atomic
-        atomic = mkSystem {
-          modules = [
-            wsl.nixosModules.wsl
-            ./systems/wsl
-            { home-manager.users.jawn = dotfiles.home.full; }
-          ];
-        };
-
         cloudpi4 = mkRPi "cloudpi4" [ ];
         homepi4 = mkRPi "homepi4" [ ./systems/rpi/modules/kiosk.nix ];
         screenpi4 = mkRPi "screenpi4" [ ./systems/rpi/modules/kiosk.nix ];

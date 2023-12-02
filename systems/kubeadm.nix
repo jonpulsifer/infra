@@ -1,5 +1,7 @@
 { config, lib, pkgs, ... }:
 {
+  disabledModules = [ "virtualisation/containerd.nix" ];
+  imports = [ ./containerd.nix ];
   boot = {
     kernelModules = [ "br_netfilter" "overlay" "iptable_raw" "xt_socket" ];
     kernel.sysctl = {
@@ -69,11 +71,6 @@
       thin-provisioning-tools
       iptables
       socat
-      openiscsi
-    ] ++ [
-      "/run/wrappers/bin"
-      "/nix/var/nix/profiles/default/bin"
-      "/run/current-system/sw/bin"
     ];
 
     serviceConfig = {
