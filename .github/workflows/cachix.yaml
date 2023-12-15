@@ -3,9 +3,9 @@ on:
   push:
     paths:
       - systems/**
-      - ./flake.nix
-      - ./flake.lock
-      - ./shell.nix
+      - flake.nix
+      - flake.lock
+      - shell.nix
 jobs:
   cachix:
     runs-on: 800g3-1
