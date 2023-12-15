@@ -8,7 +8,7 @@ on:
       - ./shell.nix
 jobs:
   cachix:
-    runs-on: ubuntu-latest
+    runs-on: 800g3-1
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
