@@ -8,7 +8,7 @@
     };
     dotfiles = {
       enable = true;
-      url = "https://github.com/jonpulsifer/ts";
+      url = "https://github.com/jonpulsifer/dotfiles";
       tokenFile = "/var/secrets/github-token-dotfiles";
       extraPackages = with pkgs; [ cachix ];
     };
