@@ -2,6 +2,7 @@ name: cachix
 on:
   push:
     paths:
+      - ./github/workflows/cachix.yaml
       - systems/**
       - flake.nix
       - flake.lock
