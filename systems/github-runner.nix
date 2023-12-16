@@ -16,7 +16,7 @@
       enable = true;
       url = "https://github.com/jonpulsifer/ts";
       tokenFile = "/var/secrets/github-token-ts";
-      extraPackages = with pkgs; [ cachix ];
+      extraPackages = with pkgs; [ ];
     };
   };
   nix.settings.trusted-users = [ "github-runner-infra" "github-runner-dotfiles" ];
