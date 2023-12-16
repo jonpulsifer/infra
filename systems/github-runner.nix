@@ -19,5 +19,5 @@
       extraPackages = with pkgs; [ cachix ];
     };
   };
-  nix.settings.trusted-users = [ "github-runner-800g3-1" "github-runner-oldschool" ];
+  nix.settings.trusted-users = [ "github-runner-infra" "github-runner-dotfiles" ];
 }
