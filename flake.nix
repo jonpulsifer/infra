@@ -110,7 +110,7 @@
               tokenFile = "/var/secrets/github-token";
               extraPackages = with pkgs; [ cachix ];
             };
-            nix.settings.trustedUsers = [ "github-runner-800g3-1" ];
+            nix.settings.trusted-users = [ "github-runner-800g3-1" ];
           })
         ];
         "800g3-2" = mkSff "800g3-2" [
