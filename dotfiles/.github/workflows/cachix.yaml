@@ -1,9 +1,13 @@
 name: cachix
 on:
   push:
+    paths:
+      - .github/workflows/cachix.yaml
+      - flake.lock
+      - '**/*.nix'
 jobs:
   cachix:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
