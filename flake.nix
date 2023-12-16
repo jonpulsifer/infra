@@ -108,6 +108,7 @@
               enable = true;
               url = "https://github.com/jonpulsifer/infra";
               tokenFile = "/var/secrets/github-token";
+              extraPackages = [ pkgs.cachix ];
             };
           }
         ];
