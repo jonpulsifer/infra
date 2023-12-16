@@ -103,14 +103,14 @@
         "800g2-2" = mkSff "800g2-2" [ ./systems/kubeadm.nix ];
         "800g3-1" = mkSff "800g3-1" [
           { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
-          {
+          ({ pkgs, ... }: {
             services.github-runner = {
               enable = true;
               url = "https://github.com/jonpulsifer/infra";
               tokenFile = "/var/secrets/github-token";
-              extraPackages = [ pkgs.cachix ];
+              extraPackages = with pkgs; [ cachix ];
             };
-          }
+          })
         ];
         "800g3-2" = mkSff "800g3-2" [
           # { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
