@@ -6,6 +6,12 @@
       tokenFile = "/var/secrets/github-token-infra";
       extraPackages = with pkgs; [ cachix ];
     };
+    dotfiles = {
+      enable = true;
+      url = "https://github.com/jonpulsifer/ts";
+      tokenFile = "/var/secrets/github-token-dotfiles";
+      extraPackages = with pkgs; [ cachix ];
+    };
     ts = {
       enable = true;
       url = "https://github.com/jonpulsifer/ts";
