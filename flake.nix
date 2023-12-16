@@ -10,7 +10,7 @@
   };
   outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
     let
-      inherit (nixos.lib) mkIf attrValues;
+      inherit (nixos.lib) mkIf optionals attrValues genAttrs;
 
       kubernetesOnlyBuildKubeletOverlay = final: prev: {
         kubernetes = (prev.kubernetes.override {
@@ -43,10 +43,13 @@
         { system.configurationRevision = mkIf (self ? rev) self.rev; }
       ];
 
-      mkRPi = hostName: modules:
+      mkRPi = hostName: { kiosk ? false, extraModules ? [ ], ... }:
         nixos.lib.nixosSystem {
           system = "aarch64-linux";
-          modules = nixosModules ++ modules ++ [
+          modules = nixosModules
+            ++ extraModules
+            ++ optionals kiosk [ ./systems/rpi/modules/kiosk.nix ]
+            ++ [
             nixos-hardware.nixosModules.raspberry-pi-4
             ./systems/rpi/rpi.nix
             "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
@@ -64,18 +67,48 @@
           specialArgs = { inherit keys hostName; needsRoutes = true; };
         };
 
-      mkSystem = { hostName ? null, modules ? [ ] }:
+      mkSystem = hostName: { sff ? true, k8s ? true, extraModules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
-          modules = nixosModules ++ modules ++ [ ./systems/nixos.nix ];
+          modules = nixosModules
+            ++ optionals sff [ ./systems/sff ]
+            ++ optionals k8s [ ./systems/kubeadm.nix ]
+            ++ extraModules
+            ++ [ ./systems/nixos.nix ];
           specialArgs = { inherit keys hostName; needsRoutes = false; };
         };
 
-      mkSff = hostName: modules:
-        mkSystem { inherit hostName; modules = [ ./systems/sff ] ++ modules; };
     in
     rec {
-      legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" ] (system:
+      nixosConfigurations = builtins.mapAttrs
+        (hostName: config:
+          if config.rpi or false then
+            mkRPi hostName config
+          else
+            mkSystem hostName config
+        )
+        {
+          # lab machines
+          oldschool = {
+            extraModules = [
+              ./systems/github-runner.nix
+              { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
+            ];
+          };
+          optiplex = { };
+          "800g2" = { };
+          "800g2-2" = { };
+
+          # raspberry pis
+          cloudpi4 = { rpi = true; };
+          homepi4 = { rpi = true; kiosk = true; };
+          screenpi4 = { rpi = true; kiosk = true; };
+
+          # iso
+          iso = { extraModules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
+        };
+
+      legacyPackages = genAttrs [ "x86_64-linux" ] (system:
         import inputs.nixpkgs {
           inherit system;
           config.allowUnfree = true;
@@ -87,35 +120,6 @@
         x86_64-linux.default = import ./shell.nix {
           pkgs = legacyPackages.x86_64-linux;
         };
-      };
-
-      nixosConfigurations = rec {
-        cloudpi4 = mkRPi "cloudpi4" [ ];
-        homepi4 = mkRPi "homepi4" [ ./systems/rpi/modules/kiosk.nix ];
-        screenpi4 = mkRPi "screenpi4" [ ./systems/rpi/modules/kiosk.nix ];
-
-        iso = mkSystem { modules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
-        nuc = mkSystem { modules = [ ./systems/nuc ./systems/kubeadm.nix ]; };
-        htpc = mkSystem { modules = [ ./systems/htpc ]; };
-        optiplex = mkSff "optiplex" [ ./systems/kubeadm.nix ];
-
-        "800g2" = mkSff "800g2" [ ./systems/kubeadm.nix ];
-        "800g2-2" = mkSff "800g2-2" [ ./systems/kubeadm.nix ];
-        "800g3-1" = mkSff "800g3-1" [
-          { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
-          ({ pkgs, ... }: {
-            services.github-runner = {
-              enable = true;
-              url = "https://github.com/jonpulsifer/infra";
-              tokenFile = "/var/secrets/github-token";
-              extraPackages = with pkgs; [ cachix ];
-            };
-            nix.settings.trusted-users = [ "github-runner-800g3-1" ];
-          })
-        ];
-        "800g3-2" = mkSff "800g3-2" [
-          # { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
-        ];
       };
     };
 }
