@@ -4,4 +4,10 @@ kind: Namespace
 metadata:
   name: unpoller
   labels:
-    kustomize.toolkit.fluxcd.io/prune: true
+    kustomize.toolkit.fluxcd.io/prune: enabled
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
