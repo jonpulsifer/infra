@@ -3,10 +3,8 @@ on:
   push:
     paths:
       - .github/workflows/cachix.yaml
-      - systems/**
-      - flake.nix
+      - '**/*.nix'
       - flake.lock
-      - shell.nix
 jobs:
   cachix:
     runs-on: self-hosted
