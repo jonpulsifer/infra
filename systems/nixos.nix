@@ -27,7 +27,7 @@ in
     useDHCP = false;
     networkmanager.enable = mkDefault false;
     wireless = {
-      enable = false;
+      enable = mkDefault false;
       networks = mkDefault { lab = { hidden = true; }; };
     };
   };
