@@ -7,8 +7,8 @@ metadata:
     pulsifer.dev/service: node-exporter
 subsets:
   - addresses:
-      - ip: 10.2.0.9
-        nodeName: htpc
+      # - ip: 10.2.0.9
+      #   nodeName: htpc
       - ip: 10.2.0.20
         nodeName: cloudpi4
       # - ip: 10.2.0.22
@@ -23,6 +23,8 @@ subsets:
       #   nodeName: screenpi4
       - ip: 10.2.0.28
         nodeName: screenpi4-wifi
+      - ip: 100.73.219.127
+        nodeName: oldschool
     ports:
       - name: http-metrics
         port: 9100
