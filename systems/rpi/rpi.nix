@@ -1,11 +1,10 @@
-{ config, lib, pkgs, keys, hostName, ... }:
+{ config, lib, pkgs, keys, ... }:
 let
   inherit (lib) mkDefault mkForce;
 in
 {
   imports = [
     # Include the results of the hardware scan.
-    ../nixos.nix
   ];
 
   # Required for the Wireless firmware
@@ -42,7 +41,6 @@ in
     };
 
   networking = {
-    inherit hostName;
     wireless.enable = mkForce true;
     wireless.networks.lab = { hidden = true; };
   };

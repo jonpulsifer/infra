@@ -41,55 +41,55 @@
         home-manager.nixosModules.home-manager
         { home-manager.users.jawn = dotfiles.home.basic; }
         { system.configurationRevision = mkIf (self ? rev) self.rev; }
+        ./systems/nixos.nix
       ];
 
-      mkRPi = hostName: { kiosk ? false, extraModules ? [ ], ... }:
+      mkRPi = host: { kiosk ? false, extraModules ? [ ], ... }:
         nixos.lib.nixosSystem {
           system = "aarch64-linux";
           modules = nixosModules
-            ++ extraModules
+            ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
+            ++ [{ config.networking.hostName = host; }]
+            ++ [ ./systems/rpi/rpi.nix ]
             ++ optionals kiosk [ ./systems/rpi/modules/kiosk.nix ]
-            ++ [
-            nixos-hardware.nixosModules.raspberry-pi-4
-            ./systems/rpi/rpi.nix
-            "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
-            { config.sdImage.compressImage = false; config.sdImage.firmwareSize = 512; }
-            {
-              nixpkgs.overlays = [
-                # https://github.com/NixOS/nixpkgs/issues/154163
-                (final: super: {
-                  makeModulesClosure = x:
-                    super.makeModulesClosure (x // { allowMissing = true; });
-                })
-              ];
-            }
-          ];
-          specialArgs = { inherit keys hostName; needsRoutes = true; };
+            ++ extraModules
+            ++ [ "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix" { config.sdImage.compressImage = false; config.sdImage.firmwareSize = 512; } ]
+            ++ [{
+            nixpkgs.overlays = [
+              # https://github.com/NixOS/nixpkgs/issues/154163
+              (final: super: {
+                makeModulesClosure = x:
+                  super.makeModulesClosure (x // { allowMissing = true; });
+              })
+            ];
+          }];
+          specialArgs = { inherit keys; needsRoutes = true; };
         };
 
-      mkSystem = hostName: { sff ? true, k8s ? true, extraModules ? [ ] }:
+      mkSystem = host: { sff ? true, k8s ? true, extraModules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
           modules = nixosModules
+            ++ [{ config.networking.hostName = host; }]
             ++ optionals sff [ ./systems/sff ]
             ++ optionals k8s [ ./systems/kubeadm.nix ]
-            ++ extraModules
-            ++ [ ./systems/nixos.nix ];
-          specialArgs = { inherit keys hostName; needsRoutes = false; };
+            ++ extraModules;
+          specialArgs = { inherit keys; needsRoutes = false; };
         };
 
     in
     rec {
       nixosConfigurations = builtins.mapAttrs
-        (hostName: config:
+        (host: config:
           if config.rpi or false then
-            mkRPi hostName config
+            mkRPi host config
           else
-            mkSystem hostName config
+            mkSystem host config
         )
         {
           # lab machines
           oldschool = {
+            k8s = false;
             extraModules = [
               ./systems/github-runner.nix
               { networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864"; }
@@ -105,7 +105,12 @@
           screenpi4 = { rpi = true; kiosk = true; };
 
           # iso
-          iso = { extraModules = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ]; };
+          iso = {
+            extraModules = [
+              "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+              ./systems/iso.nix
+            ];
+          };
         };
 
       legacyPackages = genAttrs [ "x86_64-linux" ] (system:
