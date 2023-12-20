@@ -6,12 +6,12 @@
     jawn.extraGroups = [ "video" "networkmanager" ];
   };
 
-  networking.wireless.enabled = false;
+  networking.wireless.enable = true;
 
   # why is this a thing that exists
   services.openssh.settings.PermitRootLogin = mkForce "no";
 
-  # auto log me in and let me be a trusted user
+  # auto log me in
   services.getty.autologinUser = mkForce config.users.users.jawn.name;
 }
   
