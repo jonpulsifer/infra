@@ -3,7 +3,7 @@
 
   # this section is only required for longhorn
   disabledModules = [ "virtualisation/containerd.nix" ];
-  imports = [ ./containerd.nix ];
+  imports = [ ../services/containerd.nix ];
   systemd.tmpfiles.rules = [
     "L+ /usr/local/bin - - - - /run/current-system/sw/bin/"
   ];

@@ -6,6 +6,8 @@
     jawn.extraGroups = [ "video" "networkmanager" ];
   };
 
+  networking.wireless.enabled = false;
+
   # why is this a thing that exists
   services.openssh.settings.PermitRootLogin = mkForce "no";
 

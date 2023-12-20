@@ -5,13 +5,22 @@ let
 in
 {
   imports = [
-    # Include the results of the hardware scan.
-    # ./hardware-configuration.nix
+    # (modulesPath + "/installer/scan/not-detected.nix")
   ];
 
+  hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+  powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
+
   boot = {
+    initrd.availableKernelModules = [ "xhci_pci" "ahci" "usbhid" "usb_storage" ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" ]) [ "nvme" ];
+    initrd.kernelModules = [ ];
+
     kernelPackages = mkDefault pkgs.linuxPackages_latest;
+    kernelModules = [ ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" "800g2" "800g2-2" "optiplex" ]) [ "kvm-intel" ];
+
     consoleLogLevel = mkDefault 0;
+    extraModulePackages = [ ];
+
     loader = {
       # Use the systemd-boot EFI boot loader.
       systemd-boot.enable = mkDefault true;
@@ -20,6 +29,24 @@ in
     };
     supportedFilesystems = mkForce [ "ext4" "vfat" ];
   };
+
+  fileSystems."/boot" = {
+    device = "/dev/disk/by-label/boot";
+    fsType = "vfat";
+  };
+
+  fileSystems."/" = mkDefault {
+    device = "/dev/disk/by-label/nixos";
+    fsType = "ext4";
+  };
+
+  fileSystems."/mnt/disks" = {
+    device = "/dev/disk/by-label/storage";
+    fsType = "ext4";
+    options = [ "nofail" "relatime" ];
+  };
+
+  swapDevices = [ ];
 
   networking = {
     hostName = mkDefault "nixos";
@@ -63,6 +90,7 @@ in
   time.timeZone = "Canada/Atlantic";
 
   environment.systemPackages = with pkgs; [ bash bash-completion zsh git tailscale ];
+
   services.prometheus.exporters.node = {
     enable = mkDefault true;
     openFirewall = mkDefault true;
@@ -113,6 +141,7 @@ in
     shell = pkgs.zsh;
   };
 
+  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
   nix = {
     package = pkgs.nixFlakes;
     gc = {

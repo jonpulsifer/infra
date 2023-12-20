@@ -44,14 +44,13 @@
         ./systems/nixos.nix
       ];
 
-      mkRPi = host: { kiosk ? false, extraModules ? [ ], ... }:
+      mkRPi = host: { extraModules ? [ ], ... }:
         nixos.lib.nixosSystem {
           system = "aarch64-linux";
           modules = nixosModules
             ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
             ++ [{ config.networking.hostName = host; }]
-            ++ [ ./systems/rpi/rpi.nix ]
-            ++ optionals kiosk [ ./systems/rpi/modules/kiosk.nix ]
+            ++ [ ./systems/rpi.nix ]
             ++ extraModules
             ++ [ "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix" { config.sdImage.compressImage = false; config.sdImage.firmwareSize = 512; } ]
             ++ [{
@@ -66,13 +65,12 @@
           specialArgs = { inherit keys; needsRoutes = true; };
         };
 
-      mkSystem = host: { sff ? true, k8s ? true, extraModules ? [ ] }:
+      mkSystem = host: { k8s ? true, extraModules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
           modules = nixosModules
             ++ [{ config.networking.hostName = host; }]
-            ++ optionals sff [ ./systems/sff ]
-            ++ optionals k8s [ ./systems/kubeadm.nix ]
+            ++ optionals k8s [ ./systems/modules/kubeadm.nix ]
             ++ extraModules;
           specialArgs = { inherit keys; needsRoutes = false; };
         };
@@ -91,7 +89,7 @@
           oldschool = {
             k8s = false;
             extraModules = [
-              ./systems/github-runner.nix
+              ./systems/modules/github-runner.nix
               {
                 networking.wireless.enable = true;
                 networking.wireless.networks.Goggly.pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864";
@@ -105,8 +103,8 @@
 
           # raspberry pis
           cloudpi4 = { rpi = true; };
-          homepi4 = { rpi = true; kiosk = true; };
-          screenpi4 = { rpi = true; kiosk = true; };
+          homepi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
+          screenpi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
 
           # iso
           iso = {
