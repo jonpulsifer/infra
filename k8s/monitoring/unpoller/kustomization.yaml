@@ -10,7 +10,7 @@ namespace: &app unpoller
 
 images:
   - name: ghcr.io/unpoller/unpoller
-    newTag: v2.9.4
+    newTag: v2.9.5
 
 commonLabels:
   app.kubernetes.io/name: *app
