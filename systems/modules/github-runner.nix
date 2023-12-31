@@ -5,7 +5,7 @@
       url = "https://github.com/jonpulsifer/infra";
       tokenFile = "/var/secrets/github-token-infra";
       replace = true;
-      extraPackages = with pkgs; [ cachix nodejx-18_x unzip ];
+      extraPackages = with pkgs; [ cachix nodejs-18_x unzip ];
     };
     dotfiles = {
       enable = true;
