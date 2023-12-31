@@ -18,7 +18,6 @@ in
       fluxcd
       grafana-loki
       k6
-      k8sgpt
       k9s
       kubectl
       kubecolor

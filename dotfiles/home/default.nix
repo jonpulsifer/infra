@@ -22,7 +22,6 @@ in
       _1password
       age
       gh
-      gptcommit
       postgresql_15
       terraform
     ] ++ optionals isDarwin [ reattach-to-user-namespace ];
