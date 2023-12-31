@@ -10,7 +10,7 @@ on:
       - vault/**
       - workspace/**
   pull_request:
-    paths: 
+    paths:
       - cloudflare/**
       - gcp/**
       - unifi/**
@@ -19,7 +19,7 @@ on:
 jobs:
   changed-directories:
     name: Get Changed Files
-    runs-on: infra
+    runs-on: self-hosted
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
