@@ -4,8 +4,10 @@ on:
     branches:
       - main
     paths:
+      - argo/**
       - cloudflare/**
       - gcp/**
+      - k8s/nodes.tf
       - unifi/**
       - vault/**
       - workspace/**
