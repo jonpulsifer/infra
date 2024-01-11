@@ -6,9 +6,9 @@ ingress:
   - hostname: cf.lolwtf.ca
     service: http://request-headers-app.request-headers:8080
   - hostname: cf2.lolwtf.ca
-    service: hello_world
+    service: http://authme-app.authme:8080
   - hostname: cf3.lolwtf.ca
-    service: http_status:518
+    service: http://nested-app.nested:8080
   - service: http_status:404
 # - hostname: wishin.lolwtf.ca
 #   service: http://wishin.wishin:8080
