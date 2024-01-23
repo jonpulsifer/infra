@@ -9,6 +9,7 @@ in
 
   # Required for the Wireless firmware
   hardware.enableRedistributableFirmware = true;
+  hardware.cpu.intel.updateMicrocode = lib.mkForce null;
 
   boot = {
     kernelPackages = pkgs.linuxPackages_rpi4;
