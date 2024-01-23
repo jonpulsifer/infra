@@ -1,7 +1,7 @@
 # https://github.com/actions/runner/blob/main/images/Dockerfile
 # https://github.com/onedr0p/containers/blob/main/apps/github-actions-runner/Dockerfile
 # TODO stop stealing onedr0p's and make my own, do we even need docker?
-FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-jammy@sha256:efa6f75adfcf2559902654b63c48b4473469d449440099598731dd295256860e
+FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-jammy@sha256:678811e02015b3c76d3b408b57a6fe13998c54901ce9ae0f9d9c9a2e78da0978
 
 ARG VERSION=2.311.0
 # renovate: datasource=github-releases depName=actions/runner-container-hooks
