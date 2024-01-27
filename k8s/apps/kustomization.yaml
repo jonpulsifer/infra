@@ -12,6 +12,7 @@ resources:
   - dump.yaml
   - falco
   - flux-system
+  - k6
   # - minecraft
   - reloader
   - rosie
