@@ -7,8 +7,6 @@ metadata:
 spec:
   interval: 24h
   chart:
-    install:
-      createNamespace: false
     spec:
       chart: k6-operator
       version: 3.4.0
@@ -16,6 +14,8 @@ spec:
         kind: HelmRepository
         name: grafana
         namespace: flux-system
+  install:
+    createNamespace: false
   values:
     fullnameOverride: k6
     namespace.create: false
