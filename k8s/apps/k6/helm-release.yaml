@@ -6,6 +6,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 24h
+  targetNamespace: k6
   chart:
     spec:
       chart: k6-operator
