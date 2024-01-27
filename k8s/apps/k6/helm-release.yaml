@@ -9,6 +9,8 @@ spec:
   chart:
     spec:
       chart: k6-operator
+      install:
+        createNamespace: false
       version: 3.4.0
       sourceRef:
         kind: HelmRepository
