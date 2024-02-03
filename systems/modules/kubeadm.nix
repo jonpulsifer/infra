@@ -30,7 +30,7 @@
     [ openiscsi ];
   services.prometheus.exporters.node.enable = lib.mkForce false;
   services.kubernetes = {
-    apiServerAddress = "https://k8s.lolwtf.ca";
+    apiserverAddress = "https://k8s.lolwtf.ca";
     kubelet.enable = true;
     proxy.enable = false;
     pki = {
