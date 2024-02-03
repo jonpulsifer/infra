@@ -66,39 +66,39 @@
     };
   };
 
-#   systemd.services.kubelet = {
-#     description = "kubelet: The Kubernetes Node Agent";
-#     documentation = [ "https://kubernetes.io/docs/home/" ];
-#     wantedBy = [ "multi-user.target" ];
+  #   systemd.services.kubelet = {
+  #     description = "kubelet: The Kubernetes Node Agent";
+  #     documentation = [ "https://kubernetes.io/docs/home/" ];
+  #     wantedBy = [ "multi-user.target" ];
 
-#     path = with pkgs; [
-#       gitMinimal
-#       openssh
-#       util-linux
-#       iproute2
-#       ethtool
-#       thin-provisioning-tools
-#       iptables
-#       socat
-#     ];
+  #     path = with pkgs; [
+  #       gitMinimal
+  #       openssh
+  #       util-linux
+  #       iproute2
+  #       ethtool
+  #       thin-provisioning-tools
+  #       iptables
+  #       socat
+  #     ];
 
-#     serviceConfig = {
-#       StateDirectory = "kubelet";
+  #     serviceConfig = {
+  #       StateDirectory = "kubelet";
 
-#       Environment = [
-#         "KUBELET_KUBECONFIG_ARGS=\"--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf\""
-#         "KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
-#       ];
+  #       Environment = [
+  #         "KUBELET_KUBECONFIG_ARGS=\"--bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf\""
+  #         "KUBELET_CONFIG_ARGS=--config=/var/lib/kubelet/config.yaml"
+  #       ];
 
-#       EnvironmentFile = [
-#         "-/var/lib/kubelet/kubeadm-flags.env"
-#         "-/etc/default/kubelet"
-#       ];
+  #       EnvironmentFile = [
+  #         "-/var/lib/kubelet/kubeadm-flags.env"
+  #         "-/etc/default/kubelet"
+  #       ];
 
-#       Restart = "always";
-#       RestartSec = 10;
+  #       Restart = "always";
+  #       RestartSec = 10;
 
-#       ExecStart = "${pkgs.kubernetes}/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS";
-#     };
-#   };
-# }
+  #       ExecStart = "${pkgs.kubernetes}/bin/kubelet $KUBELET_KUBECONFIG_ARGS $KUBELET_CONFIG_ARGS $KUBELET_KUBEADM_ARGS $KUBELET_EXTRA_ARGS";
+  #     };
+  #   };
+}
