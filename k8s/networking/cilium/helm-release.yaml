@@ -24,24 +24,27 @@ spec:
     remediation:
       retries: 5
   values:
-    # autoDirectNodeRoutes: true
+    autoDirectNodeRoutes: true
     devices: eno+ enp+ tailscale0
     kubeProxyReplacement: true
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
+    routingMode: native
     ipam:
       mode: multi-pool
       operator:
-        clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
+        autoCreateCiliumPodIPPools:
+          default:
+            ipv4:
+              cidrs:
+                - ${CILIUM_POD_CIDR}
+              maskSize: 27
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableXTSocketFallback: false
     bpf:
       masquerade: true
     bgpControlPlane:
       enabled: true
-    # encryption:
-    #   enabled: true
-    #   type: wireguard
     gatewayAPI:
       enabled: true
     ingressController:
