@@ -30,11 +30,10 @@ spec:
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
     ipam:
-      mode: cluster-pool-v2beta
+      mode: multi-pool
       operator:
         clusterPoolIPv4PodCIDRList: ${CILIUM_POD_CIDR}
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
-    tunnel: disabled
     enableXTSocketFallback: false
     bpf:
       masquerade: true
