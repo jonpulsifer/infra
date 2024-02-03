@@ -30,7 +30,7 @@
         config.allowUnfree = true;
         overlays = [
           dotfiles.overlays.pkgs
-          kubernetesOnlyBuildKubeletOverlay
+          # kubernetesOnlyBuildKubeletOverlay
         ];
       };
 

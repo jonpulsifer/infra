@@ -17,7 +17,7 @@
     };
   };
 
-  networking.firewall.enable = lib.mkForce false;
+  networking.firewall.enable = lib.mkForce true;
   systemd.network.config = {
     networkConfig = {
       ManageForeignRoutes = false;
@@ -30,9 +30,12 @@
     [ openiscsi ];
   services.prometheus.exporters.node.enable = lib.mkForce false;
   services.kubernetes = {
-    masterAddress = "nuc";
-    kubelet.enable = false;
+    apiServerAddress = "https://k8s.lolwtf.ca";
+    kubelet.enable = true;
     proxy.enable = false;
+    pki = {
+      cfsslAPIExtraSANs = [ "nuc" "nuc.lolwtf.ca" "nuc.fml.pulsifer.ca" "nuc.pirate-musical.ts.net" "10.3.0.10" "10.2.0.10" ];
+    };
   };
 
   virtualisation.containerd = {
