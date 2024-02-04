@@ -65,12 +65,12 @@
           specialArgs = { inherit keys; needsRoutes = true; };
         };
 
-      mkSystem = host: { k8s ? true, extraModules ? [ ] }:
+      mkSystem = host: { k8s ? false, extraModules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
           modules = nixosModules
             ++ [{ config.networking.hostName = host; }]
-            ++ optionals k8s [ ./systems/modules/kubeadm.nix ]
+            ++ optionals k8s [ ./systems/modules/k8s.nix ]
             ++ extraModules;
           specialArgs = { inherit keys; needsRoutes = false; };
         };
@@ -96,7 +96,7 @@
               }
             ];
           };
-          nuc = { };
+          nuc = { k8s = true; };
           optiplex = { };
           "800g2" = { };
           "800g2-2" = { };
