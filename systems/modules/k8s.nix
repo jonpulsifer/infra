@@ -26,9 +26,7 @@ in
     };
   };
 
-  environment.systemPackages = with pkgs; [ cri-tools kubectl kubernetes ]
-    ++ # for longhorn
-    [ openiscsi ];
+  environment.systemPackages = with pkgs; [ cri-tools kubectl kubernetes ] ++ [ openiscsi ]; # for longhorn
   services.prometheus.exporters.node.enable = lib.mkForce false;
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;
