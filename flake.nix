@@ -87,7 +87,6 @@
         {
           # lab machines
           oldschool = {
-            k8s = false;
             extraModules = [
               ./systems/modules/github-runner.nix
               ./systems/modules/jellyfin.nix
@@ -96,7 +95,7 @@
               }
             ];
           };
-          nuc = { k8s = true; };
+          nuc = { k8s = false; };
           optiplex = { };
           "800g2" = { };
           "800g2-2" = { };
