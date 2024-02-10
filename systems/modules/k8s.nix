@@ -41,10 +41,10 @@ in
     scheduler.enable = true;
     addonManager.enable = true;
     proxy.enable = false;
+    easyCerts = true;
     pki = {
       enable = true;
       cfsslAPIExtraSANs = [ "nuc" "nuc.lolwtf.ca" "nuc.fml.pulsifer.ca" "nuc.pirate-musical.ts.net" "10.3.0.10" ];
-      pkiTrustOnBootstrap = false;
     };
   };
 
