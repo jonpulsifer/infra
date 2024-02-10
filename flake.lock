@@ -30,11 +30,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1706990457,
-        "narHash": "sha256-ifLr2zva40UzN6FzuBBmnaKDFIlnuGUnCU8qVB37jzg=",
+        "lastModified": 1707597639,
+        "narHash": "sha256-x6MH53J2sIJTCboqYFmajhv0RGeRHy36VdaOEQp+vD0=",
         "owner": "jonpulsifer",
         "repo": "dotfiles",
-        "rev": "e52639bc49ba5184ba057f4b43b3246e008af1b8",
+        "rev": "43749f4448177c32daccbe294a58b05970f8e333",
         "type": "github"
       },
       "original": {
@@ -51,11 +51,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1706985585,
-        "narHash": "sha256-ptshv4qXiC6V0GCfpABz88UGGPNwqs5tAxaRUKbk1Qo=",
+        "lastModified": 1707591592,
+        "narHash": "sha256-sTFPBn9MnJHcoBcG+xpljsG/JGJxPaevpzhdOrW2uf0=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "1ca210648a6ca9b957efde5da957f3de6b1f0c45",
+        "rev": "4c0357ff874f8250fcae621d5626aba1c7161710",
         "type": "github"
       },
       "original": {
