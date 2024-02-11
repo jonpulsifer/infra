@@ -42,7 +42,7 @@ in
       tree = ls + " --tree";
       diff = "${pkgs.delta}/bin/delta";
     };
-    stateVersion = "23.11";
+    stateVersion = "24.05";
   };
 
   home.packages = with pkgs;
