@@ -17,7 +17,7 @@ in
   };
 
   networking.extraHosts = "${kubeAPIServerIP} ${kubeAPIServerHostname}";
-  networking.firewall.enable = lib.mkForce true;
+  networking.firewall.enable = lib.mkForce false;
   systemd.network.config = {
     networkConfig = {
       ManageForeignRoutes = false;
