@@ -17,6 +17,5 @@
     easyCerts = true;
     pki.enabled = true;
   };
+  services.etcd.enable = true;
 };
-services.etcd.enable = true;
-}
