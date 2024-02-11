@@ -24,12 +24,10 @@ in
       ManageForeignRoutingPolicyRules = false;
     };
   };
-  environment.systemPackages = with pkgs; [ cri-tools kubernetes ]
 
-    environment.systemPackages = with pkgs;
-  [ cri-tools kubectl kubernetes ]
-  ++ [ ethtool conntrack-tools iptables socat ] # for wat
-  ++ [ openiscsi ]; # for longhorn
+  environment.systemPackages = with pkgs; [ cri-tools kubectl kubernetes ]
+    ++ [ ethtool conntrack-tools iptables socat ] # for some k8s networking
+    ++ [ openiscsi ]; # for longhorn
 
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;
