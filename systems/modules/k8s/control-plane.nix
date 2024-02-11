@@ -16,6 +16,6 @@
     addonManager.enable = true;
     proxy.enable = false;
     easyCerts = true;
-    pki.enabled = true;
+    pki.enable = true;
   };
 }
