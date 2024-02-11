@@ -16,7 +16,7 @@ in
     kernelModules = [ "br_netfilter" "overlay" "iptable_raw" "xt_socket" ];
   };
 
-  networking.extraHosts = "${kubeAPIServerIP} ${kubeAPIServerHostname}";
+  # networking.extraHosts = "${kubeAPIServerIP} ${kubeAPIServerHostname}";
   networking.firewall.enable = lib.mkForce false;
   systemd.network.config = {
     networkConfig = {
@@ -24,8 +24,12 @@ in
       ManageForeignRoutingPolicyRules = false;
     };
   };
+  environment.systemPackages = with pkgs; [ cri-tools kubernetes ]
 
-  environment.systemPackages = with pkgs; [ cri-tools kubectl kubernetes ] ++ [ openiscsi ]; # for longhorn
+    environment.systemPackages = with pkgs;
+  [ cri-tools kubectl kubernetes ]
+  ++ [ ethtool conntrack-tools iptables socat ] # for wat
+  ++ [ openiscsi ]; # for longhorn
 
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;

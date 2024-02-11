@@ -7,6 +7,7 @@
     apiserver = {
       enable = true;
       allowPrivileged = true;
+      extraSANs = [ "nuc" "nuc.lolwtf.ca" "nuc.fml.pulsifer.ca" "nuc.pirate-musical.ts.net" "10.3.0.10" ];
     };
     kubelet.enable = true;
     controllerManager.enable = true;
@@ -14,10 +15,8 @@
     addonManager.enable = true;
     proxy.enable = false;
     easyCerts = true;
-    pki = {
-      enable = true;
-      cfsslAPIExtraSANs = [ "nuc" "nuc.lolwtf.ca" "nuc.fml.pulsifer.ca" "nuc.pirate-musical.ts.net" "10.3.0.10" ];
-    };
+    pki.enabled = true;
   };
-  services.etcd.enable = true;
+};
+services.etcd.enable = true;
 }
