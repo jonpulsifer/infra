@@ -36,6 +36,9 @@ in
       securePort = kubeAPIServerPort;
       advertiseAddress = kubeAPIServerIP;
     };
+    services.kubernetes = {
+      kubelet.enable = true;
+    };
   };
 
   virtualisation.containerd = {

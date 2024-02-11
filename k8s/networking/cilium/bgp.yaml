@@ -25,7 +25,7 @@ metadata:
   namespace: kube-system
 spec:
   cidrs:
-    - cidr: ${LB_RANGE}
+    - cidr: 10.3.0.64/26
   serviceSelector:
     # give all services a load balancer IP
     matchExpressions:
