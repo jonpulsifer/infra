@@ -4,7 +4,7 @@
     dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
     home-manager = { url = "github:nix-community/home-manager"; follows = "dotfiles/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
-    nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
+    nixos = { url = "github:jonpulsifer/nixpkgs/kubernetes-cfssl-fix-install-command"; };
     nixos-hardware = { url = "github:nixos/nixos-hardware"; };
     nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
   };
@@ -65,16 +65,19 @@
           specialArgs = { inherit keys; needsRoutes = true; };
         };
 
-      mkSystem = host: { k8s ? false, extraModules ? [ ] }:
+      mkSystem = host: { extraModules ? [ ] }:
         nixos.lib.nixosSystem {
           system = "x86_64-linux";
           modules = nixosModules
             ++ [{ config.networking.hostName = host; }]
-            ++ optionals k8s [ ./systems/modules/k8s.nix ]
             ++ extraModules;
           specialArgs = { inherit keys; needsRoutes = false; };
         };
 
+      workerModules = [
+        { nixpkgs.overlays = [ kubernetesOnlyBuildKubeletOverlay ]; }
+        ./systems/modules/k8s/worker.nix
+      ];
     in
     rec {
       nixosConfigurations = builtins.mapAttrs
@@ -95,10 +98,10 @@
               }
             ];
           };
-          nuc = { k8s = false; };
-          optiplex = { };
-          "800g2" = { };
-          "800g2-2" = { };
+          nuc = { extraModules = [ ./systems/modules/k8s/control-plane.nix ]; };
+          optiplex = { extraModules = workerModules; };
+          "800g2" = { extraModules = workerModules; };
+          "800g2-2" = { extraModules = workerModules; };
 
           # raspberry pis
           cloudpi4 = { rpi = true; };

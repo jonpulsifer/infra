@@ -78,16 +78,16 @@
     },
     "nixos": {
       "locked": {
-        "lastModified": 1707546158,
-        "narHash": "sha256-nYYJTpzfPMDxI8mzhQsYjIUX+grorqjKEU9Np6Xwy/0=",
-        "owner": "nixos",
+        "lastModified": 1707676595,
+        "narHash": "sha256-GpX+K5cUSPRPt1eQtH0q9l6N0kFFMSXSi79nR37+Oxo=",
+        "owner": "jonpulsifer",
         "repo": "nixpkgs",
-        "rev": "d934204a0f8d9198e1e4515dd6fec76a139c87f0",
+        "rev": "0d67ba5483c30e46183047374ba6b79e639f0d9c",
         "type": "github"
       },
       "original": {
-        "owner": "nixos",
-        "ref": "nixos-unstable",
+        "owner": "jonpulsifer",
+        "ref": "kubernetes-cfssl-fix-install-command",
         "repo": "nixpkgs",
         "type": "github"
       }
