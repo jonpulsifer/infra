@@ -4,6 +4,13 @@ locals {
 {
   "api_addr": "https://0.0.0.0:${local.vault_port}",
   "cluster_addr": "https://0.0.0.0:8201",
+  "listener": {
+    "tcp": {
+      "address" : "0.0.0.0:${local.vault_port}",
+      "tls_disable" : true,
+      "tls_disable_client_certs" : true
+    }
+  },
   "seal": {
     "gcpckms": {
       "crypto_key" : "vault",
@@ -41,7 +48,7 @@ resource "google_cloud_run_v2_service" "vault" {
         cpu_idle = true
         limits = {
           cpu    = "1000m"
-          memory = "256Mi"
+          memory = "512Mi"
         }
       }
       ports {

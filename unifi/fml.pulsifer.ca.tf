@@ -19,6 +19,8 @@ resource "unifi_network" "fml" {
   dhcp_lease    = local.one_day
   dhcp_start    = cidrhost(local.fml_cidr, 100)
   dhcp_stop     = cidrhost(local.fml_cidr, 254)
+  dhcp_v6_start = "::2"
+  dhcp_v6_stop  = "::7d1"
   multicast_dns = true
   igmp_snooping = true
 }

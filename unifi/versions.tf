@@ -36,9 +36,9 @@ provider "unifi" {
 
 provider "vault" {
   # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer)
-  address            = "https://vault.lolwtf.ca"
+  address            = "http://localhost:8080"
   add_address_to_env = true
-  skip_tls_verify    = false
+  skip_tls_verify    = true
 }
 
 # terraform apply -target=unifi_user.import

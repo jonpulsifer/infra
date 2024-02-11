@@ -1,18 +1,19 @@
 locals {
   node_cidr = "10.3.0.0/24"
   pod_cidr  = "10.100.0.0/16"
-  node_dns = {
+  static_records = {
     "erx" : cidrhost(local.lab_cidr, 5)
+    "k8s" : cidrhost(local.node_cidr, 10)
     "nuc" : cidrhost(local.node_cidr, 10)
     "800g2" : cidrhost(local.node_cidr, 11)
     "800g2-2" : cidrhost(local.node_cidr, 12)
     # "800g3-1" : cidrhost(local.node_cidr, 13)
-    "optiplex": cidrhost(local.node_cidr, 13)
+    "optiplex" : cidrhost(local.node_cidr, 13)
   }
 }
 
 resource "cloudflare_record" "k8s_remote_dns" {
-  for_each = local.node_dns
+  for_each = local.static_records
   zone_id  = data.cloudflare_zone.lab.id
   name     = each.key
   value    = each.value
@@ -53,7 +54,7 @@ resource "unifi_firewall_rule" "allow_fml_to_k8s" {
   name       = "Allow ${local.fml_cidr} to ${local.node_cidr} and ${local.pod_cidr}"
   action     = "accept"
   ruleset    = "LAN_IN"
-  rule_index = "2100"
+  rule_index = "20003"
 
   protocol = "all"
 
