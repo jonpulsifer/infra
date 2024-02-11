@@ -3,6 +3,7 @@ let
   kubeAPIServerIP = "10.3.0.10";
   kubeAPIServerHostname = "k8s.lolwtf.ca";
   kubeAPIServerPort = 6443;
+  kubePodCidr = "10.100.0.0/16";
 in
 {
   # this section is only required for longhorn
@@ -37,6 +38,7 @@ in
       advertiseAddress = kubeAPIServerIP;
     };
     kubelet.enable = true;
+    clusterCidr = kubePodCidr;
   };
 
   virtualisation.containerd = {
