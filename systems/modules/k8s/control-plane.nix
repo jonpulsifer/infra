@@ -4,7 +4,10 @@
   imports = [ ./common.nix ];
   services.prometheus.exporters.node.enable = lib.mkForce false;
   services.kubernetes = {
-    apiserver.enable = true;
+    apiserver = {
+      enable = true;
+      allowPrivileged = true;
+    };
     kubelet.enable = true;
     controllerManager.enable = true;
     scheduler.enable = true;
