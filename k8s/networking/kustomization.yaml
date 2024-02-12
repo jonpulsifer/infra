@@ -7,7 +7,7 @@ resources:
   - cert-manager
   - cloudflare
   - external-dns
-  - ingress-nginx
+  # - ingress-nginx
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
