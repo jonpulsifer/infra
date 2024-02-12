@@ -20,23 +20,19 @@ resource "github_repository_deploy_key" "this" {
   title      = "Flux"
   repository = local.github.repo
   key        = tls_private_key.flux.public_key_openssh
-  read_only  = "false"
+  read_only  = "true"
 }
 
-provider "flux" {
-  kubernetes = {
-    config_path = "~/.kube/config"
-  }
-  git = {
-    url = "ssh://git@github.com/${local.github.org}/${local.github.repo}.git"
-    ssh = {
-      username    = "git"
-      private_key = tls_private_key.flux.private_key_pem
-    }
-  }
-}
+resource "kubernetes_secret" "main" {
 
-resource "flux_bootstrap_git" "this" {
-  depends_on = [github_repository_deploy_key.this]
-  path       = "k8s/flux"
+  metadata {
+    name      = "flux-system"
+    namespace = "flux-system"
+  }
+
+  data = {
+    identity       = tls_private_key.flux.private_key_pem
+    "identity.pub" = tls_private_key.flux.public_key_pem
+    known_hosts    = "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg="
+  }
 }

@@ -40,6 +40,7 @@ in
     kubelet = {
       enable = true;
       taints = lib.mkForce { };
+      cni.packages = lib.mkForce [ ];
     };
     clusterCidr = kubePodCidr;
   };
