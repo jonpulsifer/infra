@@ -37,7 +37,10 @@ in
       securePort = kubeAPIServerPort;
       advertiseAddress = kubeAPIServerIP;
     };
-    kubelet.enable = true;
+    kubelet = {
+      enable = true;
+      taints = lib.mkForce { };
+    };
     clusterCidr = kubePodCidr;
   };
 
