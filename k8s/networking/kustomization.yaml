@@ -4,9 +4,9 @@ kind: Kustomization
 resources:
   - gateway-api.yaml
   - cilium
+  - cert-manager
   - cloudflare
   - external-dns
-  - cert-manager
   - ingress-nginx
 patches:
   - target:
