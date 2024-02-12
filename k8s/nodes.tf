@@ -11,16 +11,13 @@ locals {
     # "800g2" = {
     #   "node-role.kubernetes.io/worker" = ""
     #   "bgp-policy"                     = "fml"
-    #   "bgp.lolwtf.ca/peer"             = "800g2"
     # },
     # "800g2-2" = {
     #   "node-role.kubernetes.io/worker" = ""
     #   "bgp-policy"                     = "fml"
-    #   "bgp.lolwtf.ca/peer"             = "800g2-2"
     # },
     # "optiplex" = {
     #   "node-role.kubernetes.io/worker" = ""
-    #   "bgp.lolwtf.ca/peer"             = "optiplex"
     #   "bgp-policy"                     = "fml"
     # }
   }

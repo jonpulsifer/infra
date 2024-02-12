@@ -39,10 +39,26 @@ in
     };
     kubelet = {
       enable = true;
-      taints = lib.mkForce { };
-      cni.packages = lib.mkForce [ ];
+      taints = lib.mkForce { }; # we want to schedule some workloads on the master
+      cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
     };
     clusterCidr = kubePodCidr;
+    addons.dns.corefile = ''
+      .:10053 {
+        errors
+        health :10054
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+          pods insecure
+          fallthrough in-addr.arpa ip6.arpa
+        }
+        prometheus :10055
+        forward . 10.2.0.1
+        cache 30
+        loop
+        reload
+        loadbalance
+      }
+    '';
   };
 
   virtualisation.containerd = {
