@@ -9,7 +9,7 @@ spec:
   ref:
     branch: main
   secretRef:
-    name: github-jonpulsifer-infra-deploy-key
+    name: flux-system
   url: ssh://git@github.com/jonpulsifer/infra
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1

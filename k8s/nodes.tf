@@ -6,23 +6,23 @@ locals {
   nodes_with_labels = {
     "nuc" = {
       "node-role.kubernetes.io/control-plane" = ""
+      "bgp-policy"                            = "fml"
     },
-    "800g2" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
-      "bgp.lolwtf.ca/peer"             = "800g2"
-    },
-    "800g2-2" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
-      "bgp.lolwtf.ca/peer"             = "800g2-2"
-    },
-    "optiplex" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp.lolwtf.ca/peer"             = "optiplex"
-      "bgp-policy"                     = "fml"
-    }
-   
+    # "800g2" = {
+    #   "node-role.kubernetes.io/worker" = ""
+    #   "bgp-policy"                     = "fml"
+    #   "bgp.lolwtf.ca/peer"             = "800g2"
+    # },
+    # "800g2-2" = {
+    #   "node-role.kubernetes.io/worker" = ""
+    #   "bgp-policy"                     = "fml"
+    #   "bgp.lolwtf.ca/peer"             = "800g2-2"
+    # },
+    # "optiplex" = {
+    #   "node-role.kubernetes.io/worker" = ""
+    #   "bgp.lolwtf.ca/peer"             = "optiplex"
+    #   "bgp-policy"                     = "fml"
+    # }
   }
 }
 
@@ -50,6 +50,12 @@ terraform {
   required_providers {
     kubernetes = {
       source = "hashicorp/kubernetes"
+    }
+    flux = {
+      source = "fluxcd/flux"
+    }
+    github = {
+      source = "integrations/github"
     }
   }
 }
