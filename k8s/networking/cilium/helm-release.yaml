@@ -63,7 +63,7 @@ spec:
     prometheus:
       enabled: true
       serviceMonitor:
-        enabled: false
+        enabled: true
         labels:
           release: prom-stack
       dashboards:
@@ -75,12 +75,12 @@ spec:
         prometheus:
           enabled: true
           serviceMonitor:
-            enabled: false
+            enabled: true
             labels:
               release: prom-stack
       metrics:
         serviceMonitor:
-          enabled: false
+          enabled: true
           labels:
             release: prom-stack
         dashboards:
