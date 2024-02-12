@@ -5,6 +5,7 @@ locals {
     "erx" : cidrhost(local.lab_cidr, 5)
     "k8s" : cidrhost(local.node_cidr, 10)
     "nuc" : cidrhost(local.node_cidr, 10)
+    "k8s" : cidrhost(local.node_cidr, 10)
     "800g2" : cidrhost(local.node_cidr, 11)
     "800g2-2" : cidrhost(local.node_cidr, 12)
     # "800g3-1" : cidrhost(local.node_cidr, 13)
