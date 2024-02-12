@@ -13,6 +13,9 @@ spec:
       neighbors:
         - peerASN: 64512
           peerAddress: 10.3.0.1/24
+      podIPPoolSelector:
+        matchExpressions:
+          - { key: debug, operator: NotIn, values: [lol] }
       serviceSelector:
         matchExpressions:
           # announce all services on the node

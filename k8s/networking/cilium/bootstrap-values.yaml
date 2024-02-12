@@ -14,6 +14,8 @@ ipam:
             - 10.100.0.0/16
           maskSize: 27
 ipv4NativeRoutingCIDR: 10.0.0.0/9
+endpointRoutes:
+  enabled: true
 enableXTSocketFallback: false
 bpf:
   masquerade: true
