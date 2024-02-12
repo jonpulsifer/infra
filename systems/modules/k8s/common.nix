@@ -17,7 +17,7 @@ in
     kernelModules = [ "br_netfilter" "overlay" "iptable_raw" "xt_socket" ];
   };
 
-  # networking.extraHosts = "${kubeAPIServerIP} ${kubeAPIServerHostname}";
+  networking.extraHosts = "${kubeAPIServerIP} ${kubeAPIServerHostname}";
   networking.firewall.enable = lib.mkForce false;
   systemd.network.config = {
     networkConfig = {
@@ -43,6 +43,7 @@ in
       cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
     };
     clusterCidr = kubePodCidr;
+    easyCerts = true;
     addons.dns.corefile = ''
       .:10053 {
         errors

@@ -15,7 +15,5 @@
     scheduler.enable = true;
     addonManager.enable = true;
     proxy.enable = false;
-    easyCerts = true;
-    pki.enable = true;
   };
 }
