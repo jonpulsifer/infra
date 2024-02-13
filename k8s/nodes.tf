@@ -8,14 +8,14 @@ locals {
       "node-role.kubernetes.io/control-plane" = ""
       "bgp-policy"                            = "fml"
     },
-    # "800g2" = {
-    #   "node-role.kubernetes.io/worker" = ""
-    #   "bgp-policy"                     = "fml"
-    # },
-    # "800g2-2" = {
-    #   "node-role.kubernetes.io/worker" = ""
-    #   "bgp-policy"                     = "fml"
-    # },
+    "800g2" = {
+      "node-role.kubernetes.io/worker" = ""
+      "bgp-policy"                     = "fml"
+    },
+    "800g2-2" = {
+      "node-role.kubernetes.io/worker" = ""
+      "bgp-policy"                     = "fml"
+    },
     "optiplex" = {
       "node-role.kubernetes.io/worker" = ""
       "bgp-policy"                     = "fml"
