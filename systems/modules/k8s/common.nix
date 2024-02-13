@@ -27,6 +27,8 @@ in
     ++ [ ethtool conntrack-tools iptables socat ] # for some k8s networking
     ++ [ openiscsi ]; # for longhorn
 
+  systemd.services.kubelet.preStart = ""; # we do not want to pre-pull images or remove /opt/cni/bin/*
+  services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;
     apiserverAddress = "https://${kubeAPIServerHostname}:${toString kubeAPIServerPort}";
@@ -58,5 +60,4 @@ in
       }
     '';
   };
-  systemd.services.kubelet.preStart = ""; # we do not want to pre-pull images or remove /opt/cni/bin/*
 }
