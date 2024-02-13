@@ -38,7 +38,7 @@ in
     };
     kubelet = {
       enable = true;
-      # taints = lib.mkForce { }; # we want to schedule some workloads on the master
+      taints = lib.mkForce { }; # we want to schedule some workloads on the master
       cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
     };
     clusterCidr = kubePodCidr;
