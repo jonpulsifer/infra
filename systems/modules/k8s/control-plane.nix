@@ -3,7 +3,6 @@
 {
   imports = [ ./common.nix ];
   services.etcd.enable = true;
-  services.prometheus.exporters.node.enable = lib.mkForce false;
   services.kubernetes = {
     apiserver = {
       enable = true;
