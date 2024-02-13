@@ -4,6 +4,8 @@ let
   kubeAPIServerHostname = "k8s.lolwtf.ca";
   kubeAPIServerPort = 6443;
   kubePodCidr = "10.100.0.0/16";
+  kubeServiceCidr = "10.10.0.0/16";
+  kubeDns = "10.10.0.254";
 in
 {
   # this section is only required for longhorn
@@ -35,9 +37,11 @@ in
     apiserver = {
       securePort = kubeAPIServerPort;
       advertiseAddress = kubeAPIServerIP;
+      serviceClusterIpRange = kubeServiceCidr;
     };
     kubelet = {
       enable = true;
+      clusterDns = kubeDns;
       cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
     };
     clusterCidr = kubePodCidr;
