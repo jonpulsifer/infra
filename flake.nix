@@ -4,7 +4,7 @@
     dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
     home-manager = { url = "github:nix-community/home-manager"; follows = "dotfiles/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
-    nixos = { url = "github:jonpulsifer/nixpkgs/kubernetes-cfssl-fix-install-command"; };
+    nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
     nixos-hardware = { url = "github:nixos/nixos-hardware"; };
     nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
   };
