@@ -32,13 +32,6 @@ spec:
     routingMode: native
     ipam:
       mode: multi-pool
-      operator:
-        autoCreateCiliumPodIPPools:
-          default:
-            ipv4:
-              cidrs:
-                - ${CILIUM_POD_CIDR}
-              maskSize: 27
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableXTSocketFallback: false
     bpf:
