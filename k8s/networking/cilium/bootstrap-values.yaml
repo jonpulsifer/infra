@@ -6,13 +6,6 @@ k8sServicePort: "6443"
 routingMode: native
 ipam:
   mode: multi-pool
-  operator:
-    autoCreateCiliumPodIPPools:
-      default:
-        ipv4:
-          cidrs:
-            - 10.100.0.0/16
-          maskSize: 27
 ipv4NativeRoutingCIDR: 10.0.0.0/9
 endpointRoutes:
   enabled: true
