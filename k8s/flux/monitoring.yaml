@@ -12,8 +12,6 @@ spec:
     kind: GitRepository
     name: infra
   dependsOn:
-    - name: config
-    - name: networking
     - name: storage
   decryption:
     provider: sops

@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - local-path-provisioner
-  - longhorn # remember to remove the openiscsi package from nix systems
+  # - longhorn # remember to remove the openiscsi package from nix systems
 patches:
   - target:
       group: helm.toolkit.fluxcd.io

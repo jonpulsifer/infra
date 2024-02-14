@@ -13,7 +13,6 @@ spec:
     name: infra
   dependsOn:
     - name: config
-    - name: storage
   decryption:
     provider: sops
     secretRef:

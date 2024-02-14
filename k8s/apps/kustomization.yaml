@@ -4,13 +4,13 @@ kind: Kustomization
 resources:
   - arc
   - argo
-  - atlantis
+  # - atlantis
   - cloudnative-pg
   # - csgo
   - default
   - descheduler
   - dump.yaml
-  - falco
+  # - falco
   - flux-system
   - k6
   # - minecraft
