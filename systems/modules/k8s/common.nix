@@ -30,7 +30,7 @@ in
     ++ [ openiscsi ]; # for longhorn
 
   systemd.services.kubelet.preStart = lib.mkForce ''
-      ${concatMapStrings (img: ''
+      ${lib.concatMapStrings (img: ''
       echo "Seeding container image: ${img}"
       ${if (lib.hasSuffix "gz" img) then
         ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import --all-platforms -''
