@@ -97,37 +97,38 @@
               }
             ];
           };
-          nuc = { extraModules = [ ./systems/modules/k8s/control-plane.nix ]; };
-          optiplex = { extraModules = workerModules; };
-          "800g2" = { extraModules = workerModules; };
-          "800g2-2" = { extraModules = workerModules; };
+          nuc = {
+            extraModules = [ ]; # ./systems/modules/k8s/control-plane.nix ]; };
+            optiplex = { }; # extraModules = workerModules; };
+            "800g2" = { }; # extraModules = workerModules; };
+            "800g2-2" = { }; # extraModules = workerModules; };
 
-          # raspberry pis
-          cloudpi4 = { rpi = true; };
-          homepi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
-          screenpi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
+            # raspberry pis
+            cloudpi4 = { rpi = true; };
+            homepi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
+            screenpi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
 
-          # iso
-          iso = {
-            extraModules = [
-              "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
-              ./systems/iso.nix
-            ];
+            # iso
+            iso = {
+              extraModules = [
+                "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+                ./systems/iso.nix
+              ];
+            };
+          };
+
+          legacyPackages = genAttrs [ "x86_64-linux" ] (system:
+            import inputs.nixpkgs {
+              inherit system;
+              config.allowUnfree = true;
+            }
+          );
+          formatter.x86_64-linux = legacyPackages.x86_64-linux.nixpkgs-fmt;
+
+          devShells = {
+            x86_64-linux.default = import ./shell.nix {
+              pkgs = legacyPackages.x86_64-linux;
+            };
           };
         };
-
-      legacyPackages = genAttrs [ "x86_64-linux" ] (system:
-        import inputs.nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-        }
-      );
-      formatter.x86_64-linux = legacyPackages.x86_64-linux.nixpkgs-fmt;
-
-      devShells = {
-        x86_64-linux.default = import ./shell.nix {
-          pkgs = legacyPackages.x86_64-linux;
-        };
-      };
-    };
-}
+    }
