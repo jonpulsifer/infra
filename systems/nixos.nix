@@ -174,8 +174,8 @@ in
   system = {
     stateVersion = "23.11";
     autoUpgrade = {
-      enable = true;
-      flake = inputs.self.outPath;
+      enable = false;
+      flake = "github.com:jonpulsifer/infra";
     };
   };
 }
