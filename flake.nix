@@ -99,8 +99,8 @@
           };
           nuc = { extraModules = [ ./systems/modules/k8s/control-plane.nix ]; };
           optiplex = { extraModules = workerModules; };
-          "800g2" = { }; # extraModules = workerModules; };
-          "800g2-2" = { }; # extraModules = workerModules; };
+          "800g2" = { extraModules = workerModules; };
+          "800g2-2" = { extraModules = workerModules; };
 
           # raspberry pis
           cloudpi4 = { rpi = true; };

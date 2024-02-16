@@ -5,5 +5,5 @@ metadata:
 spec:
   ipv4:
     cidrs:
-      - 10.100.0.0/16
+      - 10.100.0.0/20
     maskSize: 24

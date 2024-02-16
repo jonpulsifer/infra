@@ -175,7 +175,7 @@ in
     stateVersion = "23.11";
     autoUpgrade = {
       enable = true;
-      flake = "github.com:jonpulsifer/infra";
+      flake = inputs.self.outPath;
     };
   };
 }

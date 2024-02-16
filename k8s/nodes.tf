@@ -8,14 +8,14 @@ locals {
       "node-role.kubernetes.io/control-plane" = ""
       "bgp-policy"                            = "fml"
     },
-    "800g2" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
-    },
-    "800g2-2" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
-    },
+    # "800g2" = {
+    #   "node-role.kubernetes.io/worker" = ""
+    #   "bgp-policy"                     = "fml"
+    # },
+    # "800g2-2" = {
+    #   "node-role.kubernetes.io/worker" = ""
+    #   "bgp-policy"                     = "fml"
+    # },
     "optiplex" = {
       "node-role.kubernetes.io/worker" = ""
       "bgp-policy"                     = "fml"
@@ -36,7 +36,7 @@ resource "kubernetes_labels" "nodes" {
 
 provider "kubernetes" {
   config_path    = "~/.kube/config"
-  config_context = "home"
+  config_context = "local"
 }
 
 terraform {
