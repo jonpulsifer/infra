@@ -45,6 +45,7 @@ in
   ''; # we do not want to remove /opt/cni/bin/*
 
   services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
+  services.certmgr.renewInterval = "1d"; # we want to check and renew certs daily instead of every 30m
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;
     apiserverAddress = "https://${kubeAPIServerHostname}:${toString kubeAPIServerPort}";
