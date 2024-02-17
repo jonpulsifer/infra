@@ -16,10 +16,10 @@ locals {
     #   "node-role.kubernetes.io/worker" = ""
     #   "bgp-policy"                     = "fml"
     # },
-    "optiplex" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
-    }
+    # "optiplex" = {
+    #   "node-role.kubernetes.io/worker" = ""
+    #   "bgp-policy"                     = "fml"
+    # }
   }
 }
 

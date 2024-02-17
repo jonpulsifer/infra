@@ -6,6 +6,7 @@ let
   kubePodCidr = "10.100.0.0/16";
   kubeServiceCidr = "10.10.0.0/16";
   kubeDns = "10.10.0.254";
+  kubeUpstreamDns = "10.2.0.1";
 in
 {
   # this section is only required for longhorn
@@ -25,6 +26,9 @@ in
     };
   };
 
+  # cilium writes its own config to /etc/cni/net.d, so we need to make sure it's writable/empty/whatever
+  environment.etc."cni/net.d".source = lib.mkForce null;
+
   environment.systemPackages = with pkgs; [ cri-tools kubectl kubernetes ]
     ++ [ ethtool conntrack-tools iptables socat ] # for some k8s networking
     ++ [ openiscsi ]; # for longhorn
@@ -38,7 +42,8 @@ in
         ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import --all-platforms -''
       }
     '') config.services.kubernetes.kubelet.seedDockerImages}
-  ''; # we do not want to pre-pull images or remove /opt/cni/bin/*
+  ''; # we do not want to remove /opt/cni/bin/*
+
   services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;
@@ -64,7 +69,7 @@ in
           fallthrough in-addr.arpa ip6.arpa
         }
         prometheus :10055
-        forward . 10.2.0.1
+        forward . ${kubeUpstreamDns}
         cache 30
         loop
         reload
