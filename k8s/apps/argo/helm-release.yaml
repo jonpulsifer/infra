@@ -25,10 +25,5 @@ spec:
           hajimari.io/enable: "true"
           hajimari.io/icon: sync
           cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
-        hosts:
-          - &argo "argo.${SECRET_DOMAIN}"
-        https: false
-        tls:
-          - hosts:
-              - *argo
-            secretName: *argo
+        hostname: argo.${SECRET_DOMAIN}
+        tls: true
