@@ -27,7 +27,7 @@ in
   };
 
   # cilium writes its own config to /etc/cni/net.d, so we need to make sure it's writable/empty/whatever
-  environment.etc."cni/net.d".source = lib.mkForce null;
+  environment.etc."cni/net.d".enable = false;
 
   environment.systemPackages = with pkgs; [ cri-tools kubectl kubernetes ]
     ++ [ ethtool conntrack-tools iptables socat ] # for some k8s networking
