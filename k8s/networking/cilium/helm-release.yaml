@@ -49,6 +49,8 @@ spec:
         backend: envoy
     nodePort:
       enabled: true
+    k8sNetworkPolicy:
+      enabled: false
     operator.prometheus.enabled: true
     dashboards:
       enabled: true
