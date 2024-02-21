@@ -4,7 +4,7 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.1.9 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 5.16.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 5.17.0 |
 | <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 4.84.0 |
 
 ## Providers
