@@ -16,7 +16,7 @@ apiServer:
 certificatesDir: /etc/kubernetes/pki
 clusterName: kubernetes
 controlPlaneEndpoint: nuc
-kubernetesVersion: 1.27.0
+kubernetesVersion: 1.29.2
 networking:
   dnsDomain: cluster.local
   serviceSubnet: 10.10.0.0/16
