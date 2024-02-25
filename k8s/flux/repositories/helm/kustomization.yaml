@@ -22,7 +22,6 @@ resources:
   - prometheus.yaml
   - stakater.yaml
   - stefanprodan.yaml
-  - weaveworks.yaml
 patches:
   - target:
       group: source.toolkit.fluxcd.io
