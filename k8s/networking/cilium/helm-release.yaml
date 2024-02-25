@@ -35,6 +35,8 @@ spec:
       mode: multi-pool
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableXTSocketFallback: false
+    endpointRoutes:
+      enabled: true
     bpf:
       masquerade: false
     bgpControlPlane:
