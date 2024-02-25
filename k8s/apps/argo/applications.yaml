@@ -1,40 +1,3 @@
-apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
-metadata:
-  name: nextjs
-  namespace: argo
-spec:
-  generators:
-  - list:
-      elements:
-      - app: request-headers
-        server: in-cluster
-  template:
-    metadata:
-      name: "{{app}}-gitops"
-    spec:
-      project: default
-      sources:
-      - repoURL: 'https://jonpulsifer.github.io/charts'
-        chart: nextjs
-        targetRevision: 0.0.1
-        helm:
-          valueFiles:
-          - $values/apps/{{app}}/helm/values-gitops.yaml
-      - repoURL: https://github.com/jonpulsifer/ts.git
-        targetRevision: HEAD
-        ref: values
-      destination:
-        name: "{{server}}"
-        namespace: "{{app}}-gitops"
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
-        retry:
-          limit: 2
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -44,15 +7,15 @@ metadata:
 spec:
   project: default
   sources:
-  - repoURL: 'https://jonpulsifer.github.io/charts'
-    chart: nextjs
-    targetRevision: 0.0.1
-    helm:
-      valueFiles:
-      - $values/apps/request-headers/helm/values.yaml
-  - repoURL: https://github.com/jonpulsifer/ts.git
-    targetRevision: HEAD
-    ref: values
+    - repoURL: "https://jonpulsifer.github.io/charts"
+      chart: nextjs
+      targetRevision: 0.0.1
+      helm:
+        valueFiles:
+          - $values/apps/request-headers/helm/values.yaml
+    - repoURL: https://github.com/jonpulsifer/ts.git
+      targetRevision: HEAD
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: request-headers
