@@ -36,7 +36,7 @@ spec:
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableXTSocketFallback: false
     bpf:
-      masquerade: true
+      masquerade: false
     bgpControlPlane:
       enabled: true
     gatewayAPI:
