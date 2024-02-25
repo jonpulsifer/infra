@@ -6,19 +6,82 @@ metadata:
   namespace: argo
 spec:
   project: default
-  sources:
-    - repoURL: "https://jonpulsifer.github.io/charts"
-      chart: nextjs
-      targetRevision: 0.0.1
-      helm:
-        valueFiles:
-          - $values/apps/request-headers/helm/values.yaml
-    - repoURL: https://github.com/jonpulsifer/ts.git
-      targetRevision: HEAD
-      ref: values
+  source:
+    repoURL: https://github.com/jonpulsifer/ts.git
+    targetRevision: HEAD
+    path: apps/request-headers/k8s
   destination:
     server: https://kubernetes.default.svc
     namespace: request-headers
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nested
+  namespace: argo
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jonpulsifer/ts.git
+    targetRevision: HEAD
+    path: apps/nested/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nested
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rosie
+  namespace: argo
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jonpulsifer/ts.git
+    targetRevision: HEAD
+    path: apps/rosie/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rosie
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: authme
+  namespace: argo
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jonpulsifer/ts.git
+    targetRevision: HEAD
+    path: apps/authme/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: authme
   syncPolicy:
     automated:
       prune: true
