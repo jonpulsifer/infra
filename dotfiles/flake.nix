@@ -69,14 +69,13 @@
 
       # nix-darwin
       darwinConfigurations = rec {
-        air = darwinSystem {
+        Craftbook-Air.fml.pulsifer.ca = darwinSystem {
           system = "aarch64-darwin";
           modules = common ++ [
             ./systems/air.nix
             { home-manager.users.jawn = import ./home/home.nix; }
           ];
         };
-        "Constances-Laptop" = air;
 
         mini = darwinSystem {
           system = "x86_64-darwin";
