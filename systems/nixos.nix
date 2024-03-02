@@ -131,7 +131,6 @@ in
     authKeyFile = "/var/secrets/tailscale-auth-key";
   };
 
-  virtualisation.docker.enable = false;
   users.mutableUsers = false;
   users.users.jawn = {
     uid = 1337;
@@ -141,7 +140,11 @@ in
     shell = pkgs.zsh;
   };
 
-  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+  nixpkgs = {
+    hostPlatform = mkDefault "x86_64-linux";
+    config.allowUnfree = true;
+  };
+
   nix = {
     package = pkgs.nixFlakes;
     gc = {

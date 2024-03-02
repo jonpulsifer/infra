@@ -10,110 +10,82 @@
   };
   outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
     let
-      inherit (nixos.lib) mkIf optionals attrValues genAttrs;
+      inherit (nixos.lib) mkIf optionals attrValues genAttrs nixosSystem strings;
 
-      kubernetesOnlyBuildKubeletOverlay = final: prev: {
-        kubernetes = (prev.kubernetes.override {
-          # buildGoModule = prev.buildGo119Module;
-          components = [ "cmd/kubelet" ];
-        }).overrideAttrs (_: rec {
-          # version = "1.26.1";
-          # src = prev.fetchFromGitHub {
-          #   owner = "kubernetes";
-          #   repo = "kubernetes";
-          #   rev = "v${version}";
-          #   sha256 = "sha256-bC2Q4jWBh27bqLGhvG4JcuHIAQmiGz5jDt9Me9qbVpk=";
-          # };
-        });
-      };
-      pkgs = {
-        config.allowUnfree = true;
-        overlays = [
-          dotfiles.overlays.pkgs
-        ];
+      mkSystem = name: extra: nixosSystem {
+        system = "x86_64-linux";
+        modules = common ++ extra ++ [{ config.networking.hostName = name; }];
+        specialArgs = { inherit keys; needsRoutes = false; };
       };
 
-      nixosModules = [
-        { nixpkgs = pkgs; }
-        { home-manager.useUserPackages = true; }
-        { home-manager.useGlobalPkgs = true; }
+      mkRPi4 = name: extra: nixosSystem {
+        system = "aarch64-linux";
+        modules = common ++ extra
+          ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
+          ++ [{ config.networking.hostName = name; }]
+          ++ [ ./systems/rpi.nix ]
+          ++ [ "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix" { config.sdImage.compressImage = false; config.sdImage.firmwareSize = 512; } ]
+          ++ [{
+          nixpkgs.overlays = [
+            # https://github.com/NixOS/nixpkgs/issues/154163
+            (final: super: {
+              makeModulesClosure = x:
+                super.makeModulesClosure (x // { allowMissing = true; });
+            })
+          ];
+        }];
+        specialArgs = { inherit keys; needsRoutes = true; };
+      };
+
+      mkSystems = builtins.mapAttrs
+        (name: modules:
+          if strings.hasInfix "pi4" name then
+            mkRPi4 name modules
+          else
+            mkSystem name modules
+        );
+
+      common = [
+        {
+          nixpkgs.overlays = [ dotfiles.overlays.pkgs ];
+          system.configurationRevision = mkIf (self ? rev) self.rev;
+        }
+        {
+          home-manager.useUserPackages = true;
+          home-manager.useGlobalPkgs = true;
+          home-manager.users.jawn = dotfiles.home.basic;
+        }
         home-manager.nixosModules.home-manager
-        { home-manager.users.jawn = dotfiles.home.basic; }
-        { system.configurationRevision = mkIf (self ? rev) self.rev; }
         ./systems/nixos.nix
       ];
-
-      mkRPi = host: { extraModules ? [ ], ... }:
-        nixos.lib.nixosSystem {
-          system = "aarch64-linux";
-          modules = nixosModules
-            ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
-            ++ [{ config.networking.hostName = host; }]
-            ++ [ ./systems/rpi.nix ]
-            ++ extraModules
-            ++ [ "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix" { config.sdImage.compressImage = false; config.sdImage.firmwareSize = 512; } ]
-            ++ [{
-            nixpkgs.overlays = [
-              # https://github.com/NixOS/nixpkgs/issues/154163
-              (final: super: {
-                makeModulesClosure = x:
-                  super.makeModulesClosure (x // { allowMissing = true; });
-              })
-            ];
-          }];
-          specialArgs = { inherit keys; needsRoutes = true; };
-        };
-
-      mkSystem = host: { extraModules ? [ ] }:
-        nixos.lib.nixosSystem {
-          system = "x86_64-linux";
-          modules = nixosModules
-            ++ [{ config.networking.hostName = host; }]
-            ++ extraModules;
-          specialArgs = { inherit keys; needsRoutes = false; };
-        };
-
-      workerModules = [
-        { nixpkgs.overlays = [ kubernetesOnlyBuildKubeletOverlay ]; }
-        ./systems/modules/k8s/worker.nix
-      ];
+      k8sControlPlane = [ ./systems/modules/k8s/control-plane.nix ];
+      k8sWorker = [ ./systems/modules/k8s/worker.nix ];
     in
     rec {
-      nixosConfigurations = builtins.mapAttrs
-        (host: config:
-          if config.rpi or false then
-            mkRPi host config
-          else
-            mkSystem host config
-        )
+      nixosConfigurations = mkSystems
         {
           # lab machines
-          oldschool = {
-            extraModules = [
-              ./systems/modules/github-runner.nix
-              ./systems/modules/jellyfin.nix
-              {
-                services.tailscale.useRoutingFeatures = "server";
-              }
-            ];
-          };
-          nuc = { extraModules = [ ./systems/modules/k8s/control-plane.nix ]; };
-          optiplex = { extraModules = workerModules; };
-          "800g2" = { extraModules = workerModules; };
-          "800g2-2" = { extraModules = workerModules; };
+          oldschool = [
+            ./systems/modules/github-runner.nix
+            ./systems/modules/jellyfin.nix
+            { services.tailscale.useRoutingFeatures = "server"; }
+          ];
+          nuc = k8sControlPlane;
+          optiplex = k8sWorker;
+          "800g2" = k8sWorker;
+          "800g2-2" = k8sWorker;
 
           # raspberry pis
-          cloudpi4 = { rpi = true; };
-          homepi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
-          screenpi4 = { rpi = true; extraModules = [ ./systems/modules/kiosk.nix ]; };
+          cloudpi4 = [ ];
+          homepi4 = [ ./systems/modules/kiosk.nix ];
+          screenpi4 = [ ./systems/modules/kiosk.nix ];
 
           # iso
-          iso = {
-            extraModules = [
-              "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
-              ./systems/iso.nix
-            ];
-          };
+          iso = [
+            "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+            ./systems/iso.nix
+          ];
+
         };
 
       legacyPackages = genAttrs [ "x86_64-linux" ] (system:
@@ -122,6 +94,7 @@
           config.allowUnfree = true;
         }
       );
+
       formatter.x86_64-linux = legacyPackages.x86_64-linux.nixpkgs-fmt;
 
       devShells = {

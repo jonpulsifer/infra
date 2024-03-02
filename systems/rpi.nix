@@ -34,10 +34,17 @@ in
 
   documentation.enable = false;
 
-  fileSystems."/" = {
-    device = "/dev/disk/by-label/NIXOS_SD";
-    fsType = "ext4";
-    options = [ "noatime" ];
+  fileSystems = lib.mkForce {
+    "/" = {
+      device = "/dev/disk/by-label/NIXOS_SD";
+      fsType = "ext4";
+      options = [ "noatime" ];
+    };
+    "/boot/firmware" = {
+      device = "/dev/disk/by-label/FIRMWARE";
+      fsType = "vfat";
+      options = [ "noauto" "nofail" ];
+    };
   };
 
   networking = {
