@@ -1,14 +1,15 @@
 {
   description = "the homelab";
   inputs = {
-    dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
+    nixos.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixos-hardware.url = "github:nixos/nixos-hardware";
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+
     home-manager = { url = "github:nix-community/home-manager"; follows = "dotfiles/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
-    nixos = { url = "github:nixos/nixpkgs/nixos-unstable"; };
-    nixos-hardware = { url = "github:nixos/nixos-hardware"; };
-    nixpkgs = { url = "github:nixos/nixpkgs/nixpkgs-unstable"; };
+    dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
+  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-stable, nixos-hardware, ... }@inputs:
     let
       inherit (nixos.lib) mkIf optionals attrValues genAttrs nixosSystem strings;
 
@@ -18,7 +19,7 @@
         specialArgs = { inherit keys; needsRoutes = false; };
       };
 
-      mkRPi4 = name: extra: nixosSystem {
+      mkRPi4 = name: extra: nixos.lib.nixosSystem {
         system = "aarch64-linux";
         modules = common ++ extra
           ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
@@ -64,16 +65,18 @@
     rec {
       nixosConfigurations = mkSystems
         {
+          # k8s cluster
+          nuc = k8sControlPlane;
+          optiplex = k8sWorker;
+          "800g2" = k8sWorker;
+          "800g2-2" = k8sWorker;
+
           # lab machines
           oldschool = [
             ./systems/modules/github-runner.nix
             ./systems/modules/jellyfin.nix
             { services.tailscale.useRoutingFeatures = "server"; }
           ];
-          nuc = k8sControlPlane;
-          optiplex = k8sWorker;
-          "800g2" = k8sWorker;
-          "800g2-2" = k8sWorker;
 
           # raspberry pis
           cloudpi4 = [ ];
@@ -85,7 +88,6 @@
             "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
             ./systems/iso.nix
           ];
-
         };
 
       legacyPackages = genAttrs [ "x86_64-linux" ] (system:

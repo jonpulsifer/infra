@@ -152,23 +152,23 @@ in
       dates = "weekly";
       options = "--delete-older-than 30d";
     };
-    # Free up to 1GiB whenever there is less than 100MiB left.
+    # Free up to 2GiB whenever there is less than 512MiB left.
     extraOptions = ''
-      min-free = ${toString (100 * 1024 * 1024)}
-      max-free = ${toString (1024 * 1024 * 1024)}
+      min-free = ${toString (512 * 1024 * 1024)}
+      max-free = ${toString (2048 * 1024 * 1024)}
     '';
     settings = {
       auto-optimise-store = true;
       experimental-features = "nix-command flakes";
       substituters = [
+        "https://jonpulsifer.cachix.org"
         "https://cache.nixos.org"
         "https://nix-community.cachix.org"
-        "https://jonpulsifer.cachix.org"
       ];
       trusted-public-keys = [
+        "jonpulsifer.cachix.org-1:Rwya0JXhlZXczd5v3JVBgY0pU5tUbiaqw5RfFdxBakQ="
         "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
-        "jonpulsifer.cachix.org-1:Rwya0JXhlZXczd5v3JVBgY0pU5tUbiaqw5RfFdxBakQ="
       ];
       trusted-users = [ "root" config.users.users.jawn.name ];
     };

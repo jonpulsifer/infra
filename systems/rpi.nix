@@ -53,7 +53,7 @@ in
   };
 
   nixpkgs = {
-    # buildPlatform.system = "x86_64-linux";
+    buildPlatform.system = "x86_64-linux";
     hostPlatform.system = "aarch64-linux";
   };
 
