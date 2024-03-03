@@ -9,7 +9,7 @@
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
     dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-stable, nixos-hardware, ... }@inputs:
+  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
     let
       inherit (nixos.lib) mkIf optionals attrValues genAttrs nixosSystem strings;
 
