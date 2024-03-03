@@ -79,7 +79,7 @@
           ];
 
           # raspberry pis
-          cloudpi4 = [ ];
+          rpi4 = [ ];
           homepi4 = [ ./systems/modules/kiosk.nix ];
           screenpi4 = [ ./systems/modules/kiosk.nix ];
 
@@ -89,6 +89,9 @@
             ./systems/iso.nix
           ];
         };
+
+      image.iso = nixosConfigurations.iso.config.system.build.isoImage;
+      image.rpi4 = nixosConfigurations.rpi4.config.system.build.sdImage;
 
       legacyPackages = genAttrs [ "x86_64-linux" ] (system:
         import inputs.nixpkgs {
