@@ -14,6 +14,7 @@ resources:
   # - flux-system
   - k6
   # - minecraft
+  - redis
   - reloader
   - rosie
   # - satisfactory
