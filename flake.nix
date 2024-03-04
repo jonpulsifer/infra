@@ -80,8 +80,8 @@
 
           # raspberry pis
           rpi4 = [ ];
-          homepi4 = [ ./systems/modules/kiosk.nix ];
-          screenpi4 = [ ./systems/modules/kiosk.nix ];
+          homepi4 = [{ services.kiosk.enable = true; }];
+          screenpi4 = [{ services.kiosk.enable = true; }];
 
           # iso
           iso = [

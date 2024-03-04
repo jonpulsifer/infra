@@ -4,7 +4,7 @@ let
 in
 {
   imports = [
-    # Include the results of the hardware scan.
+    ./modules/kiosk.nix
   ];
 
   # Required for the Wireless firmware
