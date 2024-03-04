@@ -19,7 +19,7 @@ spec:
       sentinel: true
     master:
       persistence:
-        enabled: true
+        enabled: false
     replica:
       persistence:
         enabled: false
@@ -30,7 +30,7 @@ spec:
       startupProbe:
         failureThreshold: 2
       persistence:
-        enabled: true
+        enabled: false
     metrics:
       enabled: true
       serviceMonitor:
