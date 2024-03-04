@@ -2,4 +2,5 @@
 *.tfstate
 *.tfplan
 result
-
+*.iso
+*.img
