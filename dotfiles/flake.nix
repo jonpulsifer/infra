@@ -76,6 +76,7 @@
             { home-manager.users.jawn = import ./home/home.nix; }
           ];
         };
+        Craftbook-Air = Craftbook-Air.fml.pulsifer.ca;
 
         mini = darwinSystem {
           system = "x86_64-darwin";
