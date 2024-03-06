@@ -21,8 +21,10 @@ in
 
     hardware = {
       opengl.enable = true;
-      raspberry-pi."4".touch-ft5406.enable = true;
-      hardware.raspberry-pi."4".fkms-3d.enable = true;
+      raspberry-pi."4" = {
+        touch-ft5406.enable = true;
+        fkms-3d.enable = true;
+      };
     };
 
     users.users.${cfg.user} = {
