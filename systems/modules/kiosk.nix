@@ -20,7 +20,7 @@ in
     boot.kernelParams = [ "nomodeset" ];
 
     hardware = {
-      opengl.enable = true;
+      opengl.enable = false;
       raspberry-pi."4".touch-ft5406.enable = true;
     };
 
