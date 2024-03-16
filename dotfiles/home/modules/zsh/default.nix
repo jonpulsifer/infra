@@ -8,7 +8,7 @@ in
     enable = true;
     autocd = true;
     enableCompletion = false;
-    enableAutosuggestions = true;
+    autosuggestion.enable = true;
     syntaxHighlighting.enable = true;
 
     shellAliases = { };
@@ -99,8 +99,8 @@ in
         src = fetchFromGitHub {
           owner = "Aloxaf";
           repo = "fzf-tab";
-          rev = "c2b4aa5ad2532cca91f23908ac7f00efb7ff09c9";
-          sha256 = "sha256-gvZp8P3quOtcy1Xtt1LAW1cfZ/zCtnAmnWqcwrKel6w=";
+          rev = "v1.1.1";
+          sha256 = "sha256-0/YOL1/G2SWncbLNaclSYUz7VyfWu+OB8TYJYm4NYkM=";
         };
       }
       {
@@ -108,8 +108,8 @@ in
         src = fetchFromGitHub {
           owner = "sindresorhus";
           repo = "pure";
-          rev = "v1.22.0";
-          sha256 = "sha256-TR4CyBZ+KoZRs9XDmWE5lJuUXXU1J8E2Z63nt+FS+5w=";
+          rev = "v1.23.0";
+          sha256 = "sha256-BmQO4xqd/3QnpLUitD2obVxL0UulpboT8jGNEh4ri8k=";
         };
       }
     ];

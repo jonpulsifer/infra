@@ -37,7 +37,6 @@ in
 
   services.gpg-agent = mkIf isLinux {
     enable = false;
-    pinentryFlavor = "tty";
     defaultCacheTtl = 86400;
     maxCacheTtl = 7200;
     enableExtraSocket = true;
