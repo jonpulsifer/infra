@@ -23,6 +23,7 @@ in
       age
       gh
       postgresql_15
+      rustup
       terraform
     ] ++ optionals isDarwin [ reattach-to-user-namespace ];
 
