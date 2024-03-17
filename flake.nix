@@ -8,8 +8,9 @@
     home-manager = { url = "github:nix-community/home-manager"; follows = "dotfiles/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
     dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
+    ddnsd = { url = "github:jonpulsifer/ddnsd"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
+  outputs = { self, ddnsd, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
     let
       inherit (nixos.lib) mkIf optionals attrValues genAttrs nixosSystem strings;
 
@@ -48,7 +49,7 @@
 
       common = [
         {
-          nixpkgs.overlays = [ dotfiles.overlays.pkgs ];
+          nixpkgs.overlays = [ dotfiles.overlays.pkgs ddnsd.overlays.pkgs ];
           system.configurationRevision = mkIf (self ? rev) self.rev;
         }
         {
@@ -57,6 +58,7 @@
           home-manager.users.jawn = dotfiles.home.basic;
         }
         home-manager.nixosModules.home-manager
+        ddnsd.nixosModules.default
         ./systems/nixos.nix
       ];
       k8sControlPlane = [ ./systems/modules/k8s/control-plane.nix ];
@@ -65,18 +67,19 @@
     rec {
       nixosConfigurations = mkSystems
         {
-          # k8s cluster
-          nuc = k8sControlPlane;
-          optiplex = k8sWorker;
-          "800g2" = k8sWorker;
-          "800g2-2" = k8sWorker;
-
           # lab machines
           oldschool = [
             ./systems/modules/github-runner.nix
             ./systems/modules/jellyfin.nix
             { services.tailscale.useRoutingFeatures = "server"; }
+            { services.ddnsd = { enable = true; }; }
           ];
+
+          # k8s cluster
+          nuc = k8sControlPlane;
+          optiplex = k8sWorker;
+          "800g2" = k8sWorker;
+          "800g2-2" = k8sWorker;
 
           # raspberry pis
           rpi4 = [ ];

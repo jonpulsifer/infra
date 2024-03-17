@@ -91,6 +91,11 @@ in
 
   environment.systemPackages = with pkgs; [ bash bash-completion zsh git tailscale ];
 
+  services.ddnsd = {
+    domain = "lolwtf.ca";
+    tokenFile = "/var/secrets/cloudflare-api-token";
+  };
+
   services.prometheus.exporters.node = {
     enable = mkDefault true;
     openFirewall = mkDefault true;
