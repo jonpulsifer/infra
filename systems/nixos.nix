@@ -92,7 +92,7 @@ in
   environment.systemPackages = with pkgs; [ bash bash-completion zsh git tailscale ];
 
   services.ddnsd = {
-    domain = "lolwtf.ca";
+    zone = "lolwtf.ca";
     tokenFile = "/var/secrets/cloudflare-api-token";
   };
 
