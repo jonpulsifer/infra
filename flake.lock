@@ -30,11 +30,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1710708073,
-        "narHash": "sha256-180AP5BPU/vf4V+zI9Cr/8Cn4Ymg/DWOv852J5YqrOs=",
+        "lastModified": 1710709045,
+        "narHash": "sha256-3fsWNOk7lw8kGySFlgdcUGDJMCf8eVPHkz1P7Z7lwpA=",
         "owner": "jonpulsifer",
         "repo": "ddnsd",
-        "rev": "7a72baa324eca52541cb8c1a467d2fdc56a33c0e",
+        "rev": "a631d460b8919412d653fb3ec69001c805279249",
         "type": "github"
       },
       "original": {
