@@ -8,8 +8,8 @@ in
     # (modulesPath + "/installer/scan/not-detected.nix")
   ];
 
-  hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
-  powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
+  hardware.cpu.intel.updateMicrocode = mkDefault config.hardware.enableRedistributableFirmware;
+  powerManagement.cpuFreqGovernor = mkDefault "ondemand";
 
   boot = {
     initrd.availableKernelModules = [ "xhci_pci" "ahci" "usbhid" "usb_storage" ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" ]) [ "nvme" ];

@@ -7,17 +7,18 @@
 
     home-manager = { url = "github:nix-community/home-manager"; follows = "dotfiles/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
+    wannabekeys = { url = "https://github.com/wannabehero.keys"; flake = false; };
     dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
     ddnsd = { url = "github:jonpulsifer/ddnsd"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, ddnsd, dotfiles, home-manager, keys, nixos, nixos-hardware, ... }@inputs:
+  outputs = { self, ddnsd, dotfiles, home-manager, keys, wannabekeys, nixos, nixos-hardware, ... }@inputs:
     let
       inherit (nixos.lib) mkIf optionals attrValues genAttrs nixosSystem strings;
 
       mkSystem = name: extra: nixosSystem {
         system = "x86_64-linux";
         modules = common ++ extra ++ [{ config.networking.hostName = name; }];
-        specialArgs = { inherit keys; needsRoutes = false; };
+        specialArgs = { inherit keys wannabekeys; needsRoutes = false; };
       };
 
       mkRPi4 = name: extra: nixos.lib.nixosSystem {
@@ -68,12 +69,7 @@
       nixosConfigurations = mkSystems
         {
           # lab machines
-          oldschool = [
-            ./systems/modules/github-runner.nix
-            ./systems/modules/jellyfin.nix
-            { services.tailscale.useRoutingFeatures = "server"; }
-            { services.ddnsd = { enable = true; }; }
-          ];
+          oldschool = [ ./systems/oldschool.nix ];
 
           # k8s cluster
           nuc = k8sControlPlane;
@@ -93,8 +89,10 @@
           ];
         };
 
-      image.iso = nixosConfigurations.iso.config.system.build.isoImage;
-      image.rpi4 = nixosConfigurations.rpi4.config.system.build.sdImage;
+      packages = {
+        x86_64-linux = { iso = nixosConfigurations.iso.config.system.build.isoImage; };
+        aarch64-linux = { rpi4 = nixosConfigurations.rpi4.config.system.build.sdImage; };
+      };
 
       legacyPackages = genAttrs [ "x86_64-linux" ] (system:
         import inputs.nixpkgs {
