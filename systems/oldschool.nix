@@ -9,6 +9,7 @@ in
   ];
 
   services.tailscale.useRoutingFeatures = "server";
+  services.mullvad-vpn.enable = true;
   services.ddnsd.enable = true;
   virtualisation.docker.enable = true;
 
