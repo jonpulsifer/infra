@@ -18,7 +18,7 @@ in
   systemd.network = {
     enable = true;
     netdevs = {
-      "50-wg0" = {
+      "13-wg0" = {
         netdevConfig = {
           Kind = "wireguard";
           Name = "wg0";

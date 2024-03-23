@@ -1,4 +1,4 @@
-{ config, lib, pkgs, keys, needsRoutes, ... }:
+{ config, lib, pkgs, keys, ... }:
 let
   inherit (lib) mkDefault mkForce;
   sshKeys = lib.splitString "\n" (builtins.readFile keys);
@@ -51,7 +51,8 @@ in
   networking = {
     hostName = mkDefault "nixos";
     firewall.enable = true;
-    useDHCP = false;
+    useDHCP = true;
+    useNetworkd = true;
     networkmanager.enable = mkDefault false;
     wireless = {
       enable = mkDefault false;
@@ -61,31 +62,19 @@ in
 
   # dnssec = false is required for tailscale to work
   services.resolved = { enable = true; dnssec = "false"; };
-  systemd.network =
-    let
-      networkConfig = { DHCP = "yes"; DNSSEC = false; DNSOverTLS = "opportunistic"; };
-      linkConfig = { RequiredForOnline = false; };
-      dhcpV4Config = { UseRoutes = true; };
-      k8s-routes = [
-        { routeConfig = { Gateway = "10.2.0.5"; Destination = "10.3.0.0/24"; GatewayOnLink = true; }; }
-        { routeConfig = { Gateway = "10.2.0.5"; Destination = "10.100.0.0/16"; GatewayOnLink = true; }; }
-      ];
-    in
-    {
-      enable = true;
-      wait-online.anyInterface = true;
+  # systemd.network = {
+  #   enable = true;
+  #   wait-online.anyInterface = true;
 
-      networks."10-wired" = {
-        inherit dhcpV4Config linkConfig networkConfig;
-        matchConfig.Name = "en* eth*";
-        routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }; }] ++ lib.optionals needsRoutes k8s-routes;
-      };
-      networks."11-wlan" = {
-        inherit dhcpV4Config linkConfig networkConfig;
-        matchConfig.Name = "wl*";
-        routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }; }] ++ lib.optionals needsRoutes k8s-routes;
-      };
-    };
+  #   networks."10-wired" = {
+  #     matchConfig.Name = "en* eth*";
+  #     # routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }; }];
+  #   };
+  #   networks."11-wlan" = {
+  #     matchConfig.Name = "wl*";
+  #     # routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }; }];
+  #   };
+  # };
 
   console.keyMap = "us";
   i18n.defaultLocale = "en_US.UTF-8";
