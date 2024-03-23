@@ -11,7 +11,7 @@ jobs:
       - name: 'Checkout'
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
       - name: Terraform Docs
-        uses: terraform-docs/gh-actions@v1.0.0
+        uses: terraform-docs/gh-actions@v1.1.0
         with:
           recursive: "true"
           recursive-path: "."
