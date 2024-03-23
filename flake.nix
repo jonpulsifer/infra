@@ -18,7 +18,7 @@
       mkSystem = name: extra: nixosSystem {
         system = "x86_64-linux";
         modules = common ++ extra ++ [{ config.networking.hostName = name; }];
-        specialArgs = { inherit keys wannabekeys; needsRoutes = false; };
+        specialArgs = { inherit keys wannabekeys; };
       };
 
       mkRPi4 = name: extra: nixos.lib.nixosSystem {
@@ -37,7 +37,7 @@
             })
           ];
         }];
-        specialArgs = { inherit keys; needsRoutes = false; };
+        specialArgs = { inherit keys; };
       };
 
       mkSystems = builtins.mapAttrs

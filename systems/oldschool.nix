@@ -14,7 +14,6 @@ in
 
   networking.wireguard.enable = true;
   networking.firewall.allowedUDPPorts = [ 51820 ];
-  networking.useNetworkd = true;
   systemd.network = {
     enable = true;
     netdevs = {

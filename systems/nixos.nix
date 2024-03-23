@@ -60,22 +60,6 @@ in
     };
   };
 
-  # dnssec = false is required for tailscale to work
-  services.resolved = { enable = true; dnssec = "false"; };
-  # systemd.network = {
-  #   enable = true;
-  #   wait-online.anyInterface = true;
-
-  #   networks."10-wired" = {
-  #     matchConfig.Name = "en* eth*";
-  #     # routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 100; Destination = "0.0.0.0/0"; }; }];
-  #   };
-  #   networks."11-wlan" = {
-  #     matchConfig.Name = "wl*";
-  #     # routes = [{ routeConfig = { Gateway = "_dhcp4"; Metric = 200; Destination = "0.0.0.0/0"; }; }];
-  #   };
-  # };
-
   console.keyMap = "us";
   i18n.defaultLocale = "en_US.UTF-8";
   time.timeZone = "Canada/Atlantic";
@@ -122,6 +106,9 @@ in
     }];
   };
   services.sshguard.enable = true;
+
+  # dnssec = false is required for tailscale to work
+  services.resolved = { enable = true; dnssec = "false"; };
   services.tailscale = {
     enable = true;
     authKeyFile = "/var/secrets/tailscale-auth-key";
