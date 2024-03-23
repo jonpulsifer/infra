@@ -8,7 +8,7 @@ in
     ./modules/jellyfin.nix
   ];
 
-  services.tailscale.useRoutingFeatures = "server";
+  services.tailscale.advertiseRoutes = [ "192.168.2.0/24" ];
   services.ddnsd.enable = true;
   virtualisation.docker.enable = true;
 
