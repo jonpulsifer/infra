@@ -37,7 +37,7 @@
             })
           ];
         }];
-        specialArgs = { inherit keys; needsRoutes = true; };
+        specialArgs = { inherit keys; needsRoutes = false; };
       };
 
       mkSystems = builtins.mapAttrs

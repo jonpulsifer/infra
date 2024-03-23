@@ -9,9 +9,45 @@ in
   ];
 
   services.tailscale.useRoutingFeatures = "server";
-  services.mullvad-vpn.enable = true;
   services.ddnsd.enable = true;
   virtualisation.docker.enable = true;
+
+  networking.wireguard.enable = true;
+  networking.firewall.allowedUDPPorts = [ 51820 ];
+  networking.useNetworkd = true;
+  systemd.network = {
+    enable = true;
+    netdevs = {
+      "50-wg0" = {
+        netdevConfig = {
+          Kind = "wireguard";
+          Name = "wg0";
+          MTUBytes = "1300";
+        };
+        wireguardConfig = {
+          PrivateKeyFile = "/var/secrets/wg-key";
+          ListenPort = 51820;
+        };
+        wireguardPeers = [
+          {
+            wireguardPeerConfig = {
+              PublicKey = "L4msD0mEG2ctKDtaMJW2y3cs1fT2LBRVV7iVlWZ2nZc=";
+              AllowedIPs = [ "0.0.0.0/0" "::0/0" ];
+              Endpoint = "178.249.214.2:51820";
+            };
+          }
+        ];
+      };
+    };
+    networks.wg0 = {
+      matchConfig.Name = "wg0";
+      address = [ "10.68.22.178/32" "fc00:bbbb:bbbb:bb01::5:16b1/128" ];
+      networkConfig = {
+        IPMasquerade = "ipv4";
+        IPForward = true;
+      };
+    };
+  };
 
   users.users.quiker = {
     uid = 1338;

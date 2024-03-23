@@ -73,6 +73,8 @@ in
     in
     {
       enable = true;
+      wait-online.anyInterface = true;
+
       networks."10-wired" = {
         inherit dhcpV4Config linkConfig networkConfig;
         matchConfig.Name = "en* eth*";
