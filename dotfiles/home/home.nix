@@ -16,13 +16,12 @@ in
       [
         # cloudevents
         asciinema
-        hugo
+        # hugo
         sops
         vault
 
         # pixlet
-        pixlet
-        bazel-buildtools
+        # bazel-buildtools
       ] ++ optionals isLinux [ wol ];
 
     sessionVariables = {
