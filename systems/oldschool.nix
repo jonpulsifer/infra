@@ -6,6 +6,7 @@ in
   imports = [
     ./modules/github-runner.nix
     ./modules/jellyfin.nix
+    ./modules/vpn.nix
   ];
 
   services.tailscale = {
@@ -14,24 +15,6 @@ in
   };
   services.ddnsd.enable = true;
   virtualisation.docker.enable = true;
-
-  networking.wireguard.enable = true;
-  networking.firewall.allowedUDPPorts = [ 51820 ];
-  services.mullvad-vpn.enable = true;
-  # networking.wg-quick.interfaces = {
-  #   wg-mullvad = {
-  #     address = [ "10.68.22.178/32" "fc00:bbbb:bbbb:bb01::5:16b1/128" ];
-  #     dns = [ "1.1.1.1" "1.0.0.1" "2606:4700:4700::1111" "2606:4700:4700::1001" ];
-  #     privateKeyFile = "/var/secrets/wg-key";
-  #     peers = [{
-  #       publicKey = "L4msD0mEG2ctKDtaMJW2y3cs1fT2LBRVV7iVlWZ2nZc=";
-  #       allowedIPs = [ "0.0.0.0/0" "::0/0" ];
-  #       endpoint = "178.249.214.2:51820";
-  #     }];
-  #     #postUp = "iptables -I OUTPUT ! -o wg-mullvad -m mark ! --mark $(wg show wg-mullvad fwmark) -m addrtype ! --dst-type LOCAL -j REJECT && ip6tables -I OUTPUT ! -o wg-mullvad -m mark ! --mark $(wg show wg-mullvad fwmark) -m addrtype ! --dst-type LOCAL -j REJECT";
-  #     #preDown = "iptables -D OUTPUT ! -o wg-mullvad -m mark ! --mark $(wg show wg-mullvad fwmark) -m addrtype ! --dst-type LOCAL -j REJECT && ip6tables -D OUTPUT ! -o wg-mullvad -m mark ! --mark $(wg show wg-mullvad fwmark) -m addrtype ! --dst-type LOCAL -j REJECT";
-  #   };
-  # };
 
   users.users.quiker = {
     uid = 1338;
