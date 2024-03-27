@@ -6,6 +6,8 @@ let
   ];
 in
 {
+  services.prometheus.exporters.node.enable = false;
+  networking.nftables.enable = true;
   # networking.wireguard.enable = true;
   # networking.firewall.allowedUDPPorts = [ 51820 ];
   services.mullvad-vpn.enable = true;
