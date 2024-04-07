@@ -52,11 +52,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1712511046,
-        "narHash": "sha256-c7BojzIxHKGKYCaEgQuAeVs+7vsnBBOQaaeGxoaOiKA=",
+        "lastModified": 1712511322,
+        "narHash": "sha256-J+cSYJcxlwz803yHhZBhV5HzKQTFFBYiiKy8YNBORVE=",
         "owner": "jonpulsifer",
         "repo": "dotfiles",
-        "rev": "08c329109aa8902d8d85dbc22225f55b2acbe131",
+        "rev": "5d3017199737448f91616b5a749aaa23ec8e6a9f",
         "type": "github"
       },
       "original": {
