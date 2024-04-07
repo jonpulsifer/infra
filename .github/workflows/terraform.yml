@@ -31,7 +31,7 @@ jobs:
           fetch-depth: 0
       - name: Directories with Changes
         id: changed-directories
-        uses: tj-actions/changed-files@v43
+        uses: tj-actions/changed-files@v44
         with:
           dir_names: true
           json: true
