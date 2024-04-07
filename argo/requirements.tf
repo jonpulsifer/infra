@@ -22,7 +22,7 @@ terraform {
     }
     argocd = {
       source  = "oboukili/argocd"
-      version = "~> 6.0.2"
+      version = "~> 6.1.0"
     }
   }
   required_version = ">= 1.5.6"
