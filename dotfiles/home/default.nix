@@ -24,7 +24,7 @@ in
       gh
       postgresql_15
       terraform
-    ] ++ optionals isDarwin [ reattach-to-user-namespace ];
+    ] ++ optionals isDarwin [ ffmpeg reattach-to-user-namespace ];
 
   fonts.fontconfig.enable = true;
 
