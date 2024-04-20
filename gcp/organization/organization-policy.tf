@@ -58,7 +58,7 @@ locals {
     "sql.restrictAuthorizedNetworks",
     "sql.restrictNoncompliantDiagnosticDataAccess",
     "sql.restrictNoncompliantResourceCreation",
-    "sql.restrictPublicIp",
+    # "sql.restrictPublicIp",
     "storage.publicAccessPrevention",
     "storage.secureHttpTransport",
     "storage.uniformBucketLevelAccess",
