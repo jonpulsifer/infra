@@ -1,28 +1,42 @@
 locals {
+  # policies as of 2024-04-20
   boolean_policies = [
+    "ainotebooks.disableFileDownloads",
+    "ainotebooks.disableRootAccess",
+    "ainotebooks.disableTerminal",
+    "ainotebooks.requireAutoUpgradeSchedule",
+    "ainotebooks.restrictPublicIp",
     "appengine.disableCodeDownload",
     "bigquery.disableBQOmniAWS",
     "bigquery.disableBQOmniAzure",
+    "cloudbuild.disableCreateDefaultServiceAccount",
     "clouddeploy.disableServiceLabelGeneration",
     "cloudfunctions.requireVPCConnector",
+    "cloudkms.disableBeforeDestroy",
+    "commerceorggovernance.disablePublicMarketplace",
     "compute.disableAllIpv6",
     "compute.disableGlobalCloudArmorPolicy",
     "compute.disableGlobalLoadBalancing",
     "compute.disableGlobalSelfManagedSslCertificate",
+    "compute.disableGlobalSerialPortAccess",
     "compute.disableGuestAttributesAccess",
     "compute.disableHybridCloudIpv6",
+    "compute.disableInstanceDataAccessApis",
     "compute.disableInternetNetworkEndpointGroup",
     "compute.disableNestedVirtualization",
+    "compute.disableNonFIPSMachineTypes",
     "compute.disableSerialPortAccess",
     "compute.disableSerialPortLogging",
     "compute.disableSshInBrowser",
     "compute.disableVpcExternalIpv6",
     "compute.disableVpcInternalIpv6",
+    "compute.enableComplianceMemoryProtection",
     "compute.requireOsLogin",
     "compute.requireShieldedVm",
     "compute.restrictXpnProjectLienRemoval",
     "compute.setNewProjectDefaultToZonalDNSOnly",
     "compute.skipDefaultNetworkCreation",
+    "container.restrictNoncompliantDiagnosticDataAccess",
     "datastream.disablePublicConnectivity",
     "essentialcontacts.disableProjectSecurityContacts",
     "firestore.requireP4SAforImportExport",
@@ -37,26 +51,44 @@ locals {
     "iam.restrictCrossProjectServiceAccountLienRemoval",
     "iap.requireGlobalIapWebDisabled",
     "iap.requireRegionalIapWebDisabled",
+    "pubsub.enforceInTransitRegions",
+    "spanner.assuredWorkloadsAdvancedServiceControls",
+    "spanner.disableMultiRegionInstanceIfNoLocationSelected",
     "sql.disableDefaultEncryptionCreation",
     "sql.restrictAuthorizedNetworks",
+    "sql.restrictNoncompliantDiagnosticDataAccess",
+    "sql.restrictNoncompliantResourceCreation",
     "sql.restrictPublicIp",
     "storage.publicAccessPrevention",
+    "storage.secureHttpTransport",
     "storage.uniformBucketLevelAccess",
   ]
   list_policies = [
+    "ainotebooks.accessMode",
+    "ainotebooks.environmentOptions",
+    "ainotebooks.restrictVpcNetworks",
+    "appengine.runtimeDeploymentExemption",
     "cloudbuild.allowedIntegrations",
     # "cloudbuild.allowedWorkerPools",
     "cloudfunctions.allowedIngressSettings",
     "cloudfunctions.allowedVpcConnectorEgressSettings",
+    "cloudfunctions.restrictAllowedGenerations",
     # "cloudkms.allowedProtectionLevels",
+    "cloudkms.minimumDestroyScheduledDuration",
     "cloudscheduler.allowedTargetTypes",
+    "commerceorggovernance.marketplaceServices",
+    "compute.allowedVlanAttachmentEncryption",
     "compute.disablePrivateServiceConnectCreationForConsumers",
+    "compute.requireSslPolicy",
     # "compute.requireVpcFlowLogs",
     "compute.restrictCloudNATUsage",
+    "compute.restrictCrossProjectServices",
     "compute.restrictDedicatedInterconnectUsage",
     "compute.restrictLoadBalancerCreationForTypes",
     "compute.restrictNonConfidentialComputing",
     "compute.restrictPartnerInterconnectUsage",
+    "compute.restrictPrivateServiceConnectConsumer",
+    "compute.restrictPrivateServiceConnectProducer",
     "compute.restrictProtocolForwardingCreationForTypes",
     "compute.restrictSharedVpcBackendServices",
     "compute.restrictSharedVpcHostProjects",
@@ -68,17 +100,21 @@ locals {
     # "compute.trustedImageProjects",
     "compute.vmCanIpForward",
     "compute.vmExternalIpAccess",
+    "dataform.restrictGitRemotes",
     "essentialcontacts.allowedContactDomains",
     # "gcp.resourceLocations",
     # "gcp.restrictCmekCryptoKeyProjects",
     # "gcp.restrictNonCmekServices",
     # "gcp.restrictServiceUsage",
+    # "gcp.restrictTLSVersion",
     # "iam.allowedPolicyMemberDomains",
     "iam.allowServiceAccountCredentialLifetimeExtension",
+    "iam.serviceAccountKeyExpiryHours",
+    "iam.serviceAccountKeyExposureResponse",
     "iam.workloadIdentityPoolAwsAccounts",
     "iam.workloadIdentityPoolProviders",
     "meshconfig.allowedVpcscModes",
-    # resourcemanager.accessBoundaries",
+    # "resourcemanager.accessBoundaries",
     "resourcemanager.allowedExportDestinations",
     "resourcemanager.allowedImportSources",
     "resourcemanager.allowEnabledServicesForExport",
@@ -91,6 +127,7 @@ locals {
   ]
 }
 
+# apply all policies by default
 resource "google_org_policy_policy" "default_deny_boolean_constraint" {
   for_each = toset(local.boolean_policies)
   name     = "${data.google_organization.org.name}/${each.key}"
@@ -102,6 +139,7 @@ resource "google_org_policy_policy" "default_deny_boolean_constraint" {
   }
 }
 
+# apply all policies by default
 resource "google_org_policy_policy" "default_deny_list_constraint" {
   for_each = toset(local.list_policies)
   name     = "${data.google_organization.org.name}/${each.key}"
@@ -157,6 +195,8 @@ resource "google_org_policy_policy" "trusted_image_projects" {
       values {
         allowed_values = [
           "projects/cos-cloud",
+          # "projects/debian-cloud",
+          "projects/ubuntu-os-cloud",
           "projects/trusted-builds",
         ]
       }
@@ -246,18 +286,31 @@ resource "google_org_policy_policy" "gcp_restrictNonCmekServices" {
     rules {
       values {
         denied_values = [
+          "aiplatform.googleapis.com",
           "artifactregistry.googleapis.com",
           "bigquery.googleapis.com",
+          "bigquerydatatransfer.googleapis.com",
           "bigtable.googleapis.com",
+          "cloudfunctions.googleapis.com",
           "composer.googleapis.com",
           "compute.googleapis.com",
           "container.googleapis.com",
           "dataflow.googleapis.com",
+          "dataproc.googleapis.com",
+          "documentai.googleapis.com",
+          "file.googleapis.com",
+          "firestore.googleapis.com",
+          "integrations.googleapis.com",
           "logging.googleapis.com",
+          "notebooks.googleapis.com",
           "pubsub.googleapis.com",
+          "run.googleapis.com",
+          "secretmanager.googleapis.com",
           "spanner.googleapis.com",
           "sqladmin.googleapis.com",
           # "storage.googleapis.com",
+          "storagetransfer.googleapis.com",
+          "workstations.googleapis.com",
         ]
       }
     }
