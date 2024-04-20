@@ -42,7 +42,6 @@ jobs:
   validate:
     # name: 'fmt, init, validate'
     needs: [changed-directories]
-    if: ${{ needs.changed-directories.outputs.matrix != '' && needs.changed-directories.outputs.matrix.dir != '[]' }}
     strategy:
       matrix:
         dirs: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
