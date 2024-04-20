@@ -3,7 +3,7 @@ on:
   push:
     branches:
       - main
-    paths:
+    paths: &paths
       - argo/**
       - cloudflare/**
       - gcp/**
@@ -13,8 +13,10 @@ on:
       - workspace/**
   pull_request:
     paths:
+      - argo/**
       - cloudflare/**
       - gcp/**
+      - k8s/**.tf
       - unifi/**
       - vault/**
       - workspace/**
@@ -69,7 +71,7 @@ jobs:
         run: terraform validate
 
   docs:
-    needs: [validate]
+    needs: [validate, changed-directories]
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' }}
     strategy:
