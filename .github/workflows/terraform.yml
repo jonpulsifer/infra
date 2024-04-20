@@ -68,6 +68,7 @@ jobs:
         id: validate
         run: terraform validate
       - name: Render terraform docs and push changes back to PR
+        if: ${{ github.event_name == 'pull_request' }}
         uses: terraform-docs/gh-actions@v1.1.0
         with:
           working-dir: ${{ matrix.dir }}
