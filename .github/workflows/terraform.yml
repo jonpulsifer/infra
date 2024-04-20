@@ -67,14 +67,21 @@ jobs:
       - name: Terraform Validate
         id: validate
         run: terraform validate
-      - name: Checkout HEAD
-        uses: actions/checkout@v4
-        if: ${{ github.event_name == 'pull_request' }}
-        id: get-pr
+
+  docs:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' }}
+    strategy:
+      matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Render terraform docs and push changes back to PR
-        if: ${{ github.event_name == 'pull_request' }} && steps.get-pr.status == 'success'
         uses: terraform-docs/gh-actions@v1.1.0
         with:
           working-dir: ${{ matrix.dir }}
