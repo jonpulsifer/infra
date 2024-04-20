@@ -15,7 +15,7 @@ in
   }];
   home.packages = with pkgs; [
     bun
-    nodejs-18_x
+    nodejs_20
     nodePackages.pnpm
     nodePackages.ts-node
     nodePackages.vercel
