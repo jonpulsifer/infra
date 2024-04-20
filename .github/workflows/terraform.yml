@@ -21,7 +21,7 @@ on:
 jobs:
   changed-directories:
     name: Get Changed Files
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
@@ -46,10 +46,10 @@ jobs:
   validate:
     # name: 'fmt, init, validate'
     needs: [changed-directories]
+    runs-on: ubuntu-latest
     if: ${{ needs.changed-directories.outputs.matrix != '' && needs.changed-directories.outputs.matrix.dir != '[]' }}
     strategy:
       matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
-    # runs-on: self-hosted
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
