@@ -22,6 +22,8 @@ jobs:
   changed-directories:
     name: Get Changed Files
     runs-on: self-hosted
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,23 +34,25 @@ jobs:
         uses: tj-actions/changed-files@v44
         with:
           dir_names: true
-          matrix: true
+          json: true
           files: |
             **/*.tf
             **/*.lock.hcl
       - name: List all changed directories
         run: echo '${{ steps.changed-directories.outputs.all_changed_files }}'
+      - id: set-matrix
+        run: echo "matrix={\"dir\":${{ steps.changed-directories.outputs.all_changed_files }}}" >> "$GITHUB_OUTPUT"
 
   validate:
     # name: 'fmt, init, validate'
     needs: [changed-directories]
+    if: ${{ needs.changed-directories.outputs.matrix != '' && needs.changed-directories.outputs.matrix.dir != '[]' }}
     strategy:
       matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
-      fail-fast: true
     runs-on: infra
     defaults:
       run:
-        working-directory: ${{ matrix.dirs }}
+        working-directory: ${{ matrix.dir }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
