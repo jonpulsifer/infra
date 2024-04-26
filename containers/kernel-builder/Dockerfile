@@ -1,4 +1,4 @@
-FROM ubuntu:jammy
+FROM ubuntu:noble
 
 ENV PACKAGES build-essential libncurses-dev bison flex libssl-dev libelf-dev
 
