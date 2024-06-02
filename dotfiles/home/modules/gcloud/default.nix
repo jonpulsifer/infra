@@ -31,7 +31,8 @@ in
   home.packages = with pkgs; [
     google-cloud-sql-proxy
     # nodePackages.firebase-tools
-    openjdk19
+    # openjdk19
+    openjdk
     (google-cloud-sdk.withExtraComponents components)
   ];
 }
