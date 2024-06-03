@@ -73,7 +73,7 @@ jobs:
   docs:
     needs: [validate, changed-directories]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
     strategy:
       matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
     defaults:
