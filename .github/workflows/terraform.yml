@@ -73,7 +73,7 @@ jobs:
   docs:
     needs: [validate, changed-directories]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
     strategy:
       matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
     defaults:
@@ -84,7 +84,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
       - name: Render terraform docs and push changes back to PR
-        uses: terraform-docs/gh-actions@v1.1.0
+        uses: terraform-docs/gh-actions@v1.2.0
         with:
           working-dir: ${{ matrix.dir }}
           output-file: README.md
