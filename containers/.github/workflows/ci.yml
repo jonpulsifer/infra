@@ -44,7 +44,7 @@ jobs:
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
       - name: Build and push ${{ matrix.container }}
         if: steps.changed-files.outputs.any_modified == 'true'
-        uses: docker/build-push-action@c382f710d39a5bb4e430307530a720f50c2d3318 # v6
+        uses: docker/build-push-action@94f8f8c2eec4bc3f1d78c1755580779804cb87b2 # v6
         with:
           push: ${{ github.event_name != 'pull_request' }}
           context: ${{ matrix.container }}
