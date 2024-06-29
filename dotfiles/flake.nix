@@ -19,7 +19,7 @@
             (optionalAttrs (prev.stdenv.system == "aarch64-darwin") {
               inherit (final.pkgs-x86) emacsMacport nerdctl;
             }))
-          (import ./overlays/pnpm)
+          # (import ./overlays/pnpm) # 2024-06-28 we don't use nodePackages.pnpm anymore
           # (import ./overlays/httpie) # 2022-12-18 httpie tests are broken
           # (import ./overlays/opa) # 2023-02-04 opa tests are broken
           (import ./pkgs)
