@@ -1,0 +1,38 @@
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "--cache-from",
+        "gcr.io/$PROJECT_ID/ubuntu:latest",
+        "-t",
+        "gcr.io/$PROJECT_ID/ubuntu:latest",
+        "-t",
+        "gcr.io/$PROJECT_ID/ubuntu:$COMMIT_SHA",
+        "-f",
+        "images/ubuntu-2404.Dockerfile",
+        ".",
+      ]
+    env:
+      - "LANGUAGE=${_LANGUAGE}"
+      - "LINUX_USER=${_LINUX_USER}"
+      - "LINUX_UUID=${_LINUX_UUID}"
+      - "GITHUB_USER=${_GITHUB_USER}"
+      - "GO_VERSION=${_GO_VERSION}"
+      - "DEP_VERSION=${_DEP_VERSION}"
+      - "OP_VERSION=${_OP_VERSION}"
+    timeout: 600s
+substitutions:
+  _BASEIMAGE: "gcr.io/trusted-builds/ubuntu-2404-base:latest"
+  _LANGUAGE: "en_US.UTF-8"
+  _LINUX_USER: "jawn"
+  _LINUX_UUID: "1337"
+  _GITHUB_USER: "j0npulsifer"
+  _GO_VERSION: "1.11"
+  _DEP_VERSION: "0.5.0"
+  _OP_VERSION: "0.5.5"
+tags:
+  - docker
+  - ubuntu
+  - ubuntu-2404
+images: ["gcr.io/$PROJECT_ID/ubuntu"]

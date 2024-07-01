@@ -1,0 +1,30 @@
+steps:
+  - name: "hashicorp/packer:light"
+    args: ["build", "-color=false", "images/ubuntu-2404-gce.json"]
+    timeout: 600s
+    env:
+      - "GCE_REGION=${_GCE_REGION}"
+      - "GCE_ZONE=${_GCE_ZONE}"
+      - "GCE_NETWORK=${_GCE_NETWORK}"
+      - "GCE_SUBNETWORK=${_GCE_SUBNETWORK}"
+      - "SERVICE_ACCOUNT=${_SERVICE_ACCOUNT}"
+      - "LANGUAGE=${_LANGUAGE}"
+      - "LINUX_USER=${_LINUX_USER}"
+      - "LINUX_UUID=${_LINUX_UUID}"
+      - "GITHUB_USER=${_GITHUB_USER}"
+      - "GO_VERSION=${_GO_VERSION}"
+      - "DEP_VERSION=${_DEP_VERSION}"
+      - "OP_VERSION=${_OP_VERSION}"
+substitutions:
+  _GCE_NETWORK: "builds"
+  _GCE_SUBNETWORK: "vms"
+  _GCE_REGION: "northamerica-northeast1"
+  _GCE_ZONE: "northamerica-northeast1-a"
+  _SERVICE_ACCOUNT: "builder@trusted-builds.iam.gserviceaccount.com"
+  _LANGUAGE: "en_US.UTF-8"
+  _LINUX_USER: "jawn"
+  _LINUX_UUID: "1337"
+  _GITHUB_USER: "j0npulsifer"
+  _GO_VERSION: "1.11"
+  _DEP_VERSION: "0.5.0"
+  _OP_VERSION: "0.5.5"

@@ -1,0 +1,27 @@
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "-t",
+        "baseimage-builder",
+        "-f",
+        "images/ubuntu-builder.Dockerfile",
+        ".",
+      ]
+  - name: "baseimage-builder"
+    args: ["make", "verify-baseimage"]
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      [
+        "build",
+        "-t",
+        "gcr.io/$PROJECT_ID/$_IMAGE-base",
+        "-f",
+        "images/$_IMAGE.Dockerfile",
+        "build/",
+      ]
+images: ["gcr.io/$PROJECT_ID/$_IMAGE"]
+substitutions:
+  _IMAGE: "ubuntu-2404-base"
+tags: ["docker", "ubuntu", "$_IMAGE", "base"]
