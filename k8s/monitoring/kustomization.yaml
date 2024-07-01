@@ -7,7 +7,7 @@ resources:
   - grafana-dashboards
   - local-node-exporters.yaml
   - loki.yaml
-  #- metrics-server.yaml
+  - metrics-server.yaml
   - picow.yaml
   - promtail.yaml
   - screenpi4.yaml
