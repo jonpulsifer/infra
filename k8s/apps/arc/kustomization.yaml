@@ -5,4 +5,5 @@ resources:
   - namespace.yaml
   - secret.sops.yaml
   - actions-runner-controller.yaml
-  - runners.yaml
+  - ts.yaml
+  - infra.yaml
