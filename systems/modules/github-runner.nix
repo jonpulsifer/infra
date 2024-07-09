@@ -2,6 +2,7 @@
   services.github-runners = {
     infra = {
       enable = true;
+      name = "metal";
       url = "https://github.com/jonpulsifer/infra";
       tokenFile = "/var/secrets/github-token-infra";
       replace = true;
@@ -9,6 +10,7 @@
     };
     dotfiles = {
       enable = true;
+      name = "metal";
       url = "https://github.com/jonpulsifer/dotfiles";
       tokenFile = "/var/secrets/github-token-dotfiles";
       replace = true;
@@ -16,6 +18,7 @@
     };
     ts = {
       enable = true;
+      name = "metal";
       url = "https://github.com/jonpulsifer/ts";
       tokenFile = "/var/secrets/github-token-ts";
       replace = true;
