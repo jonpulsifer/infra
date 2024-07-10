@@ -26,8 +26,7 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    nameOverride: lol
-    runnerScaleSetName: arc
+    runnerScaleSetName: arc-ts
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
     minRunners: 0
