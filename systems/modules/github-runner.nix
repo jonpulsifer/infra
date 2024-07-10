@@ -4,7 +4,7 @@ let
     if enable then {
       inherit enable name replace;
       url = "https://github.com/jonpulsifer/${repo}";
-      user = config.users.users.github-runner.name;
+      user = "root";
       tokenFile = "/var/secrets/github-token-${repo}";
       extraEnvironment = {
         NIX_PATH = "nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos";
