@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 let
   mkRunner = { repo, enable ? true, name ? "metal", replace ? true, extraPackages ? [ ] }:
     if enable then {
