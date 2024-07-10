@@ -6,6 +6,9 @@ let
       url = "https://github.com/jonpulsifer/${repo}";
       user = config.users.users.github-runner.name;
       tokenFile = "/var/secrets/github-token-${repo}";
+      extraEnvironment = {
+        NIX_PATH = "nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos";
+      };
       extraLabels = [ name config.networking.hostName "metal" ];
       extraPackages = with pkgs; [ docker nodejs-18_x unzip ] ++ extraPackages;
     } else null;
@@ -16,7 +19,7 @@ in
     isSystemUser = true;
     shell = pkgs.bash;
     group = config.users.groups.github-runner.name;
-    extraGroups = [ "wheel" "docker" ];
+    extraGroups = [ "wheel" ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
   };
 
   services.github-runners = {
