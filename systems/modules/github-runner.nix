@@ -6,7 +6,7 @@ let
       url = "https://github.com/jonpulsifer/${repo}";
       tokenFile = "/var/secrets/github-token-${repo}";
       extraLabels = [ name config.networking.hostName "metal" ];
-      extraPackages = with pkgs; [ nodejs-18_x unzip ] ++ extraPackages;
+      extraPackages = with pkgs; [ docker nodejs-18_x unzip ] ++ extraPackages;
     } else null;
 in
 {
