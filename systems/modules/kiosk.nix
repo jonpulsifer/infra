@@ -37,6 +37,14 @@ in
       shell = pkgs.zsh;
     };
 
+    services.displayManager = {
+      autoLogin = {
+        enable = true;
+        user = cfg.user;
+      };
+      defaultSession = "none+openbox";
+    };
+
     services.xserver = {
       enable = true;
       monitorSection = ''
@@ -55,11 +63,6 @@ in
         xterm.enable = false;
       };
       displayManager = {
-        autoLogin = {
-          enable = true;
-          user = cfg.user;
-        };
-        defaultSession = "none+openbox";
         lightdm = {
           enable = true;
           greeter.enable = false;

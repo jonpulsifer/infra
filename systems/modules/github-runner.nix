@@ -1,29 +1,19 @@
-{ pkgs, ... }: {
+{ config, pkgs, ... }:
+let
+  mkRunner = { repo, enable ? true, name ? "metal", replace ? true, extraPackages ? [ ] }:
+    if enable then {
+      inherit enable name replace;
+      url = "https://github.com/jonpulsifer/${repo}";
+      tokenFile = "/var/secrets/github-token-${name}";
+      extraLabels = [ name config.networking.hostName "metal" ];
+      extraPackages = with pkgs; [ nodejs-18_x unzip ] ++ extraPackages;
+    } else null;
+in
+{
   services.github-runners = {
-    infra = {
-      enable = true;
-      name = "metal";
-      url = "https://github.com/jonpulsifer/infra";
-      tokenFile = "/var/secrets/github-token-infra";
-      replace = true;
-      extraPackages = with pkgs; [ cachix nodejs-18_x unzip ];
-    };
-    dotfiles = {
-      enable = true;
-      name = "metal";
-      url = "https://github.com/jonpulsifer/dotfiles";
-      tokenFile = "/var/secrets/github-token-dotfiles";
-      replace = true;
-      extraPackages = with pkgs; [ cachix ];
-    };
-    ts = {
-      enable = true;
-      name = "metal";
-      url = "https://github.com/jonpulsifer/ts";
-      tokenFile = "/var/secrets/github-token-ts";
-      replace = true;
-      extraPackages = with pkgs; [ nodejs-18_x nodePackages.pnpm ];
-    };
+    dotfiles = mkRunner { repo = "dotfiles"; extraPackages = [ pkgs.cachix ]; };
+    infra = mkRunner { repo = "infra"; extraPackages = [ pkgs.cachix ]; };
+    ts = mkRunner { repo = "ts"; };
   };
   nix.settings.trusted-users = [ "github-runner-infra" "github-runner-dotfiles" ];
 }
