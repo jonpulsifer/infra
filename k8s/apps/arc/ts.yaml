@@ -37,3 +37,6 @@ spec:
           - name: runner
             image: jonpulsifer/actions-runner:latest
             command: ["/home/runner/run.sh"]
+            env:
+              - name: ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT
+                value: "false"
