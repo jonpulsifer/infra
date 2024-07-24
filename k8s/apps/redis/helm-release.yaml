@@ -22,10 +22,12 @@ spec:
     master:
       persistence:
         enabled: false
+      automountServiceAccountToken: true
     replica:
       replicaCount: 2
       persistence:
         enabled: false
+      automountServiceAccountToken: true
     sentinel:
       enabled: true
       masterSet: redis-master
