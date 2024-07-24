@@ -42,3 +42,5 @@ spec:
       enabled: true
       serviceMonitor:
         enabled: true
+    rbac:
+      create: true
