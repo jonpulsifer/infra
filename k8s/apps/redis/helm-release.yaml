@@ -34,6 +34,8 @@ spec:
         failureThreshold: 2
       persistence:
         enabled: false
+      masterService:
+        enabled: true
     metrics:
       enabled: true
       serviceMonitor:
