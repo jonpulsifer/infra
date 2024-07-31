@@ -6,19 +6,19 @@ locals {
   nodes_with_labels = {
     "nuc" = {
       "node-role.kubernetes.io/control-plane" = ""
-      "bgp-policy"                            = "fml"
+      "bgp-enabled"                           = "true"
     },
     "800g2" = {
       "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
+      "bgp-enabled"                    = "true"
     },
     "800g2-2" = {
       "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
+      "bgp-enabled"                    = "true"
     },
     "optiplex" = {
       "node-role.kubernetes.io/worker" = ""
-      "bgp-policy"                     = "fml"
+      "bgp-enabled"                    = "true"
     }
   }
 }
