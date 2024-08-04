@@ -16,13 +16,20 @@ spec:
       labels:
         app: satisfactory
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: satisfactory
           image: wolveix/satisfactory-server
           securityContext:
-            runAsNonRoot: true
-            runAsUser: 1000
             allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 15000
               name: beacon
