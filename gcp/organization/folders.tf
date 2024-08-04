@@ -22,6 +22,20 @@ resource "google_folder" "dev" {
   parent       = data.google_organization.org.name
 }
 
+# "iam.serviceAccountKeyExpiryHours"
+resource "google_org_policy_policy" "iam_serviceAccountKeyExpiryHours" {
+  name   = "${google_folder.dev.name}/policies/iam.serviceAccountKeyExpiryHours"
+  parent = google_folder.dev.name
+
+  spec {
+    rules {
+      values {
+        allowed_values = ["2160h"]
+      }
+    }
+  }
+}
+
 resource "google_org_policy_policy" "gcp_restrictCmekCryptoKeyProjects_dev" {
   name   = "${google_folder.dev.name}/policies/gcp.restrictCmekCryptoKeyProjects"
   parent = google_folder.dev.name

@@ -109,8 +109,8 @@ locals {
     # "gcp.restrictTLSVersion",
     # "iam.allowedPolicyMemberDomains",
     "iam.allowServiceAccountCredentialLifetimeExtension",
-    "iam.serviceAccountKeyExpiryHours",
-    "iam.serviceAccountKeyExposureResponse",
+    # "iam.serviceAccountKeyExpiryHours",
+    # "iam.serviceAccountKeyExposureResponse",
     "iam.workloadIdentityPoolAwsAccounts",
     "iam.workloadIdentityPoolProviders",
     "meshconfig.allowedVpcscModes",
@@ -273,7 +273,7 @@ resource "google_org_policy_policy" "gcp_restrictCmekCryptoKeyProjects" {
   parent = data.google_organization.org.name
   spec {
     rules {
-      allow_all = "TRUE"
+      values { allowed_values = ["under:${data.google_organization.org.name}"] }
     }
   }
 }
@@ -360,6 +360,19 @@ resource "google_org_policy_policy" "gcp_restrictServiceUsage" {
   spec {
     rules {
       allow_all = "TRUE"
+    }
+  }
+}
+
+# "iam.serviceAccountKeyExposureResponse"
+resource "google_org_policy_policy" "iam_serviceAccountKeyExposureResponse" {
+  name   = "${data.google_organization.org.name}/policies/iam.serviceAccountKeyExposureResponse"
+  parent = data.google_organization.org.name
+  spec {
+    rules {
+      values {
+        allowed_values = ["DISABLE_KEY"]
+      }
     }
   }
 }
