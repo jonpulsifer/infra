@@ -19,6 +19,10 @@ spec:
       containers:
         - name: satisfactory
           image: wolveix/satisfactory-server
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
           ports:
             - containerPort: 15000
               name: beacon
