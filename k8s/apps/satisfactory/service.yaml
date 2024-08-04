@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: satisfactory
+  namespace: satisfactory
+  labels:
+    app: satisfactory
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: satisfactory.lolwtf.ca
+spec:
+  selector:
+    app: satisfactory
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  ports:
+    - protocol: UDP
+      port: 7777
+      targetPort: 7777
+      name: game
+    - protocol: UDP
+      port: 15777
+      targetPort: 15777
+      name: query
+    - protocol: UDP
+      port: 15000
+      targetPort: 15000
+      name: beacon
