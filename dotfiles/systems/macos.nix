@@ -28,10 +28,8 @@
   programs.zsh.enable = true;
   environment.systemPackages = with pkgs; [ alacritty ];
 
-  fonts = {
-    fontDir.enable = true;
-    fonts = with pkgs; [ (nerdfonts.override { fonts = [ "FiraCode" ]; }) ];
-  };
+
+  fonts.packages = with pkgs; [ (nerdfonts.override { fonts = [ "FiraCode" ]; }) ];
 
   home-manager = {
     useGlobalPkgs = true;
