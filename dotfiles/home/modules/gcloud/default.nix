@@ -32,7 +32,6 @@ in
     google-cloud-sql-proxy
     # nodePackages.firebase-tools
     # openjdk19
-    openjdk
     (google-cloud-sdk.withExtraComponents components)
   ];
 }

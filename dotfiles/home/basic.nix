@@ -47,10 +47,8 @@ in
 
   home.packages = with pkgs;
     [
+      # daily driving apps
       shell-utils
-
-      # things i use
-
       dig
       # gnumake
       jq
@@ -60,20 +58,17 @@ in
       # nmap
       # shellcheck
       tcpdump
-      # unzip
+      unzip
       wget
-      # whois
+      whois
 
       # hipster tools
       eza
       delta
       fd
-      # hexyl
       httpie
       ripgrep
       sd
-      # silver-searcher
-      # tokei
       xsv
     ];
 

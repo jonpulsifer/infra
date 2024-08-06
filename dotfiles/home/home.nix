@@ -17,6 +17,7 @@ in
         # cloudevents
         asciinema
         # hugo
+        nodejs_20
         sops
         vault
 

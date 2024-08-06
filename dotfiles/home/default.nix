@@ -23,7 +23,8 @@ in
       age
       gh
       postgresql_15
-      terraform
+      # terraform
+      tenv
     ] ++ optionals isDarwin [ ffmpeg reattach-to-user-namespace ];
 
   fonts.fontconfig.enable = true;
