@@ -23,4 +23,12 @@
   kubernetes: {
     fileMatch: ["k8s/.+\\.ya?ml$"],
   },
+  "packageRules": [
+    {
+      "matchManagers": [
+        "terraform"
+      ],
+      "groupName": "terraform"
+    }
+  ]
 }
