@@ -14,9 +14,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: request-headers
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # automated:
+    #   prune: true
+    #   selfHeal: true
     syncOptions:
       - CreateNamespace=true
     retry:
@@ -37,9 +37,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: nested
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # automated:
+    #   prune: true
+    #   selfHeal: true
     syncOptions:
       - CreateNamespace=true
     retry:
@@ -60,9 +60,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: rosie
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # automated:
+    #   prune: true
+    #   selfHeal: true
     syncOptions:
       - CreateNamespace=true
     retry:
@@ -83,9 +83,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: authme
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # automated:
+    #   prune: true
+    #   selfHeal: true
     syncOptions:
       - CreateNamespace=true
     retry:
@@ -106,6 +106,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: hub
   syncPolicy:
+    # automated:
+    #   prune: true
+    #   selfHeal: true
     syncOptions:
       - CreateNamespace=true
     retry:
