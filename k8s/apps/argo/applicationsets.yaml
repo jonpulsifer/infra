@@ -11,7 +11,7 @@ spec:
             server: in-cluster
   template:
     metadata:
-      name: "{{app}}-gitops"
+      name: "{{app}}"
     spec:
       project: default
       sources:
