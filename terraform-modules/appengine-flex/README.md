@@ -34,7 +34,7 @@ No modules.
 | <a name="input_auth_domain"></a> [auth\_domain](#input\_auth\_domain) | The domain to authenticate users with when using App Engine's User API | `string` | `"pulsifer.ca"` | no |
 | <a name="input_domain_names"></a> [domain\_names](#input\_domain\_names) | Map of domain names | `any` | `null` | no |
 | <a name="input_enable_stackdriver"></a> [enable\_stackdriver](#input\_enable\_stackdriver) | Enable Stackdriver logging, monitoring, etc for the instance service account | `bool` | `false` | no |
-| <a name="input_firewall_rules"></a> [firewall\_rules](#input\_firewall\_rules) | List of firewall rules | `map(object({ action = string, source_range = string, priority = number }))` | <pre>{<br>  "deny all the things": {<br>    "action": "DENY",<br>    "priority": 1337,<br>    "source_range": "*"<br>  }<br>}</pre> | no |
+| <a name="input_firewall_rules"></a> [firewall\_rules](#input\_firewall\_rules) | List of firewall rules | `map(object({ action = string, source_range = string, priority = number }))` | <pre>{<br/>  "deny all the things": {<br/>    "action": "DENY",<br/>    "priority": 1337,<br/>    "source_range": "*"<br/>  }<br/>}</pre> | no |
 | <a name="input_location"></a> [location](#input\_location) | The location, usually a region e.g. northamerica-northeast1 | `string` | `"northamerica-northeast1"` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name for the AppEngine application | `string` | `"app"` | no |
 | <a name="input_project"></a> [project](#input\_project) | The project that will contain the application | `string` | `""` | no |

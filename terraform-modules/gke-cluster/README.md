@@ -58,7 +58,7 @@ No modules.
 | <a name="input_master_authorized_networks"></a> [master\_authorized\_networks](#input\_master\_authorized\_networks) | Map of cidrs that can access the master network | `map` | `{}` | no |
 | <a name="input_monitoring_service"></a> [monitoring\_service](#input\_monitoring\_service) | Monitoring Service for the cluster, one of monitoring.googleapis.com/kubernetes, or none | `string` | `"monitoring.googleapis.com/kubernetes"` | no |
 | <a name="input_name"></a> [name](#input\_name) | Prefix of the cluster resources | `string` | `"lab"` | no |
-| <a name="input_network_config"></a> [network\_config](#input\_network\_config) | VPC network configuration for the cluster | `map` | <pre>{<br>  "enable_natgw": false,<br>  "enable_ssh": false,<br>  "master_cidr": "10.20.30.0/28",<br>  "node_cidr": "10.0.0.0/24",<br>  "pod_cidr": "10.2.0.0/24",<br>  "private_master": true,<br>  "private_nodes": true,<br>  "service_cidr": "10.1.0.0/24"<br>}</pre> | no |
+| <a name="input_network_config"></a> [network\_config](#input\_network\_config) | VPC network configuration for the cluster | `map` | <pre>{<br/>  "enable_natgw": false,<br/>  "enable_ssh": false,<br/>  "master_cidr": "10.20.30.0/28",<br/>  "node_cidr": "10.0.0.0/24",<br/>  "pod_cidr": "10.2.0.0/24",<br/>  "private_master": true,<br/>  "private_nodes": true,<br/>  "service_cidr": "10.1.0.0/24"<br/>}</pre> | no |
 | <a name="input_network_policy"></a> [network\_policy](#input\_network\_policy) | Enable Network Policy | `bool` | `true` | no |
 | <a name="input_pod_security_policy"></a> [pod\_security\_policy](#input\_pod\_security\_policy) | Enable Pod Security Policy | `bool` | `true` | no |
 | <a name="input_project"></a> [project](#input\_project) | The GCP project to use | `string` | n/a | yes |

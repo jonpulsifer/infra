@@ -34,8 +34,8 @@ No modules.
 | <a name="input_labels"></a> [labels](#input\_labels) | n/a | `map` | `{}` | no |
 | <a name="input_location"></a> [location](#input\_location) | n/a | `string` | n/a | yes |
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | n/a | `string` | `"custom-1-1"` | no |
-| <a name="input_metadata_cos"></a> [metadata\_cos](#input\_metadata\_cos) | GCE instance metadata pairs assigned to the instances in the group | `map` | <pre>{<br>  "disable-legacy-endpoints": "true",<br>  "enable-guest-attributes": "false",<br>  "enable-os-inventory": "false"<br>}</pre> | no |
-| <a name="input_metadata_ubuntu"></a> [metadata\_ubuntu](#input\_metadata\_ubuntu) | GCE instance metadata pairs assigned to the instances in the group | `map` | <pre>{<br>  "disable-legacy-endpoints": "true",<br>  "enable-guest-attributes": "true",<br>  "enable-os-inventory": "true"<br>}</pre> | no |
+| <a name="input_metadata_cos"></a> [metadata\_cos](#input\_metadata\_cos) | GCE instance metadata pairs assigned to the instances in the group | `map` | <pre>{<br/>  "disable-legacy-endpoints": "true",<br/>  "enable-guest-attributes": "false",<br/>  "enable-os-inventory": "false"<br/>}</pre> | no |
+| <a name="input_metadata_ubuntu"></a> [metadata\_ubuntu](#input\_metadata\_ubuntu) | GCE instance metadata pairs assigned to the instances in the group | `map` | <pre>{<br/>  "disable-legacy-endpoints": "true",<br/>  "enable-guest-attributes": "true",<br/>  "enable-os-inventory": "true"<br/>}</pre> | no |
 | <a name="input_name"></a> [name](#input\_name) | n/a | `string` | `"labpool"` | no |
 | <a name="input_node_count"></a> [node\_count](#input\_node\_count) | n/a | `number` | `0` | no |
 | <a name="input_node_metadata"></a> [node\_metadata](#input\_node\_metadata) | Adjusts the node metadata service, one of: GCE\_METADATA, GKE\_METADATA | `string` | `"GKE_METADATA"` | no |

@@ -49,7 +49,7 @@ No modules.
 | <a name="input_enable_stackdriver"></a> [enable\_stackdriver](#input\_enable\_stackdriver) | Enable Stackdriver logging, monitoring, etc for the instance service account | `bool` | `true` | no |
 | <a name="input_encrypt_disk"></a> [encrypt\_disk](#input\_encrypt\_disk) | Whether or not to encrypt the disk with KMS | `bool` | `true` | no |
 | <a name="input_external_ip"></a> [external\_ip](#input\_external\_ip) | Create an external IP address for the instance | `bool` | `false` | no |
-| <a name="input_image"></a> [image](#input\_image) | Map that holds the GCE image family and project | `map(string)` | <pre>{<br>  "family": "cos-beta",<br>  "project": "gce-uefi-images"<br>}</pre> | no |
+| <a name="input_image"></a> [image](#input\_image) | Map that holds the GCE image family and project | `map(string)` | <pre>{<br/>  "family": "cos-beta",<br/>  "project": "gce-uefi-images"<br/>}</pre> | no |
 | <a name="input_location"></a> [location](#input\_location) | The location, usually a region e.g. northamerica-northeast1 | `string` | `""` | no |
 | <a name="input_machine_type"></a> [machine\_type](#input\_machine\_type) | GCE Machine Type | `string` | `"n1-standard-1"` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name for the service account and VM prefix | `string` | `"lab"` | no |
