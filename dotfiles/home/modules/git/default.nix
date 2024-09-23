@@ -5,7 +5,7 @@ let
 in
 {
   home.shellAliases = {
-    yeet = "${pkgs.git}/bin/git commit -sm \"\$(${pkgs.curl}/bin/curl -s https://whatthecommit.com/index.txt)\" && ${pkgs.git}/bin/git push";
+    yeet = "${pkgs.git}/bin/git yeet";
   };
   programs.git = {
     enable = true;
@@ -32,7 +32,22 @@ in
 
     aliases = {
       ad = "add";
-      yeet = "!git commit -sm \"$(curl -s https://whatthecommit.com/index.txt)\" && git push";
+      yeet = ''
+        !commit_messages=(
+          "fix: oops"
+          "chore: move things around"
+          "feat: add more cowbell"
+          "refactor: let's try this again"
+          "style: make it pop"
+          "docs: add more emojis"
+          "test: hope this works"
+          "perf: zoom zoom"
+          "build: maybe it'll work this time"
+          "ci: cross your fingers"
+        )
+        message=''${commit_messages[$RANDOM % ''${#commit_messages[@]}]}
+        git commit -sm "$message" && git push
+      '';
       letsgo = "!git lfg";
       lfg = "!{ git checkout main || git checkout master; } && git pull --rebase";
       lol = "log --graph --decorate --pretty=oneline --abbrev-commit --all";
