@@ -17,11 +17,7 @@ spec:
       port: 7777
       targetPort: 7777
       name: game
-    - protocol: UDP
-      port: 15777
-      targetPort: 15777
-      name: query
-    - protocol: UDP
-      port: 15000
-      targetPort: 15000
-      name: beacon
+    - protocol: TCP
+      port: 7777
+      targetPort: 7777
+      name: gametcp
