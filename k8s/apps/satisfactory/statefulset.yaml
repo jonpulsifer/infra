@@ -31,12 +31,9 @@ spec:
             capabilities:
               drop: ["ALL"]
           ports:
-            - containerPort: 15000
-              name: beacon
-              protocol: UDP
-            - containerPort: 15777
-              name: query
-              protocol: UDP
+            - containerPort: 7777
+              name: gameTCP
+              protocol: TCP
             - containerPort: 7777
               name: game
               protocol: UDP
@@ -72,14 +69,10 @@ spec:
               value: "3" # -- set the network quality (1-3)
             - name: ROOTLESS
               value: "true" # -- run the container as a non-root user (requires PGID and PUID to be set)
-            - name: SERVERBEACONPORT
-              value: "15000" # -- set the game's beacon port
             - name: SERVERGAMEPORT
               value: "7777" # -- set the game's port
             - name: SERVERIP
               value: "0.0.0.0" # -- set the game's IP (usually not needed)
-            - name: SERVERQUERYPORT
-              value: "15777" # -- set the game's query port
             - name: SERVERSTREAMING
               value: "true" # -- toggle whether the game utilizes asset streaming
             - name: SKIPUPDATE
