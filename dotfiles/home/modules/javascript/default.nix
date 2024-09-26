@@ -16,7 +16,7 @@ in
   home.packages = with pkgs; [
     bun
     pnpm_9
-    # nodejs_20 -- different in work/home
+    nodejs_22
     nodePackages.ts-node
     nodePackages.vercel
     nodePackages.yarn
