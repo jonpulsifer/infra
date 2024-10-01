@@ -14,6 +14,7 @@ in
     PNPM_HOME = paths.pnpm;
   }];
   home.packages = with pkgs; [
+    biome
     bun
     pnpm_9
     nodejs_22
