@@ -21,7 +21,7 @@ terraform {
       source = "hashicorp/google"
     }
     argocd = {
-      source  = "oboukili/argocd"
+      source  = "argoproj-labs/argocd"
       version = "~> 7.0.0"
     }
   }
