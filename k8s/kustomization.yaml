@@ -5,4 +5,4 @@ kind: Kustomization
 metadata:
   name: bootstrap
 resources:
-  - github.com/fluxcd/flux2/manifests/install?ref=v2.3.0
+  - github.com/fluxcd/flux2/manifests/install?ref=v2.4.0
