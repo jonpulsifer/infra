@@ -66,6 +66,8 @@ spec:
       grafana.ini:
         feature_toggles:
           publicDashboards: true
+      plugins:
+        - grafana-mqtt-datasource
       deleteDatasources:
         - name: Loki
           orgId: 1
@@ -81,6 +83,16 @@ spec:
             httpHeaderName1: "X-Scope-OrgID"
           secureJsonData:
             httpHeaderValue1: "1"
+        - name: FlameBoss
+          type: grafana-mqtt-datasource
+          orgId: 1
+          version: 1
+          jsonData:
+            tlsSkipVerify: true
+            uri: tls://s4.myflameboss.com:8883
+            username: ${SECRET_FLAMEBOSS_USERNAME}
+          secureJsonData:
+            password: ${SECRET_FLAMEBOSS_PASSWORD}
       dashboardProviders:
         dashboardproviders.yaml:
           apiVersion: 1
