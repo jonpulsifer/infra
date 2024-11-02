@@ -6,7 +6,7 @@ ingress:
   - hostname: cf.lolwtf.ca
     service: http://request-headers-app.request-headers:8080
   - hostname: cf2.lolwtf.ca
-    service: http://authme-app.authme:8080
+    service: tcp://satisfactory.satisfactory:7777
   - hostname: cf3.lolwtf.ca
     service: http://nested-app.nested:8080
   - service: http_status:404
