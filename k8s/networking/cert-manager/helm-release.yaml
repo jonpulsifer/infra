@@ -28,10 +28,13 @@ spec:
       namespace: kube-system
   values:
     installCRDs: true
+    config:
+      apiVersion: controller.config.cert-manager.io/v1alpha1
+      kind: ControllerConfiguration
+      enableGatewayAPI: true
     webhook:
       enabled: true
     extraArgs:
-      - --feature-gates=ExperimentalGatewayAPISupport=true
       - --dns01-recursive-nameservers=1.0.0.1:53,1.1.1.1:53
       - --dns01-recursive-nameservers-only
     replicaCount: 1
