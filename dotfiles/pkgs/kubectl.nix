@@ -1,6 +1,6 @@
-{ stdenv, fetchurl, installShellFiles }:
+{ stdenv, fetchurl, installShellFiles, lib }:
 let
-  version = "1.28.3";
+  version = "1.31.2";
   sources = {
     aarch64-linux = [
       (fetchurl {
@@ -53,6 +53,12 @@ stdenv.mkDerivation rec {
       --zsh <($out/bin/kubectl completion zsh)
     done
   '';
+  meta = with lib; {
+    description = "The Kubernetes command-line tool";
+    homepage = "https://kubernetes.io/docs/reference/kubectl/";
+    license = licenses.asl20;
+    mainProgram = "kubectl";
+  };
 
   platforms = [
     "x86_64-linux"

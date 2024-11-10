@@ -2,9 +2,11 @@
   nix = {
     # package = pkgs.nixFlakes;
     configureBuildUsers = true;
+    optimise = {
+      automatic = true;
+    };
     settings = {
       trusted-users = [ "@admin" ];
-      auto-optimise-store = true;
       build-users-group = "nixbld";
       sandbox = true;
       experimental-features = "nix-command flakes";

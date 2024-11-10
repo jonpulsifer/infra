@@ -19,7 +19,7 @@ in
 
   home.packages = with pkgs;
     [
-      _1password
+      _1password-cli
       age
       gh
       postgresql_15

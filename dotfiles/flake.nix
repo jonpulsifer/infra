@@ -66,6 +66,7 @@
           pixelbook = self.homeConfigurations.pixelbook.activationPackage;
         };
         aarch64-linux.default = self.homeConfigurations.arm.activationPackage;
+        aarch64-darwin.default = self.darwinConfigurations.air.system;
       };
 
       # nix-darwin
@@ -77,6 +78,7 @@
             { home-manager.users.jawn = import ./home/home.nix; }
           ];
         };
+        air = Craftbook-Air;
 
         mini = darwinSystem {
           system = "x86_64-darwin";
