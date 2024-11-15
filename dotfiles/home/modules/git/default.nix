@@ -32,6 +32,7 @@ in
 
     aliases = {
       ad = "add";
+      boop = "git commit -s --allow-empty -m '🫵 boop'";
       yeet = ''
         !commit_messages=(
           "fix: oops"
