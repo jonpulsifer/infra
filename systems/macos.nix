@@ -1,6 +1,6 @@
 { pkgs, lib, ... }: {
   nix = {
-    # package = pkgs.nixFlakes;
+    # package = pkgs.nixVersions.latest;
     configureBuildUsers = true;
     settings = {
       trusted-users = [ "@admin" ];

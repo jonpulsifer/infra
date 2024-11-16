@@ -5,7 +5,7 @@ let
   kubeAPIServerPort = 6443;
   kubePodCidr = "10.100.0.0/16";
   kubeServiceCidr = "10.10.0.0/16";
-  kubeDns = "10.10.0.254";
+  kubeDns = [ "10.10.0.254" "10.3.0.1" ];
   kubeUpstreamDns = "10.2.0.1";
 in
 {

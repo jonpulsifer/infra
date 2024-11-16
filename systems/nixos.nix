@@ -129,7 +129,7 @@ in
   };
 
   nix = {
-    package = pkgs.nixFlakes;
+    package = pkgs.nixVersions.latest;
     gc = {
       automatic = true;
       dates = "weekly";
