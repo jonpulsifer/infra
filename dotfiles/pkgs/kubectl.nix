@@ -15,17 +15,17 @@ let
     x86_64-linux = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl";
-        hash = "sha256-DGgMkIksQ+XOcI6RiCH5JEXR0kT5s9dRMCO8rppiRtE=";
+        hash = "sha256-OZ6dGZXagLZNLvNgbBojkBhmDYs1IJ+6P3sLwRxjHGg=";
       })
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubeadm";
-        hash = "sha256-zjhIsd+lYuD6L5EaPY47sHugQO6nZlTWjiEzFciEasA=";
+        hash = "sha256-49PxBR2ffkMaq69DPxIcdvz22EAbfqUfTHr2WvRPHlQ=";
       })
     ];
     aarch64-darwin = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/darwin/arm64/kubectl";
-        hash = "sha256-B5LVcNIPxJXqZLrsJs1r3pYUNLkAA48pUvMzRQGHLoA=";
+        hash = "";
       })
     ];
     x86_64-darwin = [
