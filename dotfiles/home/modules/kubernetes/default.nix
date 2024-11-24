@@ -63,8 +63,8 @@ in
         src = fetchFromGitHub {
           owner = "jonmosco";
           repo = "kube-ps1";
-          rev = "v0.8.0";
-          sha256 = "sha256-gOJ6XsFHbEZK+147gFUo7Nv6S4zLGPSvF6WYpO6QxLg=";
+          rev = "v0.9.0";
+          sha256 = "sha256-r8rrEfHklpPw4IvVTVqy8BmPoLv0cw9Zg8JjPh5rrm8=";
         };
       }
       {
