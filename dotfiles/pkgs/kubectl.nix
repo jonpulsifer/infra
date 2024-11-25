@@ -25,7 +25,7 @@ let
     aarch64-darwin = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/darwin/arm64/kubectl";
-        hash = "";
+        hash = "sha256-B5LVcNIPxJXqZLrsJs1r3pYUNLkAA48pUvMzRQGHLoA=";
       })
     ];
     x86_64-darwin = [
