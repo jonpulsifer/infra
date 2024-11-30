@@ -3,6 +3,9 @@ kind: Endpoints
 metadata:
   name: nix-serve
   namespace: nix-kache
+  labels:
+    app.kubernetes.io/name: nix-serve
+    app.kubernetes.io/part-of: nix-kache
 subsets:
   - addresses:
       - ip: 10.3.0.13
