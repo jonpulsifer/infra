@@ -29,6 +29,8 @@ spec:
           image: busybox
           securityContext:
             runAsUser: 0
+            seccompProfile:
+              type: RuntimeDefault
           command:
             - "sh"
             - "-c"
@@ -36,7 +38,7 @@ spec:
               set -e
               while true; do
                 echo "Refreshing certificates at $(date)"
-                cd /nix-serve/hostPath
+                cd /nix-serve/host
                 cp -v /nix-serve/certificate/* .
                 chown -R 999:999 .
                 chmod 600 tls.key
@@ -44,15 +46,15 @@ spec:
                 sleep 86400 # Run once every 24 hours
               done
           volumeMounts:
-            - name: nix-serve-host-path
-              mountPath: /nix-serve/hostPath
+            - name: nix-serve-host
+              mountPath: /nix-serve/host
               readOnly: false
             - name: nix-serve-certificate
               mountPath: /nix-serve/certificate
               readOnly: true
       restartPolicy: Always
       volumes:
-        - name: nix-serve-host-path
+        - name: nix-serve-host
           hostPath:
             path: /var/secrets/nix-serve
             type: DirectoryOrCreate
