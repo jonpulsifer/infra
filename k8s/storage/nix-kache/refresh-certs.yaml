@@ -44,7 +44,7 @@ spec:
                 sleep 86400 # Run once every 24 hours
               done
           volumeMounts:
-            - name: nix-serve-hostPath
+            - name: nix-serve-host-path
               mountPath: /nix-serve/hostPath
               readOnly: false
             - name: nix-serve-certificate
@@ -52,7 +52,7 @@ spec:
               readOnly: true
       restartPolicy: Always
       volumes:
-        - name: nix-serve-hostPath
+        - name: nix-serve-host-path
           hostPath:
             path: /var/secrets/nix-serve
             type: DirectoryOrCreate
