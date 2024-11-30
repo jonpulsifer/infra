@@ -44,8 +44,8 @@ spec:
       - service
       - gateway-httproute
       - gateway-tlsroute
-      - gateway-tcproute
-      - gateway-udproute
+      # - gateway-tcproute
+      # - gateway-udproute
     txtPrefix: "k8s."
     txtOwnerId: "default"
     domainFilters:
