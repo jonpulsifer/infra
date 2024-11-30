@@ -11,19 +11,19 @@ spec:
   selector:
     matchLabels:
       app: refresh-certs
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-              - key: kubernetes.io/hostname
-                operator: In
-                values: ["optiplex"]
   template:
     metadata:
       labels:
         app: refresh-certs
     spec:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values: ["optiplex"]
       containers:
         - name: busybox
           image: busybox
