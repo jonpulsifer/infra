@@ -70,12 +70,13 @@
         {
           # lab machines
           oldschool = [ ./systems/oldschool.nix ];
+          retrofit = [ ./systems/retrofit.nix ];
 
           # k8s cluster
           nuc = k8sControlPlane;
           optiplex = k8sWorker ++ [ ./systems/modules/nix-serve.nix ];
+          riptide = k8sWorker ++ [ ./systems/modules/jellyfin.nix ];
           "800g2" = k8sWorker;
-          "800g2-2" = k8sWorker;
 
           # raspberry pis
           rpi4 = [ ];

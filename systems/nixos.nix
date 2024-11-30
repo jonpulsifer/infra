@@ -16,7 +16,7 @@ in
     initrd.kernelModules = [ ];
 
     kernelPackages = mkDefault pkgs.linuxPackages_latest;
-    kernelModules = [ ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" "800g2" "800g2-2" "optiplex" ]) [ "kvm-intel" ];
+    kernelModules = [ ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" "800g2" "riptide" "optiplex" ]) [ "kvm-intel" ];
 
     consoleLogLevel = mkDefault 0;
     extraModulePackages = [ ];

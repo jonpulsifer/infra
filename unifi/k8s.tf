@@ -7,8 +7,7 @@ locals {
     "nuc" : cidrhost(local.node_cidr, 10)
     "k8s" : cidrhost(local.node_cidr, 10)
     "800g2" : cidrhost(local.node_cidr, 11)
-    "800g2-2" : cidrhost(local.node_cidr, 12)
-    # "800g3-1" : cidrhost(local.node_cidr, 13)
+    "riptide" : cidrhost(local.node_cidr, 12)
     "optiplex" : cidrhost(local.node_cidr, 13)
   }
 }

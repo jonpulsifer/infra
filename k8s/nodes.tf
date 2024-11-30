@@ -12,7 +12,7 @@ locals {
       "node-role.kubernetes.io/worker" = ""
       "bgp-enabled"                    = "true"
     },
-    "800g2-2" = {
+    "riptide" = {
       "node-role.kubernetes.io/worker" = ""
       "bgp-enabled"                    = "true"
     },
