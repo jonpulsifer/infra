@@ -28,7 +28,7 @@ spec:
         - name: busybox
           image: busybox
           securityContext:
-            runAsUser: 62540
+            runAsUser: 0
             seccompProfile:
               type: RuntimeDefault
           command:
