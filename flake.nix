@@ -73,7 +73,7 @@
 
           # k8s cluster
           nuc = k8sControlPlane;
-          optiplex = k8sWorker;
+          optiplex = k8sWorker ++ [ ./systems/modules/nix-serve.nix ];
           "800g2" = k8sWorker;
           "800g2-2" = k8sWorker;
 
