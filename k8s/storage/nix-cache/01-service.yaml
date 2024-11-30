@@ -2,10 +2,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nix-serve
-  namespace: nix-kache
+  namespace: nix-cache
   labels:
     app.kubernetes.io/name: nix-serve
-    app.kubernetes.io/part-of: nix-kache
+    app.kubernetes.io/part-of: nix-cache
 spec:
   type: ClusterIP
   ports:

@@ -144,13 +144,13 @@ in
       auto-optimise-store = true;
       experimental-features = "nix-command flakes";
       substituters = [
-        "https://nix-kache.lolwtf.ca"
+        "https://nix.lolwtf.ca"
         "https://jonpulsifer.cachix.org"
-        "https://cache.nixos.org"
         "https://nix-community.cachix.org"
+        "https://cache.nixos.org"
       ];
       trusted-public-keys = [
-        "nix-kache.lolwtf.ca:bTE8+LnSHpdqNssQLo1MFZjU4+zJbfVEHUvAukmOF2Y="
+        "nix.lolwtf.ca:RVHS59kCG4aWsOjbQeFRnDKrCQzc2nHt8UJrBTm/e0Y="
         "jonpulsifer.cachix.org-1:Rwya0JXhlZXczd5v3JVBgY0pU5tUbiaqw5RfFdxBakQ="
         "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="

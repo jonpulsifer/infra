@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
   - cloudnative-pg
   - local-path-provisioner
-  - nix-kache.yaml
+  - nix-cache.yaml
   # - longhorn # remember to remove the openiscsi package from nix systems
 patches:
   - target:
