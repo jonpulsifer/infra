@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: refresh-certs
+  namespace: nix-kache
+  labels:
+    app.kubernetes.io/name: refresh-certs
+    app.kubernetes.io/part-of: nix-kache
+    secret.reloader.stakater.com/reload: "nix-kache.${SECRET_DOMAIN}"
+spec:
+  selector:
+    matchLabels:
+      app: refresh-certs
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values: ["optiplex"]
+  template:
+    metadata:
+      labels:
+        app: refresh-certs
+    spec:
+      containers:
+        - name: busybox
+          image: busybox
+          securityContext:
+            runAsUser: 0
+          command:
+            - "sh"
+            - "-c"
+            - |
+              set -e
+              while true; do
+                echo "Refreshing certificates at $(date)"
+                cd /nix-serve/hostPath
+                cp -v /nix-serve/certificate/* .
+                chown -R 999:999 .
+                chmod 600 tls.key
+                echo "Certificates copied and permissions set"
+                sleep 86400 # Run once every 24 hours
+              done
+          volumeMounts:
+            - name: nix-serve-hostPath
+              mountPath: /nix-serve/hostPath
+              readOnly: false
+            - name: nix-serve-certificate
+              mountPath: /nix-serve/certificate
+              readOnly: true
+      restartPolicy: Always
+      volumes:
+        - name: nix-serve-hostPath
+          hostPath:
+            path: /var/secrets/nix-serve
+            type: DirectoryOrCreate
+        - name: nix-serve-certificate
+          secret:
+            secretName: nix-kache.${SECRET_DOMAIN}
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
