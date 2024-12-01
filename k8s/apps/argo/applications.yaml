@@ -71,29 +71,6 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: authme
-  namespace: argo
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/jonpulsifer/ts.git
-    targetRevision: HEAD
-    path: apps/authme/k8s
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: authme
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-    retry:
-      limit: 2
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
   name: hub
   namespace: argo
 spec:
@@ -105,29 +82,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: hub
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-    retry:
-      limit: 2
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: cached
-  namespace: argo
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/jonpulsifer/ts.git
-    targetRevision: HEAD
-    path: apps/cached/k8s
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: cached
   syncPolicy:
     automated:
       prune: true
