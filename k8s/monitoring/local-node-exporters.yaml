@@ -25,6 +25,8 @@ subsets:
         nodeName: screenpi4-wifi
       - ip: 100.73.219.127
         nodeName: oldschool
+      - ip: 100.70.220.96
+        nodeName: retrofit
     ports:
       - name: http-metrics
         port: 9100

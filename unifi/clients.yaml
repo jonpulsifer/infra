@@ -55,7 +55,7 @@ k8s:
   riptide:
     dev-id: 2847
     skip_forget_on_destroy: false
-    mac: 
+    mac: 38:22:e2:2d:96:44
 
 rpis:
   pikvm:
