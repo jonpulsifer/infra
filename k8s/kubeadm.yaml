@@ -1,28 +1,64 @@
-# kubeadm init --config kubeadm.yaml --skip-phases=addon/kube-proxy
-apiVersion: kubeadm.k8s.io/v1beta3
-kind: ClusterConfiguration
+apiVersion: kubeadm.k8s.io/v1beta4
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: cxbmc5.ayhvakeug4n6j5n1
+  ttl: 24h0m0s
+  usages:
+  - signing
+  - authentication
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 10.3.0.10
+  bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  imagePullPolicy: IfNotPresent
+  imagePullSerial: true
+  name: nuc
+  taints:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
+timeouts:
+  controlPlaneComponentHealthCheck: 4m0s
+  discovery: 5m0s
+  etcdAPICall: 2m0s
+  kubeletHealthCheck: 4m0s
+  kubernetesAPICall: 1m0s
+  tlsBootstrap: 5m0s
+  upgradeManifests: 5m0s
+---
 apiServer:
-  timeoutForControlPlane: 4m0s
   certSANs:
-    - nuc
-    - nuc.lolwtf.ca
-    - nuc.fml.pulsifer.ca
-    - nuc.pirate-musical.ts.net
-    - 10.3.0.10
-    - 10.2.0.10
-    - k8s.lolwtf.ca
+  - nuc
+  - nuc.lolwtf.ca
+  - nuc.fml.pulsifer.ca
+  - nuc.pirate-musical.ts.net
+  - 10.3.0.10
+  - 10.2.0.10
   extraArgs:
-    authorization-mode: Node,RBAC
-    enable-admission-plugins: NodeRestriction
+  - name: authorization-mode
+    value: Node,RBAC
+  - name: enable-admission-plugins
+    value: NodeRestriction
+apiVersion: kubeadm.k8s.io/v1beta4
+caCertificateValidityPeriod: 87600h0m0s
+certificateValidityPeriod: 8760h0m0s
 certificatesDir: /etc/kubernetes/pki
 clusterName: kubernetes
-controlPlaneEndpoint: k8s.lolwtf.ca
-kubernetesVersion: 1.31.2
+controlPlaneEndpoint: k8s.lolwtf.ca:6443
+controllerManager: {}
+dns: {}
+encryptionAlgorithm: RSA-2048
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+imageRepository: registry.k8s.io
+kind: ClusterConfiguration
+kubernetesVersion: v1.31.2
 networking:
   dnsDomain: cluster.local
-  serviceSubnet: 10.10.0.0/16
   podSubnet: 10.100.0.0/16
----
-kind: KubeletConfiguration
-apiVersion: kubelet.config.k8s.io/v1beta1
-cgroupDriver: systemd
+  serviceSubnet: 10.10.0.0/16
+proxy: {}
+scheduler: {}
