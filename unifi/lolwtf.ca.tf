@@ -18,12 +18,12 @@ resource "cloudflare_record" "lab_remote_dns" {
     for name, client in local.lab_clients : name => client
     if can(client.ip == true)
   }
-  zone_id = data.cloudflare_zone.lab.id
-  name    = each.key
-  value   = cidrhost(local.lab_cidr, each.value.ip)
-  type    = "A"
-  ttl     = 1
-  comment = "terraform managed"
+  zone_id   = data.cloudflare_zone.lab.id
+  name      = each.key
+  content   = cidrhost(local.lab_cidr, each.value.ip)
+  type      = "A"
+  ttl       = 1
+  comment   = "terraform managed"
   # tags    = ["terraform-managed"]
 }
 

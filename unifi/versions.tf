@@ -21,22 +21,22 @@ terraform {
 }
 
 provider "cloudflare" {
-  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer)
+  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer --reveal)
 }
 
 
 provider "unifi" {
   username = "terraform"
   # password = "" or UNIFI_PASSWORD env
-  # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer)
+  # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer --reveal)
   api_url        = "https://unifi"
   allow_insecure = true
   site           = "default"
 }
 
 provider "vault" {
-  # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer)
-  address            = "http://localhost:8080"
+  # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer --reveal)
+  # address            = "http://localhost:8080" # VAULT_ADDR
   add_address_to_env = true
   skip_tls_verify    = true
 }

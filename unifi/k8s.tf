@@ -14,12 +14,13 @@ locals {
 
 resource "cloudflare_record" "k8s_remote_dns" {
   for_each = local.static_records
-  zone_id  = data.cloudflare_zone.lab.id
-  name     = each.key
-  value    = each.value
-  type     = "A"
-  ttl      = 1
-  comment  = "terraform managed"
+
+  zone_id   = data.cloudflare_zone.lab.id
+  name      = each.key
+  content   = each.value
+  type      = "A"
+  ttl       = 1
+  comment   = "terraform managed"
   # tags    = ["terraform-managed"]
 }
 
