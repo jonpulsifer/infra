@@ -6,7 +6,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./k8s/flux/repositories
+  path: ./k8s/shared/repositories
   prune: true
   sourceRef:
     kind: GitRepository

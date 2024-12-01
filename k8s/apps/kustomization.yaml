@@ -11,9 +11,9 @@ resources:
   - descheduler
   - dump.yaml
   # - falco
-  # - flux-system
   - k6
   # - minecraft
+  - nix-cache
   - postgres
   - redis
   - reloader

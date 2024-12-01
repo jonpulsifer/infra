@@ -2,17 +2,17 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: monitoring
+  name: networking
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./k8s/monitoring
+  path: ./k8s/shared/networking
   prune: true
   sourceRef:
     kind: GitRepository
     name: infra
   dependsOn:
-    - name: storage
+    - name: config
   decryption:
     provider: sops
     secretRef:

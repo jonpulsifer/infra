@@ -1,9 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - cloudnative-pg
   - local-path-provisioner
-  - nix-cache.yaml
   # - longhorn # remember to remove the openiscsi package from nix systems
 patches:
   - target:
