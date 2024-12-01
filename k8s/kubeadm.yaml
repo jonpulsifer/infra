@@ -10,13 +10,14 @@ apiServer:
     - nuc.pirate-musical.ts.net
     - 10.3.0.10
     - 10.2.0.10
+    - k8s.lolwtf.ca
   extraArgs:
     authorization-mode: Node,RBAC
     enable-admission-plugins: NodeRestriction
 certificatesDir: /etc/kubernetes/pki
 clusterName: kubernetes
-controlPlaneEndpoint: nuc
-kubernetesVersion: 1.29.2
+controlPlaneEndpoint: k8s.lolwtf.ca
+kubernetesVersion: 1.31.2
 networking:
   dnsDomain: cluster.local
   serviceSubnet: 10.10.0.0/16
