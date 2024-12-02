@@ -22,7 +22,6 @@ in
   };
 
   nix = {
-    package = pkgs.nix;
     settings = {
       substituters = [
         "https://nix.lolwtf.ca"
