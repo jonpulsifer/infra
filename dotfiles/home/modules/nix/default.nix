@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 let
   inherit (pkgs.stdenv) isDarwin;
   dotfiles = "${config.home.homeDirectory}/src/github.com/jonpulsifer/dotfiles";
@@ -22,6 +22,7 @@ in
   };
 
   nix = {
+    package = lib.mkDefault pkgs.nix;
     settings = {
       substituters = [
         "https://nix.lolwtf.ca"
