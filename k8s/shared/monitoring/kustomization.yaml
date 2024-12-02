@@ -12,7 +12,7 @@ resources:
   - promtail.yaml
   # - screenpi4.yaml
   - secret.sops.yaml
-  - unpoller
+  # - unpoller
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
