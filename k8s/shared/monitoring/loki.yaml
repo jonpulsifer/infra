@@ -59,6 +59,6 @@ spec:
       serviceMonitor:
         enabled: true
     write:
-      replicas: 1
+      replicas: 0
     read:
-      replicas: 1
+      replicas: 0
