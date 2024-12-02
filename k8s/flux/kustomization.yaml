@@ -6,5 +6,5 @@ kind: Kustomization
 metadata:
   name: bootstrap
 resources:
-  - shared/repositories/git/infra.yaml
-  - shared/flux/cluster.yaml
+  - ../shared/repositories/git/infra.yaml
+  - cluster.yaml
