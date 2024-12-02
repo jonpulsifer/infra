@@ -1,5 +1,5 @@
 k8sNetworkPolicy:
-  enabled: "false"
+  enabled: false
 autoDirectNodeRoutes: true
 devices: eno+ enp+ tailscale0
 kubeProxyReplacement: true

@@ -5,7 +5,7 @@ resources:
   - arc
   - argo
   # - atlantis
-  # - cloudnative-pg
+  - cloudnative-pg
   # - csgo
   - default
   - descheduler
