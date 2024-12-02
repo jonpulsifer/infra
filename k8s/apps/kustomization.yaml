@@ -13,7 +13,7 @@ resources:
   # - falco
   - k6
   # - minecraft
-  - nix-cache
+  - nix-cache.yaml
   - postgres
   - redis
   - reloader
