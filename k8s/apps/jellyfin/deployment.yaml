@@ -52,4 +52,4 @@ spec:
           hostPath:
             path: /dev/dri
       nodeSelector:
-        kubernetes.io/hostname: riptide
+        intel.feature.node.kubernetes.io/gpu: "true"
