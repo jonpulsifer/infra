@@ -26,10 +26,9 @@ spec:
             - containerPort: 1900
               protocol: UDP
               name: dlna
-          requests:
-            cpu: 100m
-          limits:
-            gpu.intel.com/i915: 1
+          resources:
+            limits:
+              gpu.intel.com/i915: 1
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
