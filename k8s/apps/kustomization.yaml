@@ -11,7 +11,7 @@ resources:
   - descheduler
   - dump.yaml
   # - falco
-  - jellyfin
+  - jellyfin.yaml
   - k6
   # - minecraft
   - nix-cache.yaml
