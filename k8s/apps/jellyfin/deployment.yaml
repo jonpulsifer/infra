@@ -27,6 +27,8 @@ spec:
               protocol: UDP
               name: dlna
           resources:
+            requests:
+              cpu: 100m
             limits:
               gpu.intel.com/i915: 1
           securityContext:
