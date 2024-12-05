@@ -4,8 +4,8 @@ metadata:
   name: jellyfin
   namespace: jellyfin
   labels: &labels
-    kubernetes.io/name: jellyfin
-    kubernetes.io/part-of: jellyfin
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/part-of: jellyfin
 spec:
   selector:
     matchLabels: *labels
