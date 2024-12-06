@@ -45,12 +45,6 @@ spec:
         type: filesystem
       commonConfig:
         replication_factor: 1
-    singleBinary:
-      replicas: 1
-      persistence:
-        enabled: true
-        size: 10Gi
-        storageClassName: local-path
     monitoring:
       dashboards:
         enabled: true
@@ -62,3 +56,11 @@ spec:
       replicas: 0
     read:
       replicas: 0
+    backend:
+      replicas: 0
+    singleBinary:
+      replicas: 1
+      persistence:
+        enabled: true
+        size: 10Gi
+        storageClassName: local-path
