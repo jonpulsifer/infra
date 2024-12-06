@@ -23,9 +23,6 @@ spec:
             - containerPort: 8096
               protocol: TCP
               name: http
-            - containerPort: 1900
-              protocol: UDP
-              name: dlna
           resources:
             requests:
               cpu: 100m
@@ -48,7 +45,8 @@ spec:
               mountPath: /dev/dri
       volumes:
         - name: jellyfin-config
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: jellyfin-config
         - name: media
           hostPath:
             path: /mnt/media
