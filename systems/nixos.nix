@@ -144,7 +144,7 @@ in
       auto-optimise-store = true;
       experimental-features = "nix-command flakes";
       substituters = [
-        "https://nix.lolwtf.ca"
+        # "https://nix.lolwtf.ca"
         "https://jonpulsifer.cachix.org"
         "https://nix-community.cachix.org"
         "https://cache.nixos.org"

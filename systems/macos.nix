@@ -9,7 +9,7 @@
       sandbox = true;
       experimental-features = "nix-command flakes";
       substituters = [
-        "https://nix.lolwtf.ca"
+        # "https://nix.lolwtf.ca"
         "https://cache.nixos.org"
         "https://nix-community.cachix.org"
         "https://jonpulsifer.cachix.org"
