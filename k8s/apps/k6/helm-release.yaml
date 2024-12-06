@@ -14,7 +14,3 @@ spec:
         kind: HelmRepository
         name: grafana
         namespace: flux-system
-  values:
-    fullnameOverride: k6
-    namespace.create: false
-    prometheus.enabled: true
