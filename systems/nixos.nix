@@ -12,7 +12,7 @@ in
   powerManagement.cpuFreqGovernor = mkDefault "ondemand";
 
   boot = {
-    initrd.availableKernelModules = [ "xhci_pci" "ahci" "usbhid" "usb_storage" ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" ]) [ "nvme" ];
+    initrd.availableKernelModules = [ "xhci_pci" "ahci" "usbhid" "usb_storage" ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" "riptide" ]) [ "nvme" ];
     initrd.kernelModules = [ ];
 
     kernelPackages = mkDefault pkgs.linuxPackages_latest;

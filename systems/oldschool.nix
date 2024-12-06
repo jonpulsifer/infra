@@ -5,7 +5,6 @@ in
 {
   imports = [
     ./modules/github-runner.nix
-    ./modules/vpn.nix
   ];
 
   services.tailscale = {
