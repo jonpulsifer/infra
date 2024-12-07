@@ -24,7 +24,7 @@ in
         rpc-bind-address = "0.0.0.0";
         rpc-port = uiPort;
         rpc-whitelist-enabled = true;
-        rpc-whitelist = "127.0.0.1,192.168.*,10.*,100.64.*";
+        rpc-whitelist = "127.0.0.1,192.168.*,10.*,100.*";
         rpc-authentication-required = false;
       };
     };
