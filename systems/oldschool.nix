@@ -12,10 +12,10 @@ in
     enable = true;
     networks = {
       Goggly = {
-        psk = "094508182124ae98856ec537bb3eb9bdfbe455cfc6cd87742428ae063f848e05";
+        psk = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864";
       };
       # Goggly2 = {
-      #   psk = "9f68361e39f16afe89e334cc54c0c9f0efe0d4e3c9fcd92081308cb16762bb29";
+      #   psk = "fd6e6e6bbb22865a53302494040e6e3799a2f097a8321152e264c568bc16b3d5";
       # };
     };
   };
