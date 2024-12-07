@@ -9,6 +9,7 @@ in
   ];
 
   networking.wireless = {
+    enable = true;
     networks = {
       Goggly = {
         psk = "094508182124ae98856ec537bb3eb9bdfbe455cfc6cd87742428ae063f848e05";
