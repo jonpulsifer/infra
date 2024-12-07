@@ -5,6 +5,7 @@ in
 {
   imports = [
     ./modules/github-runner.nix
+    ./modules/yarr.nix
   ];
 
   networking.wireless = {
