@@ -6,6 +6,7 @@ let
 in
 {
   services = {
+    mullvad-vpn.enable = true;
     transmission = {
       enable = true;
       package = pkgs.transmission_4;
