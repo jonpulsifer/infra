@@ -27,7 +27,7 @@
       extra-platforms = x86_64-darwin aarch64-darwin
     '';
   };
-  time.timeZone = "America/Halifax";
+  # time.timeZone = "America/Halifax";
   services.nix-daemon.enable = true;
   programs.zsh.enable = true;
   environment.systemPackages = with pkgs; [ alacritty ];
