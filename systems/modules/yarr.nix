@@ -10,10 +10,13 @@ in
     transmission = {
       enable = true;
       package = pkgs.transmission_4;
+      openPeerPorts = true;
       settings = {
         download-dir = downloadDir;
         incomplete-dir = "${downloadDir}/.incomplete";
         watch-dir = "${downloadDir}/.watch";
+
+        peer-port = 51413;
 
         encryption = 1;
         blocklist-enabled = true;
