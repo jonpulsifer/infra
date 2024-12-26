@@ -5,6 +5,7 @@ let
   uiPort = 9091;
 in
 {
+  networking.firewall.enable = false;
   services = {
     mullvad-vpn.enable = true;
     transmission = {
