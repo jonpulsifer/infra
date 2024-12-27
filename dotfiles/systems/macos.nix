@@ -11,7 +11,8 @@
       sandbox = true;
       experimental-features = "nix-command flakes";
       substituters = [
-        "https://nix-kache.lolwtf.ca"
+        # TODO: figure out a way to use this only when local to the nix cache, or split dns
+        # "https://nix.lolwtf.ca"
         "https://cache.nixos.org"
         "https://nix-community.cachix.org"
         "https://jonpulsifer.cachix.org"
@@ -30,8 +31,9 @@
   # time.timeZone = "America/Halifax";
   services.nix-daemon.enable = true;
   programs.zsh.enable = true;
-  environment.systemPackages = with pkgs; [ alacritty ];
 
+  # TODO: replace with ghostty when available
+  # environment.systemPackages = with pkgs [ alacritty ];
 
   fonts.packages = with pkgs.nerd-fonts; [ fira-code ];
 

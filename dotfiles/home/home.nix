@@ -7,7 +7,6 @@ in
 {
   imports = [
     ./default.nix
-    ./gui.nix
     modules/ssh
   ];
 

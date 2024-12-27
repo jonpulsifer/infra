@@ -9,7 +9,7 @@ let
   email = "${user}@${domain}";
 in
 {
-  imports = [ ./default.nix ./gui.nix ];
+  imports = [ ./default.nix ];
   home.packages = with pkgs; [ awscli2 cloudflared ffmpeg python3 terraform-docs gnupg ];
   programs.git = {
     userEmail = mkForce email;
