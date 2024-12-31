@@ -18,18 +18,26 @@ in
         watch-dir = "${downloadDir}/.watch";
 
         peer-port = 51413;
+        peer-limit-global = 10000;
+        peer-limit-per-torrent = 1000;
+        peer-limit-per-ip = 100;
 
-        encryption = 1;
+        encryption = 2;
         blocklist-enabled = true;
         blocklist-url = "https://github.com/Naunter/BT_BlockLists/raw/master/bt_blocklists.gz";
         port-forwarding-enabled = false;
         anti-brute-force-enabled = true;
         anti-brute-force-threshold = 10;
 
+        dht-enabled = false;
+        pex-enabled = false;
+        lpd-enabled = false;
+
+
         rpc-bind-address = "0.0.0.0";
         rpc-port = uiPort;
         rpc-whitelist-enabled = true;
-        rpc-whitelist = "127.0.0.1,192.168.*,10.*,100.*";
+        rpc-whitelist = "127.0.0.1,192.168.*.*,10.*.*.*,100.*.*.*";
         rpc-authentication-required = false;
       };
     };
