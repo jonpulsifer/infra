@@ -65,6 +65,7 @@ in
   time.timeZone = "Canada/Atlantic";
 
   environment.systemPackages = with pkgs; [ bash bash-completion zsh git tailscale ];
+  environment.enableAllTerminfo = true;
 
   services.ddnsd = {
     zone = "lolwtf.ca";
