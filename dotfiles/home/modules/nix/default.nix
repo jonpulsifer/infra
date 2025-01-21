@@ -25,7 +25,7 @@ in
     package = lib.mkDefault pkgs.nix;
     settings = {
       substituters = [
-        "https://nix.lolwtf.ca"
+        # "https://nix.lolwtf.ca"
         "https://jonpulsifer.cachix.org"
         "https://cache.nixos.org"
         "https://nix-community.cachix.org"

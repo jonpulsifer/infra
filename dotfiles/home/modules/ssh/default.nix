@@ -68,6 +68,12 @@ in
           "PasswordAuthentication" = "yes";
         };
       };
+      "compute.*" = {
+        port = 22;
+        extraOptions = {
+          "ChallengeResponseAuthentication" = "yes"; # gce oslogin 2fa
+        };
+      };
     };
   };
   systemd.user.services.ssh-agent = mkIf isLinux {
