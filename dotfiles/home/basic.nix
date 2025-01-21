@@ -11,9 +11,9 @@ in
     modules/zsh
   ];
 
-  home = rec {
+  home = {
     username = lib.mkDefault "jawn";
-    homeDirectory = (if isDarwin then "/Users/" else "/home/") + username;
+    homeDirectory = (if isDarwin then "/Users/" else "/home/") + config.home.username;
     sessionVariables = rec {
       # GIT_EDITOR = EDITOR;
       LANG = "en_US.UTF-8";

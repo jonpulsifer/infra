@@ -65,6 +65,7 @@
           default = self.homeConfigurations.full.activationPackage;
           basic = self.homeConfigurations.basic.activationPackage;
           pixelbook = self.homeConfigurations.pixelbook.activationPackage;
+          oldboy = self.homeConfigurations.oldboy.activationPackage;
         };
         aarch64-linux.default = self.homeConfigurations.arm.activationPackage;
         aarch64-darwin.default = self.darwinConfigurations.air.system;
