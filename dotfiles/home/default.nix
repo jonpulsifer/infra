@@ -2,11 +2,7 @@
 
 let
   inherit (pkgs.stdenv) isDarwin;
-  inherit (lib) mkDefault mkIf optionals;
-  inherit (config.lib.file) mkOutOfStoreSymlink;
-
-  username = "jawn";
-  homeDirectory = (if isDarwin then "/Users/" else "/home/") + username;
+  inherit (lib) mkIf optionals;
 in
 {
   imports = [

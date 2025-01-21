@@ -56,6 +56,7 @@
         basic = mkHomeConfiguration "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHomeConfiguration "aarch64-linux" [ ./home/basic.nix ];
         pixelbook = mkHomeConfiguration "x86_64-linux" [ ./home/pixelbook.nix ];
+        oldboy = mkHomeConfiguration "x86_64-linux" [ ./home/basic.nix { config.home.username = "jonathan_pulsifer_ca"; } ];
       };
 
       # nix run .#basic

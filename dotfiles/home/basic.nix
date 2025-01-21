@@ -1,12 +1,6 @@
 { lib, pkgs, config, ... }:
-
 let
   inherit (pkgs.stdenv) isDarwin;
-  inherit (lib) mkDefault mkIf optionals;
-  inherit (config.lib.file) mkOutOfStoreSymlink;
-
-  username = "jawn";
-  homeDirectory = (if isDarwin then "/Users/" else "/home/") + username;
 in
 {
   imports = [
@@ -17,14 +11,10 @@ in
     modules/zsh
   ];
 
-  home = {
-    inherit username homeDirectory;
-
-    file.".dotfiles".source =
-      mkOutOfStoreSymlink "${homeDirectory}/src/github.com/jonpulsifer/dotfiles";
-
+  home = rec {
+    username = lib.mkDefault "jawn";
+    homeDirectory = (if isDarwin then "/Users/" else "/home/") + username;
     sessionVariables = rec {
-      # EDITOR = mkDefault "code --wait";
       # GIT_EDITOR = EDITOR;
       LANG = "en_US.UTF-8";
       LC_ALL = LANG;

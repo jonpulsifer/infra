@@ -10,7 +10,7 @@ in
     modules/ssh
   ];
 
-  home = {
+  home = rec {
     packages = with pkgs;
       [
         # cloudevents
