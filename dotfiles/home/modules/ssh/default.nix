@@ -24,6 +24,7 @@ in
       ForwardX11Trusted no
       PasswordAuthentication no
       StrictHostKeyChecking yes
+      UpdateHostKeys yes
       VerifyHostKeyDNS yes
       VisualHostKey no
       HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com,ssh-ed25519
@@ -36,38 +37,37 @@ in
       "*.lolwtf.ca" = { port = 22; forwardAgent = true; };
       "github.com" = {
         user = "git";
-        forwardAgent = true; # Enable agent forwarding only for GitHub
       };
       "*pi0*" = {
         user = "pi";
         forwardAgent = true;
         extraOptions = {
-          PasswordAuthentication = "yes"; # Retained for compatibility
+          PasswordAuthentication = "yes";
         };
       };
       "pikvm" = {
         user = "root";
         extraOptions = {
-          PasswordAuthentication = "yes"; # Retained for compatibility
+          PasswordAuthentication = "yes";
         };
       };
       "unifi" = {
         user = "root";
         extraOptions = {
-          PasswordAuthentication = "yes"; # Legacy compatibility
-          Ciphers = "aes256-ctr"; # Optimized for older devices
+          PasswordAuthentication = "yes";
+          Ciphers = "aes256-ctr";
           MACs = "hmac-sha2-256";
         };
       };
-      "erx-eth0" = {
+      "erx-eth0*" = {
         user = "ubnt";
         extraOptions = {
-          PasswordAuthentication = "yes"; # Legacy compatibility
+          PasswordAuthentication = "yes";
         };
       };
       "compute.*" = {
         extraOptions = {
-          ChallengeResponseAuthentication = "yes"; # Needed for GCE OS Login 2FA
+          ChallengeResponseAuthentication = "yes";
         };
       };
     };
