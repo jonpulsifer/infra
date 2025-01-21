@@ -11,7 +11,7 @@ in
   programs.ssh = {
     enable = true;
     compression = true;
-    forwardAgent = true;
+    forwardAgent = false; # Disabled globally for better security
     serverAliveInterval = 300;
     serverAliveCountMax = 2;
     hashKnownHosts = true;
@@ -23,55 +23,51 @@ in
       ForwardX11 no
       ForwardX11Trusted no
       PasswordAuthentication no
-      StrictHostKeyChecking ask
+      StrictHostKeyChecking yes
       VerifyHostKeyDNS yes
       VisualHostKey no
-      HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com,ssh-rsa-cert-v01@openssh.com,ssh-ed25519,ssh-rsa
+      HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com,ssh-ed25519
       Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
       KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256
       MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
     '';
     matchBlocks = {
-      "*.fml.pulsifer.ca" = { port = 22; };
+      "*.fml.pulsifer.ca" = { port = 22; forwardAgent = true; };
+      "*.lolwtf.ca" = { port = 22; forwardAgent = true; };
       "github.com" = {
         user = "git";
-        port = 22;
+        forwardAgent = true; # Enable agent forwarding only for GitHub
       };
-      "*pi0" = {
+      "*pi0*" = {
         user = "pi";
-        port = 22;
-        extraOptions = { "PasswordAuthentication" = "yes"; };
-      };
-      "*pi0.lolwtf.ca" = {
-        user = "pi";
-        port = 22;
-        extraOptions = { "PasswordAuthentication" = "yes"; };
+        forwardAgent = true;
+        extraOptions = {
+          PasswordAuthentication = "yes"; # Retained for compatibility
+        };
       };
       "pikvm" = {
         user = "root";
-        port = 22;
-        extraOptions = { "PasswordAuthentication" = "yes"; };
+        extraOptions = {
+          PasswordAuthentication = "yes"; # Retained for compatibility
+        };
       };
       "unifi" = {
         user = "root";
-        port = 22;
         extraOptions = {
-          "PasswordAuthentication" = "yes";
-          "Ciphers" = "aes256-ctr";
-          "MACs" = "hmac-sha2-256";
+          PasswordAuthentication = "yes"; # Legacy compatibility
+          Ciphers = "aes256-ctr"; # Optimized for older devices
+          MACs = "hmac-sha2-256";
         };
       };
       "erx-eth0" = {
         user = "ubnt";
-        port = 22;
         extraOptions = {
-          "PasswordAuthentication" = "yes";
+          PasswordAuthentication = "yes"; # Legacy compatibility
         };
       };
       "compute.*" = {
-        port = 22;
         extraOptions = {
-          "ChallengeResponseAuthentication" = "yes"; # gce oslogin 2fa
+          ChallengeResponseAuthentication = "yes"; # Needed for GCE OS Login 2FA
         };
       };
     };
@@ -83,6 +79,10 @@ in
       Environment = [ "SSH_AUTH_SOCK=%t/ssh-agent.sock" ];
       ExecStart = "ssh-agent -D -a $SSH_AUTH_SOCK";
       ProtectSystem = "strict";
+      ProtectHome = "yes";
+      PrivateTmp = "yes";
+      NoNewPrivileges = "yes";
+      ProtectKernelModules = "yes";
       Restart = "on-failure";
     };
   };
