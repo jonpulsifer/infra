@@ -78,11 +78,6 @@ in
     Service = {
       Environment = [ "SSH_AUTH_SOCK=%t/ssh-agent.sock" ];
       ExecStart = "ssh-agent -D -a $SSH_AUTH_SOCK";
-      ProtectSystem = "strict";
-      ProtectHome = "yes";
-      PrivateTmp = "yes";
-      NoNewPrivileges = "yes";
-      ProtectKernelModules = "yes";
       Restart = "on-failure";
     };
   };
