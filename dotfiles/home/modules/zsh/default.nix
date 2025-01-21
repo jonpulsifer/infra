@@ -80,9 +80,6 @@ in
       ZSH_HIGHLIGHT_STYLES[dollar-double-quoted-argument]=fg=009
       ZSH_HIGHLIGHT_STYLES[back-double-quoted-argument]=fg=009
       ZSH_HIGHLIGHT_STYLES[assign]=none
-      # make completion work with kubecolor
-      # autoload -U +X bashcompinit && bashcompinit
-      # complete -o nospace -C ${pkgs.kubecolor}/bin/kubecolor kubecolor
     '';
     plugins = [
       {
