@@ -35,7 +35,7 @@ data "google_iam_policy" "gcs_vault" {
     role = "roles/storage.admin"
     members = [
       "group:cloud@pulsifer.ca",
-      format("serviceAccount:%s", google_service_account.vault.email),
+      google_service_account.vault.member,
     ]
   }
 }

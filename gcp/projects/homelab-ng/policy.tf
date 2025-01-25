@@ -145,3 +145,18 @@ resource "google_org_policy_policy" "allowed_workload_identity_providers" {
     }
   }
 }
+
+resource "google_org_policy_policy" "allowed_locations" {
+  name   = "projects/${local.project}/policies/gcp.resourceLocations"
+  parent = "projects/${local.project}"
+  spec {
+    inherit_from_parent = true
+    rules {
+      values {
+        allowed_values = [
+          "in:us-east1-locations" # free tier compute engine
+        ]
+      }
+    }
+  }
+}

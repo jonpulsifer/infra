@@ -12,12 +12,35 @@ provider "google" {
   zone    = local.zone
 }
 
+provider "google" {
+  alias = "free-tier"
+  impersonate_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
+
+  project = local.project
+  region  = "us-east1"
+  zone    = "us-east1-b"
+}
+
+provider "google-beta" {
+  alias = "free-tier"
+  impersonate_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
+
+  project = local.project
+  region  = "us-east1"
+  zone    = "us-east1-b"
+}
+
 provider "google-beta" {
   impersonate_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
 
   project = local.project
   region  = local.region
   zone    = local.zone
+}
+
+
+provider "cloudflare" {
+  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer --reveal)
 }
 
 terraform {
@@ -33,6 +56,10 @@ terraform {
     google-beta = {
       source  = "hashicorp/google-beta"
       version = "~> 6.17.0"
+    }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.50.0"
     }
   }
   required_version = ">= 1.2.6"

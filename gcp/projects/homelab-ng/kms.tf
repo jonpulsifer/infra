@@ -15,11 +15,11 @@ resource "google_kms_crypto_key" "vault" {
 resource "google_kms_crypto_key_iam_member" "vault_encrypt_decrypt" {
   crypto_key_id = google_kms_crypto_key.vault.id
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  member        = format("serviceAccount:%s", google_service_account.vault.email)
+  member        = google_service_account.vault.member
 }
 
 resource "google_kms_crypto_key_iam_member" "vault_viewer" {
   crypto_key_id = google_kms_crypto_key.vault.id
   role          = "roles/cloudkms.viewer"
-  member        = format("serviceAccount:%s", google_service_account.vault.email)
+  member        = google_service_account.vault.member
 }

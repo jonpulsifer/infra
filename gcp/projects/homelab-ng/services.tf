@@ -19,6 +19,7 @@ resource "google_project_service" "service" {
     "groupssettings.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
+    "iap.googleapis.com",
     "logging.googleapis.com",
     "maps-backend.googleapis.com",
     "monitoring.googleapis.com",

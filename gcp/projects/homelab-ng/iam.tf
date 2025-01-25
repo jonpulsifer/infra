@@ -1,19 +1,19 @@
 resource "google_project_iam_member" "ddnsbot" {
   project = "homelab-ng"
   role    = "roles/dns.admin"
-  member  = join(":", ["serviceAccount", google_service_account.ddns.email])
+  member  = google_service_account.ddns.member
 }
 
 resource "google_project_iam_member" "ddnsd" {
   project = "homelab-ng"
   role    = "roles/dns.admin"
-  member  = join(":", ["serviceAccount", google_service_account.ddnsd.email])
+  member  = google_service_account.ddnsd.member
 }
 
 resource "google_project_iam_member" "vault" {
   project = "homelab-ng"
   role    = "organizations/5046617773/roles/readOnlyVault"
-  member  = format("serviceAccount:%s", google_service_account.vault.email)
+  member  = google_service_account.vault.member
 }
 
 resource "google_service_account" "ddnsd" {
@@ -23,7 +23,7 @@ resource "google_service_account" "ddnsd" {
 data "google_iam_policy" "ddnsd_token_creator" {
   binding {
     role    = "roles/iam.serviceAccountTokenCreator"
-    members = [format("serviceAccount:%s", google_service_account.ddnsd.email)]
+    members = [google_service_account.ddnsd.member]
   }
 }
 
@@ -62,7 +62,7 @@ resource "google_service_account_iam_policy" "github_actions" {
 resource "google_project_iam_member" "github_actions_function_admin" {
   project = "homelab-ng"
   role    = "roles/cloudfunctions.admin"
-  member  = join(":", ["serviceAccount", google_service_account.github_actions.email])
+  member  = google_service_account.github_actions.member
 }
 
 resource "google_service_account" "view_counter" {
@@ -73,13 +73,13 @@ resource "google_service_account" "view_counter" {
 resource "google_service_account_iam_member" "github_actions_view_counter" {
   service_account_id = google_service_account.view_counter.name
   role               = "roles/iam.serviceAccountUser"
-  member             = format("serviceAccount:%s", google_service_account.github_actions.email)
+  member             = google_service_account.github_actions.member
 }
 
 resource "google_project_iam_member" "view_counter_firestore" {
   project = "homelab-ng"
   role    = "roles/datastore.user"
-  member  = join(":", ["serviceAccount", google_service_account.view_counter.email])
+  member  = google_service_account.view_counter.member
 }
 
 resource "google_service_account" "terraform" {
@@ -90,7 +90,7 @@ resource "google_service_account" "terraform" {
 data "google_iam_policy" "terraform_token_creator" {
   binding {
     role    = "roles/iam.serviceAccountTokenCreator"
-    members = [format("serviceAccount:%s", google_service_account.terraform.email), format("group:%s", "cloud@pulsifer.ca")]
+    members = [google_service_account.terraform.member, format("group:%s", "cloud@pulsifer.ca")]
   }
 
   binding {

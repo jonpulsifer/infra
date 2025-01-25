@@ -12,6 +12,7 @@ module "homelab-ng" {
   source          = "./modules/project"
   project_id      = "homelab-ng"
   name            = "whats a home lab"
+  compute         = true
   folder_id       = google_folder.production.name
   billing_account = data.google_billing_account.cloudlab.id
   labels = {
