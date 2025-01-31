@@ -31,6 +31,8 @@ in
       ls = "${pkgs.eza}/bin/eza";
       tree = ls + " --tree";
       diff = "${pkgs.delta}/bin/delta";
+      bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.lolcat}/bin/lolcat";
+      paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.lolcat}/bin/lolcat";
     };
     stateVersion = "24.05";
   };
@@ -65,6 +67,22 @@ in
   programs.home-manager.enable = true;
   manual.manpages.enable = false;
   xdg.enable = true;
+
+  ghostty = {
+    enable = true;
+    enableZshIntegration = true;
+
+    installBatSyntax = true;
+
+    settings = {
+      auto-update = "off";
+      background-opacity = 0.8;
+      confirm-close-surface = false;
+      font-family = "FiraCode Nerd Font Mono";
+      font-size = 12;
+      theme = "Teerb";
+    };
+  };
 
   programs.bat = {
     enable = true;

@@ -26,11 +26,6 @@ in
     sessionVariables = {
       VAULT_ADDR = "https://vault.lolwtf.ca";
     };
-
-    shellAliases = {
-      bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.lolcat}/bin/lolcat";
-      paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.lolcat}/bin/lolcat";
-    };
   };
 
   services.gpg-agent = mkIf isLinux {

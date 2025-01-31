@@ -10,7 +10,7 @@ let
 in
 {
   imports = [ ./default.nix ];
-  home.packages = with pkgs; [ awscli2 cloudflared ffmpeg python3 terraform-docs gnupg ];
+  home.packages = with pkgs; [ awscli2 cloudflared ffmpeg pre-commit python3 terraform-docs gnupg ];
   programs.git = {
     userEmail = mkForce email;
     signing.key = mkForce "~/.ssh/${toLower company}_ed25519";
