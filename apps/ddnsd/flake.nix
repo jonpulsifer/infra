@@ -31,8 +31,8 @@
         overlays = [
           gomod2nix.overlays.default
           (final: prev: {
-            go = prev.go_1_22;
-            buildGoModule = prev.buildGo122Module;
+            go = prev.go_1_23;
+            buildGoModule = prev.buildGo123Module;
           })
         ];
       };
