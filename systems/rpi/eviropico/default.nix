@@ -12,6 +12,6 @@ mkShell {
     echo -e "Welcome to the infra repo! This is a nix-shell environment.
     It contains all the tools you need to work with the rpi.\n"
 
-    echo "To get started, run 'TODO: lol' to deploy the infra."
+    echo "To get started, run 'TODO: lol' to run the thing."
   '';
 }
