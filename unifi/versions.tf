@@ -36,7 +36,7 @@ provider "unifi" {
 
 provider "vault" {
   # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer --reveal)
-  # address            = "http://localhost:8080" # VAULT_ADDR
+  address            = "http://vault.lolwtf.ca" # VAULT_ADDR
   add_address_to_env = true
   skip_tls_verify    = true
 }
