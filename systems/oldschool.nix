@@ -72,7 +72,7 @@ in
         httpie
         ripgrep
         sd
-        xsv
+        xan
       ];
 
     programs.bat.enable = true;
