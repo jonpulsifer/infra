@@ -37,15 +37,15 @@ in
       ${lib.concatMapStrings (img: ''
       echo "Seeding container image: ${img}"
       ${if (lib.hasSuffix "gz" img) then
-        ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import --all-platforms -''
+        ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
       else
-        ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import --all-platforms -''
+        ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
       }
     '') config.services.kubernetes.kubelet.seedDockerImages}
   ''; # we do not want to remove /opt/cni/bin/*
 
   services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
-  services.certmgr.renewInterval = "1d"; # we want to check and renew certs daily instead of every 30m
+  services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;
     apiserverAddress = "https://${kubeAPIServerHostname}:${toString kubeAPIServerPort}";
