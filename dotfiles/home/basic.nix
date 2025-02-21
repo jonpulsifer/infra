@@ -61,15 +61,15 @@ in
       httpie
       ripgrep
       sd
-      xsv
+      xan
     ];
 
   programs.home-manager.enable = true;
   manual.manpages.enable = false;
   xdg.enable = true;
 
-  ghostty = {
-    enable = true;
+  programs.ghostty = {
+    enable = false;
     enableZshIntegration = true;
 
     installBatSyntax = true;

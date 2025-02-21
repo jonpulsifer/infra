@@ -1,7 +1,6 @@
 { pkgs, lib, ... }: {
   nix = {
     # package = pkgs.nixFlakes;
-    configureBuildUsers = true;
     optimise = {
       automatic = true;
     };
@@ -29,7 +28,6 @@
     '';
   };
   # time.timeZone = "America/Halifax";
-  services.nix-daemon.enable = true;
   programs.zsh.enable = true;
 
   # TODO: replace with ghostty when available
