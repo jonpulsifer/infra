@@ -4,6 +4,7 @@
     nixos.url = "github:nixos/nixpkgs/nixos-unstable";
     nixos-hardware.url = "github:nixos/nixos-hardware";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nixos-wsl = { url = "github:nix-community/NixOS-WSL/main"; inputs.nixpkgs.follows = "nixpkgs"; };
 
     home-manager = { url = "github:nix-community/home-manager"; follows = "dotfiles/home-manager"; inputs.nixpkgs.follows = "nixpkgs"; };
     keys = { url = "https://github.com/jonpulsifer.keys"; flake = false; };
@@ -11,9 +12,29 @@
     dotfiles = { url = "github:jonpulsifer/dotfiles"; inputs.nixpkgs.follows = "nixpkgs"; };
     ddnsd = { url = "github:jonpulsifer/ddnsd"; inputs.nixpkgs.follows = "nixpkgs"; };
   };
-  outputs = { self, ddnsd, dotfiles, home-manager, keys, wannabekeys, nixos, nixos-hardware, ... }@inputs:
+  outputs = { self, ddnsd, dotfiles, home-manager, keys, wannabekeys, nixos, nixos-hardware, nixos-wsl, ... }@inputs:
     let
       inherit (nixos.lib) mkIf optionals attrValues genAttrs nixosSystem strings;
+
+      # common modules for all systems
+      common = [
+        {
+          nixpkgs.overlays = [ dotfiles.overlays.pkgs ddnsd.overlays.pkgs ];
+          system.configurationRevision = mkIf (self ? rev) self.rev;
+        }
+        {
+          home-manager.useUserPackages = true;
+          home-manager.useGlobalPkgs = true;
+          home-manager.users.jawn = dotfiles.home.basic;
+        }
+        home-manager.nixosModules.home-manager
+        ddnsd.nixosModules.default
+        ./systems/nixos.nix
+      ];
+
+      # k8s cluster modules
+      k8sControlPlane = [ ./systems/modules/k8s/control-plane.nix ];
+      k8sWorker = [ ./systems/modules/k8s/worker.nix ];
 
       mkSystem = name: extra: nixosSystem {
         system = "x86_64-linux";
@@ -47,23 +68,6 @@
           else
             mkSystem name modules
         );
-
-      common = [
-        {
-          nixpkgs.overlays = [ dotfiles.overlays.pkgs ddnsd.overlays.pkgs ];
-          system.configurationRevision = mkIf (self ? rev) self.rev;
-        }
-        {
-          home-manager.useUserPackages = true;
-          home-manager.useGlobalPkgs = true;
-          home-manager.users.jawn = dotfiles.home.basic;
-        }
-        home-manager.nixosModules.home-manager
-        ddnsd.nixosModules.default
-        ./systems/nixos.nix
-      ];
-      k8sControlPlane = [ ./systems/modules/k8s/control-plane.nix ];
-      k8sWorker = [ ./systems/modules/k8s/worker.nix ];
     in
     rec {
       nixosConfigurations = mkSystems
@@ -71,6 +75,10 @@
           # lab machines
           oldschool = [ ./systems/oldschool.nix ];
           retrofit = [ ./systems/retrofit.nix ];
+          wsl = [
+            nixos-wsl.nixosModules.wsl
+            ./systems/wsl.nix
+          ];
 
           # k8s cluster
           nuc = k8sControlPlane;
@@ -91,7 +99,10 @@
         };
 
       packages = {
-        x86_64-linux = { iso = nixosConfigurations.iso.config.system.build.isoImage; };
+        x86_64-linux = {
+          iso = nixosConfigurations.iso.config.system.build.isoImage;
+          wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
+        };
         aarch64-linux = { rpi4 = nixosConfigurations.rpi4.config.system.build.sdImage; };
       };
 

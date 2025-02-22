@@ -1,30 +1,27 @@
 { lib, pkgs, config, modulesPath, ... }:
 with lib;
 {
-  imports = [
-    "${modulesPath}/profiles/minimal.nix"
-  ];
   wsl = {
     enable = true;
-    wslConf.automount.root = "/mnt";
     defaultUser = "jawn";
-    startMenuLaunchers = true;
-
     # Enable integration with Docker Desktop (needs to be installed separately)
     # docker.enable = true;
   };
+
+  # resolf.conf is managed by WSL (wsl.wslConf.network.generateResolvConf)
   services.resolved.enable = lib.mkForce false;
 
-  programs.zsh.enable = true;
-  users.users.jawn = {
-    uid = lib.mkForce 1000;
-    name = lib.mkDefault "jawn";
-    home = lib.mkDefault "/home/jawn";
-    shell = lib.mkDefault pkgs.zsh;
-    description = lib.mkDefault "Jonathan Pulsifer";
+  # users.users.jawn = {
+  #   uid = lib.mkForce 1000;
+  # };
+
+  # required for vscode language server
+  programs.nix-ld = {
+    enable = true;
+    package = pkgs.nix-ld-rs;
   };
 
-  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
-  system.stateVersion = lib.mkDefault "22.11";
+  programs.zsh.enable = true;
+  system.stateVersion = lib.mkDefault "24.05";
   system.build.installBootLoader = lib.mkForce "${pkgs.coreutils}/bin/true";
 }

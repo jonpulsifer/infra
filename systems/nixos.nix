@@ -117,7 +117,7 @@ in
 
   users.mutableUsers = false;
   users.users.jawn = {
-    uid = 1337;
+    uid = lib.mkDefault 1337;
     isNormalUser = true;
     extraGroups = [ "wheel" "tty" ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
     openssh.authorizedKeys.keys = sshKeys;
