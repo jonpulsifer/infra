@@ -23,6 +23,10 @@ spec:
     remediation:
       retries: 5
   values:
+    tolerations:
+      - key: unschedulable
+        operator: Equal
+        effect: NoSchedule
     serviceMonitor:
       enabled: true
     config:
