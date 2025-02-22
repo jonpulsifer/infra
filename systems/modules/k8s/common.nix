@@ -3,7 +3,7 @@ let
   kubeAPIServerIP = "10.3.0.10";
   kubeAPIServerHostname = "k8s.lolwtf.ca";
   kubeAPIServerPort = 6443;
-  kubePodCidr = "10.100.0.0/16";
+  kubePodCidr = "10.100.0.0/20";
   kubeServiceCidr = "10.10.0.0/16";
   kubeDns = [ "10.10.0.254" "10.3.0.1" ];
   kubeUpstreamDns = "10.2.0.1";

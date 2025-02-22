@@ -1,6 +1,6 @@
 locals {
   node_cidr = "10.3.0.0/24"
-  pod_cidr  = "10.100.0.0/16"
+  pod_cidr  = "10.100.0.0/20"
   static_records = {
     "erx" : cidrhost(local.lab_cidr, 5)
     "k8s" : cidrhost(local.node_cidr, 10)
