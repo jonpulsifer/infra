@@ -27,6 +27,7 @@ spec:
       - key: unschedulable
         operator: Equal
         effect: NoSchedule
+        value: "true"
     serviceMonitor:
       enabled: true
     config:
