@@ -69,7 +69,7 @@ spec:
         size: 10Gi
         storageClassName: local-path
     minio:
-      enabled: true
+      enabled: false
 
     monitoring:
       dashboards:
