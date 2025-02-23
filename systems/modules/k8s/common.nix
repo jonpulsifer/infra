@@ -45,6 +45,8 @@ in
   ''; # we do not want to remove /opt/cni/bin/*
 
   services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
+
+  nixpkgs.overlays = [ (import ../../overlays/certmgr.nix) ];
   services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
   services.kubernetes = {
     masterAddress = kubeAPIServerHostname;
