@@ -30,6 +30,7 @@ in
     PasswordAuthentication no
     ChallengeResponseAuthentication no
     StrictHostKeyChecking ask
+    UpdateHostKeys ask
     VerifyHostKeyDNS yes
     ForwardX11 no
     ForwardX11Trusted no

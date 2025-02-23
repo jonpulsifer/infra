@@ -23,8 +23,8 @@ in
       ForwardX11 no
       ForwardX11Trusted no
       PasswordAuthentication no
-      StrictHostKeyChecking yes
-      UpdateHostKeys yes
+      StrictHostKeyChecking ask
+      UpdateHostKeys ask
       VerifyHostKeyDNS yes
       VisualHostKey no
       HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com,ssh-ed25519
@@ -35,6 +35,7 @@ in
     matchBlocks = {
       "*.fml.pulsifer.ca" = { port = 22; forwardAgent = true; };
       "*.lolwtf.ca" = { port = 22; forwardAgent = true; };
+      "*.pirate-musical.ts.net" = { port = 22; forwardAgent = true; };
       "github.com" = {
         user = "git";
       };
