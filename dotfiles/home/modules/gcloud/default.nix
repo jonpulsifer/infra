@@ -29,6 +29,7 @@ in
     USE_GKE_GCLOUD_AUTH_PLUGIN = "True";
   };
   home.packages = with pkgs; [
+    google-alloydb-auth-proxy
     google-cloud-sql-proxy
     # nodePackages.firebase-tools
     # openjdk19
