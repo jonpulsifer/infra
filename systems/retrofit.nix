@@ -2,6 +2,7 @@
 {
   imports = [
     ./modules/yarr.nix
+    ./modules/jellyfin.nix
   ];
   networking.wireless = {
     enable = true;

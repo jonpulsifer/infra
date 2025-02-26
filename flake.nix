@@ -82,8 +82,8 @@
 
           # k8s cluster
           nuc = k8sControlPlane;
-          optiplex = k8sWorker ++ [ ./systems/modules/nix-serve.nix ];
-          riptide = k8sWorker ++ [ ./systems/modules/jellyfin.nix ];
+          optiplex = k8sWorker;
+          riptide = k8sWorker;
           "800g2" = k8sWorker;
 
           # raspberry pis
