@@ -2,8 +2,7 @@
 let
   inherit (config.home) homeDirectory;
   inherit (pkgs) fetchFromGitHub;
-in
-{
+in {
   programs.zsh = {
     enable = true;
     autocd = true;
@@ -82,15 +81,16 @@ in
       ZSH_HIGHLIGHT_STYLES[assign]=none
     '';
     plugins = [
-      {
-        name = "zsh-autocomplete";
-        src = fetchFromGitHub {
-          owner = "marlonrichert";
-          repo = "zsh-autocomplete";
-          rev = "23.07.13";
-          sha256 = "sha256-0NW0TI//qFpUA2Hdx6NaYdQIIUpRSd0Y4NhwBbdssCs=";
-        };
-      }
+      # # https://github.com/marlonrichert/zsh-autocomplete/issues/763
+      # {
+      #   name = "zsh-autocomplete";
+      #   src = fetchFromGitHub {
+      #     owner = "marlonrichert";
+      #     repo = "zsh-autocomplete";
+      #     rev = "24.09.04";
+      #     sha256 = "sha256-o8IQszQ4/PLX1FlUvJpowR2Tev59N8lI20VymZ+Hp4w=";
+      #   };
+      # }
       {
         name = "fzf-tab";
         src = fetchFromGitHub {

@@ -5,7 +5,7 @@ let
 in
 {
   home = {
-    packages = with pkgs; [ cachix nixpkgs-fmt ];
+    packages = with pkgs; [ cachix nixfmt-classic nixpkgs-fmt ];
     shellAliases = rec {
       nixpkgs = "nix repl '<nixpkgs>'";
       update = "nix flake update ${dotfiles}";
