@@ -1,9 +1,10 @@
-{ config, pkgs, ... }:
+{ config, pkgs, name, ... }:
 {
   imports = [
-    ./modules/yarr.nix
-    ./modules/jellyfin.nix
+    ../nix/modules/yarr.nix
+    ../nix/modules/jellyfin.nix
   ];
+  networking.hostName = name;
   networking.wireless = {
     enable = true;
     networks = {

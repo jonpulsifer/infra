@@ -1,13 +1,14 @@
-{ config, lib, pkgs, wannabekeys, ... }:
+{ config, lib, pkgs, wannabekeys, name, ... }:
 let
   sshKeys = lib.splitString "\n" (builtins.readFile wannabekeys);
 in
 {
   imports = [
-    ./modules/github-runner.nix
-    ./modules/yarr.nix
+    ../nix/modules/github-runner.nix
+    ../nix/modules/yarr.nix
   ];
 
+  networking.hostName = name;
   networking.wireless = {
     enable = true;
     networks = {

@@ -1,10 +1,10 @@
-{ config, lib, pkgs, keys, ... }:
+{ config, lib, pkgs, keys, name, ... }:
 let
   inherit (lib) mkDefault mkForce;
 in
 {
   imports = [
-    ./modules/kiosk.nix
+    ../nix/modules/kiosk.nix
   ];
 
   # Required for the Wireless firmware
@@ -48,6 +48,7 @@ in
   };
 
   networking = {
+    hostName = name;
     wireless.enable = mkForce true;
     wireless.networks.lab = { hidden = true; };
   };

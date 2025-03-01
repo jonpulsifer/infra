@@ -30,7 +30,7 @@ terraform {
 
 
 provider "argocd" {
+  # https://github.com/grpc/grpc-go/issues/434
+  # export GRPC_ENFORCE_ALPN_ENABLED=false
   use_local_config = true
-  grpc_web         = true
-  # context = "foo" # Use explicit context from ArgoCD config instead of `current-context`.
 }

@@ -1,5 +1,6 @@
 locals {
   request_headers_hostname = "request-headers.lolwtf.ca"
+  image_name               = "ghcr.io/jonpulsifer/request-headers"
 }
 resource "argocd_application" "request_headers" {
   metadata {
@@ -11,6 +12,9 @@ resource "argocd_application" "request_headers" {
     project = "default"
 
     source {
+      kustomize {
+        images = ["ghcr.io/jonpulsifer/does-not-exist=${local.image_name}:latest"]
+      }
       repo_url        = "https://github.com/jonpulsifer/ts.git"
       target_revision = "HEAD"
       ref             = "values"
@@ -31,6 +35,14 @@ resource "argocd_application" "request_headers" {
     }
 
     sync_policy {
+      managed_namespace_metadata {
+        labels = {
+          "pod-security.kubernetes.io/enforce" = "restricted"
+          "pod-security.kubernetes.io/audit"   = "restricted"
+          "pod-security.kubernetes.io/warn"    = "restricted"
+        }
+      }
+
       sync_options = ["CreateNamespace=true"]
     }
   }

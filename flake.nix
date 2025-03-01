@@ -29,24 +29,19 @@
         }
         home-manager.nixosModules.home-manager
         ddnsd.nixosModules.default
-        ./systems/nixos.nix
+        ./nix/nixos.nix
       ];
-
-      # k8s cluster modules
-      k8sControlPlane = [ ./systems/modules/k8s/control-plane.nix ];
-      k8sWorker = [ ./systems/modules/k8s/worker.nix ];
 
       mkSystem = name: extra: nixosSystem {
         system = "x86_64-linux";
-        modules = common ++ extra ++ [{ config.networking.hostName = name; }];
-        specialArgs = { inherit keys wannabekeys; };
+        modules = [./systems/${name}.nix] ++ common ++ extra;
+        specialArgs = { inherit keys wannabekeys name; };
       };
 
       mkRPi4 = name: extra: nixos.lib.nixosSystem {
         system = "aarch64-linux";
         modules = common ++ extra
           ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
-          ++ [{ config.networking.hostName = name; }]
           ++ [ ./systems/rpi.nix ]
           ++ [ "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix" { config.sdImage.compressImage = false; config.sdImage.firmwareSize = 512; } ]
           ++ [{
@@ -58,7 +53,7 @@
             })
           ];
         }];
-        specialArgs = { inherit keys; };
+        specialArgs = { inherit keys name; };
       };
 
       mkSystems = builtins.mapAttrs
@@ -73,29 +68,23 @@
       nixosConfigurations = mkSystems
         {
           # lab machines
-          oldschool = [ ./systems/oldschool.nix ];
-          retrofit = [ ./systems/retrofit.nix ];
-          wsl = [
-            nixos-wsl.nixosModules.wsl
-            ./systems/wsl.nix
-          ];
+          oldschool = [ ];
+          retrofit = [ ];
+          wsl = [ nixos-wsl.nixosModules.wsl ];
 
           # k8s cluster
-          nuc = k8sControlPlane;
-          optiplex = k8sWorker;
-          riptide = k8sWorker;
-          "800g2" = k8sWorker;
+          nuc = [];
+          optiplex = [];
+          riptide = [];
+          "800g2" = [];
+
+          # iso
+          iso = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ];
 
           # raspberry pis
           rpi4 = [ ];
           homepi4 = [{ services.kiosk.enable = true; }];
           screenpi4 = [{ services.kiosk.enable = true; }];
-
-          # iso
-          iso = [
-            "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
-            ./systems/iso.nix
-          ];
         };
 
       packages = {
