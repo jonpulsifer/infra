@@ -22,20 +22,17 @@ spec:
           targetRevision: HEAD
           path: apps/{{app}}/k8s
           kustomize:
-            namespace: "{{app}}-gitops"
+            namespace: "{{namespace}}"
             images:
               - ghcr.io/jonpulsifer/does-not-exist={{image}}
       destination:
         name: "{{cluster}}"
-        namespace: "{{app}}-gitops"
+        namespace: "{{namespace}}"
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
         managedNamespaceMetadata:
-          annotations:
-            argocd.argoproj.io/sync-options: Delete=confirm
-            foo: bar
           labels:
             pod-security.kubernetes.io/enforce: restricted
             pod-security.kubernetes.io/audit: restricted
