@@ -8,7 +8,7 @@ spec:
     - list:
         elements:
           - app: request-headers
-            cluster: https://kubernetes.default.svc
+            cluster: in-cluster
             namespace: request-headers
             image: ghcr.io/jonpulsifer/request-headers:latest
 
@@ -26,7 +26,7 @@ spec:
             images:
               - ghcr.io/jonpulsifer/does-not-exist={{image}}
       destination:
-        server: "{{cluster}}"
+        name: "{{cluster}}"
         namespace: "{{app}}-gitops"
       syncPolicy:
         automated:
@@ -35,6 +35,7 @@ spec:
         managedNamespaceMetadata:
           annotations:
             argocd.argoproj.io/sync-options: Delete=confirm
+            foo: bar
           labels:
             pod-security.kubernetes.io/enforce: restricted
             pod-security.kubernetes.io/audit: restricted
