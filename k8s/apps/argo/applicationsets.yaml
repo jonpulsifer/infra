@@ -8,7 +8,7 @@ spec:
     - list:
         elements:
           - app: request-headers
-            cluster: in-cluster
+            cluster: https://kubernetes.default.svc
             namespace: request-headers
             image: ghcr.io/jonpulsifer/request-headers:latest
 
@@ -26,7 +26,7 @@ spec:
             images:
               - ghcr.io/jonpulsifer/does-not-exist={{image}}
       destination:
-        name: "{{cluster}}"
+        server: "{{cluster}}"
         namespace: "{{app}}-gitops"
       syncPolicy:
         automated:
