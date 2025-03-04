@@ -8,29 +8,33 @@ spec:
     - list:
         elements:
           - app: request-headers
-            server: in-cluster
+            cluster: in-cluster
+            image: ghcr.io/jonpulsifer/request-headers:latest
+
   template:
     metadata:
       name: "{{app}}"
     spec:
       project: default
       sources:
-        - repoURL: "https://jonpulsifer.github.io/charts"
-          chart: nextjs
-          targetRevision: 0.0.1
-          helm:
-            valueFiles:
-              - $values/apps/{{app}}/helm/values-gitops.yaml
         - repoURL: https://github.com/jonpulsifer/ts.git
           targetRevision: HEAD
-          ref: values
+          path: apps/{{app}}/k8s
+          kustomize:
+            images:
+              - ghcr.io/jonpulsifer/does-not-exist={{image}}
       destination:
-        name: "{{server}}"
+        name: "{{cluster}}"
         namespace: "{{app}}-gitops"
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
+        managedNamespaceMetadata:
+          labels:
+            pod-security.kubernetes.io/enforce: restricted
+            pod-security.kubernetes.io/audit: restricted
+            pod-security.kubernetes.io/warn: restricted
         syncOptions:
           - CreateNamespace=true
         retry:
