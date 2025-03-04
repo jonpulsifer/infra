@@ -9,6 +9,7 @@ spec:
         elements:
           - app: request-headers
             cluster: in-cluster
+            namespace: request-headers
             image: ghcr.io/jonpulsifer/request-headers:latest
 
   template:
@@ -21,6 +22,7 @@ spec:
           targetRevision: HEAD
           path: apps/{{app}}/k8s
           kustomize:
+            namespace: "{{app}}-gitops"
             images:
               - ghcr.io/jonpulsifer/does-not-exist={{image}}
       destination:
@@ -31,6 +33,8 @@ spec:
           prune: true
           selfHeal: true
         managedNamespaceMetadata:
+          annotations:
+            argocd.argoproj.io/sync-options: Delete=confirm
           labels:
             pod-security.kubernetes.io/enforce: restricted
             pod-security.kubernetes.io/audit: restricted
