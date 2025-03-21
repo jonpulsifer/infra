@@ -1,0 +1,67 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: vault
+  namespace: vault
+spec:
+  chart:
+    spec:
+      chart: vault
+      version: 0.29.1
+      sourceRef:
+        kind: HelmRepository
+        name: hashicorp
+        namespace: flux-system
+  values:
+    server:
+      enabled: true
+      ingress:
+        enabled: true
+        annotations:
+          cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+          hajimari.io/icon: safe
+        hosts:
+          - host: &host "vault.${SECRET_DOMAIN}"
+        tls:
+          - hosts:
+              - *host
+            secretName: *host
+      extraEnvironmentVars:
+        GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
+      dataStorage:
+        enabled: false
+      standalone:
+        enabled: true
+        config: |
+          api_addr     = "https://0.0.0.0:8200"
+          cluster_addr = "https://0.0.0.0:8201"
+          ui = true
+
+          seal "gcpckms" {
+            project     = "homelab-ng"
+            region      = "northamerica-northeast1"
+            key_ring    = "vault"
+            crypto_key  = "vault"
+          }
+
+          storage "gcs" {
+            bucket     = "homelab-ng-vault"
+            ha_enabled = "false"
+          }
+
+          listener "tcp" {
+            address       = "0.0.0.0:8200"
+            tls_disable = true
+            tls_disable_client_certs = true
+          }
+      volumeMounts:
+        - name: secrets
+          mountPath: /var/run/secrets/vault
+          readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: vault
+    ui:
+      enabled: true

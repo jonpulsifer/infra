@@ -1,0 +1,91 @@
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPClusterConfig
+metadata:
+  name: cilium-bgp
+spec:
+  nodeSelector:
+    matchLabels:
+      bgp-enabled: "true"
+  bgpInstances:
+    - name: fml
+      localASN: 64512
+      peers:
+        - name: edgerouter
+          peerASN: 64512
+          peerAddress: 10.3.0.1
+          peerConfigRef:
+            name: ipv4-peer-config
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPPeerConfig
+metadata:
+  name: ipv4-peer-config
+spec:
+  timers:
+    connectRetryTimeSeconds: 12
+    holdTimeSeconds: 9
+    keepAliveTimeSeconds: 3
+  gracefulRestart:
+    enabled: true
+    restartTimeSeconds: 15
+  families:
+    - afi: ipv4
+      safi: unicast
+      advertisements:
+        matchLabels:
+          advertise: bgp
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPAdvertisement
+metadata:
+  name: pod-ip-pools
+  labels:
+    advertise: bgp
+spec:
+  advertisements:
+    - advertisementType: CiliumPodIPPool
+      selector:
+        matchExpressions:
+          # announce all pod ip pools
+          - { key: bgp, operator: NotIn, values: [lol] }
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPAdvertisement
+metadata:
+  name: service-addresses
+  labels:
+    advertise: bgp
+spec:
+  advertisements:
+    - advertisementType: Service
+      service:
+        addresses:
+          - ClusterIP
+          - ExternalIP
+          - LoadBalancerIP
+      selector:
+        matchExpressions:
+          # announce all services on the node
+          - { key: bgp, operator: NotIn, values: [lol] }
+# ---
+# apiVersion: "cilium.io/v2alpha1"
+# kind: CiliumBGPPeeringPolicy
+# metadata:
+#   name: k8s
+# spec:
+#   nodeSelector:
+#     matchLabels:
+#       bgp-enabled: "true"
+#   virtualRouters:
+#     - localASN: 64512
+#       exportPodCIDR: true
+#       neighbors:
+#         - peerASN: 64512
+#           peerAddress: 10.3.0.1/24
+#       podIPPoolSelector:
+#         matchExpressions:
+#           - { key: debug, operator: NotIn, values: [lol] }
+#       serviceSelector:
+#         matchExpressions:
+#           # announce all services on the node
+#           - { key: debug, operator: NotIn, values: [lol] }

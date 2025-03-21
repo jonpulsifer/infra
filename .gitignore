@@ -1,0 +1,8 @@
+.terraform
+*.tfstate
+*.tfplan
+result
+*.iso
+*.img
+systems/ubuntu/build
+*.backup

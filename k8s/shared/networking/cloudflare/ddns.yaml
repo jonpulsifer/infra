@@ -1,0 +1,42 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ddns
+  namespace: cloudflare
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: "Forbid"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      ttlSecondsAfterFinished: 300
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ddns
+              image: jonpulsifer/bashcurljq:latest
+              envFrom:
+                - secretRef:
+                    name: ddns
+              command:
+                - "/bin/bash"
+                - "/app/ddns.sh"
+              volumeMounts:
+                - name: ddns
+                  mountPath: /app/ddns.sh
+                  subPath: ddns.sh
+                  readOnly: true
+          volumes:
+            - name: ddns
+              projected:
+                defaultMode: 0775
+                sources:
+                  - configMap:
+                      name: ddns
+                      items:
+                        - key: ddns.sh
+                          path: ddns.sh

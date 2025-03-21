@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: jellyfin
+  labels: &labels
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/part-of: jellyfin
+spec:
+  selector:
+    matchLabels: *labels
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: jellyfin
+          image: jellyfin/jellyfin:latest
+          ports:
+            - containerPort: 8096
+              protocol: TCP
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+            limits:
+              gpu.intel.com/i915: 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["SYS_ADMIN"]
+              drop: ["ALL"]
+            privileged: false
+          volumeMounts:
+            - name: jellyfin-config
+              mountPath: /config
+              readOnly: false
+            - name: media
+              mountPath: /mnt/media
+              readOnly: false
+            - name: hardware-acceleration
+              mountPath: /dev/dri
+      volumes:
+        - name: jellyfin-config
+          persistentVolumeClaim:
+            claimName: jellyfin-config
+        - name: media
+          hostPath:
+            path: /mnt/disks/media
+            type: DirectoryOrCreate
+        - name: hardware-acceleration
+          hostPath:
+            path: /dev/dri
+      nodeSelector:
+        intel.feature.node.kubernetes.io/gpu: "true"

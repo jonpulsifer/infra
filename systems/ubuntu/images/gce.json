@@ -1,0 +1,110 @@
+{
+  "variables": {
+    "PROJECT": "trusted-builds",
+    "GCE_REGION": "{{env `GCE_REGION`}}",
+    "GCE_ZONE": "{{env `GCE_ZONE`}}",
+    "GCE_NETWORK": "{{env `GCE_NETWORK`}}",
+    "GCE_SUBNETWORK": "{{env `GCE_SUBNETWORK`}}",
+    "SERVICE_ACCOUNT": "{{env `SERVICE_ACCOUNT`}}",
+    "language": "en_US.UTF-8",
+    "LINUX_USER": "{{env `LINUX_USER`}}",
+    "LINUX_UUID": "{{env `LINUX_UUID`}}",
+    "GITHUB_USER": "{{env `GITHUB_USER`}}",
+    "DEP_VERSION": "{{env `DEP_VERSION`}}",
+    "GO_VERSION": "{{env `GO_VERSION`}}",
+    "OP_VERSION": "{{env `OP_VERSION`}}"
+  },
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "{{user `PROJECT`}}",
+      "source_image_family": "ubuntu-1804-lts",
+      "source_image_project_id": "ubuntu-os-cloud",
+      "image_family": "ubuntu-1804-lts",
+      "image_description": "created with packer {{packer_version}} on {{isotime}} by {{build_name}} {{build_type}}",
+      "image_name": "bionic-lab-{{isotime \"2006-01-02\"}}",
+      "instance_name": "builder-packer-{{uuid}}",
+      "machine_type": "n1-standard-1",
+      "zone": "{{user `GCE_ZONE`}}",
+      "preemptible": "true",
+      "ssh_username": "packer",
+      "ssh_timeout": "10m",
+      "ssh_read_write_timeout": "10m",
+      "state_timeout": "10m",
+      "disk_size": "10",
+      "disk_type": "pd-standard",
+      "network": "{{user `GCE_NETWORK`}}",
+      "subnetwork": "{{user `GCE_SUBNETWORK`}}",
+      "service_account_email": "{{user `SERVICE_ACCOUNT`}}",
+      "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
+      "tags": [
+        "packer",
+        "gce",
+        "ubuntu",
+        "docker"
+      ]
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/base.sh",
+      "execute_command": "sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'",
+      "environment_vars": ["LANG={{user `LANGUAGE`}}"]
+    },
+    {
+      "type": "shell",
+      "script": "scripts/packages.sh",
+      "execute_command": "sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'",
+      "environment_vars": [
+        "DEBIAN_FRONTEND=noninteractive",
+        "DEP_VERSION={{user `DEP_VERSION`}}",
+        "GO_VERSION={{user `GO_VERSION`}}",
+        "OP_VERSION={{user `OP_VERSION`}}"
+      ]
+    },
+    {
+      "type": "shell",
+      "script": "scripts/user.sh",
+      "execute_command": "sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'",
+      "environment_vars": [
+        "LINUX_USER={{user `LINUX_USER`}}",
+        "LINUX_UUID={{user `LINUX_UUID`}}",
+        "GITHUB_USER={{user `GITHUB_USER`}}"
+      ]
+    },
+    {
+      "type": "shell",
+      "script": "scripts/vm.sh",
+      "execute_command": "sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'"
+    },
+    {
+      "type": "file",
+      "source": "etc/environment",
+      "destination": "/tmp/",
+      "direction": "upload"
+    },
+    {
+      "type": "file",
+      "source": "etc/ssh/sshd_config",
+      "destination": "/tmp/",
+      "direction": "upload"
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'",
+      "inline": [
+        "mv -v /tmp/sshd_config /etc/ssh/",
+        "mv -v /tmp/environment /etc/",
+        "rm -rvf /tmp/*"
+      ]
+    }
+  ],
+  "post-processors": [
+    {
+      "type": "manifest",
+      "output": "manifest.json",
+      "strip_path": true
+    }
+  ]
+}

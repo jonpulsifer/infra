@@ -1,0 +1,92 @@
+name: "Terraform"
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - argo/**
+      - cloudflare/**
+      - gcp/**
+      - k8s/**.tf
+      - unifi/**
+      - vault/**
+      - workspace/**
+  pull_request:
+    paths:
+      - argo/**
+      - cloudflare/**
+      - gcp/**
+      - k8s/**.tf
+      - unifi/**
+      - vault/**
+      - workspace/**
+jobs:
+  changed-directories:
+    name: Get Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Directories with Changes
+        id: changed-directories
+        uses: tj-actions/changed-files@v46
+        with:
+          dir_names: true
+          json: true
+          files: |
+            **/*.tf
+            **/*.lock.hcl
+      - name: List all changed directories
+        run: echo '${{ steps.changed-directories.outputs.all_changed_files }}'
+      - id: set-matrix
+        run: echo "matrix={\"dir\":${{ steps.changed-directories.outputs.all_changed_files }}}" >> "$GITHUB_OUTPUT"
+
+  validate:
+    # name: 'fmt, init, validate'
+    needs: [changed-directories]
+    runs-on: ubuntu-latest
+    if: ${{ needs.changed-directories.outputs.matrix != '' && needs.changed-directories.outputs.matrix.dir != '[]' }}
+    strategy:
+      matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check
+        continue-on-error: true
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend=false
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+  docs:
+    needs: [validate, changed-directories]
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+    strategy:
+      matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Render terraform docs and push changes back to PR
+        uses: terraform-docs/gh-actions@v1.3.0
+        with:
+          working-dir: ${{ matrix.dir }}
+          output-file: README.md
+          output-method: inject
+          git-push: "true"

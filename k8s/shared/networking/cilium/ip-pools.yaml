@@ -1,0 +1,21 @@
+apiVersion: cilium.io/v2alpha1
+kind: CiliumPodIPPool
+metadata:
+  name: default
+spec:
+  ipv4:
+    cidrs:
+      - 10.100.0.0/20
+    maskSize: 24
+---
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: fml
+spec:
+  blocks:
+    - cidr: 10.3.0.64/26 # 10.3.0.64-127
+  serviceSelector:
+    # give all load balancers and gateways an IP from the blocks above
+    matchExpressions:
+      - { key: debug, operator: NotIn, values: [lol] }

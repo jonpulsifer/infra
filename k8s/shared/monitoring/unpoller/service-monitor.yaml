@@ -1,0 +1,24 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: unifipoller
+  namespace: unpoller
+  labels:
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      honorLabels: true
+      scheme: http
+      path: /metrics
+      tlsConfig:
+        insecureSkipVerify: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: unpoller
+  namespaceSelector:
+    matchNames:
+      - unpoller

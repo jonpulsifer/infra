@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unpoller
+  namespace: unpoller
+spec:
+  template:
+    spec:
+      containers:
+        - name: unpoller
+          image: ghcr.io/unpoller/unpoller:v2.14.1
+          env:
+            - name: UP_UNIFI_DEFAULT_URL
+              value: https://10.2.0.1
+            - name: UP_UNIFI_DEFAULT_USER
+              value: "unpoller"
+            - name: UP_UNIFI_DEFAULT_PASS
+              value: "unpollerLOL1!"
+            - name: UP_PROMETHEUS_DISABLE
+              value: "false"
+            - name: UP_PROMETHEUS_NAMESPACE
+              value: "unpoller"
+            - name: UP_INFLUXDB_DISABLE
+              value: "true"
+            - name: UP_LOKI_URL
+              value: "https://loki.${SECRET_DOMAIN}"
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 9130
+              name: http-metrics
+              protocol: TCP

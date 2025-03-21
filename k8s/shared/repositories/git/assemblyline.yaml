@@ -1,0 +1,16 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: assemblyline
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://github.com/CybercentreCanada/assemblyline-helm-chart
+  ref:
+    branch: master
+  ignore: |
+    # exclude all
+    /*
+    # include assemblyline directory
+    !/assemblyline

@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: screenpi4
+  namespace: monitoring
+  labels:
+    pulsifer.dev/service: dht22
+subsets:
+  - addresses:
+      - ip: 10.2.0.28
+        nodeName: screenpi4
+    ports:
+      - name: http-metrics
+        port: 8000
+        protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: screenpi4
+  namespace: monitoring
+  labels:
+    pulsifer.dev/service: dht22
+spec:
+  type: ExternalName
+  externalName: screenpi4.localdomain
+  ports:
+    - name: http-metrics
+      port: 8000
+      protocol: TCP
+      targetPort: 8000
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dht22
+  namespace: monitoring
+  labels:
+    pulsifer.dev/service: dht22
+    release: prom-stack
+spec:
+  jobLabel: pulsifer.dev/service
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      honorLabels: true
+      scheme: http
+      path: /
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - sourceLabels: [__address__]
+          targetLabel: __address__
+          regex: (.*)
+          replacement: "screenpi4-wifi:8000"
+          action: replace
+  selector:
+    matchLabels:
+      pulsifer.dev/service: dht22
+  namespaceSelector:
+    matchNames:
+      - monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: screenpi4
+  namespace: monitoring
+  labels:
+    pulsifer.dev/service: dht22
+    release: prom-stack
+spec:
+  groups:
+    - name: screenpi4
+      rules:
+        - alert: PrometheusTargetMissing
+          expr: up {endpoint="http-metrics",  namespace="monitoring", service="screenpi4"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            message: Prometheus target missing (instance {{ $labels.instance }})
+            description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

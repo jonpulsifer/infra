@@ -1,0 +1,250 @@
+cameras:
+  Garage:
+    mac: 74:83:c2:3f:ea:11
+  Outside:
+    dev-id: 2636
+    mac: 74:83:c2:3f:ea:21
+  Garage Door Camera Current:
+    mac: d4:12:43:3c:c6:55
+    dev-id: 2051
+  Garage Door Camera New:
+    mac: d4:9c:dd:90:48:82
+    dev-id: 2051
+
+unmanaged-infra:
+  Wall Unit PoE Switch:
+    mac: 18:8b:45:3a:ea:4b
+    model: Cisco SG300-10PP-K9 V03
+
+lab:
+  erx-eth0:
+    mac: 74:83:c2:6e:80:6a
+    ip: 5
+  nuc-wifi:
+    mac: d0:c6:37:4d:c2:fe
+    dev-id: 3592
+    skip_forget_on_destroy: false
+    hostname: nuc-wifi
+    ip: 30
+
+k8s:
+  nuc:
+    mac: 1c:69:7a:01:2a:ef
+    dev-id: 3592
+    skip_forget_on_destroy: false
+  800g2:
+    dev-id: 2847
+    skip_forget_on_destroy: false
+    mac: ec:8e:b5:72:35:24
+  800g2-2:
+    dev-id: 2847
+    skip_forget_on_destroy: false
+    mac: 40:b0:34:f3:90:bd
+  800g3-1:
+    dev-id: 2847
+    skip_forget_on_destroy: false
+    mac: ac:e2:d3:0d:90:66
+  800g3-2:
+    dev-id: 2847
+    skip_forget_on_destroy: false
+    mac: ac:e2:d3:0c:fb:b5
+  optiplex:
+    dev-id: 2847
+    skip_forget_on_destroy: false
+    mac: 14:b3:1f:2b:57:85
+  riptide:
+    dev-id: 2847
+    skip_forget_on_destroy: false
+    mac: 38:22:e2:2d:96:44
+
+rpis:
+  pikvm:
+    mac: e4:5f:01:e4:6d:1c
+    ip: 2
+    hostname: pikvm
+    dev-id: 4134
+  cloudpi4:
+    mac: dc:a6:32:35:e8:b4
+    ip: 20
+    dev-id: 4134
+  cloudpi4-wifi:
+    mac: dc:a6:32:35:e8:b5
+    ip: 21
+    dev-id: 4134
+    hostname: cloudpi4-wifi
+  homepi4:
+    mac: dc:a6:32:d9:90:07
+    ip: 22
+    dev-id: 4134
+  homepi4-wifi:
+    mac: dc:a6:32:d9:90:08
+    ip: 23
+    dev-id: 4134
+  radiopi0:
+    mac: b8:27:eb:ad:f3:aa
+    ip: 24
+    dev-id: 3515
+  blinkypi0:
+    mac: b8:27:eb:e6:e7:95
+    ip: 25
+    dev-id: 3515
+  speechpi2:
+    mac: b8:27:eb:70:45:f6
+    dev-id: 2813
+    ip: 26
+  screenpi4:
+    mac: e4:5f:01:17:61:68
+    dev-id: 4134
+    ip: 27
+  screenpi4-wifi:
+    mac: e4:5f:01:17:61:69
+    dev-id: 4134
+    ip: 28
+
+desktops:
+  caldigit:
+    mac: 64:4b:f0:10:0f:0c
+    ip: 3
+  caldigit ts4:
+    mac: 64:4b:f0:37:15:69
+    ip: 4
+  atomic:
+    mac: a8:a1:59:42:16:1c
+    dev-id: 2663
+    ip: 5
+  atomic-wifi:
+    mac: b8:9a:2a:d5:26:f9
+    dev-id: 2663
+    ip: 6
+  cie:
+    mac: a8:a1:59:42:16:1b
+    dev-id: 2663
+    ip: 7
+  mini:
+    mac: a8:20:66:03:f5:05
+    ip: 8
+  htpc:
+    mac: bc:ae:c5:6b:43:8f
+    ip: 9
+    hostname: htpc
+  tinytower:
+    mac: 78:24:af:3c:a4:67
+    dev-id: 2663
+
+laptops:
+  Constance's Macbook Pro:
+    mac: f0:18:98:54:4b:32
+  Hackbook Pro:
+    mac: 00:00:00:00:00:00
+    dev-id: 4664
+  Hackbook Pro Wifi:
+    mac: f8:4d:89:81:c0:2d
+    dev-id: 4664
+  Pixelbook:
+    mac: 28:c6:3f:30:2a:c3
+    dev-id: 44
+  Pixelbook Go:
+    mac: a4:b1:c1:b1:27:95
+    dev-id: 3431
+
+personal-devices:
+  reMarkable:
+    mac: 10:2c:6b:de:b1:b0
+  Apple iPhone X:
+    mac: ee:4f:95:c9:64:2f
+  Pixel 3:
+    mac: 3c:28:6d:d4:d7:8e
+    dev-id: 2822
+  Pixel 5:
+    mac: f8:1a:2b:34:81:87
+  Jonathan's iPhone:
+    mac: b6:2e:ca:fd:4d:40
+
+iot:
+  Constance's Office Google Home Mini:
+    color: Coral
+    mac: e4:f0:42:15:b1:03
+  Garage Google Home Mini:
+    color: Chalk
+    mac: 48:d6:d5:84:70:5a
+  Bedroom Nest Mini:
+    color: Charcoal
+    mac: 7c:2e:bd:56:db:88
+  Bedroom Scale:
+    mac: 00:24:e4:37:b2:da
+    dev-id: 2850
+  Garage Door Opener Current:
+    mac: cc:6a:10:19:63:02
+    dev-id: 2051
+  Garage Door Opener New:
+    mac: cc:6a:10:36:be:1a
+    dev-id: 2051
+  Hue Bridge:
+    mac: 00:17:88:2c:a0:59
+  Jon's Office Chromecast:
+    mac: 48:d6:d5:07:2f:c6
+    dev-id: 2029
+    streaming: true
+  Jon's Office Fan:
+    mac: c8:ff:77:6d:69:74
+    model: Dyson DP04
+    dev-id: 3495
+  Jon's Office Nest Mini:
+    color: Charcoal
+    mac: d4:f5:47:2e:de:48
+    dev-id: 3418
+  Jon's Office Phone:
+    mac: ec:e1:a9:cc:ee:fc
+    model: Cisco SPA504G
+    dev-id: 4420
+    hostname: cathy
+  Laboratory:
+    mac: 68:b6:b3:51:d4:5c
+    model: "69 Pro"
+    hostname: laboratory
+  Living Room Chromecast:
+    mac: 14:ae:85:70:4d:d8
+    streaming: true
+    dev-id: 4449
+  Living Room Chromecast WiFi:
+    mac: 90:0c:c8:de:24:f5
+    streaming: true
+    dev-id: 4449
+  Downstairs Nest Hub:
+    mac: 7c:d9:5c:7b:07:a4
+    streaming: true
+    dev-id: 3591
+  Downstairs Thermostat:
+    mac: 18:b4:30:bd:fc:b5
+    dev-id: 2044
+  Lab TV:
+    mac: e4:e0:c5:03:f0:81
+    model: Samsung UNC5500
+  LG DualCool Lab:
+    mac: 1c:39:29:5c:5d:2a
+    dev-id: 4816
+  LG DualCool Garage:
+    mac: 1c:39:29:5c:5f:03
+    dev-id: 4816
+  Living Room TV:
+    mac: 80:5b:65:89:fd:a4
+    model: LG OLED65C2PUA
+  WeatherFlow Hub:
+    mac: c0:ee:40:72:76:33
+  Sonos Arc:
+    mac: 38:42:0b:48:e2:1b
+  Sonos Sub:
+    mac: f0:f6:c1:e2:85:c4
+  Sonos Play 5:
+    mac: 34:7e:5c:d7:c2:d8
+  Sonos Sub Office:
+    mac: f0:f6:c1:e2:85:32
+    dev-id: 294
+  Switch House:
+    mac: 98:41:5c:aa:d1:59
+  # Switch Office:
+  #   mac: 98:41:5c:aa:d1:5a
+  Tidbyt House:
+    mac: b4:8a:0a:27:07:f4
+  Tidbyt Office:
+    mac: cc:db:a7:1e:14:88

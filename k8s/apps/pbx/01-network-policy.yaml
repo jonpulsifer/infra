@@ -1,0 +1,44 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+  namespace: pbx
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pbx
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+    app.kubernetes.io/part-of: pbx
+spec:
+  egress:
+    - {}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: kube-system
+        - ipBlock:
+          # montreal9.voip.ms
+          cidr: 208.100.60.27/32
+      ports:
+        - port: 5060
+          protocol: TCP
+        - port: 5061
+          protocol: TCP
+        - port: 5061
+          protocol: UDP
+  podSelector:
+    matchLabels:
+      app: pbx
+  policyTypes:
+    - Ingress
+    - Egress

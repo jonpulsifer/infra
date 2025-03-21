@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+    app.kubernetes.io/part-of: pbx

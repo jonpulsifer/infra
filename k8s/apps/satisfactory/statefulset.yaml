@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: satisfactory
+  namespace: satisfactory
+  labels:
+    app: satisfactory
+spec:
+  serviceName: satisfactory
+  replicas: 1
+  selector:
+    matchLabels:
+      app: satisfactory
+  template:
+    metadata:
+      labels:
+        app: satisfactory
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: satisfactory
+          image: wolveix/satisfactory-server
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 7777
+              name: gametcp
+              protocol: TCP
+            - containerPort: 7777
+              name: game
+              protocol: UDP
+          resources:
+            requests:
+              memory: 8Gi
+          env:
+            - name: AUTOPAUSE
+              value: "false" # -- pause game when no player is connected
+            - name: AUTOSAVEINTERVAL
+              value: "300" # -- autosave interval in seconds
+            - name: AUTOSAVENUM
+              value: "3" # -- number of rotating autosave files
+            - name: AUTOSAVEONDISCONNECT
+              value: "true" # -- autosave when the last player disconnects
+            - name: CRASHREPORT
+              value: "true" # -- automatic crash reporting
+            - name: DEBUG
+              value: "false" # -- for debugging the server
+            - name: DISABLESEASONALEVENTS
+              value: "false" # -- disable the FICSMAS event
+            - name: MAXPLAYERS
+              value: "3" # -- set the player limit for your server
+            - name: MAXOBJECTS
+              value: "2162688" # -- set the object limit for your server
+            - name: MAXTICKRATE
+              value: "30" # -- set the maximum sim tick rate for your server
+            - name: PGID
+              value: "1000" # -- set the group ID of the user the server will run as
+            - name: PUID
+              value: "1000" # -- set the user ID of the user the server will run as
+            - name: NETWORKQUALITY
+              value: "3" # -- set the network quality (1-3)
+            - name: ROOTLESS
+              value: "true" # -- run the container as a non-root user (requires PGID and PUID to be set)
+            - name: SERVERGAMEPORT
+              value: "7777" # -- set the game's port
+            - name: SERVERIP
+              value: "0.0.0.0" # -- set the game's IP (usually not needed)
+            - name: SERVERSTREAMING
+              value: "true" # -- toggle whether the game utilizes asset streaming
+            - name: SKIPUPDATE
+              value: "false" # -- avoid updating the game on container start/restart
+            - name: STEAMBETA
+              value: "false" # -- set experimental game version
+            - name: TIMEOUT
+              value: "30" # -- set client timeout (in seconds)
+          volumeMounts:
+            - name: satisfactory-data
+              mountPath: /config
+  volumeClaimTemplates:
+    - metadata:
+        name: satisfactory-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 25Gi

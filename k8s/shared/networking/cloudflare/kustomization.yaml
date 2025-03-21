@@ -1,0 +1,21 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - ddns.yaml
+  - ddns.sops.yaml
+  - cloudflared.yaml
+  - cloudflared.sops.yaml
+namespace: cloudflare
+configMapGenerator:
+  - name: ddns
+    files:
+      - ddns.sh
+  - name: cloudflared
+    files:
+      - cloudflared-config.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled

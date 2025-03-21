@@ -1,0 +1,38 @@
+resource "google_project_service" "service" {
+  for_each = toset([
+    "admin.googleapis.com",
+    "appengine.googleapis.com",
+    "bigquery.googleapis.com",
+    "bigquerystorage.googleapis.com",
+    "cloudasset.googleapis.com",
+    "cloudbilling.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "cloudfunctions.googleapis.com",
+    "cloudidentity.googleapis.com",
+    "cloudkms.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
+    "container.googleapis.com",
+    "containerregistry.googleapis.com",
+    "dns.googleapis.com",
+    "domains.googleapis.com",
+    "groupssettings.googleapis.com",
+    "iam.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "iap.googleapis.com",
+    "logging.googleapis.com",
+    "maps-backend.googleapis.com",
+    "monitoring.googleapis.com",
+    "orgpolicy.googleapis.com",
+    "oslogin.googleapis.com",
+    "pubsub.googleapis.com",
+    "run.googleapis.com",
+    "serviceusage.googleapis.com",
+    "storage-api.googleapis.com",
+    "storage-component.googleapis.com",
+    "vision.googleapis.com",
+    "websecurityscanner.googleapis.com",
+  ])
+  service            = each.key
+  disable_on_destroy = false
+}

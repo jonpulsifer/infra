@@ -1,0 +1,83 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: hajimari
+  namespace: default
+spec:
+  interval: 1h0m0s
+  chart:
+    spec:
+      chart: hajimari
+      version: 2.0.2
+      sourceRef:
+        kind: HelmRepository
+        name: hajimari
+        namespace: flux-system
+      interval: 1h0m0s
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    image:
+      repository: ghcr.io/toboshii/hajimari
+      tag: v0.3.1
+    hajimari:
+      defaultEnable: true
+      namespaceSelector:
+        matchNames:
+          - argo
+          - default
+          - dump
+          - falco
+          - flux-system
+          - request-headers
+          - kube-system
+          - monitoring
+          - vault
+      name: "overlord"
+      customApps:
+        - group: Monitoring
+          apps:
+            - name: ingress (should 404)
+              url: http://${LB_NGINX}
+              icon: test-tube
+      globalBookmarks:
+        - group: Cloud
+          bookmarks:
+            - name: GitHub
+              url: "https://github.com/jonpulsifer"
+            - name: Google Cloud Console
+              url: "https://console.cloud.google.com"
+    ingress:
+      main:
+        enabled: true
+        annotations:
+          cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+          hajimari.io/enable: "true"
+          hajimari.io/icon: weather-sunset
+        hosts:
+          - host: &hajimari "hajimari.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+        tls:
+          - hosts:
+              - *hajimari
+            secretName: *hajimari
+    persistence:
+      data:
+        enabled: true
+        existingClaim: hajimari-config
+    podAnnotations:
+      configmap.reloader.stakater.com/reload: "hajimari-config"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi

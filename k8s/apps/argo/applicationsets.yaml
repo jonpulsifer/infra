@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: nextjs
+  namespace: argo
+spec:
+  generators:
+    - list:
+        elements:
+          - app: request-headers
+            cluster: in-cluster
+            namespace: request-headers
+            image: ghcr.io/jonpulsifer/request-headers:latest
+          - app: request-headers
+            cluster: lab
+            namespace: request-headers
+            image: ghcr.io/jonpulsifer/request-headers:latest
+
+  template:
+    metadata:
+      name: "{{app}}-{{cluster}}"
+    spec:
+      project: default
+      sources:
+        - repoURL: https://github.com/jonpulsifer/ts.git
+          targetRevision: HEAD
+          path: apps/{{app}}/k8s
+          kustomize:
+            namespace: "{{namespace}}-{{cluster}}"
+            images:
+              - ghcr.io/jonpulsifer/does-not-exist={{image}}
+      destination:
+        name: "{{cluster}}"
+        namespace: "{{namespace}}-{{cluster}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        managedNamespaceMetadata:
+          labels:
+            pod-security.kubernetes.io/enforce: restricted
+            pod-security.kubernetes.io/audit: restricted
+            pod-security.kubernetes.io/warn: restricted
+        syncOptions:
+          - CreateNamespace=true
+        retry:
+          limit: 2

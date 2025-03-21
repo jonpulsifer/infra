@@ -1,0 +1,23 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: csgo
+  namespace: csgo
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: "csgo.${SECRET_DOMAIN}."
+  labels:
+    app.kubernetes.io/name: csgo
+    app.kubernetes.io/part-of: csgo
+spec:
+  type: LoadBalancer
+  ports:
+    - name: srcds 
+      port: 27015
+      protocol: UDP
+    - name: srctv 
+      port: 27020
+      protocol: UDP
+  selector:
+    app.kubernetes.io/name: csgo
+    app.kubernetes.io/part-of: csgo

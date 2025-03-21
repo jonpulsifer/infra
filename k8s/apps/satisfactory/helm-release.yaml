@@ -1,0 +1,27 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: satisfactory
+  namespace: satisfactory
+spec:
+  chart:
+    spec:
+      chart: satisfactory
+      version: 0.1.16
+      sourceRef:
+        kind: HelmRepository
+        name: jonpulsifer
+        namespace: flux-system
+  values:
+    replicaCount: 0
+    env:
+      AUTOPAUSE: false
+    service:
+      annotations:
+        external-dns.alpha.kubernetes.io/hostname: "satisfactory.${SECRET_DOMAIN}"
+    resources:
+      limits:
+        memory: 16Gi
+      requests:
+        memory: 8Gi

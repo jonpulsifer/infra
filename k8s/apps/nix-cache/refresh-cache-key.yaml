@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: refresh-cache-key
+  namespace: nix-cache
+  labels:
+    app.kubernetes.io/name: refresh-cache-key
+    app.kubernetes.io/part-of: nix-cache
+    secret.reloader.stakater.com/reload: "nix-serve"
+spec:
+  selector:
+    matchLabels:
+      app: refresh-cache-key
+  template:
+    metadata:
+      labels:
+        app: refresh-cache-key
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: ["optiplex"]
+      containers:
+        - name: busybox
+          image: busybox
+          securityContext:
+            runAsUser: 0
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - "sh"
+            - "-c"
+            - |
+              set -e
+              while true; do
+                echo "Refreshing cache key at $(date)"
+                cd /nix-serve/host
+                cp -v /nix-serve/key/cache.key .
+                chown -R 62540:62540 .
+                chmod 600 cache.key
+                echo "Cache key copied and permissions set"
+                sleep 86400 # Run once every 24 hours
+              done
+          volumeMounts:
+            - name: nix-serve-host
+              mountPath: /nix-serve/host
+              readOnly: false
+            - name: nix-serve-key
+              mountPath: /nix-serve/key
+              readOnly: true
+      restartPolicy: Always
+      volumes:
+        - name: nix-serve-host
+          hostPath:
+            path: /var/secrets/nix-serve
+            type: DirectoryOrCreate
+        - name: nix-serve-key
+          secret:
+            secretName: nix-serve
+            items:
+              - key: NIX_SERVE_KEY
+                path: cache.key

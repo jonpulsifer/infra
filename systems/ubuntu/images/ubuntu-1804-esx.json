@@ -1,0 +1,136 @@
+{
+  "variables": {
+    "language": "en_US.UTF-8",
+    "LINUX_USER": "jawn",
+    "LINUX_UUID": "1337",
+    "GITHUB_USER": "j0npulsifer",
+    "VCENTER_SERVER": "",
+    "VCENTER_USERNAME": "",
+    "VCENTER_PASSWORD": "",
+    "VCENTER_DC": "",
+    "ESX_SERVER": "",
+    "ESX_USERNAME": "",
+    "ESX_PASSWORD": "",
+    "ESX_DATASTORE": ""
+  },
+  "builders": [{
+    "name": "ubuntu-1804-esx",
+    "vm_name": "packer-ubuntu-1804-esx",
+    "type": "vmware-iso",
+    "disk_type_id": "thin",
+    "guest_os_type": "ubuntu-64",
+    "iso_url": "http://cdimage.ubuntu.com/releases/18.04/release/ubuntu-18.04.1-server-amd64.iso",
+    "iso_checksum": "a5b0ea5918f850124f3d72ef4b85bda82f0fcd02ec721be19c1a6952791c8ee8",
+    "iso_checksum_type": "sha256",
+
+    "remote_type": "esx5",
+    "remote_host": "{{user `ESX_SERVER`}}",
+    "remote_username": "{{user `ESX_USERNAME`}}",
+    "remote_password": "{{user `ESX_PASSWORD`}}",
+    "remote_datastore": "{{user `ESX_DATASTORE`}}",
+    "headless": false,
+    "tools_upload_flavor": "linux",
+    "vnc_disable_password": true,
+    "keep_registered": true,
+
+    "vmx_data": {
+      "ethernet0.networkName": "VM Network"
+    },
+
+    "ssh_username": "packer",
+    "ssh_password": "packer",
+    "ssh_timeout": "15m",
+
+    "floppy_files": [
+      "preseed.cfg"
+    ],
+
+    "boot_wait": "10s",
+    "boot_command": [
+      "<esc><wait>",
+      "<esc><wait>",
+      "<enter><wait>",
+      "/install/vmlinuz",
+      " auto",
+      " console-setup/ask_detect=false",
+      " console-setup/layoutcode=us",
+      " console-setup/modelcode=pc105",
+      " debconf/frontend=noninteractive",
+      " debian-installer=en_US",
+      " grub-installer/bootdev=/dev/sda",
+      " fb=false",
+      " initrd=/install/initrd.gz",
+      " kbd-chooser/method=us",
+      " keyboard-configuration/layout=USA",
+      " keyboard-configuration/variant=USA",
+      " locale=en_US",
+      " netcfg/get_domain=vm",
+      " netcfg/get_hostname=packer",
+      " noapic",
+      " preseed/file=/floppy/preseed.cfg",
+      " -- ",
+      "<enter>"
+    ],
+    "shutdown_command": "echo 'shutdown -P now' > shutdown.sh; echo 'packer'|sudo -S sh 'shutdown.sh'"
+  }],
+
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/base.sh",
+      "execute_command": "echo 'packer'|sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'",
+      "environment_vars": ["LANG={{user `LANGUAGE`}}"]
+    },
+    {
+      "type": "shell",
+      "script": "scripts/user.sh",
+      "execute_command": "echo 'packer'|sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'",
+      "environment_vars": [
+        "LINUX_USER={{user `LINUX_USER`}}",
+        "LINUX_UUID={{user `LINUX_UUID`}}",
+        "GITHUB_USER={{user `GITHUB_USER`}}"
+      ]
+    },
+    {
+      "type": "shell",
+      "script": "scripts/vm.sh",
+      "execute_command": "echo 'packer'|sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'"
+    },
+    {
+      "type": "file",
+      "source": "etc/environment",
+      "destination": "/tmp/",
+      "direction": "upload"
+    },
+    {
+      "type": "file",
+      "source": "etc/ssh/sshd_config",
+      "destination": "/tmp/",
+      "direction": "upload"
+    },
+    {
+      "type": "shell",
+      "execute_command": "echo 'packer'|sudo -S sh -c '{{ .Vars  }} {{ .Path  }}'",
+      "inline": [
+        "mv -v /tmp/sshd_config /etc/ssh/",
+        "mv -v /tmp/environment /etc/",
+        "rm -rvf /tmp/*"
+      ]
+    }
+  ],
+  "post-processors": [
+    {
+      "type": "manifest",
+      "output": "manifest.json",
+      "strip_path": true
+    },
+    {
+      "type": "vsphere-template",
+      "host": "{{user `VCENTER_SERVER`}}",
+      "insecure": true,
+      "username": "{{user `VCENTER_USERNAME`}}",
+      "password": "{{user `VCENTER_PASSWORD`}}",
+      "datacenter": "{{ user `VCENTER_DC`}}"
+   }
+  ]
+}

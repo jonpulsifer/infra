@@ -1,0 +1,34 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":disableRateLimiting",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":automergePr",
+    ":automergeRequireAllStatusChecks",
+    "regexManagers:dockerfileVersions",
+    "regexManagers:githubActionsVersions",
+    "regexManagers:helmChartYamlAppVersions",
+  ],
+  dependencyDashboard: true,
+  suppressNotifications: ["prEditedNotification, prIgnoreNotification"],
+  rebaseWhen: "conflicted",
+  flux: {
+    fileMatch: ["k8s/.+\\.ya?ml$"],
+  },
+  "helm-values": {
+    fileMatch: ["k8s/.+\\.ya?ml$"],
+  },
+  kubernetes: {
+    fileMatch: ["k8s/.+\\.ya?ml$"],
+  },
+  "packageRules": [
+    {
+      "matchManagers": [
+        "terraform"
+      ],
+      "groupName": "terraform"
+    }
+  ]
+}

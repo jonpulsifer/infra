@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: satisfactory
+  namespace: satisfactory
+  labels:
+    app: satisfactory
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: satisfactory.lolwtf.ca
+spec:
+  selector:
+    app: satisfactory
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  ports:
+    - protocol: UDP
+      port: 7777
+      targetPort: 7777
+      name: game
+    - protocol: TCP
+      port: 7777
+      targetPort: 7777
+      name: gametcp
