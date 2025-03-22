@@ -21,6 +21,8 @@ spec:
         enabled: true
       grpc_output:
         enabled: true
+      serviceMonitor:
+        create: true
     falcosidekick:
       enabled: true
       webui:
