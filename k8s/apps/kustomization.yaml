@@ -10,7 +10,7 @@ resources:
   - default
   - descheduler
   - dump.yaml
-  # - falco
+  - falco
   - jellyfin.yaml
   - k6
   # - minecraft
