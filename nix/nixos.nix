@@ -1,4 +1,10 @@
-{ config, lib, pkgs, keys, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  keys,
+  ...
+}:
 let
   inherit (lib) mkDefault mkForce;
   sshKeys = lib.splitString "\n" (builtins.readFile keys);
@@ -12,11 +18,28 @@ in
   powerManagement.cpuFreqGovernor = mkDefault "ondemand";
 
   boot = {
-    initrd.availableKernelModules = [ "xhci_pci" "ahci" "usbhid" "usb_storage" ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" "riptide" ]) [ "nvme" ];
+    initrd.availableKernelModules =
+      [
+        "xhci_pci"
+        "ahci"
+        "usbhid"
+        "usb_storage"
+      ]
+      ++ lib.optionals (builtins.elem config.networking.hostName [
+        "nuc"
+        "riptide"
+      ]) [ "nvme" ];
     initrd.kernelModules = [ ];
 
     kernelPackages = mkDefault pkgs.linuxPackages_latest;
-    kernelModules = [ ] ++ lib.optionals (builtins.elem config.networking.hostName [ "nuc" "800g2" "riptide" "optiplex" ]) [ "kvm-intel" ];
+    kernelModules =
+      [ ]
+      ++ lib.optionals (builtins.elem config.networking.hostName [
+        "nuc"
+        "800g2"
+        "riptide"
+        "optiplex"
+      ]) [ "kvm-intel" ];
 
     consoleLogLevel = mkDefault 0;
     extraModulePackages = [ ];
@@ -27,7 +50,10 @@ in
       efi.canTouchEfiVariables = mkDefault true;
       timeout = mkDefault 0;
     };
-    supportedFilesystems = mkForce [ "ext4" "vfat" ];
+    supportedFilesystems = mkForce [
+      "ext4"
+      "vfat"
+    ];
   };
 
   fileSystems."/boot" = {
@@ -43,7 +69,10 @@ in
   fileSystems."/mnt/disks" = {
     device = "/dev/disk/by-label/storage";
     fsType = "ext4";
-    options = [ "nofail" "relatime" ];
+    options = [
+      "nofail"
+      "relatime"
+    ];
   };
 
   swapDevices = [ ];
@@ -56,7 +85,11 @@ in
     networkmanager.enable = mkDefault false;
     wireless = {
       enable = mkDefault false;
-      networks = mkDefault { lab = { hidden = true; }; };
+      networks = mkDefault {
+        lab = {
+          hidden = true;
+        };
+      };
     };
   };
 
@@ -64,7 +97,13 @@ in
   i18n.defaultLocale = "en_US.UTF-8";
   time.timeZone = "Canada/Atlantic";
 
-  environment.systemPackages = with pkgs; [ bash bash-completion zsh git tailscale ];
+  environment.systemPackages = with pkgs; [
+    bash
+    bash-completion
+    zsh
+    git
+    tailscale
+  ];
   environment.enableAllTerminfo = true;
 
   services.ddnsd = {
@@ -101,15 +140,20 @@ in
       PermitRootLogin = mkDefault "no";
     };
 
-    hostKeys = [{
-      type = "ed25519";
-      path = "/etc/ssh/ssh_host_ed25519_key";
-    }];
+    hostKeys = [
+      {
+        type = "ed25519";
+        path = "/etc/ssh/ssh_host_ed25519_key";
+      }
+    ];
   };
   services.sshguard.enable = true;
 
   # dnssec = false is required for tailscale to work
-  services.resolved = { enable = true; dnssec = "false"; };
+  services.resolved = {
+    enable = true;
+    dnssec = "false";
+  };
   services.tailscale = {
     enable = true;
     authKeyFile = "/var/secrets/tailscale-auth-key";
@@ -119,7 +163,10 @@ in
   users.users.jawn = {
     uid = lib.mkDefault 1337;
     isNormalUser = true;
-    extraGroups = [ "wheel" "tty" ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
+    extraGroups = [
+      "wheel"
+      "tty"
+    ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
     openssh.authorizedKeys.keys = sshKeys;
     shell = pkgs.zsh;
   };
@@ -156,7 +203,10 @@ in
         "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
       ];
-      trusted-users = [ "root" config.users.users.jawn.name ];
+      trusted-users = [
+        "root"
+        config.users.users.jawn.name
+      ];
     };
   };
 

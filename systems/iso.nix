@@ -1,9 +1,19 @@
-{ config, lib, name, ... }: with lib; {
+{
+  config,
+  lib,
+  name,
+  ...
+}:
+with lib;
+{
   users.users = {
     # Remove initialHashedPassword for root and nixos
     root.initialHashedPassword = mkForce null;
     nixos.initialHashedPassword = mkForce null;
-    jawn.extraGroups = [ "video" "networkmanager" ];
+    jawn.extraGroups = [
+      "video"
+      "networkmanager"
+    ];
   };
 
   networking.hostName = "nixos-iso";
@@ -15,4 +25,3 @@
   # auto log me in
   services.getty.autologinUser = mkForce config.users.users.jawn.name;
 }
-  

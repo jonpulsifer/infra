@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   downloadDir = "/mnt/disks/transmission";
@@ -33,7 +38,6 @@ in
         pex-enabled = false;
         lpd-enabled = false;
 
-
         rpc-bind-address = "0.0.0.0";
         rpc-host-whitelist = "*.pirate-musical.ts.net";
         rpc-host-whitelist-enabled = true;
@@ -43,7 +47,6 @@ in
         rpc-authentication-required = false;
       };
     };
-
 
     # https://github.com/NixOS/nixpkgs/issues/360592
     sonarr.enable = true;

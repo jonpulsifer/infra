@@ -1,4 +1,5 @@
-{ pkgs, lib, ... }: {
+{ pkgs, lib, ... }:
+{
   nix = {
     # package = pkgs.nixVersions.latest;
     configureBuildUsers = true;
@@ -28,7 +29,10 @@
   time.timeZone = "America/Halifax";
   services.nix-daemon.enable = true;
   programs.zsh.enable = true;
-  environment.systemPackages = with pkgs; [ alacritty sonos ];
+  environment.systemPackages = with pkgs; [
+    alacritty
+    sonos
+  ];
 
   fonts = {
     fontDir.enable = true;

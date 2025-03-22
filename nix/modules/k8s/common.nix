@@ -1,21 +1,38 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   kubeAPIServerIP = "10.3.0.10";
   kubeAPIServerHostname = "k8s.lolwtf.ca";
   kubeAPIServerPort = 6443;
   kubePodCidr = "10.100.0.0/20";
   kubeServiceCidr = "10.10.0.0/16";
-  kubeDns = [ "10.10.0.254" "10.3.0.1" ];
+  kubeDns = [
+    "10.10.0.254"
+    "10.3.0.1"
+  ];
   kubeUpstreamDns = "10.2.0.1";
 in
 {
   # this section is only required for longhorn
-  systemd.services.containerd.path = [ pkgs.openiscsi "/run/wrappers/bin" "/run/current-system/sw/bin/" ];
+  systemd.services.containerd.path = [
+    pkgs.openiscsi
+    "/run/wrappers/bin"
+    "/run/current-system/sw/bin/"
+  ];
   systemd.tmpfiles.rules = [
     "L+ /usr/local/bin - - - - /run/current-system/sw/bin/"
   ];
 
-  boot.kernelModules = [ "br_netfilter" "overlay" "iptable_raw" "xt_socket" ];
+  boot.kernelModules = [
+    "br_netfilter"
+    "overlay"
+    "iptable_raw"
+    "xt_socket"
+  ];
 
   networking.extraHosts = "${kubeAPIServerIP} ${kubeAPIServerHostname}";
   networking.firewall.enable = lib.mkForce false;
@@ -29,17 +46,29 @@ in
   # cilium writes its own config to /etc/cni/net.d, so we need to make sure it's writable/empty/whatever
   environment.etc."cni/net.d".enable = false;
 
-  environment.systemPackages = with pkgs; [ cri-tools kubectl kubernetes ]
-    ++ [ ethtool conntrack-tools iptables socat ] # for some k8s networking
+  environment.systemPackages =
+    with pkgs;
+    [
+      cri-tools
+      kubectl
+      kubernetes
+    ]
+    ++ [
+      ethtool
+      conntrack-tools
+      iptables
+      socat
+    ] # for some k8s networking
     ++ [ openiscsi ]; # for longhorn
 
   systemd.services.kubelet.preStart = lib.mkForce ''
-      ${lib.concatMapStrings (img: ''
+    ${lib.concatMapStrings (img: ''
       echo "Seeding container image: ${img}"
-      ${if (lib.hasSuffix "gz" img) then
-        ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
-      else
-        ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
+      ${
+        if (lib.hasSuffix "gz" img) then
+          ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
+        else
+          ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
       }
     '') config.services.kubernetes.kubelet.seedDockerImages}
   ''; # we do not want to remove /opt/cni/bin/*

@@ -7,8 +7,6 @@ locals {
 
 provider "github" {
   owner = local.github.org
-  # token = "" or GH_TOKEN env
-  # export GH_TOKEN=$(op item get 'fluxcd pat' --fields=password --account=pulsifer)
 }
 
 resource "tls_private_key" "flux" {

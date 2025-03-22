@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 {
   imports = [ ./common.nix ];
@@ -7,7 +12,13 @@
     apiserver = {
       enable = true;
       allowPrivileged = true;
-      extraSANs = [ "nuc" "nuc.lolwtf.ca" "nuc.fml.pulsifer.ca" "nuc.pirate-musical.ts.net" "10.3.0.10" ];
+      extraSANs = [
+        "nuc"
+        "nuc.lolwtf.ca"
+        "nuc.fml.pulsifer.ca"
+        "nuc.pirate-musical.ts.net"
+        "10.3.0.10"
+      ];
       extraOpts = ''
         --enable-aggregator-routing=true \
         --requestheader-allowed-names=front-proxy-client \

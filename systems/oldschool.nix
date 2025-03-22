@@ -1,4 +1,11 @@
-{ config, lib, pkgs, wannabekeys, name, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  wannabekeys,
+  name,
+  ...
+}:
 let
   sshKeys = lib.splitString "\n" (builtins.readFile wannabekeys);
 in
@@ -29,12 +36,12 @@ in
   systemd.services.tailscale-transport-layer-offloads = {
     # https://tailscale.com/kb/1320/performance-best-practices#ethtool-configuration.
     description = "Linux optimizations for subnet routers and exit nodes";
-    after = ["network.target"];
+    after = [ "network.target" ];
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${pkgs.ethtool}/sbin/ethtool -K eno1 rx-udp-gro-forwarding on rx-gro-list off";
     };
-    wantedBy = ["default.target"];
+    wantedBy = [ "default.target" ];
   };
 
   services.ddnsd.enable = true;
@@ -43,7 +50,10 @@ in
   users.users.quiker = {
     uid = 1338;
     isNormalUser = true;
-    extraGroups = [ "wheel" "tty" ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
+    extraGroups = [
+      "wheel"
+      "tty"
+    ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
     openssh.authorizedKeys.keys = sshKeys;
     shell = pkgs.zsh;
   };
@@ -68,25 +78,24 @@ in
     };
     xdg.enable = true;
 
-    home.packages = with pkgs;
-      [
-        dig
-        jq
-        mtr
-        nano
-        tcpdump
-        wget
-        whois
+    home.packages = with pkgs; [
+      dig
+      jq
+      mtr
+      nano
+      tcpdump
+      wget
+      whois
 
-        # hipster tools
-        eza
-        delta
-        fd
-        httpie
-        ripgrep
-        sd
-        xan
-      ];
+      # hipster tools
+      eza
+      delta
+      fd
+      httpie
+      ripgrep
+      sd
+      xan
+    ];
 
     programs.bat.enable = true;
     programs.btop.enable = true;

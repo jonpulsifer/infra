@@ -1,4 +1,11 @@
-{ config, lib, pkgs, keys, name, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  keys,
+  name,
+  ...
+}:
 let
   inherit (lib) mkDefault mkForce;
 in
@@ -19,10 +26,15 @@ in
       "cgroup_enable=cpuset"
       "cgroup_enable=memory"
     ];
-    supportedFilesystems = [ "ext4" "vfat" ];
+    supportedFilesystems = [
+      "ext4"
+      "vfat"
+    ];
 
     # this runs out of space sometimes
-    tmp = { useTmpfs = false; };
+    tmp = {
+      useTmpfs = false;
+    };
     consoleLogLevel = 7;
     loader = {
       # we legacy boot
@@ -43,14 +55,19 @@ in
     "/boot/firmware" = {
       device = "/dev/disk/by-label/FIRMWARE";
       fsType = "vfat";
-      options = [ "noauto" "nofail" ];
+      options = [
+        "noauto"
+        "nofail"
+      ];
     };
   };
 
   networking = {
     hostName = name;
     wireless.enable = mkForce true;
-    wireless.networks.lab = { hidden = true; };
+    wireless.networks.lab = {
+      hidden = true;
+    };
   };
 
   nixpkgs = {

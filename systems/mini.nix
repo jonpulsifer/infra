@@ -1,6 +1,8 @@
 { pkgs, ... }:
-let hostName = "mini";
-in {
+let
+  hostName = "mini";
+in
+{
   networking = rec {
     inherit hostName;
     computerName = hostName;
