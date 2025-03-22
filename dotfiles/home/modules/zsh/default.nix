@@ -1,8 +1,14 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   inherit (config.home) homeDirectory;
   inherit (pkgs) fetchFromGitHub;
-in {
+in
+{
   programs.zsh = {
     enable = true;
     autocd = true;

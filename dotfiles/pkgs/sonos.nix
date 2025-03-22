@@ -1,4 +1,9 @@
-{ lib, stdenv, fetchurl, undmg }:
+{
+  lib,
+  stdenv,
+  fetchurl,
+  undmg,
+}:
 stdenv.mkDerivation rec {
   pname = "sonos";
   version = "73.0-41050";
@@ -24,6 +29,9 @@ stdenv.mkDerivation rec {
       free = false;
     };
     maintainers = with maintainers; [ jonpulsifer ];
-    platforms = [ "aarch64-darwin" "x86_64-darwin" ];
+    platforms = [
+      "aarch64-darwin"
+      "x86_64-darwin"
+    ];
   };
 }

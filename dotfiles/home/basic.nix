@@ -1,4 +1,9 @@
-{ lib, pkgs, config, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}:
 let
   inherit (pkgs.stdenv) isDarwin;
 in
@@ -37,32 +42,31 @@ in
     stateVersion = "24.05";
   };
 
-  home.packages = with pkgs;
-    [
-      # daily driving apps
-      shell-utils
-      dig
-      # gnumake
-      jq
-      mtr
-      nano
-      # neofetch
-      # nmap
-      # shellcheck
-      tcpdump
-      unzip
-      wget
-      whois
+  home.packages = with pkgs; [
+    # daily driving apps
+    shell-utils
+    dig
+    # gnumake
+    jq
+    mtr
+    nano
+    # neofetch
+    # nmap
+    # shellcheck
+    tcpdump
+    unzip
+    wget
+    whois
 
-      # hipster tools
-      eza
-      delta
-      fd
-      httpie
-      ripgrep
-      sd
-      xan
-    ];
+    # hipster tools
+    eza
+    delta
+    fd
+    httpie
+    ripgrep
+    sd
+    xan
+  ];
 
   programs.home-manager.enable = true;
   manual.manpages.enable = false;
@@ -86,7 +90,9 @@ in
 
   programs.bat = {
     enable = true;
-    config = { theme = "Dracula"; };
+    config = {
+      theme = "Dracula";
+    };
   };
 
   programs.btop = {
@@ -123,8 +129,7 @@ in
       personal-cipher-preferences = "AES256 AES192 AES";
       personal-digest-preferences = "SHA512 SHA384 SHA256";
       personal-compress-preferences = "ZLIB BZIP2 ZIP Uncompressed";
-      default-preference-list =
-        "SHA512 SHA384 SHA256 AES256 AES192 AES ZLIB BZIP2 ZIP Uncompressed";
+      default-preference-list = "SHA512 SHA384 SHA256 AES256 AES192 AES ZLIB BZIP2 ZIP Uncompressed";
       cert-digest-algo = "SHA512";
       s2k-digest-algo = "SHA512";
       s2k-cipher-algo = "AES256";

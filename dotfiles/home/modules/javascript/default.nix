@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   inherit (lib) mkMerge;
 
@@ -8,11 +13,18 @@ let
   };
 in
 {
-  home.sessionPath = mkMerge [ [ paths.npm paths.pnpm ] ];
-  home.sessionVariables = mkMerge [{
-    NPM_CONFIG_PREFIX = paths.npm;
-    PNPM_HOME = paths.pnpm;
-  }];
+  home.sessionPath = mkMerge [
+    [
+      paths.npm
+      paths.pnpm
+    ]
+  ];
+  home.sessionVariables = mkMerge [
+    {
+      NPM_CONFIG_PREFIX = paths.npm;
+      PNPM_HOME = paths.pnpm;
+    }
+  ];
   home.packages = with pkgs; [
     biome
     bun

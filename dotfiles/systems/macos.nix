@@ -1,4 +1,5 @@
-{ pkgs, lib, ... }: {
+{ pkgs, lib, ... }:
+{
   nix = {
     # package = pkgs.nixFlakes;
     optimise = {

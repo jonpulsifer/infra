@@ -1,4 +1,9 @@
-{ stdenv, fetchurl, installShellFiles, lib }:
+{
+  stdenv,
+  fetchurl,
+  installShellFiles,
+  lib,
+}:
 let
   version = "1.31.2";
   sources = {

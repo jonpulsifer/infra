@@ -1,6 +1,16 @@
-{ lib, pkgs, config, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}:
 let
-  inherit (lib) mkForce mkIf mkMerge optionals;
+  inherit (lib)
+    mkForce
+    mkIf
+    mkMerge
+    optionals
+    ;
   inherit (lib.attrsets) optionalAttrs;
   inherit (pkgs.stdenv) isLinux;
 in
@@ -11,17 +21,19 @@ in
   ];
 
   home = rec {
-    packages = with pkgs;
+    packages =
+      with pkgs;
       [
         # cloudevents
-        asciinema
+        # asciinema
         # hugo
         sops
         vault
 
         # pixlet
         # bazel-buildtools
-      ] ++ optionals isLinux [ wol ];
+      ]
+      ++ optionals isLinux [ wol ];
 
     sessionVariables = {
       VAULT_ADDR = "https://vault.lolwtf.ca";

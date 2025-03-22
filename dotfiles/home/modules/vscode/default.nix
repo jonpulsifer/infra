@@ -3,9 +3,11 @@
   programs.vscode = {
     enable = true;
     mutableExtensionsDir = true;
-    userSettings =
-      let fontSize = 18;
-      in {
+    profiles.default.userSettings =
+      let
+        fontSize = 18;
+      in
+      {
         "editor.autoClosingBrackets" = "never";
         "editor.autoClosingQuotes" = "never";
         "editor.fontFamily" = "FiraCode Nerd Font";
@@ -52,7 +54,9 @@
         "[typescriptreact]" = {
           "editor.defaultFormatter" = "esbenp.prettier-vscode";
         };
-        "[yaml]" = { "editor.defaultFormatter" = "redhat.vscode-yaml"; };
+        "[yaml]" = {
+          "editor.defaultFormatter" = "redhat.vscode-yaml";
+        };
       };
   };
 }

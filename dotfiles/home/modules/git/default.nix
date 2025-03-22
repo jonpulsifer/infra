@@ -22,19 +22,34 @@ in
         pager = delta;
         whitespace = "trailing-space,space-before-tab";
       };
-      delta = { navigate = true; side-by-side = true; };
-      format = { signoff = true; };
+      delta = {
+        navigate = true;
+        side-by-side = true;
+      };
+      format = {
+        signoff = true;
+      };
       gpg.format = "ssh";
       github.user = mkDefault github;
-      help = { autocorrect = 1; };
+      help = {
+        autocorrect = 1;
+      };
       hub.protocol = "https";
       init.defaultBranch = "main";
-      interactive = { diffFilter = "${delta} --color-only"; };
-      merge = { conflictstyle = "zdiff3"; };
-      pull = { ff = "only"; rebase = true; };
-      push = { default = "current"; };
-      url."git@github.com:${github}/".insteadOf =
-        [ "https://github.com/${github}/" ];
+      interactive = {
+        diffFilter = "${delta} --color-only";
+      };
+      merge = {
+        conflictstyle = "zdiff3";
+      };
+      pull = {
+        ff = "only";
+        rebase = true;
+      };
+      push = {
+        default = "current";
+      };
+      url."git@github.com:${github}/".insteadOf = [ "https://github.com/${github}/" ];
     };
 
     aliases = {

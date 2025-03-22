@@ -1,4 +1,10 @@
-{ config, lib, pkgs, ... }: {
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
   home.packages = with pkgs; [ gitmux ];
   programs.tmux = {
     enable = true;

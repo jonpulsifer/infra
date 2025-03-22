@@ -1,9 +1,16 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 with lib;
 
-let cfg = config.services.ddnsb0t;
-in {
+let
+  cfg = config.services.ddnsb0t;
+in
+{
   meta.maintainers = [ maintainers.jonpulsifer ];
   options.services.ddnsb0t = {
     enable = mkEnableOption "ddnsb0t robot";
@@ -23,8 +30,7 @@ in {
     token = mkOption {
       type = types.str;
       example = "abcdefg";
-      description =
-        "(optional) a shared token that can be used to prevent abuse";
+      description = "(optional) a shared token that can be used to prevent abuse";
       default = "homelabisthedopestlab";
     };
 

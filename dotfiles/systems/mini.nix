@@ -1,6 +1,8 @@
 { pkgs, ... }:
-let hostname = "mini";
-in {
+let
+  hostname = "mini";
+in
+{
   networking = {
     computerName = hostname;
     hostName = hostname;

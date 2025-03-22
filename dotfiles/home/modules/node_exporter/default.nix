@@ -1,9 +1,16 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 with lib;
 
-let cfg = config.services.node_exporter;
-in {
+let
+  cfg = config.services.node_exporter;
+in
+{
   meta.maintainers = [ maintainers.jonpulsifer ];
   options.services.node_exporter = {
     enable = mkEnableOption "Prometheus node_exporter";

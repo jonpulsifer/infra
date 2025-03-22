@@ -1,10 +1,17 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   inherit (lib) mkIf;
   inherit (pkgs.stdenv) isLinux;
 in
 {
-  home.sessionVariables = { SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent.sock"; };
+  home.sessionVariables = {
+    SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent.sock";
+  };
   programs.zsh.shellAliases = {
     sshpw = "SSH_ASKPASS=${pkgs.shell-utils}/bin/sshpw DISPLAY=1 ssh-add ${config.programs.git.signing.key} < /dev/null";
   };
@@ -33,9 +40,18 @@ in
       MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
     '';
     matchBlocks = {
-      "*.fml.pulsifer.ca" = { port = 22; forwardAgent = true; };
-      "*.lolwtf.ca" = { port = 22; forwardAgent = true; };
-      "*.pirate-musical.ts.net" = { port = 22; forwardAgent = true; };
+      "*.fml.pulsifer.ca" = {
+        port = 22;
+        forwardAgent = true;
+      };
+      "*.lolwtf.ca" = {
+        port = 22;
+        forwardAgent = true;
+      };
+      "*.pirate-musical.ts.net" = {
+        port = 22;
+        forwardAgent = true;
+      };
       "github.com" = {
         user = "git";
       };

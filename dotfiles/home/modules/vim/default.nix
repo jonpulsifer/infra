@@ -1,1 +1,4 @@
-{ config, ... }: { home.file.".vimrc".source = ./vimrc; }
+{ config, ... }:
+{
+  home.file.".vimrc".source = ./vimrc;
+}

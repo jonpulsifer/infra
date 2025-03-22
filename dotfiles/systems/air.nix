@@ -1,6 +1,8 @@
 { pkgs, ... }:
-let hostname = "air";
-in {
+let
+  hostname = "air";
+in
+{
   system.defaults.alf.globalstate = 1; # enabled
   system.defaults.alf.allowsignedenabled = 1;
   system.defaults.alf.allowdownloadsignedenabled = 0;

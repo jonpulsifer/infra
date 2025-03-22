@@ -1,4 +1,8 @@
-{ buildGoModule, fetchFromGitHub, lib }:
+{
+  buildGoModule,
+  fetchFromGitHub,
+  lib,
+}:
 
 buildGoModule rec {
   pname = "ddnsb0t";
@@ -14,8 +18,7 @@ buildGoModule rec {
   subPackages = [ "." ];
 
   meta = with lib; {
-    description =
-      "ddnsb0t is a program that uses CloudEvents to communicate to a Google Cloud Function and update my DNS entries using Google Cloud DNS.";
+    description = "ddnsb0t is a program that uses CloudEvents to communicate to a Google Cloud Function and update my DNS entries using Google Cloud DNS.";
     homepage = "https://github.com/jonpulsifer/ddnsb0t";
     license = licenses.mit;
     maintainers = with maintainers; [ jonpulsifer ];

@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   inherit (lib) mkIf optionals;
   inherit (pkgs) fetchFromGitHub stdenv;
@@ -12,17 +17,20 @@ let
 in
 {
   home = {
-    packages = with pkgs; [
-      argocd
-      cilium-cli
-      fluxcd
-      grafana-loki
-      k6
-      k9s
-      kubectl
-      kubecolor
-      kubernetes-helm
-    ] ++ optionals (stdenv.isLinux) [ nerdctl ];
+    packages =
+      with pkgs;
+      [
+        argocd
+        cilium-cli
+        fluxcd
+        grafana-loki
+        k6
+        k9s
+        kubectl
+        kubecolor
+        kubernetes-helm
+      ]
+      ++ optionals (stdenv.isLinux) [ nerdctl ];
     sessionPath = mkIf shellIntegration [ "${k8s-workflow-utils}/kubectl-plugins" ];
     sessionVariables = {
       KUBECONFIG = "${config.home.homeDirectory}/.kube/config";

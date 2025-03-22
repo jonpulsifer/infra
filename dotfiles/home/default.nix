@@ -1,4 +1,9 @@
-{ lib, pkgs, config, ... }:
+{
+  lib,
+  pkgs,
+  config,
+  ...
+}:
 
 let
   inherit (pkgs.stdenv) isDarwin;
@@ -13,7 +18,8 @@ in
     modules/kubernetes
   ];
 
-  home.packages = with pkgs;
+  home.packages =
+    with pkgs;
     [
       _1password-cli
       age
@@ -21,7 +27,11 @@ in
       postgresql_15
       # terraform
       tenv
-    ] ++ optionals isDarwin [ ffmpeg reattach-to-user-namespace ];
+    ]
+    ++ optionals isDarwin [
+      ffmpeg
+      reattach-to-user-namespace
+    ];
 
   fonts.fontconfig.enable = true;
 
