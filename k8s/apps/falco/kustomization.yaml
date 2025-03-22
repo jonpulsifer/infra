@@ -4,5 +4,4 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helm-release.yaml
-  - falco-exporter.yaml
 namespace: falco
