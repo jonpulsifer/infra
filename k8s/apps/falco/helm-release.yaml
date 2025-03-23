@@ -22,7 +22,7 @@ spec:
     customRules:
       rules-allow-runc-memfd.yaml: |-
         - list: known_memfd_execution_binaries
-          items: [.runc-wrapped]
+          items: [".runc-wrapped"]
           override:
             items: append
     falco:
