@@ -16,6 +16,7 @@ spec:
   values:
     driver:
       kind: modern-bpf
+    collectors:
       kubernetes:
         enabled: true
     falco:
