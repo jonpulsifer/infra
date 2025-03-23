@@ -53,6 +53,12 @@ spec:
         value: "true"
     falcosidekick:
       enabled: true
+      loki:
+        hostport: http://loki.monitoring.svc.cluster.local:3100          
+        tenant_id: "1"
+        grafanaDashboard:
+          enabled: true
+          namespace: monitoring
       webui:
         enabled: true
         ingress:
