@@ -33,6 +33,12 @@ spec:
           condition: or (proc.exepath = "memfd:runc_cloned:/proc/self/exe") or (proc.exe = "memfd:runc_cloned:/proc/self/exe")
           override:
             condition: append
+        
+        # k8s containers that talk to the apiserver
+        - macro: k8s_containers
+          condition: or (container.image.repository in (docker.io/kiwigrid/k8s-sidecar))
+          override:
+            condition: append
     falco:
       grpc:
         enabled: true
