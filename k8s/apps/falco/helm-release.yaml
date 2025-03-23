@@ -38,8 +38,8 @@ spec:
         enabled: true
       grpc_output:
         enabled: true
-      serviceMonitor:
-        create: true
+    serviceMonitor:
+      create: true
     tolerations:
       - effect: NoSchedule
         key: unschedulable
