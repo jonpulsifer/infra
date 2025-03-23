@@ -16,6 +16,8 @@ spec:
   values:
     driver:
       kind: modern-bpf
+      kubernetes:
+        enabled: true
     falco:
       grpc:
         enabled: true
