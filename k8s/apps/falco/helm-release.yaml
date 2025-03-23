@@ -23,11 +23,11 @@ spec:
         enabled: true
       serviceMonitor:
         create: true
-      tolerations:
-        - effect: NoSchedule
-          key: unschedulable
-          operator: Equal
-          value: "true"
+    tolerations:
+      - effect: NoSchedule
+        key: unschedulable
+        operator: Equal
+        value: "true"
     falcosidekick:
       enabled: true
       webui:
