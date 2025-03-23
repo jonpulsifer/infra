@@ -21,10 +21,18 @@ spec:
         enabled: true
     customRules:
       rules-allow-runc-memfd.yaml: |-
+        # https://github.com/falcosecurity/falco/issues/3444
+        # Add runc to known binaries
         - list: known_memfd_execution_binaries
-          items: [".runc-wrapped"]
+          items: [runc, .runc-wrapped]
           override:
             items: append
+
+        # Add specific path conditions to existing macro
+        - macro: known_memfd_execution_processes
+          condition: or (proc.exepath = "memfd:runc_cloned:/proc/self/exe") or (proc.exe = "memfd:runc_cloned:/proc/self/exe")
+          override:
+            condition: append
     falco:
       grpc:
         enabled: true
