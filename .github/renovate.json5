@@ -1,34 +1,42 @@
 {
-  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
-    "config:recommended",
-    ":disableRateLimiting",
-    ":dependencyDashboard",
-    ":semanticCommits",
-    ":automergePr",
-    ":automergeRequireAllStatusChecks",
-    "regexManagers:dockerfileVersions",
-    "regexManagers:githubActionsVersions",
-    "regexManagers:helmChartYamlAppVersions",
+    'config:recommended',
+    ':disableRateLimiting',
+    ':dependencyDashboard',
+    ':semanticCommits',
+    ':automergePr',
+    ':automergeRequireAllStatusChecks',
+    'customManagers:dockerfileVersions',
+    'customManagers:githubActionsVersions',
+    'customManagers:helmChartYamlAppVersions',
   ],
   dependencyDashboard: true,
-  suppressNotifications: ["prEditedNotification, prIgnoreNotification"],
-  rebaseWhen: "conflicted",
+  suppressNotifications: [
+    'prEditedNotification, prIgnoreNotification',
+  ],
+  rebaseWhen: 'conflicted',
   flux: {
-    fileMatch: ["k8s/.+\\.ya?ml$"],
+    fileMatch: [
+      'k8s/.+\\.ya?ml$',
+    ],
   },
-  "helm-values": {
-    fileMatch: ["k8s/.+\\.ya?ml$"],
+  'helm-values': {
+    fileMatch: [
+      'k8s/.+\\.ya?ml$',
+    ],
   },
   kubernetes: {
-    fileMatch: ["k8s/.+\\.ya?ml$"],
+    fileMatch: [
+      'k8s/.+\\.ya?ml$',
+    ],
   },
-  "packageRules": [
+  packageRules: [
     {
-      "matchManagers": [
-        "terraform"
+      matchManagers: [
+        'terraform',
       ],
-      "groupName": "terraform"
-    }
-  ]
+      groupName: 'terraform',
+    },
+  ],
 }
