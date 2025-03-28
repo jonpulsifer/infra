@@ -38,7 +38,7 @@ in
     shellAliases = rec {
       chctx = "kubectl ctx";
       chns = "kubectl ns";
-      kube = "${pkgs.kubecolor}/bin/kubecolor";
+      kube = "kubectl";
       k = kube;
     };
   };
@@ -50,6 +50,8 @@ in
       KUBE_PS1_SYMBOL_PADDING = "true";
     };
     initExtra = ''
+      alias kubectl="kubecolor"
+      compdef kubecolor="kubectl"
       export RPS1='$(kube_ps1)'
       logs() {
         FZF_DEFAULT_COMMAND="kubectl get pods --all-namespaces" \

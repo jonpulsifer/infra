@@ -12,12 +12,14 @@ in
   programs.zsh = {
     enable = true;
     autocd = true;
-    enableCompletion = false;
+    enableCompletion = true;
     autosuggestion.enable = true;
     syntaxHighlighting.enable = true;
+    zprof.enable = false;
 
     shellAliases = { };
     initExtraBeforeCompInit = ''
+      fpath+=("${config.home.profileDirectory}"/share/zsh/site-functions "${config.home.profileDirectory}"/share/zsh/$ZSH_VERSION/functions "${config.home.profileDirectory}"/share/zsh/vendor-completions)
       declare -a files=(
         ${homeDirectory}/.nix-profile/etc/profile.d/nix.sh
       )
@@ -54,7 +56,6 @@ in
       [[ -n "''${key[PageUp]}"    ]] && bindkey -- "''${key[PageUp]}"     beginning-of-buffer-or-history
       [[ -n "''${key[PageDown]}"  ]] && bindkey -- "''${key[PageDown]}"   end-of-buffer-or-history
       [[ -n "''${key[Shift-Tab]}" ]] && bindkey -- "''${key[Shift-Tab]}"  reverse-menu-complete
-      # autoload -U bashcompinit && bashcompinit
     '';
 
     initExtra = ''
@@ -102,8 +103,8 @@ in
         src = fetchFromGitHub {
           owner = "Aloxaf";
           repo = "fzf-tab";
-          rev = "v1.1.1";
-          sha256 = "sha256-0/YOL1/G2SWncbLNaclSYUz7VyfWu+OB8TYJYm4NYkM=";
+          rev = "v1.2.0";
+          sha256 = "sha256-q26XVS/LcyZPRqDNwKKA9exgBByE0muyuNb0Bbar2lY=";
         };
       }
       {
