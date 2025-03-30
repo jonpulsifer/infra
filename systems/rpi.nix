@@ -6,20 +6,13 @@
   name,
   ...
 }:
-let
-  inherit (lib) mkDefault mkForce;
-in
 {
-  imports = [
-    ../nix/modules/kiosk.nix
-  ];
-
   # Required for the Wireless firmware
   hardware.enableRedistributableFirmware = true;
   hardware.cpu.intel.updateMicrocode = lib.mkForce false;
 
   boot = {
-    kernelPackages = pkgs.linuxPackages_rpi4;
+    kernelPackages = lib.mkForce pkgs.linuxPackages_rpi4;
     kernelParams = [
       "console=tty0"
       "cma=256M"
@@ -40,7 +33,7 @@ in
       # we legacy boot
       systemd-boot.enable = false;
       efi.canTouchEfiVariables = false;
-      timeout = mkForce 1;
+      timeout = lib.mkForce 1;
     };
   };
 
@@ -64,16 +57,17 @@ in
 
   networking = {
     hostName = name;
-    wireless.enable = mkForce true;
+    wireless.enable = lib.mkForce true;
     wireless.networks.lab = {
       hidden = true;
     };
   };
 
   nixpkgs = {
+    # Cross compile the system from x86_64-linux to aarch64-linux if you want
     # buildPlatform.system = "x86_64-linux";
     hostPlatform.system = "aarch64-linux";
   };
 
-  powerManagement.cpuFreqGovernor = mkDefault "ondemand";
+  powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
 }

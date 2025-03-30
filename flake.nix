@@ -8,7 +8,6 @@
       url = "github:nix-community/NixOS-WSL/main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
 
     home-manager = {
@@ -16,6 +15,8 @@
       follows = "dotfiles/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    hosts.url = "github:StevenBlack/hosts";
 
     # my repositories
     dotfiles = {
@@ -43,6 +44,7 @@
       ddnsd,
       dotfiles,
       home-manager,
+      hosts,
       nixos,
       nixos-hardware,
       nixos-wsl,
@@ -51,49 +53,41 @@
       ...
     }@inputs:
     let
-      inherit (nixos.lib)
-        genAttrs
-        mkIf
-        nixosSystem
-        strings
-        ;
-
-      # common modules for all systems
-      common = [
+      commonModules = [
+        ./nix/nixos.nix
         {
           nixpkgs.overlays = [
             dotfiles.overlays.pkgs
             ddnsd.overlays.pkgs
           ];
-          system.configurationRevision = mkIf (self ? rev) self.rev;
+          system.configurationRevision = nixos.lib.mkIf (self ? rev) self.rev;
         }
+        home-manager.nixosModules.home-manager
         {
           home-manager.useUserPackages = true;
           home-manager.useGlobalPkgs = true;
           home-manager.users.jawn = dotfiles.home.basic;
         }
-        home-manager.nixosModules.home-manager
         ddnsd.nixosModules.default
-        ./nix/nixos.nix
       ];
 
       mkSystem =
-        name: extra:
-        nixosSystem {
+        name: extraModules:
+        nixos.lib.nixosSystem {
           system = "x86_64-linux";
-          modules = [ ./systems/${name}.nix ] ++ common ++ extra;
+          modules = [ ./systems/${name}.nix ] ++ commonModules ++ extraModules;
           specialArgs = { inherit keys wannabekeys name; };
         };
 
       mkRPi4 =
-        name: extra:
+        name: extraModules:
         nixos.lib.nixosSystem {
           system = "aarch64-linux";
           modules =
-            common
-            ++ extra
+            [ ./systems/${name}.nix ./systems/rpi.nix ]
             ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
-            ++ [ ./systems/rpi.nix ]
+            ++ commonModules
+            ++ extraModules
             ++ [
               "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
               {
@@ -115,7 +109,7 @@
         };
 
       mkSystems = builtins.mapAttrs (
-        name: modules: (if strings.hasInfix "pi4" name then mkRPi4 else mkSystem) name modules
+        name: modules: (if nixos.lib.strings.hasInfix "pi4" name then mkRPi4 else mkSystem) name modules
       );
     in
     rec {
@@ -135,9 +129,9 @@
         iso = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ];
 
         # raspberry pis
-        rpi4 = [ ];
-        homepi4 = [ { services.kiosk.enable = true; } ];
-        screenpi4 = [ { services.kiosk.enable = true; } ];
+        cloudpi4 = [ hosts.nixosModule ];
+        homepi4 = [ ];
+        screenpi4 = [ ];
       };
 
       packages = {
@@ -146,11 +140,13 @@
           wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
         };
         aarch64-linux = {
-          rpi4 = nixosConfigurations.rpi4.config.system.build.sdImage;
+          cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
+          homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
+          screenpi4 = nixosConfigurations.screenpi4.config.system.build.sdImage;
         };
       };
 
-      legacyPackages = genAttrs [ "x86_64-linux" ] (
+      legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" ] (
         system:
         import inputs.nixpkgs {
           inherit system;

@@ -6,7 +6,6 @@
   ...
 }:
 let
-  inherit (lib) mkDefault mkForce;
   sshKeys = lib.splitString "\n" (builtins.readFile keys);
 in
 {
@@ -14,8 +13,8 @@ in
     # (modulesPath + "/installer/scan/not-detected.nix")
   ];
 
-  hardware.cpu.intel.updateMicrocode = mkDefault config.hardware.enableRedistributableFirmware;
-  powerManagement.cpuFreqGovernor = mkDefault "ondemand";
+  hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+  powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
 
   boot = {
     initrd.availableKernelModules =
@@ -31,7 +30,7 @@ in
       ]) [ "nvme" ];
     initrd.kernelModules = [ ];
 
-    kernelPackages = mkDefault pkgs.linuxPackages_latest;
+    kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
     kernelModules =
       [ ]
       ++ lib.optionals (builtins.elem config.networking.hostName [
@@ -41,16 +40,16 @@ in
         "optiplex"
       ]) [ "kvm-intel" ];
 
-    consoleLogLevel = mkDefault 0;
+    consoleLogLevel = lib.mkDefault 0;
     extraModulePackages = [ ];
 
     loader = {
       # Use the systemd-boot EFI boot loader.
-      systemd-boot.enable = mkDefault true;
-      efi.canTouchEfiVariables = mkDefault true;
-      timeout = mkDefault 0;
+      systemd-boot.enable = lib.mkDefault true;
+      efi.canTouchEfiVariables = lib.mkDefault true;
+      timeout = lib.mkDefault 0;
     };
-    supportedFilesystems = mkForce [
+    supportedFilesystems = lib.mkForce [
       "ext4"
       "vfat"
     ];
@@ -61,7 +60,7 @@ in
     fsType = "vfat";
   };
 
-  fileSystems."/" = mkDefault {
+  fileSystems."/" = lib.mkDefault {
     device = "/dev/disk/by-label/nixos";
     fsType = "ext4";
   };
@@ -78,14 +77,14 @@ in
   swapDevices = [ ];
 
   networking = {
-    hostName = mkDefault "nixos";
+    hostName = lib.mkDefault "nixos";
     firewall.enable = true;
     useDHCP = true;
     useNetworkd = true;
-    networkmanager.enable = mkDefault false;
+    networkmanager.enable = lib.mkDefault false;
     wireless = {
-      enable = mkDefault false;
-      networks = mkDefault {
+      enable = lib.mkDefault false;
+      networks = lib.mkDefault {
         lab = {
           hidden = true;
         };
@@ -112,8 +111,8 @@ in
   };
 
   services.prometheus.exporters.node = {
-    enable = mkDefault true;
-    openFirewall = mkDefault true;
+    enable = lib.mkDefault true;
+    openFirewall = lib.mkDefault true;
   };
   programs.zsh.enable = true;
 
@@ -137,7 +136,7 @@ in
       ChallengeResponseAuthentication = false;
       KbdInteractiveAuthentication = false;
       PasswordAuthentication = false;
-      PermitRootLogin = mkDefault "no";
+      PermitRootLogin = lib.mkDefault "no";
     };
 
     hostKeys = [
@@ -172,7 +171,7 @@ in
   };
 
   nixpkgs = {
-    hostPlatform = mkDefault "x86_64-linux";
+    hostPlatform = lib.mkDefault "x86_64-linux";
     config.allowUnfree = true;
   };
 
