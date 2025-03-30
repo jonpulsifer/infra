@@ -13,14 +13,12 @@ on:
           - homepi4
           - screenpi4
           - wsl
-env:
-  RUNNER: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   check:
-    runs-on: ${{ env.RUNNER }}
+    runs-on: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -30,7 +28,7 @@ jobs:
       - uses: DeterminateSystems/flake-checker-action@main
       - run: nix flake check
   nixos:
-    runs-on: ${{ env.RUNNER }}
+    runs-on: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs: check
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
