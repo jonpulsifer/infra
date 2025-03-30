@@ -40,3 +40,12 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
       - run: nix build .#${{ inputs.image }}
+      - run: sha256sum result/sd-image/nixos-image-sd-card-* > nixos-image-sd-card.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${inputs.image}
+          path: |
+            result/sd-image/nixos-image-sd-card-*
+            nixos-image-sd-card.sha256
+          retention-days: 1
+          compression-level: 0
