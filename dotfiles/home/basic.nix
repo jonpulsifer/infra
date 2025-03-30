@@ -11,7 +11,7 @@ in
   imports = [
     modules/git
     modules/nix
-    modules/node_exporter
+    # modules/node_exporter
     modules/tmux
     modules/zsh
   ];
@@ -62,7 +62,6 @@ in
     eza
     delta
     fd
-    httpie
     ripgrep
     sd
     xan
