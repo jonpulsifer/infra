@@ -117,7 +117,7 @@
         # lab machines
         oldschool = [ ];
         retrofit = [ ];
-        wsl = [ nixos-wsl.nixosModules.wsl ];
+        wsl = [ nixos-wsl.nixosModules.default ];
 
         # k8s cluster
         nuc = [ ];

@@ -21,13 +21,16 @@ with lib;
   #   uid = lib.mkForce 1000;
   # };
 
-  # required for vscode language server
+  # https://nix-community.github.io/NixOS-WSL/how-to/vscode.html
+  environment.systemPackages = [
+    pkgs.wget
+  ];
   programs.nix-ld = {
     enable = true;
     package = pkgs.nix-ld-rs;
   };
 
   programs.zsh.enable = true;
-  system.stateVersion = lib.mkDefault "24.05";
+  system.stateVersion = lib.mkDefault "24.11";
   system.build.installBootLoader = lib.mkForce "${pkgs.coreutils}/bin/true";
 }

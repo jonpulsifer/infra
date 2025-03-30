@@ -6,3 +6,5 @@ result
 *.img
 systems/ubuntu/build
 *.backup
+*.wsl
+*.zstd
