@@ -1,0 +1,46 @@
+name: nix-rpi-sd
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Image to build'
+        required: true
+        default: 'cloudpi4'
+        type: choice
+        options:
+          - iso
+          - cloudpi4
+          - homepi4
+          - screenpi4
+          - wsl
+env:
+  RUNNER: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ${{ env.RUNNER }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: DeterminateSystems/flake-checker-action@main
+      - run: nix flake check
+  nixos:
+    runs-on: ${{ env.RUNNER }}
+    needs: check
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+      - uses: cachix/cachix-action@v16
+        with:
+          name: jonpulsifer
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          skipPush: ${{ github.ref != 'refs/heads/main' }}
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+      - run: nix build .#${{ inputs.image }}
