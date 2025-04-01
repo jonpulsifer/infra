@@ -62,9 +62,7 @@
       ];
 
       # System-specific settings
-      darwinCommon = common ++ [
-        { home-manager.users.jawn = import ./home/home.nix; }
-      ];
+      darwinCommon = common ++ [ { home-manager.users.jawn = import ./home/home.nix; } ];
     in
     {
       devShells.x86_64-linux.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.x86_64-linux; };
@@ -81,7 +79,8 @@
         basic = mkHomeConfiguration "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHomeConfiguration "aarch64-linux" [ ./home/basic.nix ];
         pixelbook = mkHomeConfiguration "x86_64-linux" [ ./home/pixelbook.nix ];
-        oldboy = mkHomeConfiguration "x86_64-linux" ([ ./home/basic.nix ] ++ [
+        oldboy = mkHomeConfiguration "x86_64-linux" ([
+          ./home/basic.nix
           { config.home.username = "jonathan_pulsifer_ca"; }
         ]);
       };
@@ -91,7 +90,7 @@
           system = "aarch64-darwin";
           modules = darwinCommon ++ [ ./systems/air.nix ];
         };
-        air = Craftbook-Air;  # alias
+        air = Craftbook-Air; # alias
 
         mini = darwinSystem {
           system = "x86_64-darwin";
@@ -100,11 +99,9 @@
 
         hackbookpro = darwinSystem {
           system = "aarch64-darwin";
-          modules = common ++ [
-            { home-manager.users.jawn = import ./home/work.nix; }
-          ];
+          modules = common ++ [ { home-manager.users.jawn = import ./home/work.nix; } ];
         };
-        JTWV573RHQ = hackbookpro;  # alias
+        JTWV573RHQ = hackbookpro; # alias
       };
 
       # nix run .#basic

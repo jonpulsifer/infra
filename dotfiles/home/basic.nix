@@ -39,7 +39,7 @@ in
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.lolcat}/bin/lolcat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.lolcat}/bin/lolcat";
     };
-    stateVersion = "24.05";
+    stateVersion = "24.11";
   };
 
   home.packages = with pkgs; [
