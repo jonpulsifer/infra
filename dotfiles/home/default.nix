@@ -24,7 +24,6 @@ in
       _1password-cli
       age
       gh
-      httpie
       postgresql_15
       tenv
     ]

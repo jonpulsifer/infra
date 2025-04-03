@@ -47,6 +47,7 @@ in
     shell-utils
     dig
     # gnumake
+    httpie
     jq
     mtr
     nano
