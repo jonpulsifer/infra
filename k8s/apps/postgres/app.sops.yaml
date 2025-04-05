@@ -1,10 +1,11 @@
 apiVersion: v1
 data:
-    username: ENC[AES256_GCM,data:j4xtSw==,iv:MPMpZvYKRgJHdpJMW6ptgMaa3LgWSFHWGaO1Fbdkn5E=,tag:r1cZLc9dKPPvj90wnM6I6g==,type:str]
-    password: ENC[AES256_GCM,data:0uhLXbEdunjTfDsMbiB7apcvxKcftqMlRtQA4WqDjBChWauhX3n1W8kdwg==,iv:03Fl1dz+4bNdp8wALeFX2SGMtAiv1H/h5DkAN2uKU+c=,tag:/fB2McPjXxMH658BV0yixw==,type:str]
+    username: ENC[AES256_GCM,data:G1tMHA==,iv:nmy6Gm2D7ySenhD7jRVF0E2zX7OG+hsCVvyrBIilRXU=,tag:BQNbKbvJ1u+E8MquTloN4g==,type:str]
+    password: ENC[AES256_GCM,data:2dUt9bI+242FG/VSNFtkUbAZ6NcsP0qqL0Z3SlY2zLyeiUf+sJ7l4rRlZg==,iv:4D49W52AbHTitWS4HgmUEeIvItU1huYekzAm73QZfpE=,tag:qCdl25tWVicq6qVt2Pw7Bw==,type:str]
 kind: Secret
 metadata:
     name: app-password
+    namespace: postgres
 type: kubernetes.io/basic-auth
 sops:
     kms: []
@@ -15,14 +16,14 @@ sops:
         - recipient: age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
           enc: |
             -----BEGIN AGE ENCRYPTED FILE-----
-            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA2aEZCMDFrQ2V4cHhvUFFt
-            RkRpUVhPbGIwc0Rra1RIcm5vMzRYbmx2cUhzClJEaE5xOUc2dVB6MGdSZGI4MGJx
-            UHJrOVkxUXBWcjJhc1hBaTdaSlFwRlEKLS0tIDc3L3hXejlucENpa0lMbzYvbDdp
-            M0U4RjJlc1dWSGdwUFB1ajFraTVLOFEKZUKJxIAEt2KZG4sRKjOOa33q2S/OjceO
-            vdNn4ajscq0Mes7c7AbdgaGKea8+AO3/r0/hRJvlyvtnvs4LGByo5w==
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBwNHI4U016d2FKaStkcmdr
+            WHNkbk5WTGpWb04yb3NXY1FhQVJrMHJldEdZClk2OWNJMlU1ZWFyWlFWL0Z0Nk5O
+            YUlHcTRBT0NSREdRb0U3NldsZlhaTzAKLS0tICtrQnpNd3ZqZjBxbFd0RjNvMnQ2
+            M1hZWHpHRklIQ3pnNXMzcVV1aHNISkkKRL7Y8nliBd/hi0c0AW5eDH/AArAAqnFx
+            g+c74PTv2pl/y+ZSAcFCZUdaTrwlXsBmaekTAdGGXFlwbFN9NKmjkA==
             -----END AGE ENCRYPTED FILE-----
-    lastmodified: "2025-04-05T16:56:58Z"
-    mac: ENC[AES256_GCM,data:yq+bM4UWpd+8vwWzbK4ukwI62W/g0ILmA6tZ/Rw1dv/bbnuDna2d+d/YgXb7FZLje3DbZtRLKYAWYyFpWr8D/sbTJYuYhRYPwfZ1tTs8qTOSC9S1Y7jWPBdxiwttNs1WwYdwsn39/WcCdCGc+XuGNb2j4Hhxr6/HsWVLPaIPKAc=,iv:qbnfv3xlU77ypH5sSx9HDi4g7X3hRzmLq9rQZOFAC4U=,tag:cI4NvMt2IfDhiDCaXBkpfg==,type:str]
+    lastmodified: "2025-04-05T17:00:20Z"
+    mac: ENC[AES256_GCM,data:+fs5uRLWgkdowiiPE52k3RCejsxrw1xYqvDMjKut7HnFtEITAsdag6CR0n02OBmFzeY7eFdToLTkFtWSCN6PE3WJFkLY7p44PGhv7I2UaxL59MqRV8EPfofxBu4zdK3mfWcp1MwpplmV+4Jl15UHVLaNU8xkuEuFUaGPOIo5sHs=,iv:MB+LpUC/ns4jk14p166JXEj6rkVDxbwHMbff1lj3PvM=,tag:9Hp5jbzgNr1xGNPbi+5nRw==,type:str]
     pgp: []
     encrypted_regex: ^(data|stringData)$
     version: 3.9.4
