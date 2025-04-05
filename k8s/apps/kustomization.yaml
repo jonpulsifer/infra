@@ -15,7 +15,7 @@ resources:
   - k6
   # - minecraft
   - nix-cache.yaml
-  # - postgres
+  - postgres
   - redis
   - reloader
   - rosie
