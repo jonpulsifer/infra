@@ -16,5 +16,4 @@ spec:
     storageClass: local-path
     size: 256Mi
   monitoring:
-    podMonitor:
-      enabled: true
+    enablePodMonitor: true
