@@ -36,6 +36,7 @@ provider "registry.terraform.io/hashicorp/googleworkspace" {
   constraints = "~> 0.7"
   hashes = [
     "h1:CCBixim5kETOkLHmJKC2dmqAsF2Z7aNFff2waQ83uC4=",
+    "h1:QsmqFq5tTfweczBUaQpQpqzVq0d8bYJM9K23r9bIFGc=",
     "zh:0fef459a2ac51ad30fb5b31ca8b39f3004fe7ae58d03ec1910d83fe8d98e077e",
     "zh:119ee8d39af1d2e08a15cd2c5e3f74b4e365ecf728ed2995820fd94140cfd02f",
     "zh:2a3d2b5c6a7e9487c30c7dc3617c13c2c5b978331bf65933917881efd180d177",
