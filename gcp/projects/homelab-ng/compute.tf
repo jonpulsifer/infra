@@ -16,17 +16,6 @@ resource "google_service_account" "vm" {
 
 data "cloudflare_ip_ranges" "cloudflare" {}
 
-resource "google_compute_firewall" "allow_postgres" {
-  name = "allow-postgres"
-  network = module.network.network.self_link
-  allow {
-    protocol = "tcp"
-    ports = ["5432"]
-  }
-  source_ranges = data.cloudflare_ip_ranges.cloudflare.cidr_blocks
-  target_service_accounts = [google_service_account.vm.email]
-}
-
 resource "google_compute_instance" "oldboy" {
   provider = google.free-tier
   name = "oldboy"
