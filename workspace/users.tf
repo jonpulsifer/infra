@@ -1,5 +1,5 @@
 locals {
-  username = "jonathan_pulsifer_ca"
+  username = "jawn"
 }
 
 resource "googleworkspace_user" "me" {
