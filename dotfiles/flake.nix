@@ -79,10 +79,6 @@
         basic = mkHomeConfiguration "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHomeConfiguration "aarch64-linux" [ ./home/basic.nix ];
         pixelbook = mkHomeConfiguration "x86_64-linux" [ ./home/pixelbook.nix ];
-        oldboy = mkHomeConfiguration "x86_64-linux" ([
-          ./home/basic.nix
-          { config.home.username = "jonathan_pulsifer_ca"; }
-        ]);
       };
 
       darwinConfigurations = rec {
@@ -110,7 +106,6 @@
           default = self.homeConfigurations.full.activationPackage;
           basic = self.homeConfigurations.basic.activationPackage;
           pixelbook = self.homeConfigurations.pixelbook.activationPackage;
-          oldboy = self.homeConfigurations.oldboy.activationPackage;
         };
         aarch64-linux.default = self.homeConfigurations.arm.activationPackage;
         aarch64-darwin.default = self.darwinConfigurations.air.system;
