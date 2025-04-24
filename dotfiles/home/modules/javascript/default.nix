@@ -28,7 +28,7 @@ in
   home.packages = with pkgs; [
     biome
     bun
-    pnpm_9
+    pnpm_10
     nodejs_22
     nodePackages.ts-node
     nodePackages.vercel
