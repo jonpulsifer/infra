@@ -20,12 +20,19 @@ on:
       - unifi/**
       - vault/**
       - workspace/**
+  workflow_dispatch:
+    inputs:
+      regenerate_docs:
+        description: 'Regenerate documentation for all Terraform modules'
+        required: true
+        type: boolean
+        default: true
 jobs:
   changed-directories:
     name: Get Changed Files
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      directories: ${{ steps.changed-directories.outputs.all_changed_files }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,18 +47,14 @@ jobs:
           files: |
             **/*.tf
             **/*.lock.hcl
-      - name: List all changed directories
-        run: echo '${{ steps.changed-directories.outputs.all_changed_files }}'
-      - id: set-matrix
-        run: echo "matrix={\"dir\":${{ steps.changed-directories.outputs.all_changed_files }}}" >> "$GITHUB_OUTPUT"
 
   validate:
-    # name: 'fmt, init, validate'
     needs: [changed-directories]
     runs-on: ubuntu-latest
-    if: ${{ needs.changed-directories.outputs.matrix != '' && needs.changed-directories.outputs.matrix.dir != '[]' }}
+    if: ${{ needs.changed-directories.outputs.directories != '[]' }}
     strategy:
-      matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
+      matrix:
+        dir: ${{ fromJSON(needs.changed-directories.outputs.directories) }}
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
@@ -71,20 +74,18 @@ jobs:
         run: terraform validate
 
   docs:
-    needs: [validate, changed-directories]
+    needs: [validate]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' || github.event_name == 'workflow_dispatch' && inputs.regenerate_docs == true }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: main
       - name: Render terraform docs and push changes back to PR
         uses: terraform-docs/gh-actions@v1.4.1
         with:
           find-dir: .
-          output-file: README.md
-          output-method: inject
-          git-push: "true"
+          git-push: true
           recursive: true
           recursive-path: modules
           git-commit-message: "docs: regenerate terraform documentation"
