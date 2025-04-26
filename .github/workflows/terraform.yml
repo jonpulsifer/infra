@@ -75,8 +75,8 @@ jobs:
 
   docs:
     needs: [validate]
+    if: always() && (needs.validate.result == 'success' || (needs.validate.result == 'skipped' && github.event_name == 'workflow_dispatch'))
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && github.ref_name == 'main' || github.event_name == 'workflow_dispatch' && inputs.regenerate_docs == true }}
     steps:
       - uses: actions/checkout@v4
         with:
