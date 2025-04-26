@@ -74,11 +74,6 @@ jobs:
     needs: [validate, changed-directories]
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
-    strategy:
-      matrix: ${{ fromJSON(needs.changed-directories.outputs.matrix) }}
-    defaults:
-      run:
-        working-directory: ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,7 +81,10 @@ jobs:
       - name: Render terraform docs and push changes back to PR
         uses: terraform-docs/gh-actions@v1.4.1
         with:
-          working-dir: ${{ matrix.dir }}
+          find-dir: .
           output-file: README.md
           output-method: inject
           git-push: "true"
+          recursive: true
+          recursive-path: modules
+          git-commit-message: "docs: regenerate terraform documentation"
