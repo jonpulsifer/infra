@@ -10,20 +10,23 @@ data "unifi_ap_group" "lab" {
 }
 
 data "cloudflare_zone" "lab" {
-  name = local.lab_domain
+  filter = {
+    name   = local.lab_domain
+    status = "active"
+  }
 }
 
-resource "cloudflare_record" "lab_remote_dns" {
+resource "cloudflare_dns_record" "lab_remote_dns" {
   for_each = {
     for name, client in local.lab_clients : name => client
     if can(client.ip == true)
   }
-  zone_id   = data.cloudflare_zone.lab.id
-  name      = each.key
-  content   = cidrhost(local.lab_cidr, each.value.ip)
-  type      = "A"
-  ttl       = 1
-  comment   = "terraform managed"
+  zone_id = data.cloudflare_zone.lab.zone_id
+  name    = "${each.key}.${local.lab_domain}"
+  content = cidrhost(local.lab_cidr, each.value.ip)
+  type    = "A"
+  ttl     = 1
+  comment = "terraform managed"
   # tags    = ["terraform-managed"]
 }
 
@@ -35,12 +38,17 @@ resource "unifi_network" "lab" {
   subnet        = local.lab_cidr
   vlan_id       = 2
 
-  dhcp_enabled  = true
-  dhcp_lease    = local.one_week
-  dhcp_start    = cidrhost(local.lab_cidr, 200)
-  dhcp_stop     = cidrhost(local.lab_cidr, 254)
-  multicast_dns = false
-  igmp_snooping = false
+  dhcp_enabled     = true
+  dhcp_lease       = local.one_week
+  dhcp_start       = cidrhost(local.lab_cidr, 200)
+  dhcp_stop        = cidrhost(local.lab_cidr, 254)
+  dhcp_v6_start    = "::2"
+  dhcp_v6_stop     = "::7d1"
+  ipv6_pd_start    = "::2"
+  ipv6_pd_stop     = "::7d1"
+  ipv6_ra_priority = "high"
+  multicast_dns    = false
+  igmp_snooping    = false
 }
 
 resource "unifi_wlan" "lab" {

@@ -1,6 +1,6 @@
 locals {
   node_cidr = "10.3.0.0/24"
-  pod_cidr  = "10.100.0.0/20"
+  pod_cidr  = "10.100.0.0/16"
   static_records = {
     "erx" : cidrhost(local.lab_cidr, 5)
     "k8s" : cidrhost(local.node_cidr, 10)
@@ -12,15 +12,15 @@ locals {
   }
 }
 
-resource "cloudflare_record" "k8s_remote_dns" {
+resource "cloudflare_dns_record" "k8s_remote_dns" {
   for_each = local.static_records
 
-  zone_id   = data.cloudflare_zone.lab.id
-  name      = each.key
-  content   = each.value
-  type      = "A"
-  ttl       = 1
-  comment   = "terraform managed"
+  zone_id = data.cloudflare_zone.lab.zone_id
+  name    = "${each.key}.${local.lab_domain}"
+  content = each.value
+  type    = "A"
+  ttl     = 1
+  comment = "terraform managed"
   # tags    = ["terraform-managed"]
 }
 

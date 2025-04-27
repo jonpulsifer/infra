@@ -4,48 +4,50 @@ locals {
 }
 
 resource "cloudflare_zone" "lolwtf_ca" {
-  account_id = cloudflare_account.fml.id
-  zone       = "lolwtf.ca"
+  account = {
+    id = local.fml_account_id
+  }
+  name = "lolwtf.ca"
 }
 
-resource "cloudflare_record" "cf" {
+resource "cloudflare_dns_record" "cf" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   comment = "terraform managed"
-  name    = "cf"
-  value   = local.lab_tunnel_url
+  name    = "cf.${cloudflare_zone.lolwtf_ca.name}"
+  content = local.lab_tunnel_url
   type    = "CNAME"
   proxied = true
   ttl     = 1
 }
 
 
-resource "cloudflare_record" "cf2" {
+resource "cloudflare_dns_record" "cf2" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   comment = "terraform managed"
-  name    = "cf2"
-  value   = local.lab_tunnel_url
+  name    = "cf2.${cloudflare_zone.lolwtf_ca.name}"
+  content = local.lab_tunnel_url
   type    = "CNAME"
   proxied = true
   ttl     = 1
 }
 
 
-resource "cloudflare_record" "cf3" {
+resource "cloudflare_dns_record" "cf3" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   comment = "terraform managed"
-  name    = "cf3"
-  value   = local.lab_tunnel_url
+  name    = "cf3.${cloudflare_zone.lolwtf_ca.name}"
+  content = local.lab_tunnel_url
   type    = "CNAME"
   proxied = true
   ttl     = 1
 }
 
 
-resource "cloudflare_record" "db" {
+resource "cloudflare_dns_record" "db" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   comment = "terraform managed"
-  name    = "db"
-  value   = local.lab_tunnel_url
+  name    = "db.${cloudflare_zone.lolwtf_ca.name}"
+  content = local.lab_tunnel_url
   type    = "CNAME"
   proxied = true
   ttl     = 1

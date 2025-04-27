@@ -20,6 +20,7 @@ lab:
   erx-eth0:
     mac: 74:83:c2:6e:80:6a
     ip: 5
+    dev-id: 3687
   nuc-wifi:
     mac: d0:c6:37:4d:c2:fe
     dev-id: 3592
@@ -198,10 +199,11 @@ iot:
     model: Cisco SPA504G
     dev-id: 4420
     hostname: cathy
-  Laboratory:
+  AC Controller 69 Pro:
     mac: 68:b6:b3:51:d4:5c
     model: "69 Pro"
     hostname: laboratory
+    dev-id: 3221
   Living Room Chromecast:
     mac: 14:ae:85:70:4d:d8
     streaming: true

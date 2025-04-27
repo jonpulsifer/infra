@@ -6,7 +6,7 @@ terraform {
   required_providers {
     cloudflare = {
       source  = "cloudflare/cloudflare"
-      version = "~> 4.0"
+      version = "~> 5.1"
     }
     unifi = {
       # overridden in ~/.terraformrc
@@ -29,7 +29,7 @@ provider "unifi" {
   username = "terraform"
   # password = "" or UNIFI_PASSWORD env
   # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer --reveal)
-  api_url        = "https://unifi"
+  api_url        = "https://unifi.fml.pulsifer.ca"
   allow_insecure = true
   site           = "default"
 }

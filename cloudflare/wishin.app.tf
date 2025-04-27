@@ -1,11 +1,5 @@
-resource "cloudflare_zone" "wishin_app" {
-  account_id = cloudflare_account.fml.id
-  zone       = "wishin.app"
-}
-
-resource "cloudflare_zone_settings_override" "wishin_app" {
-  zone_id = cloudflare_zone.wishin_app.id
-  settings {
+locals {
+  wishin_app_zone_settings = {
     always_online            = "on"
     always_use_https         = "on"
     brotli                   = "on"
@@ -18,18 +12,35 @@ resource "cloudflare_zone_settings_override" "wishin_app" {
   }
 }
 
-resource "cloudflare_record" "wishin_app" {
+resource "cloudflare_zone" "wishin_app" {
+  account = {
+    id = local.fml_account_id
+  }
+  name = "wishin.app"
+}
+
+resource "cloudflare_zone_setting" "wishin_app" {
+  for_each   = local.wishin_app_zone_settings
+  zone_id    = cloudflare_zone.wishin_app.id
+  setting_id = each.key
+  value      = each.value
+  id         = each.key
+}
+
+resource "cloudflare_dns_record" "wishin_app" {
   zone_id = cloudflare_zone.wishin_app.id
   name    = "wishin.app"
   type    = "CNAME"
-  value   = "cname.vercel-dns.com"
+  content = "cname.vercel-dns.com"
   proxied = true
+  ttl     = 1
 }
 
-resource "cloudflare_record" "www_wishin_app" {
+resource "cloudflare_dns_record" "www_wishin_app" {
   zone_id = cloudflare_zone.wishin_app.id
   name    = "www.wishin.app"
   type    = "CNAME"
-  value   = "wishin.app"
+  content = "wishin.app"
   proxied = true
+  ttl     = 1
 }

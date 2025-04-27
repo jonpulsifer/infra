@@ -15,14 +15,17 @@ resource "unifi_network" "fml" {
   subnet        = local.fml_cidr
   # wan_gateway   = "0.0.0.0"
 
-  dhcp_enabled  = true
-  dhcp_lease    = local.one_day
-  dhcp_start    = cidrhost(local.fml_cidr, 100)
-  dhcp_stop     = cidrhost(local.fml_cidr, 254)
-  dhcp_v6_start = "::2"
-  dhcp_v6_stop  = "::7d1"
-  multicast_dns = true
-  igmp_snooping = true
+  dhcp_enabled     = true
+  dhcp_lease       = local.one_day
+  dhcp_start       = cidrhost(local.fml_cidr, 100)
+  dhcp_stop        = cidrhost(local.fml_cidr, 254)
+  dhcp_v6_start    = "::2"
+  dhcp_v6_stop     = "::7d1"
+  ipv6_pd_start    = "::2"
+  ipv6_pd_stop     = "::7d1"
+  ipv6_ra_priority = "high"
+  multicast_dns    = true
+  igmp_snooping    = true
 }
 
 
