@@ -11,7 +11,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 4.52.0 |
+| <a name="provider_cloudflaree"></a> [cloudflare](#provider\_cloudflare) | 4.52.0 |
 | <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.0 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 4.8.0 |
 

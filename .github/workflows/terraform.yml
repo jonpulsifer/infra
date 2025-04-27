@@ -27,13 +27,16 @@ on:
         required: true
         type: boolean
         default: true
+
 jobs:
   changed-directories:
     name: Get Changed Files
     runs-on: ubuntu-latest
     outputs:
-      directories: ${{ steps.changed-directories.outputs.all_changed_files }}
-      any_changed: ${{ steps.changed-directories.outputs.any_changed }}
+      # Output a JSON string list of unique directories containing changed files matching the patterns
+      directories: ${{ steps.changed-dirs.outputs.all_changed_files }}
+      # Output 'true' or 'false' as a string
+      any_changed: ${{ steps.changed-dirs.outputs.any_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,8 +55,9 @@ jobs:
   validate:
     needs: [changed-directories]
     runs-on: ubuntu-latest
-    if: ${{ needs.changed-directories.outputs.any_changed == 'true' }}
+    if: needs.changed-directories.outputs.any_changed == 'true'
     strategy:
+      fail-fast: false # Keep running other matrix jobs even if one fails
       matrix:
         dir: ${{ fromJSON(needs.changed-directories.outputs.directories) }}
     defaults:
@@ -76,8 +80,16 @@ jobs:
 
   docs:
     needs: [validate]
-    if: needs.validate.result == 'success' || (github.event_name == 'workflow_dispatch' && github.event.inputs.regenerate_docs)
     runs-on: ubuntu-latest
+    # Run IF:
+    # 1. It's a push to main AND (validate succeeded OR validate was skipped because no files changed)
+    # OR
+    # 2. It's a manual dispatch AND the regenerate_docs input is true
+    if: |
+      always() && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.validate.result == 'success' || needs.validate.result == 'skipped')) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.regenerate_docs)
+      )
     steps:
       - uses: actions/checkout@v4
         with:
