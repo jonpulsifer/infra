@@ -12,7 +12,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 4.52.0 |
+| <a name="provider_cloudflares"></a> [cloudflare](#provider\_cloudflare) | 4.52.0 |
 | <a name="provider_google"></a> [google](#provider\_google) | 6.32.0 |
 | <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 6.32.0 |
 | <a name="provider_google-beta"></a> [google-beta](#provider\_google-beta) | 6.32.0 |
