@@ -55,10 +55,11 @@ resource "google_compute_instance" "oldboy" {
   tags = ["maximum-uptime"]
 }
 
-resource "cloudflare_record" "oldboy" {
+resource "cloudflare_dns_record" "oldboy" {
   zone_id = "6db37c857d0c3631bea427fab3301e89" # lolwtf.ca
   name = "oldboy.lolwtf.ca"
   type = "A"
   content = google_compute_instance.oldboy.network_interface[0].access_config[0].nat_ip
   proxied = true
+  ttl = 1
 }

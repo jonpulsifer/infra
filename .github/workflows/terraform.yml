@@ -51,10 +51,10 @@ jobs:
   validate:
     needs: [changed-directories]
     runs-on: ubuntu-latest
-    if: ${{ needs.changed-directories.outputs.directories != '[]' }}
+    if: ${{ needs.changed-directories.outputs.all_changed_files != '[]' }}
     strategy:
       matrix:
-        dir: ${{ fromJSON(needs.changed-directories.outputs.directories) }}
+        dir: ${{ fromJSON(needs.changed-directories.outputs.all_changed_files) }}
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
