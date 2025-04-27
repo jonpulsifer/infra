@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       directories: ${{ steps.changed-directories.outputs.all_changed_files }}
+      any_changed: ${{ steps.changed-directories.outputs.any_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,10 +52,10 @@ jobs:
   validate:
     needs: [changed-directories]
     runs-on: ubuntu-latest
-    if: ${{ needs.changed-directories.outputs.all_changed_files != '[]' }}
+    if: ${{ needs.changed-directories.outputs.any_changed == 'true' }}
     strategy:
       matrix:
-        dir: ${{ fromJSON(needs.changed-directories.outputs.all_changed_files) }}
+        dir: ${{ fromJSON(needs.changed-directories.outputs.directories) }}
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
@@ -75,7 +76,7 @@ jobs:
 
   docs:
     needs: [validate]
-    if: always() && (needs.validate.result == 'success' || (needs.validate.result == 'skipped' && github.event_name == 'workflow_dispatch'))
+    if: needs.validate.result == 'success' || (github.event_name == 'workflow_dispatch' && github.event.inputs.regenerate_docs)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
