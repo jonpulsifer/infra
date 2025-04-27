@@ -3,7 +3,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 4.0 |
+| <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.1 |
 | <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.41 |
 | <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 4.0 |
 
@@ -11,7 +11,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflaree"></a> [cloudflare](#provider\_cloudflare) | 4.52.0 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.3.0 |
 | <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.0 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 4.8.0 |
 
@@ -23,8 +23,8 @@ No modules.
 
 | Name | Type |
 |------|------|
-| [cloudflare_record.k8s_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/record) | resource |
-| [cloudflare_record.lab_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/record) | resource |
+| [cloudflare_dns_record.k8s_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
+| [cloudflare_dns_record.lab_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [unifi_firewall_group.k8s](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_group) | resource |
 | [unifi_firewall_group.rfc1918](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_group) | resource |
 | [unifi_firewall_rule.allow_established](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_rule) | resource |

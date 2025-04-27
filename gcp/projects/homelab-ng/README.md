@@ -1,10 +1,10 @@
 <!-- BEGIN_TF_DOCS -->
-## Requirementss
+## Requirements
 
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2.6 |
-| <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 4.52.0 |
+| <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.3 |
 | <a name="requirement_google"></a> [google](#requirement\_google) | ~> 6.32.0 |
 | <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 6.32.0 |
 
@@ -12,7 +12,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflares"></a> [cloudflare](#provider\_cloudflare) | 4.52.0 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.3.0 |
 | <a name="provider_google"></a> [google](#provider\_google) | 6.32.0 |
 | <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 6.32.0 |
 | <a name="provider_google-beta"></a> [google-beta](#provider\_google-beta) | 6.32.0 |
@@ -27,7 +27,7 @@
 
 | Name | Type |
 |------|------|
-| [cloudflare_record.oldboy](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/record) | resource |
+| [cloudflare_dns_record.oldboy](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [google-beta_google_iam_workload_identity_pool.homelab](https://registry.terraform.io/providers/hashicorp/google-beta/latest/docs/resources/google_iam_workload_identity_pool) | resource |
 | [google-beta_google_iam_workload_identity_pool_provider.github](https://registry.terraform.io/providers/hashicorp/google-beta/latest/docs/resources/google_iam_workload_identity_pool_provider) | resource |
 | [google_compute_instance.oldboy](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance) | resource |
