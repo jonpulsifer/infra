@@ -10,7 +10,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflaree"></a> [cloudflare](#provider\_cloudflare) | 5.3.0 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.3.0 |
 
 ## Modules
 
