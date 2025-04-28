@@ -20,7 +20,6 @@ resource "cloudflare_dns_record" "cf" {
   ttl     = 1
 }
 
-
 resource "cloudflare_dns_record" "cf2" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   comment = "terraform managed"
@@ -31,7 +30,6 @@ resource "cloudflare_dns_record" "cf2" {
   ttl     = 1
 }
 
-
 resource "cloudflare_dns_record" "cf3" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   comment = "terraform managed"
@@ -41,7 +39,6 @@ resource "cloudflare_dns_record" "cf3" {
   proxied = true
   ttl     = 1
 }
-
 
 resource "cloudflare_dns_record" "db" {
   zone_id = cloudflare_zone.lolwtf_ca.id
