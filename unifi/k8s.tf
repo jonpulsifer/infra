@@ -40,8 +40,6 @@ resource "unifi_static_route" "k8s_pods" {
   next_hop = cidrhost(local.lab_cidr, 5)
 }
 
-
-
 resource "unifi_firewall_group" "k8s" {
   name = "Kubernetes Network"
   type = "address-group"
