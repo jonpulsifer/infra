@@ -34,9 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Output a JSON string list of unique directories containing changed files matching the patterns
-      directories: ${{ steps.changed-dirs.outputs.all_changed_files }}
+      directories: ${{ steps.changed-dirs.outputs.all_changed_files }} 
       # Output 'true' or 'false' as a string
       any_changed: ${{ steps.changed-dirs.outputs.any_changed }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,7 +52,12 @@ jobs:
           files: |
             **/*.tf
             **/*.lock.hcl
-
+      - name: List all changed directories
+        run: echo '${{ steps.changed-directories.outputs.all_changed_files }}'
+      - name: List any changed
+        run: echo '${{ steps.changed-directories.outputs.any_changed }}'
+      - id: set-matrix
+        run: echo "matrix={\"dir\":${{ steps.changed-directories.outputs.all_changed_files }}}" >> "$GITHUB_OUTPUT"
   validate:
     needs: [changed-directories]
     runs-on: ubuntu-latest
