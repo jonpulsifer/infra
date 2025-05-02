@@ -16,39 +16,27 @@ in
     signing.key = mkDefault "~/.ssh/id_ed25519";
     signing.signByDefault = true;
 
+    delta.enable = true;
+
     extraConfig = {
       color.ui = true;
-      core = {
-        pager = delta;
-        whitespace = "trailing-space,space-before-tab";
-      };
-      delta = {
-        navigate = true;
-        side-by-side = true;
-      };
-      format = {
-        signoff = true;
-      };
+      core.pager = delta;
+      core.whitespace = "trailing-space,space-before-tab";
+      delta.navigate = true;
+      delta.side-by-side = true;
+      format.signoff = true;
       gpg.format = "ssh";
       github.user = mkDefault github;
-      help = {
-        autocorrect = 1;
-      };
-      hub.protocol = "https";
+      help.autocorrect = 1;
+      hub.protocol = "ssh";
       init.defaultBranch = "main";
-      interactive = {
-        diffFilter = "${delta} --color-only";
-      };
-      merge = {
-        conflictstyle = "zdiff3";
-      };
-      pull = {
-        ff = "only";
-        rebase = true;
-      };
-      push = {
-        default = "current";
-      };
+      interactive.diffFilter = "${delta} --color-only";
+      
+      merge.conflictstyle = "zdiff3";
+      pull.ff = "only";
+      pull.rebase = true;
+      push.default = "current";
+      
       url."git@github.com:${github}/".insteadOf = [ "https://github.com/${github}/" ];
     };
 

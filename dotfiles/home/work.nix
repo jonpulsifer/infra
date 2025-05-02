@@ -12,33 +12,29 @@ let
   domain = (toLower company) + ".com";
   user = "jonathan";
   email = "${user}@${domain}";
+  username = "jpulsifer";
 in
-{
+{  
   imports = [ ./default.nix ];
-  home.packages = with pkgs; [
-    awscli2
-    cloudflared
-    ffmpeg
-    pre-commit
-    python3
-    terraform-docs
-    gnupg
-  ];
+
+  home.username = mkForce username;
+
   programs.git = {
     userEmail = mkForce email;
-    signing.key = mkForce "~/.ssh/${toLower company}_ed25519";
+    signing.key = mkForce "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay";
     extraConfig = {
       url."git@github.com:${toLower company}/".insteadOf = [
         "git@github.com:${company}/"
         "https://github.com/${toLower company}/"
       ];
+      gpg.ssh.program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign";
     };
-  };
+  }; 
 
-  programs.ssh.extraConfig = mkForce ''
-    IdentityFile ~/.ssh/${toLower company}_ed25519
-    IdentitiesOnly yes
-    AddressFamily inet
+  programs.ssh.enable = true;
+  programs.ssh.extraConfig = ''
+    IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+    IdentitiesOnly no
     VisualHostKey no
     PasswordAuthentication no
     ChallengeResponseAuthentication no

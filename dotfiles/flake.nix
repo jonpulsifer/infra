@@ -55,8 +55,11 @@
 
       common = [
         { nixpkgs = pkgs; }
-        { home-manager.useUserPackages = true; }
-        { home-manager.useGlobalPkgs = true; }
+        {
+          home-manager.useUserPackages = true;
+          home-manager.useGlobalPkgs = true;
+          home-manager.backupFileExtension = ".bak";
+        }
         home-manager.darwinModules.home-manager
         ./systems/macos.nix
       ];
@@ -79,6 +82,7 @@
         basic = mkHomeConfiguration "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHomeConfiguration "aarch64-linux" [ ./home/basic.nix ];
         pixelbook = mkHomeConfiguration "x86_64-linux" [ ./home/pixelbook.nix ];
+        worktest = mkHomeConfiguration "aarch64-darwin" [./home/work.nix ];
       };
 
       darwinConfigurations = rec {
@@ -97,7 +101,7 @@
           system = "aarch64-darwin";
           modules = common ++ [ { home-manager.users.jawn = import ./home/work.nix; } ];
         };
-        JTWV573RHQ = hackbookpro; # alias
+        JRFHWF22CL = hackbookpro; # alias
       };
 
       # nix run .#basic
@@ -108,7 +112,7 @@
           pixelbook = self.homeConfigurations.pixelbook.activationPackage;
         };
         aarch64-linux.default = self.homeConfigurations.arm.activationPackage;
-        aarch64-darwin.default = self.darwinConfigurations.air.system;
+        aarch64-darwin.default = self.homeConfigurations.worktest.activationPackage;
       };
 
       # export home-manager modules for use in other systems
