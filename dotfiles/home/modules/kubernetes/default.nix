@@ -49,7 +49,7 @@ in
       KUBE_PS1_SEPARATOR = '''';
       KUBE_PS1_SYMBOL_PADDING = "true";
     };
-    initExtra = ''
+    initContent = ''
       alias kubectl="kubecolor"
       compdef kubecolor="kubectl"
       export RPS1='$(kube_ps1)'

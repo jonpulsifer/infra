@@ -1,28 +1,23 @@
 {
   description = "jonpulsifer/dotfiles lol";
+  
   inputs = {
-    darwin = {
-      url = "github:LnL7/nix-darwin";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    home-manager = {
-      url = "github:nix-community/home-manager";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    home-manager.url = "github:nix-community/home-manager";
+    home-manager.inputs.nixpkgs.follows = "nixpkgs";
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   };
 
   outputs =
     {
       self,
-      darwin,
       home-manager,
       nixpkgs,
       ...
     }:
     let
       inherit (nixpkgs.lib) attrValues optionalAttrs;
-      inherit (darwin.lib) darwinSystem;
+
+      forallSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-darwin" ] f;
 
       pkgs = {
         config = {
@@ -33,12 +28,9 @@
           (
             final: prev:
             (optionalAttrs (prev.stdenv.system == "aarch64-darwin") {
-              inherit (final.pkgs-x86) emacsMacport nerdctl;
+              inherit (final.pkgs-x86) emacsMacport;
             })
           )
-          # (import ./overlays/pnpm) # 2024-06-28 we don't use nodePackages.pnpm anymore
-          # (import ./overlays/httpie) # 2022-12-18 httpie tests are broken
-          # (import ./overlays/opa) # 2023-02-04 opa tests are broken
           (import ./pkgs)
         ];
       };
@@ -52,29 +44,23 @@
             inherit (pkgs) config overlays;
           };
         });
-
-      common = [
-        { nixpkgs = pkgs; }
-        {
-          home-manager.useUserPackages = true;
-          home-manager.useGlobalPkgs = true;
-          home-manager.backupFileExtension = ".bak";
-        }
-        home-manager.darwinModules.home-manager
-        ./systems/macos.nix
-      ];
-
-      # System-specific settings
-      darwinCommon = common ++ [ { home-manager.users.jawn = import ./home/home.nix; } ];
     in
     {
-      devShells.x86_64-linux.default = import ./shell.nix { pkgs = nixpkgs.legacyPackages.x86_64-linux; };
-      devShells.aarch64-darwin.default = import ./shell.nix {
-        pkgs = nixpkgs.legacyPackages.aarch64-darwin;
-      };
+      devShells = forallSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in {
+          default = import ./shell.nix { inherit pkgs; };
+        }
+      );
 
-      formatter.x86_64-linux = nixpkgs.legacyPackages.x86_64-linux.nixfmt-rfc-style;
-      formatter.aarch64-darwin = nixpkgs.legacyPackages.aarch64-darwin.nixfmt-rfc-style;
+      formatter = forallSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in {
+          default = pkgs.nixfmt-rfc-style;
+        }
+      );
 
       # Simplified home-manager configurations
       homeConfigurations = {
@@ -82,26 +68,7 @@
         basic = mkHomeConfiguration "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHomeConfiguration "aarch64-linux" [ ./home/basic.nix ];
         pixelbook = mkHomeConfiguration "x86_64-linux" [ ./home/pixelbook.nix ];
-        worktest = mkHomeConfiguration "aarch64-darwin" [./home/work.nix ];
-      };
-
-      darwinConfigurations = rec {
-        Craftbook-Air = darwinSystem {
-          system = "aarch64-darwin";
-          modules = darwinCommon ++ [ ./systems/air.nix ];
-        };
-        air = Craftbook-Air; # alias
-
-        mini = darwinSystem {
-          system = "x86_64-darwin";
-          modules = darwinCommon ++ [ ./systems/mini.nix ];
-        };
-
-        hackbookpro = darwinSystem {
-          system = "aarch64-darwin";
-          modules = common ++ [ { home-manager.users.jawn = import ./home/work.nix; } ];
-        };
-        JRFHWF22CL = hackbookpro; # alias
+        work = mkHomeConfiguration "aarch64-darwin" [./home/work.nix ];
       };
 
       # nix run .#basic
@@ -112,7 +79,7 @@
           pixelbook = self.homeConfigurations.pixelbook.activationPackage;
         };
         aarch64-linux.default = self.homeConfigurations.arm.activationPackage;
-        aarch64-darwin.default = self.homeConfigurations.worktest.activationPackage;
+        aarch64-darwin.default = self.homeConfigurations.work.activationPackage;
       };
 
       # export home-manager modules for use in other systems

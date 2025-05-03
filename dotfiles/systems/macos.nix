@@ -10,7 +10,7 @@
       build-users-group = "nixbld";
       sandbox = true;
       experimental-features = "nix-command flakes";
-      substituters = [
+      trusted-substituters = [
         # TODO: figure out a way to use this only when local to the nix cache, or split dns
         # "https://nix.lolwtf.ca"
         "https://cache.nixos.org"

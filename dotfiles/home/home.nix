@@ -17,6 +17,7 @@ in
 {
   imports = [
     ./default.nix
+    modules/go
     modules/ssh
   ];
 

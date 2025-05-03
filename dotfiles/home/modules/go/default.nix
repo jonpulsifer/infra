@@ -8,7 +8,7 @@ in
     GOPATH = homeDirectory;
   };
   home.packages = with pkgs; [
-    go_1_22
+    go_1_24
     gopls
     gotools
     go-tools
