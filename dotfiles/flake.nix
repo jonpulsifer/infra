@@ -81,7 +81,7 @@
             pkgs-x86 = pkgsForSystem "x86_64-darwin";
           };
       };
-      
+
       devShells = forAllSystems (
         system:
         let
