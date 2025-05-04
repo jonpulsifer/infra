@@ -26,8 +26,11 @@ in
         grafana-loki
         k6
         k9s
-        kubectl
+        krew
         kubecolor
+        kubectl
+        kubectl-cnpg
+        kubectl-klock
         kubernetes-helm
       ]
       ++ optionals (stdenv.isLinux) [ nerdctl ];

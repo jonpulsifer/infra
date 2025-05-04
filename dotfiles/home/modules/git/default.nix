@@ -31,12 +31,12 @@ in
       hub.protocol = "ssh";
       init.defaultBranch = "main";
       interactive.diffFilter = "${delta} --color-only";
-      
+
       merge.conflictstyle = "zdiff3";
       pull.ff = "only";
       pull.rebase = true;
       push.default = "current";
-      
+
       url."git@github.com:${github}/".insteadOf = [ "https://github.com/${github}/" ];
     };
 

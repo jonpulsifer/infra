@@ -21,10 +21,5 @@ install_nix() {
 ensure_dependencies
 install_nix
 
-if [ "$(uname -s)" == "Darwin" ]; then
-  nix build ".#darwinConfigurations.$(hostname).system"
-  ./result/sw/bin/darwin-rebuild switch --flake .
-else
-  source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-  nix run
-fi
+source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+nix run

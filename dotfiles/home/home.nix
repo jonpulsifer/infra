@@ -5,13 +5,6 @@
   ...
 }:
 let
-  inherit (lib)
-    mkForce
-    mkIf
-    mkMerge
-    optionals
-    ;
-  inherit (lib.attrsets) optionalAttrs;
   inherit (pkgs.stdenv) isLinux;
 in
 {
@@ -34,14 +27,14 @@ in
         # pixlet
         # bazel-buildtools
       ]
-      ++ optionals isLinux [ wol ];
+      ++ lib.optionals isLinux [ wol ];
 
     sessionVariables = {
       VAULT_ADDR = "https://vault.lolwtf.ca";
     };
   };
 
-  services.gpg-agent = mkIf isLinux {
+  services.gpg-agent = lib.mkIf isLinux {
     enable = false;
     defaultCacheTtl = 86400;
     maxCacheTtl = 7200;

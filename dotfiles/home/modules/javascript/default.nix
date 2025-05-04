@@ -5,26 +5,20 @@
   ...
 }:
 let
-  inherit (lib) mkMerge;
-
   paths = {
     npm = "$HOME/.npm/bin";
     pnpm = "$HOME/.local/share/pnpm";
   };
 in
 {
-  home.sessionPath = mkMerge [
-    [
-      paths.npm
-      paths.pnpm
-    ]
+  home.sessionPath = [
+    paths.npm
+    paths.pnpm
   ];
-  home.sessionVariables = mkMerge [
-    {
-      NPM_CONFIG_PREFIX = paths.npm;
-      PNPM_HOME = paths.pnpm;
-    }
-  ];
+  home.sessionVariables = {
+    NPM_CONFIG_PREFIX = paths.npm;
+    PNPM_HOME = paths.pnpm;
+  };
   home.packages = with pkgs; [
     biome
     bun

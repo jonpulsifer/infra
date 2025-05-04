@@ -5,7 +5,6 @@
   ...
 }:
 let
-  inherit (lib) mkOrder;
   zshConfigEarlyInit = ''
     setopt TRANSIENT_RPROMPT
     zstyle ':autocomplete:tab:*' fzf-completion
@@ -35,6 +34,7 @@ let
     ZSH_HIGHLIGHT_STYLES[back-double-quoted-argument]=fg=009
     ZSH_HIGHLIGHT_STYLES[assign]=none
   '';
+
   zshConfig = ''
     fpath+=("${config.home.profileDirectory}"/share/zsh/site-functions "${config.home.profileDirectory}"/share/zsh/$ZSH_VERSION/functions "${config.home.profileDirectory}"/share/zsh/vendor-completions)
     declare -a files=(
@@ -83,15 +83,16 @@ in
     autosuggestion.enable = true;
     syntaxHighlighting.enable = true;
     zprof.enable = false;
-
     shellAliases = { };
-    initContent = let 
-      early = lib.mkOrder 1200 zshConfigEarlyInit;
-      late = lib.mkOrder 1200 zshConfig;
-    in lib.mkMerge [
-      early
-      late
-    ];
+    initContent =
+      let
+        early = lib.mkOrder 1200 zshConfigEarlyInit;
+        late = lib.mkOrder 1200 zshConfig;
+      in
+      lib.mkMerge [
+        early
+        late
+      ];
 
     plugins = [
       # # https://github.com/marlonrichert/zsh-autocomplete/issues/763

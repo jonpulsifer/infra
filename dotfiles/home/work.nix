@@ -14,7 +14,7 @@ let
   email = "${user}@${domain}";
   username = "jpulsifer";
 in
-{  
+{
   imports = [ ./default.nix ];
 
   home.username = mkForce username;
@@ -29,7 +29,7 @@ in
       ];
       gpg.ssh.program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign";
     };
-  }; 
+  };
 
   programs.ssh.enable = true;
   programs.ssh.extraConfig = ''

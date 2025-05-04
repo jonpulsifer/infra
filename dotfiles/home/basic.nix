@@ -14,6 +14,7 @@ in
     # modules/node_exporter
     modules/tmux
     modules/zsh
+    modules/vim
   ];
 
   home = {
@@ -39,6 +40,12 @@ in
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.lolcat}/bin/lolcat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.lolcat}/bin/lolcat";
     };
+
+    file.".dotfiles" = {
+      source = config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/src/github.com/jonpulsifer/dotfiles";
+      enable = true;
+    };
+
     stateVersion = "24.11";
   };
 

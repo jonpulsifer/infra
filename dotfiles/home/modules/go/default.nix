@@ -1,11 +1,8 @@
 { config, pkgs, ... }:
-let
-  inherit (config.home) homeDirectory;
-in
 {
-  home.sessionPath = [ "${homeDirectory}/bin" ];
+  home.sessionPath = [ "${config.home.homeDirectory}/bin" ];
   home.sessionVariables = {
-    GOPATH = homeDirectory;
+    GOPATH = config.home.homeDirectory;
   };
   home.packages = with pkgs; [
     go_1_24
