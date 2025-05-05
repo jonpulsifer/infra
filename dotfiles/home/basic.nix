@@ -37,8 +37,8 @@ in
       ls = "${pkgs.eza}/bin/eza";
       tree = ls + " --tree";
       diff = "${pkgs.delta}/bin/delta";
-      bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.lolcat}/bin/lolcat";
-      paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.lolcat}/bin/lolcat";
+      bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat";
+      paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.dotacat}/bin/dotacat";
     };
 
     file.".dotfiles" = {
@@ -80,32 +80,31 @@ in
   xdg.enable = true;
 
   programs.ghostty = {
-    enable = false;
+    enable = true;
     enableZshIntegration = true;
-
-    installBatSyntax = true;
-
+    installBatSyntax = lib.mkIf (config.programs.ghostty.package != null) true;
     settings = {
-      auto-update = "off";
-      background-opacity = 0.8;
-      confirm-close-surface = false;
-      font-family = "FiraCode Nerd Font Mono";
+      background-blur = true;
+      background-opacity = 0.9;
+      bold-is-bright = true;
+      font-family = "CaskaydiaCove Nerd Font";
       font-size = 12;
-      theme = "Teerb";
+      font-thicken = false;
+      theme = "Argonaut";
     };
   };
 
   programs.bat = {
     enable = true;
     config = {
-      theme = "Dracula";
+      theme = "1337";
     };
   };
 
   programs.btop = {
     enable = true;
     settings = {
-      color_theme = "dracula";
+      color_theme = "tokyo-night";
       theme_background = false;
       update_ms = 250;
     };

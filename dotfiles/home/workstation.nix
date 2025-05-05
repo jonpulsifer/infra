@@ -13,24 +13,18 @@ in
 {
   imports = [
     ./basic.nix
-    modules/gcloud
-    modules/javascript
     modules/kubernetes
   ];
 
-  home.packages =
-    with pkgs;
-    [
-      _1password-cli
-      age
-      gh
-      postgresql_15
-      tenv
-    ]
-    ++ optionals isDarwin [
-      ffmpeg
-      reattach-to-user-namespace
-    ];
+  home.packages = with pkgs; [
+    gh
+    postgresql_15
+    tenv
+  ];
+  
+  home.sessionPath = [
+    "${config.home.homeDirectory}/.tenv/bin"
+  ];
 
   fonts.fontconfig.enable = true;
 

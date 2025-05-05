@@ -9,25 +9,30 @@ let
 in
 {
   imports = [
-    ./default.nix
+    ./workstation.nix
+    modules/gcloud
     modules/go
     modules/ssh
+    modules/javascript
   ];
 
   home = rec {
     packages =
-      with pkgs;
-      [
+      with pkgs; [
         # cloudevents
         # asciinema
         # hugo
+        _1password-cli
+        age
         sops
+        tenv
         vault
 
         # pixlet
         # bazel-buildtools
       ]
-      ++ lib.optionals isLinux [ wol ];
+      ++ lib.optionals isLinux [ wol ]
+      ++ lib.optionals isDarwin [ reattach-to-user-namespace ];
 
     sessionVariables = {
       VAULT_ADDR = "https://vault.lolwtf.ca";
