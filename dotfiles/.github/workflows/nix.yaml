@@ -16,7 +16,6 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-      - uses: DeterminateSystems/magic-nix-cache-action@main
       - uses: DeterminateSystems/flake-checker-action@main
       - run: nix flake check
   linux:
@@ -32,7 +31,6 @@ jobs:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - run: nix build
 
   darwin:
@@ -48,5 +46,4 @@ jobs:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
-      - uses: DeterminateSystems/magic-nix-cache-action@v9
       - run: nix build
