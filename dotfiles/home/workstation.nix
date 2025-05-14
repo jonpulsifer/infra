@@ -21,7 +21,7 @@ in
     postgresql_15
     tenv
   ];
-  
+
   home.sessionPath = [
     "${config.home.homeDirectory}/.tenv/bin"
   ];

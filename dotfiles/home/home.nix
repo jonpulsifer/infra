@@ -5,7 +5,7 @@
   ...
 }:
 let
-  inherit (pkgs.stdenv) isLinux;
+  inherit (pkgs.stdenv) isDarwin isLinux;
 in
 {
   imports = [
@@ -18,7 +18,8 @@ in
 
   home = rec {
     packages =
-      with pkgs; [
+      with pkgs;
+      [
         # cloudevents
         # asciinema
         # hugo
