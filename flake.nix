@@ -115,8 +115,6 @@
     rec {
       nixosConfigurations = mkSystems {
         # lab machines
-        oldschool = [ ];
-        retrofit = [ ];
         wsl = [ nixos-wsl.nixosModules.default ];
 
         # k8s cluster
@@ -124,6 +122,10 @@
         optiplex = [ ];
         riptide = [ ];
         "800g2" = [ ];
+
+        # offsite
+        oldschool = [ ];
+        retrofit = [ ];
 
         # iso
         iso = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ];

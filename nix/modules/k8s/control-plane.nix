@@ -13,11 +13,11 @@
       enable = true;
       allowPrivileged = true;
       extraSANs = [
-        "nuc"
-        "nuc.lolwtf.ca"
-        "nuc.fml.pulsifer.ca"
-        "nuc.pirate-musical.ts.net"
-        "10.3.0.10"
+        config.networking.hostName
+        "${config.networking.hostName}.lolwtf.ca"
+        "${config.networking.hostName}.fml.pulsifer.ca"
+        "${config.networking.hostName}.pirate-musical.ts.net"
+        config.services.kubernetes.apiserver.advertiseAddress
       ];
       extraOpts = ''
         --enable-aggregator-routing=true \

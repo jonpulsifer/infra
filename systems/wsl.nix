@@ -13,6 +13,8 @@
     # docker.enable = true;
   };
 
+  system.build.installBootLoader = lib.mkForce "${pkgs.coreutils}/bin/true";
+
   i18n.defaultLocale = "en_US.UTF-8";
 
   # resolf.conf is managed by WSL (wsl.wslConf.network.generateResolvConf)
