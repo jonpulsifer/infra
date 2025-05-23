@@ -77,6 +77,7 @@
             # Add access to x86 packages if system is running Apple Silicon
             pkgs-x86 = pkgsForSystem "x86_64-darwin";
           };
+        pkgs = import ./pkgs;
       };
 
       devShells = forAllSystems (
