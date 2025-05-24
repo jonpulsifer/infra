@@ -1,11 +1,9 @@
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 {
-  imports = [ ./common.nix ];
   nixpkgs.overlays = [ (import ../../overlays/k8s.nix) ];
   services.kubernetes = {
     kubelet = {

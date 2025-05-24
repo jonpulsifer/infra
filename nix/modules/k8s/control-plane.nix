@@ -1,12 +1,8 @@
 {
   config,
-  lib,
-  pkgs,
   ...
 }:
-
 {
-  imports = [ ./common.nix ];
   services.etcd.enable = true;
   services.kubernetes = {
     apiserver = {
@@ -15,7 +11,7 @@
       extraSANs = [
         config.networking.hostName
         "${config.networking.hostName}.lolwtf.ca"
-        "${config.networking.hostName}.fml.pulsifer.ca"
+        "${config.networking.hostName}.${config.services.k8s.network}.lolwtf.ca"
         "${config.networking.hostName}.pirate-musical.ts.net"
         config.services.kubernetes.apiserver.advertiseAddress
       ];

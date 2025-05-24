@@ -84,7 +84,10 @@
         nixos.lib.nixosSystem {
           system = "aarch64-linux";
           modules =
-            [ ./systems/${name}.nix ./systems/rpi.nix ]
+            [
+              ./systems/${name}.nix
+              ./systems/rpi.nix
+            ]
             ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
             ++ commonModules
             ++ extraModules

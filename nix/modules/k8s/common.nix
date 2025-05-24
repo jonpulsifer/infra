@@ -5,18 +5,15 @@
   ...
 }:
 let
-  kubeAPIServerIP = "10.3.0.10";
-  kubeAPIServerHostname = "k8s.lolwtf.ca";
-  kubeAPIServerPort = 6443;
-  kubePodCidr = "10.100.0.0/20";
-  kubeServiceCidr = "10.10.0.0/16";
-  kubeDns = [
-    "10.10.0.254"
-    "10.3.0.1"
-  ];
-  kubeUpstreamDns = "10.2.0.1";
+  networks = import ./networks.nix;
+  networkConfig = networks.${config.services.k8s.network};
+  cfg = config.services.k8s;
 in
 {
+  imports = lib.optionals cfg.enable [
+    (if cfg.role == "control-plane" then ./control-plane.nix else ./worker.nix)
+  ];
+
   # this section is only required for longhorn
   systemd.services.containerd.path = [
     pkgs.openiscsi
@@ -34,7 +31,7 @@ in
     "xt_socket"
   ];
 
-  networking.extraHosts = "${kubeAPIServerIP} ${kubeAPIServerHostname}";
+  networking.extraHosts = "${config.services.kubernetes.apiserver.advertiseAddress} ${config.services.kubernetes.masterAddress}";
   networking.firewall.enable = lib.mkForce false;
   systemd.network.config = {
     networkConfig = {
@@ -78,19 +75,19 @@ in
   nixpkgs.overlays = [ (import ../../overlays/certmgr.nix) ];
   services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
   services.kubernetes = {
-    masterAddress = kubeAPIServerHostname;
-    apiserverAddress = "https://${kubeAPIServerHostname}:${toString kubeAPIServerPort}";
+    masterAddress = networkConfig.apiServerHostname;
+    apiserverAddress = "https://${networkConfig.apiServerHostname}:${toString networkConfig.apiServerPort}";
     apiserver = {
-      securePort = kubeAPIServerPort;
-      advertiseAddress = kubeAPIServerIP;
-      serviceClusterIpRange = kubeServiceCidr;
+      securePort = networkConfig.apiServerPort;
+      advertiseAddress = networkConfig.apiServerIP;
+      serviceClusterIpRange = networkConfig.serviceCidr;
     };
     kubelet = {
       enable = true;
-      clusterDns = kubeDns;
+      clusterDns = networkConfig.dns;
       cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
     };
-    clusterCidr = kubePodCidr;
+    clusterCidr = networkConfig.podCidr;
     easyCerts = true;
     addons.dns.corefile = ''
       .:10053 {
@@ -101,7 +98,7 @@ in
           fallthrough in-addr.arpa ip6.arpa
         }
         prometheus :10055
-        forward . ${kubeUpstreamDns}
+        forward . ${networkConfig.upstreamDns}
         cache 30
         loop
         reload
