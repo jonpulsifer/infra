@@ -13,7 +13,7 @@
   };
 
   offsite = {
-    apiServerIP = "192.168.2.60";
+    apiServerIP = "192.168.2.10";
     apiServerHostname = "offsite.lolwtf.ca";
     apiServerPort = 6443;
     podCidr = "10.101.0.0/20";
