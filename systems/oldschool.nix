@@ -15,6 +15,7 @@ in
     ../nix/modules/yarr.nix
     ../nix/modules/k8s/common.nix
     ../nix/modules/k8s/default.nix
+    ../nix/modules/k8s/worker.nix
   ];
 
   networking.hostName = name;
