@@ -7,6 +7,7 @@
 {
   imports = [
     ../nix/modules/k8s/default.nix
+    ../nix/modules/k8s/common.nix
   ];
   networking.hostName = name;
   # networking.wireless = {

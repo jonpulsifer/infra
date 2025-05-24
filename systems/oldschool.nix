@@ -13,6 +13,7 @@ in
   imports = [
     ../nix/modules/github-runner.nix
     ../nix/modules/yarr.nix
+    ../nix/modules/k8s/common.nix
     ../nix/modules/k8s/default.nix
   ];
 
