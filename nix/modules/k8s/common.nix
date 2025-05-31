@@ -54,19 +54,17 @@ in
       ] # for some k8s networking
       ++ [ openiscsi ]; # for longhorn
 
-    # systemd.services.kubelet.preStart = lib.mkForce ''
-    #   ${lib.concatMapStrings (img: ''
-    #     echo "Seeding container image: ${img}"
-    #     ${
-    #       if (lib.hasSuffix "gz" img) then
-    #         ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
-    #       else
-    #         ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
-    #     }
-    #   '') config.services.kubernetes.kubelet.seedDockerImages}
-    # ''; # we do not want to remove /opt/cni/bin/*
-    systemd.services.kubelet.preStart = lib.mkForce '''';
-    services.kubernetes.kubelet.seedDockerImages = lib.mkForce [ ];
+    systemd.services.kubelet.preStart = lib.mkForce ''
+      ${lib.concatMapStrings (img: ''
+        echo "Seeding container image: ${img}"
+        ${
+          if (lib.hasSuffix "gz" img) then
+            ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
+          else
+            ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
+        }
+      '') config.services.kubernetes.kubelet.seedDockerImages}
+    ''; # we do not want to remove /opt/cni/bin/*
 
     services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
 
@@ -90,12 +88,12 @@ in
       };
       clusterCidr = networkConfig.podCidr;
       easyCerts = true;
-      # addons.dns.coredns = {
-      #   imageName = "docker.io/coredns/coredns"; # docker.io is required now for the image to be pulled
-      #   imageDigest = "sha256:a0ead06651cf580044aeb0a0feba63591858fb2e43ade8c9dea45a6a89ae7e5e";
-      #   finalImageTag = "1.10.1";
-      #   sha256 = "0wg696920smmal7552a2zdhfncndn5kfammfa8bk8l7dz9bhk0y1";
-      # };
+      addons.dns.coredns = {
+        imageName = "docker.io/coredns/coredns"; # docker.io is required now for the image to be pulled
+        imageDigest = "sha256:a0ead06651cf580044aeb0a0feba63591858fb2e43ade8c9dea45a6a89ae7e5e";
+        finalImageTag = "1.10.1";
+        sha256 = "0wg696920smmal7552a2zdhfncndn5kfammfa8bk8l7dz9bhk0y1";
+      };
       addons.dns.corefile = ''
         .:10053 {
           errors
