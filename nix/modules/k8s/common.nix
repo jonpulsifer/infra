@@ -89,10 +89,17 @@ in
       clusterCidr = networkConfig.podCidr;
       easyCerts = true;
       addons.dns.coredns = {
-        imageName = "docker.io/coredns/coredns"; # docker.io is required now for the image to be pulled
+        imageName = "coredns/coredns";
         imageDigest = "sha256:a0ead06651cf580044aeb0a0feba63591858fb2e43ade8c9dea45a6a89ae7e5e";
         finalImageTag = "1.10.1";
-        sha256 = "0wg696920smmal7552a2zdhfncndn5kfammfa8bk8l7dz9bhk0y1";
+        arch = pkgs.go.GOARCH;
+        hash =
+          if pkgs.go.GOARCH == "amd64" then
+            "sha256-wYMJV/rtUDQXUq5W5WaxzTLrYPtCiVIOVbVqIJJJ5nE="
+          else if pkgs.go.GOARCH == "arm64" then
+            "sha256-yXkgJW2SQcAFzjmBSAn2qo6O4m5AgMKwiT/LR+dqmzA="
+          else
+            builtins.throw "Unsupported arch ${pkgs.go.GOARCH}.";
       };
       addons.dns.corefile = ''
         .:10053 {
