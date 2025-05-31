@@ -54,17 +54,19 @@ in
       ] # for some k8s networking
       ++ [ openiscsi ]; # for longhorn
 
-    systemd.services.kubelet.preStart = lib.mkForce ''
-      ${lib.concatMapStrings (img: ''
-        echo "Seeding container image: ${img}"
-        ${
-          if (lib.hasSuffix "gz" img) then
-            ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
-          else
-            ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
-        }
-      '') config.services.kubernetes.kubelet.seedDockerImages}
-    ''; # we do not want to remove /opt/cni/bin/*
+    # systemd.services.kubelet.preStart = lib.mkForce ''
+    #   ${lib.concatMapStrings (img: ''
+    #     echo "Seeding container image: ${img}"
+    #     ${
+    #       if (lib.hasSuffix "gz" img) then
+    #         ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
+    #       else
+    #         ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -''
+    #     }
+    #   '') config.services.kubernetes.kubelet.seedDockerImages}
+    # ''; # we do not want to remove /opt/cni/bin/*
+    systemd.services.kubelet.preStart = lib.mkForce null;
+    config.services.kubernetes.kubelet.seedDockerImages = lib.mkForce [ ];
 
     services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
 
