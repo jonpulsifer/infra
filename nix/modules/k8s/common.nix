@@ -65,7 +65,7 @@ in
     #     }
     #   '') config.services.kubernetes.kubelet.seedDockerImages}
     # ''; # we do not want to remove /opt/cni/bin/*
-    systemd.services.kubelet.preStart = lib.mkForce null;
+    systemd.services.kubelet.preStart = lib.mkForce '''';
     services.kubernetes.kubelet.seedDockerImages = lib.mkForce [ ];
 
     services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
