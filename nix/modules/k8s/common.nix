@@ -70,7 +70,7 @@ in
 
     nixpkgs.overlays = [ (import ../../overlays/certmgr.nix) ];
     services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
-    
+
     services.kubernetes = {
       masterAddress = networkConfig.apiServerHostname;
       apiserverAddress = "https://${networkConfig.apiServerHostname}:${toString networkConfig.apiServerPort}";
