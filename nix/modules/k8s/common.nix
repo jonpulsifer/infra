@@ -59,9 +59,9 @@ in
         echo "Seeding container image: ${img}"
         ${
           if (lib.hasSuffix "gz" img) then
-            ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import --all-platforms -''
+            ''${pkgs.gzip}/bin/zcat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -platform linux/amd64 -''
           else
-            ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import --all-platforms -''
+            ''${pkgs.coreutils}/bin/cat "${img}" | ${pkgs.containerd}/bin/ctr -n k8s.io image import -platform linux/amd64 -''
         }
       '') config.services.kubernetes.kubelet.seedDockerImages}
     ''; # we do not want to remove /opt/cni/bin/*
