@@ -95,7 +95,7 @@ in
         arch = pkgs.go.GOARCH;
         hash =
           if pkgs.go.GOARCH == "amd64" then
-            "sha256-wYMJV/rtUDQXUq5W5WaxzTLrYPtCiVIOVbVqIJJJ5nE="
+            "sha256-dKb1+jiF8P6gnXtF7kxVPWxptXNS+oXJr+/NwJl5++I="
           else if pkgs.go.GOARCH == "arm64" then
             "sha256-yXkgJW2SQcAFzjmBSAn2qo6O4m5AgMKwiT/LR+dqmzA="
           else
