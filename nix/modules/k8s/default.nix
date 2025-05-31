@@ -23,6 +23,7 @@ in
         "worker"
       ];
       description = "K8s node role";
+      default = "worker";
     };
   };
 }

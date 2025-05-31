@@ -71,7 +71,7 @@ in
     nixpkgs.overlays = [ (import ../../overlays/certmgr.nix) ];
     services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
     
-    services.kubernetes = {
+    services.kubernetes = rec {
       masterAddress = networkConfig.apiServerHostname;
       apiserverAddress = "https://${networkConfig.apiServerHostname}:${toString networkConfig.apiServerPort}";
       apiserver = {
@@ -83,6 +83,8 @@ in
         enable = true;
         clusterDns = networkConfig.dns;
         cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
+        kubeconfig.server = apiserverAddress;
+        taints = lib.mkForce { }; # we want to schedule workloads everywhere
       };
       clusterCidr = networkConfig.podCidr;
       easyCerts = true;
