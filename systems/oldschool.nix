@@ -11,7 +11,7 @@ let
 in
 {
   imports = [
-    ../nix/modules/github-runner.nix
+    # ../nix/modules/github-runner.nix
     ../nix/modules/yarr.nix
     ../nix/modules/k8s
   ];
