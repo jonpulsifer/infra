@@ -6,9 +6,7 @@
 }:
 {
   imports = [
-    ../nix/modules/k8s/default.nix
-    ../nix/modules/k8s/common.nix
-    ../nix/modules/k8s/control-plane.nix
+    ../nix/modules/k8s
   ];
   networking.hostName = name;
   # networking.wireless = {
