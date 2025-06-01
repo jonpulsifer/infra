@@ -85,6 +85,8 @@ in
         cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
         kubeconfig.server = config.services.kubernetes.apiserverAddress;
         taints = lib.mkForce { }; # we want to schedule workloads everywhere
+        extraOpts = "--pod-infra-container-image=registry.k8s.io/pause:latest";
+        seedDockerImages = lib.mkForce [ ];
       };
       clusterCidr = networkConfig.podCidr;
       easyCerts = true;
