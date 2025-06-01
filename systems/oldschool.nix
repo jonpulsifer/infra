@@ -35,8 +35,8 @@ in
   };
 
   services.tailscale = {
-    extraUpFlags = [ "--advertise-routes=192.168.2.0/24" ];
-    useRoutingFeatures = "both";
+    # extraUpFlags = [ "--advertise-routes=192.168.2.0/24" ];
+    # useRoutingFeatures = "both";
   };
 
   systemd.services.tailscale-transport-layer-offloads = {
