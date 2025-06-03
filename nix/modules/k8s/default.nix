@@ -124,6 +124,7 @@ in
           cni.packages = lib.mkForce [ ]; # we're using cilium for CNI, so we don't need this
           kubeconfig.server = config.services.kubernetes.apiserverAddress;
           taints = lib.mkForce { }; # we want to schedule workloads everywhere
+          extraOpts = "--node-labels=node-role.kubernetes.io/${cfg.role}=${lib.optionalString (cfg.network == "folly") ",bgp-enabled=true"}";
         };
 
         proxy.enable = false;
