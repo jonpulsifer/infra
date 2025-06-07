@@ -1,4 +1,5 @@
-# kubectl apply --kustomize install-flux
+# kubectl apply --kustomize .
+# terraform apply
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

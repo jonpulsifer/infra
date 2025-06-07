@@ -19,6 +19,12 @@ locals {
     "optiplex" = {
       "node-role.kubernetes.io/worker" = ""
       "bgp-enabled"                    = "true"
+    },
+    "oldschool" = {
+      "node-role.kubernetes.io/worker" = ""
+    },
+    "retrofit" = {
+      "node-role.kubernetes.io/control-plane" = ""
     }
   }
 }
@@ -34,25 +40,3 @@ resource "kubernetes_labels" "nodes" {
   labels = each.value
 }
 
-provider "kubernetes" {
-  config_path    = "~/.kube/config"
-  config_context = "local"
-}
-
-terraform {
-  backend "gcs" {
-    bucket = "homelab-ng"
-    prefix = "terraform/k8s"
-  }
-  required_providers {
-    kubernetes = {
-      source = "hashicorp/kubernetes"
-    }
-    flux = {
-      source = "fluxcd/flux"
-    }
-    github = {
-      source = "integrations/github"
-    }
-  }
-}

@@ -1,4 +1,6 @@
 # kubectl apply --kustomize bootstrap
+# terraform apply
+# kubectl apply --kustomize .
 # do this after ensuring flux is installed and self managing
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -6,5 +8,5 @@ kind: Kustomization
 metadata:
   name: bootstrap
 resources:
-  - ../shared/repositories/git/infra.yaml
+  - ../../shared/repositories/git/infra.yaml
   - cluster.yaml
