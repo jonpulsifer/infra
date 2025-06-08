@@ -19,7 +19,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./k8s/clusters/folly
+  path: ./k8s/clusters/folly/flux-system
   prune: true
   sourceRef:
     kind: GitRepository
