@@ -5,7 +5,7 @@ resources:
   - namespace.yaml
   - ddns.yaml
   - ddns.sops.yaml
-  - cloudflared.yaml
+  # - cloudflared.yaml
   - cloudflared.sops.yaml
 namespace: cloudflare
 configMapGenerator:
