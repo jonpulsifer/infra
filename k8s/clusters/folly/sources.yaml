@@ -6,7 +6,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./k8s/clusters/folly/repositories
+  path: ./k8s/clusters/folly/sources
   prune: true
   sourceRef:
     kind: GitRepository
