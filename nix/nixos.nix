@@ -23,7 +23,7 @@ in
         "ahci"
         "usbhid"
         "usb_storage"
-      ]
+      ];
     initrd.kernelModules = [ ];
 
     kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
