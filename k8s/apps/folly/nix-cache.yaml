@@ -6,7 +6,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./k8s/apps/nix-cache
+  path: ./k8s/apps/folly/nix-cache
   prune: true
   sourceRef:
     kind: GitRepository
