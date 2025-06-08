@@ -10,7 +10,7 @@
     ../nix/modules/k8s
   ];
   services.k8s = {
-    enable = true;
+    enable = false;
     network = "folly";
     role = "control-plane";
   };
