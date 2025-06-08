@@ -3,6 +3,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helm-release.yaml
-  # - letsencrypt-production.yaml
-  # - letsencrypt-staging.yaml
+  - letsencrypt-production.yaml
+  - letsencrypt-staging.yaml
   - cloudflare-secret.sops.yaml
