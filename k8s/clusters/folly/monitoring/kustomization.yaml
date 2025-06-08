@@ -13,7 +13,7 @@ resources:
   - screenpi4.yaml
   - secret.sops.yaml
   - unpoller
-  - signoz.yaml
+  # - signoz.yaml
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
