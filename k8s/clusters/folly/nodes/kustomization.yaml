@@ -6,5 +6,5 @@ resources:
   - node-feature-discovery.yaml
   - intel-device-plugin-operator.yaml
   - intel-device-plugin-gpu.yaml
-  - intel-uhd-630.yaml
+  # - intel-uhd-630.yaml
 namespace: nodes
