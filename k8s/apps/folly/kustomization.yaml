@@ -19,7 +19,7 @@ resources:
   - redis
   - reloader
   - rosie
-  - satisfactory
+  # - satisfactory
   - vault
 patches:
   - target:
