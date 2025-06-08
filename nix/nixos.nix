@@ -24,21 +24,10 @@ in
         "usbhid"
         "usb_storage"
       ]
-      ++ lib.optionals (builtins.elem config.networking.hostName [
-        "nuc"
-        "riptide"
-      ]) [ "nvme" ];
     initrd.kernelModules = [ ];
 
     kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
-    kernelModules =
-      [ ]
-      ++ lib.optionals (builtins.elem config.networking.hostName [
-        "nuc"
-        "800g2"
-        "riptide"
-        "optiplex"
-      ]) [ "kvm-intel" ];
+    kernelModules = [ ];
 
     consoleLogLevel = lib.mkDefault 0;
     extraModulePackages = [ ];
