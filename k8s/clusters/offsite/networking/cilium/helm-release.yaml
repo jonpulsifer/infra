@@ -1,0 +1,110 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cilium
+  namespace: kube-system
+spec:
+  interval: 24h
+  maxHistory: 2
+  chart:
+    spec:
+      chart: cilium
+      version: 1.17.4
+      sourceRef:
+        kind: HelmRepository
+        name: cilium
+        namespace: flux-system
+      interval: 24h
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    timeout: 10m
+    remediation:
+      retries: 5
+  values:
+    autoDirectNodeRoutes: true
+    devices: eno+ enp+
+    kubeProxyReplacement: true
+    k8sServiceHost: ${API_SERVER_IP}
+    k8sServicePort: ${API_SERVER_PORT}
+    routingMode: native
+    enableIPv4Masquerade: false
+    ipam:
+      mode: multi-pool
+    ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
+    enableXTSocketFallback: false
+    endpointRoutes:
+      enabled: true
+    bpf:
+      masquerade: false
+    bgpControlPlane:
+      enabled: false
+    gatewayAPI:
+      enabled: true
+    envoy:
+      enabled: true
+    ingressController:
+      enabled: true
+      default: true
+    l7Proxy: true
+    loadBalancer:
+      l7:
+        backend: envoy
+    nodePort:
+      enabled: true
+    k8sNetworkPolicy:
+      enabled: false
+    operator.prometheus.enabled: true
+    dashboards:
+      enabled: true
+    prometheus:
+      enabled: true
+      serviceMonitor:
+        enabled: false
+        labels:
+          release: prom-stack
+      dashboards:
+        enabled: true
+    hubble:
+      enabled: true
+      relay:
+        enabled: true
+        prometheus:
+          enabled: true
+          serviceMonitor:
+            enabled: false
+            labels:
+              release: prom-stack
+      metrics:
+        serviceMonitor:
+          enabled: false
+          labels:
+            release: prom-stack
+        dashboards:
+          enabled: true
+        enableOpenMetrics: true
+        enabled:
+          - dns
+          - drop
+          - tcp
+          - flow
+          - port-distribution
+          - icmp
+          - httpV2:exemplars=true
+      ui:
+        enabled: false
+        ingress:
+          enabled: true
+          annotations:
+            cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+            hajimari.io/enable: "true"
+            hajimari.io/icon: "network"
+          hosts:
+            - &host hubble.${SECRET_DOMAIN}
+          tls:
+            - hosts:
+                - *host
+              secretName: *host

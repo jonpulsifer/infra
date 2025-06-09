@@ -1,0 +1,24 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gateway-api.yaml
+  - cilium
+  - cert-manager
+  - cloudflare
+  - external-dns
+patches:
+  - target:
+      group: helm.toolkit.fluxcd.io
+      version: v2
+      kind: HelmRelease
+    patch: |-
+      - op: replace
+        path: /spec/interval
+        value: 1m0s
+      - op: replace
+        path: /spec/chart/spec/interval
+        value: 5m0s
+      - op: replace
+        path: /spec/maxHistory
+        value: 2
