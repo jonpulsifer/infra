@@ -31,10 +31,10 @@ spec:
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
     routingMode: native
+    ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableIPv4Masquerade: false
     ipam:
       mode: multi-pool
-    ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableXTSocketFallback: false
     endpointRoutes:
       enabled: true

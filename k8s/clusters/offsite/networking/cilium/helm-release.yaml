@@ -30,16 +30,16 @@ spec:
     kubeProxyReplacement: true
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
-    routingMode: native
+    routingMode: tunnel
+    # ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableIPv4Masquerade: false
     ipam:
       mode: multi-pool
-    ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableXTSocketFallback: false
     endpointRoutes:
       enabled: true
     bpf:
-      masquerade: false
+      masquerade: true
     bgpControlPlane:
       enabled: false
     gatewayAPI:
