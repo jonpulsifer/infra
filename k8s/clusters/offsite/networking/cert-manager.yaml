@@ -6,7 +6,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./cert-manager
+  path: ./k8s/clusters/offsite/networking/cert-manager
   prune: true
   sourceRef:
     kind: GitRepository
@@ -22,7 +22,7 @@ metadata:
   name: cert-manager-issuer
   namespace: flux-system
 spec:
-  path: ./cert-manager/issuers
+  path: ./k8s/clusters/offsite/networking/cert-manager/issuers
   interval: 1h0m0s
   dependsOn:
     - name: cert-manager
