@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - gateway-api.yaml
   - cilium
-  - cert-manager
   - cloudflare
   - external-dns
 patches:
@@ -22,3 +21,21 @@ patches:
       - op: replace
         path: /spec/maxHistory
         value: 2
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  path: ./cert-manager
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager-issuer
+  namespace: flux-system
+spec:
+  path: ./cert-manager/issuers
+  dependsOn:
+    - name: cert-manager
