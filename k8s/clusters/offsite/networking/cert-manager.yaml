@@ -5,6 +5,7 @@ metadata:
   name: cert-manager
   namespace: flux-system
 spec:
+  interval: 1h0m0s
   path: ./cert-manager
   prune: true
   sourceRef:
@@ -22,6 +23,7 @@ metadata:
   namespace: flux-system
 spec:
   path: ./cert-manager/issuers
+  interval: 1h0m0s
   dependsOn:
     - name: cert-manager
   prune: true
