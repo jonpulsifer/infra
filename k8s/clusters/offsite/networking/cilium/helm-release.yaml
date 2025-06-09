@@ -36,7 +36,7 @@ spec:
     ipam:
       mode: cluster-pool
       operator:
-        clusterPoolIPv4PodCIDR: ${CILIUM_POD_CIDR}
+        clusterPoolIPv4PodCIDRList: ["${CILIUM_POD_CIDR}"]
         clusterPoolIPv4MaskSize: 25
     enableXTSocketFallback: false
     endpointRoutes:
