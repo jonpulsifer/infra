@@ -2,12 +2,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - cert-manager.yaml
   - gateway-api.yaml
   - cilium
-  - cert-manager
   - cloudflare
   - external-dns
-  # - ingress-nginx
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
