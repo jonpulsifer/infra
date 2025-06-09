@@ -34,7 +34,10 @@ spec:
     # ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableIPv4Masquerade: false
     ipam:
-      mode: multi-pool
+      mode: cluster-pool
+      operator:
+      clusterPoolIPv4PodCIDR: ${CILIUM_POD_CIDR}
+      clusterPoolIPv4MaskSize: 25
     enableXTSocketFallback: false
     endpointRoutes:
       enabled: true
