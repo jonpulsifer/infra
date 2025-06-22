@@ -18,7 +18,7 @@ metadata:
   name: cert-manager-issuer
   namespace: flux-system
 spec:
-  path: ./k8s/clusters/offsite/networking/cert-manager/issuers
+  path: ./k8s/clusters/folly/networking/cert-manager/issuers
   sourceRef:
     kind: GitRepository
     name: infra
