@@ -17,18 +17,18 @@
   ],
   rebaseWhen: 'conflicted',
   flux: {
-    fileMatch: [
-      'k8s/.+\\.ya?ml$',
+    managerFilePatterns: [
+      '/k8s/.+\\.ya?ml$/',
     ],
   },
   'helm-values': {
-    fileMatch: [
-      'k8s/.+\\.ya?ml$',
+    managerFilePatterns: [
+      '/k8s/.+\\.ya?ml$/',
     ],
   },
   kubernetes: {
-    fileMatch: [
-      'k8s/.+\\.ya?ml$',
+    managerFilePatterns: [
+      '/k8s/.+\\.ya?ml$/',
     ],
   },
   packageRules: [
