@@ -29,7 +29,7 @@ spec:
     runnerScaleSetName: arc-ts
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
-    minRunners: 0
+    minRunners: 1
     maxRunners: 20
     template:
       spec:
