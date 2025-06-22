@@ -18,7 +18,7 @@ resources:
   - postgres
   - redis
   - reloader
-  - rosie
+  # - rosie
   # - satisfactory
   - vault
 patches:
