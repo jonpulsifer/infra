@@ -1,26 +1,26 @@
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: request-headers
-  namespace: argo
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/jonpulsifer/ts.git
-    targetRevision: HEAD
-    path: apps/request-headers/k8s
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: request-headers
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-    retry:
-      limit: 2
+# ---
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: request-headers
+#   namespace: argo
+# spec:
+#   project: default
+#   source:
+#     repoURL: https://github.com/jonpulsifer/ts.git
+#     targetRevision: HEAD
+#     path: apps/request-headers/k8s
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: request-headers
+#   syncPolicy:
+#     automated:
+#       prune: true
+#       selfHeal: true
+#     syncOptions:
+#       - CreateNamespace=true
+#     retry:
+#       limit: 2
 # ---
 # apiVersion: argoproj.io/v1alpha1
 # kind: Application
@@ -67,26 +67,26 @@ spec:
 #       - CreateNamespace=true
 #     retry:
 #       limit: 2
-# ---
-# apiVersion: argoproj.io/v1alpha1
-# kind: Application
-# metadata:
-#   name: hub
-#   namespace: argo
-# spec:
-#   project: default
-#   source:
-#     repoURL: https://github.com/jonpulsifer/ts.git
-#     targetRevision: HEAD
-#     path: apps/hub/k8s
-#   destination:
-#     server: https://kubernetes.default.svc
-#     namespace: hub
-#   syncPolicy:
-#     automated:
-#       prune: true
-#       selfHeal: true
-#     syncOptions:
-#       - CreateNamespace=true
-#     retry:
-#       limit: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hub
+  namespace: argo
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jonpulsifer/ts.git
+    targetRevision: HEAD
+    path: apps/hub/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hub
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 2
