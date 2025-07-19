@@ -82,8 +82,7 @@ in
         iptables
         socat
       ] # for some k8s networking
-      ++ [ openiscsi ] # for longhorn
-      ++ [ shadow ]; # for user namespace support
+      ++ [ openiscsi ]; # for longhorn
 
     users.groups.kubelet = {};
     users.users.kubelet = {
@@ -103,7 +102,7 @@ in
         }
       ];
     };
-
+    systemd.services.kubelet.path = lib.mkMerge [ pkgs.shadow ];
     systemd.services.kubelet.preStart = lib.mkForce ''
       ${lib.concatMapStrings (img: ''
         echo "Seeding container image: ${img}"
