@@ -16,6 +16,10 @@ with lib;
     ];
   };
 
+  networking.useDHCP = mkForce true;
+  networking.useNetworkd = mkForce true;
+  networking.networkmanager.enable = mkForce false;
+
   networking.hostName = "nixos-iso";
   networking.wireless.enable = true;
 
