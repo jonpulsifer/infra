@@ -117,7 +117,10 @@ in
 
     services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
 
-    nixpkgs.overlays = [ (import ../../overlays/certmgr.nix) ];
+    nixpkgs.overlays = [
+      (import ../../overlays/certmgr.nix)
+      (import ../../overlays/runc.nix)
+    ];
     services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
 
     # Add static host entries using the networkConfig directly to avoid circular dependency
