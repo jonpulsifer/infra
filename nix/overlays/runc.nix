@@ -10,7 +10,7 @@ final: prev: {
           owner = "opencontainers";
           repo = "runc";
           rev = "v${version}";
-          hash = "";
+          hash = "sha256-oXoDio3l23Z6UyAhb9oDMo1O4TLBbFyLh9sRWXnfLVY=";
         };
         makeFlags = [ "BUILDTAGS+=seccomp" ];
 
