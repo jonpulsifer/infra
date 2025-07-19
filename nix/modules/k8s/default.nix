@@ -84,6 +84,7 @@ in
       ] # for some k8s networking
       ++ [ openiscsi ]; # for longhorn
 
+    users.groups.kubelet = {};
     users.users.kubelet = {
       description = "Kubernetes kubelet user for user namespace support";
       isSystemUser = true;
