@@ -82,7 +82,8 @@ in
         iptables
         socat
       ] # for some k8s networking
-      ++ [ openiscsi ]; # for longhorn
+      ++ [ openiscsi ] # for longhorn
+      ++ [ shadow ]; # for user namespace support
 
     users.groups.kubelet = {};
     users.users.kubelet = {
