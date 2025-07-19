@@ -102,7 +102,7 @@ in
         }
       ];
     };
-    systemd.services.kubelet.path = lib.mkMerge [ pkgs.shadow ];
+    systemd.services.kubelet.path = [ pkgs.shadow ];
     systemd.services.kubelet.preStart = lib.mkForce ''
       ${lib.concatMapStrings (img: ''
         echo "Seeding container image: ${img}"
