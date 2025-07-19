@@ -5,7 +5,7 @@ final: prev: {
       # components = [ "cmd/kubelet" ];
     }).overrideAttrs
       (_: rec {
-        version = "1.2.2";
+        version = "1.3.0";
         src = prev.fetchFromGitHub {
           owner = "opencontainers";
           repo = "runc";
