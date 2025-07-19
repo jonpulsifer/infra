@@ -17,13 +17,12 @@ in
   powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
 
   boot = {
-    initrd.availableKernelModules =
-      [
-        "xhci_pci"
-        "ahci"
-        "usbhid"
-        "usb_storage"
-      ];
+    initrd.availableKernelModules = [
+      "xhci_pci"
+      "ahci"
+      "usbhid"
+      "usb_storage"
+    ];
     initrd.kernelModules = [ ];
 
     kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;

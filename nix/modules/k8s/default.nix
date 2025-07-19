@@ -84,6 +84,23 @@ in
       ] # for some k8s networking
       ++ [ openiscsi ]; # for longhorn
 
+    users.users.kubelet = {
+      description = "Kubernetes kubelet user for user namespace support";
+      isSystemUser = true;
+      subUidRanges = [
+        {
+          startUid = 65536;
+          count = 7208960;
+        }
+      ];
+      subGidRanges = [
+        {
+          startGid = 65536;
+          count = 7208960;
+        }
+      ];
+    };
+
     systemd.services.kubelet.preStart = lib.mkForce ''
       ${lib.concatMapStrings (img: ''
         echo "Seeding container image: ${img}"
@@ -106,7 +123,7 @@ in
 
     # Control plane specific configuration
     services.etcd.enable = lib.mkIf (cfg.role == "control-plane") true;
-    
+
     services.kubernetes = lib.mkMerge [
       {
         masterAddress = networkConfig.apiServerHostname;
@@ -117,7 +134,7 @@ in
           advertiseAddress = networkConfig.apiServerIP;
           serviceClusterIpRange = networkConfig.serviceCidr;
         };
-        
+
         kubelet = {
           enable = true;
           clusterDns = networkConfig.dns;
@@ -169,6 +186,6 @@ in
         addonManager.enable = true;
       })
     ];
-    
+
   };
 }
