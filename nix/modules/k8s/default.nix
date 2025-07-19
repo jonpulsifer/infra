@@ -87,6 +87,7 @@ in
     users.users.kubelet = {
       description = "Kubernetes kubelet user for user namespace support";
       isSystemUser = true;
+      group = "kubelet";
       subUidRanges = [
         {
           startUid = 65536;
