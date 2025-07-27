@@ -21,24 +21,9 @@
 
       forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] f;
       
-      # Stable packages - core system tools that don't need frequent updates
-      pkgsStableForSystem =
+      pkgsForSystem =
         system:
         import nixpkgs {
-          inherit system;
-          config = {
-            allowUnfree = true;
-          };
-          overlays = [
-            # Core packages overlay
-            (import ./overlays/stable.nix)
-          ];
-        };
-
-      # Unstable packages - newer tools that update frequently
-      pkgsUnstableForSystem =
-        system:
-        import nixpkgs-unstable {
           inherit system;
           config = {
             allowUnfree = true;
@@ -51,24 +36,17 @@
                 inherit (final.pkgs-x86) emacsMacport;
               })
             )
-            # Development and CLI tools overlay
-            (import ./overlays/unstable.nix)
+            # Add unstable packages as an overlay
+            (final: prev: {
+              unstable = import nixpkgs-unstable {
+                inherit system;
+                config = prev.config;
+              };
+            })
+            # Custom packages overlay
+            (import ./pkgs)
           ];
         };
-
-      # Combined package set with both stable and unstable
-      pkgsForSystem =
-        system:
-        let
-          stable = pkgsStableForSystem system;
-          unstable = pkgsUnstableForSystem system;
-        in
-        stable.extend (
-          final: prev: {
-            # Expose unstable packages
-            unstable = unstable;
-          }
-        );
 
       mkHomeConfiguration =
         system: profile:
@@ -108,10 +86,9 @@
           _: prev:
           optionalAttrs (prev.stdenv.system == "aarch64-darwin") {
             # Add access to x86 packages if system is running Apple Silicon
-            pkgs-x86 = pkgsUnstableForSystem "x86_64-darwin";
+            pkgs-x86 = pkgsForSystem "x86_64-darwin";
           };
-        stable = import ./overlays/stable.nix;
-        unstable = import ./overlays/unstable.nix;
+        pkgs = import ./pkgs;
       };
 
       devShells = forAllSystems (

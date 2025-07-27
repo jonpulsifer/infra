@@ -6,7 +6,6 @@
 }:
 let
   inherit (lib) mkIf optionals;
-  inherit (pkgs) stdenv;
   shellIntegration = config.programs.zsh.enable;
   k8s-workflow-utils = pkgs.unstable.fetchFromGitHub {
     owner = "jonpulsifer";
@@ -17,9 +16,9 @@ let
 in
 {
   home = {
-    # Use unstable packages for Kubernetes tools to get latest features
     packages =
-      (with pkgs.unstable; [
+      with pkgs.unstable;
+      [
         argocd
         cilium-cli
         fluxcd
@@ -28,12 +27,12 @@ in
         k9s
         krew
         kubecolor
+        kubectl
         kubectl-cnpg
         kubectl-klock
         kubernetes-helm
-      ])
-      ++ [ pkgs.kubectl ] # Use our custom kubectl package from stable overlay
-      ++ optionals (stdenv.isLinux) [ pkgs.unstable.nerdctl ];
+      ]
+      ++ optionals (pkgs.stdenv.isLinux) [ nerdctl ];
       
     sessionPath = mkIf shellIntegration [ "${k8s-workflow-utils}/kubectl-plugins" ];
     sessionVariables = {
