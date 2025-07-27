@@ -18,7 +18,8 @@ in
   imports = [ ./workstation.nix ];
 
   home.username = mkForce username;
-  home.packages = with pkgs; [
+  # Use unstable packages for development tools
+  home.packages = with pkgs.unstable; [
     ffmpeg
     reattach-to-user-namespace
   ];

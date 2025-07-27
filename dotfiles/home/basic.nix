@@ -49,31 +49,28 @@ in
     stateVersion = "24.11";
   };
 
+  # Stable packages - core system tools that rarely change
   home.packages = with pkgs; [
-    # daily driving apps
-    shell-utils
+    # Basic system utilities - stable
     dig
-    # gnumake
     httpie
     jq
     mtr
     nano
-    # neofetch
-    # nmap
-    # shellcheck
     tcpdump
     unzip
     wget
     whois
-
-    # hipster tools
+    shell-utils
+  ] ++ (with pkgs.unstable; [
+    # Development tools - from unstable for latest features
     eza
     delta
     fd
     ripgrep
     sd
     xan
-  ];
+  ]);
 
   programs.home-manager.enable = true;
   manual.manpages.enable = false;
@@ -114,7 +111,7 @@ in
 
   programs.fzf = {
     enable = true;
-    defaultCommand = "${pkgs.fd}/bin/fd --type f";
+    defaultCommand = "${pkgs.unstable.fd}/bin/fd --type f";
     defaultOptions = [
       "--reverse"
       "--info=inline"
