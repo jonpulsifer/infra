@@ -16,14 +16,17 @@ in
     signing.key = mkDefault "~/.ssh/id_ed25519";
     signing.signByDefault = true;
 
-    delta.enable = true;
+    delta = {
+      enable = true;
+      options = {
+        navigate = true;
+        side-by-side = true;
+      };
+    };
 
     extraConfig = {
       color.ui = true;
-      core.pager = delta;
       core.whitespace = "trailing-space,space-before-tab";
-      delta.navigate = true;
-      delta.side-by-side = true;
       format.signoff = true;
       gpg.format = "ssh";
       github.user = mkDefault github;
