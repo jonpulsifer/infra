@@ -67,10 +67,6 @@
           final: prev: {
             # Expose unstable packages
             unstable = unstable;
-            # Merge custom packages from unstable
-            inherit (unstable) 
-              kubectl 
-              shell-utils;
           }
         );
 

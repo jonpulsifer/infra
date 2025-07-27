@@ -32,7 +32,7 @@ in
         kubectl-klock
         kubernetes-helm
       ])
-      ++ [ pkgs.kubectl ] # Use our custom kubectl package
+      ++ [ pkgs.kubectl ] # Use our custom kubectl package from stable overlay
       ++ optionals (stdenv.isLinux) [ pkgs.unstable.nerdctl ];
       
     sessionPath = mkIf shellIntegration [ "${k8s-workflow-utils}/kubectl-plugins" ];
