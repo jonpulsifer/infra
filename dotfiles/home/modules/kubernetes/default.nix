@@ -6,7 +6,7 @@
 }:
 let
   inherit (lib) mkIf optionals;
-  inherit (pkgs.stdenv) stdenv;
+  inherit (pkgs) stdenv;
   shellIntegration = config.programs.zsh.enable;
   k8s-workflow-utils = pkgs.unstable.fetchFromGitHub {
     owner = "jonpulsifer";
