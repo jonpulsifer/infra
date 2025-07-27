@@ -1,7 +1,7 @@
 { lib, pkgs, ... }:
 let
   inherit (lib) mkDefault;
-  delta = "${pkgs.delta}/bin/delta";
+  delta = "${pkgs.unstable.delta}/bin/delta";
   github = "jonpulsifer";
 in
 {
