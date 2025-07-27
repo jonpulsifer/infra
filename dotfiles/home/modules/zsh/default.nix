@@ -84,7 +84,7 @@ in
     syntaxHighlighting.enable = true;
     zprof.enable = false;
     shellAliases = { };
-    initExtra =
+    initContent =
       let
         early = lib.mkOrder 1200 zshConfigEarlyInit;
         late = lib.mkOrder 1200 zshConfig;
