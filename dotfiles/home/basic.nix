@@ -34,9 +34,9 @@ in
       l = ll;
       ll = ls + " -lg";
       la = ls + " -lag";
-      ls = "${pkgs.eza}/bin/eza";
+      ls = "${pkgs.unstable.eza}/bin/eza";
       tree = ls + " --tree";
-      diff = "${pkgs.delta}/bin/delta";
+      diff = "${pkgs.unstable.delta}/bin/delta";
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.dotacat}/bin/dotacat";
     };
@@ -46,34 +46,31 @@ in
       enable = true;
     };
 
-    stateVersion = "24.11";
+    stateVersion = "25.05";
   };
 
+  # Stable packages - core system tools that rarely change
   home.packages = with pkgs; [
-    # daily driving apps
-    shell-utils
+    # Basic system utilities - stable and rarely changing
     dig
-    # gnumake
-    httpie
-    jq
     mtr
     nano
-    # neofetch
-    # nmap
-    # shellcheck
     tcpdump
     unzip
     wget
     whois
-
-    # hipster tools
+    shell-utils
+  ] ++ (with pkgs.unstable; [
+    # Modern CLI tools and development tools - from unstable for latest features
+    httpie
+    jq
     eza
     delta
     fd
     ripgrep
     sd
     xan
-  ];
+  ]);
 
   programs.home-manager.enable = true;
   manual.manpages.enable = false;
@@ -114,7 +111,7 @@ in
 
   programs.fzf = {
     enable = true;
-    defaultCommand = "${pkgs.fd}/bin/fd --type f";
+    defaultCommand = "${pkgs.unstable.fd}/bin/fd --type f";
     defaultOptions = [
       "--reverse"
       "--info=inline"

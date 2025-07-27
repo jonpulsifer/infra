@@ -6,9 +6,8 @@
 }:
 let
   inherit (lib) mkIf optionals;
-  inherit (pkgs) fetchFromGitHub stdenv;
   shellIntegration = config.programs.zsh.enable;
-  k8s-workflow-utils = fetchFromGitHub {
+  k8s-workflow-utils = pkgs.unstable.fetchFromGitHub {
     owner = "jonpulsifer";
     repo = "k8s-workflow-utils";
     rev = "c013d43763750321fdcd5fcdd8e152f62ff17dc7";
@@ -18,7 +17,7 @@ in
 {
   home = {
     packages =
-      with pkgs;
+      with pkgs.unstable;
       [
         argocd
         cilium-cli
@@ -33,7 +32,8 @@ in
         kubectl-klock
         kubernetes-helm
       ]
-      ++ optionals (stdenv.isLinux) [ nerdctl ];
+      ++ optionals (pkgs.stdenv.isLinux) [ nerdctl ];
+      
     sessionPath = mkIf shellIntegration [ "${k8s-workflow-utils}/kubectl-plugins" ];
     sessionVariables = {
       KUBECONFIG = "${config.home.homeDirectory}/.kube/config";
@@ -73,7 +73,7 @@ in
       {
         name = "kube-ps1";
         file = "kube-ps1.sh";
-        src = fetchFromGitHub {
+        src = pkgs.unstable.fetchFromGitHub {
           owner = "jonmosco";
           repo = "kube-ps1";
           rev = "v0.9.0";

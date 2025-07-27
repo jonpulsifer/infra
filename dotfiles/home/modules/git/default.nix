@@ -1,7 +1,6 @@
 { lib, pkgs, ... }:
 let
   inherit (lib) mkDefault;
-  delta = "${pkgs.delta}/bin/delta";
   github = "jonpulsifer";
 in
 {
@@ -16,21 +15,24 @@ in
     signing.key = mkDefault "~/.ssh/id_ed25519";
     signing.signByDefault = true;
 
-    delta.enable = true;
+    delta = {
+      enable = true;
+      package = pkgs.unstable.delta;
+      options = {
+        navigate = true;
+        side-by-side = true;
+      };
+    };
 
     extraConfig = {
       color.ui = true;
-      core.pager = delta;
       core.whitespace = "trailing-space,space-before-tab";
-      delta.navigate = true;
-      delta.side-by-side = true;
       format.signoff = true;
       gpg.format = "ssh";
       github.user = mkDefault github;
       help.autocorrect = 1;
       hub.protocol = "ssh";
       init.defaultBranch = "main";
-      interactive.diffFilter = "${delta} --color-only";
 
       merge.conflictstyle = "zdiff3";
       pull.ff = "only";

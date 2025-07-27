@@ -26,7 +26,6 @@ in
         _1password-cli
         age
         sops
-        tenv
         vault
 
         # pixlet

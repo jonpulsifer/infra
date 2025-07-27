@@ -2,9 +2,10 @@
   description = "jonpulsifer/dotfiles lol";
 
   inputs = {
-    home-manager.url = "github:nix-community/home-manager";
+    home-manager.url = "github:nix-community/home-manager/release-25.05";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   };
 
   outputs =
@@ -12,12 +13,14 @@
       self,
       home-manager,
       nixpkgs,
+      nixpkgs-unstable,
       ...
     }:
     let
       inherit (nixpkgs.lib) attrValues optionalAttrs;
 
       forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] f;
+      
       pkgsForSystem =
         system:
         import nixpkgs {
@@ -33,6 +36,14 @@
                 inherit (final.pkgs-x86) emacsMacport;
               })
             )
+            # Add unstable packages as an overlay
+            (final: prev: {
+              unstable = import nixpkgs-unstable {
+                inherit system;
+                config = prev.config;
+              };
+            })
+            # Custom packages overlay
             (import ./pkgs)
           ];
         };
