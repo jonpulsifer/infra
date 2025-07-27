@@ -1,7 +1,6 @@
 { lib, pkgs, ... }:
 let
   inherit (lib) mkDefault;
-  delta = "${pkgs.unstable.delta}/bin/delta";
   github = "jonpulsifer";
 in
 {
@@ -18,6 +17,7 @@ in
 
     delta = {
       enable = true;
+      package = pkgs.unstable.delta;
       options = {
         navigate = true;
         side-by-side = true;
@@ -33,7 +33,6 @@ in
       help.autocorrect = 1;
       hub.protocol = "ssh";
       init.defaultBranch = "main";
-      interactive.diffFilter = "${delta} --color-only";
 
       merge.conflictstyle = "zdiff3";
       pull.ff = "only";

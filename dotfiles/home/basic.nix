@@ -51,10 +51,8 @@ in
 
   # Stable packages - core system tools that rarely change
   home.packages = with pkgs; [
-    # Basic system utilities - stable
+    # Basic system utilities - stable and rarely changing
     dig
-    httpie
-    jq
     mtr
     nano
     tcpdump
@@ -63,7 +61,9 @@ in
     whois
     shell-utils
   ] ++ (with pkgs.unstable; [
-    # Development tools - from unstable for latest features
+    # Modern CLI tools and development tools - from unstable for latest features
+    httpie
+    jq
     eza
     delta
     fd
