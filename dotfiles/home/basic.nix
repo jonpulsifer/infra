@@ -34,9 +34,9 @@ in
       l = ll;
       ll = ls + " -lg";
       la = ls + " -lag";
-      ls = "${pkgs.eza}/bin/eza";
+      ls = "${pkgs.unstable.eza}/bin/eza";
       tree = ls + " --tree";
-      diff = "${pkgs.delta}/bin/delta";
+      diff = "${pkgs.unstable.delta}/bin/delta";
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.dotacat}/bin/dotacat";
     };
