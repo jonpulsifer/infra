@@ -6,6 +6,8 @@
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    gh-aipr.url = "github:jonpulsifer/gh-aipr/add-nix-support";
+    gh-aipr.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -14,39 +16,27 @@
       home-manager,
       nixpkgs,
       nixpkgs-unstable,
-      ...
+      gh-aipr
     }:
     let
-      inherit (nixpkgs.lib) attrValues optionalAttrs;
-
       forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] f;
-      
-      pkgsForSystem =
-        system:
-        import nixpkgs {
-          inherit system;
-          config = {
-            allowUnfree = true;
-          };
-          overlays = [
-            # Sub in x86 version of packages that don't build on Apple Silicon yet
-            (
-              final: prev:
-              (optionalAttrs (prev.stdenv.system == "aarch64-darwin") {
-                inherit (final.pkgs-x86) emacsMacport;
-              })
-            )
-            # Add unstable packages as an overlay
-            (final: prev: {
-              unstable = import nixpkgs-unstable {
-                inherit system;
-                config = prev.config;
-              };
-            })
-            # Custom packages overlay
-            (import ./pkgs)
-          ];
+
+      pkgsForSystem = system: import nixpkgs {
+        inherit system;
+        config = {
+          allowUnfree = true;
         };
+        overlays = [
+          (final: prev: {
+            unstable = import nixpkgs-unstable {
+              inherit system;
+              config = prev.config;
+            };
+          })
+          (import ./pkgs)
+          gh-aipr.overlays.default
+        ];
+      };
 
       mkHomeConfiguration =
         system: profile:
@@ -82,21 +72,12 @@
       };
 
       overlays = {
-        apple-silicon =
-          _: prev:
-          optionalAttrs (prev.stdenv.system == "aarch64-darwin") {
-            # Add access to x86 packages if system is running Apple Silicon
-            pkgs-x86 = pkgsForSystem "x86_64-darwin";
-          };
         pkgs = import ./pkgs;
       };
 
-      devShells = forAllSystems (
+      devShells = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-darwin" ] (
         system:
-        let
-          pkgs = pkgsForSystem system;
-        in
-        {
+        let pkgs = pkgsForSystem system; in {
           default = import ./shell.nix { inherit pkgs; };
         }
       );

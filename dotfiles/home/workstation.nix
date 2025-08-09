@@ -18,7 +18,6 @@ in
 
   # Use unstable packages for development tools
   home.packages = with pkgs.unstable; [
-    gh
     postgresql_15
     tenv
   ];
