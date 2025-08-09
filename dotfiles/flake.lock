@@ -26,11 +26,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1754762213,
-        "narHash": "sha256-vThKtxl4D1vXGxR0W5xYk4KdbeDNE5xq4PnVFPoEhWs=",
+        "lastModified": 1754765198,
+        "narHash": "sha256-g1nAaha8p10g0gz70NUL7Pm1xeTFc8K/AZbCT38bZN8=",
         "owner": "jonpulsifer",
         "repo": "gh-aipr",
-        "rev": "905d8a8b3c397cd4be51c69b89b56bea35d09915",
+        "rev": "1926af730f815cad95f84c8a7c7105732a6395a2",
         "type": "github"
       },
       "original": {

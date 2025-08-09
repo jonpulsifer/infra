@@ -40,7 +40,7 @@
             };
           })
           pkgsOverlay
-          gh-aipr.overlays.default
+          gh-aipr.overlays.pkgs
         ];
       };
 
