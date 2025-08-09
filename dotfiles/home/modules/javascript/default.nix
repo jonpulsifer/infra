@@ -19,7 +19,7 @@ in
     NPM_CONFIG_PREFIX = paths.npm;
     PNPM_HOME = paths.pnpm;
   };
-  home.packages = with pkgs; [
+  home.packages = with pkgs.unstable; [
     biome
     bun
     pnpm_10

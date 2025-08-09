@@ -18,7 +18,7 @@ in
 
   home = rec {
     packages =
-      with pkgs;
+      with pkgs.unstable;
       [
         # cloudevents
         # asciinema

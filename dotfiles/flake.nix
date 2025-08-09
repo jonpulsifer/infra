@@ -21,6 +21,12 @@
     let
       forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] f;
 
+      # Single source of truth for our overlayed packages
+      pkgsOverlay = final: prev: {
+        kubectl = final.callPackage ./pkgs/kubectl.nix { };
+        shell-utils = final.callPackage ./pkgs/shell-utils { };
+      };
+
       pkgsForSystem = system: import nixpkgs {
         inherit system;
         config = {
@@ -33,7 +39,7 @@
               config = prev.config;
             };
           })
-          (import ./pkgs)
+          pkgsOverlay
           gh-aipr.overlays.default
         ];
       };
@@ -50,7 +56,6 @@
         basic = mkHomeConfiguration "x86_64-linux" "basic";
         arm = mkHomeConfiguration "aarch64-linux" "basic";
         homebook = mkHomeConfiguration "aarch64-darwin" "homebook";
-        pixelbook = mkHomeConfiguration "x86_64-linux" "pixelbook";
         work = mkHomeConfiguration "aarch64-darwin" "work";
       };
     in
@@ -59,7 +64,6 @@
       packages = {
         x86_64-linux.default = homeConfigurations.full.activationPackage;
         x86_64-linux.basic = homeConfigurations.basic.activationPackage;
-        x86_64-linux.pixelbook = homeConfigurations.pixelbook.activationPackage;
         aarch64-linux.default = homeConfigurations.arm.activationPackage;
         aarch64-darwin.default = homeConfigurations.work.activationPackage;
         aarch64-darwin.homebook = homeConfigurations.homebook.activationPackage;
@@ -72,11 +76,10 @@
       };
 
       overlays = {
-        pkgs = import ./pkgs;
+        pkgs = pkgsOverlay;
       };
 
-      devShells = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-darwin" ] (
-        system:
+      devShells = forAllSystems (system:
         let pkgs = pkgsForSystem system; in {
           default = import ./shell.nix { inherit pkgs; };
         }

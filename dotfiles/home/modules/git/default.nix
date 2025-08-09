@@ -8,6 +8,7 @@ in
     yeet = "${pkgs.git}/bin/git yeet";
     boop = "${pkgs.git}/bin/git boop";
   };
+
   programs.gh = {
     enable = true;
     extensions = [ pkgs.gh-aipr ];
