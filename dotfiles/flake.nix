@@ -6,7 +6,7 @@
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    gh-aipr.url = "github:jonpulsifer/gh-aipr/add-nix-support";
+    gh-aipr.url = "github:wannabehero/gh-aipr";
     gh-aipr.inputs.nixpkgs.follows = "nixpkgs";
   };
 
@@ -22,7 +22,14 @@
       forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] f;
 
       pkgsOverlay = final: prev:
+        let
+          system = if prev.stdenv ? hostPlatform then prev.stdenv.hostPlatform.system else prev.stdenv.system;
+        in
         (gh-aipr.overlays.pkgs final prev) // {
+          unstable = import nixpkgs-unstable {
+            inherit system;
+            config = prev.config;
+          };
           kubectl = final.callPackage ./pkgs/kubectl.nix { };
           shell-utils = final.callPackage ./pkgs/shell-utils { };
         };
@@ -32,15 +39,7 @@
         config = {
           allowUnfree = true;
         };
-        overlays = [
-          (final: prev: {
-            unstable = import nixpkgs-unstable {
-              inherit system;
-              config = prev.config;
-            };
-          })
-          pkgsOverlay
-        ];
+        overlays = [ pkgsOverlay ];
       };
 
       mkHomeConfiguration =
