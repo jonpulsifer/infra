@@ -21,11 +21,11 @@
     let
       forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] f;
 
-      # Single source of truth for our overlayed packages
-      pkgsOverlay = final: prev: {
-        kubectl = final.callPackage ./pkgs/kubectl.nix { };
-        shell-utils = final.callPackage ./pkgs/shell-utils { };
-      };
+      pkgsOverlay = final: prev:
+        (gh-aipr.overlays.pkgs final prev) // {
+          kubectl = final.callPackage ./pkgs/kubectl.nix { };
+          shell-utils = final.callPackage ./pkgs/shell-utils { };
+        };
 
       pkgsForSystem = system: import nixpkgs {
         inherit system;
@@ -40,7 +40,6 @@
             };
           })
           pkgsOverlay
-          gh-aipr.overlays.pkgs
         ];
       };
 
