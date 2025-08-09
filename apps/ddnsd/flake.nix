@@ -2,21 +2,18 @@
   description = "ddnsd, a dynamic DNS updater for Cloudflare-managed domains";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-unstable";
-    gomod2nix = {
-      url = "github:nix-community/gomod2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    nixpkgs.url = "nixpkgs/nixos-25.05";
   };
 
-  outputs = { self, nixpkgs, flake-utils, gomod2nix, ... }:
+  outputs = { self, nixpkgs, ... }:
     let
       ddnsd = { pkgs, ... }:
-        pkgs.buildGoApplication rec {
+        pkgs.buildGoModule rec {
           pname = "ddnsd";
           version = "0.0.1";
           src = ./.;
-          modules = ./gomod2nix.toml;
+          vendorHash = "sha256-4AP7m6gj30mCQ2naNlleH7JjS4R0J2c7Yvd/2/yYdYM=";
+          subPackages = [ "." ];
         };
       buildDeps = with pkgs; [ git go ];
       devDeps = with pkgs; buildDeps ++ [
@@ -24,16 +21,14 @@
         gopls
         gotools
         go-tools
-        gomod2nix.packages.${system}.default
       ];
       pkgs = import nixpkgs {
         system = "x86_64-linux";
         overlays = [
-          gomod2nix.overlays.default
-          (final: prev: {
-            go = prev.go_1_23;
-            buildGoModule = prev.buildGo123Module;
-          })
+          # (final: prev: {
+          #   go = prev.go_1_23;
+          #   buildGoModule = prev.buildGo123Module;
+          # })
         ];
       };
     in
