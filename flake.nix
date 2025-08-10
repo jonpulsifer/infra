@@ -2,18 +2,17 @@
   description = "the homelab";
 
   inputs = {
-    nixos.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixos.url = "github:nixos/nixpkgs/nixos-25.05";
     nixos-hardware.url = "github:nixos/nixos-hardware";
     nixos-wsl = {
       url = "github:nix-community/NixOS-WSL/main";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixos";
     };
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
 
     home-manager = {
       url = "github:nix-community/home-manager";
       follows = "dotfiles/home-manager";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixos";
     };
 
     hosts.url = "github:StevenBlack/hosts";
@@ -21,11 +20,11 @@
     # my repositories
     dotfiles = {
       url = "github:jonpulsifer/dotfiles";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixos";
     };
     ddnsd = {
       url = "github:jonpulsifer/ddnsd";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs.follows = "nixos";
     };
 
     # ssh keys
@@ -153,7 +152,7 @@
 
       legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" ] (
         system:
-        import inputs.nixpkgs {
+        import nixos {
           inherit system;
           config.allowUnfree = true;
         }
