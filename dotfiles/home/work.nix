@@ -29,19 +29,6 @@ in
   ];
   home.sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
 
-  xdg.configFile."gcloud/configurations/config_${toLower company}".text = ''
-    [core]
-    account = ${email}
-
-    [compute]
-    region = europe-west1
-    zone = europe-west1-b
-
-    [artifacts]
-    location = europe-west1
-    repository = i
-  '';
-
   # homebrew paths like to be at the top of the path list
   programs.zsh.initContent = lib.mkOrder 100 ''
     [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && source "/opt/homebrew/opt/nvm/nvm.sh"

@@ -2,7 +2,7 @@
 with pkgs;
 mkShell {
   buildInputs = [
-    nixfmt-rfc-style
+    nixfmt-tree
     shellcheck
   ];
 

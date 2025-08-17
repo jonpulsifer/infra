@@ -37,11 +37,11 @@
       overlays = [
         gh-aipr.overlays.pkgs
         (final: prev: {
-          inherit (final.pkgs-unstable) google-cloud-sdk jq;
           pkgs-unstable = import nixpkgs-unstable {
-            inherit (final.stdenv.hostPlatform) system;
-            config = final.config;
+            inherit (prev) system config;
+            overlays = [ ];
           };
+          inherit (final.pkgs-unstable) google-cloud-sdk;
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
         })
       ];
@@ -57,7 +57,7 @@
         full = mkHome "x86_64-linux" [ ./home/home.nix ];
         basic = mkHome "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHome "aarch64-linux" [ ./home/basic.nix ];
-        homebook = mkHome "aarch64-darwin" [ ./home/homebook.nix ];
+        homebook = mkHome "aarch64-darwin" [ ./home/home.nix ./home/darwin.nix ];
         work = mkHome "aarch64-darwin" [ ./home/work.nix ];
       };
     in

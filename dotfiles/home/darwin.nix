@@ -18,6 +18,7 @@ in
 
   programs.ghostty = {
     enable = true;
+    package = null;
     enableZshIntegration = true;
     installBatSyntax = mkIf (config.programs.ghostty.package != null) true;
     settings = {
