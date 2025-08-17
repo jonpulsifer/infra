@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# channels baked in here
+# Usage: np <pkg>
+channels=(
+  "nixos-25.05"
+  "nixos-unstable"
+  "nixpkgs-unstable"
+)
+
+pkg="$1"
+
+if [[ -z "$pkg" ]]; then
+  echo "usage: np <pkg>" >&2
+  exit 1
+fi
+
+for ch in "${channels[@]}"; do
+  ver=$(nix eval --impure --raw --expr \
+    "(builtins.getFlake \"github:nixos/nixpkgs/${ch}\").legacyPackages.x86_64-linux.${pkg}.version" \
+    2>/dev/null || echo "not found")
+  echo "${ch}: ${ver}"
+done

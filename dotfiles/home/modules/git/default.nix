@@ -23,7 +23,7 @@ in
 
     delta = {
       enable = true;
-      package = pkgs.unstable.delta;
+      package = pkgs.delta;
       options = {
         navigate = true;
         side-by-side = true;

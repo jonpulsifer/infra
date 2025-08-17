@@ -4,32 +4,29 @@
   lib,
   ...
 }:
+let
+  buildShellScriptBin = name: file: pkgs.stdenvNoCC.mkDerivation {
+    pname = name;
+    version = "0.1";
+    src = file;
+    installPhase = ''
+      mkdir -p $out/bin
+      install -m 755 $src $out/bin/${name}
+    '';
+    dontUnpack = true;
+  };
+
+in
 {
   home.shellAliases = {
     "," = "nr";
   };
 
-  programs.zsh.initContent = ''
-    # Run a package from this flake's pinned nixpkgs without updating channels
-    # Usage: nr <pkg> [-- args]
-    nr() {
-      local pkg="$1"; shift || true
-      if [[ -z "$pkg" ]]; then
-        echo "usage: nr <pkg> [-- args]" >&2
-        return 1
-      fi
-      nix run path:$HOME/src/github.com/jonpulsifer/dotfiles#''${pkg} -- "$@"
-    }
-
-    ns() {
-      local pkg="$1"; shift || true
-      if [[ -z "$pkg" ]]; then
-        echo "usage: ns <pkg> [-- args]" >&2
-        return 1
-      fi
-      nix shell path:$HOME/src/github.com/jonpulsifer/dotfiles#''${pkg} -- "$@"
-    }
-  '';
+  home.packages = with pkgs; [
+    (buildShellScriptBin "np" ./shell-utils/np)
+    (buildShellScriptBin "nr" ./shell-utils/nr)
+    (buildShellScriptBin "ns" ./shell-utils/ns)
+  ];
 
   nix = {
     package = lib.mkDefault pkgs.nix;

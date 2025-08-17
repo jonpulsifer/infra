@@ -35,7 +35,7 @@ in
       la = ls + " -lag";
       ls = "${pkgs.unstable.eza}/bin/eza";
       tree = ls + " --tree";
-      diff = "${pkgs.unstable.delta}/bin/delta";
+      diff = "${pkgs.delta}/bin/delta";
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.dotacat}/bin/dotacat";
     };
@@ -61,13 +61,14 @@ in
       wget
       whois
       shell-utils
+            delta
+
     ]
     ++ (with pkgs.unstable; [
       # Modern CLI tools and development tools - from unstable for latest features
       httpie
       jq
       eza
-      delta
       fd
       ripgrep
       sd

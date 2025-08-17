@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run a shell including the given package from this flake's pinned nixpkgs without updating channels
+# Usage: ns <pkg> [-- args]
+ns() {
+  local pkg="$1"; shift || true
+  if [[ -z "$pkg" ]]; then
+    echo "usage: ns <pkg> [-- args]" >&2
+    exit 1
+  fi
+  nix shell path:$HOME/src/github.com/jonpulsifer/dotfiles#''${pkg} -- "$@"
+}
+
+ns "$@"
