@@ -15,7 +15,10 @@
       inputs.nixpkgs.follows = "nixos";
     };
 
-    hosts.url = "github:StevenBlack/hosts";
+    hosts = {
+      url = "github:StevenBlack/hosts";
+      inputs.nixpkgs.follows = "nixos";
+    };
 
     # my repositories
     dotfiles = {

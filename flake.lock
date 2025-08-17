@@ -123,7 +123,9 @@
     },
     "hosts": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": [
+          "nixos"
+        ]
       },
       "locked": {
         "lastModified": 1755441351,
@@ -202,20 +204,6 @@
         "ref": "main",
         "repo": "NixOS-WSL",
         "type": "github"
-      }
-    },
-    "nixpkgs": {
-      "locked": {
-        "lastModified": 1755268003,
-        "narHash": "sha256-nNaeJjo861wFR0tjHDyCnHs1rbRtrMgxAKMoig9Sj/w=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "32f313e49e42f715491e1ea7b306a87c16fe0388",
-        "type": "github"
-      },
-      "original": {
-        "id": "nixpkgs",
-        "type": "indirect"
       }
     },
     "nixpkgs-unstable": {
