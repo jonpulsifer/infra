@@ -73,6 +73,19 @@ let
     [[ -n "''${key[PageUp]}"    ]] && bindkey -- "''${key[PageUp]}"     beginning-of-buffer-or-history
     [[ -n "''${key[PageDown]}"  ]] && bindkey -- "''${key[PageDown]}"   end-of-buffer-or-history
     [[ -n "''${key[Shift-Tab]}" ]] && bindkey -- "''${key[Shift-Tab]}"  reverse-menu-complete
+
+    # Run a package from this flake's pinned nixpkgs without updating channels
+    # Usage: nr <pkg> [-- args]
+    nr() {
+      local pkg="$1"; shift || true
+      if [[ -z "$pkg" ]]; then
+        echo "usage: nr <pkg> [-- args]" >&2
+        return 1
+      fi
+      local system
+      system="$(nix eval --impure --raw --expr 'builtins.currentSystem')"
+      nix run "path:$HOME/.dotfiles#legacyPackages.''${system}.''${pkg}" -- "$@"
+    }
   '';
 in
 {

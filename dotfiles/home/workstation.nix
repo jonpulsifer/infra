@@ -22,9 +22,7 @@ in
     tenv
   ];
 
-  home.sessionPath = [
-    "${config.home.homeDirectory}/.tenv/bin"
-  ];
+  home.sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
 
   fonts.fontconfig.enable = true;
 
@@ -38,8 +36,8 @@ in
           paths = config.home.packages;
           pathsToLink = "/Applications";
         };
-      in
 
+      in
       lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         baseDir="$HOME/Applications/Home Manager Apps"
         if [ -d "$baseDir" ]; then

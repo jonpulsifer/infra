@@ -33,7 +33,7 @@ in
         kubernetes-helm
       ]
       ++ optionals (pkgs.stdenv.isLinux) [ nerdctl ];
-      
+
     sessionPath = mkIf shellIntegration [ "${k8s-workflow-utils}/kubectl-plugins" ];
     sessionVariables = {
       KUBECONFIG = "${config.home.homeDirectory}/.kube/config";
@@ -47,9 +47,9 @@ in
   };
   programs.zsh = mkIf shellIntegration {
     sessionVariables = {
-      KUBE_PS1_PREFIX = '''';
-      KUBE_PS1_SUFFIX = '''';
-      KUBE_PS1_SEPARATOR = '''';
+      KUBE_PS1_PREFIX = "";
+      KUBE_PS1_SUFFIX = "";
+      KUBE_PS1_SEPARATOR = "";
       KUBE_PS1_SYMBOL_PADDING = "true";
     };
     initContent = ''

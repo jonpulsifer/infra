@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# dotfiles-run: A comma-like tool for running packages from your dotfiles flake
+# Usage: dotfiles-run <command> [args...]
+# Example: dotfiles-run cowsay "Hello from dotfiles!"
+
+if [ $# -eq 0 ]; then
+    echo "Usage: dotfiles-run <command> [args...]" >&2
+    echo "       , <command> [args...]" >&2
+    echo "" >&2
+    echo "Run a command from your dotfiles flake without installing it permanently." >&2
+    echo "Similar to 'comma' but uses your local dotfiles flake." >&2
+    exit 1
+fi
+
+COMMAND="$1"
+shift
+
+# Get the dotfiles directory - assume it's where this script lives relative to the flake
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOTFILES_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+# Check if we're in the dotfiles directory or can find it
+if [ ! -f "$DOTFILES_DIR/flake.nix" ]; then
+    # Try to find dotfiles via the symlink in home directory
+    if [ -L "$HOME/.dotfiles" ]; then
+        DOTFILES_DIR="$(readlink -f "$HOME/.dotfiles")"
+    elif [ -d "$HOME/src/github.com/jonpulsifer/dotfiles" ]; then
+        DOTFILES_DIR="$HOME/src/github.com/jonpulsifer/dotfiles"
+    else
+        echo "Error: Could not find dotfiles flake.nix" >&2
+        echo "Please run this from your dotfiles directory or ensure ~/.dotfiles symlink exists" >&2
+        exit 1
+    fi
+fi
+
+# Detect system architecture
+SYSTEM="$(nix eval --impure --raw --expr 'builtins.currentSystem')"
+
+# Try to find the command in different package sets
+echo "🔍 Looking for $COMMAND in dotfiles flake ($SYSTEM)..." >&2
+
+# Extract nixpkgs URLs from flake.lock to use the same versions
+UNSTABLE_URL=$(nix eval --json --impure --no-warn-dirty --expr "builtins.fromJSON (builtins.readFile \"$DOTFILES_DIR/flake.lock\")" | jq -r '.nodes.nixpkgs-unstable.locked | "github:" + .owner + "/" + .repo + "/" + .rev' 2>/dev/null || echo "")
+STABLE_URL=$(nix eval --json --impure --no-warn-dirty --expr "builtins.fromJSON (builtins.readFile \"$DOTFILES_DIR/flake.lock\")" | jq -r '.nodes.nixpkgs.locked | "github:" + .owner + "/" + .repo + "/" + .rev' 2>/dev/null || echo "")
+
+# Try unstable packages first (most common in your setup)
+if [ -n "$UNSTABLE_URL" ]; then
+    if nix shell --no-warn-dirty "$UNSTABLE_URL#$COMMAND" -c "$COMMAND" "$@" 2>/dev/null; then
+        exit 0
+    fi
+fi
+
+# Try stable packages as fallback
+if [ -n "$STABLE_URL" ]; then
+    if nix shell --no-warn-dirty "$STABLE_URL#$COMMAND" -c "$COMMAND" "$@" 2>/dev/null; then
+        exit 0
+    fi
+fi
+
+# If we get here, the command wasn't found
+echo "❌ Command '$COMMAND' not found in dotfiles flake packages" >&2
+echo "" >&2
+echo "💡 Try one of these:" >&2
+echo "   - Check if the package exists: nix search nixpkgs $COMMAND" >&2
+echo "   - Add it to your flake's packages" >&2
+exit 1

@@ -39,6 +39,7 @@ in
       diff = "${pkgs.unstable.delta}/bin/delta";
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.dotacat}/bin/dotacat";
+      "," = "dotfiles-run";
     };
 
     file.".dotfiles" = {
@@ -50,27 +51,30 @@ in
   };
 
   # Stable packages - core system tools that rarely change
-  home.packages = with pkgs; [
-    # Basic system utilities - stable and rarely changing
-    dig
-    mtr
-    nano
-    tcpdump
-    unzip
-    wget
-    whois
-    shell-utils
-  ] ++ (with pkgs.unstable; [
-    # Modern CLI tools and development tools - from unstable for latest features
-    httpie
-    jq
-    eza
-    delta
-    fd
-    ripgrep
-    sd
-    xan
-  ]);
+  home.packages =
+    with pkgs;
+    [
+      # Basic system utilities - stable and rarely changing
+      dig
+      mtr
+      nano
+      tcpdump
+      unzip
+      wget
+      whois
+      shell-utils
+    ]
+    ++ (with pkgs.unstable; [
+      # Modern CLI tools and development tools - from unstable for latest features
+      httpie
+      jq
+      eza
+      delta
+      fd
+      ripgrep
+      sd
+      xan
+    ]);
 
   programs.home-manager.enable = true;
   manual.manpages.enable = false;

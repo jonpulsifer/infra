@@ -6,25 +6,15 @@
 }:
 let
   version = "1.31.2";
-  sources = {
-    aarch64-linux = [
-      (fetchurl {
-        url = "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubectl";
-        hash = "";
-      })
-      (fetchurl {
-        url = "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubeadm";
-        hash = "";
-      })
-    ];
+in
+stdenv.mkDerivation rec {
+  inherit version;
+  pname = "kubectl";
+  srcs = {
     x86_64-linux = [
       (fetchurl {
         url = "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubectl";
         hash = "sha256-OZ6dGZXagLZNLvNgbBojkBhmDYs1IJ+6P3sLwRxjHGg=";
-      })
-      (fetchurl {
-        url = "https://dl.k8s.io/release/v${version}/bin/linux/amd64/kubeadm";
-        hash = "sha256-49PxBR2ffkMaq69DPxIcdvz22EAbfqUfTHr2WvRPHlQ=";
       })
     ];
     aarch64-darwin = [
@@ -33,18 +23,7 @@ let
         hash = "sha256-B5LVcNIPxJXqZLrsJs1r3pYUNLkAA48pUvMzRQGHLoA=";
       })
     ];
-    x86_64-darwin = [
-      (fetchurl {
-        url = "https://dl.k8s.io/release/v${version}/bin/darwin/amd64/kubectl";
-        hash = "";
-      })
-    ];
   };
-in
-stdenv.mkDerivation rec {
-  inherit version;
-  pname = "kubectl";
-  srcs = sources.${stdenv.hostPlatform.system};
 
   dontUnpack = true;
 
@@ -58,11 +37,11 @@ stdenv.mkDerivation rec {
       --zsh <($out/bin/kubectl completion zsh)
     done
   '';
-  meta = with lib; {
-    description = "The Kubernetes command-line tool";
-    homepage = "https://kubernetes.io/docs/reference/kubectl/";
-    license = licenses.asl20;
+  meta = {
+    description = "Kubernetes CLI";
+    homepage = "https://github.com/kubernetes/kubectl";
     mainProgram = "kubectl";
+    platforms = lib.platforms.unix;
   };
 
   platforms = [

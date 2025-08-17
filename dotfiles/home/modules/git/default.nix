@@ -101,12 +101,12 @@ in
       undo = "reset HEAD~1 --mixed";
 
       # Logs and History
-      lg = "!git log --pretty=format:\"%C(dim blue)%h%Creset -%C(red)%d%Creset %s %C(dim cyan)(%cr) [%an]\" --abbrev-commit -30";
+      lg = ''!git log --pretty=format:"%C(dim blue)%h%Creset -%C(red)%d%Creset %s %C(dim cyan)(%cr) [%an]" --abbrev-commit -30'';
       stash-list = "stash list --pretty=format:'%C(yellow)%gd%Creset %C(red)%an%Creset: %s'";
       ilog = "log --oneline --graph --name-status --abbrev-commit";
       blame-details = "!git log -p --follow -- $1";
-      repo-growth = "!git log --format='%at %s' --reverse | awk '{print strftime(\"%Y-%m-%d\", $1)}' | uniq -c";
-      security-log = "!git log -p --follow -- \"$1\"";
+      repo-growth = ''!git log --format='%at %s' --reverse | awk '{print strftime("%Y-%m-%d", $1)}' | uniq -c'';
+      security-log = ''!git log -p --follow -- "$1"'';
       recent-files = "!git log --name-only --pretty=format: --since='7 days ago' | sort | uniq";
       top-contributors = "!git shortlog -sn --all --no-merges";
       audit-emails = "!git log --format='%ae' | sort | uniq -c | sort -nr";
@@ -125,7 +125,7 @@ in
       bigfiles = "!git rev-list --objects --all | git cat-file --batch-check='%(objectname) %(objecttype) %(objectsize:disk) %(rest)' | sort -k3nr | head -10";
       large-file-commits = "!git rev-list --objects --all | git cat-file --batch-check='%(objectname) %(objecttype) %(objectsize) %(rest)' | awk '$3 > 1000000 {print $0}'";
       reposize = "!du -sh .git";
-      files-by-author = "!git log --author=\"$1\" --name-only --pretty=format: | sort | uniq";
+      files-by-author = ''!git log --author="$1" --name-only --pretty=format: | sort | uniq'';
       check-perms = "!git ls-files -s | awk '{ if (substr($1,1,3) ~ /75[0-7]/) print $2 \" \" $4 }'";
     };
 

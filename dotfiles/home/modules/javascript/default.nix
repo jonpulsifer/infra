@@ -20,7 +20,6 @@ in
     PNPM_HOME = paths.pnpm;
   };
   home.packages = with pkgs.unstable; [
-    biome
     bun
     pnpm_10
     nodejs_22

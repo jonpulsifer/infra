@@ -16,45 +16,57 @@
       home-manager,
       nixpkgs,
       nixpkgs-unstable,
-      gh-aipr
+      gh-aipr,
     }:
     let
-      forAllSystems = f: nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] f;
+      forEachSystem = nixpkgs.lib.genAttrs [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
 
-      pkgsOverlay = final: prev:
+      unstableOverlay =
+        final: prev:
         let
-          system = if prev.stdenv ? hostPlatform then prev.stdenv.hostPlatform.system else prev.stdenv.system;
+          system =
+            if final.stdenv ? hostPlatform then final.stdenv.hostPlatform.system else final.stdenv.system;
         in
-        (gh-aipr.overlays.pkgs final prev) // {
+        {
           unstable = import nixpkgs-unstable {
             inherit system;
             config = prev.config;
           };
-          kubectl = final.callPackage ./pkgs/kubectl.nix { };
-          shell-utils = final.callPackage ./pkgs/shell-utils { };
         };
 
-      pkgsForSystem = system: import nixpkgs {
-        inherit system;
-        config = {
-          allowUnfree = true;
-        };
-        overlays = [ pkgsOverlay ];
-      };
+      overlays = [
+        gh-aipr.overlays.pkgs
+        unstableOverlay
+        (import ./overlays.nix)
+      ];
 
-      mkHomeConfiguration =
-        system: profile:
-        home-manager.lib.homeManagerConfiguration ({
-          modules = [ ./home/${profile}.nix ];
-          pkgs = pkgsForSystem system;
-        });
+      forEachPkgs =
+        f:
+        forEachSystem (
+          system:
+          f (
+            import nixpkgs {
+              inherit system overlays;
+              config = {
+                allowUnfree = true;
+              };
+            }
+          )
+        );
+      pkgsForSystem = forEachPkgs (pkgs: pkgs);
+
+      mkHome = modules: pkgs: home-manager.lib.homeManagerConfiguration { inherit modules pkgs; };
 
       homeConfigurations = {
-        full = mkHomeConfiguration "x86_64-linux" "home";
-        basic = mkHomeConfiguration "x86_64-linux" "basic";
-        arm = mkHomeConfiguration "aarch64-linux" "basic";
-        homebook = mkHomeConfiguration "aarch64-darwin" "homebook";
-        work = mkHomeConfiguration "aarch64-darwin" "work";
+        full = mkHome [ ./home/home.nix ] pkgsForSystem."x86_64-linux";
+        basic = mkHome [ ./home/basic.nix ] pkgsForSystem."x86_64-linux";
+        arm = mkHome [ ./home/basic.nix ] pkgsForSystem."aarch64-linux";
+        homebook = mkHome [ ./home/homebook.nix ] pkgsForSystem."aarch64-darwin";
+        work = mkHome [ ./home/work.nix ] pkgsForSystem."aarch64-darwin";
       };
     in
     {
@@ -67,6 +79,10 @@
         aarch64-darwin.homebook = homeConfigurations.homebook.activationPackage;
       };
 
+      # expose full package sets so you can do
+      # nix run .#legacyPackages.$system.<pkg>
+      legacyPackages = pkgsForSystem;
+
       # export home-manager modules for use in other systems
       home = {
         basic = import ./home/basic.nix;
@@ -74,14 +90,12 @@
       };
 
       overlays = {
-        pkgs = pkgsOverlay;
+        pkgs = nixpkgs.lib.composeManyExtensions overlays;
       };
 
-      devShells = forAllSystems (system:
-        let pkgs = pkgsForSystem system; in {
-          default = import ./shell.nix { inherit pkgs; };
-        }
-      );
-      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-rfc-style);
+      devShells = forEachPkgs (pkgs: {
+        default = import ./shell.nix { inherit pkgs; };
+      });
+      formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.nixfmt-rfc-style);
     };
 }
