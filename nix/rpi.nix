@@ -4,9 +4,26 @@
   pkgs,
   keys,
   name,
+  inputs,
   ...
 }:
 {
+  imports = [
+    ./nixos.nix
+    inputs.nixos-hardware.nixosModules.raspberry-pi-4
+    "${inputs.nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
+  ];
+
+  nixpkgs.overlays = [
+    # https://github.com/NixOS/nixpkgs/issues/154163
+    (final: super: {
+      makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
+    })
+  ];
+
+  sdImage.compressImage = true;
+  sdImage.firmwareSize = 512;
+
   # Required for the Wireless firmware
   hardware.enableRedistributableFirmware = true;
   hardware.cpu.intel.updateMicrocode = lib.mkForce false;

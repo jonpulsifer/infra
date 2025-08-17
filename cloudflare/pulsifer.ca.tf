@@ -24,7 +24,6 @@ resource "cloudflare_zone_setting" "pulsifer_ca" {
   zone_id    = cloudflare_zone.pulsifer_ca.id
   setting_id = each.key
   value      = each.value
-  id         = each.key
 }
 
 resource "cloudflare_dns_record" "www_pulsifer_ca" {

@@ -2,16 +2,26 @@
   config,
   lib,
   pkgs,
-  keys,
+  inputs,
   ...
 }:
 let
-  sshKeys = lib.splitString "\n" (builtins.readFile keys);
+  sshKeys = lib.splitString "\n" (builtins.readFile inputs.keys);
 in
 {
   imports = [
-    # (modulesPath + "/installer/scan/not-detected.nix")
+    inputs.home-manager.nixosModules.home-manager
+    inputs.ddnsd.nixosModules.default
   ];
+
+  nixpkgs.overlays = [
+    inputs.dotfiles.overlays.pkgs
+    inputs.ddnsd.overlays.pkgs
+  ];
+
+  home-manager.useUserPackages = true;
+  home-manager.useGlobalPkgs = true;
+  home-manager.users.jawn = inputs.dotfiles.home.basic;
 
   hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
   powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
@@ -153,7 +163,8 @@ in
     extraGroups = [
       "wheel"
       "tty"
-    ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
+    ]
+    ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
     openssh.authorizedKeys.keys = sshKeys;
     shell = pkgs.zsh;
   };

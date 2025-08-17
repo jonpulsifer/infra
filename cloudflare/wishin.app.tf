@@ -24,7 +24,6 @@ resource "cloudflare_zone_setting" "wishin_app" {
   zone_id    = cloudflare_zone.wishin_app.id
   setting_id = each.key
   value      = each.value
-  id         = each.key
 }
 
 resource "cloudflare_dns_record" "wishin_app" {

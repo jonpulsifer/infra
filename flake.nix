@@ -52,66 +52,35 @@
       ...
     }@inputs:
     let
-      commonModules = [
-        ./nix/nixos.nix
-        {
-          nixpkgs.overlays = [
-            dotfiles.overlays.pkgs
-            ddnsd.overlays.pkgs
-          ];
-          system.configurationRevision = nixos.lib.mkIf (self ? rev) self.rev;
-        }
-        home-manager.nixosModules.home-manager
-        {
-          home-manager.useUserPackages = true;
-          home-manager.useGlobalPkgs = true;
-          home-manager.users.jawn = dotfiles.home.basic;
-        }
-        ddnsd.nixosModules.default
-      ];
+      inherit (nixos.lib) genAttrs strings nixosSystem;
+      forAllSystems = f: genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: f system);
 
       mkSystem =
         name: extraModules:
-        nixos.lib.nixosSystem {
+        nixosSystem {
           system = "x86_64-linux";
-          modules = [ ./systems/${name}.nix ] ++ commonModules ++ extraModules;
-          specialArgs = { inherit keys wannabekeys name; };
+          modules = [
+            ./nix/nixos.nix
+            ./systems/${name}.nix
+          ]
+          ++ extraModules;
+          specialArgs = { inherit name inputs; };
         };
 
       mkRPi4 =
         name: extraModules:
-        nixos.lib.nixosSystem {
+        nixosSystem {
           system = "aarch64-linux";
-          modules =
-            [
-              ./systems/${name}.nix
-              ./systems/rpi.nix
-            ]
-            ++ [ nixos-hardware.nixosModules.raspberry-pi-4 ]
-            ++ commonModules
-            ++ extraModules
-            ++ [
-              "${nixos}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
-              {
-                config.sdImage.compressImage = true;
-                config.sdImage.firmwareSize = 512;
-              }
-            ]
-            ++ [
-              {
-                nixpkgs.overlays = [
-                  # https://github.com/NixOS/nixpkgs/issues/154163
-                  (final: super: {
-                    makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
-                  })
-                ];
-              }
-            ];
-          specialArgs = { inherit keys name; };
+          modules = [
+            ./nix/rpi.nix
+            ./systems/${name}.nix
+          ]
+          ++ extraModules;
+          specialArgs = { inherit name inputs; };
         };
 
       mkSystems = builtins.mapAttrs (
-        name: modules: (if nixos.lib.strings.hasInfix "pi4" name then mkRPi4 else mkSystem) name modules
+        name: modules: (if strings.hasInfix "pi4" name then mkRPi4 else mkSystem) name modules
       );
     in
     rec {
@@ -150,7 +119,7 @@
         };
       };
 
-      legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" ] (
+      legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
         system:
         import nixos {
           inherit system;
@@ -158,12 +127,12 @@
         }
       );
 
-      formatter.x86_64-linux = legacyPackages.x86_64-linux.nixfmt-rfc-style;
+      formatter = forAllSystems (system: legacyPackages.${system}.nixfmt-tree);
 
-      devShells = {
-        x86_64-linux.default = import ./shell.nix {
-          pkgs = legacyPackages.x86_64-linux;
+      devShells = forAllSystems (system: {
+        default = import ./shell.nix {
+          pkgs = legacyPackages.${system};
         };
-      };
+      });
     };
 }

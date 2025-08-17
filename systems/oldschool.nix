@@ -2,12 +2,12 @@
   config,
   lib,
   pkgs,
-  wannabekeys,
   name,
+  inputs,
   ...
 }:
 let
-  sshKeys = lib.splitString "\n" (builtins.readFile wannabekeys);
+  sshKeys = lib.splitString "\n" (builtins.readFile inputs.wannabekeys);
 in
 {
   imports = [
@@ -59,7 +59,8 @@ in
     extraGroups = [
       "wheel"
       "tty"
-    ] ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
+    ]
+    ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
     openssh.authorizedKeys.keys = sshKeys;
     shell = pkgs.zsh;
   };

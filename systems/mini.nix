@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ config, ... }:
 let
   hostName = "mini";
 in

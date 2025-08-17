@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, ... }:
 {
   networking.stevenBlackHosts = {
     enable = true;
