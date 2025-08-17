@@ -34,24 +34,16 @@
 
       pkgsBySystem = nixpkgs.lib.genAttrs systems pkgsFor;
 
-      # Provide an "unstable" namespace under pkgs via overlay
-      unstableOverlay =
-        final: prev:
-        let
-          system =
-            if final.stdenv ? hostPlatform then final.stdenv.hostPlatform.system else final.stdenv.system;
-        in
-        {
-          unstable = import nixpkgs-unstable {
-            inherit system;
-            config = prev.config;
-          };
-        };
-
       overlays = [
         gh-aipr.overlays.pkgs
-        unstableOverlay
-        (final: prev: (import ./pkgs { pkgs = final; }))
+        (final: prev: {
+          inherit (final.pkgs-unstable) google-cloud-sdk jq;
+          pkgs-unstable = import nixpkgs-unstable {
+            inherit (final.stdenv.hostPlatform) system;
+            config = final.config;
+          };
+          shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
+        })
       ];
 
       mkHome =
@@ -97,6 +89,6 @@
         default = import ./shell.nix { pkgs = pkgsBySystem.${system}; };
       });
 
-      formatter = nixpkgs.lib.genAttrs systems (system: pkgsBySystem.${system}.nixfmt-rfc-style);
+      formatter = nixpkgs.lib.genAttrs systems (system: pkgsBySystem.${system}.nixfmt-tree);
     };
 }

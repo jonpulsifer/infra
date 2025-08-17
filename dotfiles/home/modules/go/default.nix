@@ -4,8 +4,8 @@
   home.sessionVariables = {
     GOPATH = config.home.homeDirectory;
   };
-  home.packages = with pkgs.unstable; [
-    go_1_24
+  home.packages = with pkgs; [
+    go
     gopls
     gotools
     go-tools

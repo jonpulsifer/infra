@@ -1,34 +1,39 @@
 {
+  config,
   lib,
   pkgs,
-  config,
-  home-manager,
   ...
 }:
-
 let
+  inherit (lib) mkIf;
   inherit (pkgs.stdenv) isDarwin;
-  inherit (lib) mkIf optionals;
 in
 {
-  imports = [
-    ./basic.nix
-    modules/kubernetes
+  home.homeDirectory = "/Users/${config.home.username}";
+  home.packages = with pkgs; [
+    reattach-to-user-namespace
   ];
-
-  # Use unstable packages for development tools
-  home.packages = with pkgs.unstable; [
-    postgresql_15
-    tenv
-  ];
-
-  home.sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
 
   fonts.fontconfig.enable = true;
 
+  programs.ghostty = {
+    enable = true;
+    enableZshIntegration = true;
+    installBatSyntax = mkIf (config.programs.ghostty.package != null) true;
+    settings = {
+      background-blur = true;
+      background-opacity = 0.9;
+      bold-is-bright = true;
+      font-family = "CaskaydiaCove Nerd Font";
+      font-size = 12;
+      font-thicken = false;
+      theme = "Argonaut";
+    };
+  };
+
   # remove when https://github.com/nix-community/home-manager/issues/1341 is resolved
   disabledModules = [ "targets/darwin/linkapps.nix" ];
-  home.activation = mkIf isDarwin {
+  home.activation = {
     copyApplications =
       let
         apps = pkgs.buildEnv {

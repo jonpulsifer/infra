@@ -7,7 +7,7 @@
 let
   inherit (lib) mkIf optionals;
   shellIntegration = config.programs.zsh.enable;
-  k8s-workflow-utils = pkgs.unstable.fetchFromGitHub {
+  k8s-workflow-utils = pkgs.fetchFromGitHub {
     owner = "jonpulsifer";
     repo = "k8s-workflow-utils";
     rev = "c013d43763750321fdcd5fcdd8e152f62ff17dc7";
@@ -17,7 +17,7 @@ in
 {
   home = {
     packages =
-      with pkgs.unstable;
+      with pkgs;
       [
         argocd
         cilium-cli
@@ -73,7 +73,7 @@ in
       {
         name = "kube-ps1";
         file = "kube-ps1.sh";
-        src = pkgs.unstable.fetchFromGitHub {
+        src = pkgs.fetchFromGitHub {
           owner = "jonmosco";
           repo = "kube-ps1";
           rev = "v0.9.0";

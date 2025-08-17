@@ -19,10 +19,10 @@ in
     NPM_CONFIG_PREFIX = paths.npm;
     PNPM_HOME = paths.pnpm;
   };
-  home.packages = with pkgs.unstable; [
+  home.packages = with pkgs; [
     bun
-    pnpm_10
-    nodejs_22
+    nodejs
+    pnpm
     nodePackages.ts-node
     nodePackages.vercel
     nodePackages.yarn

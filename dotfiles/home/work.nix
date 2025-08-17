@@ -15,14 +15,19 @@ let
   username = "jpulsifer";
 in
 {
-  imports = [ ./workstation.nix ];
+  imports = [
+    ./basic.nix
+    ./darwin.nix
+    modules/kubernetes
+  ];
 
   home.username = mkForce username;
-  # Use unstable packages for development tools
-  home.packages = with pkgs.unstable; [
+  home.packages = with pkgs; [
     ffmpeg
-    reattach-to-user-namespace
+    tenv
+    postgresql
   ];
+  home.sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
 
   xdg.configFile."gcloud/configurations/config_${toLower company}".text = ''
     [core]

@@ -5,16 +5,18 @@
   ...
 }:
 let
-  buildShellScriptBin = name: file: pkgs.stdenvNoCC.mkDerivation {
-    pname = name;
-    version = "0.1";
-    src = file;
-    installPhase = ''
-      mkdir -p $out/bin
-      install -m 755 $src $out/bin/${name}
-    '';
-    dontUnpack = true;
-  };
+  buildShellScriptBin =
+    name: file:
+    pkgs.stdenvNoCC.mkDerivation {
+      pname = name;
+      version = "0.1";
+      src = file;
+      installPhase = ''
+        mkdir -p $out/bin
+        install -m 755 $src $out/bin/${name}
+      '';
+      dontUnpack = true;
+    };
 
 in
 {

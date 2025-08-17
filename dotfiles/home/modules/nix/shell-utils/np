@@ -16,6 +16,7 @@ if [[ -z "$pkg" ]]; then
   exit 1
 fi
 
+echo "checking ${pkg} in channels: ${channels[@]}"
 for ch in "${channels[@]}"; do
   ver=$(nix eval --impure --raw --expr \
     "(builtins.getFlake \"github:nixos/nixpkgs/${ch}\").legacyPackages.x86_64-linux.${pkg}.version" \
