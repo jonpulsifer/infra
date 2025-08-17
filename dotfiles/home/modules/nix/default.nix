@@ -5,9 +5,31 @@
   ...
 }:
 {
-  home = {
-    packages = with pkgs; [ cachix ];
+  home.shellAliases = {
+    "," = "nr";
   };
+
+  programs.zsh.initContent = ''
+    # Run a package from this flake's pinned nixpkgs without updating channels
+    # Usage: nr <pkg> [-- args]
+    nr() {
+      local pkg="$1"; shift || true
+      if [[ -z "$pkg" ]]; then
+        echo "usage: nr <pkg> [-- args]" >&2
+        return 1
+      fi
+      nix run path:$HOME/src/github.com/jonpulsifer/dotfiles#''${pkg} -- "$@"
+    }
+
+    ns() {
+      local pkg="$1"; shift || true
+      if [[ -z "$pkg" ]]; then
+        echo "usage: ns <pkg> [-- args]" >&2
+        return 1
+      fi
+      nix shell path:$HOME/src/github.com/jonpulsifer/dotfiles#''${pkg} -- "$@"
+    }
+  '';
 
   nix = {
     package = lib.mkDefault pkgs.nix;

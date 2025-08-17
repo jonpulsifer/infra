@@ -19,12 +19,22 @@
       gh-aipr,
     }:
     let
-      forEachSystem = nixpkgs.lib.genAttrs [
+      systems = [
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
       ];
 
+      pkgsFor =
+        system:
+        import nixpkgs {
+          inherit system overlays;
+          config.allowUnfree = true;
+        };
+
+      pkgsBySystem = nixpkgs.lib.genAttrs systems pkgsFor;
+
+      # Provide an "unstable" namespace under pkgs via overlay
       unstableOverlay =
         final: prev:
         let
@@ -41,32 +51,22 @@
       overlays = [
         gh-aipr.overlays.pkgs
         unstableOverlay
-        (import ./overlays.nix)
+        (final: prev: (import ./pkgs { pkgs = final; }))
       ];
 
-      forEachPkgs =
-        f:
-        forEachSystem (
-          system:
-          f (
-            import nixpkgs {
-              inherit system overlays;
-              config = {
-                allowUnfree = true;
-              };
-            }
-          )
-        );
-      pkgsForSystem = forEachPkgs (pkgs: pkgs);
-
-      mkHome = modules: pkgs: home-manager.lib.homeManagerConfiguration { inherit modules pkgs; };
+      mkHome =
+        system: modules:
+        home-manager.lib.homeManagerConfiguration {
+          inherit modules;
+          pkgs = pkgsBySystem.${system};
+        };
 
       homeConfigurations = {
-        full = mkHome [ ./home/home.nix ] pkgsForSystem."x86_64-linux";
-        basic = mkHome [ ./home/basic.nix ] pkgsForSystem."x86_64-linux";
-        arm = mkHome [ ./home/basic.nix ] pkgsForSystem."aarch64-linux";
-        homebook = mkHome [ ./home/homebook.nix ] pkgsForSystem."aarch64-darwin";
-        work = mkHome [ ./home/work.nix ] pkgsForSystem."aarch64-darwin";
+        full = mkHome "x86_64-linux" [ ./home/home.nix ];
+        basic = mkHome "x86_64-linux" [ ./home/basic.nix ];
+        arm = mkHome "aarch64-linux" [ ./home/basic.nix ];
+        homebook = mkHome "aarch64-darwin" [ ./home/homebook.nix ];
+        work = mkHome "aarch64-darwin" [ ./home/work.nix ];
       };
     in
     {
@@ -81,7 +81,7 @@
 
       # expose full package sets so you can do
       # nix run .#legacyPackages.$system.<pkg>
-      legacyPackages = pkgsForSystem;
+      legacyPackages = pkgsBySystem;
 
       # export home-manager modules for use in other systems
       home = {
@@ -93,9 +93,10 @@
         pkgs = nixpkgs.lib.composeManyExtensions overlays;
       };
 
-      devShells = forEachPkgs (pkgs: {
-        default = import ./shell.nix { inherit pkgs; };
+      devShells = nixpkgs.lib.genAttrs systems (system: {
+        default = import ./shell.nix { pkgs = pkgsBySystem.${system}; };
       });
-      formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.nixfmt-rfc-style);
+
+      formatter = nixpkgs.lib.genAttrs systems (system: pkgsBySystem.${system}.nixfmt-rfc-style);
     };
 }

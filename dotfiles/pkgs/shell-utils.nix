@@ -1,11 +1,11 @@
 { pkgs }:
 pkgs.stdenvNoCC.mkDerivation {
   pname = "shell-utils";
-  version = "0.1.0";
+  version = "0.1.1";
   src = ./shell-utils;
   buildinputs = [ pkgs.bash ];
   installPhase = ''
     mkdir -p $out/bin
-    cp $src/* $out/bin
+    install -m 755 $src/* $out/bin
   '';
 }

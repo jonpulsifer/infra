@@ -11,7 +11,6 @@ in
   imports = [
     modules/git
     modules/nix
-    # modules/node_exporter
     modules/tmux
     modules/zsh
     modules/vim
@@ -39,7 +38,6 @@ in
       diff = "${pkgs.unstable.delta}/bin/delta";
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.dotacat}/bin/dotacat";
-      "," = "dotfiles-run";
     };
 
     file.".dotfiles" = {
