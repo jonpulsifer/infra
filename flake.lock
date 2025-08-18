@@ -121,6 +121,26 @@
         "type": "github"
       }
     },
+    "home-manager_2": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1755442500,
+        "narHash": "sha256-RHK4H6SWzkAtW/5WBHsyugaXJX25yr5y7FAZznxcBJs=",
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "rev": "d2ffdedfc39c591367b1ddf22b4ce107f029dcc3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "home-manager",
+        "type": "github"
+      }
+    },
     "hosts": {
       "inputs": {
         "nixpkgs": [
@@ -226,10 +246,7 @@
       "inputs": {
         "ddnsd": "ddnsd",
         "dotfiles": "dotfiles",
-        "home-manager": [
-          "dotfiles",
-          "home-manager"
-        ],
+        "home-manager": "home-manager_2",
         "hosts": "hosts",
         "keys": "keys",
         "nixos-hardware": "nixos-hardware",
