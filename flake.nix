@@ -11,7 +11,7 @@
 
     home-manager = {
       url = "github:nix-community/home-manager";
-      follows = "dotfiles/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     hosts = {
