@@ -41,7 +41,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 2
       - name: Directories with Changes
         id: changed-directories
         uses: tj-actions/changed-files@v46
