@@ -2,32 +2,32 @@
   description = "the homelab";
 
   inputs = {
-    nixos.url = "github:nixos/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
     nixos-hardware.url = "github:nixos/nixos-hardware";
     nixos-wsl = {
       url = "github:nix-community/NixOS-WSL/main";
-      inputs.nixpkgs.follows = "nixos";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     home-manager = {
       url = "github:nix-community/home-manager";
       follows = "dotfiles/home-manager";
-      inputs.nixpkgs.follows = "nixos";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     hosts = {
       url = "github:StevenBlack/hosts";
-      inputs.nixpkgs.follows = "nixos";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # my repositories
     dotfiles = {
       url = "github:jonpulsifer/dotfiles";
-      inputs.nixpkgs.follows = "nixos";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
     ddnsd = {
       url = "github:jonpulsifer/ddnsd";
-      inputs.nixpkgs.follows = "nixos";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # ssh keys
@@ -47,7 +47,7 @@
       dotfiles,
       home-manager,
       hosts,
-      nixos,
+      nixpkgs,
       nixos-hardware,
       nixos-wsl,
       keys,
@@ -55,7 +55,7 @@
       ...
     }@inputs:
     let
-      inherit (nixos.lib) genAttrs strings nixosSystem;
+      inherit (nixpkgs.lib) genAttrs strings nixosSystem;
       forAllSystems = f: genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: f system);
 
       mkSystem =
@@ -102,7 +102,7 @@
         retrofit = [ ];
 
         # iso
-        iso = [ "${nixos}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ];
+        iso = [ "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ];
 
         # raspberry pis
         cloudpi4 = [ hosts.nixosModule ];
@@ -122,9 +122,9 @@
         };
       };
 
-      legacyPackages = nixos.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
+      legacyPackages = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
         system:
-        import nixos {
+        import nixpkgs {
           inherit system;
           config.allowUnfree = true;
         }
