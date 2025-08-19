@@ -55,6 +55,8 @@ jobs:
           scan-type: config
           scan-ref: ${{ matrix.dir }}
           hide-progress: false
+          ignore-unfixed: true
+          limit-severities-for-sarif: true # only include critical and high severity vulnerabilities in the SARIF file (default is false)
           format: sarif
           output: trivy-results.sarif
           exit-code: 1
