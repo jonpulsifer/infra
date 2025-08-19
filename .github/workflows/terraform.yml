@@ -47,7 +47,7 @@ jobs:
         uses: tj-actions/changed-files@v46
         with:
           dir_names: true
-          json: true
+          matrix: true
           files: |
             **/*.tf
             **/*.lock.hcl
