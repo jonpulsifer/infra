@@ -1,4 +1,4 @@
-name: "Trivy Vulnerability Scan"
+name: "Trivy"
 on:
   push:
     branches:
@@ -10,6 +10,7 @@ on:
     paths:
       - '**/*.tf'
       - 'k8s/**'
+
 jobs:
   changed-directories:
     name: Get Changed Files
@@ -35,6 +36,9 @@ jobs:
     needs: [changed-directories]
     runs-on: ubuntu-latest
     if: needs.changed-directories.outputs.any_changed == 'true'
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
     strategy:
       fail-fast: false # Keep running other matrix jobs even if one fails
       matrix:
