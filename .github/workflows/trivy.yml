@@ -43,9 +43,9 @@ jobs:
       fail-fast: false # Keep running other matrix jobs even if one fails
       matrix:
         dir: ${{ fromJSON(needs.changed-directories.outputs.directories) }}
-    defaults:
-      run:
-        working-directory: ${{ matrix.dir }}
+    # defaults:
+    #   run:
+    #     working-directory: ${{ matrix.dir }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -53,7 +53,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: config
-          scan-ref: .
+          scan-ref: ${{ matrix.dir }}
           hide-progress: false
           format: sarif
           output: trivy-results.sarif
