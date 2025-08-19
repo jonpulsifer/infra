@@ -1,0 +1,68 @@
+name: "Trivy"
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.tf'
+      - 'k8s/**'
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - 'k8s/**'
+
+jobs:
+  changed-directories:
+    name: Get Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      # Output a JSON string list of unique directories containing changed files matching the patterns
+      directories: ${{ steps.changed-directories.outputs.all_changed_files }} 
+      # Output 'true' or 'false' as a string
+      any_changed: ${{ steps.changed-directories.outputs.any_changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - name: Directories with Changes
+        id: changed-directories
+        uses: tj-actions/changed-files@v46
+        with:
+          dir_names: true
+          matrix: true
+
+  scan:
+    needs: [changed-directories]
+    runs-on: ubuntu-latest
+    if: needs.changed-directories.outputs.any_changed == 'true'
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+    strategy:
+      fail-fast: false # Keep running other matrix jobs even if one fails
+      matrix:
+        dir: ${{ fromJSON(needs.changed-directories.outputs.directories) }}
+    # defaults:
+    #   run:
+    #     working-directory: ${{ matrix.dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Run Trivy vulnerability scanner in IaC mode
+        uses: aquasecurity/trivy-action@0.32.0
+        with:
+          scan-type: config
+          scan-ref: ${{ matrix.dir }}
+          hide-progress: false
+          ignore-unfixed: true
+          limit-severities-for-sarif: true # only include critical and high severity vulnerabilities in the SARIF file (default is false)
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: 1
+          severity: CRITICAL
+      - name: Upload Trivy scan results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
