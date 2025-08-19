@@ -41,7 +41,7 @@
             inherit (prev) system config;
             overlays = [ ];
           };
-          inherit (final.pkgs-unstable) google-cloud-sdk;
+          inherit (final.pkgs-unstable) google-cloud-sdk gemini-cli;
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
         })
       ];

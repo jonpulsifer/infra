@@ -33,6 +33,9 @@ in
 
         # pixlet
         # bazel-buildtools
+
+        # the future is now
+        gemini-cli
       ]
       ++ lib.optionals isLinux [ wol ];
 

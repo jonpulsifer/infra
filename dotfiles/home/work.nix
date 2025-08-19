@@ -24,6 +24,7 @@ in
   home.username = mkForce username;
   home.packages = with pkgs; [
     ffmpeg
+    gemini-cli
     tenv
     postgresql
   ];
