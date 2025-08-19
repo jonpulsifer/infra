@@ -5,17 +5,16 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2.6 |
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.3 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 6.32.0 |
-| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 6.32.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 6.49.0 |
+| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 6.49.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.3.0 |
-| <a name="provider_google"></a> [google](#provider\_google) | 6.32.0 |
-| <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 6.32.0 |
-| <a name="provider_google-beta"></a> [google-beta](#provider\_google-beta) | 6.32.0 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.8.4 |
+| <a name="provider_google"></a> [google](#provider\_google) | 6.49.0 |
+| <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 6.49.0 |
 
 ## Modules
 
@@ -28,9 +27,10 @@
 | Name | Type |
 |------|------|
 | [cloudflare_dns_record.oldboy](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
-| [google-beta_google_iam_workload_identity_pool.homelab](https://registry.terraform.io/providers/hashicorp/google-beta/latest/docs/resources/google_iam_workload_identity_pool) | resource |
-| [google-beta_google_iam_workload_identity_pool_provider.github](https://registry.terraform.io/providers/hashicorp/google-beta/latest/docs/resources/google_iam_workload_identity_pool_provider) | resource |
 | [google_compute_instance.oldboy](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance) | resource |
+| [google_iam_workload_identity_pool.homelab](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/iam_workload_identity_pool) | resource |
+| [google_iam_workload_identity_pool_provider.github](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/iam_workload_identity_pool_provider) | resource |
+| [google_iam_workload_identity_pool_provider.vercel](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/iam_workload_identity_pool_provider) | resource |
 | [google_kms_crypto_key.vault](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/kms_crypto_key) | resource |
 | [google_kms_crypto_key_iam_member.vault_encrypt_decrypt](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/kms_crypto_key_iam_member) | resource |
 | [google_kms_crypto_key_iam_member.vault_viewer](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/kms_crypto_key_iam_member) | resource |

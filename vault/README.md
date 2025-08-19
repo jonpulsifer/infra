@@ -3,13 +3,13 @@
 
 | Name | Version |
 |------|---------|
-| <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 4.0 |
+| <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_vault"></a> [vault](#provider\_vault) | 4.8.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.2.1 |
 
 ## Modules
 
