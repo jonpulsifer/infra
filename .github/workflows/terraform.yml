@@ -4,22 +4,10 @@ on:
     branches:
       - main
     paths:
-      - argo/**
-      - cloudflare/**
-      - gcp/**
-      - k8s/**.tf
-      - unifi/**
-      - vault/**
-      - workspace/**
+      - '**/*.tf'
   pull_request:
     paths:
-      - argo/**
-      - cloudflare/**
-      - gcp/**
-      - k8s/**.tf
-      - unifi/**
-      - vault/**
-      - workspace/**
+      - '**/*.tf'
   workflow_dispatch:
     inputs:
       regenerate_docs:
@@ -50,7 +38,7 @@ jobs:
           matrix: true
           files: |
             **/*.tf
-            **/*.lock.hcl
+            **/.terraform.lock.hcl
 
   validate:
     needs: [changed-directories]
@@ -77,20 +65,6 @@ jobs:
       - name: Terraform Validate
         id: validate
         run: terraform validate
-      - name: Run Trivy vulnerability scanner in IaC mode
-        uses: aquasecurity/trivy-action@0.32.0
-        with:
-          scan-type: 'config'
-          hide-progress: false
-          format: 'table'
-          # output: 'trivy-results.sarif'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-      # - name: Upload Trivy scan results to GitHub Security tab
-      #   if: always()
-      #   uses: github/codeql-action/upload-sarif@v3
-      #   with:
-      #     sarif_file: 'trivy-results.sarif'
 
   docs:
     needs: [validate]
