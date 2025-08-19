@@ -54,8 +54,8 @@ jobs:
         with:
           scan-type: config
           scan-ref: .
-          hide-progress: true
-          format: table
+          hide-progress: false
+          format: sarif
           output: trivy-results.sarif
           exit-code: 1
           severity: CRITICAL
