@@ -6,6 +6,11 @@ metadata:
 spec:
   template:
     spec:
+      hostUsers: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: unpoller
           image: ghcr.io/unpoller/unpoller:v2.15.4
@@ -25,6 +30,9 @@ spec:
             - name: UP_LOKI_URL
               value: "https://loki.${SECRET_DOMAIN}"
           resources:
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
             limits:
               memory: "128Mi"
               cpu: "500m"
@@ -32,3 +40,10 @@ spec:
             - containerPort: 9130
               name: http-metrics
               protocol: TCP
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

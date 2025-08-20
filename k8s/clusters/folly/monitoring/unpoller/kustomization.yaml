@@ -5,7 +5,7 @@ resources:
   - namespace.yaml
   - service.yaml
   - deployment.yaml
-#  - service-monitor.yaml
+  - service-monitor.yaml
 namespace: &app unpoller
 
 images:
