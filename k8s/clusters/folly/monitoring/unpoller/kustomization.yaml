@@ -5,12 +5,12 @@ resources:
   - namespace.yaml
   - service.yaml
   - deployment.yaml
-#  - service-monitor.yaml
+  - service-monitor.yaml
 namespace: &app unpoller
 
 images:
   - name: ghcr.io/unpoller/unpoller
-    newTag: v2.15.3
+    newTag: v2.15.4
 
 commonLabels:
   app.kubernetes.io/name: *app
