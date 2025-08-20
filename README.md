@@ -8,7 +8,7 @@ nix develop
 nix build .#nixosConfigurations.<system>.config.system.build.toplevel
 
 # Build installation media
-nix build .#iso         # x86_64 ISO
+nix build .#iso         # x86_64 NixOS ISO
 nix build .#wsl         # WSL tarball
 nix build .#rpi4        # Raspberry Pi 4 image
 ```

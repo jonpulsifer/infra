@@ -57,12 +57,20 @@ jobs:
           hide-progress: false
           ignore-unfixed: true
           limit-severities-for-sarif: true # only include critical and high severity vulnerabilities in the SARIF file (default is false)
-          format: sarif
-          output: trivy-results.sarif
+          output: trivy-results.txt
           exit-code: 1
           severity: CRITICAL,HIGH
       - name: Upload Trivy scan results to GitHub Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results.sarif
+        run: |
+          if [[ -s trivy-results.txt ]]; then
+            {
+              echo "### Security Output"
+              echo "<details><summary>Click to expand</summary>"
+              echo ""
+              echo '```terraform'
+              cat trivy.txt
+              echo '```'
+              echo "</details>"
+            } >> $GITHUB_STEP_SUMMARY
+          fi
