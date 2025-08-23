@@ -2,6 +2,7 @@
   lib,
   pkgs,
   config,
+  inputs,
   ...
 }:
 {
@@ -11,6 +12,8 @@
     # Enable integration with Docker Desktop (needs to be installed separately)
     # docker.enable = true;
   };
+
+  home-manager.users.jawn = inputs.dotfiles.home.full;
 
   system.build.installBootLoader = lib.mkForce "${pkgs.coreutils}/bin/true";
 
@@ -30,5 +33,5 @@
   };
 
   programs.zsh.enable = true;
-  system.stateVersion = lib.mkDefault "24.11";
+  system.stateVersion = lib.mkDefault "25.05";
 }
