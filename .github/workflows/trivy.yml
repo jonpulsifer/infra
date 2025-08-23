@@ -58,10 +58,10 @@ jobs:
           hide-progress: false
           ignore-unfixed: true
           limit-severities-for-sarif: true # only include critical and high severity vulnerabilities in the SARIF file (default is false)
-          output: trivy-results.txt
+          output: trivy.txt
           exit-code: 1
           severity: CRITICAL,HIGH
-      - name: Upload Trivy scan results to GitHub Security tab
+      - name: Output Trivy results
         if: always()
         run: |
           if [[ -s trivy-results.txt ]]; then
@@ -74,4 +74,5 @@ jobs:
               echo '```'
               echo "</details>"
             } >> $GITHUB_STEP_SUMMARY
+            cat trivy.txt
           fi
