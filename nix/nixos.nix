@@ -209,7 +209,7 @@ in
   };
 
   system = {
-    stateVersion = "23.11";
+    stateVersion = "25.05";
     autoUpgrade = {
       enable = false;
       flake = "github.com:jonpulsifer/infra";

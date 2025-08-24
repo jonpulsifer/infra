@@ -15,7 +15,10 @@
 
   home-manager.users.jawn = inputs.dotfiles.home.full;
 
-  system.build.installBootLoader = lib.mkForce "${pkgs.coreutils}/bin/true";
+  # in other systems we use the default boot loader and firewall
+  # TODO: don't use nixos.nix for wsl
+  boot.loader.systemd-boot.enable = false;
+  networking.firewall.enable = lib.mkForce false;
 
   i18n.defaultLocale = "en_US.UTF-8";
 
