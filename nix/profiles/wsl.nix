@@ -9,7 +9,6 @@
   imports = [
     inputs.nixos-wsl.nixosModules.default
     ../system/user.nix
-    ../system/ssh.nix
   ];
 
   nixpkgs.config.allowUnfree = true;
@@ -22,11 +21,6 @@
   };
 
   home-manager.users.jawn = inputs.dotfiles.home.full;
-
-  # in other systems we use the default boot loader and firewall
-  # TODO: don't use nixos.nix for wsl
-  # boot.loader.systemd-boot.enable = false;
-  # networking.firewall.enable = lib.mkForce false;
 
   i18n.defaultLocale = "en_US.UTF-8";
 
