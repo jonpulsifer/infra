@@ -9,6 +9,7 @@
   imports = [
     inputs.nixos-wsl.nixosModules.default
     ../system/user.nix
+    ../system/ssh.nix
   ];
 
   nixpkgs.config.allowUnfree = true;

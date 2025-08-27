@@ -60,9 +60,10 @@
       mkSystem =
         name: config:
         let
-          system = if config.type == "rpi" then "aarch64-linux" else "x86_64-linux";
-          type = if config.type == "image" then "image" else "host";
-          modules = [ ./nix/${type}s/${name}.nix ] ++ (config.modules or [ ]);
+          profile = config.profile or "host";
+          system = if profile == "rpi" then "aarch64-linux" else "x86_64-linux";
+          moduleDir = if profile == "image" then "profiles" else "hosts";
+          modules = [ ./nix/${moduleDir}/${name}.nix ] ++ (config.modules or [ ]);
         in
         nixosSystem {
           inherit system modules;
@@ -73,10 +74,10 @@
       nixosConfigurations = builtins.mapAttrs mkSystem {
         # images (wsl, iso)
         wsl = {
-          type = "image";
+          profile = "image";
         };
         iso = {
-          type = "image";
+          profile = "image";
         };
 
         # kubernetes cluster (folly)
@@ -91,13 +92,13 @@
 
         # raspberry pis
         cloudpi4 = {
-          type = "rpi";
+          profile = "rpi";
         };
         homepi4 = {
-          type = "rpi";
+          profile = "rpi";
         };
         screenpi4 = {
-          type = "rpi";
+          profile = "rpi";
         };
       };
 
