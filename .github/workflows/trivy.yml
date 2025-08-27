@@ -64,7 +64,7 @@ jobs:
       - name: Output Trivy results
         if: always()
         run: |
-          if [[ -s trivy-results.txt ]]; then
+          if [[ -s trivy.txt ]]; then
             {
               echo "### Security Output"
               echo "<details><summary>Click to expand</summary>"
