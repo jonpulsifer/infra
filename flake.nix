@@ -5,7 +5,7 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
     nixos-hardware.url = "github:nixos/nixos-hardware";
     nixos-wsl = {
-      url = "github:nix-community/NixOS-WSL/main";
+      url = "github:nix-community/NixOS-WSL/release-25.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -58,55 +58,47 @@
       forAllSystems = f: genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: f system);
 
       mkSystem =
-        name: extraModules:
+        name: config:
+        let
+          system = if config.type == "rpi" then "aarch64-linux" else "x86_64-linux";
+          type = if config.type == "image" then "image" else "host";
+          modules = [ ./nix/${type}s/${name}.nix ] ++ (config.modules or [ ]);
+        in
         nixosSystem {
-          system = "x86_64-linux";
-          modules = [
-            ./nix/nixos.nix
-            ./systems/${name}.nix
-          ]
-          ++ extraModules;
+          inherit system modules;
           specialArgs = { inherit name inputs; };
         };
-
-      mkRPi4 =
-        name: extraModules:
-        nixosSystem {
-          system = "aarch64-linux";
-          modules = [
-            ./nix/rpi.nix
-            ./systems/${name}.nix
-          ]
-          ++ extraModules;
-          specialArgs = { inherit name inputs; };
-        };
-
-      mkSystems = builtins.mapAttrs (
-        name: modules: (if strings.hasInfix "pi4" name then mkRPi4 else mkSystem) name modules
-      );
     in
     rec {
-      nixosConfigurations = mkSystems {
-        # lab machines
-        wsl = [ nixos-wsl.nixosModules.default ];
+      nixosConfigurations = builtins.mapAttrs mkSystem {
+        # images (wsl, iso)
+        wsl = {
+          type = "image";
+        };
+        iso = {
+          type = "image";
+        };
 
-        # k8s cluster
-        nuc = [ ];
-        optiplex = [ ];
-        riptide = [ ];
-        "800g2" = [ ];
+        # kubernetes cluster (folly)
+        nuc = { };
+        optiplex = { };
+        riptide = { };
+        "800g2" = { };
 
-        # offsite
-        oldschool = [ ];
-        retrofit = [ ];
-
-        # iso
-        iso = [ "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix" ];
+        # kubernetes cluster (offsite)
+        oldschool = { };
+        retrofit = { };
 
         # raspberry pis
-        cloudpi4 = [ hosts.nixosModule ];
-        homepi4 = [ ];
-        screenpi4 = [ ];
+        cloudpi4 = {
+          type = "rpi";
+        };
+        homepi4 = {
+          type = "rpi";
+        };
+        screenpi4 = {
+          type = "rpi";
+        };
       };
 
       packages = {

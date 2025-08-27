@@ -1,13 +1,24 @@
 {
   config,
+  lib,
   pkgs,
   name,
+  inputs,
   ...
 }:
+let
+  sshKeys = lib.splitString "\n" (builtins.readFile inputs.wannabekeys);
+in
 {
   imports = [
-    ../nix/modules/k8s
+    ../hardware/x86
+    ../profiles/server.nix
+    ../system/quiker.nix
+    ../services/k8s
+    ../services/github-runner.nix
+    ../services/yarr.nix
   ];
+
   networking.hostName = name;
   # networking.wireless = {
   #   enable = true;
@@ -24,10 +35,8 @@
   services.k8s = {
     enable = true;
     network = "offsite";
-    role = "control-plane";
   };
 
-  services.ddnsd.enable = true;
   services.tailscale = {
     extraUpFlags = [ "--advertise-routes=192.168.2.0/24" ];
     useRoutingFeatures = "both";
@@ -43,4 +52,6 @@
     };
     wantedBy = [ "default.target" ];
   };
+
+  virtualisation.docker.enable = true;
 }

@@ -1,5 +1,11 @@
-{ config, ... }:
+{ config, inputs, ... }:
 {
+  imports = [
+    ../hardware/pi4
+    ../profiles/server.nix
+    inputs.hosts.nixosModule
+  ];
+
   networking.stevenBlackHosts = {
     enable = true;
     enableIPv6 = true;

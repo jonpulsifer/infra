@@ -6,6 +6,13 @@
   ...
 }:
 {
+  imports = [
+    inputs.nixos-wsl.nixosModules.default
+    ../system/user.nix
+  ];
+
+  nixpkgs.config.allowUnfree = true;
+
   wsl = {
     enable = true;
     defaultUser = "jawn";
@@ -17,10 +24,12 @@
 
   # in other systems we use the default boot loader and firewall
   # TODO: don't use nixos.nix for wsl
-  boot.loader.systemd-boot.enable = false;
-  networking.firewall.enable = lib.mkForce false;
+  # boot.loader.systemd-boot.enable = false;
+  # networking.firewall.enable = lib.mkForce false;
 
   i18n.defaultLocale = "en_US.UTF-8";
+
+  programs.ssh.startAgent = true;
 
   # resolf.conf is managed by WSL (wsl.wslConf.network.generateResolvConf)
   services.resolved.enable = lib.mkForce false;
