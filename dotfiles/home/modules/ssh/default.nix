@@ -7,14 +7,13 @@
 let
   inherit (lib) mkIf;
   inherit (pkgs.stdenv) isLinux;
+  isNixos = (isLinux && !(config ? osConfig));
 in
 {
-  home.sessionVariables = {
-    SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent.sock";
-  };
   programs.zsh.shellAliases = {
     sshpw = "SSH_ASKPASS=${pkgs.shell-utils}/bin/sshpw DISPLAY=1 ssh-add ${config.programs.git.signing.key} < /dev/null";
   };
+
   programs.ssh = {
     enable = true;
     compression = true;
@@ -89,12 +88,15 @@ in
       };
     };
   };
-  systemd.user.services.ssh-agent = mkIf isLinux {
+  home.sessionVariables = mkIf isNixos {
+    SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent.sock";
+  };
+  systemd.user.services.ssh-agent = mkIf isNixos {
     Unit.Description = "SSH Agent";
     Install.WantedBy = [ "default.target" ];
     Service = {
       Environment = [ "SSH_AUTH_SOCK=%t/ssh-agent.sock" ];
-      ExecStart = "ssh-agent -D -a $SSH_AUTH_SOCK";
+      ExecStart = "${pkgs.openssh}/bin/ssh-agent -D -a $SSH_AUTH_SOCK";
       Restart = "on-failure";
     };
   };
