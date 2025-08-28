@@ -76,14 +76,13 @@
       legacyPackages = pkgsBySystem;
 
       # export home-manager modules for use in other systems
-      home = {
+      nixosModules = {
+        default = import ./home/basic.nix;
         basic = import ./home/basic.nix;
         full = import ./home/home.nix;
       };
 
-      overlays = {
-        pkgs = nixpkgs.lib.composeManyExtensions overlays;
-      };
+      overlays.default = nixpkgs.lib.composeManyExtensions overlays;
 
       devShells = nixpkgs.lib.genAttrs systems (system: {
         default = import ./shell.nix { pkgs = pkgsBySystem.${system}; };
