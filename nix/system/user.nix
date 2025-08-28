@@ -13,11 +13,11 @@ in
     inputs.home-manager.nixosModules.home-manager
   ];
   nixpkgs.overlays = [
-    inputs.dotfiles.overlays.pkgs
+    inputs.dotfiles.overlays.default
   ];
   home-manager.useUserPackages = true;
   home-manager.useGlobalPkgs = true;
-  home-manager.users.jawn = inputs.dotfiles.home.basic;
+  home-manager.users.jawn = inputs.dotfiles.nixosModules.basic;
 
   programs.zsh.enable = true;
 
