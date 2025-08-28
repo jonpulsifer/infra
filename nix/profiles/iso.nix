@@ -9,7 +9,7 @@
   imports = [
     (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix")
     ../hardware/x86
-    ../profiles/server.nix
+    ./server.nix
   ];
 
   users.users = {
