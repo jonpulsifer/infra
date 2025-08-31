@@ -54,7 +54,7 @@
       ...
     }@inputs:
     let
-      inherit (nixpkgs.lib) genAttrs strings nixosSystem;
+      inherit (nixpkgs.lib) genAttrs nixosSystem;
       forAllSystems = f: genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: f system);
 
       mkSystem =

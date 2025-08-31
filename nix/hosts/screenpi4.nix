@@ -2,7 +2,7 @@
 {
   imports = [
     ../hardware/pi4
-    ../profiles/server.nix
+    ../profiles/rpi.nix
     ../services/kiosk.nix
   ];
 

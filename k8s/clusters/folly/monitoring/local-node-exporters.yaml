@@ -31,7 +31,7 @@ subsets:
       - name: http-metrics
         port: 9100
         protocol: TCP
----
+--- # trivy:ignore:avd-ksv-0108
 apiVersion: v1
 kind: Service
 metadata:

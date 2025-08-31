@@ -2,7 +2,6 @@
   config,
   lib,
   pkgs,
-  keys,
   name,
   inputs,
   ...
@@ -50,22 +49,6 @@
   };
 
   documentation.enable = false;
-
-  fileSystems = lib.mkForce {
-    "/" = {
-      device = "/dev/disk/by-label/NIXOS_SD";
-      fsType = "ext4";
-      options = [ "noatime" ];
-    };
-    "/boot/firmware" = {
-      device = "/dev/disk/by-label/FIRMWARE";
-      fsType = "vfat";
-      options = [
-        "noauto"
-        "nofail"
-      ];
-    };
-  };
 
   networking = {
     hostName = name;

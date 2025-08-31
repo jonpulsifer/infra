@@ -2,7 +2,7 @@
 {
   imports = [
     ../hardware/pi4
-    ../profiles/server.nix
+    ../profiles/rpi.nix
     inputs.hosts.nixosModule
   ];
 
