@@ -32,6 +32,8 @@ resource "google_compute_instance" "oldboy" {
   network_interface {
     network = module.network.network.self_link
     subnetwork = module.network.subnet.self_link
+
+    # trivy:ignore:avd-gcp-0031
     access_config {
       network_tier = "STANDARD" # free tier
     }
