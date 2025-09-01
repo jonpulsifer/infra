@@ -4,13 +4,13 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.6 |
-| <a name="requirement_argocd"></a> [argocd](#requirement\_argocd) | ~> 7.10.0 |
+| <a name="requirement_argocd"></a> [argocd](#requirement\_argocd) | ~> 7.11.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_argocd"></a> [argocd](#provider\_argocd) | 7.10.1 |
+| <a name="provider_argocd"></a> [argocd](#provider\_argocd) | 7.11.0 |
 
 ## Modules
 
