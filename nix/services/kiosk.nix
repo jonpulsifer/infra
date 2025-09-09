@@ -17,7 +17,27 @@ in
     };
     url = mkOption {
       type = types.str;
-      default = "https://hub.lolwtf.ca";
+      default = "http://localhost:${toString cfg.hostPort}";
+    };
+
+    container = mkOption {
+      type = types.bool;
+      default = false;
+    };
+
+    image = mkOption {
+      type = types.str;
+      default = "ghcr.io/jonpulsifer/hub:latest";
+    };
+
+    hostPort = mkOption {
+      type = types.int;
+      default = 8080;
+    };
+
+    containerPort = mkOption {
+      type = types.int;
+      default = 8080;
     };
   };
 
@@ -84,6 +104,18 @@ in
       # https://developer.mozilla.org/en-US/docs/Mozilla/Command_Line_Options
       ${pkgs.firefox}/bin/firefox --kiosk ${cfg.url} &
     '';
+
+    virtualisation.docker.enable = mkIf cfg.container true;
+    virtualisation.oci-containers = mkIf cfg.container {
+      backend = "docker";
+      containers.kiosk = {
+        autoStart = true;
+        image = cfg.image;
+        ports = [ "127.0.0.1:${toString cfg.hostPort}:${toString cfg.containerPort}" ];
+        environmentFiles = [ "/var/secrets/kiosk.env" ];
+        user = "nobody:nogroup";
+      };
+    };
 
     nixpkgs.overlays = with pkgs; [
       (final: prev: {

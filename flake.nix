@@ -79,6 +79,9 @@
         iso = {
           profile = "image";
         };
+        gce = {
+          profile = "image";
+        };
 
         # kubernetes cluster (folly)
         nuc = { };
@@ -106,6 +109,7 @@
         x86_64-linux = {
           iso = nixosConfigurations.iso.config.system.build.isoImage;
           wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
+          gce = nixosConfigurations.gce.config.system.build.googleComputeImage;
         };
         aarch64-linux = {
           cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;

@@ -21,7 +21,7 @@
       ChallengeResponseAuthentication = false;
       KbdInteractiveAuthentication = false;
       PasswordAuthentication = false;
-      PermitRootLogin = lib.mkDefault "no";
+      PermitRootLogin = "no";
     };
 
     hostKeys = [
