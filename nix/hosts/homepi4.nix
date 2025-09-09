@@ -9,7 +9,6 @@
 
   services.kiosk = {
     enable = true;
-    url = "https://hub.lolwtf.ca";
     container = true;
   };
 }

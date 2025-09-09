@@ -15,6 +15,7 @@ in
       type = types.str;
       default = "kiosk";
     };
+
     url = mkOption {
       type = types.str;
       default = "http://localhost:${toString cfg.hostPort}";
