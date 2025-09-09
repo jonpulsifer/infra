@@ -1,9 +1,11 @@
-{ config, inputs, ... }:
+{ config, lib, inputs, ... }:
 {
   imports = [
     ../profiles/rpi.nix
     inputs.hosts.nixosModule
   ];
+
+  services.ddnsd.enable = lib.mkForce false;
 
   networking.stevenBlackHosts = {
     enable = true;
