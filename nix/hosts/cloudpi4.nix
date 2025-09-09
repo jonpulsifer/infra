@@ -1,7 +1,6 @@
 { config, inputs, ... }:
 {
   imports = [
-    ../hardware/pi4
     ../profiles/rpi.nix
     inputs.hosts.nixosModule
   ];
