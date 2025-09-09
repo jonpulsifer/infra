@@ -5,8 +5,6 @@
     inputs.hosts.nixosModule
   ];
 
-  services.ddnsd.enable = lib.mkForce false;
-
   networking.stevenBlackHosts = {
     enable = true;
     enableIPv6 = true;
