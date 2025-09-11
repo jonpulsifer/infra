@@ -5,8 +5,6 @@
     ../services/kiosk.nix
   ];
 
-  services.ddnsd.enable = lib.mkForce false;
-
   services.kiosk = {
     enable = true;
     container = true;

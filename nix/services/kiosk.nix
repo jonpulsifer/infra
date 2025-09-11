@@ -114,6 +114,9 @@ in
         image = cfg.image;
         ports = [ "127.0.0.1:${toString cfg.hostPort}:${toString cfg.containerPort}" ];
         environmentFiles = [ "/var/secrets/kiosk.env" ];
+        environment = {
+          PORT = toString cfg.containerPort;
+        };
         user = "nobody:nogroup";
       };
     };
