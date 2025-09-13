@@ -32,7 +32,7 @@ jobs:
           fetch-depth: 2
       - name: Directories with Changes
         id: changed-directories
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
         with:
           dir_names: true
           matrix: true
