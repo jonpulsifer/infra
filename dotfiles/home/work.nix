@@ -18,6 +18,7 @@ in
   imports = [
     ./basic.nix
     ./darwin.nix
+    modules/go
     modules/kubernetes
   ];
 
