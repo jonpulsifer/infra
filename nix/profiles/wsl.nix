@@ -18,7 +18,7 @@
     enable = true;
     defaultUser = "jawn";
     # Enable integration with Docker Desktop (needs to be installed separately)
-    # docker.enable = true;
+    docker-desktop.enable = true;
   };
 
   home-manager.users.jawn = inputs.dotfiles.nixosModules.full;
