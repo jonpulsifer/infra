@@ -43,7 +43,7 @@
 
   services.prometheus.exporters.node = {
     enable = lib.mkDefault true;
-    openFirewall = lib.mkDefault true;
+    openFirewall = true;
   };
   programs.zsh.enable = true;
 

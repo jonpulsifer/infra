@@ -15,7 +15,7 @@
   ];
 
   services.ddnsd = {
-    enable = true;
+    enable = lib.mkDefault true;
     zone = "lolwtf.ca";
     tokenFile = "/var/secrets/cloudflare-api-token";
   };
