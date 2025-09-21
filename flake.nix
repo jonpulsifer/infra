@@ -72,17 +72,6 @@
     in
     rec {
       nixosConfigurations = builtins.mapAttrs mkSystem {
-        # images (wsl, iso)
-        wsl = {
-          profile = "image";
-        };
-        iso = {
-          profile = "image";
-        };
-        gce = {
-          profile = "image";
-        };
-
         # kubernetes cluster (folly)
         nuc = { };
         optiplex = { };
@@ -102,6 +91,17 @@
         };
         screenpi4 = {
           profile = "rpi";
+        };
+
+        # images
+        wsl = {
+          profile = "image";
+        };
+        iso = {
+          profile = "image";
+        };
+        gce = {
+          profile = "image";
         };
       };
 

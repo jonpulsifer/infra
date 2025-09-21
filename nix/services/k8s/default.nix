@@ -21,6 +21,7 @@ let
   # }
 in
 {
+
   options.services.k8s = {
     enable = lib.mkEnableOption "Kubernetes";
     network = lib.mkOption {
@@ -40,7 +41,16 @@ in
     };
   };
 
+  imports = [
+    ./gvisor.nix
+  ];
+
   config = lib.mkIf cfg.enable {
+    nixpkgs.overlays = [
+      (import ../../overlays/certmgr.nix)
+      (import ../../overlays/runc.nix)
+    ];
+
     # this section is only required for longhorn
     systemd.services.containerd.path = [
       pkgs.openiscsi
@@ -117,10 +127,7 @@ in
 
     services.prometheus.exporters.node.enable = lib.mkForce false; # we run node-exporter as a daemonset
 
-    nixpkgs.overlays = [
-      (import ../../overlays/certmgr.nix)
-      (import ../../overlays/runc.nix)
-    ];
+
     services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
 
     # Add static host entries using the networkConfig directly to avoid circular dependency
