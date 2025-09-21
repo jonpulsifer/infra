@@ -92,16 +92,23 @@
     enable = true;
     defaultCommand = "${pkgs.fd}/bin/fd --type f";
     defaultOptions = [
-      "--reverse"
-      "--info=inline"
-      "--border"
-      "--height=50%"
-      "--margin=0,25,0,0"
+      "--prompt='❯ '"
+      "--pointer='❯ '"
+      "--marker='❯ '"
+      "--layout=reverse"
+      "--info=inline:'❮ '"
+      # "--border"
+      # "--height=50%"
+      # "--margin=0,25,0,0"
       "--color=fg:-1,bg:-1,hl:#bd93f9"
       "--color=fg+:#f8f8f2,bg+:#282a36,hl+:#bd93f9"
       "--color=info:#ffb86c,prompt:#50fa7b,pointer:#ff79c6"
       "--color=marker:#ff79c6,spinner:#ffb86c,header:#6272a4"
-      "--prompt='❯ '"
+      
+    ];
+    historyWidgetOptions = [
+      # "--reverse"
+      #"--layout=default"
     ];
   };
 }

@@ -23,8 +23,6 @@ in
     bun
     nodejs
     pnpm
-    nodePackages.ts-node
-    nodePackages.vercel
     nodePackages.yarn
   ];
 }

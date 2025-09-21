@@ -41,6 +41,7 @@ in
 
     sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
     sessionVariables = {
+      EDITOR = "cursor";
       VAULT_ADDR = "https://vault.lolwtf.ca";
     };
   };
