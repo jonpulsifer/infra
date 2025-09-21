@@ -43,22 +43,13 @@ in
 
   imports = [
     ./gvisor.nix
+    ./longhorn.nix
   ];
 
   config = lib.mkIf cfg.enable {
     nixpkgs.overlays = [
       (import ../../overlays/certmgr.nix)
       (import ../../overlays/runc.nix)
-    ];
-
-    # this section is only required for longhorn
-    systemd.services.containerd.path = [
-      pkgs.openiscsi
-      "/run/wrappers/bin"
-      "/run/current-system/sw/bin/"
-    ];
-    systemd.tmpfiles.rules = [
-      "L+ /usr/local/bin - - - - /run/current-system/sw/bin/"
     ];
 
     boot.kernelModules = [
@@ -91,8 +82,7 @@ in
         conntrack-tools
         iptables
         socat
-      ] # for some k8s networking
-      ++ [ openiscsi ]; # for longhorn
+      ]; # for some k8s networking
 
     users.groups.kubelet = { };
     users.users.kubelet = {
