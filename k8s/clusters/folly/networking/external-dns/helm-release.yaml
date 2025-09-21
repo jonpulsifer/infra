@@ -38,7 +38,7 @@ spec:
     extraArgs:
       # - --cloudflare-proxied
       # - --annotation-filter=external-dns/is-public in (true)
-      - --fqdn-template={{.Name}}.${SECRET_DOMAIN}
+      - --fqdn-template={{ `{{.Name}}.${SECRET_DOMAIN}` }}
     policy: sync
     sources:
       - node
