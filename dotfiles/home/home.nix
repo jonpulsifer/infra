@@ -10,11 +10,12 @@ in
 {
   imports = [
     ./basic.nix
-    modules/gcloud
-    modules/go
-    modules/kubernetes
-    modules/ssh
-    modules/javascript
+    modules/gcloud.nix
+    modules/go.nix
+    modules/javascript.nix
+    modules/kubernetes.nix
+    modules/ssh.nix
+    modules/terraform.nix
   ];
 
   home = rec {
@@ -28,7 +29,6 @@ in
         age
         postgresql
         sops
-        tenv
         vault
 
         # pixlet
@@ -39,7 +39,6 @@ in
       ]
       ++ lib.optionals isLinux [ wol ];
 
-    sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
     sessionVariables = {
       EDITOR = "cursor";
       VAULT_ADDR = "https://vault.lolwtf.ca";

@@ -57,7 +57,10 @@
         full = mkHome "x86_64-linux" [ ./home/home.nix ];
         basic = mkHome "x86_64-linux" [ ./home/basic.nix ];
         arm = mkHome "aarch64-linux" [ ./home/basic.nix ];
-        homebook = mkHome "aarch64-darwin" [ ./home/home.nix ./home/darwin.nix ];
+        homebook = mkHome "aarch64-darwin" [
+          ./home/home.nix
+          ./home/darwin.nix
+        ];
         work = mkHome "aarch64-darwin" [ ./home/work.nix ];
       };
     in

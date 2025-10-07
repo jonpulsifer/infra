@@ -23,6 +23,5 @@ in
     bun
     nodejs
     pnpm
-    nodePackages.yarn
   ];
 }

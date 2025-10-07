@@ -18,18 +18,17 @@ in
   imports = [
     ./basic.nix
     ./darwin.nix
-    modules/go
-    modules/kubernetes
+    modules/go.nix
+    modules/kubernetes.nix
+    modules/terraform.nix
   ];
 
   home.username = mkForce username;
   home.packages = with pkgs; [
     ffmpeg
     gemini-cli
-    tenv
     postgresql
   ];
-  home.sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
 
   # homebrew paths like to be at the top of the path list
   programs.zsh.initContent = lib.mkOrder 100 ''
