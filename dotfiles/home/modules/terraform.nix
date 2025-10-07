@@ -10,9 +10,14 @@ in
   home.sessionPath = [ "${config.home.homeDirectory}/.tenv/bin" ];
 
   # sick of downloading providers all the time? do this!
-  home.file.".terraformrc".text = ''
-    plugin_cache_dir = "${terraformPluginCacheDir}"
-  '';
+  home.sessionVariables = {
+    TF_PLUGIN_CACHE_DIR = terraformPluginCacheDir;
+  };
+
+  # or this!
+  # home.file.".terraformrc".text = ''
+  #   plugin_cache_dir = "${terraformPluginCacheDir}"
+  # '';
 
   # This directory must already exist before Terraform will cache plugins; Terraform will not create the directory itself.
   home.activation.name = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
