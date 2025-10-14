@@ -139,7 +139,8 @@ resource "google_org_policy_policy" "allowed_workload_identity_providers" {
     rules {
       values {
         allowed_values = [
-          "is:https://token.actions.githubusercontent.com"
+          "is:https://token.actions.githubusercontent.com",
+          "is:https://oidc.vercel.com/jonpulsifers-projects"
         ]
       }
     }
