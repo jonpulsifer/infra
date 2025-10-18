@@ -35,6 +35,9 @@ in
         # bazel-buildtools
 
         # the future is now
+        
+      ]
+      ++ with pkgs.unstable; [
         gemini-cli
       ]
       ++ lib.optionals isLinux [ wol ];
