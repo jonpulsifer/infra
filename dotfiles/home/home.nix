@@ -37,10 +37,9 @@ in
         # the future is now
         
       ]
-      ++ with pkgs.unstable; [
-        gemini-cli
-      ]
-      ++ lib.optionals isLinux [ wol ];
+      ++ (with pkgs.unstable; [ gemini-cli ])
+      ++ lib.optionals isLinux [ wol ]
+      ++ lib.optionals isDarwin [ ];
 
     sessionVariables = {
       EDITOR = "cursor";
