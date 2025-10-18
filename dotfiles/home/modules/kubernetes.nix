@@ -17,7 +17,7 @@ in
 {
   home = {
     packages =
-      with pkgs;
+      with pkgs.unstable;
       [
         argocd
         cilium-cli

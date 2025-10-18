@@ -37,11 +37,11 @@
       overlays = [
         gh-aipr.overlays.pkgs
         (final: prev: {
-          pkgs-unstable = import nixpkgs-unstable {
+          # use as pkgs.unstable.<pkg> in modules
+          unstable = import nixpkgs-unstable {
             inherit (prev) system config;
             overlays = [ ];
           };
-          inherit (final.pkgs-unstable) google-cloud-sdk gemini-cli;
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
         })
       ];
