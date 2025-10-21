@@ -43,7 +43,7 @@ spec:
     sources:
       - node
       - ingress
-      - service
+      # - service
       - gateway-httproute
       - gateway-tlsroute
       # - gateway-tcproute
