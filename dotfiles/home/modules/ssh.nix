@@ -82,6 +82,7 @@ in
         };
       };
       "compute.*" = {
+        forwardAgent = true;
         extraOptions = {
           ChallengeResponseAuthentication = "yes";
         };
