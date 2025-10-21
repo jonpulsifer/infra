@@ -30,11 +30,11 @@
         "nixpkgs-unstable": "nixpkgs-unstable"
       },
       "locked": {
-        "lastModified": 1760809336,
-        "narHash": "sha256-FBAqv/Cg5boGDrGGPLHVRJGJkNaD+ylJR8LM59WeEK8=",
+        "lastModified": 1761083584,
+        "narHash": "sha256-fCz9BrQkbHx6/K8PxeeW5elWdqz7F4JJp02Y/YcX3as=",
         "owner": "jonpulsifer",
         "repo": "dotfiles",
-        "rev": "a555a2f8380ea4190bae82fe146b104da2b6deac",
+        "rev": "d32d6b76f59310cf20ad42bd34b16adb762a816d",
         "type": "github"
       },
       "original": {
