@@ -2,7 +2,7 @@
 set -eu
 
 # script that uses op run to pass the password from 1password to ssh-add
-SSH_KEY_PASSWORD="op://le vault/home ssh/password"
+SSH_KEY_PASSWORD="op://SSH/SSH Key/password"
 SSH_KEY_FINGERPRINT="${SSH_KEY_FINGERPRINT:-SHA256:irAaZjbawI58jsAh8EJToey1bV8EA6xIajW8LJWJMi}"
 SSH_KEY_PATH="${SSH_KEY_PATH:-$HOME/.ssh/id_ed25519}"
 
