@@ -64,6 +64,7 @@
     ripgrep
     sd
     xan
+    bat-extras.core
   ];
 
   programs.home-manager.enable = true;

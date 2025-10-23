@@ -6,7 +6,7 @@
 }:
 let
   inherit (lib) mkIf;
-  inherit (pkgs.stdenv) isDarwin;
+  inherit (pkgs.stdenv) isDarwin isLinux;
 in
 {
   home.homeDirectory = "/Users/${config.home.username}";
@@ -16,11 +16,15 @@ in
 
   fonts.fontconfig.enable = true;
 
-  programs.ghostty = {
-    enable = true;
-    package = null;
+  programs.ghostty = let 
+    macosBinds = {
+      keybind = "global:cmd+backquote=toggle_quick_terminal";
+    };
+  in {
+    enable = isDarwin;
+    package = if isDarwin then null else pkgs.ghostty;
     enableZshIntegration = true;
-    installBatSyntax = mkIf (config.programs.ghostty.package != null) true;
+    installBatSyntax = mkIf (isLinux) true;
     settings = {
       background-blur = true;
       background-opacity = 0.9;
@@ -29,7 +33,7 @@ in
       font-size = 12;
       font-thicken = false;
       theme = "Argonaut";
-    };
+    } // lib.optionalAttrs isDarwin macosBinds;
   };
 
   # remove when https://github.com/nix-community/home-manager/issues/1341 is resolved
