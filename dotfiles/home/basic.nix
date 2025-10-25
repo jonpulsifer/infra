@@ -63,8 +63,6 @@
   manual.manpages.enable = false;
   xdg.enable = true;
 
-  programs.nano.enable = true;
-
   # TODO move to programs.git.delta on next hm release
   programs.git.delta = {
     enable = true;
