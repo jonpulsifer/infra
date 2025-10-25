@@ -1,0 +1,275 @@
+# NixOS Configuration
+
+This directory contains NixOS configurations for a homelab infrastructure using Nix flakes. The setup manages multiple physical hosts, Kubernetes clusters, Raspberry Pis, and various installation images.
+
+## 🏗️ Architecture
+
+The configuration is organized into modular components:
+
+```
+nix/
+├── hardware/          # Hardware-specific configurations
+├── hosts/             # Per-host configurations
+├── profiles/          # Reusable system profiles
+├── services/          # Service modules (k8s, jellyfin, etc.)
+├── system/            # Core system configurations
+└── overlays/          # Package overlays
+```
+
+## 🖥️ Managed Systems
+
+### Kubernetes Clusters
+
+**Folly Cluster** (on-site):
+- `nuc` - Intel NUC (control-plane)
+- `optiplex` - Dell OptiPlex
+- `riptide` - Worker node
+- `800g2` - HP EliteDesk 800 G2
+
+**Offsite Cluster**:
+- `oldschool` - Offsite control-plane
+- `retrofit` - Offsite worker
+
+### Raspberry Pi Systems
+
+- `cloudpi4` - Cloud services Pi
+- `homepi4` - Home automation Pi
+- `screenpi4` - Display/kiosk Pi
+
+### Installation Images
+
+- `iso` - x86_64 NixOS installation ISO
+- `wsl` - Windows Subsystem for Linux tarball
+- `gce` - Google Compute Engine image
+
+## 🚀 Quick Start
+
+### Development Environment
+
+Enter the development shell with all required tools:
+
+```bash
+nix develop
+```
+
+This provides: `kubectl`, `helm`, `terraform`, `vault`, `sops`, `fluxcd`, `cilium-cli`, and more.
+
+### Building Systems
+
+Build a specific system configuration:
+
+```bash
+# Build a host system
+nix build .#nixosConfigurations.nuc.config.system.build.toplevel
+
+# Build installation media
+nix build .#iso         # x86_64 NixOS ISO
+nix build .#wsl         # WSL tarball
+nix build .#gce         # Google Compute Engine image
+
+# Build Raspberry Pi images
+nix build .#cloudpi4    # SD card image
+```
+
+### Deploying Updates
+
+After making changes, rebuild and switch:
+
+```bash
+# On the target system
+sudo nixos-rebuild switch --flake .#<hostname>
+
+# Or build remotely and copy
+nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-sudo
+```
+
+## 📦 Profiles
+
+Reusable configuration profiles in `profiles/`:
+
+- **`server.nix`** - Base server configuration with SSH, Tailscale, monitoring
+- **`rpi.nix`** - Raspberry Pi 4 hardware profile
+- **`wsl.nix`** - WSL-specific configuration
+- **`iso.nix`** - Live ISO environment
+- **`gce.nix`** - Google Compute Engine optimizations
+
+## 🔧 Services
+
+Custom service modules in `services/`:
+
+- **`k8s/`** - Kubernetes cluster configuration
+- **`jellyfin.nix`** - Media server
+- **`github-runner.nix`** - Self-hosted GitHub Actions runners
+- **`kiosk.nix`** - Kiosk mode display
+- **`nas.nix`** - Network attached storage
+- **`nix-serve.nix`** - Binary cache server
+- **`yarr.nix`** - RSS reader
+
+## 🌐 System Modules
+
+Core system configurations in `system/`:
+
+- **`nixos.nix`** - Base NixOS settings (flakes, caching, auto-upgrade)
+- **`user.nix`** - User account management
+- **`ssh.nix`** - SSH server configuration
+- **`tailscale.nix`** - Tailscale VPN setup
+- **`ddnsd.nix`** - Dynamic DNS daemon
+- **`fpc.nix`** - Custom FPC configuration
+
+## 🔑 Inputs & Dependencies
+
+The flake uses several external inputs:
+
+- **`nixpkgs`** - NixOS 25.05 package set
+- **`nixos-hardware`** - Hardware-specific configurations
+- **`nixos-wsl`** - WSL integration
+- **`home-manager`** - User environment management
+- **`dotfiles`** - Personal dotfiles repository
+- **`ddnsd`** - Custom dynamic DNS daemon
+- **`hosts`** - StevenBlack's unified hosts file
+
+SSH keys are automatically imported from GitHub:
+- `jonpulsifer.keys` - Main user keys
+- `wannabehero.keys` - Additional authorized keys
+
+## 🛠️ Common Tasks
+
+### Adding a New Host
+
+1. Create a new file in `hosts/<hostname>.nix`:
+
+```nix
+{ config, name, ... }:
+{
+  imports = [
+    ../hardware/x86
+    ../profiles/server.nix
+  ];
+  
+  networking.hostName = name;
+  # Add host-specific configuration
+}
+```
+
+2. Add to `flake.nix` outputs:
+
+```nix
+nixosConfigurations = builtins.mapAttrs mkSystem {
+  # ... existing hosts
+  newhostname = { };
+};
+```
+
+### Creating a New Service
+
+1. Create `services/<service>.nix`:
+
+```nix
+{ config, lib, pkgs, ... }:
+{
+  options.services.<service> = {
+    enable = lib.mkEnableOption "<service>";
+  };
+
+  config = lib.mkIf config.services.<service>.enable {
+    # Service configuration
+  };
+}
+```
+
+2. Import in host configuration:
+
+```nix
+imports = [ ../services/<service>.nix ];
+services.<service>.enable = true;
+```
+
+### Updating Dependencies
+
+Update flake inputs:
+
+```bash
+# Update all inputs
+nix flake update
+
+# Update specific input
+nix flake lock --update-input nixpkgs
+```
+
+## 🎯 Design Principles
+
+1. **Declarative** - All system state defined in configuration
+2. **Modular** - Reusable components shared across hosts
+3. **Reproducible** - Flake lock ensures consistent builds
+4. **Secure** - Immutable users, automatic security updates
+5. **Observable** - Prometheus exporters on all nodes
+
+## 📝 Configuration Features
+
+- **Automatic garbage collection** - Weekly cleanup of old generations
+- **Binary caching** - Custom cachix cache for faster builds
+- **Tailscale integration** - Secure mesh networking
+- **SSH hardening** - Key-based auth, fail2ban protection
+- **Monitoring** - Node exporters for Prometheus
+- **Dynamic DNS** - Automatic DNS updates via ddnsd
+
+## 🔍 Troubleshooting
+
+### Build failures
+
+```bash
+# Check flake evaluation
+nix flake check
+
+# Build with verbose output
+nix build --verbose .#nixosConfigurations.<host>.config.system.build.toplevel
+```
+
+### Disk space issues
+
+```bash
+# Manual garbage collection
+nix-collect-garbage -d
+
+# Remove old boot entries
+sudo nix-collect-garbage -d
+sudo /run/current-system/bin/switch-to-configuration boot
+```
+
+### WSL VHD optimization
+
+The WSL virtual hard disk can grow large over time. After cleaning up space in WSL, compact the VHD from Windows PowerShell (run as Administrator):
+
+```powershell
+# Optimize/compact the NixOS WSL VHD
+Optimize-VHD ((Get-ChildItem -Path HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss | Where-Object { $_.GetValue("DistributionName") -eq 'nixos' }).GetValue("BasePath") + "\ext4.vhdx")
+```
+
+This recovers disk space after running garbage collection inside WSL.
+
+### Rolling back
+
+```bash
+# List generations
+sudo nix-env --list-generations --profile /nix/var/nix/profiles/system
+
+# Rollback to previous generation
+sudo nixos-rebuild switch --rollback
+```
+
+## 📚 Resources
+
+- [NixOS Manual](https://nixos.org/manual/nixos/stable/)
+- [Nix Flakes](https://nixos.wiki/wiki/Flakes)
+- [NixOS Search](https://search.nixos.org/)
+- [Home Manager Manual](https://nix-community.github.io/home-manager/)
+
+## 🤝 Contributing
+
+When making changes:
+
+1. Test locally with `nix flake check`
+2. Format code with `nix fmt`
+3. Build affected systems to verify
+4. Document any new options or services
+
