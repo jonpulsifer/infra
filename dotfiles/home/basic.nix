@@ -68,7 +68,7 @@
   # TODO move to programs.git.delta on next hm release
   programs.git.delta = {
     enable = true;
-    enableGitIntegration = true;
+    # enableGitIntegration = true;
     options = {
       navigate = true;
       side-by-side = true;
