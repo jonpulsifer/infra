@@ -21,15 +21,6 @@ in
     signing.key = mkDefault "~/.ssh/id_ed25519";
     signing.signByDefault = true;
 
-    delta = {
-      enable = true;
-      package = pkgs.delta;
-      options = {
-        navigate = true;
-        side-by-side = true;
-      };
-    };
-
     extraConfig = {
       color.ui = true;
       core.whitespace = "trailing-space,space-before-tab";

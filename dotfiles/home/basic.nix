@@ -27,11 +27,7 @@
 
     shellAliases = rec {
       htop = "${pkgs.btop}/bin/btop; echo 'stop using [h]top, prefer btop'";
-      l = ll;
-      ll = ls + " -lg";
-      la = ls + " -lag";
-      ls = "${pkgs.eza}/bin/eza";
-      tree = ls + " --tree";
+      tree = "${pkgs.eza}/bin/eza --tree";
       diff = "${pkgs.delta}/bin/delta";
       bruh = "${pkgs.fortune}/bin/fortune | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat";
       paths = "echo \${PATH} | cut -f2 -d= | tr -s : \\\\n  | ${pkgs.dotacat}/bin/dotacat";
@@ -56,20 +52,28 @@
     wget
     whois
     shell-utils
-    delta
     httpie
     jq
-    eza
     fd
-    ripgrep
     sd
     xan
-    bat-extras.core
   ];
 
   programs.home-manager.enable = true;
   manual.manpages.enable = false;
   xdg.enable = true;
+
+  programs.nano.enable = true;
+  programs.delta = {
+    enable = true;
+    enableGitIntegration = true;
+    options = {
+      navigate = true;
+      side-by-side = true;
+    };
+  };
+  programs.eza.enable = true;
+  programs.ripgrep.enable = true;
 
   programs.bat = {
     enable = true;
