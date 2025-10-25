@@ -63,7 +63,7 @@
   manual.manpages.enable = false;
   xdg.enable = true;
 
-  # TODO move to programs.git.delta on next hm release
+  # TODO move to programs.delta on next hm release
   programs.git.delta = {
     enable = true;
     # enableGitIntegration = true;
