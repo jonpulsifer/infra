@@ -38,7 +38,7 @@
       enable = true;
     };
 
-    stateVersion = "25.05";
+    stateVersion = "25.11";
   };
 
   # Stable packages - core system tools that rarely change
