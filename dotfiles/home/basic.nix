@@ -38,7 +38,7 @@
       enable = true;
     };
 
-    stateVersion = "25.11";
+    stateVersion = "25.05";
   };
 
   # Stable packages - core system tools that rarely change
@@ -64,7 +64,9 @@
   xdg.enable = true;
 
   programs.nano.enable = true;
-  programs.delta = {
+
+  # TODO move to programs.git.delta on next hm release
+  programs.git.delta = {
     enable = true;
     enableGitIntegration = true;
     options = {
@@ -72,6 +74,7 @@
       side-by-side = true;
     };
   };
+
   programs.eza.enable = true;
   programs.ripgrep.enable = true;
 
