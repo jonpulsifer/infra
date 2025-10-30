@@ -52,7 +52,7 @@
 
   networking = {
     hostName = name;
-    wireless.enable = lib.mkForce true;
+    wireless.enable = lib.mkDefault false;
   };
 
   nixpkgs = {

@@ -5,7 +5,14 @@
     ../services/kiosk.nix
   ];
 
-  networking.wireless.networks.lab.hidden = true;
+  networking.wireless = {
+    enable = true;
+    networks = {
+      lab = {
+        hidden = true;
+      };
+    };
+  } 
 
   services.kiosk = {
     enable = true;

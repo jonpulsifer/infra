@@ -19,14 +19,6 @@
     useDHCP = true;
     useNetworkd = true;
     networkmanager.enable = lib.mkDefault false;
-    wireless = {
-      enable = lib.mkDefault false;
-      networks = lib.mkDefault {
-        lab = {
-          hidden = true;
-        };
-      };
-    };
   };
 
   console.keyMap = "us";
