@@ -89,7 +89,7 @@
         homepi4 = {
           profile = "rpi";
         };
-        screenpi4 = {
+        weatherpi4 = {
           profile = "rpi";
         };
 

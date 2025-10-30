@@ -7,5 +7,6 @@
 
   services.kiosk = {
     enable = true;
+    container = true;
   };
 }
