@@ -5,6 +5,8 @@
     ../services/kiosk.nix
   ];
 
+  networking.wireless.networks.lab.hidden = true;
+
   services.kiosk = {
     enable = true;
     container = true;

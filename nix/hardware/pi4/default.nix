@@ -53,9 +53,6 @@
   networking = {
     hostName = name;
     wireless.enable = lib.mkForce true;
-    wireless.networks.lab = {
-      hidden = true;
-    };
   };
 
   nixpkgs = {
