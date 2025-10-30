@@ -6,9 +6,6 @@
   inputs,
   ...
 }:
-let
-  sshKeys = lib.splitString "\n" (builtins.readFile inputs.wannabekeys);
-in
 {
   imports = [
     ../hardware/x86
