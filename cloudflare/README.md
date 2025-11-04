@@ -30,6 +30,7 @@ No modules.
 | [cloudflare_dns_record.www_pulsifer_ca](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_dns_record.www_wishin_app](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_zero_trust_tunnel_cloudflared.folly](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zero_trust_tunnel_cloudflared) | resource |
+| [cloudflare_zero_trust_tunnel_cloudflared_config.folly](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zero_trust_tunnel_cloudflared_config) | resource |
 | [cloudflare_zone.lolwtf_ca](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zone) | resource |
 | [cloudflare_zone.pulsifer_ca](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zone) | resource |
 | [cloudflare_zone.wishin_app](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zone) | resource |
