@@ -23,9 +23,9 @@ spec:
         image: cloudflare/cloudflared:2025.10.1
         args:
         - tunnel
-        - --config
-        - /etc/cloudflared/config.yaml
         - run
+        - --token-file
+        - /etc/cloudflared/token
         livenessProbe:
           httpGet:
             path: /ready
@@ -34,32 +34,11 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
         volumeMounts:
-          - name: credentials
+          - name: tunnel-token
             mountPath: /etc/cloudflared/token
             subPath: token
             readOnly: true
-          # - name: credentials
-          #   mountPath: /etc/cloudflared/cert.pem
-          #   subPath: cert.pem
-          #   readOnly: true
-          - name: config
-            mountPath: /etc/cloudflared/config.yaml
-            subPath: cloudflared-config.yaml
-            readOnly: true
       volumes:
-      - name: credentials
+      - name: tunnel-token
         secret:
-          # By default, the credentials file will be created under ~/.cloudflared/<tunnel ID>.json
-          # when you run `cloudflared tunnel create`. You can move it into a secret by using:
-          # ```sh
-          # kubectl create secret generic tunnel-credentials \
-          # --from-file=credentials.json=/Users/yourusername/.cloudflared/<tunnel ID>.json
-          # ```
           secretName: cloudflared
-      # Create a config.yaml file from the ConfigMap below.
-      - name: config
-        configMap:
-          name: cloudflared
-          items:
-          - key: cloudflared-config.yaml
-            path: cloudflared-config.yaml

@@ -12,9 +12,6 @@ configMapGenerator:
   - name: ddns
     files:
       - ddns.sh
-  - name: cloudflared
-    files:
-      - cloudflared-config.yaml
 generatorOptions:
   disableNameSuffixHash: true
   annotations:
