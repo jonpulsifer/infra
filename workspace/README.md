@@ -10,7 +10,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 7.8.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 7.10.0 |
 | <a name="provider_googleworkspace"></a> [googleworkspace](#provider\_googleworkspace) | 0.7.0 |
 
 ## Modules

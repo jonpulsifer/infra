@@ -11,9 +11,9 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.11.0 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.12.0 |
 | <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.0 |
-| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.3.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.4.0 |
 
 ## Modules
 
