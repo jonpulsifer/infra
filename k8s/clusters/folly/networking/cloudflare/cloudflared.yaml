@@ -35,8 +35,8 @@ spec:
           periodSeconds: 10
         volumeMounts:
           - name: credentials
-            mountPath: /etc/cloudflared/credentials.json
-            subPath: credentials.json
+            mountPath: /etc/cloudflared/token
+            subPath: token
             readOnly: true
           # - name: credentials
           #   mountPath: /etc/cloudflared/cert.pem
