@@ -22,7 +22,24 @@ data "cloudflare_zero_trust_tunnel_cloudflared_token" "folly" {
 }
 
 output "cloudflare_tunnel_token" {
+  sensitive = true
   value = data.cloudflare_zero_trust_tunnel_cloudflared_token.folly.token
+}
+
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "folly" {
+  account_id = local.fml_account_id
+  tunnel_id = cloudflare_zero_trust_tunnel_cloudflared.folly.id
+  config = {
+    ingress = [
+    {
+      hostname = "cf.folly.${cloudflare_zone.lolwtf_ca.name}"
+      service = "http_status:401"
+    },
+    {
+      service = "http_status:418"
+    },
+    ]
+  }
 }
 
 resource "cloudflare_dns_record" "cf" {
