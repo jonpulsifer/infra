@@ -3,12 +3,14 @@
 
 | Name | Version |
 |------|---------|
+| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 2.0 |
 | <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.0 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 5.4.0 |
 
 ## Modules
@@ -39,6 +41,7 @@ No modules.
 | [vault_policy.ddnsd](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [vault_policy.godmode](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [vault_policy.home](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
+| [onepassword_item.vault](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
 | [vault_policy_document.ddnsd](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/policy_document) | data source |
 | [vault_policy_document.godmode](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/policy_document) | data source |
 | [vault_policy_document.home](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/policy_document) | data source |

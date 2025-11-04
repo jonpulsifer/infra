@@ -4,6 +4,7 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.1 |
+| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 2.0 |
 | <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.41 |
 | <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
@@ -12,6 +13,7 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.12.0 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.0 |
 | <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.0 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 5.4.0 |
 
@@ -49,6 +51,9 @@ No modules.
 | [unifi_wlan.fml](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/wlan) | resource |
 | [unifi_wlan.lab](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/wlan) | resource |
 | [cloudflare_zone.lab](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/data-sources/zone) | data source |
+| [onepassword_item.cloudflare_api_token](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
+| [onepassword_item.unifi](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
+| [onepassword_item.vault](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
 | [unifi_ap_group.all_aps](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/data-sources/ap_group) | data source |
 | [unifi_ap_group.lab](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/data-sources/ap_group) | data source |
 | [vault_generic_secret.ddns_edge_pulsifer_ca](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/generic_secret) | data source |
