@@ -26,6 +26,9 @@ spec:
         - run
         - --token-file
         - /etc/cloudflared/token
+        env:
+        - name: TUNNEL_TRANSPORT_PROTOCOL
+          value: http2
         livenessProbe:
           httpGet:
             path: /ready
