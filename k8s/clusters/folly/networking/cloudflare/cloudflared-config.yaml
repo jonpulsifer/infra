@@ -1,14 +1,10 @@
-tunnel: lab
+tunnel: b7442b4d-6a9f-45f4-9254-0e97db1eacdd
 credentials-file: /etc/cloudflared/credentials.json
 metrics: 0.0.0.0:2000
 no-autoupdate: true
 ingress:
-  - hostname: cf.lolwtf.ca
+  - hostname: cf.folly.lolwtf.ca
     service: http_status:401
-  - hostname: cf2.lolwtf.ca
-    service: http_status:402
-  - hostname: cf3.lolwtf.ca
-    service: http_status:403
   - service: http_status:404
 # - hostname: wishin.lolwtf.ca
 #   service: http://wishin.wishin:8080

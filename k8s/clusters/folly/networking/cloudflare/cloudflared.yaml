@@ -38,10 +38,10 @@ spec:
             mountPath: /etc/cloudflared/credentials.json
             subPath: credentials.json
             readOnly: true
-          - name: credentials
-            mountPath: /etc/cloudflared/cert.pem
-            subPath: cert.pem
-            readOnly: true
+          # - name: credentials
+          #   mountPath: /etc/cloudflared/cert.pem
+          #   subPath: cert.pem
+          #   readOnly: true
           - name: config
             mountPath: /etc/cloudflared/config.yaml
             subPath: cloudflared-config.yaml
