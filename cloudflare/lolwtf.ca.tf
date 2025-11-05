@@ -22,6 +22,10 @@ module "tunnel_folly" {
         service = "http_status:418"
       },
       {
+        hostname = "tf.${cloudflare_zone.lolwtf_ca.name}"
+        service = "http://atlantis.atlantis"
+      },
+      {
         service = "http_status:418"
       }
     ]
