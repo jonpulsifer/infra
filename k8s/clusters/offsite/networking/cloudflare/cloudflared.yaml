@@ -24,6 +24,8 @@ spec:
         args:
         - tunnel
         - run
+        - --metrics
+        - 0.0.0.0:2000
         - --token-file
         - /etc/cloudflared/token
         env:
