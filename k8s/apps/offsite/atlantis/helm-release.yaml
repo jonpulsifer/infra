@@ -61,4 +61,4 @@ spec:
             - *host
           secretName: *host
     servicemonitor:
-      enabled: true
+      enabled: false
