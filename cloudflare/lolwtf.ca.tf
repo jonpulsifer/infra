@@ -18,8 +18,8 @@ module "tunnel_folly" {
   config = {
     ingress = [
       {
-        hostname = "cf.folly.${cloudflare_zone.lolwtf_ca.name}"
-        service = "http_status:401"
+        hostname = "folly.${cloudflare_zone.lolwtf_ca.name}"
+        service = "http_status:418"
       },
       {
         service = "http_status:418"
@@ -36,8 +36,8 @@ module "tunnel_offsite" {
   config = {
     ingress = [
       {
-        hostname = "cf.offsite.${cloudflare_zone.lolwtf_ca.name}"
-        service = "http_status:401"
+        hostname = "offsite.${cloudflare_zone.lolwtf_ca.name}"
+        service = "http_status:418"
       },
       {
         service = "http_status:418"

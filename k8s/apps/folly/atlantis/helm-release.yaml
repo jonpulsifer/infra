@@ -58,5 +58,5 @@ spec:
         - hosts:
             - *host
           secretName: *host
-    serviceMonitor:
+    servicemonitor:
       enabled: true
