@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - arc
   - argo
-  - atlantis
   - cloudnative-pg
   # - csgo
   - default
