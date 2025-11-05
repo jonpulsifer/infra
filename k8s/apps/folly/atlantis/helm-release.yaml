@@ -54,6 +54,7 @@ spec:
         hajimari.io/enable: "true"
         hajimari.io/icon: "robot-industrial-outline"
       host: &host "atlantis.${SECRET_DOMAIN}"
+      path: /
       pathType: Prefix
       tls:
         - hosts:
