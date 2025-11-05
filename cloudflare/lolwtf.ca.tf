@@ -10,44 +10,48 @@ resource "cloudflare_zone" "lolwtf_ca" {
   name = "lolwtf.ca"
 }
 
-resource "cloudflare_zero_trust_tunnel_cloudflared" "folly" {
+module "tunnel_folly" {
+  source = "./modules/tunnel"
   account_id = local.fml_account_id
-  name = "Folly"
-  config_src = "local"
-}
-
-data "cloudflare_zero_trust_tunnel_cloudflared_token" "folly" {
-  account_id = local.fml_account_id
-  tunnel_id = cloudflare_zero_trust_tunnel_cloudflared.folly.id
-}
-
-output "cloudflare_tunnel_token" {
-  sensitive = true
-  value = data.cloudflare_zero_trust_tunnel_cloudflared_token.folly.token
-}
-
-resource "cloudflare_zero_trust_tunnel_cloudflared_config" "folly" {
-  account_id = local.fml_account_id
-  tunnel_id = cloudflare_zero_trust_tunnel_cloudflared.folly.id
+  zone_id = cloudflare_zone.lolwtf_ca.id
+  name = "folly"
   config = {
     ingress = [
-    {
-      hostname = "cf.folly.${cloudflare_zone.lolwtf_ca.name}"
-      service = "http_status:401"
-    },
-    {
-      service = "http_status:418"
-    },
+      {
+        hostname = "cf.folly.${cloudflare_zone.lolwtf_ca.name}"
+        service = "http_status:401"
+      },
+      {
+        service = "http_status:418"
+      }
     ]
   }
 }
 
-resource "cloudflare_dns_record" "cf" {
+module "tunnel_offsite" {
+  source = "./modules/tunnel"
+  account_id = local.fml_account_id
   zone_id = cloudflare_zone.lolwtf_ca.id
-  comment = "terraform managed"
-  name    = "cf.folly.${cloudflare_zone.lolwtf_ca.name}"
-  content = "${cloudflare_zero_trust_tunnel_cloudflared.folly.id}.cfargotunnel.com"
-  type    = "CNAME"
-  proxied = true
-  ttl     = 1
+  name = "offsite"
+  config = {
+    ingress = [
+      {
+        hostname = "cf.offsite.${cloudflare_zone.lolwtf_ca.name}"
+        service = "http_status:401"
+      },
+      {
+        service = "http_status:418"
+      }
+    ]
+  }
+}
+
+output "cloudflare_tunnel_token_folly" {
+  sensitive = true
+  value = module.tunnel_folly.cloudflare_tunnel_token
+}
+
+output "cloudflare_tunnel_token_offsite" {
+  sensitive = true
+  value = module.tunnel_offsite.cloudflare_tunnel_token
 }
