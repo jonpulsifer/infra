@@ -43,6 +43,8 @@ spec:
       enabled: true
     bpf:
       masquerade: true
+    l2Announcements:
+      enabled: true
     bgpControlPlane:
       enabled: false
     gatewayAPI:
