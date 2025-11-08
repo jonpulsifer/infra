@@ -24,6 +24,8 @@ mkShell {
     echo -e "Welcome to the infra repo! This is a nix-shell environment.
     It contains all the tools you need to work with my infra." | ${dotacat}/bin/dotacat
     echo "Available packages:" | ${dotacat}/bin/dotacat
-    printf '${lib.concatMapStringsSep "\\n" (pkg: "  • ${pkg.pname or pkg.name}") packages}\n' | ${dotacat}/bin/dotacat
+    printf '${
+      lib.concatMapStringsSep "\\n" (pkg: "  • ${pkg.pname or pkg.name}") packages
+    }\n' | ${dotacat}/bin/dotacat
   '';
 }

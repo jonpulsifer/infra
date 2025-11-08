@@ -1,6 +1,11 @@
-{ config, lib, pkgs, ... }:
 {
-  config = lib.mkIf config.services.kubernetes.kubelet.enable {  
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  config = lib.mkIf config.services.kubernetes.kubelet.enable {
     systemd.services.containerd.path = [ pkgs.gvisor ];
     virtualisation.containerd.settings = {
       plugins."io.containerd.grpc.v1.cri" = {

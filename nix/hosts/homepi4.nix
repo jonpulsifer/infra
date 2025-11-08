@@ -6,7 +6,7 @@
     ../services/kiosk.nix
   ];
 
-  networking = { 
+  networking = {
     hostName = name;
     wireless = {
       enable = true;
@@ -15,7 +15,7 @@
           hidden = true;
         };
       };
-    }; 
+    };
   };
 
   services.kiosk = {

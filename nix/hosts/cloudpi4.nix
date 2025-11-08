@@ -1,4 +1,9 @@
-{ config, inputs, name, ... }:
+{
+  config,
+  inputs,
+  name,
+  ...
+}:
 {
   imports = [
     ../hardware/pi4
