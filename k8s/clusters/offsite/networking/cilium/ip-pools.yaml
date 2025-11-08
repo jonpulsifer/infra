@@ -32,8 +32,15 @@ spec:
     matchExpressions:
       - { key: debug, operator: NotIn, values: [lol] }
   interfaces:
-  - ^eno[0-9]+$
-  - ^enp[0-9]+$
-  - ^tailscale0$
+    # Matches el classico ethernet device names like 'eth0'
+    - ^eth[0-9]+$
+    # Matches on-board devices like 'eno1'
+    - ^eno[0-9]+$
+    # Matches PCI slot-based names like 'enp0s31f6'
+    # This matches 'enp' + (digit) + 's' + (digit) + optional('f' + digit)
+    - ^enp[0-9]+s[0-9]+(f[0-9]+)?$
+    # Matches MAC address-based names like 'enxace2d30d9066'
+    # This matches 'enx' + (12 lowercase hex characters)
+    - ^enx[0-9a-f]{12}$
   externalIPs: false
   loadBalancerIPs: true
