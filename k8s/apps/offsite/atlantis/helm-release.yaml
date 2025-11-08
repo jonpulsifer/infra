@@ -17,6 +17,8 @@ spec:
     orgAllowlist: github.com/jonpulsifer/*
     environment:
       ATLANTIS_WRITE_GIT_CREDS: "true"
+      ATLANTIS_FAIL_ON_PRE_WORKFLOW_HOOK_ERROR: "true"
+      ATLANTIS_ENABLE_POLICY_CHECKS: "true"
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID
         secretKeyRef:
@@ -39,12 +41,28 @@ spec:
         workflow: default
         allowed_overrides: []
         allow_custom_workflows: false
+        pre_workflow_hooks:
+          - run: ./plan-hook.sh
+            description: Plan Hook
+            commands: plan
       workflows:
         default:
           plan:
             steps: [init, plan]
           apply:
             steps: [apply]
+          policy_check:
+            steps:
+              - policy_check:
+                  extra_args: ["-p /home/atlantis/policies/", "--all-namespaces"]
+      policies:
+        owners:
+          users:
+            - jonpulsifer
+        policy_sets:
+          - name: Super Duper Policy Set
+            path: /home/atlantis/policies/
+            source: local
     hidePrevPlanComments: true
     hideUnchangedPlanComments: true
     ingress:
@@ -62,3 +80,11 @@ spec:
           secretName: *host
     servicemonitor:
       enabled: false
+    extraVolumes:
+      - name: policies
+        configMap:
+          name: deny-policy
+    extraVolumeMounts:
+      - name: policies
+        mountPath: /home/atlantis/policies
+        readOnly: true

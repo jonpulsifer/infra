@@ -6,3 +6,11 @@ resources:
   - helm-release.yaml
   - secret.sops.yaml
 namespace: atlantis
+configMapGenerator:
+  - name: deny-policy
+    files:
+      - deny-policy.rego
+generatorOptions:
+  disableNameSuffixHash: true
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
