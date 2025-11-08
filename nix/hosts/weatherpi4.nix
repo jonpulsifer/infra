@@ -15,6 +15,18 @@
     useRoutingFeatures = "both";
   };
 
+
+  systemd.services.tailscale-transport-layer-offloads = {
+    # https://tailscale.com/kb/1320/performance-best-practices#ethtool-configuration.
+    description = "Linux optimizations for subnet routers and exit nodes";
+    after = [ "network.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.ethtool}/sbin/ethtool -K wlan0 rx-udp-gro-forwarding on rx-gro-list off";
+    };
+    wantedBy = [ "default.target" ];
+  };
+
   services.kiosk = {
     enable = true;
     container = true;
