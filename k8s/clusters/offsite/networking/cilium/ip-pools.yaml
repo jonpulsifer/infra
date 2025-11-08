@@ -34,5 +34,6 @@ spec:
   interfaces:
   - ^eno[0-9]+$
   - ^enp[0-9]+$
+  - ^tailscale0$
   externalIPs: false
   loadBalancerIPs: true
