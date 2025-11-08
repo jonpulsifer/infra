@@ -60,9 +60,8 @@
       mkSystem =
         name: config:
         let
-          profile = config.profile or "host";
-          system = if profile == "rpi" then "aarch64-linux" else "x86_64-linux";
-          moduleDir = if profile == "image" then "profiles" else "hosts";
+          system = config.system or "x86_64-linux";
+          moduleDir = config.profile or "hosts";
           modules = [ ./nix/${moduleDir}/${name}.nix ] ++ (config.modules or [ ]);
         in
         nixosSystem {
@@ -84,24 +83,24 @@
 
         # raspberry pis
         cloudpi4 = {
-          profile = "rpi";
+          system = "aarch64-linux";
         };
         homepi4 = {
-          profile = "rpi";
+          system = "aarch64-linux";
         };
         weatherpi4 = {
-          profile = "rpi";
+          system = "aarch64-linux";
         };
 
         # images
         wsl = {
-          profile = "image";
+          profile = "images";
         };
         iso = {
-          profile = "image";
+          profile = "images";
         };
         gce = {
-          profile = "image";
+          profile = "images";
         };
       };
 
@@ -114,7 +113,7 @@
         aarch64-linux = {
           cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
-          screenpi4 = nixosConfigurations.screenpi4.config.system.build.sdImage;
+          weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
         };
       };
 

@@ -7,7 +7,7 @@
 {
   imports = [
     ../hardware/x86
-    ../profiles/server.nix
+    ../services/common.nix
     ../services/k8s
   ];
   networking.hostName = name;

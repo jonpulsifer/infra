@@ -7,7 +7,7 @@
 {
   imports = [
     (modulesPath + "/virtualisation/google-compute-image.nix")
-    ./server.nix
+    ../services/common.nix
   ];
 
   # get the hostname from gce

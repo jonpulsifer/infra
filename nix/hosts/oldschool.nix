@@ -9,7 +9,7 @@
 {
   imports = [
     ../hardware/x86
-    ../profiles/server.nix
+    ../services/common.nix
     ../system/quiker.nix
     ../services/k8s
     ../services/github-runner.nix

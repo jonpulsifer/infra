@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  name,
   modulesPath,
   ...
 }:
@@ -9,7 +8,7 @@
   imports = [
     (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix")
     ../hardware/x86
-    ./server.nix
+    ../services/common.nix
   ];
 
   users.users = {

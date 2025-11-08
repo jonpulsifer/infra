@@ -6,7 +6,7 @@
 {
   imports = [
     ../hardware/x86
-    ../profiles/server.nix
+    ../services/common.nix
     ../services/k8s
   ];
   boot.initrd.availableKernelModules = [ "nvme" ];

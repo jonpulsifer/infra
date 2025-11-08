@@ -87,7 +87,6 @@ nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-
 
 Reusable configuration profiles in `profiles/`:
 
-- **`server.nix`** - Base server configuration with SSH, Tailscale, monitoring
 - **`rpi.nix`** - Raspberry Pi 4 hardware profile
 - **`wsl.nix`** - WSL-specific configuration
 - **`iso.nix`** - Live ISO environment
@@ -98,6 +97,7 @@ Reusable configuration profiles in `profiles/`:
 Custom service modules in `services/`:
 
 - **`k8s/`** - Kubernetes cluster configuration
+- **`common.nix`** - Base server configuration with SSH, Tailscale, monitoring
 - **`jellyfin.nix`** - Media server
 - **`github-runner.nix`** - Self-hosted GitHub Actions runners
 - **`kiosk.nix`** - Kiosk mode display
@@ -143,7 +143,7 @@ SSH keys are automatically imported from GitHub:
 {
   imports = [
     ../hardware/x86
-    ../profiles/server.nix
+    ../services/common.nix
   ];
   
   networking.hostName = name;

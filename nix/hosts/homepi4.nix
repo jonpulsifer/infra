@@ -1,18 +1,22 @@
-{ config, lib, ... }:
+{ config, name, ... }:
 {
   imports = [
-    ../profiles/rpi.nix
+    ../hardware/pi4
+    ../services/common.nix
     ../services/kiosk.nix
   ];
 
-  networking.wireless = {
-    enable = true;
-    networks = {
-      lab = {
-        hidden = true;
+  networking = { 
+    hostName = name;
+    wireless = {
+      enable = true;
+      networks = {
+        lab = {
+          hidden = true;
+        };
       };
-    };
-  } 
+    }; 
+  };
 
   services.kiosk = {
     enable = true;

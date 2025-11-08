@@ -37,6 +37,7 @@
     enable = lib.mkDefault true;
     openFirewall = true;
   };
+
   programs.zsh.enable = true;
 
   security.sudo = {

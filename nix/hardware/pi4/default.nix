@@ -2,25 +2,31 @@
   config,
   lib,
   pkgs,
-  name,
   inputs,
+  modulesPath,
   ...
 }:
 {
   imports = [
     inputs.nixos-hardware.nixosModules.raspberry-pi-4
+    (modulesPath + "/installer/sd-card/sd-image-aarch64.nix")
   ];
 
-  nixpkgs.overlays = [
-    # https://github.com/NixOS/nixpkgs/issues/154163
-    (final: super: {
-      makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
-    })
-  ];
+  # save some space
+  documentation.enable = false;
 
-  # Required for the Wireless firmware
-  hardware.enableRedistributableFirmware = true;
-  hardware.cpu.intel.updateMicrocode = lib.mkForce false;
+  nixpkgs = {
+    # Cross compile the system from x86_64-linux to aarch64-linux if you want
+    # buildPlatform.system = "x86_64-linux";
+    hostPlatform.system = "aarch64-linux";
+
+    overlays = [
+      # https://github.com/NixOS/nixpkgs/issues/154163
+      (final: super: {
+        makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
+      })
+    ];
+  };
 
   boot = {
     kernelPackages = lib.mkForce pkgs.linuxPackages_rpi4;
@@ -48,18 +54,28 @@
     };
   };
 
-  documentation.enable = false;
-
-  networking = {
-    hostName = name;
-    wireless.enable = lib.mkDefault false;
-  };
-
-  nixpkgs = {
-    # Cross compile the system from x86_64-linux to aarch64-linux if you want
-    # buildPlatform.system = "x86_64-linux";
-    hostPlatform.system = "aarch64-linux";
-  };
+  # Required for the Wireless firmware
+  hardware.enableRedistributableFirmware = true;
+  hardware.cpu.intel.updateMicrocode = lib.mkForce false;
 
   powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
+
+  sdImage.compressImage = true;
+  sdImage.firmwareSize = 512;
+
+  fileSystems = lib.mkForce {
+    "/" = {
+      device = "/dev/disk/by-label/NIXOS_SD";
+      fsType = "ext4";
+      options = [ "noatime" ];
+    };
+    "/boot/firmware" = {
+      device = "/dev/disk/by-label/FIRMWARE";
+      fsType = "vfat";
+      options = [
+        "noauto"
+        "nofail"
+      ];
+    };
+  };
 }
