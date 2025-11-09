@@ -63,6 +63,7 @@ spec:
             steps: [apply]
           policy_check:
             steps:
+              - show
               - policy_check:
                   extra_args: ["-p /home/atlantis/policies/"]
       policies:
