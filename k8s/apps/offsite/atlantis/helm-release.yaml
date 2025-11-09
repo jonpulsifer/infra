@@ -35,6 +35,10 @@ spec:
         secretKeyRef:
           name: atlantis-github
           key: github_app_private_key
+      - name: OP_SERVICE_ACCOUNT_TOKEN
+        secretKeyRef:
+          name: atlantis-github
+          key: op_service_account
     repoConfig: |
       ---
       repos:
