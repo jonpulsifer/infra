@@ -87,6 +87,7 @@ spec:
       - name: plan-hook
         configMap:
           name: plan-hook
+          defaultMode: 0777
     extraVolumeMounts:
       - name: policies
         mountPath: /home/atlantis/policies/
@@ -94,4 +95,3 @@ spec:
       - name: plan-hook
         mountPath: /home/atlantis/plan-hook.sh
         readOnly: true
-        defaultMode: 0777
