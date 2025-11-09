@@ -34,6 +34,10 @@ spec:
         secretKeyRef:
           name: atlantis-github
           key: github_app_private_key
+      - name: ATLANTIS_TERRAFORM_GSA
+        secretKeyRef:
+          name: atlantis-github
+          key: terraform.json
     repoConfig: |
       ---
       repos:
@@ -90,6 +94,10 @@ spec:
         configMap:
           name: plan-hook
           defaultMode: 0777
+      - name: terraform-gsa
+        secret:
+          secretName: atlantis-github
+          key: terraform.json
     extraVolumeMounts:
       - name: policies
         mountPath: /home/atlantis/policies/
@@ -97,6 +105,9 @@ spec:
       - name: plan-hook
         mountPath: /home/atlantis/plan-hook.sh
         subPath: plan-hook.sh
+        readOnly: true
+      - name: terraform-gsa
+        mountPath: /secrets/terraform/credentials.json
         readOnly: true
     readinessProbe:
       periodSeconds: 10
