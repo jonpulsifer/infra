@@ -29,6 +29,6 @@ data "onepassword_item" "cloudflare_api_token" {
 }
 
 provider "cloudflare" {
-  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
+  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
   api_token = data.onepassword_item.cloudflare_api_token.password
 }
