@@ -25,7 +25,7 @@ spec:
     remediation:
       retries: 5
   values:
-    # autoDirectNodeRoutes: false
+    autoDirectNodeRoutes: true
     devices: eno+ enp+
     kubeProxyReplacement: true
     k8sServiceHost: ${API_SERVER_IP}
