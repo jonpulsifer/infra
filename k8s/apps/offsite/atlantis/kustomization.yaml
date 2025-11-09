@@ -7,9 +7,14 @@ resources:
   - secret.sops.yaml
 namespace: atlantis
 configMapGenerator:
-  - name: deny-policy
+  - name: policies
     files:
-      - deny-policy.rego
+      - policies/default-deny.rego
+      - policies/only-me.rego
+      - policies/only-me.json
+  - name: plan-hook
+    files:
+      - plan-hook.sh
 generatorOptions:
   disableNameSuffixHash: true
   annotations:

@@ -42,7 +42,7 @@ spec:
         allowed_overrides: []
         allow_custom_workflows: false
         pre_workflow_hooks:
-          - run: ./plan-hook.sh
+          - run: /home/atlantis/plan-hook.sh
             description: Plan Hook
             commands: plan
       workflows:
@@ -54,7 +54,7 @@ spec:
           policy_check:
             steps:
               - policy_check:
-                  extra_args: ["-p /home/atlantis/policies/", "--all-namespaces"]
+                  extra_args: ["-p /home/atlantis/policies/"]
       policies:
         owners:
           users:
@@ -83,8 +83,14 @@ spec:
     extraVolumes:
       - name: policies
         configMap:
-          name: deny-policy
+          name: policies
+      - name: plan-hook
+        configMap:
+          name: plan-hook
     extraVolumeMounts:
       - name: policies
-        mountPath: /home/atlantis/policies
+        mountPath: /home/atlantis/policies/
+        readOnly: true
+      - name: plan-hook
+        mountPath: /home/atlantis/plan-hook.sh
         readOnly: true
