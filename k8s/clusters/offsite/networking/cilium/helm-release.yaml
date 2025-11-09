@@ -30,8 +30,8 @@ spec:
     kubeProxyReplacement: true
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
-    routingMode: tunnel
-    # ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
+    routingMode: native
+    ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     enableIPv4Masquerade: true
     ipam:
       mode: cluster-pool
@@ -43,6 +43,8 @@ spec:
       enabled: true
     bpf:
       masquerade: true
+    socketLB:
+      hostNamespaceOnly: true
     l2Announcements:
       enabled: true
     bgpControlPlane:
