@@ -1,5 +1,7 @@
 package hooks
 
+import rego.v1
+
 atlantis_users := {
     "jonpulsifer",
     "j0npulsifer",

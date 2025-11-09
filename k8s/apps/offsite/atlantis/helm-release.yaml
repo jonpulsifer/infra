@@ -94,4 +94,5 @@ spec:
         readOnly: true
       - name: plan-hook
         mountPath: /home/atlantis/plan-hook.sh
+        subPath: plan-hook.sh
         readOnly: true
