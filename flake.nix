@@ -92,6 +92,9 @@
           system = "aarch64-linux";
         };
 
+        # google cloud
+        oldboy = { };
+
         # images
         wsl = {
           profile = "images";

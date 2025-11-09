@@ -16,18 +16,33 @@ resource "google_service_account" "vm" {
 
 data "cloudflare_ip_ranges" "cloudflare" {}
 
+resource "google_compute_image" "nixos" {
+  provider = google.free-tier
+  name = "nixos"
+  family = "nixos"
+  storage_locations = ["us-east1"]
+  raw_disk {
+    source = "https://storage.googleapis.com/homelab-ng/nixos-image-google-compute-25.05.20251022.c8aa8cc-x86_64-linux.raw.tar.gz"
+  }
+}
+
+resource "google_compute_disk" "oldboy" {
+  provider = google.free-tier
+  name  = "oldboy"
+  image = google_compute_image.nixos.self_link
+  size  = 16
+  type  = "pd-standard"
+}
+
 resource "google_compute_instance" "oldboy" {
   provider = google.free-tier
   name = "oldboy"
   description = "Old Boy VM to race with Pat"
   machine_type = "e2-micro"
+  allow_stopping_for_update = true
   boot_disk {
     auto_delete = true
-    initialize_params {
-      image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
-      size = 16 # free tier
-      type = "pd-standard" # free tier
-    }
+    source = google_compute_disk.oldboy.self_link
   }
   network_interface {
     network = module.network.network.self_link
@@ -45,9 +60,9 @@ resource "google_compute_instance" "oldboy" {
   }
 
   shielded_instance_config {
-    enable_secure_boot = true
-    enable_vtpm = true
-    enable_integrity_monitoring = true
+    enable_secure_boot = false
+    enable_vtpm = false
+    enable_integrity_monitoring = false
   }
 
   metadata = {
