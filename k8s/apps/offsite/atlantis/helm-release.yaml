@@ -98,7 +98,6 @@ spec:
       - name: terraform-gsa
         secret:
           secretName: atlantis-github
-          key: terraform.json
     extraVolumeMounts:
       - name: policies
         mountPath: /home/atlantis/policies/
