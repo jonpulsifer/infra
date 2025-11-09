@@ -94,7 +94,6 @@ spec:
       - name: terraform-gsa
         secret:
           secretName: atlantis-github
-          items: ["terraform.json"]
     extraVolumeMounts:
       - name: policies
         mountPath: /home/atlantis/policies/
@@ -105,6 +104,7 @@ spec:
         readOnly: true
       - name: terraform-gsa
         mountPath: /run/secrets/terraform
+        subPath: terraform.json
         readOnly: true
     readinessProbe:
       periodSeconds: 10
