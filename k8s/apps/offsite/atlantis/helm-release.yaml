@@ -21,7 +21,7 @@ spec:
       ATLANTIS_ENABLE_POLICY_CHECKS: "true"
       ATLANTIS_FAIL_ON_PRE_WORKFLOW_HOOK_ERROR: "true"
       ATLANTIS_WRITE_GIT_CREDS: "true"
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/terraform/credentials.json
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/terraform/terraform.json
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID
         secretKeyRef:
@@ -35,10 +35,6 @@ spec:
         secretKeyRef:
           name: atlantis-github
           key: github_app_private_key
-      - name: ATLANTIS_TERRAFORM_GSA
-        secretKeyRef:
-          name: atlantis-github
-          key: terraform.json
     repoConfig: |
       ---
       repos:
