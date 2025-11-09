@@ -21,8 +21,8 @@ subsets:
         nodeName: blinkypi0
       # - ip: 10.2.0.27
       #   nodeName: screenpi4
-      - ip: 10.2.0.28
-        nodeName: screenpi4-wifi
+      - ip: 100.65.194.80
+        nodeName: weatherpi4
       - ip: 100.73.219.127
         nodeName: oldschool
       - ip: 100.70.220.96

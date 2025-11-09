@@ -24,6 +24,7 @@ spec:
       ATLANTIS_ENABLE_POLICY_CHECKS: "true"
       ATLANTIS_FAIL_ON_PRE_WORKFLOW_HOOK_ERROR: "true"
       ATLANTIS_WRITE_GIT_CREDS: "true"
+      ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID

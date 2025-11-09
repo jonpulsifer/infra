@@ -22,9 +22,9 @@ resources:
   - metrics-server.yaml
   - node-feature-discovery.yaml
   - prometheus.yaml
-  - signoz.yaml
   - stakater.yaml
   - stefanprodan.yaml
+  - tailscale.yaml
 patches:
   - target:
       group: source.toolkit.fluxcd.io
