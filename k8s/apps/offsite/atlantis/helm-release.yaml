@@ -14,6 +14,9 @@ spec:
         name: atlantis
         namespace: flux-system
   values:
+    image:
+      repository: ghcr.io/jonpulsifer/atlantis
+      tag: latest
     orgAllowlist: github.com/jonpulsifer/*
     environment:
       ATLANTIS_EMOJI_REACTION: "eyes"
