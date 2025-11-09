@@ -104,7 +104,7 @@ spec:
         subPath: plan-hook.sh
         readOnly: true
       - name: terraform-gsa
-        mountPath: /secrets/terraform
+        mountPath: /run/secrets/terraform
         readOnly: true
     readinessProbe:
       periodSeconds: 10
