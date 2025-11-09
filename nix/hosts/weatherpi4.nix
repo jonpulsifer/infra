@@ -20,11 +20,6 @@
     };
   };
 
-  services.tailscale = {
-    extraUpFlags = [ "--advertise-routes=192.168.2.0/24" ];
-    useRoutingFeatures = "both";
-  };
-
   systemd.services.tailscale-transport-layer-offloads = {
     # https://tailscale.com/kb/1320/performance-best-practices#ethtool-configuration.
     description = "Linux optimizations for subnet routers and exit nodes";
