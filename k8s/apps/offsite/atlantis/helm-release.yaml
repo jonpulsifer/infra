@@ -94,3 +94,4 @@ spec:
       - name: plan-hook
         mountPath: /home/atlantis/plan-hook.sh
         readOnly: true
+        defaultMode: 0777
