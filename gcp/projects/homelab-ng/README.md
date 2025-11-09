@@ -16,7 +16,7 @@
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.12.0 |
 | <a name="provider_google"></a> [google](#provider\_google) | 7.10.0 |
 | <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.10.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | ~> 2.0 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.0 |
 
 ## Modules
 
@@ -29,6 +29,8 @@
 | Name | Type |
 |------|------|
 | [cloudflare_dns_record.oldboy](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
+| [google_compute_disk.oldboy](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_disk) | resource |
+| [google_compute_image.nixos](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_image) | resource |
 | [google_compute_instance.oldboy](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance) | resource |
 | [google_iam_workload_identity_pool.homelab](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/iam_workload_identity_pool) | resource |
 | [google_iam_workload_identity_pool_provider.github](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/iam_workload_identity_pool_provider) | resource |
