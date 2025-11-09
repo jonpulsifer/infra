@@ -1,4 +1,4 @@
-# firebase needs a service account
+# firebase needs a service account D:
 resource "google_org_policy_policy" "allow_service_accounts" {
   name   = "projects/${local.project}/policies/iam.disableServiceAccountCreation"
   parent = "projects/${local.project}"
