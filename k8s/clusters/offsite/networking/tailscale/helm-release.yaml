@@ -8,7 +8,7 @@ spec:
   interval: 24h
   chart:
     spec:
-      chart: tailscale
+      chart: tailscale-operator
       version: 1.90.6
       sourceRef:
         kind: HelmRepository
