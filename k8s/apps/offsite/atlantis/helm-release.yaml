@@ -98,3 +98,5 @@ spec:
         mountPath: /home/atlantis/plan-hook.sh
         subPath: plan-hook.sh
         readOnly: true
+    readinessProbe:
+      periodSeconds: 10
