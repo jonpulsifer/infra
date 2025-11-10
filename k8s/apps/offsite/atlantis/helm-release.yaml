@@ -19,11 +19,13 @@ spec:
       tag: latest
     orgAllowlist: github.com/jonpulsifer/*
     environment:
+      ATLANTIS_AUTOMERGE: "true"
       ATLANTIS_EMOJI_REACTION: "eyes"
       ATLANTIS_ENABLE_DIFF_MARKDOWN_FORMAT: "true"
       ATLANTIS_ENABLE_POLICY_CHECKS: "true"
       ATLANTIS_FAIL_ON_PRE_WORKFLOW_HOOK_ERROR: "true"
       ATLANTIS_WRITE_GIT_CREDS: "true"
+      ATLANTIS_AUTOPLAN_MODULES: "true"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
     environmentSecrets:
