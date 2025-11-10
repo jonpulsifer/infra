@@ -9,6 +9,13 @@ module "network" {
   ip_cidr_range = "10.13.37.0/28"
 }
 
+resource "google_compute_address" "oldboy" {
+  provider = google.free-tier
+  name         = "oldboy"
+  address_type = "EXTERNAL"
+  network_tier = "STANDARD"
+}
+
 resource "google_service_account" "vm" {
   account_id = "oldboy"
   display_name = "Old Boy VM Service Account"
@@ -30,7 +37,7 @@ resource "google_compute_disk" "oldboy" {
   provider = google.free-tier
   name  = "oldboy"
   image = google_compute_image.nixos.self_link
-  size  = 16
+  size  = 30
   type  = "pd-standard"
 }
 
@@ -51,6 +58,7 @@ resource "google_compute_instance" "oldboy" {
     # trivy:ignore:avd-gcp-0031
     access_config {
       network_tier = "STANDARD" # free tier
+      nat_ip = google_compute_address.oldboy.address
     }
   }
 
@@ -76,7 +84,7 @@ resource "cloudflare_dns_record" "oldboy" {
   zone_id = "6db37c857d0c3631bea427fab3301e89" # lolwtf.ca
   name = "oldboy.lolwtf.ca"
   type = "A"
-  content = google_compute_instance.oldboy.network_interface[0].access_config[0].nat_ip
+  content = google_compute_address.oldboy.address
   proxied = true
   ttl = 1
 }
