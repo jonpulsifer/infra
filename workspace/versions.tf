@@ -28,9 +28,10 @@ provider "google" {
 }
 
 provider "googleworkspace" {
+
   customer_id     = local.customer_id
-  service_account = local.terraform_service_account
-  access_token    = ephemeral.google_service_account_access_token.terraform.access_token
+  # service_account = local.terraform_service_account
+  # access_token    = ephemeral.google_service_account_access_token.terraform.access_token
 
   # Impersonate an admin account for DWD operations (managing POSIX account settings)
   # impersonated_user_email = "terraform@pulsifer.ca"
