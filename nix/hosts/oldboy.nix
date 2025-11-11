@@ -5,5 +5,5 @@
     ../services/common.nix
   ];
 
-  networking.hostName = lib.mkForce "";
+  networking.hostName = lib.mkForce null;
 }
