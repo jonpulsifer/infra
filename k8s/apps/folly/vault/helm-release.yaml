@@ -29,6 +29,7 @@ spec:
             secretName: *host
       extraEnvironmentVars:
         GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
+        VAULT_LOG_LEVEL: debug
       dataStorage:
         enabled: false
       standalone:
