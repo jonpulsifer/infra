@@ -15,6 +15,11 @@ on:
         required: true
         type: boolean
         default: true
+      format_terraform:
+        description: 'Format all Terraform files recursively'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   changed-directories:
@@ -66,16 +71,57 @@ jobs:
         id: validate
         run: terraform validate
 
+  format:
+    needs: [changed-directories, validate]
+    runs-on: ubuntu-latest
+    # Run IF:
+    # 1. It's a push to main AND there are changed terraform files
+    # OR
+    # 2. It's a manual dispatch AND the format_terraform input is true
+    if: |
+      always() && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changed-directories.outputs.any_changed == 'true') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.format_terraform == 'true')
+      )
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform fmt
+        run: terraform fmt -recursive
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Commit changes
+        if: steps.check-changes.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add **/*.tf
+          git commit -m "style: format terraform files"
+      - name: Push changes
+        if: steps.check-changes.outputs.changed == 'true'
+        run: git push
+
   docs:
     needs: [validate]
     runs-on: ubuntu-latest
     # Run IF:
-    # 1. It's a push to main AND (validate succeeded OR validate was skipped because no files changed)
+    # 1. It's a push to main AND there are changed terraform   files
     # OR
     # 2. It's a manual dispatch AND the regenerate_docs input is true
     if: |
       always() && (
-        (github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.validate.result == 'success' || needs.validate.result == 'skipped')) ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.changed-directories.outputs.any_changed == 'true')) ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.regenerate_docs)
       )
     steps:
