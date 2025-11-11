@@ -12,12 +12,12 @@ locals {
   ]
 }
 
-data "google_service_account_access_token" "terraform" {
+ephemeral "google_service_account_access_token" "terraform" {
   target_service_account = local.terraform_service_account
   scopes = concat([
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/cloud-platform",
-  ]) #, local.admin_scopes), not needed while impersonating a user account for DWD
+  ], local.admin_scopes)
 }
 
 provider "google" {
@@ -30,7 +30,7 @@ provider "google" {
 provider "googleworkspace" {
   customer_id     = local.customer_id
   service_account = local.terraform_service_account
-  access_token    = data.google_service_account_access_token.terraform.access_token
+  access_token    = ephemeral.google_service_account_access_token.terraform.access_token
 
   # Impersonate an admin account for DWD operations (managing POSIX account settings)
   impersonated_user_email = "terraform@pulsifer.ca"
