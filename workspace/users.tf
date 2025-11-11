@@ -19,6 +19,16 @@ resource "googleworkspace_user" "me" {
     operating_system_type = "linux"
   }
 
+  posix_accounts {
+    primary               = false
+    username              = local.username
+    uid                   = "1338"
+    gid                   = "1338"
+    home_directory        = "/home/${local.username}"
+    shell                 = "/home/${local.username}/.nix-profile/bin/zsh"
+    operating_system_type = "linux"
+  }
+
   ssh_public_keys {
     key = <<-EOT
         ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
@@ -36,14 +46,6 @@ resource "googleworkspace_user" "me" {
       organizations,
       external_ids,
     ]
-  }
-}
-
-resource "googleworkspace_user" "terraform" {
-  primary_email = "terraform@pulsifer.ca"
-  name {
-    given_name  = "HashiCorp"
-    family_name = "Terraform"
   }
 }
 
