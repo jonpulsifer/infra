@@ -31,13 +31,13 @@ provider "google" {
 
 provider "googleworkspace" {
   customer_id     = local.customer_id
-  credentials     = local.use_direct_credentials ? "/run/secrets/terraform.json" : null 
+  credentials     = local.use_direct_credentials ? "/run/secrets/terraform.json" : null
   service_account = local.use_direct_credentials ? null : local.terraform_service_account
   access_token    = local.use_direct_credentials ? null : ephemeral.google_service_account_access_token.terraform[0].access_token
 
   # Impersonate an admin account for DWD operations (managing POSIX account settings)
   impersonated_user_email = "terraform@pulsifer.ca"
-  oauth_scopes = local.admin_scopes
+  oauth_scopes            = local.admin_scopes
 }
 
 terraform {
