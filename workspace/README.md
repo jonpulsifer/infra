@@ -10,7 +10,6 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 7.10.0 |
 | <a name="provider_googleworkspace"></a> [googleworkspace](#provider\_googleworkspace) | 0.7.0 |
 
 ## Modules
@@ -29,7 +28,6 @@ No modules.
 | [googleworkspace_user.me](https://registry.terraform.io/providers/hashicorp/googleworkspace/latest/docs/resources/user) | resource |
 | [googleworkspace_user.terraform](https://registry.terraform.io/providers/hashicorp/googleworkspace/latest/docs/resources/user) | resource |
 | [googleworkspace_user.vault](https://registry.terraform.io/providers/hashicorp/googleworkspace/latest/docs/resources/user) | resource |
-| [google_service_account_access_token.terraform](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/service_account_access_token) | data source |
 
 ## Inputs
 
