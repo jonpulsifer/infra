@@ -4,7 +4,7 @@ locals {
   region                    = "northamerica-northeast2"
   zone                      = join("-", [local.region, "a"])
   terraform_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
-  use_direct_credentials    = !fileexists("/run/secrets/terraform.json")
+  use_direct_credentials    = fileexists("/run/secrets/terraform.json")
   admin_scopes = [
     "https://www.googleapis.com/auth/admin.directory.domain",
     "https://www.googleapis.com/auth/admin.directory.group",
@@ -14,7 +14,7 @@ locals {
 }
 
 ephemeral "google_service_account_access_token" "terraform" {
-  count                  = local.use_direct_credentials ? 1 : 0
+  count                  = local.use_direct_credentials ? 0 : 1
   target_service_account = local.terraform_service_account
   scopes = concat([
     "https://www.googleapis.com/auth/userinfo.email",
@@ -26,17 +26,17 @@ provider "google" {
   project                     = local.project
   region                      = local.region
   zone                        = local.zone
-  impersonate_service_account = local.use_direct_credentials ? local.terraform_service_account : null
+  impersonate_service_account = local.use_direct_credentials ? null : local.terraform_service_account
 }
 
 provider "googleworkspace" {
   customer_id     = local.customer_id
-  credentials     = local.use_direct_credentials ? null : "/run/secrets/terraform.json"
-  service_account = local.use_direct_credentials ? local.terraform_service_account : null
-  access_token    = local.use_direct_credentials ? ephemeral.google_service_account_access_token.terraform[0].access_token : null
+  credentials     = local.use_direct_credentials ? "/run/secrets/terraform.json" : null 
+  service_account = local.use_direct_credentials ? null : local.terraform_service_account
+  access_token    = local.use_direct_credentials ? null : ephemeral.google_service_account_access_token.terraform[0].access_token
 
   # Impersonate an admin account for DWD operations (managing POSIX account settings)
-  # impersonated_user_email = "terraform@pulsifer.ca"
+  impersonated_user_email = "terraform@pulsifer.ca"
   oauth_scopes = local.admin_scopes
 }
 
