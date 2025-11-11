@@ -60,10 +60,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - uses: hashicorp/setup-terraform@v3
-      - name: Terraform fmt
-        id: fmt
-        run: terraform fmt -check
-        continue-on-error: true
       - name: Terraform Init
         id: init
         run: terraform init -backend=false
@@ -113,7 +109,7 @@ jobs:
         run: git push
 
   docs:
-    needs: [validate]
+    needs: [format]
     runs-on: ubuntu-latest
     # Run IF:
     # 1. It's a push to main AND there are changed terraform   files
