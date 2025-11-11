@@ -28,7 +28,7 @@ spec:
       ATLANTIS_AUTOPLAN_MODULES: "true"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
-      GOOGLEWORKSPACE_CLOUD_KEYFILE_JSON: "/run/secrets/terraform.json"
+      GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID
         secretKeyRef:

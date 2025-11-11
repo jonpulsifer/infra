@@ -17,7 +17,7 @@ ephemeral "google_service_account_access_token" "terraform" {
   scopes = concat([
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/cloud-platform",
-  ], local.admin_scopes)
+  ]) # , local.admin_scopes)
 }
 
 provider "google" {
