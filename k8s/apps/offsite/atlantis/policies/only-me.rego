@@ -4,7 +4,7 @@ import rego.v1
 
 atlantis_users := {
     "jonpulsifer",
-    "renovate",
+    "renovate[bot]",
 }
 
 allowed if {
