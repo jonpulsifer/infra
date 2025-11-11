@@ -4,7 +4,7 @@ locals {
   region                    = "northamerica-northeast2"
   zone                      = join("-", [local.region, "a"])
   terraform_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
-  use_direct_credentials = !fileexists("/run/secrets/terraform.json")
+  use_direct_credentials    = !fileexists("/run/secrets/terraform.json")
   admin_scopes = [
     "https://www.googleapis.com/auth/admin.directory.domain",
     "https://www.googleapis.com/auth/admin.directory.group",
@@ -14,7 +14,7 @@ locals {
 }
 
 ephemeral "google_service_account_access_token" "terraform" {
-  count = local.use_direct_credentials ? 1 : 0
+  count                  = local.use_direct_credentials ? 1 : 0
   target_service_account = local.terraform_service_account
   scopes = concat([
     "https://www.googleapis.com/auth/userinfo.email",
@@ -37,7 +37,7 @@ provider "googleworkspace" {
 
   # Impersonate an admin account for DWD operations (managing POSIX account settings)
   # impersonated_user_email = "terraform@pulsifer.ca"
-  oauth_scopes            = local.admin_scopes
+  oauth_scopes = local.admin_scopes
 }
 
 terraform {
