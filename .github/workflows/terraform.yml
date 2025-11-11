@@ -19,7 +19,7 @@ on:
         description: 'Format all Terraform files recursively'
         required: true
         type: boolean
-        default: false
+        default: true
 
 jobs:
   changed-directories:
