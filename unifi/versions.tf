@@ -30,17 +30,17 @@ locals {
 
 data "onepassword_item" "cloudflare_api_token" {
   vault = local.vault_id
-  uuid = "3x5gu5niywi6iza3jxxny7ifsy"
+  uuid  = "3x5gu5niywi6iza3jxxny7ifsy"
 }
 
 data "onepassword_item" "unifi" {
   vault = local.vault_id
-  uuid = "lb532zq5efzs3y3xlfbdk2kace"
+  uuid  = "lb532zq5efzs3y3xlfbdk2kace"
 }
 
 data "onepassword_item" "vault" {
   vault = local.vault_id
-  uuid = "jjojlizpb5p4slytyw2a4llx3m"
+  uuid  = "jjojlizpb5p4slytyw2a4llx3m"
 }
 
 provider "onepassword" {

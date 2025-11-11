@@ -25,7 +25,7 @@ locals {
 
 data "onepassword_item" "cloudflare_api_token" {
   vault = local.vault_id
-  uuid = "3x5gu5niywi6iza3jxxny7ifsy"
+  uuid  = "3x5gu5niywi6iza3jxxny7ifsy"
 }
 
 provider "cloudflare" {

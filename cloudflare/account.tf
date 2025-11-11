@@ -7,9 +7,9 @@ data "cloudflare_account" "fml" {
 }
 
 resource "cloudflare_list" "github_webhook_addresses" {
-  account_id = local.fml_account_id
-  name = "github_webhook_ips"
-  kind = "ip"
+  account_id  = local.fml_account_id
+  name        = "github_webhook_ips"
+  kind        = "ip"
   description = "GitHub webhook addresses"
   # https://api.github.com/meta
   items = [

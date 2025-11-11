@@ -4,7 +4,7 @@ locals {
 
 data "onepassword_item" "vault" {
   vault = local.vault_id
-  uuid = "jjojlizpb5p4slytyw2a4llx3m"
+  uuid  = "jjojlizpb5p4slytyw2a4llx3m"
 }
 
 provider "vault" {

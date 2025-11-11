@@ -34,7 +34,7 @@ provider "googleworkspace" {
 
   # Impersonate an admin account for DWD operations (managing POSIX account settings)
   impersonated_user_email = "terraform@pulsifer.ca"
-  oauth_scopes = local.admin_scopes
+  oauth_scopes            = local.admin_scopes
 }
 
 terraform {
