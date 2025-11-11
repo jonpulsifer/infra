@@ -25,14 +25,6 @@ data "google_iam_policy" "org" {
     members = ["group:cloud@pulsifer.ca"]
   }
   binding {
-    role    = "roles/cloudfunctions.serviceAgent"
-    members = ["serviceAccount:service-org-5046617773@security-center-api.iam.gserviceaccount.com", ]
-  }
-  binding {
-    role    = "roles/serviceusage.serviceUsageAdmin"
-    members = ["serviceAccount:service-org-5046617773@security-center-api.iam.gserviceaccount.com", ]
-  }
-  binding {
     role    = "roles/securitycenter.serviceAgent"
     members = ["serviceAccount:service-org-5046617773@security-center-api.iam.gserviceaccount.com", ]
   }
