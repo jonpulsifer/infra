@@ -1,9 +1,9 @@
-{ config, lib, modulesPath, ... }:
+{ config, lib, modulesPath, name, ... }:
 {
   imports = [
     (modulesPath + "/virtualisation/google-compute-image.nix")
     ../services/common.nix
   ];
 
-  networking.hostName = lib.mkForce null;
+  networking.hostName = name;
 }
