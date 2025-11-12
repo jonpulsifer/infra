@@ -21,6 +21,7 @@ resource "cloudflare_dns_record" "k8s_remote_dns" {
   type    = "A"
   ttl     = 1
   comment = "terraform managed"
+  proxied = false
   # tags    = ["terraform-managed"]
 }
 

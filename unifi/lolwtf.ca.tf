@@ -27,6 +27,7 @@ resource "cloudflare_dns_record" "lab_remote_dns" {
   type    = "A"
   ttl     = 1
   comment = "terraform managed"
+  proxied = false
   # tags    = ["terraform-managed"]
 }
 
