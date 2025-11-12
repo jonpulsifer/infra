@@ -28,12 +28,6 @@ No modules.
 | [cloudflare_dns_record.k8s_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_dns_record.lab_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [unifi_firewall_group.k8s](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_group) | resource |
-| [unifi_firewall_group.rfc1918](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_group) | resource |
-| [unifi_firewall_rule.allow_established](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_rule) | resource |
-| [unifi_firewall_rule.allow_fml_to_k8s](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_rule) | resource |
-| [unifi_firewall_rule.allow_fml_to_lab](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_rule) | resource |
-| [unifi_firewall_rule.drop_all_rfc1918](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_rule) | resource |
-| [unifi_firewall_rule.drop_invalid](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_rule) | resource |
 | [unifi_network.fml](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.lab](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.starlink](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/network) | resource |

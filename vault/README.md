@@ -31,8 +31,11 @@ No modules.
 | [vault_gcp_auth_backend_role.ddnsd](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/gcp_auth_backend_role) | resource |
 | [vault_identity_entity.jawn](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/identity_entity) | resource |
 | [vault_identity_entity.terraform](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/identity_entity) | resource |
+| [vault_identity_entity_alias.google](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/identity_entity_alias) | resource |
 | [vault_identity_entity_alias.jawn](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/identity_entity_alias) | resource |
 | [vault_identity_entity_alias.terraform](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/identity_entity_alias) | resource |
+| [vault_jwt_auth_backend.google](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/jwt_auth_backend) | resource |
+| [vault_jwt_auth_backend_role.google_default](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/jwt_auth_backend_role) | resource |
 | [vault_mount.home](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/mount) | resource |
 | [vault_mount.pki](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/mount) | resource |
 | [vault_pki_secret_backend_config_urls.config_urls](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/pki_secret_backend_config_urls) | resource |
@@ -41,6 +44,7 @@ No modules.
 | [vault_policy.ddnsd](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [vault_policy.godmode](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
 | [vault_policy.home](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/policy) | resource |
+| [onepassword_item.google_oauth_client](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
 | [onepassword_item.vault](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
 | [vault_policy_document.ddnsd](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/policy_document) | data source |
 | [vault_policy_document.godmode](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/data-sources/policy_document) | data source |
