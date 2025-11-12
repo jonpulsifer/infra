@@ -2,6 +2,9 @@ resource "vault_auth_backend" "gcp" {
   type        = "gcp"
   path        = "gcp"
   description = "Authenticate workloads running on GCP"
+  tune {
+    listing_visibility = "hidden"
+  }
 }
 
 resource "vault_gcp_auth_backend_role" "ddnsd" {

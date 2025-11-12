@@ -48,18 +48,3 @@ resource "unifi_firewall_group" "k8s" {
     local.pod_cidr,
   ]
 }
-
-resource "unifi_firewall_rule" "allow_fml_to_k8s" {
-  name       = "Allow ${local.fml_cidr} to ${local.node_cidr} and ${local.pod_cidr}"
-  action     = "accept"
-  ruleset    = "LAN_IN"
-  rule_index = "20003"
-
-  protocol = "all"
-
-  src_network_type = "NETv4"
-  src_network_id   = unifi_network.fml.id
-
-  dst_network_type       = "NETv4"
-  dst_firewall_group_ids = [unifi_firewall_group.k8s.id]
-}

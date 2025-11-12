@@ -1,9 +1,15 @@
+data "onepassword_item" "google_oauth_client" {
+  vault = local.vault_id
+  uuid  = "ynzbgrzrq3enshs37j72g7enhe"
+}
+
 resource "vault_jwt_auth_backend" "google" {
+  description        = "Authenticate with Google"
   path               = "google"
   type               = "oidc"
   oidc_discovery_url = "https://accounts.google.com"
-  oidc_client_id     = "629296473058-g6i3mt60i4t3sckpiru52d92gat6tqk4.apps.googleusercontent.com"
-  oidc_client_secret = ""
+  oidc_client_id     = data.onepassword_item.google_oauth_client.username
+  oidc_client_secret = data.onepassword_item.google_oauth_client.password
   default_role       = "google-default"
   tune {
     allowed_response_headers     = []
@@ -17,14 +23,10 @@ resource "vault_jwt_auth_backend" "google" {
   }
   provider_config = {
     "provider" : "gsuite",
-    "gsuite_service_account" : "/var/run/secrets/gcp/credentials.json",
-    "gsuite_admin_impersonate" : "vault@pulsifer.ca",
-    #"fetch_groups": true,
-    #"fetch_user_info": false,
-    # "groups_recurse_max_depth": "5"
-  }
-  lifecycle {
-    ignore_changes = [oidc_client_secret, provider_config]
+    "gsuite_service_account" : "/var/run/secrets/vault/credentials.json",
+    # "gsuite_admin_impersonate" : "vault@pulsifer.ca",
+    "fetch_groups": true,
+    "fetch_user_info": true,
   }
 }
 
@@ -34,10 +36,10 @@ resource "vault_jwt_auth_backend_role" "google_default" {
   role_name      = "google-default"
   token_policies = ["default"]
   allowed_redirect_uris = [
+    "https://vault.lolwtf.ca/ui/vault/auth/google/oidc/callback",
     "http://localhost:8250/oidc/callback",
-    "https://vault.home.pulsifer.ca/ui/vault/auth/google/oidc/callback",
-    "https://vault.pulsifer.ca/ui/vault/auth/google/oidc/callback"
   ]
   user_claim   = "sub"
-  groups_claim = "groups"
+  bound_audiences = [data.onepassword_item.google_oauth_client.username]
+  verbose_oidc_logging = true
 }
