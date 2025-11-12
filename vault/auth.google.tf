@@ -25,8 +25,8 @@ resource "vault_jwt_auth_backend" "google" {
     "provider" : "gsuite",
     "gsuite_service_account" : "/var/run/secrets/vault/credentials.json",
     # "gsuite_admin_impersonate" : "vault@pulsifer.ca",
-    "fetch_groups": true,
-    "fetch_user_info": true,
+    "fetch_groups" : true,
+    "fetch_user_info" : true,
   }
 }
 
@@ -39,7 +39,7 @@ resource "vault_jwt_auth_backend_role" "google_default" {
     "https://vault.lolwtf.ca/ui/vault/auth/google/oidc/callback",
     "http://localhost:8250/oidc/callback",
   ]
-  user_claim   = "sub"
-  bound_audiences = [data.onepassword_item.google_oauth_client.username]
+  user_claim           = "sub"
+  bound_audiences      = [data.onepassword_item.google_oauth_client.username]
   verbose_oidc_logging = true
 }
