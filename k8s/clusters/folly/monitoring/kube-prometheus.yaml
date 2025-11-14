@@ -120,10 +120,6 @@ spec:
             add: ["CHOWN", "DAC_READ_SEARCH"]
       dashboards:
         default:
-          nginx-ingress:
-            gnetId: 9614
-            revision: 1
-            datasource: Prometheus
           client-dpi:
             gnetId: 11310
             revision: 5

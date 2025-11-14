@@ -13,7 +13,6 @@ resources:
   - grafana.yaml
   - hajimari.yaml
   - hashicorp.yaml
-  - ingress-nginx.yaml
   - intel.yaml
   - jetstack.yaml
   - jonpulsifer.yaml
