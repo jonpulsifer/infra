@@ -11,7 +11,7 @@
     ../services/common.nix
   ];
 
-  virtualisation = { 
+  virtualisation = {
     diskSize = 4 * 1024;
     googleComputeImage = {
       efi = true;

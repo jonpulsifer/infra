@@ -46,7 +46,7 @@
     autoUpgrade = {
       enable = lib.mkDefault true;
       flake = "github.com:jonpulsifer/infra";
-      flags = ["-L"];
+      flags = [ "-L" ];
       dates = "03:37";
       randomizedDelaySec = "3600";
     };

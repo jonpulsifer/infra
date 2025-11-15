@@ -1,4 +1,10 @@
-{ config, lib, modulesPath, name, ... }:
+{
+  config,
+  lib,
+  modulesPath,
+  name,
+  ...
+}:
 {
   imports = [
     (modulesPath + "/virtualisation/google-compute-image.nix")
