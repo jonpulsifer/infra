@@ -1,15 +1,15 @@
 variable "account_id" {
-  type = string
+  type        = string
   description = "The account ID to create the tunnel in"
 }
 
 variable "zone_id" {
-  type = string
+  type        = string
   description = "The zone ID to create the DNS record in"
 }
 
 variable "name" {
-  type = string
+  type        = string
   description = "The name of the tunnel"
 }
 
@@ -18,7 +18,7 @@ variable "config" {
   type = object({
     ingress = list(object({
       hostname = optional(string)
-      service = string
+      service  = string
     }))
   })
   default = {

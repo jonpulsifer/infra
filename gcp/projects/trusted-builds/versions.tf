@@ -15,8 +15,8 @@ provider "google" {
 
 terraform {
   backend "gcs" {
-    bucket = "homelab-ng"
-    prefix = "terraform/trusted-builds"
+    bucket                      = "homelab-ng"
+    prefix                      = "terraform/trusted-builds"
     impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
   }
 

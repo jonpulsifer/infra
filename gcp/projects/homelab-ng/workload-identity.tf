@@ -17,7 +17,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
   attribute_condition = "assertion.repository_owner == 'jonpulsifer'"
-  depends_on = [google_org_policy_policy.allowed_workload_identity_providers]
+  depends_on          = [google_org_policy_policy.allowed_workload_identity_providers]
 }
 
 resource "google_iam_workload_identity_pool_provider" "vercel" {
@@ -26,11 +26,11 @@ resource "google_iam_workload_identity_pool_provider" "vercel" {
   attribute_mapping = {
     "google.subject" = "assertion.sub"
   }
-  
+
   attribute_condition = "assertion.sub.startsWith('owner:jonpulsifers-projects:')"
   oidc {
     issuer_uri = "https://oidc.vercel.com/jonpulsifers-projects"
   }
-  
+
   depends_on = [google_org_policy_policy.allowed_workload_identity_providers]
 }

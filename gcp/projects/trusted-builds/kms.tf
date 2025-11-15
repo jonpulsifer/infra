@@ -20,5 +20,5 @@ resource "google_kms_crypto_key" "signer" {
 resource "google_kms_crypto_key_iam_binding" "signer" {
   crypto_key_id = google_kms_crypto_key.signer.id
   role          = "roles/cloudkms.signer"
-  members = local.attester_principals
+  members       = local.attester_principals
 }

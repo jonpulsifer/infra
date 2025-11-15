@@ -8,5 +8,5 @@ output "cloudflare_tunnel_url" {
 
 output "cloudflare_tunnel_token" {
   sensitive = true
-  value = data.cloudflare_zero_trust_tunnel_cloudflared_token.this.token
+  value     = data.cloudflare_zero_trust_tunnel_cloudflared_token.this.token
 }

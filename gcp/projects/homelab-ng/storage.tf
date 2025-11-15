@@ -46,7 +46,7 @@ resource "google_storage_bucket_iam_policy" "vault" {
 }
 
 resource "google_storage_bucket" "free" {
-  provider = google.free-tier
+  provider                    = google.free-tier
   name                        = "homelab-ng-free"
   location                    = "us-east1"
   requester_pays              = false
