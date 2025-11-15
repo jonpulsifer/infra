@@ -54,8 +54,10 @@ jobs:
       - uses: google-github-actions/upload-cloud-storage@v3
         if: ${{ inputs.image == 'gce' }}
         with:
-          path: result/nixos-image-google-compute-*.raw.tar.gz
-          destination: gs://homelab-ng-free
+          path: result
+          destination: homelab-ng-free
+          glob: '*.raw.tar.gz'
+          parent: false
 
       - uses: actions/upload-artifact@v5
         if: ${{ contains(inputs.image, 'pi4') }}
