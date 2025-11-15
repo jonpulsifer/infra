@@ -5,12 +5,11 @@ on:
       image:
         description: 'Image to build'
         required: true
-        default: 'gce'
         type: choice
-
         options:
           - gce
           - iso
+          - oldboy
           - cloudpi4
           - homepi4
           - weatherpi4
@@ -37,13 +36,13 @@ jobs:
       - run: nix build .#${{ inputs.image }}
 
       - uses: google-github-actions/auth@v3
-        if: ${{ inputs.image == 'gce' }}
+        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' }}
         with:
           workload_identity_provider: 'projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github'
           project_id: homelab-ng
 
       - uses: google-github-actions/upload-cloud-storage@v3
-        if: ${{ inputs.image == 'gce' }}
+        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' }}
         with:
           path: result
           glob: "*.raw.tar.gz"

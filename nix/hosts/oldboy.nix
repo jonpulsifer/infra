@@ -1,13 +1,12 @@
 {
   config,
   lib,
-  modulesPath,
   name,
   ...
 }:
 {
   imports = [
-    (modulesPath + "/virtualisation/google-compute-image.nix")
+    ../images/gce.nix
     ../services/common.nix
   ];
 

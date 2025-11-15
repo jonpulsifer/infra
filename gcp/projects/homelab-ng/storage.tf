@@ -53,6 +53,15 @@ resource "google_storage_bucket" "free" {
   force_destroy               = false
   storage_class               = "REGIONAL"
   uniform_bucket_level_access = "true"
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age = 7
+    }
+  }
 }
 
 data "google_iam_policy" "free" {

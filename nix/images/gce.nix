@@ -8,13 +8,11 @@
 {
   imports = [
     (modulesPath + "/virtualisation/google-compute-image.nix")
-    ../services/common.nix
   ];
-
+  
   virtualisation = {
-    diskSize = 4 * 1024;
     googleComputeImage = {
-      efi = true;
+      # efi = true;
       contents = [
         {
           source = "${inputs.self.outPath}/flake.nix";

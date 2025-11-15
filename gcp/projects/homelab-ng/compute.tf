@@ -23,13 +23,18 @@ resource "google_service_account" "vm" {
 
 data "cloudflare_ip_ranges" "cloudflare" {}
 
+data "google_storage_bucket_objects" "files" {
+  bucket = "homelab-ng-free"
+  prefix = "nixos-image-google-compute"
+}
+
 resource "google_compute_image" "nixos" {
   provider = google.free-tier
   name = "nixos"
   family = "nixos"
   storage_locations = ["us-east1"]
   raw_disk {
-    source = "https://storage.googleapis.com/homelab-ng/nixos-image-google-compute-25.05.20251022.c8aa8cc-x86_64-linux.raw.tar.gz"
+    source = "https://storage.googleapis.com/homelab-ng-free/${data.google_storage_bucket_objects.files.bucket_objects[0].name}"
   }
 }
 
@@ -37,7 +42,7 @@ resource "google_compute_disk" "oldboy" {
   provider = google.free-tier
   name  = "oldboy"
   image = google_compute_image.nixos.self_link
-  size  = 30
+  size  = 16
   type  = "pd-standard"
 }
 
