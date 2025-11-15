@@ -29,7 +29,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_account_id"></a> [account\_id](#input\_account\_id) | The account ID to create the tunnel in | `string` | n/a | yes |
-| <a name="input_config"></a> [config](#input\_config) | The config for the tunnel. See https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zero_trust_tunnel_cloudflared_config | <pre>object({<br/>    ingress = list(object({<br/>      hostname = optional(string)<br/>      service = string<br/>    }))<br/>  })</pre> | <pre>{<br/>  "ingress": [<br/>    {<br/>      "service": "http_status:418"<br/>    }<br/>  ]<br/>}</pre> | no |
+| <a name="input_config"></a> [config](#input\_config) | The config for the tunnel. See https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zero_trust_tunnel_cloudflared_config | <pre>object({<br/>    ingress = list(object({<br/>      hostname = optional(string)<br/>      service  = string<br/>    }))<br/>  })</pre> | <pre>{<br/>  "ingress": [<br/>    {<br/>      "service": "http_status:418"<br/>    }<br/>  ]<br/>}</pre> | no |
 | <a name="input_name"></a> [name](#input\_name) | The name of the tunnel | `string` | n/a | yes |
 | <a name="input_zone_id"></a> [zone\_id](#input\_zone\_id) | The zone ID to create the DNS record in | `string` | n/a | yes |
 
