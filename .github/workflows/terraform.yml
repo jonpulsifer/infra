@@ -102,7 +102,7 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add **/*.tf
+          git add \*.tf
           git commit -m "style: format terraform files"
       - name: Push changes
         if: steps.check-changes.outputs.changed == 'true'
