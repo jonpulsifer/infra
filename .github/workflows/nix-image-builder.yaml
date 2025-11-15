@@ -5,7 +5,7 @@ on:
       image:
         description: 'Image to build'
         required: true
-        default: 'cloudpi4'
+        default: 'gce'
         type: choice
         options:
           - gce
