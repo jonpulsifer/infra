@@ -73,15 +73,41 @@ nix build .#cloudpi4    # SD card image
 
 ### Deploying Updates
 
-After making changes, rebuild and switch:
+After making changes, rebuild and deploy:
 
 ```bash
-# On the target system
+# On the target system (immediate activation)
 sudo nixos-rebuild switch --flake .#<hostname>
 
-# Or build remotely and copy
+# Or build remotely and copy (immediate activation)
 nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-sudo
 ```
+
+#### Remote Rebuilding with Boot
+
+For safer deployments, especially on remote systems, use `boot` instead of `switch`. This prepares the configuration for the next reboot rather than immediately activating it:
+
+```bash
+# Build remotely and prepare for next boot (safer)
+nixos-rebuild boot --use-remote-sudo --target-host <hostname> --flake .#<hostname>
+
+# Example: Deploy to oldboy VM via Tailscale
+nixos-rebuild boot --use-remote-sudo --target-host nixos.pirate-musical.ts.net --flake .#oldboy
+```
+
+**Why use remote rebuilding?**
+
+- **Safety**: `boot` action lets you test the configuration on reboot rather than immediately applying changes
+- **Remote systems**: Deploy to systems you can't physically access (cloud VMs, remote servers)
+- **Testing**: Verify configurations work before committing to them
+- **Rollback**: Easier to rollback if something goes wrong on next boot
+- **Network efficiency**: Build locally and transfer only the closure, rather than building on resource-constrained remote systems
+
+**Common systems to rebuild remotely:**
+
+- **Cloud VMs** (e.g., `oldboy` on GCE) - Access via Tailscale or public IP
+- **Offsite hosts** (e.g., `oldschool`, `retrofit`) - Remote Kubernetes nodes
+- **Headless systems** - Systems without direct console access
 
 ## 📦 Profiles
 

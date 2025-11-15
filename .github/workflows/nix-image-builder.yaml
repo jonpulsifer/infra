@@ -1,4 +1,4 @@
-name: nix-rpi-sd
+name: nix-image-builder
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +8,7 @@ on:
         default: 'cloudpi4'
         type: choice
         options:
+          - gce
           - iso
           - cloudpi4
           - homepi4
@@ -28,6 +29,9 @@ jobs:
       - run: nix flake check
   nixos:
     runs-on: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      id-token: write
     needs: check
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
@@ -40,6 +44,19 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
       - run: nix build .#${{ inputs.image }}
+
+      - uses: google-github-actions/auth@v3
+        if: ${{ inputs.image == 'gce' }}
+        with:
+          workload_identity_provider: 'projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github'
+          project-id: homelab-ng
+
+      - uses: google-github-actions/upload-cloud-storage@v3
+        if: ${{ inputs.image == 'gce' }}
+        with:
+          path: result/nixos-image-google-compute-*.raw.tar.gz
+          destination: gs://homelab-nixos/nixos-image-google-compute-*.raw.tar.gz
+
       - uses: actions/upload-artifact@v5
         if: ${{ contains(inputs.image, 'pi4') }}
         with:
@@ -47,6 +64,7 @@ jobs:
           path: result/sd-image/nixos-image-sd-card-*
           retention-days: 1
           compression-level: 0
+
       - uses: actions/upload-artifact@v5
         if: ${{ inputs.image == 'iso' }}
         with:
