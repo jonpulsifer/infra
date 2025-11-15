@@ -55,8 +55,8 @@ jobs:
         if: ${{ inputs.image == 'gce' }}
         with:
           path: result
+          glob: "*.raw.tar.gz"
           destination: homelab-ng-free
-          glob: '*.raw.tar.gz'
           parent: false
 
       - uses: actions/upload-artifact@v5
