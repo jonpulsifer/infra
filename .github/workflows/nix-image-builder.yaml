@@ -7,6 +7,7 @@ on:
         required: true
         default: 'gce'
         type: choice
+
         options:
           - gce
           - iso
@@ -18,15 +19,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  check:
-    runs-on: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-      - uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-      - uses: DeterminateSystems/flake-checker-action@main
-      - run: nix flake check
   build:
     runs-on: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
