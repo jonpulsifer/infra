@@ -55,7 +55,7 @@ jobs:
         if: ${{ inputs.image == 'gce' }}
         with:
           path: result/nixos-image-google-compute-*.raw.tar.gz
-          destination: gs://homelab-nixos/nixos-image-google-compute-*.raw.tar.gz
+          destination: gs://homelab-ng-free/nixos-image-google-compute-*.raw.tar.gz
 
       - uses: actions/upload-artifact@v5
         if: ${{ contains(inputs.image, 'pi4') }}
