@@ -38,9 +38,11 @@
 | [google_org_policy_policy.gcp_restrictCmekCryptoKeyProjects_production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.iam_serviceAccountKeyExpiryHours](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_organization_iam_custom_role.read_only_vault](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/organization_iam_custom_role) | resource |
+| [google_organization_iam_custom_role.storage_object_creator_deleter](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/organization_iam_custom_role) | resource |
 | [google_organization_iam_policy.organization](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/organization_iam_policy) | resource |
 | [google_billing_account.cloudlab](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/billing_account) | data source |
 | [google_iam_policy.org](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/iam_policy) | data source |
+| [google_iam_role.storage_object_creator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/iam_role) | data source |
 | [google_organization.org](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/organization) | data source |
 
 ## Inputs
