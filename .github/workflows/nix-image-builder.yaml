@@ -48,6 +48,7 @@ jobs:
           glob: "*.raw.tar.gz"
           destination: homelab-ng-free
           parent: false
+          gzip: false
 
       - uses: actions/upload-artifact@v5
         if: ${{ contains(inputs.image, 'pi4') }}
