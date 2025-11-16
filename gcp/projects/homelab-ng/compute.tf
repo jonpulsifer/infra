@@ -36,6 +36,9 @@ resource "google_compute_image" "nixos" {
   raw_disk {
     source = "https://storage.googleapis.com/homelab-ng-free/${data.google_storage_bucket_objects.files.bucket_objects[0].name}"
   }
+  guest_os_features {
+    type = "UEFI_COMPATIBLE"
+  }
 }
 
 resource "google_compute_disk" "oldboy" {
@@ -73,9 +76,9 @@ resource "google_compute_instance" "oldboy" {
   }
 
   shielded_instance_config {
-    enable_secure_boot          = false
-    enable_vtpm                 = false
-    enable_integrity_monitoring = false
+    enable_secure_boot          = true
+    enable_vtpm                 = true
+    enable_integrity_monitoring = true
   }
 
   metadata = {

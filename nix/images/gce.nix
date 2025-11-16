@@ -12,7 +12,7 @@
   
   virtualisation = {
     googleComputeImage = {
-      # efi = true;
+      efi = true;
       contents = [
         {
           source = "${inputs.self.outPath}/flake.nix";

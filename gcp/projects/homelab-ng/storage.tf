@@ -59,7 +59,7 @@ resource "google_storage_bucket" "free" {
       type = "Delete"
     }
     condition {
-      age = 7
+      age = 1
     }
   }
 }
