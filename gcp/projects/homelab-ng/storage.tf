@@ -73,7 +73,7 @@ data "google_iam_policy" "free" {
   }
 
   binding {
-    role = "roles/storage.objectCreator"
+    role = "organizations/5046617773/roles/storageObjectCreatorDeleter"
     members = [
       "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.workflow/jonpulsifer/infra/.github/workflows/nix-image-builder.yaml@refs/heads/main",
     ]
