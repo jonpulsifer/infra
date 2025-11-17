@@ -1,0 +1,42 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: argocd
+  namespace: arc
+spec:
+  interval: 24h
+  chart:
+    spec:
+      chart: gha-runner-scale-set
+      version: 0.13.0
+      sourceRef:
+        kind: HelmRepository
+        name: actions-runner-controller
+        namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    force: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    runnerScaleSetName: argocd-ts
+    githubConfigUrl: https://github.com/jonpulsifer/ts
+    githubConfigSecret: arc
+    minRunners: 1
+    maxRunners: 20
+    template:
+      spec:
+        containers:
+          - name: runner
+            image: jonpulsifer/actions-runner:latest
+            command: ["/home/runner/run.sh"]
+            env:
+              - name: ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT
+                value: "false"
