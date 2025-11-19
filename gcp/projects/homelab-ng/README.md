@@ -5,8 +5,8 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2.6 |
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.3 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.11.0 |
-| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 7.11.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.12.0 |
+| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 7.12.0 |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 2.0 |
 
 ## Providers
@@ -14,9 +14,9 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.12.0 |
-| <a name="provider_google"></a> [google](#provider\_google) | 7.11.0 |
-| <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.11.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 7.12.0 |
+| <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.12.0 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.1 |
 
 ## Modules
 

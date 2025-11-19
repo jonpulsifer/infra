@@ -12,7 +12,7 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.12.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.0 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.1 |
 
 ## Modules
 
