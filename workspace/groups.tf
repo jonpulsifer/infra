@@ -13,7 +13,7 @@ resource "googleworkspace_group_members" "cloud" {
   }
 
   members {
-    email = "jpulsifer@moonpay.com"
+    email = "jonathan@moonpay.com"
     role  = "MEMBER"
   }
 

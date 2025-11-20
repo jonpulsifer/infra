@@ -24,6 +24,10 @@ resource "cloudflare_zone" "pulsifer_ca" {
   name = "pulsifer.ca"
 }
 
+resource "cloudflare_zone_dnssec" "pulsifer_ca_dnssec" {
+  zone_id = cloudflare_zone.pulsifer_ca.id
+}
+
 resource "cloudflare_zone_setting" "pulsifer_ca" {
   for_each   = local.pulsifer_ca_zone_settings
   zone_id    = cloudflare_zone.pulsifer_ca.id
