@@ -32,7 +32,7 @@ jobs:
       any_changed: ${{ steps.changed-directories.outputs.any_changed }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 2
       - name: Directories with Changes
@@ -58,7 +58,7 @@ jobs:
         working-directory: ${{ matrix.dir }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@v3
       - name: Terraform Init
         id: init
@@ -83,7 +83,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: main
       - uses: hashicorp/setup-terraform@v3
@@ -121,7 +121,7 @@ jobs:
         (github.event_name == 'workflow_dispatch' && github.event.inputs.regenerate_docs)
       )
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: main
       - name: Render terraform docs and push changes back to PR
