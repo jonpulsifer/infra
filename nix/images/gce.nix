@@ -9,7 +9,7 @@
   imports = [
     (modulesPath + "/virtualisation/google-compute-image.nix")
   ];
-  
+
   virtualisation = {
     googleComputeImage = {
       efi = true;
