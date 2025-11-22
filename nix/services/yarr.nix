@@ -12,7 +12,7 @@ in
 {
   networking.firewall.enable = lib.mkForce false;
   services = {
-    mullvad-vpn.enable = true;
+    mullvad-vpn.enable = false;
     transmission = {
       enable = true;
       package = pkgs.transmission_4;
