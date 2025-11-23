@@ -40,9 +40,9 @@ in
 
         rpc-bind-address = "0.0.0.0";
         rpc-host-whitelist = "*.pirate-musical.ts.net";
-        rpc-host-whitelist-enabled = true;
+        rpc-host-whitelist-enabled = false;
         rpc-port = uiPort;
-        rpc-whitelist-enabled = true;
+        rpc-whitelist-enabled = false;
         rpc-whitelist = "127.0.0.1,192.168.*.*,10.*.*.*,100.*.*.*";
         rpc-authentication-required = false;
       };
