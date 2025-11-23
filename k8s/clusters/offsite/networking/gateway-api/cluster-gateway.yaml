@@ -1,0 +1,23 @@
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: cluster-gateway
+  namespace: networking
+  annotations:
+    cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http-gateway
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        kinds:
+          - kind: HTTPRoute
+    - name: tls-gateway
+      protocol: HTTPS
+      port: 443
+      allowedRoutes:
+        kinds:
+          - kind: HTTPRoute
+          - kind: TLSRoute
