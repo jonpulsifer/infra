@@ -22,3 +22,35 @@ spec:
         certificateRefs:
           - kind: Secret
             name: *hostname
+    - name: sonarr-tls
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "sonarr.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+    - name: radarr-tls
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "radarr.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+    - name: prowlarr-tls
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "prowlarr.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+    - name: bazarr-tls
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "bazarr.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname

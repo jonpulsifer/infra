@@ -1,0 +1,42 @@
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: bazarr
+  namespace: default
+spec:
+  parentRefs:
+    - name: cluster-gateway
+  hostnames:
+    - "bazarr.${SECRET_DOMAIN}"
+  rules:
+    - backendRefs:
+        - name: bazarr
+          port: 6767
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bazarr
+  namespace: default
+spec:
+  ports:
+    - protocol: TCP
+      port: 6767
+      targetPort: 6767
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: bazarr
+  namespace: default
+  labels:
+    kubernetes.io/service-name: bazarr
+addressType: IPv4
+ports:
+  - name: ""
+    port: 6767
+    protocol: TCP
+endpoints:
+  - addresses:
+      - "192.168.2.11"
