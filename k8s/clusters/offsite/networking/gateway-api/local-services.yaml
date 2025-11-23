@@ -34,7 +34,7 @@ metadata:
     kubernetes.io/service-name: bittorrent
 addressType: IPv4
 ports:
-  - name: bittorrent
+  - name: ""
     port: 9091
     protocol: TCP
 endpoints:
