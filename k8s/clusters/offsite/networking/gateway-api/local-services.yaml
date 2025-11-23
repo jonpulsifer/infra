@@ -1,0 +1,42 @@
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: bittorrent
+  namespace: default
+spec:
+  parentRefs:
+    - name: cluster-gateway
+  hostnames:
+    - "bittorrent.${SECRET_DOMAIN}"
+  rules:
+    - backendRefs:
+        - name: bittorrent
+          port: 9091
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bittorrent
+  namespace: default
+spec:
+  ports:
+    - protocol: TCP
+      port: 9091
+      targetPort: 9091
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: bittorrent
+  namespace: default
+  labels:
+    kubernetes.io/service-name: bittorrent
+addressType: IPv4
+ports:
+  - name: bittorrent
+    port: 9091
+    protocol: TCP
+endpoints:
+  - addresses:
+      - "192.168.2.11"

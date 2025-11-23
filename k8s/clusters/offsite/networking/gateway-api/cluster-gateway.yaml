@@ -14,10 +14,11 @@ spec:
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
-    - name: tls-gateway
+    - name: bittorrent-tls
       protocol: HTTPS
       port: 443
-      allowedRoutes:
-        kinds:
-          - kind: HTTPRoute
-          - kind: TLSRoute
+      hostname: &hostname "bittorrent.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
