@@ -35,8 +35,8 @@ spec:
   path: ./k8s/clusters/offsite/networking/gateway-api
   prune: true
   dependsOn:
-    - gateway-api
-    - gateway-api-experimental-apis
+    - name: gateway-api
+    - name: gateway-api-experimental-apis
   sourceRef:
     kind: GitRepository
     name: infra
