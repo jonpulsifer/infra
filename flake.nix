@@ -63,7 +63,7 @@
           system = config.system or "x86_64-linux";
           moduleDir = config.profile or "hosts";
           modules = [ ./nix/${moduleDir}/${name}.nix ] ++ (config.modules or [ ]);
-          tags = (config.tags or [ ]) ++ [ name ];
+          tags = config.tags or [ ];
         in
         nixosSystem {
           inherit system modules;
