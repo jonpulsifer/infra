@@ -1,10 +1,10 @@
 apiVersion: tailscale.com/v1alpha1
 kind: Connector
 metadata:
-  name: offsite-k8s-lan-router
+  name: folly-k8s-lan-router
 spec:
   replicas: 1
-  hostnamePrefix: offsite-k8s-lan-router
+  hostnamePrefix: folly-k8s-lan-router
   subnetRouter:
     advertiseRoutes:
-      - "192.168.2.0/24"
+      - "10.3.0.0/24"
