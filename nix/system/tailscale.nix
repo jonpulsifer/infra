@@ -18,7 +18,7 @@
   };
 
   services.tailscale = let
-    tagsString = lib.concatStringsSep "," (lib.mapAttrsToList (n: v: "tag:${n}") tags);
+    tagsString = lib.concatStringsSep "," (lib.map (tag: "tag:${tag}") tags);
   in {
     enable = true;
     authKeyFile = "/var/secrets/tailscale-auth-key";
