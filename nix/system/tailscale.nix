@@ -3,6 +3,7 @@
   lib,
   pkgs,
   inputs,
+  tags,
   ...
 }:
 {
@@ -16,8 +17,14 @@
     dnssec = "false";
   };
 
-  services.tailscale = {
+  services.tailscale = let
+    tagsString = lib.concatStringsSep "," (lib.mapAttrsToList (n: v: "tag:${n}") tags);
+  in {
     enable = true;
     authKeyFile = "/var/secrets/tailscale-auth-key";
+    extraUpFlags = [
+      "--advertise-tags=${tagsString}"
+      "--accept-routes=true"
+    ];
   };
 }
