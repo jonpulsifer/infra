@@ -23,6 +23,6 @@
     enable = true;
     authKeyFile = "/var/secrets/tailscale-auth-key";
     extraUpFlags = [ "--advertise-tags=${tagsString}" ];
-    extraSetFlags = [ "--accept-routes=true" ]
+    extraSetFlags = [ "--accept-routes=true" ];
   };
 }
