@@ -8,3 +8,7 @@ spec:
   subnetRouter:
     advertiseRoutes:
       - "10.3.0.0/24"
+  tags:
+    - tag:k8s
+    - tag:folly
+    - tag:k8s-folly
