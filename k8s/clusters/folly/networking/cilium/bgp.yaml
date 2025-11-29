@@ -7,10 +7,10 @@ spec:
     matchLabels:
       bgp-enabled: "true"
   bgpInstances:
-    - name: fml
-      localASN: 64512
+    - name: folly
+      localASN: 64513
       peers:
-        - name: edgerouter
+        - name: udm-pro
           peerASN: 64512
           peerAddress: 10.3.0.1
           peerConfigRef:
