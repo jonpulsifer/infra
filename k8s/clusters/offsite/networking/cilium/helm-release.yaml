@@ -30,7 +30,7 @@ spec:
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
     # routingMode: native
-    # ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
+    ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     # autoDirectNodeRoutes: true
     enableIPv4Masquerade: true
     bpf:
