@@ -2,6 +2,7 @@ locals {
   request_headers_hostname = "request-headers.lolwtf.ca"
   image_name               = "ghcr.io/jonpulsifer/request-headers"
 }
+
 resource "argocd_application" "request_headers" {
   metadata {
     name      = "request-headers"
