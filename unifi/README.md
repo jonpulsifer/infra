@@ -27,12 +27,10 @@ No modules.
 |------|------|
 | [cloudflare_dns_record.k8s_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_dns_record.lab_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
-| [unifi_firewall_group.k8s](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/firewall_group) | resource |
 | [unifi_network.fml](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/network) | resource |
+| [unifi_network.k8s](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.lab](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.starlink](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/network) | resource |
-| [unifi_static_route.k8s_nodes](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/static_route) | resource |
-| [unifi_static_route.k8s_pods](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/static_route) | resource |
 | [unifi_static_route.starlink](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/static_route) | resource |
 | [unifi_user.cameras](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/user) | resource |
 | [unifi_user.computers](https://registry.terraform.io/providers/paultyng/unifi/latest/docs/resources/user) | resource |
