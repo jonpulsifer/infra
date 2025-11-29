@@ -29,6 +29,8 @@ spec:
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
       GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
+      # ArgoCD Provider https://github.com/grpc/grpc-go/issues/434
+      GRPC_ENFORCE_ALPN_ENABLED: "false"
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID
         secretKeyRef:
