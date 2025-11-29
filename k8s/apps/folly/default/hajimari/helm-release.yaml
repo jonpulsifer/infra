@@ -43,9 +43,9 @@ spec:
       customApps:
         - group: Monitoring
           apps:
-            - name: ingress (should 404)
-              url: http://${LB_NGINX}
-              icon: test-tube
+            - name: Unifi
+              url: http://10.2.0.1
+              icon: wifi
       globalBookmarks:
         - group: Cloud
           bookmarks:

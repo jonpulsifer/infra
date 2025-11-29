@@ -16,7 +16,7 @@ spec:
           image: ghcr.io/unpoller/unpoller:v2.15.4
           env:
             - name: UP_UNIFI_DEFAULT_URL
-              value: https://10.2.0.1
+              value: https://10.3.0.1
             - name: UP_UNIFI_DEFAULT_USER
               value: "unpoller"
             - name: UP_UNIFI_DEFAULT_PASS
