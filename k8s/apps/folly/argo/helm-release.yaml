@@ -20,6 +20,11 @@ spec:
         server.insecure: true
       cm:
         accounts.atlantis: apiKey
+      rbac:
+        policy.csv: |
+          p, role:atlantis, applicationsets, *, */*, allow
+          p, role:atlantis, applications, *, */*, allow
+          g, atlantis, role:atlantis
     server:
       ingress:
         enabled: true
