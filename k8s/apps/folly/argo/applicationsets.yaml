@@ -11,11 +11,6 @@ spec:
             cluster: in-cluster
             namespace: request-headers
             image: ghcr.io/jonpulsifer/request-headers:latest
-          # - app: request-headers
-          #   cluster: lab
-          #   namespace: request-headers
-          #   image: ghcr.io/jonpulsifer/request-headers:latest
-
   template:
     metadata:
       name: "{{app}}-{{cluster}}"

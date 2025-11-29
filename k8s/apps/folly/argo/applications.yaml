@@ -10,6 +10,10 @@ spec:
     repoURL: https://github.com/jonpulsifer/ts.git
     targetRevision: HEAD
     path: apps/hub/k8s
+    kustomize:
+      namespace: hub
+      images:
+        - ghcr.io/jonpulsifer/does-not-exist=ghcr.io/jonpulsifer/hub:latest
   destination:
     server: https://kubernetes.default.svc
     namespace: hub
