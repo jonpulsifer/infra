@@ -32,14 +32,14 @@ spec:
     k8sServicePort: ${API_SERVER_PORT}
     routingMode: native
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
-    enableIPv4Masquerade: false
+    enableIPv4Masquerade: true
+    bpf:
+      masquerade: true
     ipam:
       mode: multi-pool
     enableXTSocketFallback: false
     endpointRoutes:
       enabled: true
-    bpf:
-      masquerade: false
     bgpControlPlane:
       enabled: true
     gatewayAPI:
