@@ -18,6 +18,7 @@ spec:
       redis.exporter.enabled: true
       params:
         server.insecure: true
+      cm:
         accounts.atlantis: apiKey
     server:
       ingress:
