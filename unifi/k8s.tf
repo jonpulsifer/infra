@@ -12,6 +12,28 @@ locals {
   }
 }
 
+resource "unifi_network" "k8s" {
+  name          = "Kubernetes"
+  domain_name   = local.lab_domain
+  network_group = "LAN"
+  purpose       = "corporate"
+  subnet        = local.node_cidr
+  # wan_gateway   = "0.0.0.0"
+
+  dhcp_enabled     = false
+  dhcp_lease       = local.one_day
+  dhcp_start       = cidrhost(local.node_cidr, 100)
+  dhcp_stop        = cidrhost(local.node_cidr, 254)
+  dhcp_v6_start    = "::2"
+  dhcp_v6_stop     = "::7d1"
+  ipv6_pd_start    = "::2"
+  ipv6_pd_stop     = "::7d1"
+  ipv6_ra_priority = "high"
+  multicast_dns    = true
+  igmp_snooping    = true
+  vlan_id          = 8
+}
+
 resource "cloudflare_dns_record" "k8s_remote_dns" {
   for_each = local.static_records
 
@@ -23,29 +45,4 @@ resource "cloudflare_dns_record" "k8s_remote_dns" {
   comment = "terraform managed"
   proxied = false
   # tags    = ["terraform-managed"]
-}
-
-resource "unifi_static_route" "k8s_nodes" {
-  type     = "nexthop-route"
-  network  = local.node_cidr
-  name     = "Kubernetes Nodes"
-  distance = 1
-  next_hop = cidrhost(local.lab_cidr, 5)
-}
-
-resource "unifi_static_route" "k8s_pods" {
-  type     = "nexthop-route"
-  network  = local.pod_cidr
-  name     = "Kubernetes Pods"
-  distance = 2
-  next_hop = cidrhost(local.lab_cidr, 5)
-}
-
-resource "unifi_firewall_group" "k8s" {
-  name = "Kubernetes Network"
-  type = "address-group"
-  members = [
-    local.node_cidr,
-    local.pod_cidr,
-  ]
 }
