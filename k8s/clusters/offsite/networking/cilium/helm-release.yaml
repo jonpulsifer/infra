@@ -32,7 +32,8 @@ spec:
     # routingMode: native
     ipv4NativeRoutingCIDR: ${CILIUM_NATIVE_ROUTING_CIDR}
     # autoDirectNodeRoutes: true
-    ipMasqAgent.enabled: true
+    ipMasqAgent:
+      enabled: true
     enableIPv4Masquerade: true
     bpf:
       masquerade: true
