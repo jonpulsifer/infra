@@ -63,23 +63,24 @@
           system = config.system or "x86_64-linux";
           moduleDir = config.profile or "hosts";
           modules = [ ./nix/${moduleDir}/${name}.nix ] ++ (config.modules or [ ]);
+          tags = config.tags or [ ];
         in
         nixosSystem {
           inherit system modules;
-          specialArgs = { inherit name inputs; };
+          specialArgs = { inherit name inputs tags; };
         };
     in
     rec {
       nixosConfigurations = builtins.mapAttrs mkSystem {
         # kubernetes cluster (folly)
-        nuc = { };
-        optiplex = { };
-        riptide = { };
-        "800g2" = { };
+        nuc = { tags = [ "folly" ]; };
+        optiplex = { tags = [ "folly" ]; };
+        riptide = { tags = [ "folly" ]; };
+        "800g2" = { tags = [ "folly" ]; };
 
         # kubernetes cluster (offsite)
-        oldschool = { };
-        retrofit = { };
+        oldschool = { tags = [ "offsite" ]; };
+        retrofit = { tags = [ "offsite" ]; };
 
         # raspberry pis
         cloudpi4 = {
@@ -93,7 +94,7 @@
         };
 
         # google cloud
-        oldboy = { };
+        oldboy = { tags = [ "gcp" ]; };
 
         # images
         wsl = {

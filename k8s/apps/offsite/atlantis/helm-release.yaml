@@ -29,6 +29,9 @@ spec:
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
       GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
+      # ArgoCD Provider https://github.com/grpc/grpc-go/issues/434
+      ARGOCD_SERVER: "argo.${SECRET_DOMAIN}:443"
+      GRPC_ENFORCE_ALPN_ENABLED: "false"
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID
         secretKeyRef:
@@ -46,6 +49,10 @@ spec:
         secretKeyRef:
           name: atlantis-github
           key: op_service_account
+      - name: ARGOCD_AUTH_TOKEN
+        secretKeyRef:
+          name: atlantis-github
+          key: argocd_token
     repoConfig: |
       ---
       repos:

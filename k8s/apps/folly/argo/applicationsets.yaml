@@ -9,16 +9,16 @@ spec:
         elements:
           - app: request-headers
             cluster: in-cluster
-            namespace: request-headers
+            dc: folly
             image: ghcr.io/jonpulsifer/request-headers:latest
           # - app: request-headers
-          #   cluster: lab
+          #   cluster: in-cluster
+          #   dc: offsite
           #   namespace: request-headers
           #   image: ghcr.io/jonpulsifer/request-headers:latest
-
   template:
     metadata:
-      name: "{{app}}-{{cluster}}"
+      name: "{{app}}-{{dc}}"
     spec:
       project: default
       sources:
@@ -26,12 +26,12 @@ spec:
           targetRevision: HEAD
           path: apps/{{app}}/k8s
           kustomize:
-            namespace: "{{namespace}}-{{cluster}}"
+            namespace: "{{app}}"
             images:
               - ghcr.io/jonpulsifer/does-not-exist={{image}}
       destination:
         name: "{{cluster}}"
-        namespace: "{{namespace}}-{{cluster}}"
+        namespace: "{{app}}"
       syncPolicy:
         automated:
           prune: true

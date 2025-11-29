@@ -1,10 +1,14 @@
 apiVersion: tailscale.com/v1alpha1
 kind: Connector
 metadata:
-  name: lan-router
+  name: offsite-k8s-lan-router
 spec:
   replicas: 1
-  hostnamePrefix: lan-router
+  hostnamePrefix: offsite-k8s-lan-router
   subnetRouter:
     advertiseRoutes:
-      - "192.168.2.0/24"
+      - ${CILIUM_NATIVE_ROUTING_CIDR}
+  tags:
+    - tag:k8s
+    - tag:k8s-offsite
+    - tag:offsite
