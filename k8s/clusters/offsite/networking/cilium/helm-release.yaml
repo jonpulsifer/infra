@@ -25,7 +25,7 @@ spec:
     remediation:
       retries: 5
   values:
-    devices: eno+ enp+
+    devices: eno+ enp+ tailscale0
     kubeProxyReplacement: true
     k8sServiceHost: ${API_SERVER_IP}
     k8sServicePort: ${API_SERVER_PORT}
