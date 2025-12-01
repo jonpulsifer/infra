@@ -5,7 +5,7 @@ metadata:
 spec:
   ipv4:
     cidrs:
-      - 10.100.0.0/20
+      - ${CILIUM_POD_CIDR}
     maskSize: 24
 ---
 apiVersion: "cilium.io/v2alpha1"
@@ -14,7 +14,7 @@ metadata:
   name: fml
 spec:
   blocks:
-    - cidr: 10.3.0.64/26 # 10.3.0.64-127
+    - cidr: ${LB_RANGE}
   serviceSelector:
     # give all load balancers and gateways an IP from the blocks above
     matchExpressions:

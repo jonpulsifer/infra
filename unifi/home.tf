@@ -8,7 +8,7 @@ locals {
 }
 
 resource "unifi_network" "fml" {
-  name          = "Folly Mountain Laboratories"
+  name          = "Management"
   domain_name   = local.fml_domain
   network_group = "LAN"
   purpose       = "corporate"

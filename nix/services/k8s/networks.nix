@@ -13,15 +13,15 @@
   };
 
   offsite = {
-    apiServerIP = "192.168.2.10";
+    apiServerIP = "10.89.0.10";
     apiServerHostname = "offsite.lolwtf.ca";
     apiServerPort = 6443;
     podCidr = "10.101.0.0/20";
     serviceCidr = "10.11.0.0/16";
     dns = [
       "10.11.0.254"
-      "192.168.2.1"
+      "10.89.0.1"
     ];
-    upstreamDns = "192.168.2.1";
+    upstreamDns = "10.89.0.1";
   };
 }

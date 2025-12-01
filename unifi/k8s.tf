@@ -1,6 +1,5 @@
 locals {
-  node_cidr = "10.3.0.0/24"
-  pod_cidr  = "10.100.0.0/16"
+  node_cidr = "10.3.0.0/26"
   static_records = {
     "erx" : cidrhost(local.lab_cidr, 5)
     "k8s" : cidrhost(local.node_cidr, 10)
@@ -20,10 +19,10 @@ resource "unifi_network" "k8s" {
   subnet        = local.node_cidr
   # wan_gateway   = "0.0.0.0"
 
-  dhcp_enabled     = false
+  dhcp_enabled     = true
   dhcp_lease       = local.one_day
-  dhcp_start       = cidrhost(local.node_cidr, 100)
-  dhcp_stop        = cidrhost(local.node_cidr, 254)
+  dhcp_start       = cidrhost(local.node_cidr, 2)
+  dhcp_stop        = cidrhost(local.node_cidr, 62)
   dhcp_v6_start    = "::2"
   dhcp_v6_stop     = "::7d1"
   ipv6_pd_start    = "::2"
