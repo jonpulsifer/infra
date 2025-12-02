@@ -7,8 +7,7 @@ spec:
   hostnamePrefix: offsite-k8s-lan-router
   subnetRouter:
     advertiseRoutes:
-      - ${CILIUM_NATIVE_ROUTING_CIDR}
-      - ${LB_RANGE}
+      - 10.89.0.0/24
       - 192.168.2.0/24
   tags:
     - tag:k8s
