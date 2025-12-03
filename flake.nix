@@ -69,9 +69,8 @@
           inherit system modules;
           specialArgs = { inherit name inputs tags; };
         };
-    in
-    rec {
-      nixosConfigurations = builtins.mapAttrs mkSystem {
+
+      hostsSpec = {
         # kubernetes cluster (folly)
         nuc = { tags = [ "folly" ]; };
         optiplex = { tags = [ "folly" ]; };
@@ -107,6 +106,9 @@
           profile = "images";
         };
       };
+    in
+    rec {
+      nixosConfigurations = builtins.mapAttrs mkSystem hostsSpec;
 
       packages = {
         x86_64-linux = {
@@ -137,5 +139,15 @@
           pkgs = legacyPackages.${system};
         };
       });
+
+      apps = forAllSystems (system:
+        let
+          pkgs = legacyPackages.${system};
+          appsLib = import ./nix/lib/apps.nix;
+        in
+        appsLib.mkApps {
+          inherit pkgs hostsSpec nixosConfigurations;
+        }
+      );
     };
 }
