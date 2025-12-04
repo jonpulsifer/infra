@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  name,
   ...
 }:
 {
@@ -9,6 +8,4 @@
     ../images/gce.nix
     ../services/common.nix
   ];
-
-  networking.hostName = name;
 }

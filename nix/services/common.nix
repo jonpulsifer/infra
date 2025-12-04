@@ -14,7 +14,6 @@
   ];
 
   networking = {
-    hostName = lib.mkDefault "nixos";
     firewall.enable = true;
     useDHCP = true;
     useNetworkd = true;

@@ -24,4 +24,7 @@
       ];
     };
   };
+  
+  # get the hostname from gce
+  networking.hostName = lib.mkForce "";
 }
