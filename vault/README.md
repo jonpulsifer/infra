@@ -3,15 +3,15 @@
 
 | Name | Version |
 |------|---------|
-| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 2.0 |
+| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
 | <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.1 |
-| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.5.0 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.0.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.6.0 |
 
 ## Modules
 

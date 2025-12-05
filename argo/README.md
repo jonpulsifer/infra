@@ -10,7 +10,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_argocd"></a> [argocd](#provider\_argocd) | 7.12.0 |
+| <a name="provider_argocd"></a> [argocd](#provider\_argocd) | 7.12.1 |
 
 ## Modules
 

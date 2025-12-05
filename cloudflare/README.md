@@ -6,7 +6,7 @@
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.1 |
 | <a name="requirement_github"></a> [github](#requirement\_github) | ~> 6.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | ~> 3.2.1 |
-| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 2.0 |
+| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
 
 ## Providers
 
@@ -14,7 +14,7 @@
 |------|---------|
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.13.0 |
 | <a name="provider_github"></a> [github](#provider\_github) | 6.8.3 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.1 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.0.0 |
 
 ## Modules
 

@@ -4,7 +4,7 @@
 | Name | Version |
 |------|---------|
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.1 |
-| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 2.0 |
+| <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
 | <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.41 |
 | <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
@@ -13,9 +13,9 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.13.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 2.2.1 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.0.0 |
 | <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.0 |
-| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.5.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.6.0 |
 
 ## Modules
 
