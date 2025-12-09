@@ -9,7 +9,18 @@ ns() {
     echo "usage: ns <pkg> [-- args]" >&2
     exit 1
   fi
-  nix shell path:$HOME/src/github.com/jonpulsifer/dotfiles#''${pkg} -- "$@"
+
+  flake_path="$HOME/src/github.com/jonpulsifer/dotfiles"
+
+  if [[ "$(uname)" == "Linux" ]]; then
+    if [[ -d "$HOME/src/github.com/jonpulsifer/infra" ]]; then
+      flake_path="$HOME/src/github.com/jonpulsifer/infra"
+    elif [[ -d "/etc/nixos" ]]; then
+      flake_path="/etc/nixos"
+    fi
+  fi
+
+  nix shell path:$flake_path#''${pkg} -- "$@"
 }
 
 ns "$@"

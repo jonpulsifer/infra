@@ -83,15 +83,28 @@ in
     autosuggestion.enable = true;
     syntaxHighlighting.enable = true;
     zprof.enable = false;
-    shellAliases = { };
+    shellAliases = {
+      nix-shell = "nix-shell --run $SHELL";
+    };
     initContent =
       let
         early = lib.mkOrder 1200 zshConfigEarlyInit;
         late = lib.mkOrder 1200 zshConfig;
+        nixWrapper = lib.mkOrder 1200 ''
+          nix() {
+            if [[ $1 == "develop" ]]; then
+              shift
+              command nix develop -c $SHELL "$@"
+            else
+              command nix "$@"
+            fi
+          }
+        '';
       in
       lib.mkMerge [
         early
         late
+        nixWrapper
       ];
 
     plugins = [
@@ -116,12 +129,38 @@ in
       }
       {
         name = "pure";
-        src = pkgs.fetchFromGitHub {
-          owner = "sindresorhus";
-          repo = "pure";
-          rev = "v1.23.0";
-          sha256 = "sha256-BmQO4xqd/3QnpLUitD2obVxL0UulpboT8jGNEh4ri8k=";
-        };
+        src = pkgs.runCommand "pure-src"
+          {
+            src = pkgs.fetchFromGitHub {
+              owner = "sindresorhus";
+              repo = "pure";
+              rev = "v1.26.0";
+              sha256 = "sha256-AZSxP2g6BWoxyiSQH7yzbbbfGcwD8jgnXPPfcYwJUL0=";
+            };
+          } ''
+          cp -r $src $out
+          chmod -R +w $out
+          patch -p1 -d $out <<'EOF'
+diff --git a/pure.zsh b/pure.zsh
+index 9235e1d..6c310c1 100644
+--- a/pure.zsh
++++ b/pure.zsh
+@@ -140,6 +140,14 @@ prompt_pure_preprompt_render() {
+ 	# Username and machine, if applicable.
+ 	[[ -n $prompt_pure_state[username] ]] && preprompt_parts+=($prompt_pure_state[username])
+ 
++	# nix shell
++	if [[ -z $ORIG_SHLVL ]]; then
++		export ORIG_SHLVL=$SHLVL
++	fi
++	if [[ $SHLVL -gt $ORIG_SHLVL ]]; then
++		preprompt_parts+=("%F{blue}  $(($SHLVL - $ORIG_SHLVL))%f")
++	fi
++
+ 	# Set the path.
+ 	preprompt_parts+=('%F{''${prompt_pure_colors[path]}}%~%f')
+EOF
+        '';
       }
     ];
   };
