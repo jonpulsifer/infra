@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: slingshot
+  namespace: slingshot
+  labels:
+    app.kubernetes.io/name: slingshot
+    app.kubernetes.io/part-of: slingshot
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: slingshot
+    app.kubernetes.io/part-of: slingshot
+
+
+

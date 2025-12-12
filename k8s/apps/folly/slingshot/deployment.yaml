@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slingshot
+  namespace: slingshot
+  labels:
+    app.kubernetes.io/name: slingshot
+    app.kubernetes.io/part-of: slingshot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: slingshot
+      app.kubernetes.io/part-of: slingshot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: slingshot
+        app.kubernetes.io/part-of: slingshot
+    spec:
+      containers:
+      - name: slingshot
+        image: # TODO: Update with actual slingshot image
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          protocol: TCP
+        env:
+        - name: BASE_URL
+          value: "https://slingshot.lolwtf.ca"
+        - name: NEXT_PUBLIC_BASE_URL
+          value: "https://slingshot.lolwtf.ca"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+
+

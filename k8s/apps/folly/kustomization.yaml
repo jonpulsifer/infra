@@ -5,20 +5,18 @@ resources:
   - arc
   - argo
   - cloudnative-pg
-  # - csgo
   - default
   - descheduler
   - dump.yaml
   - falco
   - jellyfin.yaml
   - k6
-  # - minecraft
   - nix-cache.yaml
   - postgres
   - redis
   - reloader
-  # - rosie
   # - satisfactory
+  # - slingshot
   - vault
 patches:
   - target:

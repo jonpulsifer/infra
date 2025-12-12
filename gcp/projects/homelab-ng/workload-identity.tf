@@ -30,7 +30,7 @@ resource "google_iam_workload_identity_pool_provider" "vercel" {
     "attribute.environment" = "assertion.environment"
   }
 
-  attribute_condition = "assertion.sub.startsWith('owner:jonpulsifers-projects:project:') && assertion.environment == 'production'"
+  attribute_condition = "assertion.sub.startsWith('owner:jonpulsifers-projects:project:')"
   oidc {
     allowed_audiences = ["https://vercel.com/jonpulsifers-projects"]
     issuer_uri        = "https://oidc.vercel.com/jonpulsifers-projects"

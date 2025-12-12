@@ -76,12 +76,6 @@ resource "google_service_account_iam_member" "github_actions_view_counter" {
   member             = google_service_account.github_actions.member
 }
 
-resource "google_project_iam_member" "view_counter_firestore" {
-  project = "homelab-ng"
-  role    = "roles/datastore.user"
-  member  = google_service_account.view_counter.member
-}
-
 resource "google_service_account" "terraform" {
   account_id   = "terraform"
   display_name = "Terraform Robot"
@@ -91,11 +85,6 @@ data "google_iam_policy" "terraform_token_creator" {
   binding {
     role    = "roles/iam.serviceAccountTokenCreator"
     members = [google_service_account.terraform.member, format("group:%s", "cloud@pulsifer.ca")]
-  }
-
-  binding {
-    role    = "roles/iam.serviceAccountUser"
-    members = [format("group:%s", "cloud@pulsifer.ca")]
   }
 }
 
