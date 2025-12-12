@@ -50,7 +50,7 @@ jobs:
           parent: false
           gzip: false
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ contains(inputs.image, 'pi4') }}
         with:
           name: ${{ inputs.image }}-sd-image
@@ -58,7 +58,7 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ inputs.image == 'iso' }}
         with:
           name: nixos-iso
