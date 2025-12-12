@@ -12,8 +12,8 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.13.0 |
-| <a name="provider_github"></a> [github](#provider\_github) | 6.8.3 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.14.0 |
+| <a name="provider_github"></a> [github](#provider\_github) | 6.9.0 |
 | <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.0.0 |
 
 ## Modules
