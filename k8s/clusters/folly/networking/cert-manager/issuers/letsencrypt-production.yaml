@@ -17,5 +17,5 @@ spec:
               key: api-token
         selector:
           dnsZones:
-            - ${SECRET_DOMAIN}
-            - ${GATEWAY_DOMAIN}
+            - ${CLOUDFLARE_ZONE}
+            - ${GATEWAY_ZONE}
