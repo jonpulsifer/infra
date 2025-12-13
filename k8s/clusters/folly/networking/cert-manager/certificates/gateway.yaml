@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway
+  namespace: default
+spec:
+  secretName: gateway
+  dnsNames:
+    - ${GATEWAY_DOMAIN}
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+    group: cert-manager.io
