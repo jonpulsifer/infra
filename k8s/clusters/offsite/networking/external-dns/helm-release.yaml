@@ -27,7 +27,6 @@ spec:
       namespace: kube-system
   values:
     interval: 5m
-    logLevel: debug
     provider: cloudflare
     env:
       - name: CF_API_TOKEN
@@ -40,6 +39,7 @@ spec:
       # - --annotation-filter=external-dns/is-public in (true)
     policy: sync
     sources:
+      - node
       - ingress
       - service
       - gateway-httproute
@@ -50,6 +50,7 @@ spec:
     txtOwnerId: "offsite"
     domainFilters:
       - "${CLOUDFLARE_ZONE}"
+      - "${GATEWAY_ZONE}"
     resources:
       requests:
         memory: 100Mi

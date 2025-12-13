@@ -27,7 +27,6 @@ spec:
       namespace: kube-system
   values:
     interval: 5m
-    logLevel: debug
     provider: cloudflare
     env:
       - name: CF_API_TOKEN
@@ -43,7 +42,7 @@ spec:
     sources:
       - node
       - ingress
-      # - service
+      - service
       - gateway-httproute
       - gateway-tlsroute
       # - gateway-tcproute
@@ -52,6 +51,7 @@ spec:
     txtOwnerId: "default"
     domainFilters:
       - "${SECRET_DOMAIN}"
+      - "${GATEWAY_DOMAIN}"
     resources:
       requests:
         memory: 100Mi
