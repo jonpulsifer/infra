@@ -18,4 +18,4 @@ spec:
         selector:
           dnsZones:
             - ${SECRET_DOMAIN}
-            - ${GATEWAY_DOMAIN}
+            - ${GATEWAY_ZONE}

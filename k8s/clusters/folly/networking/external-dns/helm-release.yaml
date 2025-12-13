@@ -52,7 +52,7 @@ spec:
     txtOwnerId: "default"
     domainFilters:
       - "${SECRET_DOMAIN}"
-      - "${GATEWAY_DOMAIN}"
+      - "${GATEWAY_ZONE}"
     resources:
       requests:
         memory: 100Mi
