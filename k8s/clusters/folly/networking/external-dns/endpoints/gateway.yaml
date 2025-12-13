@@ -3,6 +3,7 @@ apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
   name: ${GATEWAY_DOMAIN}
+  namespace: default
 spec:
   endpoints:
     - dnsName: ${GATEWAY_DOMAIN}
