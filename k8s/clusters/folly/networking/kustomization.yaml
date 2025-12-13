@@ -6,7 +6,7 @@ resources:
   - gateway-api.yaml
   - cilium
   - cloudflare
-  - external-dns.yaml
+  - external-dns
   - tailscale
 patches:
   - target:

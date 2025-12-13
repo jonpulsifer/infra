@@ -28,23 +28,3 @@ spec:
     provider: sops
     secretRef:
       name: sops-age
-  patches:
-    - target:
-        group: kustomize.toolkit.fluxcd.io/v1
-        version: v1
-        kind: Kustomization
-      patch: |-
-        - op: add
-          path: /spec/decryption
-          value:
-            provider: sops
-            secretRef:
-              name: sops-age
-        - op: add
-          path: /spec/postBuild
-          value:
-            substituteFrom:
-              - kind: ConfigMap
-                name: cluster-settings
-              - kind: Secret
-                name: cluster-secrets
