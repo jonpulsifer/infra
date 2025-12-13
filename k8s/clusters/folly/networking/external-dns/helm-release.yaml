@@ -40,6 +40,7 @@ spec:
       - --fqdn-template={{ `{{.Name}}.${SECRET_DOMAIN}` }}
     policy: sync
     sources:
+      - crd
       - node
       - ingress
       - service
