@@ -1,0 +1,56 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httspy
+  namespace: default
+  labels:
+    app: httspy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httspy
+  template:
+    metadata:
+      labels:
+        app: httspy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      containers:
+        - name: httspy
+          image: ghcr.io/jonpulsifer/httspy:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httspy
+  namespace: default
+spec:
+  selector:
+    app: httspy
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
