@@ -37,7 +37,7 @@ in
         # the future is now
         
       ]
-      ++ (with pkgs.unstable; [ gemini-cli ])
+      ++ (with pkgs.unstable; [ conftest gemini-cli ])
       ++ lib.optionals isLinux [ wol ]
       ++ lib.optionals isDarwin [ ];
 

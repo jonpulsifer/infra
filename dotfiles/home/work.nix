@@ -26,9 +26,8 @@ in
   home.username = mkForce username;
   home.packages = with pkgs; [
     ffmpeg
-    gemini-cli
     postgresql
-  ];
+  ] ++ (with pkgs.unstable; [ conftest gemini-cli ]);
 
   # homebrew paths like to be at the top of the path list
   programs.zsh.initContent = lib.mkOrder 100 ''
