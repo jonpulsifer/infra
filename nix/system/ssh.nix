@@ -6,6 +6,10 @@
   ...
 }:
 {
+  users.motd = ''
+    ${pkgs.fastfetch}/bin/fastfetch
+    Built at ${builtins.toString inputs.self.lastModified} | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat
+  '';
   programs.ssh.startAgent = true;
 
   programs.gnupg.agent = {

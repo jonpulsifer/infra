@@ -18,6 +18,10 @@
     useDHCP = true;
     useNetworkd = true;
     networkmanager.enable = lib.mkDefault false;
+    timeServers = [
+      "time.nrc.ca"
+      "time.chu.nrc.ca"
+    ];
   };
 
   console.keyMap = "us";
