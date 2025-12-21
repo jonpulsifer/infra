@@ -7,8 +7,16 @@
 }:
 {
   users.motd = ''
-    ${pkgs.fastfetch}/bin/fastfetch
-    Built at ${builtins.toString inputs.self.lastModified} | ${pkgs.cowsay}/bin/cowsay -f moose | ${pkgs.dotacat}/bin/dotacat
+     _________________________
+    |  _____________________  |
+    | |  N I X O S   V.2025 | |
+    | |                     | |
+    | |  > SYSTEM: OK       | |
+    | |  > KERNEL: LOADED   | |
+    | |_____________________| |
+    |_________________________|
+    | [ ] [ ] [ ] [:::::::X]|
+    '-----------------------'
   '';
   programs.ssh.startAgent = true;
 
