@@ -35,8 +35,3 @@ spec:
     - backendRefs:
         - name: slingshot
           port: 3000
-
-
-
-
-

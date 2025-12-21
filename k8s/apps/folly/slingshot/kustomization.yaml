@@ -5,8 +5,3 @@ resources:
   - deployment.yaml
   - 02-service.yaml
   - 03-gateway.yaml
-
-
-
-
-

@@ -15,8 +15,3 @@ spec:
   selector:
     app.kubernetes.io/name: slingshot
     app.kubernetes.io/part-of: slingshot
-
-
-
-
-
