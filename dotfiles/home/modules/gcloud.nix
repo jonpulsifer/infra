@@ -32,6 +32,10 @@ in
     CLOUDSDK_CONFIG = "$HOME/.config/gcloud";
     USE_GKE_GCLOUD_AUTH_PLUGIN = "True";
   };
+  home.shellAliases = {
+    ghttp = "http --header \"Authorization: Bearer $(gcloud auth print-access-token)\"";
+    gcurl = "curl -H \"Authorization: Bearer $(gcloud auth print-access-token)\"";
+  };
   home.packages = with pkgs.unstable; [
     google-cloud-sql-proxy
     # nodePackages.firebase-tools

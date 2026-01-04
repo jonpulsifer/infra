@@ -22,20 +22,11 @@ in
     packages =
       with pkgs;
       [
-        # cloudevents
-        # asciinema
-        # hugo
         _1password-cli
         age
         postgresql
         sops
         vault
-
-        # pixlet
-        # bazel-buildtools
-
-        # the future is now
-        
       ]
       ++ (with pkgs.unstable; [ conftest gemini-cli ])
       ++ lib.optionals isLinux [ wol ]
