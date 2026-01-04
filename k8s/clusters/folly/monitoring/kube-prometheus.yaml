@@ -33,6 +33,10 @@ spec:
     kubeControllerManager.enabled: false
     kubeEtcd.enabled: false
     kubeScheduler.enabled: false
+    coreDns:
+      service:
+        port: 10055
+        targetPort: 10055
     cleanPrometheusOperatorObjectNames: true
     prometheus:
       ingress:
