@@ -46,6 +46,12 @@ spec:
       enabled: true
     envoy:
       enabled: true
+      prometheus:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          labels:
+            release: prom-stack
     ingressController:
       enabled: true
       default: true
@@ -57,7 +63,15 @@ spec:
       enabled: true
     k8sNetworkPolicy:
       enabled: true
-    operator.prometheus.enabled: true
+    operator:
+      dashboards:
+        enabled: true
+      prometheus:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          labels:
+            release: prom-stack
     dashboards:
       enabled: true
     prometheus:
@@ -66,8 +80,6 @@ spec:
         enabled: true
         labels:
           release: prom-stack
-      dashboards:
-        enabled: true
     hubble:
       enabled: true
       relay:
