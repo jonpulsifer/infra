@@ -1,18 +1,19 @@
-apiVersion: v1
-kind: Endpoints
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
 metadata:
   name: screenpi4
   namespace: monitoring
   labels:
-    pulsifer.dev/service: dht22
-subsets:
-  - addresses:
-      - ip: 10.2.0.28
-        nodeName: screenpi4
-    ports:
-      - name: http-metrics
-        port: 8000
-        protocol: TCP
+    kubernetes.io/service-name: screenpi4
+    lolwtf.ca/service: dht22
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 8000
+    protocol: TCP
+endpoints:
+  - addresses: ["10.2.0.28"]
+    nodeName: screenpi4
 --- # trivy:ignore:avd-ksv-0108
 apiVersion: v1
 kind: Service
@@ -20,10 +21,8 @@ metadata:
   name: screenpi4
   namespace: monitoring
   labels:
-    pulsifer.dev/service: dht22
+    lolwtf.ca/service: dht22
 spec:
-  type: ExternalName
-  externalName: screenpi4.localdomain
   ports:
     - name: http-metrics
       port: 8000
@@ -36,27 +35,18 @@ metadata:
   name: dht22
   namespace: monitoring
   labels:
-    pulsifer.dev/service: dht22
+    lolwtf.ca/service: dht22
     release: prom-stack
 spec:
-  jobLabel: pulsifer.dev/service
+  jobLabel: lolwtf.ca/service
   endpoints:
     - port: http-metrics
       interval: 30s
       honorLabels: true
-      scheme: http
       path: /
-      tlsConfig:
-        insecureSkipVerify: true
-      relabelings:
-        - sourceLabels: [__address__]
-          targetLabel: __address__
-          regex: (.*)
-          replacement: "screenpi4-wifi:8000"
-          action: replace
   selector:
     matchLabels:
-      pulsifer.dev/service: dht22
+      lolwtf.ca/service: dht22
   namespaceSelector:
     matchNames:
       - monitoring
@@ -67,7 +57,7 @@ metadata:
   name: screenpi4
   namespace: monitoring
   labels:
-    pulsifer.dev/service: dht22
+    lolwtf.ca/service: dht22
     release: prom-stack
 spec:
   groups:

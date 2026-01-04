@@ -48,6 +48,7 @@ spec:
           - secretName: *prom
             hosts:
               - *prom
+        pathType: Prefix
       prometheusSpec:
         retention: 90d
         storageSpec:
@@ -157,6 +158,7 @@ spec:
           - secretName: *grafana
             hosts:
               - *grafana
+        pathType: Prefix
       persistence:
         enabled: true
         storageClassName: local-path
@@ -175,6 +177,7 @@ spec:
           - secretName: *am
             hosts:
               - *am
+        pathType: Prefix
     prometheus-node-exporter:
       prometheus:
         monitor:
