@@ -47,8 +47,6 @@ metadata:
     lolwtf.ca/service: windows-exporter
     jobLabel: windows-exporter
 spec:
-  type: ExternalName
-  externalName: windows-exporters
   ports:
     - name: http-metrics
       port: 9182
@@ -88,8 +86,6 @@ metadata:
     lolwtf.ca/service: node-exporter
     jobLabel: node-exporter
 spec:
-  type: ExternalName
-  externalName: local-node-exporters
   ports:
     - name: http-metrics
       port: 9100

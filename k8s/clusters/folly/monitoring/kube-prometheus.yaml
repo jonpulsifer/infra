@@ -55,6 +55,21 @@ spec:
         pathType: Prefix
       prometheusSpec:
         retention: 90d
+        additionalScrapeConfigs:
+          - job_name: windows-exporters
+            scrape_interval: 30s
+            scrape_timeout: 30s
+            metrics_path: /metrics
+            scheme: http
+            static_configs:
+              - targets: ["windows-exporters.monitoring.svc.cluster.local:9182"]
+          - job_name: local-node-exporters
+            scrape_interval: 30s
+            scrape_timeout: 30s
+            metrics_path: /metrics
+            scheme: http
+            static_configs:
+              - targets: ["local-node-exporters.monitoring.svc.cluster.local:9100"]
         storageSpec:
           volumeClaimTemplate:
             spec:
