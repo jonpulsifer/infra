@@ -70,7 +70,7 @@ spec:
                 - tallboy.${SECRET_DOMAIN}:9182
             relabel_configs:
               - source_labels: [__address__]
-                regex: '^(.+)\.(.+):(\d+)$'
+                regex: '(\w+)\.(.+):(\d+)'
                 replacement: '$1'
                 target_label: instance
         storageSpec:
