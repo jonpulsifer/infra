@@ -66,10 +66,10 @@ spec:
                 - cloudpi4.${SECRET_DOMAIN}:9100
                 - homepi4-wifi.${SECRET_DOMAIN}:9100
                 - radiopi0.${SECRET_DOMAIN}:9100
-                - blinkypi0.${SECRET_DOMAIN}:9100
+                # - blinkypi0.${SECRET_DOMAIN}:9100
                 - tallboy.${SECRET_DOMAIN}:9182
             relabel_configs:
-              - source_labels: [__instance__]
+              - source_labels: [__address__]
                 regex: '(.+)\.${SECRET_DOMAIN}'
                 replacement: '$1'
                 target_label: instance
