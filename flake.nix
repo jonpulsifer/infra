@@ -124,6 +124,7 @@
           cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
+          rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
         };
       };
 
