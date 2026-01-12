@@ -91,6 +91,9 @@
         weatherpi4 = {
           system = "aarch64-linux";
         };
+        rackpi5 = {
+          system = "aarch64-linux";
+        };
 
         # google cloud
         oldboy = { tags = [ "gcp" ]; };
