@@ -66,7 +66,7 @@
           moduleDir = config.profile or "hosts";
           modules = [ ./nix/${moduleDir}/${name}.nix ] ++ (config.modules or [ ]);
           tags = config.tags or [ ];
-          nixosSystem = name == "rackpi5" ? unstable.lib.nixosSystem : nixosSystem;
+          nixosSystem = (name == "rackpi5" ? unstable.lib.nixosSystem : nixosSystem);
         in
         nixosSystem {
           inherit system modules;
