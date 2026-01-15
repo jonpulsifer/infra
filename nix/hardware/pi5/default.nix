@@ -29,7 +29,7 @@
   };
 
   boot = let
-    linux_rpi5 = pkgs.linux_rpi4.override {
+    linux_rpi5 = pkgs.unstable.linux_rpi4.override {
       rpiVersion = 5;
       argsOverride.defconfig = "bcm2712_defconfig";
     };
