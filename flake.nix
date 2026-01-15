@@ -8,6 +8,7 @@
       url = "github:nix-community/NixOS-WSL/release-25.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
     home-manager = {
       url = "github:nix-community/home-manager/release-25.05";
@@ -51,6 +52,7 @@
       nixos-wsl,
       keys,
       wannabekeys,
+      unstable,
       ...
     }@inputs:
     let
@@ -64,6 +66,7 @@
           moduleDir = config.profile or "hosts";
           modules = [ ./nix/${moduleDir}/${name}.nix ] ++ (config.modules or [ ]);
           tags = config.tags or [ ];
+          nixosSystem = name == "rackpi5" ? unstable.lib.nixosSystem : nixosSystem;
         in
         nixosSystem {
           inherit system modules;
