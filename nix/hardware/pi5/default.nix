@@ -20,21 +20,27 @@
     # buildPlatform.system = "x86_64-linux";
     hostPlatform.system = "aarch64-linux";
 
-    # overlays = [
-    #   # https://github.com/NixOS/nixpkgs/issues/154163
-    #   (final: super: {
-    #     makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
-    #   })
-    # ];
+    overlays = [
+      # https://github.com/NixOS/nixpkgs/issues/154163
+      (final: super: {
+        makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
+      })
+    ];
   };
 
-  boot = {
-    kernelParams = [
-      "console=tty0"
-      "cma=256M"
-      "cgroup_enable=cpuset"
-      "cgroup_enable=memory"
-    ];
+  boot = let
+    linux_rpi5 = pkgs.linux_rpi4.override {
+      rpiVersion = 5;
+      argsOverride.defconfig = "bcm2712_defconfig";
+    };
+  in {
+    kernelPackages = lib.mkForce linux_rpi5;
+    # kernelParams = [
+    #   "console=tty0"
+    #   "cma=256M"
+    #   "cgroup_enable=cpuset"
+    #   "cgroup_enable=memory"
+    # ];
     supportedFilesystems = [
       "ext4"
       "vfat"
