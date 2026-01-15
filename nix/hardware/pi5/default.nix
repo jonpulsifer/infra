@@ -20,12 +20,12 @@
     # buildPlatform.system = "x86_64-linux";
     hostPlatform.system = "aarch64-linux";
 
-    overlays = [
-      # https://github.com/NixOS/nixpkgs/issues/154163
-      (final: super: {
-        makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
-      })
-    ];
+    # overlays = [
+    #   # https://github.com/NixOS/nixpkgs/issues/154163
+    #   (final: super: {
+    #     makeModulesClosure = x: super.makeModulesClosure (x // { allowMissing = true; });
+    #   })
+    # ];
   };
 
   boot = {
