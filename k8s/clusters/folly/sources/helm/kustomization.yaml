@@ -20,6 +20,7 @@ resources:
   - longhorn.yaml
   - metrics-server.yaml
   - node-feature-discovery.yaml
+  - open-webui.yaml
   - prometheus.yaml
   - stakater.yaml
   - stefanprodan.yaml

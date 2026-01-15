@@ -12,6 +12,7 @@ resources:
   - jellyfin.yaml
   - k6
   - nix-cache.yaml
+  - open-webui.yaml
   - postgres
   - redis
   - reloader
