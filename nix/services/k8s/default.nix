@@ -8,17 +8,6 @@ let
   networks = import ./networks.nix;
   networkConfig = networks.${config.services.k8s.network};
   cfg = config.services.k8s;
-
-  # pauseImage = pkgs.dockerTools.buildImage {
-  #   name = "registry.k8s.io/pause";
-  #   tag = "3.10";
-  #   fromImage = pkgs.dockerTools.pullImage {
-  #     imageName = "registry.k8s.io/pause";
-  #     imageDigest = "sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a";
-  #     finalImageTag = "3.10";
-  #   };
-  #   arch = pkgs.go.GOARCH;
-  # }
 in
 {
 
