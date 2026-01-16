@@ -28,7 +28,7 @@ in
         sops
         vault
       ]
-      ++ (with pkgs.unstable; [ conftest gemini-cli ])
+      ++ (with pkgs.unstable; [ conftest gemini-cli opencode ])
       ++ lib.optionals isLinux [ wol ]
       ++ lib.optionals isDarwin [ ];
 
