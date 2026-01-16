@@ -24,6 +24,7 @@
     dotfiles = {
       url = "github:jonpulsifer/dotfiles";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.nixpkgs-unstable.follows = "unstable";
     };
     ddnsd = {
       url = "github:jonpulsifer/ddnsd";
