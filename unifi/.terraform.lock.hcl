@@ -2,24 +2,18 @@
 # Manual edits may be lost in future updates.
 
 provider "registry.terraform.io/1password/onepassword" {
-  version     = "3.1.0"
+  version     = "3.1.1"
   constraints = "~> 3.0"
   hashes = [
-    "h1:1dLG1s2pJEavH4qmqMx4BJXDw5QyTpfeVIB6xJDf4Ds=",
-    "h1:5y8sStT9SUOxEa70NJxm3L6XEZveA7bbExiojf1BPec=",
-    "h1:EixUr32gIKn73euEHaDWXP0Q9ZBMsYowCoddyhWFafA=",
-    "h1:EjMSC75pbDhutw/7/z4RB4fGJHMGzibSDCUdV+D9bWI=",
-    "h1:Kpo7s8dYjNseqXXt647Rzztib9qxi3aqGHCDWJAZQiI=",
-    "h1:fR7CiTfSp841ragbuucZOiwo9U7LEEGTVlo6LYIktKA=",
-    "h1:pcEPzVQEb+mrwBIDOtn08aYvlZ947CZviMYVhv3qqwk=",
-    "zh:82cfcb55b14ebc6c7a9d0f87247caf34ca5c99b31de5175e50b49047832a1238",
-    "zh:85d341bee73d9630cd7e1757ef1f2b2d2d5c5004cdede5f878c13e93a5f35587",
+    "h1:bkg1m+8QQeyOgfqb31879iwmChLusZjmWfxoxddh3ZA=",
+    "zh:1c7945e3b213655e5aaaaa1b9141d9cccf2e897fb87792dd28cfeabea42e0ce9",
+    "zh:3ec46b37e0e50dd960ab4ed713df8be9c1c0a8195e74d74f623d5f0908f27c2e",
+    "zh:6306ec411d407ffc396e93545aaec567ff1179b0ee4b5fa4313faa3f3181cfb8",
+    "zh:726ac70483b674df4de1e4430eb13c283eed2ebe1967864937a1b26414b59df7",
     "zh:890df766e9b839623b1f0437355032a3c006226a6c200cd911e15ee1a9014e9f",
-    "zh:b32822942c2d692626c953a9acbb21d9b93dd83bd3c812dd0afd9e57f272b2f0",
-    "zh:b921cdf53e5ca4f88e8b7db02ecd9a82ca67f389fe3b3b3be5797d41687d5852",
-    "zh:cb9e81acb34d21797bfcaf440d0d88fbd4fbe2e600e195936f778aceafb4ee27",
-    "zh:cc1d58cbd157d60fa124474772f2be4744ef7af26a056f6ba37c9ea822ea8a53",
-    "zh:cfe1a88bf4a93c3e833c5d30df4367c35f5427a8b3f24d421d466c89d41b780b",
+    "zh:8c78a66e2919fd1b8c3ca435874246549cd2bee64c5cf0ed5c60dc440a0122c4",
+    "zh:96c82dfcb3be1ad549f49ba4678fb7bd088de8518617372302ecc78039c2ea7b",
+    "zh:9f427d09bc5c0b0e2650e801cfb564f68a18e5d31f2aa7673a1e93e6f22f8867",
   ]
 }
 
@@ -97,5 +91,28 @@ provider "registry.terraform.io/paultyng/unifi" {
     "zh:c8354eaaab5f526e8e530b098544c7583a0f0b5b27d67500c7b3e9da56a3a7e5",
     "zh:dc29f1e70f20ce86d3c6a66c7a817616f993a1cf9d941604dfd5222a06992c4c",
     "zh:e772779333419f34d2c6da333c7f7d235a5a34f21ea47636b548e132aed74f3b",
+  ]
+}
+
+provider "registry.terraform.io/ubiquiti-community/unifi" {
+  version     = "0.41.8"
+  constraints = "~> 0.41"
+  hashes = [
+    "h1:l0I47W7pOgyvdlOe4JNNj63eakE5LnxdczdzeTMJnV4=",
+    "zh:1b7248930e3e8590c876c17e610866b9e08b6459f940bad8fa8add8663d670a7",
+    "zh:3a2b69247b68f96337203a465f3aaab6b509040043d5f15ec90b25bdacb529e2",
+    "zh:44eeaf33aef36527d0b1ddcd95825a96e7d1dfe09b3febde73d9ecec67049b56",
+    "zh:5be7a5bf0ea85aa143cac57caf04da0b423ea644e432dd6e688df49b29359665",
+    "zh:677afe32762625683da5ec7467897a2755ee8371d3dcf0fe8b040f7340a8dbe7",
+    "zh:77691cea520c5ede35461e0effdcf6805409d2f973746e09bb3381d59b0fa208",
+    "zh:77826e5e0b45dca89ef9cf63c2f3cfa68f61e0cdb17ab05f10d7af0803a81399",
+    "zh:890df766e9b839623b1f0437355032a3c006226a6c200cd911e15ee1a9014e9f",
+    "zh:8ca85c2eec224667be487dca5a3cc670e1cd311b6dfc8547612bf81787435cb9",
+    "zh:94840e0def25a4dcb855b44faf7c98eb4dca6281bdaca5fe8dd5651b8f636903",
+    "zh:9fe2fa0e0d64a7ad6f9cb574fdc255271473e549ef1dbf6e7ee491c900ab80a7",
+    "zh:a4538d13661b476589d8bf536ecf49c8e072e6da477482f67f2ac673b5bddf06",
+    "zh:b2915dcabcb192515ad898df968da2c8e6d130f735f56a21c1c3592101fd4a76",
+    "zh:e281ebac85742df8710842dcb7a3b231482798ac07044098ec14b3297b903957",
+    "zh:e2c5805549d2f0c102eadfc40a190fa9727d3dd6221f59d235ab699acafaeab3",
   ]
 }

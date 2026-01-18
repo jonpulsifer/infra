@@ -10,7 +10,7 @@ terraform {
     }
     unifi = {
       # overridden in ~/.terraformrc
-      source  = "paultyng/unifi"
+      source  = "ubiquiti-community/unifi"
       version = "~> 0.41"
     }
     vault = {

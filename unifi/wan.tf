@@ -6,21 +6,11 @@ resource "unifi_network" "starlink" {
   name    = "Starlink"
   purpose = "wan"
 
-  wan_networkgroup = "WAN"
-  wan_type         = "dhcp"
-  # wan_type_v6         = "slaac"
-  wan_dhcp_v6_pd_size = 56
-  wan_dns             = ["1.1.1.1", "1.0.0.1"]
+  network_group = "LAN"
 
-  internet_access_enabled      = true
-  intra_network_access_enabled = false
-
-  lifecycle {
-    # provider doesn't support slaac
-    ignore_changes = [
-      wan_type_v6,
-    ]
-  }
+  dhcp_enabled = false
+  dhcp_relay_enabled = false
+  dhcpd_boot_enabled = false
 }
 
 resource "unifi_static_route" "starlink" {

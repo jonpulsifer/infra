@@ -64,6 +64,14 @@ rpis:
     ip: 2
     hostname: pikvm
     dev-id: 4134
+  pihole:
+    mac: 2c:cf:67:dc:7e:ce
+    ip: 10
+    dev-id: 4133
+  spore:
+    mac: 88:a2:9e:0d:de:f5
+    ip: 11
+    dev-id: 4133
   cloudpi4:
     mac: dc:a6:32:35:e8:b4
     ip: 20
@@ -106,6 +114,7 @@ desktops:
   caldigit:
     mac: 64:4b:f0:10:0f:0c
     ip: 3
+    dev-id: 5477
   caldigit ts4:
     mac: 64:4b:f0:37:15:69
     ip: 4
