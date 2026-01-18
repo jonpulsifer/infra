@@ -8,7 +8,7 @@ resource "unifi_network" "starlink" {
 
   network_group = "LAN"
 
-  dhcp_enabled = false
+  dhcp_enabled       = false
   dhcp_relay_enabled = false
   dhcpd_boot_enabled = false
 }

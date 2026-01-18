@@ -38,10 +38,10 @@ resource "unifi_network" "lab" {
   subnet        = local.lab_cidr
   vlan_id       = 2
 
-  dhcp_enabled     = true
-  dhcp_lease       = local.one_week
-  dhcp_start       = cidrhost(local.lab_cidr, 200)
-  dhcp_stop        = cidrhost(local.lab_cidr, 254)
+  dhcp_enabled       = true
+  dhcp_lease         = local.one_week
+  dhcp_start         = cidrhost(local.lab_cidr, 200)
+  dhcp_stop          = cidrhost(local.lab_cidr, 254)
   dhcp_relay_enabled = false
   dhcpd_boot_enabled = false
 }
@@ -52,7 +52,7 @@ resource "unifi_wlan" "lab" {
   hide_ssid         = true
   ap_group_ids      = [data.unifi_ap_group.all_aps.id]
   network_id        = unifi_network.lab.id
-  user_group_id           = unifi_client_group.unmetered.id
+  user_group_id     = unifi_client_group.unmetered.id
   multicast_enhance = false
   bss_transition    = false
   no2ghz_oui        = false
@@ -72,5 +72,5 @@ resource "unifi_client" "lab" {
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
   dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.lab.id
-  group_id          = unifi_client_group.unmetered.id
+  group_id               = unifi_client_group.unmetered.id
 }

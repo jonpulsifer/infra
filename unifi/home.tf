@@ -13,11 +13,11 @@ resource "unifi_network" "fml" {
   purpose       = "corporate"
   subnet        = local.fml_cidr
 
-  dhcp_enabled     = true
-  dhcp_lease       = local.one_day
+  dhcp_enabled       = true
+  dhcp_lease         = local.one_day
   dhcp_relay_enabled = false
-  dhcp_start       = cidrhost(local.fml_cidr, 100)
-  dhcp_stop        = cidrhost(local.fml_cidr, 254)
+  dhcp_start         = cidrhost(local.fml_cidr, 100)
+  dhcp_stop          = cidrhost(local.fml_cidr, 254)
   dhcpd_boot_enabled = false
 }
 
@@ -46,8 +46,8 @@ resource "unifi_wlan" "fml" {
   bss_transition       = true
   fast_roaming_enabled = false
   multicast_enhance    = false
-  uapsd        =  true
-  no2ghz_oui          = false
+  uapsd                = true
+  no2ghz_oui           = false
 }
 
 resource "unifi_client" "personal_devices" {
@@ -62,7 +62,7 @@ resource "unifi_client" "personal_devices" {
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
   dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.fml.id
-  group_id          = unifi_client_group.unmetered.id
+  group_id               = unifi_client_group.unmetered.id
 }
 
 resource "unifi_client" "computers" {
@@ -77,7 +77,7 @@ resource "unifi_client" "computers" {
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
   dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.fml.id
-  group_id          = unifi_client_group.unmetered.id
+  group_id               = unifi_client_group.unmetered.id
 }
 
 resource "unifi_client" "iot" {
@@ -91,7 +91,7 @@ resource "unifi_client" "iot" {
   allow_existing         = lookup(each.value, "allow_existing", true)
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
   network_id             = unifi_network.fml.id
-  group_id          = lookup(each.value, "streaming", false) == false ? unifi_client_group.iot.id : unifi_client_group.streaming.id
+  group_id               = lookup(each.value, "streaming", false) == false ? unifi_client_group.iot.id : unifi_client_group.streaming.id
   dev_id_override        = lookup(each.value, "dev-id", 0)
 }
 
@@ -107,5 +107,5 @@ resource "unifi_client" "cameras" {
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
   dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.fml.id
-  group_id          = unifi_client_group.unmetered.id
+  group_id               = unifi_client_group.unmetered.id
 }

@@ -17,14 +17,14 @@ resource "unifi_network" "k8s" {
   purpose       = "corporate"
   subnet        = local.node_cidr
 
-  dhcp_enabled     = true
-  dhcp_lease       = local.one_day
+  dhcp_enabled       = true
+  dhcp_lease         = local.one_day
   dhcp_relay_enabled = false
-  dhcp_start       = cidrhost(local.node_cidr, 2)
-  dhcp_stop        = cidrhost(local.node_cidr, 62)
-  dhcp_dns         = ["10.2.0.20"]
+  dhcp_start         = cidrhost(local.node_cidr, 2)
+  dhcp_stop          = cidrhost(local.node_cidr, 62)
+  dhcp_dns           = ["10.2.0.20"]
   dhcpd_boot_enabled = false
-  vlan_id          = 8
+  vlan_id            = 8
 }
 
 resource "cloudflare_dns_record" "k8s_remote_dns" {
