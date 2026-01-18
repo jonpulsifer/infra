@@ -10,7 +10,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.0.2 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.1.0 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 5.6.0 |
 
 ## Modules

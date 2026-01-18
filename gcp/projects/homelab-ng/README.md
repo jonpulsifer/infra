@@ -16,7 +16,7 @@
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.15.0 |
 | <a name="provider_google"></a> [google](#provider\_google) | 7.16.0 |
 | <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.16.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.0.2 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.1.0 |
 
 ## Modules
 
