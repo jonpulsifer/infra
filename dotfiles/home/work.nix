@@ -24,10 +24,17 @@ in
   ];
 
   home.username = mkForce username;
-  home.packages = with pkgs; [
-    ffmpeg
-    postgresql
-  ] ++ (with pkgs.unstable; [ conftest gemini-cli ]);
+  home.packages =
+    with pkgs;
+    [
+      ffmpeg
+      postgresql
+    ]
+    ++ (with pkgs.unstable; [
+      conftest
+      gemini-cli
+      opencode
+    ]);
 
   # homebrew paths like to be at the top of the path list
   programs.zsh.initContent = lib.mkOrder 100 ''

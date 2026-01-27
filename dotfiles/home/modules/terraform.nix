@@ -1,5 +1,10 @@
-{ config, lib, pkgs, ... }:
-let 
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+let
   terraformPluginCacheDir = config.home.homeDirectory + "/.terraform.d/plugin-cache";
 in
 {
