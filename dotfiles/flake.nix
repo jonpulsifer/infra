@@ -1,5 +1,5 @@
 {
-  description = "jonpulsifer/dotfiles lol";
+  description = "jonpulsifer/dotfiles lol"; # managed with ❤️ and nix
 
   inputs = {
     home-manager.url = "github:nix-community/home-manager/release-25.05";
