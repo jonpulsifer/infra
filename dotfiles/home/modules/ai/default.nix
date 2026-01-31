@@ -94,7 +94,7 @@ let
       formatting = "use markdown, prefer code examples";
       commits = "conventional commits, signed, with DCO sign-off (-s)";
       testing = "write tests for new functionality";
-      prs = "create PRs against main using gh CLI";
+      prs = "create PRs against main using gh CLI, monitor for ci/cd pipelines";
     };
   };
 
