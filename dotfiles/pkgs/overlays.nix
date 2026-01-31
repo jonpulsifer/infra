@@ -28,7 +28,7 @@
           # this workaround can be removed once the following upstream issue is resolved:
           # https://github.com/google-gemini/gemini-cli/issues/11438
           substituteInPlace $out/bin/gemini \
-            --replace-fail 'const existingPath = await resolveExistingRgPath();' 'const existingPath = "${lib.getExe ripgrep}";'
+            --replace-fail 'const existingPath = await resolveExistingRgPath();' 'const existingPath = "${final.lib.getExe ripgrep}";'
 
           runHook postInstall
         '';

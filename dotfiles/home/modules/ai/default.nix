@@ -161,6 +161,7 @@ let
     - [ ] No wildcards in IAM policies
     - [ ] Audit logging enabled
     - [ ] Resource policies are restrictive
+    - [ ] No long lived tokens or credentials
 
     ### Kubernetes Security
     - [ ] No privileged containers
@@ -264,8 +265,9 @@ let
     npm run lint
     npm run format
     # or
-    prettier --write .
-    eslint --fix .
+    biome format --write .
+    biome check .
+    biome lint --fix .
     ```
 
     ### Python
