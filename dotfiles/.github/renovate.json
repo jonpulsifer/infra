@@ -33,16 +33,11 @@
       "automerge": true
     },
     {
-      "description": "Update gemini-cli-bin with hash refresh",
+      "description": "Update gemini-cli-bin version",
       "matchPackageNames": ["google-gemini/gemini-cli"],
       "versioning": "semver",
       "extractVersion": "^v(?<version>.*)$",
-      "automerge": true,
-      "postUpgradeTasks": {
-        "commands": [".github/scripts/update-gemini-hash.sh"],
-        "fileFilters": ["pkgs/overlays.nix"],
-        "executionMode": "branch"
-      }
+      "automerge": true
     }
   ]
 }
