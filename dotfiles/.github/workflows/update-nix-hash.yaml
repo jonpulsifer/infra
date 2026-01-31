@@ -1,0 +1,45 @@
+name: update-nix-hash
+on:
+  pull_request:
+    paths:
+      - pkgs/overlays.nix
+
+jobs:
+  update-hash:
+    runs-on: ubuntu-latest
+    # Only run on Renovate PRs for gemini-cli
+    if: startsWith(github.head_ref, 'renovate/') && contains(github.event.pull_request.title, 'gemini-cli')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: DeterminateSystems/nix-installer-action@v17
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update gemini-cli-bin hash
+        run: .github/scripts/update-gemini-hash.sh
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet pkgs/overlays.nix; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit updated hash
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pkgs/overlays.nix
+          git commit -m "fix(nix): update gemini-cli-bin hash"
+          git push
