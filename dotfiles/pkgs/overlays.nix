@@ -21,9 +21,6 @@
 
           install -D "$src" "$out/bin/gemini"
 
-          # ideal method to disable auto-update
-          sed -i '/disableautoupdate: {/,/}/ s/default: false/default: true/' "$out/bin/gemini"
-
           # use `ripgrep` from `nixpkgs`, more dependencies but prevent downloading incompatible binary on NixOS
           # this workaround can be removed once the following upstream issue is resolved:
           # https://github.com/google-gemini/gemini-cli/issues/11438
