@@ -12,9 +12,9 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.15.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.1.1 |
-| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.8 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.16.0 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.1.2 |
+| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.12 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 5.6.0 |
 
 ## Modules
