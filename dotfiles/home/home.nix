@@ -14,7 +14,7 @@ in
     modules/go.nix
     modules/javascript.nix
     modules/kubernetes.nix
-    modules/opencode
+    modules/ai
     modules/ssh.nix
     modules/terraform.nix
   ];

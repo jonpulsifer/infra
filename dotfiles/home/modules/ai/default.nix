@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   inherit (lib) concatStringsSep mapAttrs;
 
@@ -6,11 +11,19 @@ let
   mcpServers = {
     nixos = {
       command = "docker";
-      args = [ "run" "--rm" "-i" "ghcr.io/utensils/mcp-nixos" ];
+      args = [
+        "run"
+        "--rm"
+        "-i"
+        "ghcr.io/utensils/mcp-nixos"
+      ];
     };
     gcloud = {
       command = "npx";
-      args = [ "-y" "@google-cloud/gcloud-mcp" ];
+      args = [
+        "-y"
+        "@google-cloud/gcloud-mcp"
+      ];
     };
   };
 
