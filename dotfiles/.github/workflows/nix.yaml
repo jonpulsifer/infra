@@ -5,6 +5,11 @@ on:
       - .github/workflows/nix.yaml
       - flake.lock
       - "**/*.nix"
+  pull_request:
+    paths:
+      - .github/workflows/nix.yaml
+      - flake.lock
+      - "**/*.nix"
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -12,18 +17,19 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v17
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-      - uses: DeterminateSystems/flake-checker-action@main
+      - uses: DeterminateSystems/flake-checker-action@v9
       - run: nix flake check
+
   linux:
     runs-on: ubuntu-latest
     needs: check
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v17
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
       - uses: cachix/cachix-action@v16
@@ -37,8 +43,8 @@ jobs:
     runs-on: macos-latest
     needs: check
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v17
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
       - uses: cachix/cachix-action@v16
