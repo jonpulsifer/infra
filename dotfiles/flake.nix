@@ -8,6 +8,9 @@
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     gh-aipr.url = "github:wannabehero/gh-aipr";
     gh-aipr.inputs.nixpkgs.follows = "nixpkgs";
+    # Always use latest opencode from upstream
+    opencode.url = "github:sst/opencode";
+    opencode.inputs.nixpkgs.follows = "nixpkgs-unstable";
   };
 
   outputs =
@@ -17,6 +20,7 @@
       nixpkgs,
       nixpkgs-unstable,
       gh-aipr,
+      opencode,
     }:
     let
       systems = [
@@ -40,7 +44,7 @@
           # use as pkgs.unstable.<pkg> in modules
           unstable = import nixpkgs-unstable {
             inherit (prev) system config;
-            overlays = [ ];
+            overlays = import ./pkgs/overlays.nix { inherit opencode; };
           };
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
         })

@@ -20,7 +20,7 @@ in
     ./darwin.nix
     modules/go.nix
     modules/kubernetes.nix
-    modules/opencode
+    modules/ai
     modules/terraform.nix
   ];
 
