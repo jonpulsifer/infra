@@ -25,6 +25,15 @@ let
         "@google-cloud/gcloud-mcp"
       ];
     };
+    terraform = {
+      command = "docker";
+      args = [
+        "run"
+        "-i"
+        "--rm"
+        "hashicorp/terraform-mcp-server"
+      ];
+    };
   };
 
   # opencode format: { "mcp": { "name": { "type": "local", "command": [...] } } }
