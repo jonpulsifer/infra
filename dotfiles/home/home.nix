@@ -14,6 +14,7 @@ in
     modules/go.nix
     modules/javascript.nix
     modules/kubernetes.nix
+    modules/opencode
     modules/ssh.nix
     modules/terraform.nix
   ];
@@ -30,8 +31,6 @@ in
       ]
       ++ (with pkgs.unstable; [
         conftest
-        gemini-cli
-        opencode
       ])
       ++ lib.optionals isLinux [ wol ]
       ++ lib.optionals isDarwin [ ];
