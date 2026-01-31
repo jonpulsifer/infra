@@ -2,6 +2,8 @@
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
     'config:recommended',
+    'docker:enableMajor',
+    'helpers:pinGitHubActionDigests',
     ':disableRateLimiting',
     ':dependencyDashboard',
     ':semanticCommits',
@@ -11,9 +13,11 @@
     'customManagers:githubActionsVersions',
     'customManagers:helmChartYamlAppVersions',
   ],
+  dependencyDashboardTitle: 'Renovate Dashboard',
   dependencyDashboard: true,
   suppressNotifications: [
-    'prEditedNotification, prIgnoreNotification',
+    'prEditedNotification',
+    'prIgnoreNotification',
   ],
   rebaseWhen: 'conflicted',
   flux: {
@@ -31,12 +35,143 @@
       '/k8s/.+\\.ya?ml$/',
     ],
   },
-  packageRules: [
+  nix: {
+    enabled: true,
+  },
+  customManagers: [
     {
-      matchManagers: [
-        'terraform',
+      customType: 'regex',
+      description: 'Process annotated dependencies',
+      managerFilePatterns: [
+        '/\\.env$/',
+        '/\\.sh$/',
+        '/\\.yaml$/',
       ],
-      groupName: 'terraform',
+      matchStrings: [
+        // # renovate: datasource=github-releases depName=foo/bar
+        // version: v1.0.0
+        'datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n.+(:s|=)(&\\S+\\s)?(?<currentValue>\\S+)',
+      ],
+      datasourceTemplate: '{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}',
+    },
+  ],
+  packageRules: [
+    // Semantic commit formatting
+    {
+      matchUpdateTypes: ['major'],
+      semanticCommitType: 'feat',
+      commitMessagePrefix: '{{semanticCommitType}}({{semanticCommitScope}})!:',
+      commitMessageExtra: '( {{currentVersion}} → {{newVersion}} )',
+    },
+    {
+      matchUpdateTypes: ['minor'],
+      semanticCommitType: 'feat',
+      commitMessageExtra: '( {{currentVersion}} → {{newVersion}} )',
+    },
+    {
+      matchUpdateTypes: ['patch'],
+      semanticCommitType: 'fix',
+      commitMessageExtra: '( {{currentVersion}} → {{newVersion}} )',
+    },
+    {
+      matchUpdateTypes: ['digest'],
+      semanticCommitType: 'chore',
+      commitMessageExtra: '( {{currentDigestShort}} → {{newDigestShort}} )',
+    },
+    // Datasource-specific semantic scopes
+    {
+      matchDatasources: ['docker'],
+      semanticCommitScope: 'container',
+      commitMessageTopic: 'image {{depName}}',
+    },
+    {
+      matchDatasources: ['helm'],
+      semanticCommitScope: 'helm',
+      commitMessageTopic: 'chart {{depName}}',
+    },
+    {
+      matchManagers: ['github-actions'],
+      semanticCommitType: 'ci',
+      semanticCommitScope: 'github-action',
+      commitMessageTopic: 'action {{depName}}',
+    },
+    // Labels
+    {
+      matchUpdateTypes: ['major'],
+      labels: ['type/major'],
+    },
+    {
+      matchUpdateTypes: ['minor'],
+      labels: ['type/minor'],
+    },
+    {
+      matchUpdateTypes: ['patch'],
+      labels: ['type/patch'],
+    },
+    {
+      matchUpdateTypes: ['digest'],
+      labels: ['type/digest'],
+    },
+    {
+      matchDatasources: ['docker'],
+      addLabels: ['renovate/container'],
+    },
+    {
+      matchDatasources: ['helm'],
+      addLabels: ['renovate/helm'],
+    },
+    {
+      matchManagers: ['github-actions'],
+      addLabels: ['renovate/github-action'],
+    },
+    // Grouping
+    {
+      description: 'Actions Runner Controller Group',
+      groupName: 'actions-runner-controller',
+      matchDatasources: ['docker', 'helm'],
+      matchPackageNames: ['/gha-runner-scale-set-controller/', '/gha-runner-scale-set/'],
+      group: {
+        commitMessageTopic: '{{{groupName}}} group',
+      },
+    },
+    // Terraform
+    {
+      matchManagers: ['terraform'],
+      groupName: 'terraform {{depName}}',
+      automerge: true,
+      automergeType: 'pr',
+    },
+    // Flux helm charts
+    {
+      matchManagers: ['flux'],
+      matchUpdateTypes: ['minor', 'patch'],
+      automerge: true,
+      automergeType: 'pr',
+    },
+    // GitHub Actions auto-merge
+    {
+      description: 'Auto-merge GitHub Actions',
+      matchManagers: ['github-actions'],
+      automerge: true,
+      automergeType: 'branch',
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      minimumReleaseAge: '3 days',
+    },
+    {
+      description: 'Auto-merge trusted GitHub Actions',
+      matchManagers: ['github-actions'],
+      matchPackageNames: ['/^actions\\//', '/^renovatebot\\//'],
+      automerge: true,
+      automergeType: 'branch',
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      minimumReleaseAge: '1 minute',
+    },
+    // Nix flake dotfiles
+    {
+      matchManagers: ['nix'],
+      matchPackageNames: ['dotfiles'],
+      automerge: true,
+      automergeType: 'pr',
     },
   ],
 }
