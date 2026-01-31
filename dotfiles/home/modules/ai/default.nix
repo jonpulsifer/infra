@@ -386,7 +386,7 @@ in
 {
   home.packages = with pkgs.unstable; [
     opencode
-    gemini-cli
+    gemini-cli-bin
   ];
 
   # opencode config, skills, and commands (primary tool)
