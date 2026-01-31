@@ -9,7 +9,7 @@
     gh-aipr.url = "github:wannabehero/gh-aipr";
     gh-aipr.inputs.nixpkgs.follows = "nixpkgs";
     # Always use latest opencode from upstream
-    opencode.url = "github:sst/opencode";
+    opencode.url = "github:anomalyco/opencode";
     opencode.inputs.nixpkgs.follows = "nixpkgs-unstable";
   };
 
