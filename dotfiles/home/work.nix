@@ -20,6 +20,7 @@ in
     ./darwin.nix
     modules/go.nix
     modules/kubernetes.nix
+    modules/opencode
     modules/terraform.nix
   ];
 
@@ -32,8 +33,6 @@ in
     ]
     ++ (with pkgs.unstable; [
       conftest
-      gemini-cli
-      opencode
     ]);
 
   # homebrew paths like to be at the top of the path list
