@@ -424,37 +424,44 @@ in
   home.file.".cursor/skills/code-review/SKILL.md".text = codeReviewSkill;
   home.file.".cursor/skills/lint-format/SKILL.md".text = lintFormatSkill;
 
-  # Notifier plugin implementation
-  notifierPlugin = {
-    home.file.".config/opencode/plugins/notifier.ts".text = ''
-      import { type Plugin } from "@opencode-ai/plugin"
+# Notifier plugin configuration
+  home.file.".config/opencode/plugins/notifier.ts".text = ''
+    import { type Plugin } from "@opencode-ai/plugin"
 
-      export const NotifierPlugin: Plugin = async ({ $, project }) => {
-        return {
-          event: async ({ event }) => {
-            if (event.type === "session.idle") {
-              const title = "OpenCode Task Complete";
-              const message = `Project: ${project.name || 'Current Directory'}`;
+    export const NotifierPlugin: Plugin = async ({ $, project }) => {
+      return {
+        event: async ({ event }) => {
+          if (event.type === "session.idle") {
+            const title = "OpenCode Task Complete";
+            const message = `Project: ${project.name || 'Current Directory'}`;
 
-              ${if pkgs.stdenv.isDarwin then ''
-                // macOS Notification
-                await $`osascript -e 'display notification "${message}" with title "${title}" sound name "Glass"'`;
-              '' else ''
-                // WSL/Linux Notification via PowerShell bridge
-                await $`powershell.exe -Command "[System.Media.SystemSounds]::Asterisk.Play()"`.nothrow();
-                const psCommand = `
-                  [void] [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');
-                  $notification = New-Object System.Windows.Forms.NotifyIcon;
-                  $notification.Icon = [System.Drawing.SystemIcons]::Information;
-                  $notification.BalloonTipTitle = ' ${title}';
-                  $notification.BalloonTipText = ' ${message}';
-                  $notification.Visible = $True;
-                  $notification.ShowBalloonTip(5000);
-                `;
-                await $`powershell.exe -Command "${psCommand.replace(/\n/g, '')}"`.nothrow();
-              ''}
-  # Notifier plugin
-  notifierPlugin;
+            ${if pkgs.stdenv.isDarwin then ''
+              // macOS Notification - escaped for security
+              await $`osascript -e 'display notification "${builtins.replaceStrings ["'"] ["\u0027\u0027"] message}" with title "${builtins.replaceStrings ["'"] ["\u0027\u0027"] title}" sound name "Glass"'`;
+            '' else ''
+              // WSL/Linux Notification via PowerShell bridge
+              await $`powershell.exe -Command "[System.Media.SystemSounds]::Asterisk.Play()"`.nothrow();
+              const psCommand = `
+                [void] [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');
+                $notification = New-Object System.Windows.Forms.NotifyIcon;
+                $notification.Icon = [System.Drawing.SystemIcons]::Information;
+                $notification.BalloonTipTitle = '${title}';
+                $notification.BalloonTipText = '${message}';
+                $notification.Visible = $True;
+                $notification.ShowBalloonTip(5000);
+              `;
+              await $`powershell.exe -Command "${psCommand.replace(/\n/g, '')}"`.nothrow();
+            ''}
+          }
+        },
+      }
+    }
+  '';
+
+  # Configure opencode to load the plugin
+  xdg.configFile."opencode/opencode.json".text = builtins.toJSON {
+    plugin = [ "./plugins/notifier.ts" ];
+  };
 }
           },
         }
