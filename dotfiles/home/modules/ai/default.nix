@@ -34,6 +34,13 @@ let
         "hashicorp/terraform-mcp-server"
       ];
     };
+    shadcn = {
+      command = "npx";
+      args = [
+        "shadcn@latest"
+        "mcp"
+      ];
+    };
   };
 
   # opencode format: { "mcp": { "name": { "type": "local", "command": [...] } } }
