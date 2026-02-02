@@ -102,7 +102,7 @@ let
       formatting = "use markdown, prefer code examples";
       commits = "conventional commits, signed, with DCO sign-off (-s)";
       testing = "write tests for new functionality";
-      prs = "create PRs against main using gh CLI, monitor for ci/cd pipelines";
+      prs = "NEVER commit to main/master/default branch. Always prefer PRs against main using gh CLI, monitor for ci/cd pipelines";
     };
   };
 
