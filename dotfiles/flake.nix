@@ -43,7 +43,8 @@
         (final: prev: {
           # use as pkgs.unstable.<pkg> in modules
           unstable = import nixpkgs-unstable {
-            inherit (prev) system config;
+            inherit (prev) config;
+            system = prev.stdenv.hostPlatform.system;
             overlays = import ./pkgs/overlays.nix { inherit opencode; };
           };
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };

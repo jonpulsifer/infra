@@ -3,7 +3,7 @@
 [
   # Always use latest opencode from upstream flake
   (final: prev: {
-    opencode = opencode.packages.${prev.system}.default;
+    opencode = opencode.packages.${prev.stdenv.hostPlatform.system}.default;
   })
 
   # gemini-cli-bin: override to latest release from GitHub
