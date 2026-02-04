@@ -67,7 +67,10 @@ in
     };
   };
 
-  programs.mise.enable = true;
+  programs.mise = {
+    enable = true;
+    package = pkgs.unstable.mise;
+  };
 
   programs.ssh.enable = true;
   programs.ssh.extraConfig = ''
