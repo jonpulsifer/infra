@@ -13,7 +13,7 @@
       version = "0.27.1";
       src = prev.fetchurl {
         url = "https://github.com/google-gemini/gemini-cli/releases/download/v${version}/gemini.js";
-        hash = "sha256-ziekfcVXs1t7/MqeEaXUYS5p1CGpoxeE6qzaOTgQU0E=";
+        hash = "sha256-1mLXLkJd+KFViTkh5Hx/zqCC2BL+pF+FbVt68zGwN9s=";
       };
 
       installPhase = ''
