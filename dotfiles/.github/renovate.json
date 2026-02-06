@@ -13,7 +13,9 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["^pkgs/overlays\\.nix$"],
+      "managerFilePatterns": [
+        "/^pkgs/overlays\\.nix$/"
+      ],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>[^\\s]+)\\s+depName=(?<depName>[^\\s]+)\\s*\\n\\s*version\\s*=\\s*\"(?<currentValue>[^\"]+)\""
       ],
@@ -23,18 +25,28 @@
   "packageRules": [
     {
       "description": "Automerge minor and patch updates for GitHub Actions",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
       "automerge": true
     },
     {
       "description": "Automerge flake.lock updates",
-      "matchManagers": ["nix"],
+      "matchManagers": [
+        "nix"
+      ],
       "automerge": true
     },
     {
       "description": "Update gemini-cli-bin version",
-      "matchPackageNames": ["google-gemini/gemini-cli"],
+      "matchPackageNames": [
+        "google-gemini/gemini-cli"
+      ],
       "versioning": "semver",
       "extractVersion": "^v(?<version>.*)$",
       "automerge": true
