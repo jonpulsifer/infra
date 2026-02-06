@@ -10,7 +10,7 @@
   (final: prev: {
     gemini-cli-bin = prev.gemini-cli-bin.overrideAttrs (oldAttrs: rec {
       # renovate: datasource=github-releases depName=google-gemini/gemini-cli
-      version = "0.27.1";
+      version = "0.27.2";
       src = prev.fetchurl {
         url = "https://github.com/google-gemini/gemini-cli/releases/download/v${version}/gemini.js";
         hash = "sha256-1mLXLkJd+KFViTkh5Hx/zqCC2BL+pF+FbVt68zGwN9s=";
