@@ -33,11 +33,11 @@
         "opencode": "opencode"
       },
       "locked": {
-        "lastModified": 1770155613,
-        "narHash": "sha256-CoQ/AV7S8Cc+/FPc/Fi6x3g5Ytd8eyP8L7n6czXa54o=",
+        "lastModified": 1770487985,
+        "narHash": "sha256-ng639xWDTMwbY4G0kjnPjHkw3aV+AoIlskJJmDppuEI=",
         "owner": "jonpulsifer",
         "repo": "dotfiles",
-        "rev": "d9e652a0bddf6048d27d580ca728e9c4f207e54b",
+        "rev": "315730e1f3d1adeecd06959d28af4a2da6ff6295",
         "type": "github"
       },
       "original": {
@@ -238,15 +238,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1770056153,
-        "narHash": "sha256-RCNpAX5dZQUgSZoIbs+bYU1GEbTBiAxieRohQOWsvDw=",
+        "lastModified": 1770317334,
+        "narHash": "sha256-H5D1uUi/5EUPheNZSPuRaRRcFF9n4MEcT7ToIejGESo=",
         "owner": "anomalyco",
         "repo": "opencode",
-        "rev": "b9aad20be651050880bf2bc3b4c857f16a970402",
+        "rev": "a0bc65621532a5dfcd41fa08d62dbcaf093a924d",
         "type": "github"
       },
       "original": {
         "owner": "anomalyco",
+        "ref": "v1.1.52",
         "repo": "opencode",
         "type": "github"
       }
