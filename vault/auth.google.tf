@@ -1,4 +1,4 @@
-data "onepassword_item" "google_oauth_client" {
+ephemeral "onepassword_item" "google_oauth_client" {
   vault = local.vault_id
   uuid  = "ynzbgrzrq3enshs37j72g7enhe"
 }
@@ -8,8 +8,8 @@ resource "vault_jwt_auth_backend" "google" {
   path               = "google"
   type               = "oidc"
   oidc_discovery_url = "https://accounts.google.com"
-  oidc_client_id     = data.onepassword_item.google_oauth_client.username
-  oidc_client_secret = data.onepassword_item.google_oauth_client.password
+  oidc_client_id     = ephemeral.onepassword_item.google_oauth_client.username
+  oidc_client_secret = ephemeral.onepassword_item.google_oauth_client.password
   default_role       = "google-default"
   tune {
     allowed_response_headers     = []
@@ -40,6 +40,6 @@ resource "vault_jwt_auth_backend_role" "google_default" {
     "http://localhost:8250/oidc/callback",
   ]
   user_claim           = "sub"
-  bound_audiences      = [data.onepassword_item.google_oauth_client.username]
+  bound_audiences      = [ephemeral.onepassword_item.google_oauth_client.username]
   verbose_oidc_logging = true
 }

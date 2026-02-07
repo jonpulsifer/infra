@@ -2,7 +2,7 @@ locals {
   vault_id = "ib23znjeikv74p37f6mbfk7uya"
 }
 
-data "onepassword_item" "vault" {
+ephemeral "onepassword_item" "vault" {
   vault = local.vault_id
   uuid  = "jjojlizpb5p4slytyw2a4llx3m"
 }
@@ -10,10 +10,10 @@ data "onepassword_item" "vault" {
 provider "vault" {
   # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
   auth_login_userpass {
-    username = data.onepassword_item.vault.username
-    password = data.onepassword_item.vault.password
+    username = ephemeral.onepassword_item.vault.username
+    password = ephemeral.onepassword_item.vault.password
   }
-  address            = data.onepassword_item.vault.url # VAULT_ADDR
+  address            = ephemeral.onepassword_item.vault.url # VAULT_ADDR
   add_address_to_env = true
   skip_tls_verify    = true
 }
