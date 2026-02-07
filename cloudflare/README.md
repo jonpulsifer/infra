@@ -13,8 +13,7 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.16.0 |
-| <a name="provider_github"></a> [github](#provider\_github) | 6.10.2 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.1.2 |
+| <a name="provider_github"></a> [github](#provider\_github) | 6.11.0 |
 
 ## Modules
 
@@ -43,7 +42,6 @@
 | [cloudflare_zone_setting.wishin_app](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/zone_setting) | resource |
 | [cloudflare_account.fml](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/data-sources/account) | data source |
 | [github_ip_ranges.this](https://registry.terraform.io/providers/integrations/github/latest/docs/data-sources/ip_ranges) | data source |
-| [onepassword_item.cloudflare_api_token](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
 
 ## Inputs
 

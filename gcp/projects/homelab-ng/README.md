@@ -16,7 +16,6 @@
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.16.0 |
 | <a name="provider_google"></a> [google](#provider\_google) | 7.18.0 |
 | <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.18.0 |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.1.2 |
 
 ## Modules
 
@@ -87,7 +86,6 @@
 | [google_iam_policy.github_actions](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/iam_policy) | data source |
 | [google_iam_policy.terraform_token_creator](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/iam_policy) | data source |
 | [google_storage_bucket_objects.files](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_bucket_objects) | data source |
-| [onepassword_item.cloudflare_api_token](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
 
 ## Inputs
 
