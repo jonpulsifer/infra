@@ -42,13 +42,13 @@ locals {
   vault_id = "ib23znjeikv74p37f6mbfk7uya"
 }
 
-data "onepassword_item" "cloudflare_api_token" {
+ephemeral "onepassword_item" "cloudflare_api_token" {
   vault = local.vault_id
   uuid  = "3x5gu5niywi6iza3jxxny7ifsy"
 }
 provider "cloudflare" {
   # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer --reveal)
-  api_token = data.onepassword_item.cloudflare_api_token.password
+  api_token = ephemeral.onepassword_item.cloudflare_api_token.password
 }
 
 terraform {

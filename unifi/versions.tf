@@ -28,17 +28,17 @@ locals {
   vault_id = "ib23znjeikv74p37f6mbfk7uya"
 }
 
-data "onepassword_item" "cloudflare_api_token" {
+ephemeral "onepassword_item" "cloudflare_api_token" {
   vault = local.vault_id
   uuid  = "3x5gu5niywi6iza3jxxny7ifsy"
 }
 
-data "onepassword_item" "unifi" {
+ephemeral "onepassword_item" "unifi" {
   vault = local.vault_id
   uuid  = "lb532zq5efzs3y3xlfbdk2kace"
 }
 
-data "onepassword_item" "vault" {
+ephemeral "onepassword_item" "vault" {
   vault = local.vault_id
   uuid  = "jjojlizpb5p4slytyw2a4llx3m"
 }
@@ -49,15 +49,15 @@ provider "onepassword" {
 
 provider "cloudflare" {
   # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
-  api_token = data.onepassword_item.cloudflare_api_token.password
+  api_token = ephemeral.onepassword_item.cloudflare_api_token.password
 }
 
 provider "unifi" {
   username = "terraform"
-  password = data.onepassword_item.unifi.password
+  password = ephemeral.onepassword_item.unifi.password
   # password = "" or UNIFI_PASSWORD env
   # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
-  api_url        = data.onepassword_item.unifi.url
+  api_url        = ephemeral.onepassword_item.unifi.url
   allow_insecure = true
   site           = "default"
 }
@@ -65,10 +65,10 @@ provider "unifi" {
 provider "vault" {
   # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
   auth_login_userpass {
-    username = data.onepassword_item.vault.username
-    password = data.onepassword_item.vault.password
+    username = ephemeral.onepassword_item.vault.username
+    password = ephemeral.onepassword_item.vault.password
   }
-  address            = data.onepassword_item.vault.url # VAULT_ADDR
+  address            = ephemeral.onepassword_item.vault.url # VAULT_ADDR
   add_address_to_env = true
   skip_tls_verify    = true
 }
