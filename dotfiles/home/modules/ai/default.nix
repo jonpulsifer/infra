@@ -50,7 +50,7 @@ let
       type = "local";
       command = [ server.command ] ++ server.args;
     }) mcpServers;
-    plugin = [ "./plugins/notifier.ts" ];
+    plugin = [ "./plugins/peon-ping.ts" ];
   };
 
   # Cursor/Gemini format: { "mcpServers": { "name": { "command": "...", "args": [...] } } }
