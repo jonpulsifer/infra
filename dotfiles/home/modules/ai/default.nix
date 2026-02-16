@@ -41,6 +41,14 @@ let
         "mcp"
       ];
     };
+    linear = {
+      command = "npx";
+      args = [
+        "-y"
+        "mcp-remote"
+        "https://mcp.linear.app/mcp"
+      ];
+    };
   };
 
   # opencode format: { "mcp": { "name": { "type": "local", "command": [...] } } }
