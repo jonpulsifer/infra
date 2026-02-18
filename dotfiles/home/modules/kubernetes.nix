@@ -17,9 +17,9 @@ in
 {
   home = {
     packages =
-      with pkgs.unstable;
+      with pkgs;
       [
-        argocd
+        # argocd
         cilium-cli
         fluxcd
         grafana-loki

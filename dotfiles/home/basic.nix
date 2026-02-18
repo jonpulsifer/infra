@@ -60,13 +60,13 @@
   ];
 
   programs.home-manager.enable = true;
+  programs.zsh.dotDir = "${config.xdg.configHome}/zsh";
   manual.manpages.enable = false;
   xdg.enable = true;
 
-  # TODO move to programs.delta on next hm release
-  programs.git.delta = {
+  programs.delta = {
     enable = true;
-    # enableGitIntegration = true;
+    enableGitIntegration = true;
     options = {
       navigate = true;
       side-by-side = true;

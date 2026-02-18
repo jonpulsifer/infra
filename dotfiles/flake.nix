@@ -2,15 +2,18 @@
   description = "jonpulsifer/dotfiles lol"; # managed with ❤️ and nix
 
   inputs = {
-    home-manager.url = "github:nix-community/home-manager/release-25.05";
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    home-manager.url = "github:nix-community/home-manager/master";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
-    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     gh-aipr.url = "github:wannabehero/gh-aipr";
     gh-aipr.inputs.nixpkgs.follows = "nixpkgs";
-    # Always use latest opencode from upstream
-    opencode.url = "github:anomalyco/opencode/v1.1.52";
-    opencode.inputs.nixpkgs.follows = "nixpkgs-unstable";
+    llm-agents.url = "github:numtide/llm-agents.nix";
+    llm-agents.inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  nixConfig = {
+    extra-substituters = [ "https://cache.numtide.com" ];
+    extra-trusted-public-keys = [ "niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=" ];
   };
 
   outputs =
@@ -18,15 +21,22 @@
       self,
       home-manager,
       nixpkgs,
-      nixpkgs-unstable,
       gh-aipr,
-      opencode,
+      llm-agents,
     }:
     let
       systems = [
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
+      ];
+
+      overlays = [
+        llm-agents.overlays.default
+        gh-aipr.overlays.pkgs
+        (final: prev: {
+          shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
+        })
       ];
 
       pkgsFor =
@@ -37,19 +47,6 @@
         };
 
       pkgsBySystem = nixpkgs.lib.genAttrs systems pkgsFor;
-
-      overlays = [
-        gh-aipr.overlays.pkgs
-        (final: prev: {
-          # use as pkgs.unstable.<pkg> in modules
-          unstable = import nixpkgs-unstable {
-            inherit (prev) config;
-            system = prev.stdenv.hostPlatform.system;
-            overlays = import ./pkgs/overlays.nix { inherit opencode; };
-          };
-          shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
-        })
-      ];
 
       mkHome =
         system: modules:
@@ -70,7 +67,6 @@
       };
     in
     {
-      # nix run .#basic
       packages = {
         x86_64-linux.default = homeConfigurations.full.activationPackage;
         x86_64-linux.basic = homeConfigurations.basic.activationPackage;
@@ -79,12 +75,10 @@
         aarch64-darwin.homebook = homeConfigurations.homebook.activationPackage;
       };
 
-      # expose full package sets so you can do
-      # nix run .#legacyPackages.$system.<pkg>
       legacyPackages = pkgsBySystem;
 
-      # export home-manager modules for use in other systems
-      nixosModules = {
+      # home-manager modules, not NixOS modules
+      homeModules = {
         default = import ./home/basic.nix;
         basic = import ./home/basic.nix;
         full = import ./home/home.nix;

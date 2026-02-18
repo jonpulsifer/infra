@@ -36,7 +36,7 @@ in
     ghttp = "http --header \"Authorization: Bearer $(gcloud auth print-access-token)\"";
     gcurl = "curl -H \"Authorization: Bearer $(gcloud auth print-access-token)\"";
   };
-  home.packages = with pkgs.unstable; [
+  home.packages = with pkgs; [
     google-cloud-sql-proxy
     # nodePackages.firebase-tools
     # openjdk19

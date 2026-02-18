@@ -25,13 +25,12 @@ in
       [
         _1password-cli
         age
+        conftest
         postgresql
         sops
         vault
       ]
-      ++ (with pkgs.unstable; [
-        conftest
-      ])
+
       ++ lib.optionals isLinux [ wol ]
       ++ lib.optionals isDarwin [ ];
 

@@ -49,6 +49,13 @@ let
         "https://mcp.linear.app/mcp"
       ];
     };
+    next-devtools = {
+      command = "npx";
+      args = [
+        "-y"
+        "next-devtools-mcp@latest"
+      ];
+    };
   };
 
   # opencode format: { "mcp": { "name": { "type": "local", "command": [...] } } }
@@ -157,9 +164,11 @@ let
 
 in
 {
-  home.packages = with pkgs.unstable; [
+  home.packages = with pkgs.llm-agents; [
+    claude-code
+    cursor-agent
     opencode
-    gemini-cli-bin
+    gemini-cli
   ];
 
   # opencode config, skills, and commands (primary tool)
@@ -180,5 +189,6 @@ in
   home.file.".cursor/skills/lint-format/SKILL.md".text = lintFormatSkill;
 
   # Notifier plugin configuration
-  xdg.configFile."opencode/plugins/notifier.ts".source = ./plugins/notifier.ts;
+  xdg.configFile."opencode/plugins/peon-ping.ts".source = ./plugins/peon-ping.ts;
+
 }
