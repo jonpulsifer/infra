@@ -12,7 +12,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.16.0 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.17.0 |
 | <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.12 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 5.7.0 |
 
