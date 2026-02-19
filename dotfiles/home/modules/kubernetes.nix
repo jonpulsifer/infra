@@ -25,6 +25,7 @@ in
         grafana-loki
         k6
         k9s
+        kind
         krew
         kubecolor
         kubectl

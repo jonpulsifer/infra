@@ -18,7 +18,6 @@ in
     modules/ssh.nix
     modules/terraform.nix
   ];
-
   home = rec {
     packages =
       with pkgs;

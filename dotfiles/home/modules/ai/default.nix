@@ -5,7 +5,7 @@
   ...
 }:
 let
-  inherit (lib) concatStringsSep mapAttrs;
+  inherit (lib) concatStringsSep foldl' mapAttrs mapAttrs' nameValuePair;
 
   # Single source of truth for MCP servers
   mcpServers = {
@@ -78,6 +78,9 @@ let
     # preserve existing auth settings
     security.auth.selectedType = "oauth-personal";
   };
+
+  # Claude Code: mcpServers merged into ~/.claude.json via activation script
+  claudeCodeMcpServersJson = builtins.toJSON mcpServers;
 
   # Single source of truth for AI assistant context
   context = {
@@ -162,6 +165,43 @@ let
   prSkill = builtins.readFile ./skills/submit-pr.md;
   prCommand = builtins.readFile ./commands/pr.md;
 
+  # Canonical skills written to ~/.agents/skills/ and symlinked into each tool
+  skills = {
+    "personal-context" = personalSkill;
+    "submit-pr" = prSkill;
+    "security-review" = securityReviewSkill;
+    "code-review" = codeReviewSkill;
+    "lint-format" = lintFormatSkill;
+  };
+
+  homeDir = config.home.homeDirectory;
+
+  # home.file paths (relative to ~)
+  toolSkillPaths = [
+    ".cursor/skills"
+    ".claude/skills"
+  ];
+
+  # xdg.configFile paths (relative to ~/.config)
+  xdgToolSkillPaths = [
+    "opencode/skills"
+  ];
+
+  # Write each skill once to ~/.agents/skills/{name}/SKILL.md
+  canonicalSkillFiles = mapAttrs' (name: text:
+    nameValuePair ".agents/skills/${name}/SKILL.md" { inherit text; }
+  ) skills;
+
+  # Generate directory symlinks: {prefix}/{name} -> ~/.agents/skills/{name}
+  mkToolSymlinks = prefix: mapAttrs' (name: _:
+    nameValuePair "${prefix}/${name}" {
+      source = config.lib.file.mkOutOfStoreSymlink
+        "${homeDir}/.agents/skills/${name}";
+    }
+  ) skills;
+
+  agentSkillsScript = pkgs.writeShellScriptBin "agent-skills" (builtins.readFile ./scripts/agent-skills.sh);
+
 in
 {
   home.packages = with pkgs.llm-agents; [
@@ -169,26 +209,33 @@ in
     cursor-agent
     opencode
     gemini-cli
-  ];
+  ] ++ [ agentSkillsScript ];
 
-  # opencode config, skills, and commands (primary tool)
-  xdg.configFile."opencode/opencode.json".text = builtins.toJSON opencodeConfig;
-  xdg.configFile."opencode/skills/personal-context/SKILL.md".text = personalSkill;
-  xdg.configFile."opencode/skills/submit-pr/SKILL.md".text = prSkill;
-  xdg.configFile."opencode/skills/security-review/SKILL.md".text = securityReviewSkill;
-  xdg.configFile."opencode/skills/code-review/SKILL.md".text = codeReviewSkill;
-  xdg.configFile."opencode/skills/lint-format/SKILL.md".text = lintFormatSkill;
-  xdg.configFile."opencode/commands/pr.md".text = prCommand;
+  # Canonical skills in ~/.agents/skills/ + symlinks into each tool's skill directory
+  home.file = canonicalSkillFiles
+    // foldl' (acc: path: acc // mkToolSymlinks path) {} toolSkillPaths
+    // {
+      ".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
+    };
 
-  # Cursor skills and MCP config
-  home.file.".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
-  home.file.".cursor/skills/personal-context/SKILL.md".text = personalSkill;
-  home.file.".cursor/skills/submit-pr/SKILL.md".text = prSkill;
-  home.file.".cursor/skills/security-review/SKILL.md".text = securityReviewSkill;
-  home.file.".cursor/skills/code-review/SKILL.md".text = codeReviewSkill;
-  home.file.".cursor/skills/lint-format/SKILL.md".text = lintFormatSkill;
+  xdg.configFile = foldl' (acc: path: acc // mkToolSymlinks path) {} xdgToolSkillPaths
+    // {
+      "opencode/opencode.json".text = builtins.toJSON opencodeConfig;
+      "opencode/commands/pr.md".text = prCommand;
+      "opencode/plugins/peon-ping.ts".source = ./plugins/peon-ping.ts;
+    };
 
-  # Notifier plugin configuration
-  xdg.configFile."opencode/plugins/peon-ping.ts".source = ./plugins/peon-ping.ts;
+  # Claude Code: merge mcpServers into ~/.claude.json (can't overwrite, file has runtime state)
+  home.activation.claudeCodeMcp = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    CLAUDE_CONFIG="$HOME/.claude.json"
+    MCP_SERVERS='${claudeCodeMcpServersJson}'
+
+    if [ -f "$CLAUDE_CONFIG" ]; then
+      ${pkgs.jq}/bin/jq --argjson servers "$MCP_SERVERS" '.mcpServers = $servers' \
+        "$CLAUDE_CONFIG" > "$CLAUDE_CONFIG.tmp" && mv "$CLAUDE_CONFIG.tmp" "$CLAUDE_CONFIG"
+    else
+      echo "{\"mcpServers\": $MCP_SERVERS}" > "$CLAUDE_CONFIG"
+    fi
+  '';
 
 }

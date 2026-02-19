@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nix eval --raw --quiet 'builtins.readFile \\(builtins.fetchurl https://api.github.com/repos/numtide/llm-agents.nix/contents/README.md\\)')",
+      "Bash(nix search:*)",
+      "Bash(nix eval:*)",
+      "Bash(git log:*)"
+    ]
+  }
+}

@@ -13,6 +13,8 @@
     modules/vim
   ];
 
+  
+
   home = {
     username = lib.mkDefault "jawn";
     homeDirectory = lib.mkDefault "/home/${config.home.username}";
