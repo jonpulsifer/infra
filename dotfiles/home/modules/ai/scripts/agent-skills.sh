@@ -46,7 +46,7 @@ discover_skills() {
       [ "$name" = ".system" ] && continue
       if [ -z "${seen[$name]:-}" ]; then
         seen[$name]=1
-        echo "$skill_dir"
+        echo "${skill_dir%/}"
       fi
     done
   done
