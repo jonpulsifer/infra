@@ -5,7 +5,13 @@
   ...
 }:
 let
-  inherit (lib) concatStringsSep foldl' mapAttrs mapAttrs' nameValuePair;
+  inherit (lib)
+    concatStringsSep
+    foldl'
+    mapAttrs
+    mapAttrs'
+    nameValuePair
+    ;
 
   # Single source of truth for MCP servers
   mcpServers = {
@@ -56,15 +62,22 @@ let
         "next-devtools-mcp@latest"
       ];
     };
+    notion = {
+      type = "http";
+      url = "https://mcp.notion.com/mcp";
+    };
   };
 
   # opencode format: { "mcp": { "name": { "type": "local", "command": [...] } } }
   opencodeConfig = {
     "$schema" = "https://opencode.ai/config.json";
-    mcp = mapAttrs (_: server: {
-      type = "local";
-      command = [ server.command ] ++ server.args;
-    }) mcpServers;
+    mcp = mapAttrs (
+      _: server:
+      if server ? url then
+        { type = "remote"; url = server.url; }
+      else
+        { type = "local"; command = [ server.command ] ++ server.args; }
+    ) mcpServers;
     plugin = [ "./plugins/peon-ping.ts" ];
   };
 
@@ -188,42 +201,64 @@ let
   ];
 
   # Write each skill once to ~/.agents/skills/{name}/SKILL.md
-  canonicalSkillFiles = mapAttrs' (name: text:
-    nameValuePair ".agents/skills/${name}/SKILL.md" { inherit text; }
+  canonicalSkillFiles = mapAttrs' (
+    name: text: nameValuePair ".agents/skills/${name}/SKILL.md" { inherit text; }
   ) skills;
 
   # Generate directory symlinks: {prefix}/{name} -> ~/.agents/skills/{name}
-  mkToolSymlinks = prefix: mapAttrs' (name: _:
-    nameValuePair "${prefix}/${name}" {
-      source = config.lib.file.mkOutOfStoreSymlink
-        "${homeDir}/.agents/skills/${name}";
-    }
-  ) skills;
+  mkToolSymlinks =
+    prefix:
+    mapAttrs' (
+      name: _:
+      nameValuePair "${prefix}/${name}" {
+        source = config.lib.file.mkOutOfStoreSymlink "${homeDir}/.agents/skills/${name}";
+      }
+    ) skills;
 
-  agentSkillsScript = pkgs.writeShellScriptBin "agent-skills" (builtins.readFile ./scripts/agent-skills.sh);
+  agentSkillsScript = pkgs.writeShellScriptBin "agent-skills" (
+    builtins.readFile ./scripts/agent-skills.sh
+  );
+
+  statuslineScript = builtins.readFile ./scripts/statusline.sh;
+
+  # Claude Code settings merged into ~/.claude/settings.json on activation
+  claudeCodeSettings = {
+    statusLine = {
+      type = "command";
+      command = "${homeDir}/.claude/statusline.sh";
+    };
+  };
+  claudeCodeSettingsJson = builtins.toJSON claudeCodeSettings;
 
 in
 {
-  home.packages = with pkgs.llm-agents; [
-    claude-code
-    cursor-agent
-    opencode
-    gemini-cli
-  ] ++ [ agentSkillsScript ];
+  home.packages =
+    with pkgs.llm-agents;
+    [
+      claude-code
+      cursor-agent
+      opencode
+      gemini-cli
+    ]
+    ++ [ agentSkillsScript ];
 
   # Canonical skills in ~/.agents/skills/ + symlinks into each tool's skill directory
-  home.file = canonicalSkillFiles
-    // foldl' (acc: path: acc // mkToolSymlinks path) {} toolSkillPaths
+  home.file =
+    canonicalSkillFiles
+    // foldl' (acc: path: acc // mkToolSymlinks path) { } toolSkillPaths
     // {
       ".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
+      ".claude/statusline.sh" = {
+        text = statuslineScript;
+        executable = true;
+      };
     };
 
-  xdg.configFile = foldl' (acc: path: acc // mkToolSymlinks path) {} xdgToolSkillPaths
-    // {
-      "opencode/opencode.json".text = builtins.toJSON opencodeConfig;
-      "opencode/commands/pr.md".text = prCommand;
-      "opencode/plugins/peon-ping.ts".source = ./plugins/peon-ping.ts;
-    };
+  xdg.configFile = foldl' (acc: path: acc // mkToolSymlinks path) { } xdgToolSkillPaths // {
+    "opencode/opencode.json".text = builtins.toJSON opencodeConfig;
+    "opencode/commands/pr.md".text = prCommand;
+    "opencode/plugins/peon-ping.ts".source = ./plugins/peon-ping.ts;
+  };
 
   # Claude Code: merge mcpServers into ~/.claude.json (can't overwrite, file has runtime state)
   home.activation.claudeCodeMcp = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -235,6 +270,20 @@ in
         "$CLAUDE_CONFIG" > "$CLAUDE_CONFIG.tmp" && mv "$CLAUDE_CONFIG.tmp" "$CLAUDE_CONFIG"
     else
       echo "{\"mcpServers\": $MCP_SERVERS}" > "$CLAUDE_CONFIG"
+    fi
+  '';
+
+  # Claude Code: merge statusLine config into ~/.claude/settings.json
+  home.activation.claudeCodeSettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+    NEW_SETTINGS='${claudeCodeSettingsJson}'
+
+    if [ -f "$CLAUDE_SETTINGS" ]; then
+      ${pkgs.jq}/bin/jq --argjson new "$NEW_SETTINGS" '. * $new' \
+        "$CLAUDE_SETTINGS" > "$CLAUDE_SETTINGS.tmp" && mv "$CLAUDE_SETTINGS.tmp" "$CLAUDE_SETTINGS"
+    else
+      mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+      echo "$NEW_SETTINGS" > "$CLAUDE_SETTINGS"
     fi
   '';
 

@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# yeet: AI-powered commit, push, and PR workflow
+# Usage: yeet [--no-pr] [--dry-run]
+
+MAX_DIFF_LINES=8000
+NO_PR=false
+DRY_RUN=false
+
+FALLBACK_MESSAGES=(
+  "fix: patched it (again 😅)"
+  "chore: rearranged the chaos 🔄"
+  "feat: 🌟 now with extra pizzazz 🌟"
+  "refactor: (*╯°□°)╯︵ ┻━┻ unflipped it"
+  "style: ✨ shiny and new! ✨"
+  "docs: added some words 📖 (useful? maybe)"
+  "test: is it soup yet? 🍲"
+  "perf: 🚀 engage hyperdrive!"
+  "build: 🤞 fingers crossed, again"
+  "ci: ∠( ᐛ 」∠)＿ nailed it, probably"
+  "fix: \"ctrl+z\" but in real life"
+  "feat: 🐒 now with more monkey business"
+  "refactor: ⛑️ cleaned up after the code explosion"
+  "style: 🎨 Picasso would be proud"
+  "docs: added ✨sparkly✨ details"
+  "test: ᕕ(╯°□°)ᕗ stress-tested for rage quits"
+  "perf: faster than light (or my internet)"
+  "build: (╯°□°）╯︵ ┻━┻ re-flipped for luck"
+  "ci: 😬 oh no, what now?"
+  "fix: 🐛 squashed it (RIP bug)"
+  "chore: 🍪 reward yourself with cookies!"
+  "feat: 👽 we come in peace (mostly)"
+  "refactor: 🧹 sweeping up the spaghetti code"
+  "style: so fresh, so clean 🧼"
+  "docs: ✍️ a true masterpiece of documentation"
+  "test: 🔥 stress-tested with fire and tears"
+  "perf: 🚗 upgraded to code 2.0 turbo"
+  "build: who needs instructions anyway? 🙃"
+  "ci: 🧙‍♂️ wizard-level debugging"
+  "fix: patched it... or did I? 🤔"
+)
+
+err()  { echo "yeet: $*" >&2; }
+info() { echo "yeet: $*" >&2; }
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-pr)  NO_PR=true ;;
+    --dry-run) DRY_RUN=true ;;
+    -h|--help)
+      echo "Usage: yeet [--no-pr] [--dry-run]"
+      echo "  AI-powered commit, push, and PR creation"
+      exit 0
+      ;;
+    *) err "unknown flag: $arg"; exit 1 ;;
+  esac
+done
+
+random_message() {
+  echo "${FALLBACK_MESSAGES[$((RANDOM % ${#FALLBACK_MESSAGES[@]}))]}"
+}
+
+ai_generate() {
+  local prompt="$1"
+  local input="$2"
+  local result=""
+
+  if command -v claude &>/dev/null; then
+    result=$(echo "$input" | env -u CLAUDECODE claude -p \
+      --model haiku \
+      --no-session-persistence \
+      "$prompt" 2>/dev/null) || true
+  fi
+
+  if [[ -z "$result" ]] && command -v gemini &>/dev/null; then
+    result=$(echo "$input" | gemini -p "$prompt" 2>/dev/null) || true
+  fi
+
+  echo "$result"
+}
+
+generate_commit_message() {
+  local diff="$1"
+  local prompt
+  prompt="Generate a single-line conventional commit message for this diff.
+Use the format: type(scope): description
+Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore
+Keep it under 72 characters. Reply with ONLY the commit message, no markdown, no backticks, no quotes."
+
+  local msg
+  msg=$(ai_generate "$prompt" "$diff")
+
+  # strip any surrounding quotes or backticks the model might add
+  msg=$(echo "$msg" | sed 's/^[`"'\'']*//;s/[`"'\'']*$//' | head -1)
+
+  if [[ "$msg" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\(.+\))?:\ .+ ]]; then
+    echo "$msg"
+  fi
+}
+
+find_pr_template() {
+  local root
+  root=$(git rev-parse --show-toplevel)
+  local candidates=(
+    "$root/.github/PULL_REQUEST_TEMPLATE.md"
+    "$root/.github/pull_request_template.md"
+    "$root/.github/PULL_REQUEST_TEMPLATE"
+    "$root/docs/pull_request_template.md"
+    "$root/PULL_REQUEST_TEMPLATE.md"
+  )
+  for f in "${candidates[@]}"; do
+    if [[ -f "$f" ]]; then
+      cat "$f"
+      return
+    fi
+  done
+}
+
+generate_pr_body() {
+  local diff="$1"
+  local commits="$2"
+  local template="${3:-}"
+
+  local prompt
+  if [[ -n "$template" ]]; then
+    prompt="Fill in this PR template based on the diff and commits. Keep it concise. Reply with ONLY the filled-in template.
+
+Template:
+$template"
+  else
+    prompt="Generate a PR description with these sections. Keep it concise. Reply with ONLY the markdown body.
+
+### Motivation
+
+Why this change was made (1-2 sentences)
+
+### What changed
+
+Bullet list of changes
+
+### Expected outcome
+
+What should happen after merging (1-2 sentences)"
+  fi
+
+  ai_generate "$prompt" "Commits:
+$commits
+
+Diff:
+$diff"
+}
+
+# pre-flight
+git rev-parse --is-inside-work-tree &>/dev/null || { err "not in a git repo"; exit 1; }
+
+has_staged=no
+git diff --cached --quiet 2>/dev/null || has_staged=yes
+has_unstaged=no
+git diff --quiet 2>/dev/null || has_unstaged=yes
+has_untracked=$(git ls-files --others --exclude-standard | head -1)
+
+if [[ "$has_staged" == "no" && "$has_unstaged" == "no" && -z "$has_untracked" ]]; then
+  err "nothing to yeet (working tree clean)"
+  exit 1
+fi
+
+# stage if needed
+if [[ "$has_staged" == "no" ]]; then
+  info "staging all changes..."
+  git add -A
+fi
+
+# prepare diff for AI
+diff_full=$(git diff --cached)
+diff_lines=$(echo "$diff_full" | wc -l | tr -d ' ')
+
+if [[ "$diff_lines" -gt "$MAX_DIFF_LINES" ]]; then
+  diff_stat=$(git diff --cached --stat)
+  diff_input="[Diff truncated - ${diff_lines} lines. Stat summary:]
+${diff_stat}
+
+[First ${MAX_DIFF_LINES} lines:]
+$(echo "$diff_full" | head -n "$MAX_DIFF_LINES")"
+  info "diff is ${diff_lines} lines, truncating for AI"
+else
+  diff_input="$diff_full"
+fi
+
+# generate commit message
+info "generating commit message..."
+message=$(generate_commit_message "$diff_input")
+
+if [[ -z "$message" ]]; then
+  message=$(random_message)
+  info "AI unavailable, using fallback: $message"
+else
+  info "$message"
+fi
+
+if [[ "$DRY_RUN" == "true" ]]; then
+  info "[dry-run] would commit: $message"
+  info "[dry-run] would push and create PR"
+  exit 0
+fi
+
+# commit and push
+git commit -s -m "$message"
+info "pushing..."
+git push
+
+if [[ "$NO_PR" == "true" ]]; then
+  exit 0
+fi
+
+# PR creation
+default_branch=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || echo "main")
+current_branch=$(git branch --show-current)
+
+if [[ "$current_branch" == "$default_branch" ]]; then
+  info "on $default_branch, skipping PR (create a feature branch first)"
+  exit 0
+fi
+
+if gh pr view --json number &>/dev/null 2>&1; then
+  pr_url=$(gh pr view --json url -q '.url')
+  info "PR already exists: $pr_url"
+  exit 0
+fi
+
+# generate PR content
+info "generating PR description..."
+commits=$(git log --oneline "${default_branch}..HEAD" 2>/dev/null || git log --oneline -5)
+template=$(find_pr_template)
+pr_body=$(generate_pr_body "$diff_input" "$commits" "$template")
+
+if [[ -z "$pr_body" ]]; then
+  pr_body="### What changed
+- ${commits//$'\n'/$'\n'- }"
+  info "AI unavailable for PR body, using commit log"
+fi
+
+# use commit message as PR title
+pr_title="$message"
+
+info "creating PR..."
+if pr_url=$(gh pr create --title "$pr_title" --body "$pr_body" 2>&1); then
+  info "$pr_url"
+else
+  err "PR creation failed: $pr_url"
+  info "create manually: gh pr create --title \"$pr_title\" --fill"
+  exit 1
+fi

@@ -1,3 +1,5 @@
+# Minimal base: git, nix, tmux, zsh, vim. Personality: bat man, bruh/paths,
+# fzf/bat/delta/btop styling. No JS, cloud, or k8s — those live in full/work.
 {
   lib,
   pkgs,
@@ -12,8 +14,6 @@
     modules/zsh.nix
     modules/vim
   ];
-
-  
 
   home = {
     username = lib.mkDefault "jawn";
@@ -43,22 +43,12 @@
     stateVersion = "25.05";
   };
 
-  # Stable packages - core system tools that rarely change
+  # Bare minimum + shell-utils; heavier tools (dig, mtr, httpie, etc.) in full
   home.packages = with pkgs; [
-    # Basic system utilities - stable and rarely changing
-    dig
-    mtr
-    nano
-    tcpdump
-    unzip
-    wget
-    whois
-    shell-utils
-    httpie
-    jq
     fd
+    jq
     sd
-    xan
+    shell-utils
   ];
 
   programs.home-manager.enable = true;
@@ -94,7 +84,7 @@
     };
   };
 
-  programs.command-not-found.enable = true;
+  programs.command-not-found.enable = false;
 
   programs.fzf = {
     enable = true;

@@ -19,19 +19,18 @@ in
     ./basic.nix
     ./darwin.nix
     modules/go.nix
+    modules/javascript.nix
     modules/kubernetes.nix
     modules/ai
     modules/terraform.nix
   ];
 
   home.username = mkForce username;
-  home.packages =
-    with pkgs;
-    [
-      conftest
-      ffmpeg
-      postgresql
-    ];
+  home.packages = with pkgs; [
+    conftest
+    ffmpeg
+    postgresql
+  ];
 
   # homebrew paths like to be at the top of the path list
   programs.zsh.initContent = lib.mkOrder 100 ''

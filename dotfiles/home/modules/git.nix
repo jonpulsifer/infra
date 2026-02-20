@@ -5,7 +5,6 @@ let
 in
 {
   home.shellAliases = {
-    yeet = "${pkgs.git}/bin/git yeet";
     boop = "${pkgs.git}/bin/git boop";
   };
 
@@ -42,42 +41,6 @@ in
       alias = {
         ad = "add";
         boop = "commit -s --allow-empty -m '🫵 boop'";
-        yeet = ''
-          !commit_messages=(
-            "fix: patched it (again 😅)"
-            "chore: rearranged the chaos 🔄"
-            "feat: 🌟 now with extra pizzazz 🌟"
-            "refactor: (*╯°□°)╯︵ ┻━┻ unflipped it"
-            "style: ✨ shiny and new! ✨"
-            "docs: added some words 📖 (useful? maybe)"
-            "test: is it soup yet? 🍲"
-            "perf: 🚀 engage hyperdrive!"
-            "build: 🤞 fingers crossed, again"
-            "ci: ∠( ᐛ 」∠)＿ nailed it, probably"
-            "fix: \"ctrl+z\" but in real life"
-            "feat: 🐒 now with more monkey business"
-            "refactor: ⛑️ cleaned up after the code explosion"
-            "style: 🎨 Picasso would be proud"
-            "docs: added ✨sparkly✨ details"
-            "test: ᕕ(╯°□°)ᕗ stress-tested for rage quits"
-            "perf: faster than light (or my internet)"
-            "build: (╯°□°）╯︵ ┻━┻ re-flipped for luck"
-            "ci: 😬 oh no, what now?"
-            "fix: 🐛 squashed it (RIP bug)"
-            "chore: 🍪 reward yourself with cookies!"
-            "feat: 👽 we come in peace (mostly)"
-            "refactor: 🧹 sweeping up the spaghetti code"
-            "style: so fresh, so clean 🧼"
-            "docs: ✍️ a true masterpiece of documentation"
-            "test: 🔥 stress-tested with fire and tears"
-            "perf: 🚗 upgraded to code 2.0 turbo"
-            "build: who needs instructions anyway? 🙃"
-            "ci: 🧙‍♂️ wizard-level debugging"
-            "fix: patched it... or did I? 🤔"
-          )
-          message=''${commit_messages[$RANDOM % ''${#commit_messages[@]}]}
-          git commit -sm "$message" && git push
-        '';
         letsgo = "lfg";
         lfg = "!branch=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@'); git checkout $branch && git pull --rebase";
         lol = "log --graph --decorate --pretty=oneline --abbrev-commit --all";
