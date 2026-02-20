@@ -3,3 +3,5 @@ ergodox/build
 nix/config.dev.nix
 secrets/**
 config.nix
+.claude/worktrees/
+.claude/settings.local.json

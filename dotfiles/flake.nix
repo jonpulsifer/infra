@@ -5,8 +5,6 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     home-manager.url = "github:nix-community/home-manager/master";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
-    gh-aipr.url = "github:wannabehero/gh-aipr";
-    gh-aipr.inputs.nixpkgs.follows = "nixpkgs";
     llm-agents.url = "github:numtide/llm-agents.nix";
     llm-agents.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -21,7 +19,6 @@
       self,
       home-manager,
       nixpkgs,
-      gh-aipr,
       llm-agents,
     }:
     let
@@ -33,7 +30,6 @@
 
       overlays = [
         llm-agents.overlays.default
-        gh-aipr.overlays.pkgs
         (final: prev: {
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
         })

@@ -44,7 +44,7 @@ Five home configurations built via `mkHome system modules`:
 | `homebook` | aarch64-darwin   | `home/home.nix` + `home/darwin.nix`  |
 | `work`     | aarch64-darwin   | `home/work.nix`                      |
 
-Overlays applied globally: `llm-agents.nix`, `gh-aipr`, custom `shell-utils`.
+Overlays applied globally: `llm-agents.nix`, custom `shell-utils`.
 
 ### Module Hierarchy
 
