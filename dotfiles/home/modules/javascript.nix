@@ -16,7 +16,6 @@ in
     paths.pnpm
   ];
   home.sessionVariables = {
-    NPM_CONFIG_PREFIX = paths.npm;
     PNPM_HOME = paths.pnpm;
   };
   home.packages = with pkgs; [

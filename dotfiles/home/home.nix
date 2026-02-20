@@ -35,6 +35,7 @@ in
 
     sessionVariables = {
       EDITOR = "cursor";
+      NPM_CONFIG_PREFIX = "$HOME/.npm/bin";
       VAULT_ADDR = "https://vault.lolwtf.ca";
     };
   };
