@@ -8,10 +8,7 @@ in
     boop = "${pkgs.git}/bin/git boop";
   };
 
-  programs.gh = {
-    enable = true;
-    extensions = [ pkgs.gh-aipr ];
-  };
+  programs.gh.enable = true;
 
   programs.git = {
     enable = true;
@@ -98,6 +95,8 @@ in
       ".env.production*"
       "tmp"
       "temp"
+      ".claude/worktrees/"
+      ".claude/settings.local.json"
     ];
   };
 }
