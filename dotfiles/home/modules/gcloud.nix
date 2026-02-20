@@ -1,4 +1,4 @@
-{
+w{
   lib,
   pkgs,
   config,
@@ -6,7 +6,7 @@
 }:
 let
   inherit (lib) mkMerge;
-  components = with pkgs.unstable.google-cloud-sdk.components; [
+  components = with pkgs.google-cloud-sdk.components; [
     cloud-firestore-emulator
     cloud-run-proxy
     cloud_sql_proxy
