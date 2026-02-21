@@ -5,11 +5,15 @@ on:
       - .github/workflows/nix.yaml
       - flake.lock
       - "**/*.nix"
+    branches:
+      - main
   pull_request:
     paths:
       - .github/workflows/nix.yaml
       - flake.lock
       - "**/*.nix"
+    branches:
+      - main
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
