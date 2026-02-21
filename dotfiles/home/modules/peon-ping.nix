@@ -225,10 +225,10 @@ in
         GEMINI_HOOKS=$(${pkgs.jq}/bin/jq -n \
           --arg adapter "$ADAPTER" \
           '{
-            SessionStart: [{matcher: "startup", type: "command", command: ("bash " + $adapter + " SessionStart")}],
-            AfterAgent:   [{matcher: "*", type: "command", command: ("bash " + $adapter + " AfterAgent")}],
-            AfterTool:    [{matcher: "*", type: "command", command: ("bash " + $adapter + " AfterTool")}],
-            Notification: [{matcher: "*", type: "command", command: ("bash " + $adapter + " Notification")}]
+            SessionStart: [{matcher: "startup", hooks: [{type: "command", command: ("bash " + $adapter + " SessionStart")}]}],
+            AfterAgent:   [{matcher: "*", hooks: [{type: "command", command: ("bash " + $adapter + " AfterAgent")}]}],
+            AfterTool:    [{matcher: "*", hooks: [{type: "command", command: ("bash " + $adapter + " AfterTool")}]}],
+            Notification: [{matcher: "*", hooks: [{type: "command", command: ("bash " + $adapter + " Notification")}]}]
           }')
 
         if [ -f "$GEMINI_SETTINGS" ]; then
