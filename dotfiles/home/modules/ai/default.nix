@@ -74,9 +74,15 @@ let
     mcp = mapAttrs (
       _: server:
       if server ? url then
-        { type = "remote"; url = server.url; }
+        {
+          type = "remote";
+          url = server.url;
+        }
       else
-        { type = "local"; command = [ server.command ] ++ server.args; }
+        {
+          type = "local";
+          command = [ server.command ] ++ server.args;
+        }
     ) mcpServers;
     plugin = [ "./plugins/peon-ping.ts" ];
   };

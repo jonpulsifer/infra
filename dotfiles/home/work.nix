@@ -22,6 +22,7 @@ in
     modules/javascript.nix
     modules/kubernetes.nix
     modules/ai
+    modules/peon-ping.nix
     modules/terraform.nix
   ];
 
@@ -62,6 +63,12 @@ in
       ];
       gpg.ssh.program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign";
     };
+  };
+
+  programs.peon-ping = {
+    enable = true;
+    enableClaudeCodeIntegration = true;
+    enableGeminiIntegration = true;
   };
 
   programs.mise = {

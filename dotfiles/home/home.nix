@@ -15,6 +15,7 @@ in
     modules/javascript.nix
     modules/kubernetes.nix
     modules/ai
+    modules/peon-ping.nix
     modules/ssh.nix
     modules/terraform.nix
   ];
@@ -38,6 +39,12 @@ in
       NPM_CONFIG_PREFIX = "$HOME/.npm/bin";
       VAULT_ADDR = "https://vault.lolwtf.ca";
     };
+  };
+
+  programs.peon-ping = {
+    enable = true;
+    enableClaudeCodeIntegration = true;
+    enableGeminiIntegration = true;
   };
 
   services.gpg-agent = lib.mkIf isLinux {
