@@ -17,7 +17,7 @@ in
   ];
   home-manager.useUserPackages = true;
   home-manager.useGlobalPkgs = true;
-  home-manager.users.jawn = inputs.dotfiles.nixosModules.basic;
+  home-manager.users.jawn = inputs.dotfiles.homeModules.basic;
 
   programs.zsh.enable = true;
 

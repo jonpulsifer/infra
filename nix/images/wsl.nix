@@ -21,7 +21,7 @@
     docker-desktop.enable = true;
   };
 
-  home-manager.users.jawn = inputs.dotfiles.nixosModules.full;
+  home-manager.users.jawn = inputs.dotfiles.homeModules.full;
 
   i18n.defaultLocale = "en_US.UTF-8";
 

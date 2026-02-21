@@ -8,3 +8,4 @@ systems/ubuntu/build
 *.backup
 *.wsl
 *.zstd
+.claude

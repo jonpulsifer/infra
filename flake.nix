@@ -2,16 +2,16 @@
   description = "the homelab";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
     nixos-hardware.url = "github:nixos/nixos-hardware";
     nixos-wsl = {
-      url = "github:nix-community/NixOS-WSL/release-25.05";
+      url = "github:nix-community/NixOS-WSL/release-25.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
     home-manager = {
-      url = "github:nix-community/home-manager/release-25.05";
+      url = "github:nix-community/home-manager/release-25.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -24,7 +24,6 @@
     dotfiles = {
       url = "github:jonpulsifer/dotfiles";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-unstable.follows = "unstable";
     };
     ddnsd = {
       url = "github:jonpulsifer/ddnsd";
@@ -62,15 +61,42 @@
 
       baseHostsSpec = {
         # kubernetes cluster (folly)
-        nuc = { tags = [ "folly" ]; netboot = true; module = "k8s-node"; modules = [{config.services.k8s.role = "control-plane";}]; };
-        optiplex = { tags = [ "folly" ]; netboot = true; module = "k8s-node"; };
-        riptide = { tags = [ "folly" ]; netboot = true; module = "k8s-node"; };
-        "800g2" = { tags = [ "folly" ]; netboot = true; module = "k8s-node"; };
-        k8s-node = { tags = [ "folly" ]; netboot = true; };
+        nuc = {
+          tags = [ "folly" ];
+          netboot = true;
+          module = "k8s-node";
+          modules = [ { config.services.k8s.role = "control-plane"; } ];
+        };
+        optiplex = {
+          tags = [ "folly" ];
+          netboot = true;
+          module = "k8s-node";
+        };
+        riptide = {
+          tags = [ "folly" ];
+          netboot = true;
+          module = "k8s-node";
+        };
+        "800g2" = {
+          tags = [ "folly" ];
+          netboot = true;
+          module = "k8s-node";
+        };
+        k8s-node = {
+          tags = [ "folly" ];
+          netboot = true;
+        };
 
         # kubernetes cluster (offsite)
-        oldschool = { tags = [ "offsite" ]; module = "k8s-node"; };
-        retrofit = { tags = [ "offsite" ]; module = "k8s-node"; modules = [{config.services.k8s.role = "control-plane";}]; };
+        oldschool = {
+          tags = [ "offsite" ];
+          module = "k8s-node";
+        };
+        retrofit = {
+          tags = [ "offsite" ];
+          module = "k8s-node";
+          modules = [ { config.services.k8s.role = "control-plane"; } ];
+        };
 
         # raspberry pis
         cloudpi4 = {
@@ -84,7 +110,9 @@
         };
 
         # google cloud
-        oldboy = { tags = [ "gcp" ]; };
+        oldboy = {
+          tags = [ "gcp" ];
+        };
 
         # images
         wsl = {
@@ -97,6 +125,9 @@
           profile = "images";
         };
 
+        container = {
+          profile = "images";
+        };
         netboot = {
           profile = "images";
         };
@@ -109,9 +140,12 @@
         moduleDir = "hosts";
         module = host;
         modules = [
-          ({ modulesPath, ... }: {
-            imports = [ (modulesPath + "/installer/netboot/netboot-minimal.nix") ];
-          })
+          (
+            { modulesPath, ... }:
+            {
+              imports = [ (modulesPath + "/installer/netboot/netboot-minimal.nix") ];
+            }
+          )
         ];
       };
 
@@ -166,6 +200,7 @@
           {
             iso = nixosConfigurations.iso.config.system.build.isoImage;
             wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
+            container = nixosConfigurations.container.config.system.build.tarball;
             gce = nixosConfigurations.gce.config.system.build.googleComputeImage;
             oldboy = nixosConfigurations.oldboy.config.system.build.googleComputeImage;
 
@@ -203,7 +238,8 @@
         };
       });
 
-      apps = forAllSystems (system:
+      apps = forAllSystems (
+        system:
         let
           pkgs = legacyPackages.${system};
           appsLib = import ./nix/lib/apps.nix;
