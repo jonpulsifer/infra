@@ -32,6 +32,7 @@
         llm-agents.overlays.default
         (final: prev: {
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
+          peon-ping = final.callPackage ./pkgs/peon-ping.nix { };
         })
       ];
 
