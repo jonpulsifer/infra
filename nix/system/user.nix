@@ -23,7 +23,7 @@ in
 
   users.mutableUsers = false;
   users.users.jawn = {
-    uid = lib.mkDefault 1337;
+    uid = lib.mkForce 1337;
     isNormalUser = true;
     extraGroups = [
       "wheel"
