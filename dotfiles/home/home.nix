@@ -45,6 +45,7 @@ in
     enable = true;
     enableClaudeCodeIntegration = true;
     enableGeminiIntegration = true;
+    enableOpenCodeIntegration = true;
   };
 
   services.gpg-agent = lib.mkIf isLinux {

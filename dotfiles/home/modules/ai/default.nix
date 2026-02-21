@@ -84,7 +84,9 @@ let
           command = [ server.command ] ++ server.args;
         }
     ) mcpServers;
-    plugin = [ "./plugins/peon-ping.ts" ];
+    plugin = lib.optionals config.programs.peon-ping.enableOpenCodeIntegration [
+      "./plugins/peon-ping.ts"
+    ];
   };
 
   # Cursor/Gemini format: { "mcpServers": { "name": { "command": "...", "args": [...] } } }
@@ -263,7 +265,6 @@ in
   xdg.configFile = foldl' (acc: path: acc // mkToolSymlinks path) { } xdgToolSkillPaths // {
     "opencode/opencode.json".text = builtins.toJSON opencodeConfig;
     "opencode/commands/pr.md".text = prCommand;
-    "opencode/plugins/peon-ping.ts".source = ./plugins/peon-ping.ts;
   };
 
   # Claude Code: merge mcpServers into ~/.claude.json (can't overwrite, file has runtime state)

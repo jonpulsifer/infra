@@ -69,6 +69,7 @@ in
     enable = true;
     enableClaudeCodeIntegration = true;
     enableGeminiIntegration = true;
+    enableOpenCodeIntegration = true;
   };
 
   programs.mise = {

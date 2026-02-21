@@ -120,6 +120,16 @@ in
       '';
     };
 
+    enableOpenCodeIntegration = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Whether to install the peon-ping TypeScript plugin for OpenCode.
+        Places the upstream adapter at
+        {file}`~/.config/opencode/plugins/peon-ping.ts`.
+      '';
+    };
+
     claudeCodeHookEvents = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [
@@ -200,6 +210,10 @@ in
         fi
       ''
     );
+
+    xdg.configFile."opencode/plugins/peon-ping.ts" = lib.mkIf cfg.enableOpenCodeIntegration {
+      source = "${cfg.package}/lib/peon-ping/adapters/opencode/peon-ping.ts";
+    };
 
     # Merge peon-ping hooks into Gemini CLI settings.json
     home.activation.geminiPeonPingHooks = lib.mkIf cfg.enableGeminiIntegration (
