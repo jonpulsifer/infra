@@ -16,12 +16,7 @@ in
 
   programs.ssh = {
     enable = true;
-    compression = true;
-    forwardAgent = false; # Disabled globally for better security
-    serverAliveInterval = 300;
-    serverAliveCountMax = 2;
-    hashKnownHosts = true;
-    controlMaster = "auto";
+    enableDefaultConfig = false;
     extraConfig = ''
       AddKeysToAgent yes
       AddressFamily inet
@@ -39,6 +34,14 @@ in
       MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
     '';
     matchBlocks = {
+      "*" = {
+        compression = true;
+        forwardAgent = false;
+        serverAliveInterval = 300;
+        serverAliveCountMax = 2;
+        hashKnownHosts = true;
+        controlMaster = "auto";
+      };
       "*.fml.pulsifer.ca" = {
         port = 22;
         forwardAgent = true;

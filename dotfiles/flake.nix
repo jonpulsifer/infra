@@ -55,6 +55,7 @@
       homeConfigurations = {
         full = mkHome "x86_64-linux" [ ./home/home.nix ];
         basic = mkHome "x86_64-linux" [ ./home/basic.nix ];
+        pulse = mkHome "x86_64-linux" [ ./home/pulse.nix ];
         arm = mkHome "aarch64-linux" [ ./home/basic.nix ];
         homebook = mkHome "aarch64-darwin" [
           ./home/home.nix
@@ -67,7 +68,9 @@
       packages = {
         x86_64-linux.default = homeConfigurations.full.activationPackage;
         x86_64-linux.basic = homeConfigurations.basic.activationPackage;
+        x86_64-linux.pulse = homeConfigurations.pulse.activationPackage;
         aarch64-linux.default = homeConfigurations.arm.activationPackage;
+        aarch64-linux.pulse = homeConfigurations.pulse.activationPackage;
         aarch64-darwin.default = homeConfigurations.work.activationPackage;
         aarch64-darwin.homebook = homeConfigurations.homebook.activationPackage;
       };
