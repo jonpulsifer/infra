@@ -197,31 +197,10 @@ let
 
   homeDir = config.home.homeDirectory;
 
-  # home.file paths (relative to ~)
-  toolSkillPaths = [
-    ".cursor/skills"
-    ".claude/skills"
-  ];
-
-  # xdg.configFile paths (relative to ~/.config)
-  xdgToolSkillPaths = [
-    "opencode/skills"
-  ];
-
   # Write each skill once to ~/.agents/skills/{name}/SKILL.md
   canonicalSkillFiles = mapAttrs' (
     name: text: nameValuePair ".agents/skills/${name}/SKILL.md" { inherit text; }
   ) skills;
-
-  # Generate directory symlinks: {prefix}/{name} -> ~/.agents/skills/{name}
-  mkToolSymlinks =
-    prefix:
-    mapAttrs' (
-      name: _:
-      nameValuePair "${prefix}/${name}" {
-        source = config.lib.file.mkOutOfStoreSymlink "${homeDir}/.agents/skills/${name}";
-      }
-    ) skills;
 
   agentSkillsScript = pkgs.writeShellScriptBin "agent-skills" (
     builtins.readFile ./scripts/agent-skills.sh
@@ -250,10 +229,9 @@ in
     ]
     ++ [ agentSkillsScript ];
 
-  # Canonical skills in ~/.agents/skills/ + symlinks into each tool's skill directory
+  # Canonical skills in ~/.agents/skills/
   home.file =
     canonicalSkillFiles
-    // foldl' (acc: path: acc // mkToolSymlinks path) { } toolSkillPaths
     // {
       ".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
       ".claude/statusline.sh" = {
@@ -262,7 +240,7 @@ in
       };
     };
 
-  xdg.configFile = foldl' (acc: path: acc // mkToolSymlinks path) { } xdgToolSkillPaths // {
+  xdg.configFile = {
     "opencode/opencode.json".text = builtins.toJSON opencodeConfig;
     "opencode/commands/pr.md".text = prCommand;
   };
