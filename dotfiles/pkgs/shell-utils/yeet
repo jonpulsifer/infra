@@ -61,23 +61,60 @@ random_message() {
   echo "${FALLBACK_MESSAGES[$((RANDOM % ${#FALLBACK_MESSAGES[@]}))]}"
 }
 
+detect_environment() {
+   # Determine if we're in a work or home environment
+   # Work configs: "work" flake config or "work" in hostname
+   # Home configs: "homebook", "full", "basic", "arm", or other
+   local config_file="${XDG_STATE_HOME:-$HOME/.local/state}/home-manager/activation-info.json"
+   
+   if [[ -f "$config_file" ]] && grep -q '"baseName":"work"' "$config_file" 2>/dev/null; then
+     echo "work"
+   else
+     echo "home"
+   fi
+}
+
 ai_generate() {
-  local prompt="$1"
-  local input="$2"
-  local result=""
+   local prompt="$1"
+   local input="$2"
+   local result=""
+   local env
 
-  if command -v claude &>/dev/null; then
-    result=$(echo "$input" | env -u CLAUDECODE claude -p \
-      --model haiku \
-      --no-session-persistence \
-      "$prompt" 2>/dev/null) || true
-  fi
+   env=$(detect_environment)
 
-  if [[ -z "$result" ]] && command -v gemini &>/dev/null; then
-    result=$(echo "$input" | gemini -p "$prompt" 2>/dev/null) || true
-  fi
+   # At home: prefer opencode (free zen model), fallback to claude, then gemini
+   # At work: prefer claude, fallback to gemini
+   if [[ "$env" == "home" ]]; then
+     # Try OpenCode with zen provider (free model)
+     if command -v opencode &>/dev/null; then
+       result=$(echo "$input" | opencode -p \
+         --provider zen \
+         "$prompt" 2>/dev/null) || true
+     fi
+     
+     # Fallback to Claude
+     if [[ -z "$result" ]] && command -v claude &>/dev/null; then
+       result=$(echo "$input" | env -u CLAUDECODE claude -p \
+         --model haiku \
+         --no-session-persistence \
+         "$prompt" 2>/dev/null) || true
+     fi
+   else
+     # Work environment: prefer claude
+     if command -v claude &>/dev/null; then
+       result=$(echo "$input" | env -u CLAUDECODE claude -p \
+         --model haiku \
+         --no-session-persistence \
+         "$prompt" 2>/dev/null) || true
+     fi
+   fi
 
-  echo "$result"
+   # Fallback to Gemini for both environments
+   if [[ -z "$result" ]] && command -v gemini &>/dev/null; then
+     result=$(echo "$input" | gemini -p "$prompt" 2>/dev/null) || true
+   fi
+
+   echo "$result"
 }
 
 generate_commit_message() {
