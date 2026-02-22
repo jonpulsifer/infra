@@ -65,6 +65,19 @@ in
     };
   };
 
+  ai.mcpServers.notion = {
+    type = "http";
+    url = "https://mcp.notion.com/mcp";
+  };
+  ai.mcpServers.linear = {
+    command = "npx";
+    args = [
+      "-y"
+      "mcp-remote"
+      "https://mcp.linear.app/mcp"
+    ];
+  };
+
   programs.peon-ping = {
     enable = true;
     enableClaudeCodeIntegration = true;

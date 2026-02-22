@@ -13,60 +13,8 @@ let
     nameValuePair
     ;
 
-  # Single source of truth for MCP servers
-  mcpServers = {
-    nixos = {
-      command = "docker";
-      args = [
-        "run"
-        "--rm"
-        "-i"
-        "ghcr.io/utensils/mcp-nixos"
-      ];
-    };
-    gcloud = {
-      command = "npx";
-      args = [
-        "-y"
-        "@google-cloud/gcloud-mcp"
-      ];
-    };
-    terraform = {
-      command = "docker";
-      args = [
-        "run"
-        "-i"
-        "--rm"
-        "hashicorp/terraform-mcp-server"
-      ];
-    };
-    shadcn = {
-      command = "npx";
-      args = [
-        "shadcn@latest"
-        "mcp"
-      ];
-    };
-    linear = {
-      command = "npx";
-      args = [
-        "-y"
-        "mcp-remote"
-        "https://mcp.linear.app/mcp"
-      ];
-    };
-    next-devtools = {
-      command = "npx";
-      args = [
-        "-y"
-        "next-devtools-mcp@latest"
-      ];
-    };
-    notion = {
-      type = "http";
-      url = "https://mcp.notion.com/mcp";
-    };
-  };
+  jsonFormat = pkgs.formats.json { };
+  mcpServers = config.ai.mcpServers;
 
   # opencode format: { "mcp": { "name": { "type": "local", "command": [...] } } }
   opencodeConfig = {
@@ -219,7 +167,53 @@ let
 
 in
 {
-  home.packages =
+  options.ai.mcpServers = lib.mkOption {
+    type = lib.types.attrsOf jsonFormat.type;
+    default = {
+      nixos = {
+        command = "docker";
+        args = [
+          "run"
+          "--rm"
+          "-i"
+          "ghcr.io/utensils/mcp-nixos"
+        ];
+      };
+      gcloud = {
+        command = "npx";
+        args = [
+          "-y"
+          "@google-cloud/gcloud-mcp"
+        ];
+      };
+      terraform = {
+        command = "docker";
+        args = [
+          "run"
+          "-i"
+          "--rm"
+          "hashicorp/terraform-mcp-server"
+        ];
+      };
+      shadcn = {
+        command = "npx";
+        args = [
+          "shadcn@latest"
+          "mcp"
+        ];
+      };
+      next-devtools = {
+        command = "npx";
+        args = [
+          "-y"
+          "next-devtools-mcp@latest"
+        ];
+      };
+    };
+    description = "MCP server definitions fanned out to all AI agent configs.";
+  };
+
+  config.home.packages =
     with pkgs.llm-agents;
     [
       claude-code
@@ -230,23 +224,21 @@ in
     ++ [ agentSkillsScript ];
 
   # Canonical skills in ~/.agents/skills/
-  home.file =
-    canonicalSkillFiles
-    // {
-      ".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
-      ".claude/statusline.sh" = {
-        text = statuslineScript;
-        executable = true;
-      };
+  config.home.file = canonicalSkillFiles // {
+    ".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
+    ".claude/statusline.sh" = {
+      text = statuslineScript;
+      executable = true;
     };
+  };
 
-  xdg.configFile = {
+  config.xdg.configFile = {
     "opencode/opencode.json".text = builtins.toJSON opencodeConfig;
     "opencode/commands/pr.md".text = prCommand;
   };
 
   # Claude Code: merge mcpServers into ~/.claude.json (can't overwrite, file has runtime state)
-  home.activation.claudeCodeMcp = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+  config.home.activation.claudeCodeMcp = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     CLAUDE_CONFIG="$HOME/.claude.json"
     MCP_SERVERS='${claudeCodeMcpServersJson}'
 
@@ -259,7 +251,7 @@ in
   '';
 
   # Claude Code: merge statusLine config into ~/.claude/settings.json
-  home.activation.claudeCodeSettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+  config.home.activation.claudeCodeSettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     CLAUDE_SETTINGS="$HOME/.claude/settings.json"
     NEW_SETTINGS='${claudeCodeSettingsJson}'
 
