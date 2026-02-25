@@ -41,7 +41,7 @@ jobs:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
-      - run: nix build
+      - run: nix build --accept-flake-config
 
   darwin:
     runs-on: macos-latest
@@ -56,4 +56,4 @@ jobs:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
-      - run: nix build
+      - run: nix build --accept-flake-config
