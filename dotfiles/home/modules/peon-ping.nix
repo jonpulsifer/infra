@@ -37,8 +37,6 @@ let
   claudeCodeHooks = lib.listToAttrs (
     map (event: lib.nameValuePair event [ (hookEntry event) ]) cfg.claudeCodeHookEvents
   );
-
-  claudeCodeHooksJson = builtins.toJSON claudeCodeHooks;
 in
 {
   options.programs.peon-ping = {
@@ -48,8 +46,7 @@ in
 
     settings = lib.mkOption {
       inherit (jsonFormat) type;
-      default = { };
-      example = {
+      default = {
         active_pack = "peon";
         volume = 0.5;
         enabled = true;
@@ -62,12 +59,8 @@ in
       };
       description = ''
         Declarative peon-ping configuration written to
-        {file}`~/.claude/hooks/peon-ping/config.json`.
-
-        When non-empty, the config file is managed by Home Manager as an
-        immutable symlink. When left empty (the default), a mutable default
-        config is seeded on first activation so that the `peon` CLI and
-        Claude Code skills can modify it at runtime.
+        {file}`~/.claude/hooks/peon-ping/config.json` as an immutable
+        symlink managed by Home Manager.
       '';
     };
 
@@ -106,8 +99,9 @@ in
       type = lib.types.bool;
       default = false;
       description = ''
-        Whether to automatically configure Claude Code hooks for
-        peon-ping integration via an activation script.
+        Whether to configure Claude Code hooks for peon-ping integration.
+        Hooks are declared via {option}`ai.claudeCode.settings` and merged
+        into {file}`~/.claude/settings.json` on activation.
       '';
     };
 
@@ -151,11 +145,8 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
-    home.file = {
-      ".claude/hooks/peon-ping/config.json" = lib.mkIf (cfg.settings != { }) {
-        source = jsonFormat.generate "peon-ping-config.json" cfg.settings;
-      };
-    };
+    home.file.".claude/hooks/peon-ping/config.json".source =
+      jsonFormat.generate "peon-ping-config.json" cfg.settings;
 
     # Copy packs as real files (not symlinks) so peon's path traversal
     # check (os.path.realpath + startswith) doesn't reject nix store paths.
@@ -179,37 +170,7 @@ in
       verboseEcho "Installed peon-ping packs: ${lib.concatStringsSep ", " cfg.packs}"
     '';
 
-    # Seed a mutable default config when no declarative settings are provided
-    home.activation.seedPeonPingConfig = lib.mkIf (cfg.settings == { }) (
-      lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-        peonConfigDir="''${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/peon-ping"
-        peonConfigFile="$peonConfigDir/config.json"
-        if [ ! -f "$peonConfigFile" ]; then
-          run mkdir -p "$peonConfigDir"
-          run cp "${cfg.package}/lib/peon-ping/config.json" "$peonConfigFile"
-          run chmod u+w "$peonConfigFile"
-          verboseEcho "Seeded peon-ping default config at $peonConfigFile"
-        fi
-      ''
-    );
-
-    # Merge peon-ping hooks into Claude Code settings.json
-    home.activation.claudeCodePeonPingHooks = lib.mkIf cfg.enableClaudeCodeIntegration (
-      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-        CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-        PEON_HOOKS='${claudeCodeHooksJson}'
-
-        if [ -f "$CLAUDE_SETTINGS" ]; then
-          ${pkgs.jq}/bin/jq --argjson peon "$PEON_HOOKS" '
-            .hooks as $existing |
-            reduce ($peon | keys[]) as $event (.; .hooks[$event] = (($existing[$event] // []) + $peon[$event]))
-          ' "$CLAUDE_SETTINGS" > "$CLAUDE_SETTINGS.tmp" && mv "$CLAUDE_SETTINGS.tmp" "$CLAUDE_SETTINGS"
-        else
-          mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
-          echo '{"hooks": '"$PEON_HOOKS"'}' | ${pkgs.jq}/bin/jq . > "$CLAUDE_SETTINGS"
-        fi
-      ''
-    );
+    ai.claudeCode.settings.hooks = lib.mkIf cfg.enableClaudeCodeIntegration claudeCodeHooks;
 
     xdg.configFile."opencode/plugins/peon-ping.ts" = lib.mkIf cfg.enableOpenCodeIntegration {
       source = "${cfg.package}/lib/peon-ping/adapters/opencode/peon-ping.ts";

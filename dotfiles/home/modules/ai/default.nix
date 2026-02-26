@@ -134,7 +134,7 @@ let
   prSkill = builtins.readFile ./skills/submit-pr.md;
   prCommand = builtins.readFile ./commands/pr.md;
 
-  # Canonical skills written to ~/.agents/skills/ and symlinked into each tool
+  # Nix-managed skills distributed to ~/.agents/skills/, ~/.claude/skills/, ~/.config/opencode/skills/
   skills = {
     "personal-context" = personalSkill;
     "submit-pr" = prSkill;
@@ -156,17 +156,22 @@ let
 
   statuslineScript = builtins.readFile ./scripts/statusline.sh;
 
-  # Claude Code settings merged into ~/.claude/settings.json on activation
-  claudeCodeSettings = {
-    statusLine = {
-      type = "command";
-      command = "${homeDir}/.claude/statusline.sh";
-    };
-  };
-  claudeCodeSettingsJson = builtins.toJSON claudeCodeSettings;
+  claudeSkillFiles = mapAttrs' (
+    name: text: nameValuePair ".claude/skills/${name}/SKILL.md" { inherit text; }
+  ) skills;
+
+  opencodeSkillFiles = mapAttrs' (
+    name: text: nameValuePair "opencode/skills/${name}/SKILL.md" { inherit text; }
+  ) skills;
 
 in
 {
+  options.ai.claudeCode.settings = lib.mkOption {
+    type = lib.types.attrsOf jsonFormat.type;
+    default = { };
+    description = "Settings merged into ~/.claude/settings.json on activation.";
+  };
+
   options.ai.mcpServers = lib.mkOption {
     type = lib.types.attrsOf jsonFormat.type;
     default = {
@@ -202,13 +207,6 @@ in
           "mcp"
         ];
       };
-      next-devtools = {
-        command = "npx";
-        args = [
-          "-y"
-          "next-devtools-mcp@latest"
-        ];
-      };
     };
     description = "MCP server definitions fanned out to all AI agent configs.";
   };
@@ -223,16 +221,24 @@ in
     ]
     ++ [ agentSkillsScript ];
 
-  # Canonical skills in ~/.agents/skills/
-  config.home.file = canonicalSkillFiles // {
-    ".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
-    ".claude/statusline.sh" = {
-      text = statuslineScript;
-      executable = true;
-    };
+  config.ai.claudeCode.settings.statusLine = {
+    type = "command";
+    command = "${homeDir}/.claude/statusline.sh";
   };
 
-  config.xdg.configFile = {
+  # Canonical skills in ~/.agents/skills/, Claude skills in ~/.claude/skills/
+  config.home.file =
+    canonicalSkillFiles
+    // claudeSkillFiles
+    // {
+      ".cursor/mcp.json".text = builtins.toJSON cursorMcpConfig;
+      ".claude/statusline.sh" = {
+        text = statuslineScript;
+        executable = true;
+      };
+    };
+
+  config.xdg.configFile = opencodeSkillFiles // {
     "opencode/opencode.json".text = builtins.toJSON opencodeConfig;
     "opencode/commands/pr.md".text = prCommand;
   };
@@ -250,18 +256,22 @@ in
     fi
   '';
 
-  # Claude Code: merge statusLine config into ~/.claude/settings.json
-  config.home.activation.claudeCodeSettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-    NEW_SETTINGS='${claudeCodeSettingsJson}'
+  # Claude Code: merge managed settings into ~/.claude/settings.json
+  config.home.activation.claudeCodeSettings =
+    let
+      settingsJson = builtins.toJSON config.ai.claudeCode.settings;
+    in
+    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+      NEW_SETTINGS='${settingsJson}'
 
-    if [ -f "$CLAUDE_SETTINGS" ]; then
-      ${pkgs.jq}/bin/jq --argjson new "$NEW_SETTINGS" '. * $new' \
-        "$CLAUDE_SETTINGS" > "$CLAUDE_SETTINGS.tmp" && mv "$CLAUDE_SETTINGS.tmp" "$CLAUDE_SETTINGS"
-    else
-      mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
-      echo "$NEW_SETTINGS" > "$CLAUDE_SETTINGS"
-    fi
-  '';
+      if [ -f "$CLAUDE_SETTINGS" ]; then
+        ${pkgs.jq}/bin/jq --argjson new "$NEW_SETTINGS" '. * $new' \
+          "$CLAUDE_SETTINGS" > "$CLAUDE_SETTINGS.tmp" && mv "$CLAUDE_SETTINGS.tmp" "$CLAUDE_SETTINGS"
+      else
+        mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+        echo "$NEW_SETTINGS" > "$CLAUDE_SETTINGS"
+      fi
+    '';
 
 }

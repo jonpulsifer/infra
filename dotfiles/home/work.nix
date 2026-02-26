@@ -70,12 +70,8 @@ in
     url = "https://mcp.notion.com/mcp";
   };
   ai.mcpServers.linear = {
-    command = "npx";
-    args = [
-      "-y"
-      "mcp-remote"
-      "https://mcp.linear.app/mcp"
-    ];
+    type = "http";
+    url = "https://mcp.linear.app/mcp";
   };
 
   programs.peon-ping = {

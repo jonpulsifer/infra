@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Nix manages outbound skill distribution to ~/.agents/skills/, ~/.claude/skills/,
+# and ~/.config/opencode/skills/. This script discovers non-Nix skills from
+# external sources and backfills them into the canonical directory.
+
 CANONICAL_DIR="$HOME/.agents/skills"
 SCAN_DIRS=(
-  "$HOME/.agents/skills"
   "$HOME/.codex/skills"
   "$HOME/.cursor/skills-cursor"
 )
-TOOL_DIRS=(
-  "$HOME/.cursor/skills"
+BACKFILL_DIRS=(
   "$HOME/.claude/skills"
-  "$HOME/.config/opencode/skills"
 )
-TOOL_NAMES=("cursor" "claude" "opencode")
 
 BOLD='\033[1m'
 DIM='\033[2m'
@@ -35,9 +35,31 @@ parse_description() {
   sed -n '/^---$/,/^---$/{ /^description:/{ s/^description: *//; p; q; } }' "$skill_file" 2>/dev/null || echo ""
 }
 
-discover_skills() {
+is_nix_managed() {
+  local path="$1"
+  [[ -L "$path" && "$(readlink "$path")" == /nix/store/* ]]
+}
+
+discover_external_skills() {
   local -A seen
   for dir in "${SCAN_DIRS[@]}"; do
+    [ -d "$dir" ] || continue
+    for skill_dir in "$dir"/*/; do
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      local name
+      name=$(basename "$skill_dir")
+      [ "$name" = ".system" ] && continue
+      if [ -z "${seen[$name]:-}" ]; then
+        seen[$name]=1
+        echo "${skill_dir%/}"
+      fi
+    done
+  done
+}
+
+discover_all_skills() {
+  local -A seen
+  for dir in "$CANONICAL_DIR" "${SCAN_DIRS[@]}"; do
     [ -d "$dir" ] || continue
     for skill_dir in "$dir"/*/; do
       [ -f "$skill_dir/SKILL.md" ] || continue
@@ -55,40 +77,65 @@ discover_skills() {
 skill_status() {
   local name="$1"
   local status=""
-  for i in "${!TOOL_DIRS[@]}"; do
-    local tool_dir="${TOOL_DIRS[$i]}"
-    local tool_name="${TOOL_NAMES[$i]}"
-    if [ -e "$tool_dir/$name" ]; then
-      status+="${GREEN}${tool_name}${RESET} "
+
+  if [ -e "$CANONICAL_DIR/$name" ]; then
+    if is_nix_managed "$CANONICAL_DIR/$name/SKILL.md"; then
+      status+="${GREEN}nix${RESET} "
+    else
+      status+="${YELLOW}local${RESET} "
+    fi
+  else
+    status+="${DIM}missing${RESET} "
+  fi
+
+  for dir in "${BACKFILL_DIRS[@]}"; do
+    local tool_name
+    tool_name=$(basename "$(dirname "$dir")")
+    if [ -e "$dir/$name" ]; then
+      if is_nix_managed "$dir/$name/SKILL.md"; then
+        status+="${GREEN}${tool_name}${RESET} "
+      else
+        status+="${CYAN}${tool_name}${RESET} "
+      fi
     else
       status+="${DIM}${tool_name}${RESET} "
     fi
   done
+
   echo -e "$status"
 }
 
-sync_skill() {
+backfill_skill() {
   local name="$1"
-  local source="$CANONICAL_DIR/$name"
+  local source="$2"
 
-  if [ ! -d "$source" ]; then
-    echo -e "${RED}Skill '$name' not found in $CANONICAL_DIR${RESET}" >&2
-    return 1
+  if is_nix_managed "$CANONICAL_DIR/$name/SKILL.md" 2>/dev/null; then
+    echo -e "  ${DIM}canonical: nix-managed, skipping${RESET}"
+    return
   fi
 
-  for i in "${!TOOL_DIRS[@]}"; do
-    local tool_dir="${TOOL_DIRS[$i]}"
-    local tool_name="${TOOL_NAMES[$i]}"
-    local target="$tool_dir/$name"
+  if [ ! -d "$CANONICAL_DIR/$name" ]; then
+    mkdir -p "$CANONICAL_DIR"
+    cp -r "$source" "$CANONICAL_DIR/$name"
+    echo -e "  ${GREEN}canonical: imported${RESET}"
+  else
+    echo -e "  ${DIM}canonical: already exists${RESET}"
+  fi
 
-    mkdir -p "$tool_dir"
+  for dir in "${BACKFILL_DIRS[@]}"; do
+    local tool_name
+    tool_name=$(basename "$(dirname "$dir")")
+    local target="$dir/$name"
 
-    if [ -L "$target" ]; then
+    if is_nix_managed "$target/SKILL.md" 2>/dev/null; then
+      echo -e "  ${DIM}${tool_name}: nix-managed, skipping${RESET}"
+    elif [ -L "$target" ]; then
       echo -e "  ${DIM}${tool_name}: already linked${RESET}"
     elif [ -d "$target" ]; then
       echo -e "  ${YELLOW}${tool_name}: exists (not a symlink, skipping)${RESET}"
     else
-      ln -s "$source" "$target"
+      mkdir -p "$dir"
+      ln -s "$CANONICAL_DIR/$name" "$target"
       echo -e "  ${GREEN}${tool_name}: linked${RESET}"
     fi
   done
@@ -96,14 +143,14 @@ sync_skill() {
 
 cmd_list() {
   local skills
-  skills=$(discover_skills)
+  skills=$(discover_all_skills)
 
   if [ -z "$skills" ]; then
     echo -e "${DIM}No skills found${RESET}"
     return
   fi
 
-  printf "${BOLD}%-25s %-30s %s${RESET}\n" "SKILL" "TOOLS" "DESCRIPTION"
+  printf "${BOLD}%-25s %-30s %s${RESET}\n" "SKILL" "STATUS" "DESCRIPTION"
   printf "%s\n" "$(printf '%.0s─' {1..80})"
 
   while IFS= read -r skill_dir; do
@@ -119,17 +166,37 @@ cmd_list() {
 
 cmd_sync() {
   if [ "${1:-}" = "--all" ]; then
-    echo -e "${BOLD}Syncing all skills from $CANONICAL_DIR${RESET}"
-    for skill_dir in "$CANONICAL_DIR"/*/; do
-      [ -f "$skill_dir/SKILL.md" ] || continue
+    echo -e "${BOLD}Backfilling non-Nix skills into $CANONICAL_DIR${RESET}"
+    local skills
+    skills=$(discover_external_skills)
+    if [ -z "$skills" ]; then
+      echo -e "${DIM}No external skills found to backfill${RESET}"
+      return
+    fi
+    while IFS= read -r skill_dir; do
       local name
       name=$(basename "$skill_dir")
       echo -e "\n${CYAN}$name${RESET}"
-      sync_skill "$name"
-    done
+      backfill_skill "$name" "$skill_dir"
+    done <<< "$skills"
   elif [ -n "${1:-}" ]; then
-    echo -e "${BOLD}Syncing skill: ${CYAN}$1${RESET}"
-    sync_skill "$1"
+    local name="$1"
+    echo -e "${BOLD}Backfilling skill: ${CYAN}$name${RESET}"
+    local source=""
+    for dir in "${SCAN_DIRS[@]}"; do
+      if [ -d "$dir/$name" ] && [ -f "$dir/$name/SKILL.md" ]; then
+        source="$dir/$name"
+        break
+      fi
+    done
+    if [ -z "$source" ] && [ -d "$CANONICAL_DIR/$name" ]; then
+      source="$CANONICAL_DIR/$name"
+    fi
+    if [ -z "$source" ]; then
+      echo -e "${RED}Skill '$name' not found in scan directories${RESET}" >&2
+      return 1
+    fi
+    backfill_skill "$name" "$source"
   else
     echo "Usage: agent-skills sync <name|--all>" >&2
     return 1
@@ -138,25 +205,16 @@ cmd_sync() {
 
 cmd_interactive() {
   local skills
-  skills=$(discover_skills)
+  skills=$(discover_external_skills)
 
   if [ -z "$skills" ]; then
-    echo -e "${DIM}No skills found${RESET}"
+    echo -e "${DIM}No external skills found to backfill${RESET}"
     return
   fi
 
-  local entries=()
-  while IFS= read -r skill_dir; do
-    local name
-    name=$(basename "$skill_dir")
-    local desc
-    desc=$(parse_description "$skill_dir/SKILL.md")
-    entries+=("$skill_dir")
-  done <<< "$skills"
-
   local selected
-  selected=$(printf '%s\n' "${entries[@]}" | fzf \
-    --header "agent-skills: select a skill to sync (tab to multi-select)" \
+  selected=$(printf '%s\n' "$skills" | fzf \
+    --header "agent-skills: select skills to backfill (tab to multi-select)" \
     --preview "$(preview_cmd)" \
     --preview-window "right:60%:wrap" \
     --multi \
@@ -168,15 +226,8 @@ cmd_interactive() {
   while IFS= read -r skill_dir; do
     local name
     name=$(basename "$skill_dir")
-
-    if [ ! -d "$CANONICAL_DIR/$name" ]; then
-      echo -e "\n${CYAN}$name${RESET} ${DIM}(copying to canonical dir)${RESET}"
-      cp -r "$skill_dir" "$CANONICAL_DIR/$name"
-    else
-      echo -e "\n${CYAN}$name${RESET}"
-    fi
-
-    sync_skill "$name"
+    echo -e "\n${CYAN}$name${RESET}"
+    backfill_skill "$name" "$skill_dir"
   done <<< "$selected"
 }
 
@@ -187,10 +238,10 @@ case "${1:-}" in
     echo "Usage: agent-skills [command]"
     echo ""
     echo "Commands:"
-    echo "  (none)       Interactive fzf skill browser"
-    echo "  list         List all discovered skills and their status"
-    echo "  sync <name>  Symlink a skill into all tool directories"
-    echo "  sync --all   Symlink all canonical skills into all tools"
+    echo "  (none)       Interactive fzf browser for external skills"
+    echo "  list         List all skills and their status (nix/local/missing)"
+    echo "  sync <name>  Backfill a skill into canonical + Claude directories"
+    echo "  sync --all   Backfill all external skills"
     echo "  help         Show this help"
     ;;
   *)      cmd_interactive ;;
