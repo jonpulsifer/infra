@@ -65,6 +65,10 @@ in
     };
   };
 
+  ai.mcpServers.moonpay = {
+    command = "mp";
+    args = [ "mcp" ];
+  };
   ai.mcpServers.notion = {
     type = "http";
     url = "https://mcp.notion.com/mcp";
