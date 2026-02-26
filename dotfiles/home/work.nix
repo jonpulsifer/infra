@@ -30,6 +30,7 @@ in
   home.packages = with pkgs; [
     conftest
     ffmpeg
+    moonpay-cli
     postgresql
   ];
 

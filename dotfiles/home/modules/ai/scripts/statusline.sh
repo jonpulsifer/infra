@@ -58,6 +58,7 @@ G_PLUS=$'\xEF\x91\x97'         # U+F457 nf-oct-diff_added
 G_MINUS=$'\xEF\x91\x98'        # U+F458 nf-oct-diff_removed
 G_AGENT=$'\xEF\x91\xAA'        # U+F46A nf-oct-hubot
 G_FILE=$'\xEF\x80\x96'         # U+F016 nf-fa-file_o
+G_WALLET='🌕'                 # Full moon for MoonPay
 
 # -- Helper: human-readable token counts --------------------------------------
 fmt_tok() {
@@ -70,6 +71,83 @@ fmt_tok() {
   else
     echo "$n"
   fi
+}
+
+# -- MoonPay wallet balance (cached, non-blocking) ----------------------------
+MP_CACHE="${TMPDIR:-/tmp}/claude-statusline-mp-balance"
+MP_CACHE_LOCK="${MP_CACHE}.lock"
+MP_CACHE_FORCE="${MP_CACHE}.force"
+MP_CACHE_TTL=60
+
+# Force refresh: touch /tmp/claude-statusline-mp-balance.force (or set MP_FORCE_REFRESH=1)
+if [ -n "${MP_FORCE_REFRESH:-}" ] || [ -f "$MP_CACHE_FORCE" ]; then
+  rm -f "$MP_CACHE" "$MP_CACHE_FORCE"
+fi
+
+_refresh_wallet_cache() {
+  # Prevent concurrent refreshes
+  if [ -f "$MP_CACHE_LOCK" ]; then
+    local lock_mtime
+    if stat -f %m "$MP_CACHE_LOCK" >/dev/null 2>&1; then
+      lock_mtime=$(stat -f %m "$MP_CACHE_LOCK")
+    else
+      lock_mtime=$(stat -c %Y "$MP_CACHE_LOCK" 2>/dev/null || echo 0)
+    fi
+    local lock_age=$(( $(date +%s) - lock_mtime ))
+    [ "$lock_age" -lt 60 ] && return 0
+  fi
+
+  echo $$ > "$MP_CACHE_LOCK" 2>/dev/null || return 1
+  trap 'rm -f "$MP_CACHE_LOCK"' EXIT
+
+  local wallets wallet_name balances
+  wallets=$(mp wallet list --json 2>/dev/null) || { rm -f "$MP_CACHE_LOCK"; return 1; }
+  wallet_name=$(echo "$wallets" | jq -r '.[0].name // empty' 2>/dev/null)
+  [ -z "$wallet_name" ] && { rm -f "$MP_CACHE_LOCK"; return 1; }
+
+  balances=$(mp token balance list --wallet "$wallet_name" --chain solana --json 2>/dev/null) || { rm -f "$MP_CACHE_LOCK"; return 1; }
+
+  # Cache format: one line per token — symbol:amount:usd_value
+  local tmp="${MP_CACHE}.tmp.$$"
+  echo "$balances" | jq -r '
+    .items[]? |
+    select((.symbol == "SOL" or .symbol == "USDC") or (.balance.amount > 0 or .balance.value > 0)) |
+    "\(.symbol):\(.balance.amount // 0):\(.balance.value // 0)"
+  ' > "$tmp" 2>/dev/null
+
+  # If no tokens have balances, write a sentinel so we don't re-query constantly
+  [ ! -s "$tmp" ] && echo "EMPTY" > "$tmp"
+
+  mv "$tmp" "$MP_CACHE"
+  rm -f "$MP_CACHE_LOCK"
+  trap - EXIT
+}
+
+get_wallet_balance() {
+  command -v mp >/dev/null 2>&1 || return 1
+
+  local now
+  now=$(date +%s)
+
+  if [ -f "$MP_CACHE" ]; then
+    local mtime
+    if stat -f %m "$MP_CACHE" >/dev/null 2>&1; then
+      mtime=$(stat -f %m "$MP_CACHE")
+    else
+      mtime=$(stat -c %Y "$MP_CACHE" 2>/dev/null || echo 0)
+    fi
+    local age=$(( now - mtime ))
+    cat "$MP_CACHE"
+    if [ "$age" -ge "$MP_CACHE_TTL" ]; then
+      _refresh_wallet_cache &
+      disown 2>/dev/null
+    fi
+    return 0
+  fi
+
+  _refresh_wallet_cache &
+  disown 2>/dev/null
+  return 1
 }
 
 # -- Git info ------------------------------------------------------------------
@@ -129,6 +207,24 @@ lines_seg=""
 if [ -n "$lines_add" ] && [ "$lines_add" != "null" ] && [ -n "$lines_rm" ] && [ "$lines_rm" != "null" ]; then
   if [ "$lines_add" -gt 0 ] || [ "$lines_rm" -gt 0 ]; then
     lines_seg="${C_GREEN}${G_PLUS}${lines_add}${RST} ${C_CORAL}${G_MINUS}${lines_rm}${RST}"
+  fi
+fi
+
+# Wallet balance (MoonPay MPC — Solana)
+wallet_seg=""
+if wallet_data=$(get_wallet_balance 2>/dev/null); then
+  if [ -n "$wallet_data" ] && [ "$wallet_data" != "EMPTY" ]; then
+    tokens=""
+    while IFS=: read -r sym amt val; do
+      [ -z "$sym" ] && continue
+      amt_fmt=$(awk "BEGIN{v=$amt; if(v>=1) printf \"%.2f\",v; else if(v>=0.001) printf \"%.4f\",v; else printf \"%.6f\",v}")
+      val_fmt=$(awk "BEGIN{printf \"%.2f\", $val}")
+      [ -n "$tokens" ] && tokens+=" ${C_DGRAY}|${RST} "
+      tokens+="${C_MINT}${B}${sym}${RST}${C_GRAY}: ${amt_fmt} ${C_GOLD}(\$${val_fmt})${RST}"
+    done <<< "$wallet_data"
+    [ -n "$tokens" ] && wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${tokens}"
+  else
+    wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${C_GOLD}\$0.00${RST} ${C_GRAY}— fund me! 💸💰${RST}"
   fi
 fi
 
@@ -247,6 +343,7 @@ l1+=("$repo_seg")
 [ -n "$branch_seg" ] && l1+=("$branch_seg")
 [ -n "$changed_seg" ] && l1+=("$changed_seg")
 [ -n "$lines_seg" ] && l1+=("$lines_seg")
+[ -n "$wallet_seg" ] && l1+=("$wallet_seg")
 
 line1=""
 for i in "${!l1[@]}"; do

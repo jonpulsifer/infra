@@ -13,6 +13,7 @@
 
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "peon-ping";
+  # renovate: datasource=github-releases depName=PeonPing/peon-ping
   version = "2.8.1";
 
   src = fetchFromGitHub {

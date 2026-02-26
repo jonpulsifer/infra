@@ -38,6 +38,7 @@
       overlays = [
         llm-agents.overlays.default
         (final: prev: {
+          moonpay-cli = final.callPackage ./pkgs/moonpay-cli.nix { };
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
           peon-ping = final.callPackage ./pkgs/peon-ping.nix { };
         })

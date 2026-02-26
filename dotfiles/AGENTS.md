@@ -28,7 +28,20 @@ nix build .#<name>   # names: default, basic, arm, homebook, work
 nix run
 ```
 
+### Running dev shell tools without entering the shell
+
+Use `nix develop -c <command>` to run tools from the dev shell in a one-shot fashion:
+
+```bash
+nix develop -c shellcheck home/modules/ai/scripts/statusline.sh
+nix develop -c nixfmt-tree --check .
+```
+
 Linting: `nixfmt-tree` for Nix, `shellcheck` for shell scripts. Both available in `nix develop`.
+
+### Custom Nix Packages
+
+Packages in `pkgs/` use Renovate hints (`# renovate: datasource=... depName=...`) for automatic version tracking. When Renovate bumps a version, hashes (`hash`, `npmDepsHash`) must be updated manually — the CI build will fail until they match.
 
 ## Architecture
 

@@ -84,7 +84,9 @@ try_claude() {
   local prompt="$1" input="$2"
   command -v claude &>/dev/null || return 1
   local out
-  out=$(echo "$input" | env -u CLAUDECODE claude -p \
+  # Unset Claude Code env vars so nested claude -p doesn't think it's inside a session
+  out=$(echo "$input" | env -u CLAUDECODE -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_ENTRYPOINT \
+    claude -p \
     --model haiku \
     --no-session-persistence \
     "$prompt" 2>/dev/null) || return 1

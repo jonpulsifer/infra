@@ -14,7 +14,7 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/^pkgs/overlays\\.nix$/"
+        "/^pkgs/.*\\.nix$/"
       ],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>[^\\s]+)\\s+depName=(?<depName>[^\\s]+)\\s*\\n\\s*version\\s*=\\s*\"(?<currentValue>[^\"]+)\""
@@ -49,6 +49,13 @@
       ],
       "versioning": "semver",
       "extractVersion": "^v(?<version>.*)$",
+      "automerge": true
+    },
+    {
+      "description": "Automerge Nix custom package updates if CI passes",
+      "matchManagers": [
+        "custom.regex"
+      ],
       "automerge": true
     }
   ]
