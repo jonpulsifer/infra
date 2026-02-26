@@ -51,6 +51,7 @@ in
         volume = 0.5;
         enabled = true;
         desktop_notifications = true;
+        notification_style = "standard";
         categories = {
           "session.start" = true;
           "task.complete" = true;
