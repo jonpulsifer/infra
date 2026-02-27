@@ -6,20 +6,23 @@ set -euo pipefail
 
 # Configuration
 DEFAULT_BRANCH="main"
-CURRENT_BRANCH=$(git branch --show-current)
 
 err() { echo "yeet error: $*" >&2; exit 1; }
 info() { echo "yeet: $*" >&2; }
 
 # FR1 & FR2: Guard and check for staged changes [18, 33]
-git rev-parse --is-inside-work-tree &>/dev/null |
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    err "Not in a git repository."
+fi
 
-| err "Not in a git repository."
 if git diff --cached --quiet; then
     info "No changes staged. Attempting to stage all changes..."
     git add -A
     if git diff --cached --quiet; then err "Nothing to commit."; fi
 fi
+
+# Now safe to query Git for branch information
+CURRENT_BRANCH=$(git branch --show-current)
 
 # Multi-model AI orchestration [17, 19]
 ai_query() {
