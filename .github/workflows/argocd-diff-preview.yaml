@@ -29,7 +29,7 @@ jobs:
       - name: Download kubectl if needed
         run: |
           if ! command -v kubectl &> /dev/null; then
-            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
             chmod +x kubectl
             if [ "$(id -u)" -eq 0 ]; then
               mv kubectl /usr/local/bin/
