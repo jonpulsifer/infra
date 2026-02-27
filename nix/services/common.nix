@@ -14,19 +14,19 @@
   ];
 
   networking = {
-    firewall.enable = true;
-    useDHCP = true;
-    useNetworkd = true;
+    firewall.enable = lib.mkDefault true;
+    useDHCP = lib.mkDefault true;
+    useNetworkd = lib.mkDefault true;
     networkmanager.enable = lib.mkDefault false;
-    timeServers = [
+    timeServers = lib.mkDefault [
       "time.nrc.ca"
       "time.chu.nrc.ca"
     ];
   };
 
-  console.keyMap = "us";
-  i18n.defaultLocale = "en_US.UTF-8";
-  time.timeZone = "Canada/Atlantic";
+  console.keyMap = lib.mkDefault "us";
+  i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
+  time.timeZone = lib.mkDefault "Canada/Atlantic";
 
   environment.systemPackages = with pkgs; [
     bash
@@ -41,7 +41,7 @@
     openFirewall = true;
   };
 
-  programs.zsh.enable = true;
+  programs.zsh.enable = lib.mkDefault true;
 
   security.sudo = {
     enable = true;
@@ -50,5 +50,5 @@
 
   services.cron.enable = true;
 
-  users.mutableUsers = false;
+  users.mutableUsers = lib.mkDefault false;
 }
