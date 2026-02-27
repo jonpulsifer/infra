@@ -35,10 +35,7 @@
     pkgs.wget
   ];
 
-  programs.nix-ld = {
-    enable = true;
-    package = pkgs.nix-ld-rs;
-  };
+  programs.nix-ld.enable = true;
 
   programs.zsh.enable = true;
   system.stateVersion = lib.mkDefault "25.05";
