@@ -14,7 +14,7 @@
   ];
 
   networking = {
-    firewall.enable = lib.mkDefault true;
+    firewall.enable = true;
     useDHCP = lib.mkDefault true;
     useNetworkd = lib.mkDefault true;
     networkmanager.enable = lib.mkDefault false;
