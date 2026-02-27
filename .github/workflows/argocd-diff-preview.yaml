@@ -70,7 +70,7 @@ jobs:
             echo -e "# ArgoCD Diff Preview\n${DIFF_OUTPUT}" > diff.md
           else
             echo "has_diff=false" >> $GITHUB_OUTPUT
-            echo "# ArgoCD Diff Preview\n\nNo changes detected." > diff.md
+            echo -e "# ArgoCD Diff Preview\n\nNo changes detected." > diff.md
           fi
 
       - name: Post diff as comment
