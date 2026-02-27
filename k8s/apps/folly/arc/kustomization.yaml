@@ -6,3 +6,4 @@ resources:
   - secret.sops.yaml
   - actions-runner-controller.yaml
   - argocd.yaml
+  - infra.yaml
