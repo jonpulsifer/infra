@@ -75,8 +75,8 @@ try_opencode() {
   tmpfile=$(mktemp)
   printf '%s' "$input" > "$tmpfile"
   local out
-  # Timeout after 30 seconds to prevent hanging
-  out=$(timeout 30s opencode run --file "$tmpfile" "$prompt" 2>&1) || {
+  # Use summary agent to avoid MCP overhead, timeout after 30s
+  out=$(timeout 30s opencode run --agent summary "$prompt" < "$tmpfile" 2>&1) || {
     local exit_code=$?
     rm -f "$tmpfile"
     if [[ $exit_code -eq 124 ]]; then
