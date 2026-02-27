@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 env:
-  ARGOCD_SERVER: argo-argocd-server.argo
+  ARGOCD_URL: argo-argocd-server.argo
 
 jobs:
   diff-preview:
@@ -22,13 +22,9 @@ jobs:
 
       - name: Download ArgoCD CLI
         run: |
-          curl -sSL --fail -o /tmp/argocd https://${{ env.ARGOCD_SERVER }}/download/argocd-linux-amd64
+          curl -sSL -o /tmp/argocd http://${{ env.ARGOCD_URL }}/download/argocd-linux-amd64
           chmod +x /tmp/argocd
-          if [ "$(id -u)" -eq 0 ]; then
-            mv /tmp/argocd /usr/local/bin/
-          else
-            sudo mv /tmp/argocd /usr/local/bin/
-          fi
+          sudo mv /tmp/argocd /usr/local/bin/argocd
 
       - name: Download kubectl if needed
         run: |
@@ -54,9 +50,7 @@ jobs:
 
       - name: Login to ArgoCD
         run: |
-          # Get admin password from secret
-          ARGOCD_PASSWORD=$(kubectl get secret -n argo argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
-          argocd login ${{ env.ARGOCD_SERVER }}:443 --username admin --password "$ARGOCD_PASSWORD" --insecure
+          echo y | argocd login --insecure --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --grpc-web ${{ env.ARGOCD_URL }}
 
       - name: Generate diff for each app
         id: diff
