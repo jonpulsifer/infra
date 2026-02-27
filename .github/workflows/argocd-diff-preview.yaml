@@ -22,7 +22,7 @@ jobs:
 
       - name: Download ArgoCD CLI
         run: |
-          curl -sSL --fail -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          curl -sSL --fail -o /tmp/argocd http://${{ env.ARGOCD_SERVER }}/download/argocd-linux-amd64
           chmod +x /tmp/argocd
           if [ "$(id -u)" -eq 0 ]; then
             mv /tmp/argocd /usr/local/bin/
