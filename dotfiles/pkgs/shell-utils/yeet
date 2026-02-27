@@ -84,12 +84,7 @@ try_claude() {
   local prompt="$1" input="$2"
   command -v claude &>/dev/null || return 1
   local out
-  # Unset Claude Code env vars so nested claude -p doesn't think it's inside a session
-  out=$(echo "$input" | env -u CLAUDECODE -u CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -u CLAUDE_CODE_ENTRYPOINT \
-    claude -p \
-    --model haiku \
-    --no-session-persistence \
-    "$prompt" 2>/dev/null) || return 1
+  out=$(echo "$input" | claude -p --no-session-persistence "$prompt" 2>/dev/null) || return 1
   [[ -n "$out" ]] && echo "$out"
 }
 
@@ -254,18 +249,12 @@ if [[ "$NO_PR" == "true" ]]; then
   exit 0
 fi
 
-# PR creation
+# PR creation/updates
 default_branch=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || echo "main")
 current_branch=$(git branch --show-current)
 
 if [[ "$current_branch" == "$default_branch" ]]; then
-  info "on $default_branch, skipping PR (create a feature branch first)"
-  exit 0
-fi
-
-if gh pr view --json number &>/dev/null 2>&1; then
-  pr_url=$(gh pr view --json url -q '.url')
-  info "PR already exists: $pr_url"
+  info "on $default_branch, committed and pushed"
   exit 0
 fi
 
@@ -284,11 +273,23 @@ fi
 # use commit message as PR title
 pr_title="$message"
 
-info "creating PR..."
-if pr_url=$(gh pr create --title "$pr_title" --body "$pr_body" 2>&1); then
-  info "$pr_url"
+# Check for existing PR and update or create
+if gh pr view --json number &>/dev/null 2>&1; then
+  pr_url=$(gh pr view --json url -q '.url')
+  info "updating existing PR: $pr_url"
+  if gh pr edit --body "$pr_body" 2>&1; then
+    info "PR updated: $pr_url"
+  else
+    err "PR update failed"
+    exit 1
+  fi
 else
-  err "PR creation failed: $pr_url"
-  info "create manually: gh pr create --title \"$pr_title\" --fill"
-  exit 1
+  info "creating PR..."
+  if pr_url=$(gh pr create --title "$pr_title" --body "$pr_body" 2>&1); then
+    info "$pr_url"
+  else
+    err "PR creation failed: $pr_url"
+    info "create manually: gh pr create --title \"$pr_title\" --fill"
+    exit 1
+  fi
 fi
