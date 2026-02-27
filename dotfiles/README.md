@@ -20,3 +20,4 @@ Install Nix
 ### nix on linux
 
 1. `nix run`
+# test
