@@ -10,7 +10,7 @@ env:
 jobs:
   diff-preview:
     name: "👀 Generate Diff"
-    runs-on: arc-ts  # Use your self-hosted runner
+    runs-on: arc-infra-folly  # Use your self-hosted runner
     permissions:
       contents: read
       pull-requests: write
