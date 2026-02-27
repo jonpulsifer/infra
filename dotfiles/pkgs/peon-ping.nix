@@ -32,6 +32,20 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
   dontBuild = true;
 
+  postPatch = let
+    # Escape dollar sign for Nix using string concatenation
+    dollar = "$";
+  in ''
+    # Fix WSL audio path handling - file:// URI needs forward slashes, not backslashes
+    # Use wslpath to properly convert WSL paths to Windows paths, then convert backslashes to forward slashes for URI
+    # Line 466: replace wpath assignment with wslpath-based conversion
+    sed -i '466s|.*|      const wslPath = require("child_process").execSync(`wslpath -w "${dollar}{filePath}"`, { encoding: "utf8", timeout: 5000 }).toString().trim();|' adapters/opencode/peon-ping.ts
+    # Insert uriPath line after line 466
+    sed -i '466a\      const uriPath = wslPath.replace(/\\\\/g, "/")' adapters/opencode/peon-ping.ts
+    # Line 471 (now): replace wpath with uriPath in the URI
+    sed -i '471s/wpath/uriPath/' adapters/opencode/peon-ping.ts
+  '';
+
   installPhase = ''
     runHook preInstall
 
