@@ -37,7 +37,7 @@ jobs:
     name: Generate Diff Preview
     needs: detect-changes
     if: needs.detect-changes.outputs.files_changed == 'true'
-    runs-on: [self-hosted, arc-infra-folly]
+    runs-on: arc-infra-folly
     permissions:
       contents: read
       pull-requests: write
