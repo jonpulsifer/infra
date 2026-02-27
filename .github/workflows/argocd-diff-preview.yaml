@@ -1,0 +1,124 @@
+name: "🐙 ArgoCD Diff Preview"
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  ARGOCD_SERVER: argo-argocd-server.argo:443
+
+jobs:
+  diff-preview:
+    name: "👀 Generate Diff"
+    runs-on: arc-ts  # Use your self-hosted runner
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download ArgoCD CLI
+        run: |
+          curl -sSL --fail -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /tmp/argocd
+          if [ "$(id -u)" -eq 0 ]; then
+            mv /tmp/argocd /usr/local/bin/
+          else
+            sudo mv /tmp/argocd /usr/local/bin/
+          fi
+
+      - name: Download kubectl if needed
+        run: |
+          if ! command -v kubectl &> /dev/null; then
+            curl -sSL --fail -o /tmp/kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x /tmp/kubectl
+            if [ "$(id -u)" -eq 0 ]; then
+              mv /tmp/kubectl /usr/local/bin/
+            else
+              sudo mv /tmp/kubectl /usr/local/bin/
+            fi
+          fi
+
+      - name: Get ArgoCD apps
+        id: apps
+        run: |
+          # Find apps that track this repo
+          APPS=$(kubectl get applications -n argo -o json | \
+            jq -r '.items[] | select(.spec.source.repoURL | contains("'${{ github.repository }}'")) | .metadata.name' | \
+            tr '\n' ' ')
+          echo "apps=$APPS" >> $GITHUB_OUTPUT
+          echo "Found apps: $APPS"
+
+      - name: Login to ArgoCD
+        run: |
+          # Get admin password from secret
+          ARGOCD_PASSWORD=$(kubectl get secret -n argo argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
+          argocd login ${{ env.ARGOCD_SERVER }} --username admin --password "$ARGOCD_PASSWORD" --insecure
+
+      - name: Generate diff for each app
+        id: diff
+        run: |
+          DIFF_OUTPUT=""
+          for app in ${{ steps.apps.outputs.apps }}; do
+            echo "=== Diff for $app ==="
+            # Get diff between current and PR
+            APP_DIFF=$(argocd app diff $app --revision ${{ github.head_ref }} 2>&1 || true)
+            if [ -n "$APP_DIFF" ]; then
+              DIFF_OUTPUT="${DIFF_OUTPUT}\n\n## App: $app\n\n\`\`\`diff\n${APP_DIFF}\n\`\`\`"
+            fi
+          done
+          
+          if [ -n "$DIFF_OUTPUT" ]; then
+            echo "has_diff=true" >> $GITHUB_OUTPUT
+            echo -e "# ArgoCD Diff Preview\n${DIFF_OUTPUT}" > diff.md
+          else
+            echo "has_diff=false" >> $GITHUB_OUTPUT
+            echo "# ArgoCD Diff Preview\n\nNo changes detected." > diff.md
+          fi
+
+      - name: Post diff as comment
+        if: steps.diff.outputs.has_diff == 'true' || steps.diff.outputs.has_diff == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diffContent = fs.readFileSync('diff.md', 'utf8');
+            
+            const body = `## 🐙 ArgoCD Diff Preview
+            
+            ${diffContent}
+            
+            ---
+            *Generated for commit ${{ github.sha }}*
+            `;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.login === 'github-actions[bot]' &&
+              comment.body.includes('ArgoCD Diff Preview')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
