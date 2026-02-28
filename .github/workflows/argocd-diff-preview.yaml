@@ -3,129 +3,50 @@ name: "🐙 ArgoCD Diff Preview"
 on:
   pull_request:
     branches: [main]
-
-env:
-  ARGOCD_URL: argo-argocd-server.argo
+    paths:
+      - "k8s/apps/**/argo/**"
+      - "argo/**"
 
 jobs:
   diff-preview:
     name: "👀 Generate Diff"
-    runs-on: arc-infra-folly  # Use your self-hosted runner
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+
     steps:
-      - name: Checkout PR branch
+      - name: "🛒 Checkout PR branch"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          fetch-depth: 0
+          path: pull-request
 
-      - name: Download ArgoCD CLI
-        run: |
-          curl -sSL -o /tmp/argocd http://${{ env.ARGOCD_URL }}/download/argocd-linux-amd64
-          chmod +x /tmp/argocd
-          sudo mv /tmp/argocd /usr/local/bin/argocd
-
-      - name: Download kubectl if needed
-        run: |
-          if ! command -v kubectl &> /dev/null; then
-            curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl
-            if [ "$(id -u)" -eq 0 ]; then
-              mv kubectl /usr/local/bin/
-            else
-              sudo mv kubectl /usr/local/bin/
-            fi
-          fi
-
-      - name: Get ArgoCD apps
-        id: apps
-        run: |
-          # Get all applications on the cluster
-          APPS=$(kubectl get applications -n argo -o json | \
-            jq -r '.items[].metadata.name' | \
-            tr '\n' ' ')
-          echo "apps=$APPS" >> $GITHUB_OUTPUT
-          echo "Found apps: $APPS"
-
-      - name: Login to ArgoCD
-        run: |
-          echo y | argocd login --insecure --username ${{ secrets.ARGOCD_USERNAME }} --password ${{ secrets.ARGOCD_PASSWORD }} --grpc-web ${{ env.ARGOCD_URL }}
-
-      - name: Generate diff for each app
-        id: diff
-        run: |
-          DIFF_OUTPUT=""
-          for app in ${{ steps.apps.outputs.apps }}; do
-            echo "=== Diff for $app ==="
-            # Get the app source path from ArgoCD
-            APP_PATH=$(argocd app get $app -o json | jq -r '.spec.source.path // .spec.sources[0].path' 2>/dev/null || echo "")
-            if [ -z "$APP_PATH" ]; then
-              echo "Warning: Could not determine path for app $app, skipping"
-              continue
-            fi
-            
-            # Check if the path exists in our checkout
-            if [ ! -d "$APP_PATH" ]; then
-              echo "Warning: Path $APP_PATH not found in checkout for app $app, skipping"
-              continue
-            fi
-            
-            # Get diff using local files (PR branch) vs live state
-            APP_DIFF=$(argocd app diff $app --local "$APP_PATH" 2>&1 || true)
-            if [ -n "$APP_DIFF" ] && [ "$APP_DIFF" != "No differences detected" ]; then
-              DIFF_OUTPUT="${DIFF_OUTPUT}\n\n## App: $app\n\n\`\`\`diff\n${APP_DIFF}\n\`\`\`"
-            fi
-          done
-          
-          if [ -n "$DIFF_OUTPUT" ]; then
-            echo "has_diff=true" >> $GITHUB_OUTPUT
-            echo -e "# ArgoCD Diff Preview\n${DIFF_OUTPUT}" > diff.md
-          else
-            echo "has_diff=false" >> $GITHUB_OUTPUT
-            echo -e "# ArgoCD Diff Preview\n\nNo changes detected." > diff.md
-          fi
-
-      - name: Post diff as comment
-        if: steps.diff.outputs.has_diff == 'true' || steps.diff.outputs.has_diff == 'false'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+      - name: "🛒 Checkout main branch"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          script: |
-            const fs = require('fs');
-            const diffContent = fs.readFileSync('diff.md', 'utf8');
-            
-            const body = `## 🐙 ArgoCD Diff Preview
-            
-            ${diffContent}
-            
-            ---
-            *Generated for commit ${{ github.sha }}*
-            `;
-            
-            // Find existing comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-            
-            const botComment = comments.find(comment => 
-              comment.user.login === 'github-actions[bot]' &&
-              comment.body.includes('ArgoCD Diff Preview')
-            );
-            
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
-            }
+          ref: main
+          path: main
+
+      - name: "🔮 Generate Diff"
+        run: |
+          docker run \
+            --network=host \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $(pwd)/main:/base-branch \
+            -v $(pwd)/pull-request:/target-branch \
+            -v $(pwd)/output:/output \
+            -e TARGET_BRANCH=${{ github.head_ref }} \
+            -e REPO=${{ github.repository }} \
+            dagandersen/argocd-diff-preview:v0.1.26
+
+      - name: "💬 Post diff as comment"
+        run: |
+          gh pr comment ${{ github.event.number }} \
+            --repo ${{ github.repository }} \
+            --body-file output/diff.md \
+            --edit-last || \
+          gh pr comment ${{ github.event.number }} \
+            --repo ${{ github.repository }} \
+            --body-file output/diff.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
