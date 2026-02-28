@@ -33,6 +33,7 @@ spec:
     maxRunners: 5
     template:
       spec:
+        serviceAccountName: arc-infra-folly
         containers:
           - name: runner
             image: jonpulsifer/actions-runner:latest
