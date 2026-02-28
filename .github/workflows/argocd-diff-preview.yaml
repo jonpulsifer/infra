@@ -58,9 +58,22 @@ jobs:
           DIFF_OUTPUT=""
           for app in ${{ steps.apps.outputs.apps }}; do
             echo "=== Diff for $app ==="
-            # Get diff between current and PR
-            APP_DIFF=$(argocd app diff $app --revision ${{ github.head_ref }} 2>&1 || true)
-            if [ -n "$APP_DIFF" ]; then
+            # Get the app source path from ArgoCD
+            APP_PATH=$(argocd app get $app -o json | jq -r '.spec.source.path // .spec.sources[0].path' 2>/dev/null || echo "")
+            if [ -z "$APP_PATH" ]; then
+              echo "Warning: Could not determine path for app $app, skipping"
+              continue
+            fi
+            
+            # Check if the path exists in our checkout
+            if [ ! -d "$APP_PATH" ]; then
+              echo "Warning: Path $APP_PATH not found in checkout for app $app, skipping"
+              continue
+            fi
+            
+            # Get diff using local files (PR branch) vs live state
+            APP_DIFF=$(argocd app diff $app --local "$APP_PATH" 2>&1 || true)
+            if [ -n "$APP_DIFF" ] && [ "$APP_DIFF" != "No differences detected" ]; then
               DIFF_OUTPUT="${DIFF_OUTPUT}\n\n## App: $app\n\n\`\`\`diff\n${APP_DIFF}\n\`\`\`"
             fi
           done

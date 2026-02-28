@@ -17,6 +17,8 @@
   wsl = {
     enable = true;
     defaultUser = "jawn";
+    useWindowsDriver = true;
+    # ssh-agent.enable = true;
     # Enable integration with Docker Desktop (needs to be installed separately)
     docker-desktop.enable = true;
   };
