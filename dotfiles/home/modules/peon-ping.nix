@@ -18,7 +18,7 @@ let
   };
 
   hookCommand = "${cfg.package}/bin/peon";
-  adapterDir = "${cfg.package}/lib/peon-ping/adapters";
+  adapterDir = "${cfg.package}/share/peon-ping/adapters";
 
   hookEntry = event: {
     matcher = "";
@@ -166,7 +166,7 @@ in
         run chmod -R u+w "$packsDir/${name}"
       '') cfg.packs}
       # peon status checks for peon.sh and adapters/ in the hooks dir
-      run ln -sf "${cfg.package}/lib/peon-ping/peon.sh" "$peonDir/peon.sh"
+      run ln -sf "${cfg.package}/share/peon-ping/peon.sh" "$peonDir/peon.sh"
       run ln -sfn "${adapterDir}" "$peonDir/adapters"
       verboseEcho "Installed peon-ping packs: ${lib.concatStringsSep ", " cfg.packs}"
     '';
@@ -174,7 +174,7 @@ in
     ai.claudeCode.settings.hooks = lib.mkIf cfg.enableClaudeCodeIntegration claudeCodeHooks;
 
     xdg.configFile."opencode/plugins/peon-ping.ts" = lib.mkIf cfg.enableOpenCodeIntegration {
-      source = "${cfg.package}/lib/peon-ping/adapters/opencode/peon-ping.ts";
+      source = "${cfg.package}/share/peon-ping/adapters/opencode/peon-ping.ts";
     };
 
     # Merge peon-ping hooks into Gemini CLI settings.json

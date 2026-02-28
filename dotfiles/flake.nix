@@ -6,6 +6,7 @@
     home-manager.url = "github:nix-community/home-manager/master";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
     llm-agents.url = "github:numtide/llm-agents.nix";
+    peon-ping.url = "github:PeonPing/peon-ping";
   };
 
   nixConfig = {
@@ -27,6 +28,7 @@
       home-manager,
       nixpkgs,
       llm-agents,
+      peon-ping,
     }:
     let
       systems = [
@@ -40,7 +42,9 @@
         (final: prev: {
           moonpay-cli = final.callPackage ./pkgs/moonpay-cli.nix { };
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
-          peon-ping = final.callPackage ./pkgs/peon-ping.nix { };
+          peon-ping = final.callPackage ./pkgs/peon-ping-overlay.nix {
+            upstreamPeonPing = peon-ping.packages.${final.system}.peon-ping;
+          };
         })
       ];
 
