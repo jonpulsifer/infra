@@ -110,9 +110,12 @@ _refresh_wallet_cache() {
   # Cache format: one line per token — symbol:amount:usd_value
   local tmp="${MP_CACHE}.tmp.$$"
   echo "$balances" | jq -r '
-    .items[]? |
-    select((.symbol == "SOL" or .symbol == "USDC") or (.balance.amount > 0 or .balance.value > 0)) |
-    "\(.symbol):\(.balance.amount // 0):\(.balance.value // 0)"
+    [.items[]? |
+     select((.symbol == "SOL" or .symbol == "USDC") or (.balance.amount > 0 or .balance.value > 0))]
+    | group_by(.symbol)
+    | .[]
+    | {symbol: .[0].symbol, amount: (map(.balance.amount // 0) | add), value: (map(.balance.value // 0) | add)}
+    | "\(.symbol):\(.amount):\(.value)"
   ' > "$tmp" 2>/dev/null
 
   # If no tokens have balances, write a sentinel so we don't re-query constantly
