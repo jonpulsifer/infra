@@ -84,6 +84,9 @@ in
     enableClaudeCodeIntegration = true;
     enableGeminiIntegration = true;
     enableOpenCodeIntegration = true;
+    settings = {
+      default_pack = "wc2_human_ships";
+    };
   };
 
   programs.mise = {
