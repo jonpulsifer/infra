@@ -51,7 +51,7 @@ writeShellApplication {
     curl -sL "$URL" | tar xz -C "$TMPDIR"
 
     echo "==> Generating package-lock.json..."
-    (cd "$TMPDIR/package" && npm install --package-lock-only --ignore-scripts 2>/dev/null)
+    (cd "$TMPDIR/package" && npm install --package-lock-only --ignore-scripts --include=optional 2>/dev/null)
     cp "$TMPDIR/package/package-lock.json" "$LOCK_FILE"
 
     echo "==> Prefetching npm dependencies (this may take a minute)..."

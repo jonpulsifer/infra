@@ -22,6 +22,7 @@ buildNpmPackage (finalAttrs: {
 
   npmDepsHash = "sha256-iqu8CiuGmYYnWhngdh0TUeVj4dh5Dq5ye1qrMzD+YIk=";
 
+  npmFlags = [ "--include=optional" ];
   dontNpmBuild = true;
 
   meta = {

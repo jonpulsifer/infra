@@ -43,7 +43,7 @@
           moonpay-cli = final.callPackage ./pkgs/moonpay-cli.nix { };
           shell-utils = final.callPackage ./pkgs/shell-utils.nix { };
           peon-ping = final.callPackage ./pkgs/peon-ping-overlay.nix {
-            upstreamPeonPing = peon-ping.packages.${final.system}.peon-ping;
+            upstreamPeonPing = peon-ping.packages.${final.stdenv.hostPlatform.system}.peon-ping;
           };
         })
       ];
