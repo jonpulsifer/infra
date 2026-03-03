@@ -81,10 +81,19 @@
         x86_64-linux.default = homeConfigurations.full.activationPackage;
         x86_64-linux.basic = homeConfigurations.basic.activationPackage;
         x86_64-linux.pulse = homeConfigurations.pulse.activationPackage;
+        x86_64-linux.update-moonpay-cli =
+          pkgsBySystem."x86_64-linux".callPackage ./pkgs/update-moonpay-cli.nix
+            { };
         aarch64-linux.default = homeConfigurations.arm.activationPackage;
         aarch64-linux.pulse = homeConfigurations.pulse.activationPackage;
+        aarch64-linux.update-moonpay-cli =
+          pkgsBySystem."aarch64-linux".callPackage ./pkgs/update-moonpay-cli.nix
+            { };
         aarch64-darwin.default = homeConfigurations.work.activationPackage;
         aarch64-darwin.homebook = homeConfigurations.homebook.activationPackage;
+        aarch64-darwin.update-moonpay-cli =
+          pkgsBySystem."aarch64-darwin".callPackage ./pkgs/update-moonpay-cli.nix
+            { };
       };
 
       legacyPackages = pkgsBySystem;
