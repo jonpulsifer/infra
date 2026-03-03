@@ -105,13 +105,17 @@ _refresh_wallet_cache() {
   wallet_name=$(echo "$wallets" | jq -r '.[0].name // empty' 2>/dev/null)
   [ -z "$wallet_name" ] && { rm -f "$MP_CACHE_LOCK"; return 1; }
 
-  balances=$(mp token balance list --wallet "$wallet_name" --chain solana --json 2>/dev/null) || { rm -f "$MP_CACHE_LOCK"; return 1; }
-
   # Cache format: one line per token — symbol:amount:usd_value
   local tmp="${MP_CACHE}.tmp.$$"
-  echo "$balances" | jq -r '
-    [.items[]? |
-     select((.symbol == "SOL" or .symbol == "USDC") or (.balance.amount > 0 or .balance.value > 0))]
+  local all_items="[]"
+  local chain_data
+  for chain in solana ethereum; do
+    chain_data=$(mp token balance list --wallet "$wallet_name" --chain "$chain" --json 2>/dev/null) || continue
+    all_items=$(printf '%s\n%s' "$all_items" "$chain_data" | jq -s '.[0] + ([.[1].items[]?] // [])' 2>/dev/null)
+  done
+
+  echo "$all_items" | jq -r '
+    [.[]? | select(.balance.value > 0)]
     | group_by(.symbol)
     | .[]
     | {symbol: .[0].symbol, amount: (map(.balance.amount // 0) | add), value: (map(.balance.value // 0) | add)}
