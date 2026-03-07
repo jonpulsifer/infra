@@ -69,6 +69,7 @@
         basic = mkHome "x86_64-linux" [ ./home/basic.nix ];
         pulse = mkHome "x86_64-linux" [ ./home/pulse.nix ];
         arm = mkHome "aarch64-linux" [ ./home/basic.nix ];
+        armPulse = mkHome "aarch64-linux" [ ./home/pulse.nix ];
         homebook = mkHome "aarch64-darwin" [
           ./home/home.nix
           ./home/darwin.nix
@@ -85,7 +86,7 @@
           pkgsBySystem."x86_64-linux".callPackage ./pkgs/update-moonpay-cli.nix
             { };
         aarch64-linux.default = homeConfigurations.arm.activationPackage;
-        aarch64-linux.pulse = homeConfigurations.pulse.activationPackage;
+        aarch64-linux.pulse = homeConfigurations.armPulse.activationPackage;
         aarch64-linux.update-moonpay-cli =
           pkgsBySystem."aarch64-linux".callPackage ./pkgs/update-moonpay-cli.nix
             { };
@@ -95,8 +96,6 @@
           pkgsBySystem."aarch64-darwin".callPackage ./pkgs/update-moonpay-cli.nix
             { };
       };
-
-      legacyPackages = pkgsBySystem;
 
       # home-manager modules, not NixOS modules
       homeModules = {
