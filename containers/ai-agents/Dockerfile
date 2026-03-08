@@ -1,6 +1,6 @@
 FROM node:24-slim
 
-RUN apt-get update && \
+RUN apt-get update && apt-get -y upgrade \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
