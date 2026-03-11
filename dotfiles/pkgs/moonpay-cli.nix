@@ -7,7 +7,7 @@
 buildNpmPackage (finalAttrs: {
   pname = "moonpay-cli";
   # renovate: datasource=npm depName=@moonpay/cli
-  version = "1.1.1";
+  version = "1.3.0";
 
   src = fetchurl {
     url = "https://registry.npmjs.org/@moonpay/cli/-/cli-${finalAttrs.version}.tgz";
