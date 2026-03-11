@@ -135,33 +135,15 @@ in
               src = pkgs.fetchFromGitHub {
                 owner = "sindresorhus";
                 repo = "pure";
-                rev = "v1.26.0";
-                sha256 = "sha256-AZSxP2g6BWoxyiSQH7yzbbbfGcwD8jgnXPPfcYwJUL0=";
+                rev = "v1.27.1";
+                sha256 = "sha256-Fhk4nlVPS09oh0coLsBnjrKncQGE6cUEynzDO2Skiq8=";
               };
+              patchFile = ./pure-nix-shell.patch;
             }
             ''
-                        cp -r $src $out
-                        chmod -R +w $out
-                        patch -p1 -d $out <<'EOF'
-              diff --git a/pure.zsh b/pure.zsh
-              index 9235e1d..6c310c1 100644
-              --- a/pure.zsh
-              +++ b/pure.zsh
-              @@ -140,6 +140,14 @@ prompt_pure_preprompt_render() {
-               	# Username and machine, if applicable.
-               	[[ -n $prompt_pure_state[username] ]] && preprompt_parts+=($prompt_pure_state[username])
-               
-              +	# nix shell
-              +	if [[ -z $ORIG_SHLVL ]]; then
-              +		export ORIG_SHLVL=$SHLVL
-              +	fi
-              +	if [[ $SHLVL -gt $ORIG_SHLVL ]]; then
-              +		preprompt_parts+=("%F{blue}  $(($SHLVL - $ORIG_SHLVL))%f")
-              +	fi
-              +
-               	# Set the path.
-               	preprompt_parts+=('%F{''${prompt_pure_colors[path]}}%~%f')
-              EOF
+              cp -r $src $out
+              chmod -R +w $out
+              patch -p1 -d $out < $patchFile
             '';
       }
     ];

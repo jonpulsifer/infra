@@ -1,0 +1,22 @@
+diff --git a/pure.zsh b/pure.zsh
+--- a/pure.zsh
++++ b/pure.zsh
+@@ -155,5 +155,14 @@
+ 	# psvar[19]: Command execution time.
+ 	psvar[19]=${prompt_pure_cmd_exec_time}
+ 
++	# psvar[21]: Nix shell depth indicator.
++	psvar[21]=
++	if [[ -z $ORIG_SHLVL ]]; then
++		export ORIG_SHLVL=$SHLVL
++	fi
++	if [[ $SHLVL -gt $ORIG_SHLVL ]]; then
++		psvar[21]=$(($SHLVL - $ORIG_SHLVL))
++	fi
++
+ 	# Expand the prompt for future comparison.
+ 	local expanded_prompt
+@@ -866,2 +875,3 @@
+ 	PROMPT+='%(13V.%F{$prompt_pure_colors['"${prompt_pure_state[user_color]:-user}"']}%n%f%F{$prompt_pure_colors[host]}@%m%f .)'
++	PROMPT+='%(21V.%F{blue} %21v%f .)'
+ 	PROMPT+='%F{${prompt_pure_colors[path]}}%~%f'
