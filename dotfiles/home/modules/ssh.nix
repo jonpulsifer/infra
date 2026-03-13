@@ -10,10 +10,6 @@ let
   isNixos = (isLinux && !(config ? osConfig));
 in
 {
-  programs.zsh.shellAliases = {
-    sshpw = "SSH_ASKPASS=${pkgs.shell-utils}/bin/sshpw DISPLAY=1 ssh-add ${config.programs.git.signing.key} < /dev/null";
-  };
-
   programs.ssh = {
     enable = true;
     enableDefaultConfig = false;
@@ -92,16 +88,16 @@ in
       };
     };
   };
-  home.sessionVariables = mkIf isNixos {
-    SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent.sock";
-  };
-  systemd.user.services.ssh-agent = mkIf isNixos {
-    Unit.Description = "SSH Agent";
-    Install.WantedBy = [ "default.target" ];
-    Service = {
-      Environment = [ "SSH_AUTH_SOCK=%t/ssh-agent.sock" ];
-      ExecStart = "${pkgs.openssh}/bin/ssh-agent -D -a $SSH_AUTH_SOCK";
-      Restart = "on-failure";
-    };
-  };
+  # home.sessionVariables = mkIf isNixos {
+  #   SSH_AUTH_SOCK = "$XDG_RUNTIME_DIR/ssh-agent.sock";
+  # };
+  # systemd.user.services.ssh-agent = mkIf isNixos {
+  #   Unit.Description = "SSH Agent";
+  #   Install.WantedBy = [ "default.target" ];
+  #   Service = {
+  #     Environment = [ "SSH_AUTH_SOCK=%t/ssh-agent.sock" ];
+  #     ExecStart = "${pkgs.openssh}/bin/ssh-agent -D -a $SSH_AUTH_SOCK";
+  #     Restart = "on-failure";
+  #   };
+  # };
 }
