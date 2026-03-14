@@ -1,0 +1,18 @@
+[tasks.devshell]
+description = "Enter the Nix dev shell"
+run = "nix develop"
+
+[tasks.fmt]
+description = "Format Nix + Terraform"
+run = [
+  "nix develop -c nix fmt",
+  "nix develop -c terraform fmt -recursive gcp cloudflare",
+]
+
+[tasks."nix:fmt"]
+description = "Format Nix files"
+run = "nix develop -c nix fmt"
+
+[tasks."tf:fmt"]
+description = "Format Terraform files"
+run = "nix develop -c terraform fmt -recursive gcp cloudflare"
