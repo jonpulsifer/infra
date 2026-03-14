@@ -31,11 +31,11 @@ ai_query() {
     diff_context=$(git diff --cached | head -n 1000) # Context limit [32]
 
     if command -v claude &>/dev/null; then
-        echo "$diff_context" | claude -p --no-session-persistence "$prompt"
+        claude -p --no-session-persistence "$prompt" <<< "$diff_context"
     elif command -v opencode &>/dev/null; then
-        opencode run "$prompt. Here is the diff: $diff_context"
+        opencode run "$prompt" <<< "$diff_context"
     elif command -v gemini &>/dev/null; then
-        echo "$diff_context" | gemini "$prompt"
+        gemini "$prompt" <<< "$diff_context"
     else
         err "No AI CLI found (claude, opencode, or gemini required)."
     fi
@@ -44,6 +44,10 @@ ai_query() {
 # Generate Conventional Commit Message [25, 34]
 info "Generating commit message..."
 COMMIT_MSG=$(ai_query "Generate a single-line conventional commit message for this diff. Use imperative mood. No markdown.")
+
+if [ -z "$COMMIT_MSG" ]; then
+    err "Failed to generate commit message."
+fi
 
 # FR2: Commit with signing and DCO [40, 41]
 git commit -s -m "$COMMIT_MSG"
@@ -61,6 +65,10 @@ if [ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]; then
     ## Expected result"
     
     PR_BODY=$(ai_query "$PR_PROMPT")
+    
+    if [ -z "$PR_BODY" ]; then
+        err "Failed to generate PR description."
+    fi
     
     # Create PR via gh CLI [32, 37]
     gh pr create --title "$COMMIT_MSG" --body "$PR_BODY"
