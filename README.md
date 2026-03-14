@@ -26,7 +26,20 @@ This repository uses Nix flakes for a reproducible development environment:
 # Enter development shell with all tools
 nix develop
 
-# Tools included: kubectl, helm, terraform, vault, sops, fluxcd, cilium-cli, gcloud
+# Tools included: kubectl, helm, terraform, vault, sops, fluxcd, cilium-cli, gcloud, mise
+```
+
+**Preferred task runner: `mise`**
+
+```bash
+# Format all (Nix + Terraform)
+mise run fmt
+
+# Nix only
+mise run nix:fmt
+
+# Terraform only
+mise run tf:fmt
 ```
 
 ### NixOS Systems
