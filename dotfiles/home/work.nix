@@ -19,7 +19,6 @@ in
     ./basic.nix
     ./darwin.nix
     modules/go.nix
-    modules/javascript.nix
     modules/kubernetes.nix
     modules/ai
     modules/peon-ping.nix

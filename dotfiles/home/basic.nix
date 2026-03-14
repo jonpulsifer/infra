@@ -52,7 +52,6 @@
   ];
 
   programs.home-manager.enable = true;
-  programs.zsh.dotDir = "${config.xdg.configHome}/zsh";
   manual.manpages.enable = false;
   xdg.enable = true;
 
@@ -95,9 +94,9 @@
       "--marker='❯ '"
       "--layout=reverse"
       "--info=inline:'❮ '"
-      # "--border"
-      # "--height=50%"
-      # "--margin=0,25,0,0"
+      "--border"
+      "--height=50%"
+      "--margin=0,25,0,0"
       "--color=fg:-1,bg:-1,hl:#bd93f9"
       "--color=fg+:#f8f8f2,bg+:#282a36,hl+:#bd93f9"
       "--color=info:#ffb86c,prompt:#50fa7b,pointer:#ff79c6"
@@ -105,8 +104,8 @@
 
     ];
     historyWidgetOptions = [
-      # "--reverse"
-      #"--layout=default"
+      "--reverse"
+      "--layout=default"
     ];
   };
 }

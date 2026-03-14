@@ -86,6 +86,7 @@ in
     shellAliases = {
       nix-shell = "nix-shell --run $SHELL";
     };
+    dotDir = "${config.xdg.configHome}/zsh";
     initContent =
       let
         early = lib.mkOrder 1200 zshConfigEarlyInit;

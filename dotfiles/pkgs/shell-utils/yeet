@@ -28,14 +28,16 @@ CURRENT_BRANCH=$(git branch --show-current)
 ai_query() {
     local prompt="$1"
     local diff_context
-    diff_context=$(git diff --cached | head -n 1000) # Context limit [32]
+    diff_context=$(git diff --cached | head -n 1000)
+    local full_input
+    full_input="$(printf '%s\n\n%s' "$prompt" "$diff_context")"
 
     if command -v claude &>/dev/null; then
-        claude -p --no-session-persistence "$prompt" <<< "$diff_context"
+        claude -p <<< "$full_input"
     elif command -v opencode &>/dev/null; then
-        opencode run "$prompt" <<< "$diff_context"
+        opencode run <<< "$full_input"
     elif command -v gemini &>/dev/null; then
-        gemini "$prompt" <<< "$diff_context"
+        gemini <<< "$full_input"
     else
         err "No AI CLI found (claude, opencode, or gemini required)."
     fi

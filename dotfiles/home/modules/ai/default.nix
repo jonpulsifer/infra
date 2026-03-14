@@ -226,6 +226,13 @@ in
     command = "${homeDir}/.claude/statusline.sh";
   };
 
+  config.programs.peon-ping = {
+    enable = true;
+    enableClaudeCodeIntegration = true;
+    enableGeminiIntegration = true;
+    enableOpenCodeIntegration = true;
+  };
+
   # Canonical skills in ~/.agents/skills/, Claude skills in ~/.claude/skills/
   config.home.file =
     canonicalSkillFiles
