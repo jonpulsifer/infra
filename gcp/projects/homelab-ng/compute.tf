@@ -63,11 +63,6 @@ resource "google_compute_instance" "oldboy" {
     network    = module.network.network.self_link
     subnetwork = module.network.subnet.self_link
 
-    # trivy:ignore:avd-gcp-0031
-    access_config {
-      network_tier = "STANDARD" # free tier
-      nat_ip       = google_compute_address.oldboy.address
-    }
   }
 
   service_account {
