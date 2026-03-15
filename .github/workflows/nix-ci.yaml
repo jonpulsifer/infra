@@ -2,7 +2,7 @@ name: nix
 on:
   push:
     paths:
-      - .github/workflows/nix.yaml
+      - .github/workflows/nix-ci.yaml
       - flake.lock
       - "**/*.nix"
 concurrency:

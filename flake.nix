@@ -173,6 +173,7 @@
         );
     in
     rec {
+      currentSystem = builtins.currentSystem;
       nixosConfigurations = builtins.mapAttrs mkSystem hostsSpec;
 
       packages = {

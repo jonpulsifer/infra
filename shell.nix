@@ -9,6 +9,7 @@ let
     google-cloud-sdk
     kubectl
     kubernetes-helm
+    mise
     nix
     nixos-rebuild
     sops
