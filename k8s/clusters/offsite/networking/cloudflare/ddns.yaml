@@ -15,6 +15,10 @@ spec:
       ttlSecondsAfterFinished: 300
       template:
         spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           restartPolicy: Never
           containers:
             - name: ddns
@@ -25,11 +29,20 @@ spec:
               command:
                 - "/bin/bash"
                 - "/app/ddns.sh"
+              securityContext:
+                runAsUser: 65532
+                runAsGroup: 65532
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
               volumeMounts:
                 - name: ddns
                   mountPath: /app/ddns.sh
                   subPath: ddns.sh
                   readOnly: true
+                - name: tmp
+                  mountPath: /tmp
           volumes:
             - name: ddns
               projected:
@@ -40,3 +53,5 @@ spec:
                       items:
                         - key: ddns.sh
                           path: ddns.sh
+            - name: tmp
+              emptyDir: {}
