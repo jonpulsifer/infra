@@ -18,6 +18,10 @@ spec:
         app.kubernetes.io/name: cloudflared
         app.kubernetes.io/part-of: cloudflared
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: cloudflared
         image: cloudflare/cloudflared:2026.3.0
@@ -38,12 +42,23 @@ spec:
           failureThreshold: 1
           initialDelaySeconds: 10
           periodSeconds: 10
+        securityContext:
+          runAsUser: 65532
+          runAsGroup: 65532
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
         volumeMounts:
           - name: tunnel-token
             mountPath: /etc/cloudflared/token
             subPath: token
             readOnly: true
+          - name: tmp
+            mountPath: /tmp
       volumes:
       - name: tunnel-token
         secret:
           secretName: cloudflared
+      - name: tmp
+        emptyDir: {}
