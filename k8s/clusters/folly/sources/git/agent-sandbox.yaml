@@ -1,0 +1,21 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: agent-sandbox
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://github.com/kubernetes-sigs/agent-sandbox
+  ref:
+    tag: v0.2.1
+  ignore: |
+    # exclude all
+    /*
+    # include CRDs
+    !/k8s/crds/
+    # include controller manifests (excluding extensions.controller.yaml to avoid duplicate Deployment)
+    !/k8s/controller.yaml
+    !/k8s/rbac.generated.yaml
+    !/k8s/extensions-rbac.generated.yaml
+    !/k8s/extensions.yaml
