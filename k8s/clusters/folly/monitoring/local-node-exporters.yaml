@@ -20,6 +20,8 @@ endpoints:
     nodeName: radiopi0
   - addresses: ["10.2.0.25"]
     nodeName: blinkypi0
+  - addresses: ["10.2.0.225"]
+    nodeName: rosie
 ---
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice

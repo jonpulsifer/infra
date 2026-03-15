@@ -18,12 +18,12 @@
     enable = true;
     defaultUser = "jawn";
     useWindowsDriver = true;
-    # ssh-agent.enable = true;
+    ssh-agent.enable = true;
     # Enable integration with Docker Desktop (needs to be installed separately)
     docker-desktop.enable = true;
   };
 
-  home-manager.users.jawn = inputs.dotfiles.homeModules.full;
+  home-manager.users.jawn = lib.mkForce inputs.dotfiles.homeModules.full;
 
   i18n.defaultLocale = "en_US.UTF-8";
 
