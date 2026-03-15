@@ -95,11 +95,11 @@
         "peon-ping": "peon-ping"
       },
       "locked": {
-        "lastModified": 1773517846,
-        "narHash": "sha256-ClMFIICl8W8LMGjpoIZ8I4u+BK1uwjc+FDlkLE+ulag=",
+        "lastModified": 1773534285,
+        "narHash": "sha256-nBgUAo2nUheKXef9Q9LqJvqwaGhnOG022pFwC4RlIug=",
         "owner": "jonpulsifer",
         "repo": "dotfiles",
-        "rev": "decfe204aef5af6061aed50e46180e919210192a",
+        "rev": "d3ce07d0a1dc4e057f7cace217255bd60e8284af",
         "type": "github"
       },
       "original": {
@@ -264,11 +264,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1773498847,
-        "narHash": "sha256-93jTY0A0uOJJRn3qPWbPUaE7J5l0MVhTwuyy2vZzBi8=",
+        "lastModified": 1773532378,
+        "narHash": "sha256-zkxvaVYdIhcJUtlVAMuw2TdcC/WYgUCdVpgEPHY1B0w=",
         "owner": "numtide",
         "repo": "llm-agents.nix",
-        "rev": "de71dddfdd172ab4892ab0b56841e81c45ee8cc7",
+        "rev": "f3f35999cca62ab71e42e30298105e8428a74e04",
         "type": "github"
       },
       "original": {
@@ -368,11 +368,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1773486833,
-        "narHash": "sha256-eZgALKIYD7ziY4SEUWaG2Uv9GAvezUPCcP93tm9C5pw=",
+        "lastModified": 1773521804,
+        "narHash": "sha256-1w7WC7+8h5VU64ODifCHhN+wWpabCHX8G2IkY2LF7V8=",
         "owner": "PeonPing",
         "repo": "peon-ping",
-        "rev": "a70f4b551391b893e328ad2eeb1d50aca0ea1031",
+        "rev": "6203fed39e1f6eaa2aaf0ad282afb20107d6a3a0",
         "type": "github"
       },
       "original": {
