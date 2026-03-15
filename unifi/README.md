@@ -13,8 +13,8 @@
 | Name | Version |
 |------|---------|
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.18.0 |
-| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.19 |
-| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.7.0 |
+| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.25 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.8.0 |
 
 ## Modules
 
