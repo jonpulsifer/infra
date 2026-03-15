@@ -10,34 +10,20 @@ in
 {
   imports = [
     ./basic.nix
-    modules/gcloud.nix
-    modules/go.nix
-    modules/kubernetes.nix
     modules/ai
+    modules/kubernetes.nix
     modules/peon-ping.nix
     modules/ssh.nix
-    modules/terraform.nix
   ];
-  home = rec {
+  home = {
     packages =
       with pkgs;
       [
         _1password-cli
         age
-        conftest
-        postgresql
         sops
-        vault
       ]
-
-      ++ lib.optionals isLinux [ wol ]
-      ++ lib.optionals isDarwin [ ];
-
-    sessionVariables = {
-      EDITOR = "cursor";
-      NPM_CONFIG_PREFIX = "$HOME/.npm/bin";
-      VAULT_ADDR = "https://vault.lolwtf.ca";
-    };
+      ++ lib.optionals isLinux [ wol ];
   };
 
   services.gpg-agent = lib.mkIf isLinux {

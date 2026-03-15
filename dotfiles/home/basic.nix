@@ -1,5 +1,5 @@
-# Minimal base: git, nix, tmux, zsh, vim. Personality: bat man, bruh/paths,
-# fzf/bat/delta/btop styling. No JS, cloud, or k8s — those live in full/work.
+# Minimal base: git, nix, tmux, zsh, vim, mise. Shell personality and config only.
+# Dev tools (go, node, kubectl, terraform, etc.) come from mise or nix dev shells.
 {
   lib,
   pkgs,
@@ -19,12 +19,10 @@
     username = lib.mkDefault "jawn";
     homeDirectory = lib.mkDefault "/home/${config.home.username}";
     sessionVariables = rec {
-      # GIT_EDITOR = EDITOR;
       LANG = "en_US.UTF-8";
       LC_ALL = LANG;
       MANROFFOPT = "-c";
       MANPAGER = "sh -c 'col -bx | ${pkgs.bat}/bin/bat -l man -p'";
-      # VISUAL = EDITOR;
     };
 
     shellAliases = rec {
@@ -94,7 +92,6 @@
       "--marker='❯ '"
       "--layout=reverse"
       "--info=inline:'❮ '"
-      "--border"
       "--height=50%"
       "--margin=0,25,0,0"
       "--color=fg:-1,bg:-1,hl:#bd93f9"
@@ -107,5 +104,15 @@
       "--reverse"
       "--layout=default"
     ];
+  };
+
+  programs.mise = {
+    enable = true;
+    package = pkgs.mise;
+    globalConfig = {
+      tools = {
+        bun = "latest";
+      };
+    };
   };
 }

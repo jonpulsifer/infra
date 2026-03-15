@@ -16,7 +16,6 @@ in
       em = "${package}/bin/emacsclient";
     };
   };
-  xdg.dataFile."applications/emacs.desktop".source = ./emacs.desktop;
   programs.emacs = {
     enable = true;
     inherit package;

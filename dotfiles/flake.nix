@@ -79,22 +79,27 @@
     in
     {
       packages = {
-        x86_64-linux.default = homeConfigurations.full.activationPackage;
-        x86_64-linux.basic = homeConfigurations.basic.activationPackage;
-        x86_64-linux.pulse = homeConfigurations.pulse.activationPackage;
-        x86_64-linux.update-moonpay-cli =
-          pkgsBySystem."x86_64-linux".callPackage ./pkgs/update-moonpay-cli.nix
-            { };
-        aarch64-linux.default = homeConfigurations.arm.activationPackage;
-        aarch64-linux.pulse = homeConfigurations.armPulse.activationPackage;
-        aarch64-linux.update-moonpay-cli =
-          pkgsBySystem."aarch64-linux".callPackage ./pkgs/update-moonpay-cli.nix
-            { };
-        aarch64-darwin.default = homeConfigurations.work.activationPackage;
-        aarch64-darwin.homebook = homeConfigurations.homebook.activationPackage;
-        aarch64-darwin.update-moonpay-cli =
-          pkgsBySystem."aarch64-darwin".callPackage ./pkgs/update-moonpay-cli.nix
-            { };
+        x86_64-linux = {
+          default = homeConfigurations.full.activationPackage;
+          basic = homeConfigurations.basic.activationPackage;
+          pulse = homeConfigurations.pulse.activationPackage;
+          update-moonpay-cli =
+            pkgsBySystem."x86_64-linux".callPackage ./pkgs/update-moonpay-cli.nix
+              { };
+        };
+        
+        aarch64-linux = {
+          default = homeConfigurations.arm.activationPackage;
+          pulse = homeConfigurations.armPulse.activationPackage;
+        };
+
+        aarch64-darwin = {
+          default = homeConfigurations.work.activationPackage;
+          homebook = homeConfigurations.homebook.activationPackage;
+          update-moonpay-cli =
+            pkgsBySystem."aarch64-darwin".callPackage ./pkgs/update-moonpay-cli.nix
+              { };
+        };
       };
 
       # home-manager modules, not NixOS modules

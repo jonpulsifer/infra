@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Nix flake-based home-manager dotfiles supporting multiple machine configurations (Linux x86_64/ARM, macOS aarch64). Not NixOS system configs — home-manager only.
 
+## Development Tools Philosophy
+
+This repo manages dotfiles (shell environment, configuration, personality) only. Development tools (language runtimes, cloud CLIs, infrastructure tools like go, node, kubectl, terraform, gcloud) are NOT installed globally. Instead, they are provisioned per-project via:
+
+- **mise**: Add a `.mise.toml` to your project for runtime version management (globally available via `basic.nix`)
+- **Nix dev shells**: Add a `flake.nix` with `devShells` for reproducible environments
+
 ## Build & Validation
 
 ```bash
@@ -61,13 +68,13 @@ Overlays applied globally: `llm-agents.nix`, custom `shell-utils`.
 
 ### Module Hierarchy
 
-`home/basic.nix` — base config imported by everything: git, nix, tmux, zsh, vim + core packages.
+`home/basic.nix` — base config imported by everything: git, nix, tmux, zsh, vim, mise + core packages.
 
-`home/home.nix` — full dev stack: imports `basic.nix` + gcloud, go, javascript, kubernetes, ai, ssh, terraform modules.
+`home/home.nix` — full workstation: imports `basic.nix` + AI agents, SSH config, security tools (1password, age, sops).
 
 `home/darwin.nix` — macOS additions: Ghostty terminal, font config, `copyApps = true`.
 
-`home/work.nix` — work profile: extends `home.nix` with 1Password SSH, Homebrew path prefix.
+`home/work.nix` — work profile: imports `basic.nix` + `darwin.nix`, AI agents, 1Password SSH, Homebrew paths.
 
 All modules live in `home/modules/`. Each module is self-contained and manages its own packages, programs, and config files.
 

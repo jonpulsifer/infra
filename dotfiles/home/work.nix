@@ -18,30 +18,19 @@ in
   imports = [
     ./basic.nix
     ./darwin.nix
-    modules/go.nix
-    modules/kubernetes.nix
     modules/ai
+    modules/kubernetes.nix
     modules/peon-ping.nix
-    modules/terraform.nix
   ];
 
   home.username = mkForce username;
   home.packages = with pkgs; [
-    conftest
     ffmpeg
     moonpay-cli
-    postgresql
   ];
 
   # homebrew paths like to be at the top of the path list
   programs.zsh.initContent = lib.mkOrder 100 ''
-    [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && source "/opt/homebrew/opt/nvm/nvm.sh"
-    [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && source "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
-    [ -s "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc" ] && source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc"
-    export PATH="/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/bin:$PATH"
-    export PATH="$HOME/.local/share/pnpm:$PATH"
-    export PATH="/opt/homebrew/opt/ruby/bin:$PATH"
-    export PATH="$(/opt/homebrew/opt/ruby/bin/gem env gemdir)/bin:$PATH"
     export PATH="/opt/homebrew/sbin:$PATH"
     export PATH="/opt/homebrew/bin:$PATH"
   '';
@@ -86,11 +75,6 @@ in
     settings = {
       default_pack = "wc2_human_ships";
     };
-  };
-
-  programs.mise = {
-    enable = true;
-    package = pkgs.mise;
   };
 
   programs.ssh.enable = true;

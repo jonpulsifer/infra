@@ -42,12 +42,6 @@ let
     mcpServers = mcpServers;
   };
 
-  geminiMcpConfig = {
-    mcpServers = mcpServers;
-    # preserve existing auth settings
-    security.auth.selectedType = "oauth-personal";
-  };
-
   # Claude Code: mcpServers merged into ~/.claude.json via activation script
   claudeCodeMcpServersJson = builtins.toJSON mcpServers;
 
@@ -67,13 +61,12 @@ let
     ];
 
     tools = [
-      "kubernetes"
-      "terraform"
-      "gcp"
       "git"
       "tmux"
-      "docker"
+      "mise"
+      "kubernetes"
       "home-manager"
+      "nix"
     ];
 
     interests = [
