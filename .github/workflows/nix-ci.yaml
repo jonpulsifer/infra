@@ -1,6 +1,13 @@
 name: nix
 on:
   push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/nix-ci.yaml
+      - flake.lock
+      - "**/*.nix"
+  pull_request:
     paths:
       - .github/workflows/nix-ci.yaml
       - flake.lock
