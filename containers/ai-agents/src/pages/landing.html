@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Sandbox</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <!--__SERVER_CONFIG__-->
+</head>
+<body class="font-sans bg-bg text-text min-h-screen flex flex-col items-center justify-center p-8">
+  <div class="max-w-[720px] w-full text-center">
+    <h1 class="text-gradient text-3xl font-bold tracking-tight mb-2">Agent Sandbox</h1>
+    <p class="text-text-muted text-sm mb-10 leading-relaxed">Isolated AI agent runtime with web terminal access</p>
+    <div id="tools" class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4 mb-12"></div>
+    <footer class="text-border-hover text-xs tracking-wider flex items-center justify-center gap-3">
+      <span>Powered by</span>
+      <a href="https://ghostty.org" class="text-text-dim hover:text-text-muted inline-flex items-center no-underline" title="Ghostty">
+        <img src="/assets/icons/ghostty-wordmark.svg" alt="Ghostty" class="h-4 opacity-50 hover:opacity-75 transition-opacity invert">
+      </a>
+      <span class="text-border">+</span>
+      <a href="https://gvisor.dev" class="text-text-dim hover:text-text-muted inline-flex items-center no-underline" title="gVisor">
+        <img src="/assets/icons/gvisor.svg" alt="gVisor" class="h-4 opacity-50 hover:opacity-75 transition-opacity">
+      </a>
+    </footer>
+  </div>
+  <script type="module" src="/assets/landing.js"></script>
+</body>
+</html>

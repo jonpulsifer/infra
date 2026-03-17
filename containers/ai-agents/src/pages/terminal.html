@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Sandbox</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <!--__SERVER_CONFIG__-->
+</head>
+<body class="font-sans bg-bg text-text h-screen overflow-hidden flex flex-col">
+  <div class="toolbar">
+    <a class="back-btn" href="/">&larr;</a>
+    <span class="text-sm font-semibold text-text-muted tracking-tight" id="toolbar-title">Agent Sandbox</span>
+    <div class="flex-1"></div>
+    <select class="font-picker" id="font-picker">
+      <option value="CaskaydiaCove NF">Cascadia Code</option>
+      <option value="0xProto NF">0xProto</option>
+      <option value="FiraCode NF">Fira Code</option>
+      <option value="GeistMono NF">Geist Mono</option>
+      <option value="Inconsolata NF">Inconsolata</option>
+      <option value="JetBrainsMono NF">JetBrains Mono</option>
+      <option value="SpaceMono NF">Space Mono</option>
+      <option value="ZedMono NF">Zed Mono</option>
+    </select>
+    <div class="flex items-center gap-1.5 text-xs text-text-dim">
+      <div class="status-dot connecting" id="status-dot"></div>
+      <span id="status-text">Connecting</span>
+    </div>
+  </div>
+  <div id="terminal" class="flex-1 bg-bg overflow-hidden"></div>
+  <div class="session-ended" id="session-ended">
+    <h2 class="text-lg font-semibold text-text-muted">Session ended</h2>
+    <a href="/">Back to launcher</a>
+  </div>
+  <script type="module" src="/assets/terminal.js"></script>
+</body>
+</html>

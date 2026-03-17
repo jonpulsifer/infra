@@ -1,0 +1,14 @@
+/* Geist sans-serif (UI font) */
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Geist'; src: url('/fonts/Geist-SemiBold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+
+/* Nerd Fonts (terminal monospace) — Regular weight only, bold synthesized by renderer */
+@font-face { font-family: '0xProto NF'; src: url('/fonts/0xProtoNerdFont-Regular.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'CaskaydiaCove NF'; src: url('/fonts/CaskaydiaCoveNerdFont-Regular.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'FiraCode NF'; src: url('/fonts/FiraCodeNerdFont-Regular.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'GeistMono NF'; src: url('/fonts/GeistMonoNerdFont-Regular.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'Inconsolata NF'; src: url('/fonts/InconsolataNerdFont-Regular.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'JetBrainsMono NF'; src: url('/fonts/JetBrainsMonoNerdFont-Regular.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'SpaceMono NF'; src: url('/fonts/SpaceMonoNerdFont-Regular.woff2') format('woff2'); font-display: swap; }
+@font-face { font-family: 'ZedMono NF'; src: url('/fonts/ZedMonoNerdFont-Regular.woff2') format('woff2'); font-display: swap; }

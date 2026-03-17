@@ -29,7 +29,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 RUN npm install @lydell/node-pty ws
 
-# ── Stage 3: Final image ────────────────────────────────────
+# ── Stage 3: Build frontend assets (HTML/CSS/JS) ─────────────
+FROM oven/bun:latest AS frontend-builder
+
+WORKDIR /build
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+COPY src/ src/
+COPY public/ public/
+COPY build.ts ./
+RUN bun run build
+
+# ── Stage 4: Final image ────────────────────────────────────
 FROM node:24-slim
 
 RUN apt-get update && apt-get -y upgrade && \
@@ -45,6 +56,7 @@ RUN apt-get update && apt-get -y upgrade && \
       ripgrep \
       unzip \
       wget \
+      xz-utils \
       zip \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -59,20 +71,35 @@ RUN apt-get update && apt-get -y upgrade && \
 RUN npm install -g \
       bun \
       @anthropic-ai/claude-code \
-      opencode-ai
+      opencode-ai \
+      openclaw
 
-# ghostty-web assets
+# ghostty-web runtime assets
 COPY --from=ghostty-builder /build/dist /opt/ghostty-web/dist
 COPY --from=ghostty-builder /build/ghostty-vt.wasm /opt/ghostty-web/ghostty-vt.wasm
 COPY --from=pty-builder /build/node_modules /opt/ghostty-web/node_modules
 
-# Custom server
+# Frontend build output (HTML, CSS, JS, icons, fonts)
+COPY --from=frontend-builder /build/dist /opt/ghostty-web/app
+
+# Server
 COPY server.js /opt/ghostty-web/server.js
 
-WORKDIR /home/node
-RUN chown -R 1000:1000 /home/node
+# Agent user (non-root, dedicated to agent workloads)
+RUN groupadd -g 1337 agent \
+    && useradd -m -u 1337 -g agent -s /bin/bash agent
+
+WORKDIR /home/agent
+RUN chown -R agent:agent /home/agent
+
+# Persist agent home (tool configs, shell history, openclaw state, etc.)
+VOLUME /home/agent
 
 EXPOSE 8080
-USER 1000:1000
+EXPOSE 18789
+USER agent:agent
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["node", "/opt/ghostty-web/server.js"]
