@@ -13,7 +13,7 @@ RUN curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${Z
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:$PATH"
 
-ARG GHOSTTY_WEB_VERSION=master
+ARG GHOSTTY_WEB_VERSION=main
 WORKDIR /build
 RUN git clone --recurse-submodules --depth 1 --branch master \
       https://github.com/coder/ghostty-web.git .
