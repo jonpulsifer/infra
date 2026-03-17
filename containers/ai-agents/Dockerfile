@@ -15,7 +15,7 @@ ENV PATH="/root/.bun/bin:$PATH"
 
 ARG GHOSTTY_WEB_VERSION=main
 WORKDIR /build
-RUN git clone --recurse-submodules --depth 1 --branch master \
+RUN git clone --recurse-submodules --depth 1 --branch ${GHOSTTY_WEB_VERSION} \
       https://github.com/coder/ghostty-web.git .
 RUN bun install && bun run build
 
