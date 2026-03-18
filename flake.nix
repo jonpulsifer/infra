@@ -61,25 +61,13 @@
 
       baseHostsSpec = {
         # kubernetes cluster (folly)
-        nuc = {
+        optiplex = {
           tags = [ "folly" ];
-          netboot = true;
           module = "k8s-node";
           modules = [ { config.services.k8s.role = "control-plane"; } ];
         };
-        optiplex = {
-          tags = [ "folly" ];
-          netboot = true;
-          module = "k8s-node";
-        };
         riptide = {
           tags = [ "folly" ];
-          netboot = true;
-          module = "k8s-node";
-        };
-        "800g2" = {
-          tags = [ "folly" ];
-          netboot = true;
           module = "k8s-node";
         };
         k8s-node = {
@@ -173,7 +161,6 @@
         );
     in
     rec {
-      currentSystem = builtins.currentSystem;
       nixosConfigurations = builtins.mapAttrs mkSystem hostsSpec;
 
       packages = {

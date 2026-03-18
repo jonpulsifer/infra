@@ -77,7 +77,6 @@ in
       defaultOptions = [
         "--reverse"
         "--info=inline"
-        "--border"
         #"--height=50%"
         #"--margin=0,25,0,0"
         "--color=fg:-1,bg:-1,hl:#bd93f9"
@@ -87,6 +86,7 @@ in
         "--prompt='❯ '"
       ];
     };
+    programs.mise.enable = true;
     programs.zsh = {
       enable = true;
       enableCompletion = true;
