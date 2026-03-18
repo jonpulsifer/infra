@@ -31,14 +31,14 @@ No modules.
 | [unifi_client.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
 | [unifi_client.lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
 | [unifi_client.personal_devices](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
-| [unifi_client_group.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_group) | resource |
-| [unifi_client_group.streaming](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_group) | resource |
-| [unifi_client_group.unmetered](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_group) | resource |
+| [unifi_client_qos_rate.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
+| [unifi_client_qos_rate.streaming](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
+| [unifi_client_qos_rate.unmetered](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
 | [unifi_network.fml](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
-| [unifi_network.starlink](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_static_route.starlink](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/static_route) | resource |
+| [unifi_wan.starlink](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/wan) | resource |
 | [unifi_wlan.fml](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/wlan) | resource |
 | [unifi_wlan.lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/wlan) | resource |
 | [cloudflare_zone.lab](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/data-sources/zone) | data source |
