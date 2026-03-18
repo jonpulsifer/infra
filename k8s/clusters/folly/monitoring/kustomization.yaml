@@ -6,13 +6,13 @@ resources:
   - kube-prometheus.yaml
   - grafana-dashboards
  # - local-node-exporters.yaml
-  - loki.yaml
+ # - loki.yaml
   - metrics-server.yaml
  # - picow.yaml
-  - promtail.yaml
+ # - promtail.yaml
  # - screenpi4.yaml
   - secret.sops.yaml
-  - unpoller
+ # - unpoller
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
