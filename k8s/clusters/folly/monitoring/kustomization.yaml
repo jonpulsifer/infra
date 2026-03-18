@@ -5,7 +5,7 @@ resources:
   - namespace.yaml
   - kube-prometheus.yaml
   - grafana-dashboards
-  - local-node-exporters.yaml
+ # - local-node-exporters.yaml
   - loki.yaml
   - metrics-server.yaml
  # - picow.yaml
