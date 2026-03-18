@@ -10,9 +10,18 @@ terraform {
     flux = {
       source = "fluxcd/flux"
     }
+    helm = {
+      source = "hashicorp/helm"
+    }
     github = {
       source = "integrations/github"
     }
+  }
+}
+
+provider "helm" {
+  kubernetes = {
+    config_path = "~/.kube/config"
   }
 }
 

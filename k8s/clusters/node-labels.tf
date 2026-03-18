@@ -4,21 +4,13 @@ locals {
   }
 
   nodes_with_labels = {
-    "nuc" = {
-      "node-role.kubernetes.io/control-plane" = ""
-      "bgp-enabled"                           = "true"
-    },
-    "800g2" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-enabled"                    = "true"
-    },
     "riptide" = {
       "node-role.kubernetes.io/worker" = ""
       "bgp-enabled"                    = "true"
     },
     "optiplex" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-enabled"                    = "true"
+      "node-role.kubernetes.io/control-plane" = ""
+      "bgp-enabled"                           = "true"
     },
     "oldschool" = {
       "node-role.kubernetes.io/worker" = ""
