@@ -29,7 +29,15 @@ in
       KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256
       MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
     '';
-    matchBlocks = {
+    matchBlocks = let
+      piSettings = {
+        user = "pi";
+        forwardAgent = true;
+        extraOptions = {
+          PasswordAuthentication = "yes";
+        };
+      };    
+    in {
       "*" = {
         compression = true;
         forwardAgent = false;
@@ -53,18 +61,11 @@ in
       "github.com" = {
         user = "git";
       };
-      "*pi0*" = {
-        user = "pi";
-        forwardAgent = true;
-        extraOptions = {
-          PasswordAuthentication = "yes";
-        };
-      };
-      "pikvm" = {
+      "*pi0*" = piSettings;
+      "*pi4*" = piSettings;
+      "*pi5*" = piSettings;
+      "pikvm" = piSettings // {
         user = "root";
-        extraOptions = {
-          PasswordAuthentication = "yes";
-        };
       };
       "unifi" = {
         user = "root";
