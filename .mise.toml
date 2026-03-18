@@ -1,3 +1,6 @@
+[tools]
+terraform = "latest"
+
 [tasks.devshell]
 description = "Enter the Nix dev shell"
 run = "nix develop"
@@ -6,7 +9,7 @@ run = "nix develop"
 description = "Format Nix + Terraform"
 run = [
   "nix develop -c nix fmt",
-  "nix develop -c terraform fmt -recursive gcp cloudflare",
+  "nix develop -c terraform fmt -recursive",
 ]
 
 [tasks."nix:fmt"]
@@ -15,4 +18,23 @@ run = "nix develop -c nix fmt"
 
 [tasks."tf:fmt"]
 description = "Format Terraform files"
-run = "nix develop -c terraform fmt -recursive gcp cloudflare"
+run = "nix develop -c terraform fmt -recursive"
+
+[tasks."tf:init"]
+description = "Initialize Terraform modules without backends"
+run = [
+  "nix develop -c bash -lc 'for d in argo cloudflare unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done'",
+]
+
+[tasks."tf:validate"]
+description = "Validate Terraform modules"
+depends = ["tf:init"]
+run = [
+  "nix develop -c bash -lc 'for d in argo cloudflare unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done'",
+]
+
+[tasks."tf:plan"]
+description = "Run Terraform plan for one module (set TF_DIR)"
+run = [
+  "nix develop -c bash -lc 'if [ -z \"$TF_DIR\" ]; then echo \"Set TF_DIR, e.g. TF_DIR=unifi mise run tf:plan\"; exit 1; fi; terraform -chdir=\"$TF_DIR\" init -input=false && terraform -chdir=\"$TF_DIR\" plan'",
+]

@@ -8,17 +8,22 @@ locals {
 }
 
 resource "unifi_network" "fml" {
-  name          = "Management"
-  network_group = "LAN"
-  purpose       = "corporate"
-  subnet        = local.fml_cidr
+  name   = "Management"
+  subnet = local.fml_cidr
 
-  dhcp_enabled       = true
-  dhcp_lease         = local.one_day
-  dhcp_relay_enabled = false
-  dhcp_start         = cidrhost(local.fml_cidr, 100)
-  dhcp_stop          = cidrhost(local.fml_cidr, 254)
-  dhcpd_boot_enabled = false
+  dhcp_server = {
+    enabled   = true
+    leasetime = local.one_day
+    start     = cidrhost(local.fml_cidr, 100)
+    stop      = cidrhost(local.fml_cidr, 254)
+    boot = {
+      enabled = false
+    }
+  }
+
+  dhcp_relay = {
+    enabled = false
+  }
 }
 
 
@@ -40,7 +45,7 @@ resource "unifi_wlan" "fml" {
   ]
 
   network_id    = unifi_network.fml.id
-  user_group_id = unifi_client_group.unmetered.id
+  user_group_id = unifi_client_qos_rate.unmetered.id
 
   wlan_band            = "both"
   bss_transition       = true
@@ -60,9 +65,10 @@ resource "unifi_client" "personal_devices" {
   note                   = lookup(each.value, "note", "Managed by terraform")
   allow_existing         = lookup(each.value, "allow_existing", true)
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.fml.id
-  group_id               = unifi_client_group.unmetered.id
+  qos_rate = {
+    id = unifi_client_qos_rate.unmetered.id
+  }
 }
 
 resource "unifi_client" "computers" {
@@ -75,9 +81,10 @@ resource "unifi_client" "computers" {
   note                   = lookup(each.value, "note", "Managed by terraform")
   allow_existing         = lookup(each.value, "allow_existing", true)
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.fml.id
-  group_id               = unifi_client_group.unmetered.id
+  qos_rate = {
+    id = unifi_client_qos_rate.unmetered.id
+  }
 }
 
 resource "unifi_client" "iot" {
@@ -91,8 +98,9 @@ resource "unifi_client" "iot" {
   allow_existing         = lookup(each.value, "allow_existing", true)
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
   network_id             = unifi_network.fml.id
-  group_id               = lookup(each.value, "streaming", false) == false ? unifi_client_group.iot.id : unifi_client_group.streaming.id
-  dev_id_override        = lookup(each.value, "dev-id", 0)
+  qos_rate = {
+    id = lookup(each.value, "streaming", false) == false ? unifi_client_qos_rate.iot.id : unifi_client_qos_rate.streaming.id
+  }
 }
 
 resource "unifi_client" "cameras" {
@@ -105,7 +113,8 @@ resource "unifi_client" "cameras" {
   note                   = lookup(each.value, "note", "Managed by terraform")
   allow_existing         = lookup(each.value, "allow_existing", true)
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.fml.id
-  group_id               = unifi_client_group.unmetered.id
+  qos_rate = {
+    id = unifi_client_qos_rate.unmetered.id
+  }
 }

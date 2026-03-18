@@ -32,18 +32,23 @@ resource "cloudflare_dns_record" "lab_remote_dns" {
 }
 
 resource "unifi_network" "lab" {
-  name          = "Lab Net"
-  network_group = "LAN"
-  purpose       = "corporate"
-  subnet        = local.lab_cidr
-  vlan_id       = 2
+  name   = "Lab Net"
+  subnet = local.lab_cidr
+  vlan   = 2
 
-  dhcp_enabled       = true
-  dhcp_lease         = local.one_week
-  dhcp_start         = cidrhost(local.lab_cidr, 200)
-  dhcp_stop          = cidrhost(local.lab_cidr, 254)
-  dhcp_relay_enabled = false
-  dhcpd_boot_enabled = false
+  dhcp_server = {
+    enabled   = true
+    leasetime = local.one_week
+    start     = cidrhost(local.lab_cidr, 200)
+    stop      = cidrhost(local.lab_cidr, 254)
+    boot = {
+      enabled = false
+    }
+  }
+
+  dhcp_relay = {
+    enabled = false
+  }
 }
 
 resource "unifi_wlan" "lab" {
@@ -52,7 +57,7 @@ resource "unifi_wlan" "lab" {
   hide_ssid         = true
   ap_group_ids      = [data.unifi_ap_group.all_aps.id]
   network_id        = unifi_network.lab.id
-  user_group_id     = unifi_client_group.unmetered.id
+  user_group_id     = unifi_client_qos_rate.unmetered.id
   multicast_enhance = false
   bss_transition    = false
   no2ghz_oui        = false
@@ -70,7 +75,8 @@ resource "unifi_client" "lab" {
   note                   = lookup(each.value, "note", "Managed by terraform")
   allow_existing         = lookup(each.value, "allow_existing", true)
   skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  dev_id_override        = lookup(each.value, "dev-id", 0)
   network_id             = unifi_network.lab.id
-  group_id               = unifi_client_group.unmetered.id
+  qos_rate = {
+    id = unifi_client_qos_rate.unmetered.id
+  }
 }

@@ -2,15 +2,9 @@ locals {
   dishy_cidr = "192.168.100.0/24"
 }
 
-resource "unifi_network" "starlink" {
-  name    = "Starlink"
-  purpose = "wan"
-
-  network_group = "LAN"
-
-  dhcp_enabled       = false
-  dhcp_relay_enabled = false
-  dhcpd_boot_enabled = false
+resource "unifi_wan" "starlink" {
+  name = "Starlink"
+  type = "dhcp"
 }
 
 resource "unifi_static_route" "starlink" {

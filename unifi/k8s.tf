@@ -3,28 +3,34 @@ locals {
   static_records = {
     "erx" : cidrhost(local.lab_cidr, 5)
     "k8s" : cidrhost(local.node_cidr, 10)
-    "nuc" : cidrhost(local.node_cidr, 10)
+    "nuc" : cidrhost(local.node_cidr, 13)
     "k8s" : cidrhost(local.node_cidr, 10)
     "800g2" : cidrhost(local.node_cidr, 11)
     "riptide" : cidrhost(local.node_cidr, 12)
-    "optiplex" : cidrhost(local.node_cidr, 13)
+    "optiplex" : cidrhost(local.node_cidr, 10)
   }
 }
 
 resource "unifi_network" "k8s" {
-  name          = "Kubernetes"
-  network_group = "LAN"
-  purpose       = "corporate"
-  subnet        = local.node_cidr
+  name   = "Kubernetes"
+  subnet = local.node_cidr
+  vlan   = 8
 
-  dhcp_enabled       = true
-  dhcp_lease         = local.one_day
-  dhcp_relay_enabled = false
-  dhcp_start         = cidrhost(local.node_cidr, 2)
-  dhcp_stop          = cidrhost(local.node_cidr, 62)
-  dhcp_dns           = ["10.2.0.20"]
-  dhcpd_boot_enabled = false
-  vlan_id            = 8
+  dhcp_server = {
+    enabled     = true
+    leasetime   = local.one_day
+    start       = cidrhost(local.node_cidr, 2)
+    stop        = cidrhost(local.node_cidr, 62)
+    dns_enabled = true
+    dns_servers = ["10.2.0.20"]
+    boot = {
+      enabled = false
+    }
+  }
+
+  dhcp_relay = {
+    enabled = false
+  }
 }
 
 resource "cloudflare_dns_record" "k8s_remote_dns" {
