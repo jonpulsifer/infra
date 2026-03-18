@@ -1,23 +1,30 @@
-k8sNetworkPolicy:
-  enabled: false
 autoDirectNodeRoutes: true
 devices: eno+ enp+ tailscale0
 kubeProxyReplacement: true
 k8sServiceHost: 10.3.0.10
-k8sServicePort: "6443"
+k8sServicePort: 6443
 routingMode: native
+ipv4NativeRoutingCIDR: 10.3.0.0/26
+enableIPv4Masquerade: true
+bpf:
+  masquerade: true
 ipam:
   mode: multi-pool
-ipv4NativeRoutingCIDR: 10.0.0.0/9
+enableXTSocketFallback: false
 endpointRoutes:
   enabled: true
-enableXTSocketFallback: false
-bpf:
-  masquerade: false
 bgpControlPlane:
   enabled: true
 gatewayAPI:
   enabled: true
+envoy:
+  enabled: true
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+      labels:
+        release: prom-stack
 ingressController:
   enabled: true
   default: true
@@ -27,54 +34,14 @@ loadBalancer:
     backend: envoy
 nodePort:
   enabled: true
-operator.prometheus.enabled: true
-dashboards:
+k8sNetworkPolicy:
   enabled: true
-prometheus:
-  enabled: true
-  serviceMonitor:
-    enabled: false
-    labels:
-      release: prom-stack
+operator:
   dashboards:
     enabled: true
-hubble:
-  enabled: true
-  relay:
+  prometheus:
     enabled: true
-    prometheus:
-      enabled: true
-      serviceMonitor:
-        enabled: false
-        labels:
-          release: prom-stack
-  metrics:
     serviceMonitor:
       enabled: false
       labels:
         release: prom-stack
-    dashboards:
-      enabled: true
-    enableOpenMetrics: true
-    enabled:
-      - dns
-      - drop
-      - tcp
-      - flow
-      - port-distribution
-      - icmp
-      - httpV2:exemplars=true
-  ui:
-    enabled: true
-    ingress:
-      enabled: true
-      annotations:
-        cert-manager.io/cluster-issuer: letsencrypt-production
-        hajimari.io/enable: "true"
-        hajimari.io/icon: "network"
-      hosts:
-        - &host hubble.lolwtf.ca
-      tls:
-        - hosts:
-            - *host
-          secretName: *host
