@@ -80,10 +80,8 @@ spec:
             type: boolean
             default: false
     status:
-      serviceName:
-        type: string
-      serviceEndpoint:
-        type: string
+      serviceName: ${service.metadata.name}
+      serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
   resources:
     # --- Namespace (always) ---
     - id: namespace
@@ -461,6 +459,3 @@ spec:
                   protocol: TCP
           egress:
             - {}
-  status:
-    serviceName: ${service.metadata.name}
-    serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local

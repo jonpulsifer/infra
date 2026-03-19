@@ -30,10 +30,8 @@ spec:
             type: string
             default: ""
     status:
-      serviceName:
-        type: string
-      serviceEndpoint:
-        type: string
+      serviceName: ${service.metadata.name}
+      serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
   resources:
     - id: sandboxtemplate
       template:
@@ -167,6 +165,3 @@ spec:
               backendRefs:
                 - name: ${schema.metadata.name}
                   port: ${schema.spec.port}
-  status:
-    serviceName: ${service.metadata.name}
-    serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
