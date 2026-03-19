@@ -7,3 +7,4 @@ resources:
   - agents-sandbox-templates.yaml
   - agents-sandbox-claims.yaml
   - agents-sandbox-routes.yaml
+  - agents-sandbox-allow-gateway.yaml
