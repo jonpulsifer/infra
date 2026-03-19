@@ -87,4 +87,3 @@ spec:
             job: "systemd-journal"
             cluster: "folly"
             host: "{{`{{ host }}`}}"
-            unit: "{{`{{ systemd.unit }}`}}"
