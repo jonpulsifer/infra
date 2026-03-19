@@ -68,10 +68,10 @@ spec:
           labels:
             job: "kubernetes"
             cluster: "folly"
-            namespace: "{{ kubernetes.pod_namespace }}"
-            pod: "{{ kubernetes.pod_name }}"
-            container: "{{ kubernetes.container_name }}"
-            node: "{{ kubernetes.pod_node_name }}"
+            namespace: "{{`{{ kubernetes.pod_namespace }}`}}"
+            pod: "{{`{{ kubernetes.pod_name }}`}}"
+            container: "{{`{{ kubernetes.container_name }}`}}"
+            node: "{{`{{ kubernetes.pod_node_name }}`}}"
         loki_journald:
           type: loki
           inputs:
@@ -83,6 +83,6 @@ spec:
           labels:
             job: "systemd-journal"
             cluster: "folly"
-            host: "{{ host }}"
-            unit: "{{ systemd.unit }}"
-            level: "{{ level }}"
+            host: "{{`{{ host }}`}}"
+            unit: "{{`{{ systemd.unit }}`}}"
+            level: "{{`{{ level }}`}}"
