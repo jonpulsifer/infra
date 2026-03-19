@@ -29,19 +29,6 @@ spec:
           from: All
         kinds:
           - kind: HTTPRoute
-    - name: https-openclaw-gateway
-      protocol: HTTPS
-      port: 443
-      hostname: openclaw-gateway.lolwtf.ca
-      tls:
-        certificateRefs:
-          - kind: Secret
-            name: openclaw-gateway.lolwtf.ca
-      allowedRoutes:
-        namespaces:
-          from: All
-        kinds:
-          - kind: HTTPRoute
     - name: https-ai-agents
       protocol: HTTPS
       port: 443
