@@ -19,6 +19,34 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: openclaw-config
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              cat <<'EOF' > /home/agent/.openclaw/config.json5
+              {
+                gateway: {
+                  controlUi: {
+                    allowedOrigins: ["https://openclaw.lolwtf.ca", "http://openclaw.lolwtf.ca"],
+                    dangerouslyAllowHostHeaderOriginFallback: true
+                  }
+                }
+              }
+              EOF
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /home/agent/.openclaw
+              name: openclaw-config
       containers:
         - name: openclaw
           image: docker.io/jonpulsifer/ai-agents:latest
@@ -34,6 +62,8 @@ spec:
           env:
             - name: OPENCLAW_GATEWAY_TOKEN
               value: "changeme"
+            - name: OPENCLAW_CONFIG_PATH
+              value: /home/agent/.openclaw/config.json5
           command:
             - openclaw
             - gateway
