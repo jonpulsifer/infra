@@ -27,7 +27,7 @@ spec:
     - name: cluster-gateway
       namespace: default
   hostnames:
-    - "openclaw.${SECRET_DOMAIN}"
+    - "openclaw.lolwtf.ca"
   rules:
     - backendRefs:
         - name: openclaw
@@ -43,7 +43,7 @@ spec:
     - name: cluster-gateway
       namespace: default
   hostnames:
-    - "openclaw-gateway.${SECRET_DOMAIN}"
+    - "openclaw-gateway.lolwtf.ca"
   rules:
     - backendRefs:
         - name: openclaw
@@ -73,7 +73,7 @@ spec:
     - name: cluster-gateway
       namespace: default
   hostnames:
-    - "ai-agents.${SECRET_DOMAIN}"
+    - "ai-agents.lolwtf.ca"
   rules:
     - backendRefs:
         - name: ai-agents
