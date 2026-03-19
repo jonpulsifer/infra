@@ -29,13 +29,17 @@ spec:
               cat <<'EOF' > /home/agent/.openclaw/config.json5
               {
                 gateway: {
+                  trustedProxies: ["10.3.0.10", "10.3.0.12"],
                   auth: {
-                    mode: "none"
+                    mode: "trusted-proxy",
+                    trustedProxy: {
+                      userHeader: "x-forwarded-user",
+                      allowUsers: ["jonathan"]
+                    }
                   },
                   controlUi: {
                     allowedOrigins: ["https://openclaw.lolwtf.ca", "http://openclaw.lolwtf.ca"],
-                    dangerouslyAllowHostHeaderOriginFallback: true,
-                    dangerouslyDisableDeviceAuth: true
+                    dangerouslyAllowHostHeaderOriginFallback: true
                   }
                 }
               }
