@@ -5,6 +5,7 @@ metadata:
   name: openclaw
   namespace: agents-sandbox
 spec:
+  networkPolicyManagement: Unmanaged
   podTemplate:
     metadata:
       labels:
@@ -112,6 +113,7 @@ metadata:
   name: ai-agents
   namespace: agents-sandbox
 spec:
+  networkPolicyManagement: Unmanaged
   podTemplate:
     metadata:
       labels:
