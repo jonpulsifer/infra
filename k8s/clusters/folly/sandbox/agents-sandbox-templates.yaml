@@ -29,9 +29,13 @@ spec:
               cat <<'EOF' > /home/agent/.openclaw/config.json5
               {
                 gateway: {
+                  auth: {
+                    mode: "none"
+                  },
                   controlUi: {
                     allowedOrigins: ["https://openclaw.lolwtf.ca", "http://openclaw.lolwtf.ca"],
-                    dangerouslyAllowHostHeaderOriginFallback: true
+                    dangerouslyAllowHostHeaderOriginFallback: true,
+                    dangerouslyDisableDeviceAuth: true
                   }
                 }
               }
@@ -60,8 +64,6 @@ spec:
               drop:
                 - ALL
           env:
-            - name: OPENCLAW_GATEWAY_TOKEN
-              value: "changeme"
             - name: OPENCLAW_CONFIG_PATH
               value: /home/agent/.openclaw/config.json5
           command:
