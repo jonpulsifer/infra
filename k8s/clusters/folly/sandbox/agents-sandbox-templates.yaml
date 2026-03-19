@@ -17,6 +17,8 @@ spec:
         runAsGroup: 1337
         fsGroup: 1337
         runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: openclaw
           image: docker.io/jonpulsifer/ai-agents:latest
@@ -24,6 +26,8 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
@@ -84,6 +88,8 @@ spec:
         runAsGroup: 1337
         fsGroup: 1337
         runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: ai-agents
           image: docker.io/jonpulsifer/ai-agents:latest
@@ -91,6 +97,8 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
