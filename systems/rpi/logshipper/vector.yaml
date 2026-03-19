@@ -1,0 +1,20 @@
+data_dir: /var/lib/vector
+
+sources:
+  journald:
+    type: journald
+    journal_directory: /var/log/journal
+
+sinks:
+  loki:
+    type: loki
+    inputs:
+      - journald
+    endpoint: https://loki.${SECRET_DOMAIN}
+    encoding:
+      codec: json
+    labels:
+      job: "systemd-journal"
+      host: "{{ host }}"
+      unit: "{{ systemd.unit }}"
+      level: "{{ level }}"
