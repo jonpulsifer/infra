@@ -1,0 +1,18 @@
+---
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxClaim
+metadata:
+  name: openclaw
+  namespace: agents-sandbox
+spec:
+  sandboxTemplateRef:
+    name: openclaw
+---
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxClaim
+metadata:
+  name: ai-agents
+  namespace: agents-sandbox
+spec:
+  sandboxTemplateRef:
+    name: ai-agents
