@@ -1,0 +1,10 @@
+---
+apiVersion: custom.agents.x-k8s.io/v1alpha1
+kind: Agent
+metadata:
+  name: ai-agents
+  namespace: agents-sandbox
+spec:
+  image: docker.io/jonpulsifer/ai-agents:latest
+  port: 8080
+  hostname: ai-agents.lolwtf.ca

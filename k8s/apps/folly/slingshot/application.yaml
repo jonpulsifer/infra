@@ -1,0 +1,24 @@
+---
+apiVersion: custom.agents.x-k8s.io/v1alpha1
+kind: Application
+metadata:
+  name: slingshot
+  namespace: default
+spec:
+  image: ghcr.io/jonpulsifer/slingshot:latest
+  port: 3000
+  hostname: "slingshot.${SECRET_DOMAIN}"
+  certIssuer: "${CERT_CLUSTER_ISSUER}"
+  database:
+    enabled: true
+    size: "1Gi"
+    migration:
+      enabled: true
+      command: "npx prisma migrate deploy"
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"

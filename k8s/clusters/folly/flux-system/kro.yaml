@@ -13,3 +13,4 @@ spec:
     name: infra
   dependsOn:
     - name: config
+    - name: agent-sandbox-crds

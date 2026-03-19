@@ -13,3 +13,5 @@ spec:
     name: infra
   dependsOn:
     - name: config
+    - name: kro
+    - name: agent-sandbox-controller

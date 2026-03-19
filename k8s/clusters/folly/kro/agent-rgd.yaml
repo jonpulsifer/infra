@@ -1,0 +1,172 @@
+---
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: agent
+  namespace: kro-system
+spec:
+  schema:
+    apiVersion: custom.agents.x-k8s.io/v1alpha1
+    kind: Agent
+    spec:
+      image:
+        type: string
+        default: "docker.io/jonpulsifer/ai-agents:latest"
+      port:
+        type: integer
+        default: 8080
+      hostname:
+        type: string
+      storageSize:
+        type: string
+        default: "2Gi"
+      ingress:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          forwardedUser:
+            type: string
+            default: ""
+    status:
+      serviceName:
+        type: string
+      serviceEndpoint:
+        type: string
+  resources:
+    - id: sandboxtemplate
+      template:
+        apiVersion: extensions.agents.x-k8s.io/v1alpha1
+        kind: SandboxTemplate
+        metadata:
+          name: ${schema.metadata.name}
+          namespace: ${schema.metadata.namespace}
+        spec:
+          networkPolicyManagement: Unmanaged
+          podTemplate:
+            metadata:
+              labels:
+                app: ${schema.metadata.name}
+                sandbox: ${schema.metadata.name}
+            spec:
+              automountServiceAccountToken: false
+              securityContext:
+                runAsUser: 1337
+                runAsGroup: 1337
+                fsGroup: 1337
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+                - name: agent
+                  image: ${schema.spec.image}
+                  imagePullPolicy: IfNotPresent
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: false
+                    seccompProfile:
+                      type: RuntimeDefault
+                    capabilities:
+                      drop:
+                        - ALL
+                  ports:
+                    - containerPort: ${schema.spec.port}
+                  volumeMounts:
+                    - mountPath: /home/agent/.openclaw
+                      name: agent-config
+                    - mountPath: /home/agent/.openclaw/workspace
+                      name: agent-workspace
+              volumes:
+                - name: agent-config
+                  ephemeral:
+                    volumeClaimTemplate:
+                      spec:
+                        accessModes:
+                          - ReadWriteOnce
+                        resources:
+                          requests:
+                            storage: ${schema.spec.storageSize}
+                - name: agent-workspace
+                  ephemeral:
+                    volumeClaimTemplate:
+                      spec:
+                        accessModes:
+                          - ReadWriteOnce
+                        resources:
+                          requests:
+                            storage: ${schema.spec.storageSize}
+    - id: sandboxclaim
+      template:
+        apiVersion: extensions.agents.x-k8s.io/v1alpha1
+        kind: SandboxClaim
+        metadata:
+          name: ${schema.metadata.name}
+          namespace: ${schema.metadata.namespace}
+        spec:
+          sandboxTemplateRef:
+            name: ${schema.metadata.name}
+    - id: service
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${schema.metadata.name}
+          namespace: ${schema.metadata.namespace}
+        spec:
+          selector:
+            app: ${schema.metadata.name}
+          ports:
+            - name: http
+              protocol: TCP
+              port: ${schema.spec.port}
+              targetPort: ${schema.spec.port}
+    - id: httproute
+      includeWhen:
+        - ${schema.spec.ingress.enabled}
+        - ${schema.spec.ingress.forwardedUser == ""}
+      template:
+        apiVersion: gateway.networking.k8s.io/v1beta1
+        kind: HTTPRoute
+        metadata:
+          name: ${schema.metadata.name}
+          namespace: ${schema.metadata.namespace}
+        spec:
+          parentRefs:
+            - name: cluster-gateway
+              namespace: default
+          hostnames:
+            - ${schema.spec.hostname}
+          rules:
+            - backendRefs:
+                - name: ${schema.metadata.name}
+                  port: ${schema.spec.port}
+    - id: httproute-auth
+      includeWhen:
+        - ${schema.spec.ingress.enabled}
+        - ${schema.spec.ingress.forwardedUser != ""}
+      template:
+        apiVersion: gateway.networking.k8s.io/v1beta1
+        kind: HTTPRoute
+        metadata:
+          name: ${schema.metadata.name}
+          namespace: ${schema.metadata.namespace}
+        spec:
+          parentRefs:
+            - name: cluster-gateway
+              namespace: default
+          hostnames:
+            - ${schema.spec.hostname}
+          rules:
+            - filters:
+                - type: RequestHeaderModifier
+                  requestHeaderModifier:
+                    set:
+                      - name: X-Forwarded-User
+                        value: ${schema.spec.ingress.forwardedUser}
+              backendRefs:
+                - name: ${schema.metadata.name}
+                  port: ${schema.spec.port}
+  status:
+    serviceName: ${service.metadata.name}
+    serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
