@@ -24,6 +24,7 @@ resources:
   - stakater.yaml
   - stefanprodan.yaml
   - tailscale.yaml
+  - vector.yaml
 patches:
   - target:
       group: source.toolkit.fluxcd.io
