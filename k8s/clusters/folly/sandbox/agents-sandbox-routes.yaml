@@ -25,7 +25,13 @@ spec:
   hostnames:
     - "openclaw.lolwtf.ca"
   rules:
-    - backendRefs:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: X-Forwarded-User
+                value: jonathan
+      backendRefs:
         - name: openclaw
           port: 18789
 ---
