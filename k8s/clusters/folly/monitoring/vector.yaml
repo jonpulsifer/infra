@@ -31,6 +31,8 @@ spec:
         value: "true"
     podMonitor:
       enabled: true
+    image:
+      base: debian
     extraVolumes:
       - name: journal
         hostPath:
