@@ -9,7 +9,7 @@ resources:
  # - loki.yaml
   - metrics-server.yaml
  # - picow.yaml
- # - promtail.yaml
+  - vector.yaml
  # - screenpi4.yaml
   - secret.sops.yaml
  # - unpoller
