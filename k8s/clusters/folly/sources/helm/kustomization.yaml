@@ -16,6 +16,7 @@ resources:
   - intel.yaml
   - jetstack.yaml
   - jonpulsifer.yaml
+  - kro.yaml
   - longhorn.yaml
   - metrics-server.yaml
   - node-feature-discovery.yaml
