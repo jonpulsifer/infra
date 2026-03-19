@@ -1,0 +1,12 @@
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-remote-node-ingress
+  namespace: agents-sandbox
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - remote-node
+        - host
