@@ -32,7 +32,7 @@ spec:
     podMonitor:
       enabled: true
     image:
-      base: debian
+      repository: docker.io/timberio/vector
       tag: 0.54.0-debian
     extraVolumes:
       - name: journal
