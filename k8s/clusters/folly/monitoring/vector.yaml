@@ -64,7 +64,7 @@ spec:
           type: loki
           inputs:
             - kubernetes_logs
-          endpoint: https://loki.${SECRET_DOMAIN}
+          endpoint: http://loki.monitoring.svc.cluster.local:3100
           tenant_id: "1"
           encoding:
             codec: json
@@ -79,7 +79,7 @@ spec:
           type: loki
           inputs:
             - journald
-          endpoint: https://loki.${SECRET_DOMAIN}
+          endpoint: http://loki.monitoring.svc.cluster.local:3100
           tenant_id: "1"
           encoding:
             codec: json
