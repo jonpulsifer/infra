@@ -33,6 +33,7 @@ spec:
       enabled: true
     image:
       base: debian
+      tag: 0.54.0-debian
     extraVolumes:
       - name: journal
         hostPath:
