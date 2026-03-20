@@ -11,6 +11,7 @@ spec:
     group: custom.agents.x-k8s.io
     spec:
       image: string
+      command: "string | default=sleep infinity"
       port: "integer | default=8080"
       replicas: "integer | default=1"
       hostname: string
@@ -89,6 +90,10 @@ spec:
                 - name: app
                   image: ${schema.spec.image}
                   imagePullPolicy: IfNotPresent
+                  command:
+                    - sh
+                    - -c
+                    - ${schema.spec.command}
                   ports:
                     - containerPort: ${schema.spec.port}
                       protocol: TCP
@@ -146,6 +151,10 @@ spec:
                 - name: app
                   image: ${schema.spec.image}
                   imagePullPolicy: IfNotPresent
+                  command:
+                    - sh
+                    - -c
+                    - ${schema.spec.command}
                   ports:
                     - containerPort: ${schema.spec.port}
                       protocol: TCP
@@ -210,6 +219,10 @@ spec:
                 - name: app
                   image: ${schema.spec.image}
                   imagePullPolicy: IfNotPresent
+                  command:
+                    - sh
+                    - -c
+                    - ${schema.spec.command}
                   ports:
                     - containerPort: ${schema.spec.port}
                       protocol: TCP
