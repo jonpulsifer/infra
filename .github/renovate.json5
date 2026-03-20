@@ -173,5 +173,11 @@
       automerge: true,
       automergeType: 'pr',
     },
+    // Block gateway-api updates (unsupported)
+    {
+      matchManagers: ['flux'],
+      matchFileNames: ['k8s/clusters/folly/sources/git/gateway-api.yaml'],
+      enabled: false,
+    },
   ],
 }
