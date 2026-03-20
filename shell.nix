@@ -12,6 +12,7 @@ let
     mise
     nix
     nixos-rebuild
+    python3
     sops
     terraform
     vault
