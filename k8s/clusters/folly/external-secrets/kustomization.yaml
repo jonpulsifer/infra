@@ -4,4 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helm-release.yaml
-  - secret.sops.yaml
+  - onepassword-connect.sops.yaml
+  - cluster-secret-store.yaml
+namespace: external-secrets

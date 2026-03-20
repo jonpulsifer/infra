@@ -38,7 +38,6 @@ spec:
           - request-headers
           - kube-system
           - monitoring
-          - vault
       name: "overlord"
       customApps:
         - group: Monitoring

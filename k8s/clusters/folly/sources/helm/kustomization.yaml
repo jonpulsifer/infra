@@ -8,11 +8,11 @@ resources:
   - cilium.yaml
   - cloudnative-pg.yaml
   - descheduler.yaml
+  - external-secrets.yaml
   - external-dns.yaml
   - falco.yaml
   - grafana.yaml
   - hajimari.yaml
-  - hashicorp.yaml
   - intel.yaml
   - jetstack.yaml
   - jonpulsifer.yaml
@@ -20,6 +20,7 @@ resources:
   - longhorn.yaml
   - metrics-server.yaml
   - node-feature-discovery.yaml
+  - onepassword.yaml
   - open-webui.yaml
   - prometheus.yaml
   - stakater.yaml

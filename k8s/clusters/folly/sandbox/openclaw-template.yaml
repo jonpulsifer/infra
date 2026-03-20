@@ -20,42 +20,6 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      initContainers:
-        - name: openclaw-config
-          image: busybox:1.37
-          command:
-            - sh
-            - -c
-            - |
-              cat <<'EOF' > /home/agent/.openclaw/config.json5
-              {
-                gateway: {
-                  trustedProxies: ["10.3.0.10", "10.3.0.12"],
-                  auth: {
-                    mode: "trusted-proxy",
-                    trustedProxy: {
-                      userHeader: "x-forwarded-user",
-                      allowUsers: ["jonathan"]
-                    }
-                  },
-                  controlUi: {
-                    allowedOrigins: ["https://openclaw.lolwtf.ca", "http://openclaw.lolwtf.ca"],
-                    dangerouslyAllowHostHeaderOriginFallback: true
-                  }
-                }
-              }
-              EOF
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
-            seccompProfile:
-              type: RuntimeDefault
-            capabilities:
-              drop:
-                - ALL
-          volumeMounts:
-            - mountPath: /home/agent/.openclaw
-              name: openclaw-config
       containers:
         - name: openclaw
           image: docker.io/jonpulsifer/ai-agents:latest
@@ -83,20 +47,19 @@ spec:
             - containerPort: 18789
             - containerPort: 18790
           volumeMounts:
-            - mountPath: /home/agent/.openclaw
+            - mountPath: /home/agent/.openclaw/config.json5
               name: openclaw-config
+              subPath: config.json5
+              readOnly: true
             - mountPath: /home/agent/.openclaw/workspace
               name: openclaw-workspace
       volumes:
         - name: openclaw-config
-          ephemeral:
-            volumeClaimTemplate:
-              spec:
-                accessModes:
-                  - ReadWriteOnce
-                resources:
-                  requests:
-                    storage: 2Gi
+          secret:
+            secretName: openclaw-config
+            items:
+              - key: config.json5
+                path: config.json5
         - name: openclaw-workspace
           ephemeral:
             volumeClaimTemplate:
