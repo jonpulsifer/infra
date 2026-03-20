@@ -141,6 +141,7 @@ The dotfiles flake no longer exports `nixosModules` — use `homeModules` instea
 Repo-local agent skills follow the [agentskills.io](https://agentskills.io) `SKILL.md` format and live in `.agents/skills/<name>/SKILL.md`.
 
 Available skills:
+- `validate-build` — Nix flake check, kustomize build, terraform validate before commit
 - `nixos-deploy` — build, deploy, and roll back NixOS hosts
 - `terraform` — Terraform workflow, module layout, CI behaviour
 - `kubernetes-gitops` — FluxCD reconciliation, networking, SOPS secrets

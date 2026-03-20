@@ -39,9 +39,9 @@ spec:
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
-      databaseReady: "${schema.spec.database.enabled ? database.status.readyInstances : 0}"
-      migrationSucceeded: "${schema.spec.database.enabled && schema.spec.database.migration.enabled ? migration.status.succeeded : 0}"
-      migrationFailed: "${schema.spec.database.enabled && schema.spec.database.migration.enabled ? migration.status.failed : 0}"
+      databaseReady: ${database.status.readyInstances}
+      migrationSucceeded: ${migration.status.succeeded}
+      migrationFailed: ${migration.status.failed}
   resources:
     # --- Namespace (always) ---
     - id: appnamespace
