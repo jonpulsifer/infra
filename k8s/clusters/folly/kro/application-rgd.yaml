@@ -6,8 +6,9 @@ metadata:
   namespace: kro-system
 spec:
   schema:
-    apiVersion: custom.agents.x-k8s.io/v1alpha1
+    apiVersion: v1alpha1
     kind: Application
+    group: custom.agents.x-k8s.io
     spec:
       image:
         type: string
