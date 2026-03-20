@@ -45,3 +45,63 @@ spec:
           - CreateNamespace=true
         retry:
           limit: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: truffle
+  namespace: argo
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - name: truffle
+            image: ghcr.io/jonpulsifer/truffle:latest
+            version: "latest"
+            hostname: truffle.lolwtf.ca
+          - name: truffle-canary
+            image: ghcr.io/jonpulsifer/truffle:canary
+            version: "canary"
+            hostname: truffle-canary.lolwtf.ca
+  template:
+    metadata:
+      name: "{{ .name }}"
+    spec:
+      project: default
+      sources:
+        - repoURL: https://github.com/jonpulsifer/ts.git
+          targetRevision: HEAD
+          path: apps/truffle/k8s
+          kustomize:
+            patches:
+              - target:
+                  group: custom.sandboxes.x-k8s.io
+                  version: v1alpha1
+                  kind: Application
+                  name: truffle
+                patch: |-
+                  - op: replace
+                    path: /metadata/name
+                    value: "{{ .name }}"
+                  - op: replace
+                    path: /spec/image
+                    value: "{{ .image }}"
+                  - op: replace
+                    path: /spec/version
+                    value: "{{ .version }}"
+                  - op: replace
+                    path: /spec/hostname
+                    value: "{{ .hostname }}"
+      destination:
+        name: in-cluster
+        namespace: default
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
+        retry:
+          limit: 2

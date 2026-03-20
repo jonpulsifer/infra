@@ -8,18 +8,28 @@ spec:
   schema:
     apiVersion: v1alpha1
     kind: Agent
-    group: custom.agents.x-k8s.io
+    group: custom.sandboxes.x-k8s.io
     spec:
       image: "string | default=docker.io/jonpulsifer/ai-agents:latest"
       port: "integer | default=8080"
       hostname: string
       storageSize: "string | default=2Gi"
+      configPath: "string | default=/home/agent/config"
+      workspacePath: "string | default=/home/agent/workspace"
+      resources:
+        requests:
+          memory: "string | default=256Mi"
+          cpu: "string | default=100m"
+        limits:
+          memory: "string | default=512Mi"
+          cpu: "string | default=500m"
       ingress:
         enabled: "boolean | default=true"
         forwardedUser: "string | default="
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
+      sandboxReady: ${sandboxclaim.metadata.name != ""}
   resources:
     - id: sandboxtemplate
       template:
@@ -58,10 +68,17 @@ spec:
                         - ALL
                   ports:
                     - containerPort: ${schema.spec.port}
+                  resources:
+                    requests:
+                      memory: ${schema.spec.resources.requests.memory}
+                      cpu: ${schema.spec.resources.requests.cpu}
+                    limits:
+                      memory: ${schema.spec.resources.limits.memory}
+                      cpu: ${schema.spec.resources.limits.cpu}
                   volumeMounts:
-                    - mountPath: /home/agent/.openclaw
+                    - mountPath: ${schema.spec.configPath}
                       name: agent-config
-                    - mountPath: /home/agent/.openclaw/workspace
+                    - mountPath: ${schema.spec.workspacePath}
                       name: agent-workspace
               volumes:
                 - name: agent-config

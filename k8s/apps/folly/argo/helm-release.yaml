@@ -20,6 +20,63 @@ spec:
         server.insecure: true
       cm:
         accounts.atlantis: apiKey
+        resource.customizations.health.custom.sandboxes.x-k8s.io_Application: |
+          hs = {}
+
+          -- If status hasn't been written yet, we're progressing
+          if obj.status == nil then
+            hs.status = "Progressing"
+            hs.message = "Waiting for kro to reconcile Application..."
+            return hs
+          end
+
+          -- 1. Check database readiness
+          if obj.spec.database ~= nil and obj.spec.database.enabled == true then
+            if obj.status.databaseReady == nil or obj.status.databaseReady < 1 then
+              hs.status = "Progressing"
+              hs.message = "Waiting for database to become ready..."
+              return hs
+            end
+          end
+
+          -- 2. Check if migrations failed
+          if obj.status.migrationFailed ~= nil and obj.status.migrationFailed >= 1 then
+            hs.status = "Degraded"
+            hs.message = "Database migration job failed!"
+            return hs
+          end
+
+          -- 3. Check if migrations are pending/running
+          if obj.spec.database ~= nil and obj.spec.database.migration ~= nil and obj.spec.database.migration.enabled == true then
+            if obj.status.migrationSucceeded == nil or obj.status.migrationSucceeded < 1 then
+              hs.status = "Progressing"
+              hs.message = "Waiting for database migrations to complete..."
+              return hs
+            end
+          end
+
+          -- 4. Everything is good
+          hs.status = "Healthy"
+          hs.message = "Application is fully rolled out."
+          return hs
+        resource.customizations.health.custom.sandboxes.x-k8s.io_Agent: |
+          hs = {}
+
+          if obj.status == nil then
+            hs.status = "Progressing"
+            hs.message = "Waiting for kro to reconcile Agent..."
+            return hs
+          end
+
+          if obj.status.sandboxReady ~= nil and obj.status.sandboxReady == true then
+            hs.status = "Healthy"
+            hs.message = "Agent sandbox is ready."
+          else
+            hs.status = "Progressing"
+            hs.message = "Waiting for sandbox to become ready..."
+          end
+
+          return hs
       rbac:
         policy.csv: |
           p, role:atlantis, applicationsets, *, */*, allow

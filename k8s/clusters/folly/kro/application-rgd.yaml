@@ -8,9 +8,10 @@ spec:
   schema:
     apiVersion: v1alpha1
     kind: Application
-    group: custom.agents.x-k8s.io
+    group: custom.sandboxes.x-k8s.io
     spec:
       image: string
+      version: "string | default=latest"
       command: "string | default=sleep infinity"
       port: "integer | default=8080"
       replicas: "integer | default=1"
@@ -38,6 +39,9 @@ spec:
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
+      databaseReady: ${schema.spec.database.enabled ? database.status.readyInstances : 0}
+      migrationSucceeded: ${schema.spec.database.enabled && schema.spec.database.migration.enabled ? migration.status.succeeded : 0}
+      migrationFailed: ${schema.spec.database.enabled && schema.spec.database.migration.enabled ? migration.status.failed : 0}
   resources:
     # --- Namespace (always) ---
     - id: appnamespace
@@ -183,7 +187,6 @@ spec:
                         - ALL
 
     # --- Deployment (database + migration) ---
-    # Depends on the migration Job succeeding before creating/updating
     - id: deploymentmigrate
       includeWhen:
         - ${schema.spec.database.enabled}
@@ -198,7 +201,7 @@ spec:
             app.kubernetes.io/name: ${schema.metadata.name}
             app.kubernetes.io/part-of: ${schema.metadata.name}
           annotations:
-            app.kubernetes.io/migration: ${migration.metadata.name}
+            app.kubernetes.io/migration: ${schema.metadata.name}-migrate-${schema.spec.version}
         spec:
           replicas: ${schema.spec.replicas}
           selector:
@@ -316,8 +319,8 @@ spec:
             - ${schema.spec.hostname}
           rules:
             - backendRefs:
-                - name: ${schema.metadata.name}
-                  port: ${schema.spec.port}
+              - name: ${schema.metadata.name}
+                port: ${schema.spec.port}
 
     # --- CNPG PostgreSQL Cluster ---
     - id: database
@@ -349,9 +352,6 @@ spec:
               dataChecksums: true
 
     # --- Migration Job ---
-    # Depends on database readyWhen (readyInstances >= 1) via CEL reference.
-    # When spec.image changes, kro recreates the Job with the new image,
-    # running migrations before the Deployment updates.
     - id: migration
       includeWhen:
         - ${schema.spec.database.enabled}
@@ -362,7 +362,7 @@ spec:
         apiVersion: batch/v1
         kind: Job
         metadata:
-          name: ${schema.metadata.name}-migrate
+          name: ${schema.metadata.name}-migrate-${schema.spec.version}
           namespace: ${schema.metadata.name}
           labels:
             app.kubernetes.io/name: ${schema.metadata.name}
@@ -370,6 +370,8 @@ spec:
             app.kubernetes.io/component: migration
         spec:
           backoffLimit: 3
+          # Optional: Uncomment below if you want jobs to self-delete after an hour
+          # ttlSecondsAfterFinished: 3600
           template:
             metadata:
               labels:
