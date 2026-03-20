@@ -11,7 +11,6 @@ spec:
     group: custom.sandboxes.x-k8s.io
     spec:
       image: string
-      version: "string | default=latest"
       command: "string | default=sleep infinity"
       port: "integer | default=8080"
       replicas: "integer | default=1"
@@ -201,7 +200,11 @@ spec:
             app.kubernetes.io/name: ${schema.metadata.name}
             app.kubernetes.io/part-of: ${schema.metadata.name}
           annotations:
-            app.kubernetes.io/migration: ${schema.metadata.name}-migrate-${schema.spec.version}
+            app.kubernetes.io/migration: ${schema.spec.image}
+            # References migration.status so this Deployment is ordered after the migration Job and
+            # waits for migration.readyWhen (Job succeeded >= 1). Without this, kro only inferred
+            # deps on database/schema and the app could roll to the new image before migrate finished.
+            kro.run/after-migration-succeeded: "${string(migration.status.succeeded)}"
         spec:
           replicas: ${schema.spec.replicas}
           selector:
@@ -350,6 +353,9 @@ spec:
               dataChecksums: true
 
     # --- Migration Job ---
+    # KRO reconciles with server-side apply (fixed metadata.name); generateName is not supported.
+    # Name includes the image tag/digest tail so template changes get a new Job (spec.template is immutable).
+    # ttlSecondsAfterFinished removes finished Jobs from etcd after the TTL.
     - id: migration
       includeWhen:
         - ${schema.spec.database.enabled}
@@ -360,7 +366,7 @@ spec:
         apiVersion: batch/v1
         kind: Job
         metadata:
-          name: ${schema.metadata.name}-migrate-${schema.spec.version}
+          name: "${cel.bind(tag, schema.spec.image.split(':')[schema.spec.image.split(':').size()-1].lowerAscii().replace('.', '-').replace('@', '-').replace('_', '-').replace('+', '-'), cel.bind(maxTag, 63 - schema.metadata.name.size() - 9 > 8 ? 63 - schema.metadata.name.size() - 9 : 8, schema.metadata.name + '-migrate-' + (tag.size() > maxTag ? tag.substring(tag.size() - maxTag) : tag)))}"
           namespace: ${schema.metadata.name}
           labels:
             app.kubernetes.io/name: ${schema.metadata.name}
@@ -368,8 +374,7 @@ spec:
             app.kubernetes.io/component: migration
         spec:
           backoffLimit: 3
-          # Optional: Uncomment below if you want jobs to self-delete after an hour
-          # ttlSecondsAfterFinished: 3600
+          ttlSecondsAfterFinished: 3600
           template:
             metadata:
               labels:

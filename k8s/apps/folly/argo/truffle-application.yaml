@@ -1,5 +1,9 @@
 ---
 # CD-friendly single app; avoid duplicating the trufflez ApplicationSet entry or two apps will fight the same objects.
+#
+# Image is driven from ts.git Kustomize (`apps/truffle/k8s` images + kustomizeconfig for spec.image).
+# CI may run: argocd app set truffle --kustomize-image "ghcr.io/jonpulsifer/truffle=ghcr.io/jonpulsifer/truffle:$SHA"
+# Note: Flux reapplies this Application from infra Git on interval; see comment in ts kustomization.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

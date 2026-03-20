@@ -59,11 +59,9 @@ spec:
         elements:
           - name: trufflez
             image: ghcr.io/jonpulsifer/truffle:5264cf3c18a0d4b5c172b11bee0e3eab4de71428
-            version: 5264cf3c18a0d4b5c172b11bee0e3eab4de71428
             hostname: trufflez.lolwtf.ca
           - name: truffle-canary
             image: ghcr.io/jonpulsifer/truffle:latest
-            version: latest
             hostname: truffle-canary.lolwtf.ca
   template:
     metadata:
@@ -88,9 +86,6 @@ spec:
                   - op: replace
                     path: /spec/image
                     value: "{{ .image }}"
-                  - op: replace
-                    path: /spec/version
-                    value: "{{ .version }}"
                   - op: replace
                     path: /spec/hostname
                     value: "{{ .hostname }}"
