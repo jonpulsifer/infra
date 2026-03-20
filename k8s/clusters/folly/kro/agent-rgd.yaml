@@ -10,26 +10,13 @@ spec:
     kind: Agent
     group: custom.agents.x-k8s.io
     spec:
-      image:
-        type: string
-        default: "docker.io/jonpulsifer/ai-agents:latest"
-      port:
-        type: integer
-        default: 8080
-      hostname:
-        type: string
-      storageSize:
-        type: string
-        default: "2Gi"
+      image: "string | default=docker.io/jonpulsifer/ai-agents:latest"
+      port: "integer | default=8080"
+      hostname: string
+      storageSize: "string | default=2Gi"
       ingress:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-            default: true
-          forwardedUser:
-            type: string
-            default: ""
+        enabled: "boolean | default=true"
+        forwardedUser: "string | default="
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local

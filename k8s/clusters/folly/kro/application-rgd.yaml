@@ -10,82 +10,36 @@ spec:
     kind: Application
     group: custom.agents.x-k8s.io
     spec:
-      image:
-        type: string
-      port:
-        type: integer
-        default: 8080
-      replicas:
-        type: integer
-        default: 1
-      hostname:
-        type: string
-      certIssuer:
-        type: string
-        default: "letsencrypt-production"
+      image: string
+      port: "integer | default=8080"
+      replicas: "integer | default=1"
+      hostname: string
+      certIssuer: "string | default=letsencrypt-production"
       ingress:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-            default: true
+        enabled: "boolean | default=true"
       resources:
-        type: object
-        properties:
-          requests:
-            type: object
-            properties:
-              memory:
-                type: string
-                default: "256Mi"
-              cpu:
-                type: string
-                default: "100m"
-          limits:
-            type: object
-            properties:
-              memory:
-                type: string
-                default: "512Mi"
-              cpu:
-                type: string
-                default: "500m"
+        requests:
+          memory: "string | default=256Mi"
+          cpu: "string | default=100m"
+        limits:
+          memory: "string | default=512Mi"
+          cpu: "string | default=500m"
       database:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-            default: false
-          instances:
-            type: integer
-            default: 1
-          size:
-            type: string
-            default: "1Gi"
-          name:
-            type: string
-            default: "app"
-          migration:
-            type: object
-            properties:
-              enabled:
-                type: boolean
-                default: false
-              command:
-                type: string
-                default: "echo 'no migration configured'"
+        enabled: "boolean | default=false"
+        instances: "integer | default=1"
+        size: "string | default=1Gi"
+        name: "string | default=app"
+        migration:
+          enabled: "boolean | default=false"
+          command: "string | default=echo 'no migration configured'"
       networkPolicy:
-        type: object
-        properties:
-          enabled:
-            type: boolean
-            default: false
+        enabled: "boolean | default=false"
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
   resources:
     # --- Namespace (always) ---
-    - id: namespace
+    - id: appnamespace
       template:
         apiVersion: v1
         kind: Namespace
