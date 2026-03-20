@@ -1,0 +1,27 @@
+---
+# Connect server: same Secret as ESO client auth; uses key 1password-credentials.json only.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: onepassword-connect
+  namespace: external-secrets
+spec:
+  interval: 24h
+  chart:
+    spec:
+      chart: connect
+      version: 2.4.0
+      sourceRef:
+        kind: HelmRepository
+        name: onepassword
+        namespace: flux-system
+  dependsOn:
+    - name: external-secrets
+  values:
+    connect:
+      credentialsName: op-connect-credentials
+      credentialsKey: 1password-credentials.json
+      serviceAccount:
+        create: true
+    operator:
+      create: false
