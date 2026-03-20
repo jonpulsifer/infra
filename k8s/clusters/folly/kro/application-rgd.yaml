@@ -340,8 +340,6 @@ spec:
           storage:
             storageClass: local-path
             size: ${schema.spec.database.size}
-          monitoring:
-            enablePodMonitor: true
           bootstrap:
             initdb:
               database: ${schema.spec.database.name}
