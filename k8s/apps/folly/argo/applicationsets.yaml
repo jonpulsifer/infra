@@ -105,3 +105,35 @@ spec:
           - CreateNamespace=false
         retry:
           limit: 2
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: ts-apps
+  namespace: argo
+spec:
+  generators:
+    - list:
+        elements:
+          - app: hub
+          - app: slingshot
+  template:
+    metadata:
+      name: "{{app}}"
+    spec:
+      project: default
+      sources:
+        - repoURL: https://github.com/jonpulsifer/ts.git
+          targetRevision: HEAD
+          path: apps/{{app}}/k8s
+      destination:
+        name: in-cluster
+        namespace: default
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
+        retry:
+          limit: 2
