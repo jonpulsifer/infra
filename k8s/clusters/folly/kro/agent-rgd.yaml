@@ -285,8 +285,8 @@ spec:
           namespace: ${schema.metadata.namespace}
         spec:
           parentRefs:
-            - name: ${schema.spec.ingress.mode == "shared" ? "cluster-gateway" : schema.metadata.name + "-gateway"}
-              namespace: ${schema.spec.ingress.mode == "shared" ? "default" : schema.metadata.namespace}
+            - name: '${schema.spec.ingress.mode == "shared" ? "cluster-gateway" : schema.metadata.name + "-gateway"}'
+              namespace: '${schema.spec.ingress.mode == "shared" ? "default" : schema.metadata.namespace}'
           hostnames:
             - ${schema.spec.hostname}
           rules:
@@ -307,8 +307,8 @@ spec:
           namespace: ${schema.metadata.namespace}
         spec:
           parentRefs:
-            - name: ${schema.spec.ingress.mode == "shared" ? "cluster-gateway" : schema.metadata.name + "-gateway"}
-              namespace: ${schema.spec.ingress.mode == "shared" ? "default" : schema.metadata.namespace}
+            - name: '${schema.spec.ingress.mode == "shared" ? "cluster-gateway" : schema.metadata.name + "-gateway"}'
+              namespace: '${schema.spec.ingress.mode == "shared" ? "default" : schema.metadata.namespace}'
           hostnames:
             - ${schema.spec.hostname}
           rules:
