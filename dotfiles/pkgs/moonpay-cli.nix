@@ -2,6 +2,7 @@
   lib,
   buildNpmPackage,
   fetchurl,
+  nodejs,
 }:
 
 buildNpmPackage (finalAttrs: {
@@ -18,11 +19,29 @@ buildNpmPackage (finalAttrs: {
 
   postPatch = ''
     cp ${./moonpay-cli-package-lock.json} package-lock.json
+    # Remove private workspace packages that aren't published to npm
+    ${lib.getExe nodejs} -e "
+      const fs = require('fs');
+      const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+      for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+        if (pkg[section]) {
+          for (const [name, ver] of Object.entries(pkg[section])) {
+            if (name.startsWith('@moonpay/') && ver === '*') {
+              delete pkg[section][name];
+            }
+          }
+        }
+      }
+      fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+    "
   '';
 
-  npmDepsHash = "sha256-jnGpc/oDZuI2jZXCHwrEAQMhtvHLvx2bHkfjGpevsgM=";
+  npmDepsHash = "sha256-duSmJ9JotQr49U/Wm4G2JyKDMLjlOJA3+laR1wg9lkQ=";
 
-  npmFlags = [ "--include=optional" ];
+  npmFlags = [
+    "--include=optional"
+    "--legacy-peer-deps"
+  ];
   dontNpmBuild = true;
 
   meta = {

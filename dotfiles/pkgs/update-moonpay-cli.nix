@@ -51,7 +51,22 @@ writeShellApplication {
     curl -sL "$URL" | tar xz -C "$TMPDIR"
 
     echo "==> Generating package-lock.json..."
-    (cd "$TMPDIR/package" && npm install --package-lock-only --ignore-scripts --include=optional 2>/dev/null)
+    # Remove private workspace packages that aren't published to npm
+    node -e "
+      const fs = require('fs');
+      const pkg = JSON.parse(fs.readFileSync('$TMPDIR/package/package.json', 'utf8'));
+      for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+        if (pkg[section]) {
+          for (const [name, ver] of Object.entries(pkg[section])) {
+            if (name.startsWith('@moonpay/') && ver === '*') {
+              delete pkg[section][name];
+            }
+          }
+        }
+      }
+      fs.writeFileSync('$TMPDIR/package/package.json', JSON.stringify(pkg, null, 2));
+    "
+    (cd "$TMPDIR/package" && npm install --package-lock-only --ignore-scripts --include=optional --legacy-peer-deps 2>/dev/null)
     cp "$TMPDIR/package/package-lock.json" "$LOCK_FILE"
 
     echo "==> Prefetching npm dependencies (this may take a minute)..."
