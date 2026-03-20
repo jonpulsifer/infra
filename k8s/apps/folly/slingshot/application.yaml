@@ -14,7 +14,7 @@ spec:
     size: "1Gi"
     migration:
       enabled: true
-      command: "npx prisma migrate deploy"
+      command: "echo hello"
   resources:
     requests:
       memory: "256Mi"

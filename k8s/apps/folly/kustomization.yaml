@@ -17,7 +17,7 @@ resources:
   - redis
   - reloader
   # - satisfactory
-  # - slingshot
+  - slingshot
   - vault
 patches:
   - target:
