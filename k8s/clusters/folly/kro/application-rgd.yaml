@@ -162,7 +162,7 @@ spec:
                     - name: DATABASE_URL
                       valueFrom:
                         secretKeyRef:
-                          name: ${database.metadata.name}-${schema.spec.database.name}
+                          name: ${database.metadata.name}-app
                           key: uri
                   resources:
                     requests:
@@ -230,7 +230,7 @@ spec:
                     - name: DATABASE_URL
                       valueFrom:
                         secretKeyRef:
-                          name: ${database.metadata.name}-${schema.spec.database.name}
+                          name: ${database.metadata.name}-app
                           key: uri
                   resources:
                     requests:
@@ -393,7 +393,7 @@ spec:
                     - name: DATABASE_URL
                       valueFrom:
                         secretKeyRef:
-                          name: ${database.metadata.name}-${schema.spec.database.name}
+                          name: ${database.metadata.name}-app
                           key: uri
                   securityContext:
                     runAsNonRoot: true
