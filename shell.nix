@@ -4,6 +4,7 @@
 with pkgs;
 let
   packages = [
+    argocd
     cilium-cli
     fluxcd
     google-cloud-sdk

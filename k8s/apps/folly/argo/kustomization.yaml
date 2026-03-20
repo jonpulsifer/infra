@@ -8,3 +8,4 @@ resources:
   - rbac.yaml
 #  - applications.yaml
   - applicationsets.yaml
+  - truffle-application.yaml
