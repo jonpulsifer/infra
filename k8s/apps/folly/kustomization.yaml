@@ -18,6 +18,7 @@ resources:
   - reloader
   # - satisfactory
   - slingshot
+  - truffle
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
