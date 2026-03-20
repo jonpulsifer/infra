@@ -60,9 +60,6 @@ spec:
           - name: trufflez
             image: ghcr.io/jonpulsifer/truffle:5264cf3c18a0d4b5c172b11bee0e3eab4de71428
             hostname: trufflez.lolwtf.ca
-          - name: truffle-canary
-            image: ghcr.io/jonpulsifer/truffle:latest
-            hostname: truffle-canary.lolwtf.ca
   template:
     metadata:
       name: "{{ .name }}"
@@ -111,7 +108,6 @@ spec:
     - list:
         elements:
           - app: hub
-          - app: slingshot
   template:
     metadata:
       name: "{{app}}"

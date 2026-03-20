@@ -17,7 +17,6 @@ resources:
   - redis
   - reloader
   # - satisfactory
-  - slingshot
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
