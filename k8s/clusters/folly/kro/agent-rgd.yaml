@@ -26,12 +26,24 @@ spec:
       ingress:
         enabled: "boolean | default=true"
         forwardedUser: "string | default="
+        mode: "string | default=shared"
+        certIssuer: "string | default=letsencrypt-production"
+      command: "string | default="
+      secret:
+        onePasswordItem: "string | default="
+        property: "string | default=config"
+        mountPath: "string | default=/config"
+        mountKey: "string | default=config"
+        envVar: "string | default=CONFIG_PATH"
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
       sandboxReady: ${sandboxclaim.metadata.name != ""}
   resources:
+    # --- Basic SandboxTemplate (no 1Password secret) ---
     - id: sandboxtemplate
+      includeWhen:
+        - ${schema.spec.secret.onePasswordItem == ""}
       template:
         apiVersion: extensions.agents.x-k8s.io/v1alpha1
         kind: SandboxTemplate
@@ -99,6 +111,86 @@ spec:
                         resources:
                           requests:
                             storage: ${schema.spec.storageSize}
+
+    # --- Config SandboxTemplate (with 1Password secret) ---
+    - id: sandboxtemplateconfig
+      includeWhen:
+        - ${schema.spec.secret.onePasswordItem != ""}
+      template:
+        apiVersion: extensions.agents.x-k8s.io/v1alpha1
+        kind: SandboxTemplate
+        metadata:
+          name: ${schema.metadata.name}
+          namespace: ${schema.metadata.namespace}
+        spec:
+          networkPolicyManagement: Unmanaged
+          podTemplate:
+            metadata:
+              labels:
+                app: ${schema.metadata.name}
+                sandbox: ${schema.metadata.name}
+            spec:
+              automountServiceAccountToken: false
+              securityContext:
+                runAsUser: 1337
+                runAsGroup: 1337
+                fsGroup: 1337
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+                - name: agent
+                  image: ${schema.spec.image}
+                  imagePullPolicy: IfNotPresent
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: false
+                    seccompProfile:
+                      type: RuntimeDefault
+                    capabilities:
+                      drop:
+                        - ALL
+                  command:
+                    - sh
+                    - -c
+                    - ${schema.spec.command}
+                  env:
+                    - name: ${schema.spec.secret.envVar}
+                      value: ${schema.spec.secret.mountPath}
+                  ports:
+                    - containerPort: ${schema.spec.port}
+                  resources:
+                    requests:
+                      memory: ${schema.spec.resources.requests.memory}
+                      cpu: ${schema.spec.resources.requests.cpu}
+                    limits:
+                      memory: ${schema.spec.resources.limits.memory}
+                      cpu: ${schema.spec.resources.limits.cpu}
+                  volumeMounts:
+                    - mountPath: ${schema.spec.secret.mountPath}
+                      name: agent-config
+                      subPath: ${schema.spec.secret.mountKey}
+                      readOnly: true
+                    - mountPath: ${schema.spec.workspacePath}
+                      name: agent-workspace
+              volumes:
+                - name: agent-config
+                  secret:
+                    secretName: ${schema.metadata.name}-config
+                    items:
+                      - key: ${schema.spec.secret.mountKey}
+                        path: ${schema.spec.secret.mountKey}
+                - name: agent-workspace
+                  ephemeral:
+                    volumeClaimTemplate:
+                      spec:
+                        accessModes:
+                          - ReadWriteOnce
+                        resources:
+                          requests:
+                            storage: ${schema.spec.storageSize}
+
+    # --- SandboxClaim (always) ---
     - id: sandboxclaim
       template:
         apiVersion: extensions.agents.x-k8s.io/v1alpha1
@@ -109,6 +201,8 @@ spec:
         spec:
           sandboxTemplateRef:
             name: ${schema.metadata.name}
+
+    # --- Service (always) ---
     - id: service
       template:
         apiVersion: v1
@@ -124,6 +218,61 @@ spec:
               protocol: TCP
               port: ${schema.spec.port}
               targetPort: ${schema.spec.port}
+
+    # --- ExternalSecret (1Password, when configured) ---
+    - id: externalsecret
+      includeWhen:
+        - ${schema.spec.secret.onePasswordItem != ""}
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${schema.metadata.name}-config
+          namespace: ${schema.metadata.namespace}
+        spec:
+          refreshInterval: 1h
+          secretStoreRef:
+            kind: ClusterSecretStore
+            name: onepassword-connect
+          target:
+            name: ${schema.metadata.name}-config
+            creationPolicy: Owner
+          data:
+            - secretKey: ${schema.spec.secret.mountKey}
+              remoteRef:
+                key: ${schema.spec.secret.onePasswordItem}
+                property: ${schema.spec.secret.property}
+
+    # --- Standalone Gateway (per-agent, when mode != shared) ---
+    - id: gateway
+      includeWhen:
+        - ${schema.spec.ingress.enabled}
+        - ${schema.spec.ingress.mode != "shared"}
+      template:
+        apiVersion: gateway.networking.k8s.io/v1beta1
+        kind: Gateway
+        metadata:
+          name: ${schema.metadata.name}-gateway
+          namespace: ${schema.metadata.namespace}
+          annotations:
+            cert-manager.io/cluster-issuer: ${schema.spec.ingress.certIssuer}
+        spec:
+          gatewayClassName: cilium
+          listeners:
+            - name: http-gateway
+              protocol: HTTP
+              port: 80
+              hostname: ${schema.spec.hostname}
+            - name: tls-gateway
+              protocol: HTTPS
+              port: 443
+              hostname: ${schema.spec.hostname}
+              tls:
+                certificateRefs:
+                  - kind: Secret
+                    name: ${schema.spec.hostname}
+
+    # --- HTTPRoute (no auth) ---
     - id: httproute
       includeWhen:
         - ${schema.spec.ingress.enabled}
@@ -136,14 +285,16 @@ spec:
           namespace: ${schema.metadata.namespace}
         spec:
           parentRefs:
-            - name: cluster-gateway
-              namespace: default
+            - name: ${schema.spec.ingress.mode == "shared" ? "cluster-gateway" : schema.metadata.name + "-gateway"}
+              namespace: ${schema.spec.ingress.mode == "shared" ? "default" : schema.metadata.namespace}
           hostnames:
             - ${schema.spec.hostname}
           rules:
             - backendRefs:
                 - name: ${schema.metadata.name}
                   port: ${schema.spec.port}
+
+    # --- HTTPRoute with auth (X-Forwarded-User) ---
     - id: httprouteauth
       includeWhen:
         - ${schema.spec.ingress.enabled}
@@ -156,8 +307,8 @@ spec:
           namespace: ${schema.metadata.namespace}
         spec:
           parentRefs:
-            - name: cluster-gateway
-              namespace: default
+            - name: ${schema.spec.ingress.mode == "shared" ? "cluster-gateway" : schema.metadata.name + "-gateway"}
+              namespace: ${schema.spec.ingress.mode == "shared" ? "default" : schema.metadata.namespace}
           hostnames:
             - ${schema.spec.hostname}
           rules:

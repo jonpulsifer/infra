@@ -16,27 +16,14 @@ spec:
           from: All
         kinds:
           - kind: HTTPRoute
-    - name: https-openclaw
+    - name: https-wildcard
       protocol: HTTPS
       port: 443
-      hostname: openclaw.lolwtf.ca
+      hostname: "*.lolwtf.ca"
       tls:
         certificateRefs:
           - kind: Secret
-            name: openclaw.lolwtf.ca
-      allowedRoutes:
-        namespaces:
-          from: All
-        kinds:
-          - kind: HTTPRoute
-    - name: https-ai-agents
-      protocol: HTTPS
-      port: 443
-      hostname: ai-agents.lolwtf.ca
-      tls:
-        certificateRefs:
-          - kind: Secret
-            name: ai-agents.lolwtf.ca
+            name: wildcard-lolwtf-ca
       allowedRoutes:
         namespaces:
           from: All

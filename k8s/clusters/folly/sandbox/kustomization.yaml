@@ -4,8 +4,5 @@ kind: Kustomization
 resources:
   - agent-sandbox.yaml
   - agents-sandbox-namespace.yaml
-  - openclaw-config-external-secret.yaml
-  - openclaw-template.yaml
-  - openclaw-claim.yaml
-  - openclaw-routes.yaml
+  - openclaw.yaml
   - ai-agents-app.yaml

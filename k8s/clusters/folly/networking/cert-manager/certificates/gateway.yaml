@@ -12,3 +12,17 @@ spec:
     group: cert-manager.io
     kind: ClusterIssuer
     name: letsencrypt-production
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-lolwtf-ca
+  namespace: default
+spec:
+  secretName: wildcard-lolwtf-ca
+  dnsNames:
+    - "*.lolwtf.ca"
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-production

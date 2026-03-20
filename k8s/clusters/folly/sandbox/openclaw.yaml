@@ -1,0 +1,22 @@
+---
+apiVersion: custom.sandboxes.x-k8s.io/v1alpha1
+kind: Agent
+metadata:
+  name: openclaw
+  namespace: agents-sandbox
+spec:
+  image: docker.io/jonpulsifer/ai-agents:latest
+  port: 18789
+  hostname: openclaw.lolwtf.ca
+  storageSize: 2Gi
+  workspacePath: /home/agent/.openclaw/workspace
+  ingress:
+    enabled: true
+    mode: shared
+  command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
+  secret:
+    onePasswordItem: openclaw-config
+    property: config.json5
+    mountPath: /home/agent/.openclaw/config.json5
+    mountKey: config.json5
+    envVar: OPENCLAW_CONFIG_PATH

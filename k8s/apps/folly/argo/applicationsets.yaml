@@ -57,7 +57,7 @@ spec:
   generators:
     - list:
         elements:
-          - name: truffle
+          - name: trufflez
             image: ghcr.io/jonpulsifer/truffle:latest
             version: "latest"
             hostname: truffle.lolwtf.ca
