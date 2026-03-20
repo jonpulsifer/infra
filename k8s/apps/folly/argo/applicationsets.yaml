@@ -62,7 +62,7 @@ spec:
             version: "latest"
             hostname: truffle.lolwtf.ca
           - name: truffle-canary
-            image: ghcr.io/jonpulsifer/truffle:canary
+            image: ghcr.io/jonpulsifer/truffle:latest
             version: "canary"
             hostname: truffle-canary.lolwtf.ca
   template:
