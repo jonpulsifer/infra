@@ -1,79 +1,178 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Rebuilt yeet: AI-powered Git & PR Workflow
-# Dependencies: git, gh CLI, and one of (claude, opencode, gemini)
-
-# Configuration
-DEFAULT_BRANCH="main"
+# yeet: OpenCode-assisted conventional commit; optional jp/* branch + gh PR flow.
+# Requires: git, gh (when not on default branch), opencode.
+# Stage changes before running; this script never runs git add.
 
 err() { echo "yeet error: $*" >&2; exit 1; }
 info() { echo "yeet: $*" >&2; }
 
-# FR1 & FR2: Guard and check for staged changes [18, 33]
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    err "Not in a git repository."
+  err "Not in a git repository."
 fi
 
 if git diff --cached --quiet; then
-    info "No changes staged. Attempting to stage all changes..."
-    git add -A
-    if git diff --cached --quiet; then err "Nothing to commit."; fi
+  err "No changes staged. Stage files with git add, then run yeet again."
 fi
 
-# Now safe to query Git for branch information
-CURRENT_BRANCH=$(git branch --show-current)
+current_branch=$(git branch --show-current)
+if [[ -z "$current_branch" ]]; then
+  err "Detached HEAD is not supported. Checkout a branch first."
+fi
 
-# Multi-model AI orchestration [17, 19]
-ai_query() {
-    local prompt="$1"
-    local diff_context
-    diff_context=$(git diff --cached | head -n 1000)
-    local full_input
-    full_input="$(printf '%s\n\n%s' "$prompt" "$diff_context")"
-
-    if command -v claude &>/dev/null; then
-        claude -p <<< "$full_input"
-    elif command -v opencode &>/dev/null; then
-        opencode run <<< "$full_input"
-    elif command -v gemini &>/dev/null; then
-        gemini <<< "$full_input"
-    else
-        err "No AI CLI found (claude, opencode, or gemini required)."
+default_branch() {
+  local b
+  b=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
+  if [[ -n "$b" ]]; then
+    printf '%s' "$b"
+    return
+  fi
+  if command -v gh &>/dev/null && gh repo view &>/dev/null; then
+    b=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name // empty' 2>/dev/null || true)
+    if [[ -n "$b" ]]; then
+      printf '%s' "$b"
+      return
     fi
+  fi
+  for cand in main master; do
+    if git show-ref --verify --quiet "refs/remotes/origin/${cand}" 2>/dev/null; then
+      printf '%s' "$cand"
+      return
+    fi
+  done
+  printf '%s' "main"
 }
 
-# Generate Conventional Commit Message [25, 34]
-info "Generating commit message..."
-COMMIT_MSG=$(ai_query "Generate a single-line conventional commit message for this diff. Use imperative mood. No markdown.")
+repo_default=$(default_branch)
 
-if [ -z "$COMMIT_MSG" ]; then
-    err "Failed to generate commit message."
+# Cached diff with byte cap (avoid huge prompts)
+DIFF_MAX=$((256 * 1024))
+diff_bytes=$(git diff --cached | wc -c | tr -d ' ')
+if ((diff_bytes > DIFF_MAX)); then
+  info "warning: staged diff is ${diff_bytes} bytes; truncating to ${DIFF_MAX} bytes for the model"
+  diff_context=$(git diff --cached | head -c "$DIFF_MAX")
+else
+  diff_context=$(git diff --cached)
 fi
 
-# FR2: Commit with signing and DCO [40, 41]
+if ! command -v opencode &>/dev/null; then
+  err "opencode is not on PATH (required for yeet)."
+fi
+
+model=${YEET_OPENCODE_MODEL:-opencode-go/minimax-m2.7}
+prompt="Generate a single-line conventional commit message for the following staged diff. Use imperative mood. Output only the subject line, no markdown, no quotes, no explanation."
+
+run_opencode() {
+  local full_input
+  full_input=$(printf '%s\n\n%s' "$prompt" "$diff_context")
+  if [[ -n "${YEET_OPENCODE_ATTACH:-}" ]]; then
+    printf '%s' "$full_input" | opencode run -m "$model" --attach "$YEET_OPENCODE_ATTACH" -
+  else
+    printf '%s' "$full_input" | opencode run -m "$model" -
+  fi
+}
+
+info "Generating commit message (${model})..."
+commit_raw=$(run_opencode)
+COMMIT_MSG=$(printf '%s' "$commit_raw" | head -n1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+COMMIT_MSG=${COMMIT_MSG#\`}
+COMMIT_MSG=${COMMIT_MSG%\`}
+COMMIT_MSG=${COMMIT_MSG#\"}
+COMMIT_MSG=${COMMIT_MSG%\"}
+
+if [[ -z "$COMMIT_MSG" ]]; then
+  err "Failed to generate commit message (empty output from opencode)."
+fi
+
+on_default=false
+if [[ "$current_branch" == "$repo_default" ]]; then
+  on_default=true
+fi
+
+if [[ "$on_default" == true ]]; then
+  git commit -s -m "$COMMIT_MSG"
+  info "Committed on default branch '${repo_default}'."
+  exit 0
+fi
+
+if ! command -v gh &>/dev/null; then
+  err "gh is required when not on the default branch."
+fi
+
+derive_slug() {
+  local line=$1
+  line=$(printf '%s' "$line" | head -n1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [[ "$line" =~ ^([a-zA-Z]+)\(([a-zA-Z0-9_.-]+)\): ]]; then
+    local t sc
+    t=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    sc=$(printf '%s' "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]' | tr '._' '-')
+    printf '%s-%s' "$t" "$sc"
+  elif [[ "$line" =~ ^([a-zA-Z]+): ]]; then
+    printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]'
+  else
+    printf '%s' "$line" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g' | sed 's/^-\+\|-\+$//g' | cut -c1-48
+  fi
+}
+
+slug=$(derive_slug "$COMMIT_MSG")
+slug=$(printf '%s' "$slug" | tr -cd 'a-z0-9-' | sed 's/--*/-/g' | sed 's/^-\+\|-\+$//g')
+if [[ -z "$slug" ]]; then
+  slug="change-$(git rev-parse --short HEAD)"
+fi
+
+branch_exists_anywhere() {
+  local name=$1
+  if git show-ref --verify --quiet "refs/heads/${name}" 2>/dev/null; then
+    return 0
+  fi
+  if git show-ref --verify --quiet "refs/remotes/origin/${name}" 2>/dev/null; then
+    return 0
+  fi
+  if git remote get-url origin &>/dev/null; then
+    if git ls-remote --heads origin "$name" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+pick_jp_branch() {
+  local base=$1
+  local name="jp/${base}"
+  local n=2
+  while branch_exists_anywhere "$name"; do
+    name="jp/${base}-${n}"
+    n=$((n + 1))
+  done
+  printf '%s' "$name"
+}
+
+if [[ "$current_branch" != jp/* ]]; then
+  jp_branch=$(pick_jp_branch "$slug")
+  info "Creating integration branch '${jp_branch}'..."
+  git checkout -b "$jp_branch"
+fi
+
 git commit -s -m "$COMMIT_MSG"
 
-# FR3: PR Automation [32, 42]
-if [ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]; then
-    info "On branch '$CURRENT_BRANCH'. Pushing and creating PR..."
-    git push -u origin "$CURRENT_BRANCH"
+push_branch=$(git branch --show-current)
+repo_owner=$(gh repo view --json nameWithOwner --jq '.nameWithOwner | split("/")[0]' 2>/dev/null || true)
+if [[ -z "$repo_owner" ]]; then
+  err "Could not determine repository owner (gh repo view failed)."
+fi
+pr_head="${repo_owner}:${push_branch}"
 
-    # Generate Spicy PR Body [19, 33]
-    PR_PROMPT="Generate a PR description for this branch. Be spicy, witty, and use appropriate emojis.
-    Include exactly these headers:
-    ## Motivation
-    ## Changes
-    ## Expected result"
-    
-    PR_BODY=$(ai_query "$PR_PROMPT")
-    
-    if [ -z "$PR_BODY" ]; then
-        err "Failed to generate PR description."
-    fi
-    
-    # Create PR via gh CLI [32, 37]
-    gh pr create --title "$COMMIT_MSG" --body "$PR_BODY"
+pr_count=$(gh pr list --head "$pr_head" --json number --jq 'length' 2>/dev/null || echo "0")
+if [[ -z "$pr_count" ]]; then
+  pr_count=0
+fi
+
+if ((pr_count > 0)); then
+  info "Open PR already exists for ${pr_head}; pushing only."
+  git push
 else
-    info "On default branch. Changes committed and signed."
+  info "Pushing and opening a pull request..."
+  git push -u origin HEAD
+  gh pr create --title "$COMMIT_MSG" --body "Automated PR from yeet. See commits and diff for details."
 fi
