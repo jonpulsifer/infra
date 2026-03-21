@@ -66,12 +66,15 @@ fi
 model=${YEET_OPENCODE_MODEL:-opencode-go/minimax-m2.7}
 commit_prompt="Generate a single-line conventional commit message for the following staged diff. Use imperative mood. Output only the subject line, no markdown, no quotes, no explanation."
 
-# Minimal OpenCode config for this subprocess: no plugins (no peon-ping sounds), fast cold start.
+# OpenCode auto-loads any .ts/.js in ~/.config/opencode/plugins/ (peon-ping lives there).
+# Redirecting OPENCODE_CONFIG_DIR to a throwaway empty dir prevents plugin discovery entirely.
 run_opencode() {
   local prompt=$1
   local body=$2
   (
-    export OPENCODE_CONFIG_CONTENT='{"plugin":[]}'
+    tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/yeet-oc.XXXXXX")
+    trap 'rm -rf "$tmpdir"' EXIT
+    export OPENCODE_CONFIG_DIR="$tmpdir"
     export OPENCODE_DISABLE_AUTOUPDATE=${OPENCODE_DISABLE_AUTOUPDATE:-1}
     export OPENCODE_DISABLE_MODELS_FETCH=${OPENCODE_DISABLE_MODELS_FETCH:-1}
     export OPENCODE_DISABLE_CLAUDE_CODE=${OPENCODE_DISABLE_CLAUDE_CODE:-1}
