@@ -370,7 +370,7 @@ spec:
         apiVersion: batch/v1
         kind: Job
         metadata:
-          name: "${cel.bind(tag, schema.spec.image.split(':')[schema.spec.image.split(':').size()-1].lowerAscii().replace('.', '-').replace('@', '-').replace('_', '-').replace('+', '-'), cel.bind(maxTag, 63 - schema.metadata.name.size() - 9 > 8 ? 63 - schema.metadata.name.size() - 9 : 8, schema.metadata.name + '-migrate-' + (tag.size() > maxTag ? tag.substring(tag.size() - maxTag) : tag)))}"
+          name: "${schema.metadata.name}-migrate-${schema.spec.image.split(':')[schema.spec.image.split(':').size()-1].lowerAscii().replace('.', '-').replace('@', '-').replace('_', '-').replace('+', '-')}"
           namespace: ${schema.metadata.name}
           labels:
             app.kubernetes.io/name: ${schema.metadata.name}

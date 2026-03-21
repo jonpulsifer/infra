@@ -95,11 +95,11 @@
         "peon-ping": "peon-ping"
       },
       "locked": {
-        "lastModified": 1774048913,
-        "narHash": "sha256-/6if84cC1AcfXm5xLG9ZrXlHkbKnbDXWXWiye8YrMlk=",
+        "lastModified": 1774122239,
+        "narHash": "sha256-XcRnGMxtv3hca+KuNB1dk2JP25c8ulH1uC7cqLkir1A=",
         "owner": "jonpulsifer",
         "repo": "dotfiles",
-        "rev": "89e22cdb4d6cb72a20079db659fa3fd1b92b7e57",
+        "rev": "b63e915dca5c54d7fc76b0c4d84633e21689a3cc",
         "type": "github"
       },
       "original": {
