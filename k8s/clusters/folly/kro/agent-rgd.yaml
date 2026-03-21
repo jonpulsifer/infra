@@ -57,6 +57,8 @@ spec:
               labels:
                 app: ${schema.metadata.name}
                 sandbox: ${schema.metadata.name}
+              annotations:
+                kro.run/spec-inputs: "${schema.spec.image}-${string(schema.spec.port)}-${schema.spec.resources.requests.memory}-${schema.spec.resources.requests.cpu}-${schema.spec.resources.limits.memory}-${schema.spec.resources.limits.cpu}-${schema.spec.configPath}-${schema.spec.workspacePath}-${schema.spec.storageSize}"
             spec:
               automountServiceAccountToken: false
               securityContext:
@@ -129,6 +131,8 @@ spec:
               labels:
                 app: ${schema.metadata.name}
                 sandbox: ${schema.metadata.name}
+              annotations:
+                kro.run/spec-inputs: "${schema.spec.image}-${string(schema.spec.port)}-${schema.spec.command}-${schema.spec.resources.requests.memory}-${schema.spec.resources.requests.cpu}-${schema.spec.resources.limits.memory}-${schema.spec.resources.limits.cpu}-${schema.spec.secret.mountPath}-${schema.spec.secret.mountKey}-${schema.spec.secret.envVar}-${schema.spec.workspacePath}-${schema.spec.storageSize}"
             spec:
               automountServiceAccountToken: false
               securityContext:
