@@ -13,6 +13,8 @@ spec:
   ingress:
     enabled: true
     mode: shared
+  resources:
+    limits: {}
   command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
   secret:
     onePasswordItem: openclaw-config
