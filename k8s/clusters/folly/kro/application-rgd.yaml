@@ -33,6 +33,7 @@ spec:
         migration:
           enabled: "boolean | default=false"
           command: "string | default=echo 'no migration configured'"
+      sandbox: "boolean | default=true"
       networkPolicy:
         enabled: "boolean | default=false"
     status:
@@ -84,6 +85,7 @@ spec:
                 app.kubernetes.io/name: ${schema.metadata.name}
                 app.kubernetes.io/part-of: ${schema.metadata.name}
             spec:
+              runtimeClassName: '${schema.spec.sandbox ? "gvisor" : ""}'
               automountServiceAccountToken: false
               securityContext:
                 runAsNonRoot: true
@@ -145,6 +147,7 @@ spec:
                 app.kubernetes.io/name: ${schema.metadata.name}
                 app.kubernetes.io/part-of: ${schema.metadata.name}
             spec:
+              runtimeClassName: '${schema.spec.sandbox ? "gvisor" : ""}'
               automountServiceAccountToken: false
               securityContext:
                 runAsNonRoot: true
@@ -216,6 +219,7 @@ spec:
                 app.kubernetes.io/name: ${schema.metadata.name}
                 app.kubernetes.io/part-of: ${schema.metadata.name}
             spec:
+              runtimeClassName: '${schema.spec.sandbox ? "gvisor" : ""}'
               automountServiceAccountToken: false
               securityContext:
                 runAsNonRoot: true
@@ -382,6 +386,7 @@ spec:
                 app.kubernetes.io/component: migration
             spec:
               restartPolicy: OnFailure
+              runtimeClassName: '${schema.spec.sandbox ? "gvisor" : ""}'
               automountServiceAccountToken: false
               securityContext:
                 runAsNonRoot: true
