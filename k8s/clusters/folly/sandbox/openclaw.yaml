@@ -15,7 +15,7 @@ spec:
     mode: shared
   resources:
     limits:
-      cpu: 4
+      cpu: 4000m
       memory: 8Gi
   command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
   secret:
