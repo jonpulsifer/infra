@@ -16,7 +16,7 @@ spec:
   values:
     image: docker.io/jonpulsifer/ai-agents:latest
     port: 18789
-    hostname: openclaw.lolwtf.ca
+    hostname: walter.lolwtf.ca
     storageSize: 2Gi
     command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
     resources:
