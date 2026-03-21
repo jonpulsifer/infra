@@ -8,17 +8,6 @@ spec:
   command: "bun run src/index.ts"
   hostname: "truffle.${SECRET_DOMAIN}"
   port: 3000
-  replicas: 1
-  certIssuer: "${CERT_CLUSTER_ISSUER}"
-  ingress:
-    enabled: true
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "100m"
-    limits:
-      memory: "512Mi"
-      cpu: "500m"
   database:
     enabled: true
     instances: 1

@@ -58,8 +58,6 @@ spec:
     - list:
         elements:
           - name: trufflez
-            image: ghcr.io/jonpulsifer/truffle:5264cf3c18a0d4b5c172b11bee0e3eab4de71428
-            hostname: trufflez.lolwtf.ca
   template:
     metadata:
       name: "{{ .name }}"
@@ -69,23 +67,6 @@ spec:
         - repoURL: https://github.com/jonpulsifer/ts.git
           targetRevision: HEAD
           path: apps/truffle/k8s
-          kustomize:
-            patches:
-              - target:
-                  group: custom.sandboxes.x-k8s.io
-                  version: v1alpha1
-                  kind: Application
-                  name: truffle
-                patch: |-
-                  - op: replace
-                    path: /metadata/name
-                    value: "{{ .name }}"
-                  - op: replace
-                    path: /spec/image
-                    value: "{{ .image }}"
-                  - op: replace
-                    path: /spec/hostname
-                    value: "{{ .hostname }}"
       destination:
         name: in-cluster
         namespace: default
