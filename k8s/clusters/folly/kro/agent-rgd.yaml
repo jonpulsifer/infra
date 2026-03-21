@@ -132,7 +132,7 @@ spec:
                 app: ${schema.metadata.name}
                 sandbox: ${schema.metadata.name}
               annotations:
-                kro.run/spec-inputs: "${schema.spec.image}-${string(schema.spec.port)}-${schema.spec.command}-${schema.spec.resources.requests.memory}-${schema.spec.resources.requests.cpu}-${schema.spec.resources.limits.memory}-${schema.spec.resources.limits.cpu}-${schema.spec.secret.mountPath}-${schema.spec.secret.mountKey}-${schema.spec.secret.envVar}-${schema.spec.workspacePath}-${schema.spec.storageSize}"
+                kro.run/spec-inputs: "${schema.spec.image}-${string(schema.spec.port)}-${schema.spec.command}-${schema.spec.resources.requests.memory}-${schema.spec.resources.requests.cpu}-${schema.spec.resources.limits.memory}-${schema.spec.resources.limits.cpu}-${schema.spec.configPath}-${schema.spec.secret.mountPath}-${schema.spec.secret.mountKey}-${schema.spec.secret.envVar}-${schema.spec.storageSize}"
             spec:
               automountServiceAccountToken: false
               securityContext:
@@ -171,20 +171,14 @@ spec:
                       memory: ${schema.spec.resources.limits.memory}
                       cpu: ${schema.spec.resources.limits.cpu}
                   volumeMounts:
+                    - mountPath: ${schema.spec.configPath}
+                      name: agent-data
                     - mountPath: ${schema.spec.secret.mountPath}
                       name: agent-config
                       subPath: ${schema.spec.secret.mountKey}
                       readOnly: true
-                    - mountPath: ${schema.spec.workspacePath}
-                      name: agent-workspace
               volumes:
-                - name: agent-config
-                  secret:
-                    secretName: ${schema.metadata.name}-config
-                    items:
-                      - key: ${schema.spec.secret.mountKey}
-                        path: ${schema.spec.secret.mountKey}
-                - name: agent-workspace
+                - name: agent-data
                   ephemeral:
                     volumeClaimTemplate:
                       spec:
@@ -193,6 +187,12 @@ spec:
                         resources:
                           requests:
                             storage: ${schema.spec.storageSize}
+                - name: agent-config
+                  secret:
+                    secretName: ${schema.metadata.name}-config
+                    items:
+                      - key: ${schema.spec.secret.mountKey}
+                        path: ${schema.spec.secret.mountKey}
 
     # --- SandboxClaim (always) ---
     - id: sandboxclaim

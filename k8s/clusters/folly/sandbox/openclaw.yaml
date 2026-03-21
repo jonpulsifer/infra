@@ -7,9 +7,9 @@ metadata:
 spec:
   image: docker.io/jonpulsifer/ai-agents:latest
   port: 18789
+  configPath: /home/agent/.openclaw
   hostname: openclaw.lolwtf.ca
   storageSize: 2Gi
-  workspacePath: /home/agent/.openclaw/workspace
   ingress:
     enabled: true
     mode: shared
