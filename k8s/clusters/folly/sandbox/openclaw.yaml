@@ -14,7 +14,9 @@ spec:
     enabled: true
     mode: shared
   resources:
-    limits: {}
+    limits:
+      cpu: 4
+      memory: 8Gi
   command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
   secret:
     onePasswordItem: openclaw-config

@@ -38,7 +38,7 @@ spec:
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
-      sandboxReady: ${sandboxclaim.metadata.name != ""}
+      sandboxReady: ${sandboxclaim.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
   resources:
     # --- Basic SandboxTemplate (no 1Password secret) ---
     - id: sandboxtemplate
@@ -192,6 +192,8 @@ spec:
 
     # --- SandboxClaim (always) ---
     - id: sandboxclaim
+      readyWhen:
+        - ${sandboxclaim.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
       template:
         apiVersion: extensions.agents.x-k8s.io/v1alpha1
         kind: SandboxClaim
