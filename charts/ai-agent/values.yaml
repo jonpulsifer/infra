@@ -1,0 +1,26 @@
+image: docker.io/jonpulsifer/ai-agents:latest
+port: 8080
+hostname: ""
+storageSize: 2Gi
+command: ""
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 100m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+ingress:
+  enabled: true
+  forwardedUser: ""
+  mode: shared
+
+secrets: []
+# - name: config
+#   onePasswordItem: my-app-config
+#   property: config.json
+#   mountPath: /config/config.json
+#   mountKey: config.json
+#   envVar: CONFIG_PATH

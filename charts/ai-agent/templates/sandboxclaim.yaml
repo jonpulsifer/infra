@@ -1,0 +1,10 @@
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxClaim
+metadata:
+  name: {{ include "ai-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" . | nindent 4 }}
+spec:
+  sandboxTemplateRef:
+    name: {{ include "ai-agent.fullname" . }}

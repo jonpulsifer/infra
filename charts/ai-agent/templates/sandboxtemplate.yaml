@@ -1,0 +1,101 @@
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: {{ include "ai-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" . | nindent 4 }}
+spec:
+  networkPolicyManagement: Unmanaged
+  podTemplate:
+    metadata:
+      labels:
+        {{- include "ai-agent.selectorLabels" . | nindent 8 }}
+        sandbox: {{ include "ai-agent.fullname" . }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1337
+        runAsGroup: 1337
+        fsGroup: 1337
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: {{ .Values.image }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+          {{- if .Values.command }}
+          command:
+            - sh
+            - -c
+            - {{ .Values.command | quote }}
+          {{- end }}
+          {{- if .Values.secrets }}
+          env:
+            {{- range .Values.secrets }}
+            {{- if .envVar }}
+            - name: {{ .envVar }}
+              value: {{ .mountPath }}
+            {{- end }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.port }}
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory }}
+              cpu: {{ .Values.resources.requests.cpu }}
+            limits:
+              memory: {{ .Values.resources.limits.memory }}
+              cpu: {{ .Values.resources.limits.cpu }}
+          volumeMounts:
+            - mountPath: /home/agent/config
+              name: agent-config
+            {{- if not .Values.secrets }}
+            - mountPath: /home/agent/workspace
+              name: agent-workspace
+            {{- end }}
+            {{- range .Values.secrets }}
+            - mountPath: {{ .mountPath }}
+              name: secret-{{ .name }}
+              subPath: {{ .mountKey }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: agent-config
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: {{ .Values.storageSize }}
+        {{- if not .Values.secrets }}
+        - name: agent-workspace
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: {{ .Values.storageSize }}
+        {{- end }}
+        {{- range .Values.secrets }}
+        - name: secret-{{ .name }}
+          secret:
+            secretName: {{ include "ai-agent.fullname" $ }}-{{ .name }}
+            items:
+              - key: {{ .mountKey }}
+                path: {{ .mountKey }}
+        {{- end }}

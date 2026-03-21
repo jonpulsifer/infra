@@ -1,0 +1,32 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: {{ include "ai-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- if eq .Values.ingress.mode "shared" }}
+    - name: cluster-gateway
+      namespace: default
+    {{- else }}
+    - name: {{ include "ai-agent.fullname" . }}-gateway
+      namespace: {{ .Release.Namespace }}
+    {{- end }}
+  hostnames:
+    - {{ .Values.hostname }}
+  rules:
+    - {{- if .Values.ingress.forwardedUser }}
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: X-Forwarded-User
+                value: {{ .Values.ingress.forwardedUser | quote }}
+      {{- end }}
+      backendRefs:
+        - name: {{ include "ai-agent.fullname" . }}
+          port: {{ .Values.port }}
+{{- end }}

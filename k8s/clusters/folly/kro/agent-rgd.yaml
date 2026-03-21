@@ -29,21 +29,23 @@ spec:
         mode: "string | default=shared"
         certIssuer: "string | default=letsencrypt-production"
       command: "string | default="
-      secret:
-        onePasswordItem: "string | default="
-        property: "string | default=config"
-        mountPath: "string | default=/config"
-        mountKey: "string | default=config"
-        envVar: "string | default=CONFIG_PATH"
+      secrets:
+        - name: string
+          onePasswordItem: string
+          property: "string | default=config"
+          mountPath: string
+          mountKey: "string | default=config"
+          envVar: "string | default="
     status:
       serviceName: ${service.metadata.name}
       serviceEndpoint: ${service.metadata.name}.${service.metadata.namespace}.svc.cluster.local
       sandboxReady: ${sandboxclaim.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
+      secretsReady: ${schema.spec.secrets.size() == 0 || externalsecret.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
   resources:
-    # --- Basic SandboxTemplate (no 1Password secret) ---
+    # --- Basic SandboxTemplate (no secrets) ---
     - id: sandboxtemplate
       includeWhen:
-        - ${schema.spec.secret.onePasswordItem == ""}
+        - ${schema.spec.secrets.size() == 0}
       template:
         apiVersion: extensions.agents.x-k8s.io/v1alpha1
         kind: SandboxTemplate
@@ -114,10 +116,10 @@ spec:
                           requests:
                             storage: ${schema.spec.storageSize}
 
-    # --- Config SandboxTemplate (with 1Password secret) ---
+    # --- Config SandboxTemplate (with secrets) ---
     - id: sandboxtemplateconfig
       includeWhen:
-        - ${schema.spec.secret.onePasswordItem != ""}
+        - ${schema.spec.secrets.size() > 0}
       template:
         apiVersion: extensions.agents.x-k8s.io/v1alpha1
         kind: SandboxTemplate
@@ -132,7 +134,8 @@ spec:
                 app: ${schema.metadata.name}
                 sandbox: ${schema.metadata.name}
               annotations:
-                kro.run/spec-inputs: "${schema.spec.image}-${string(schema.spec.port)}-${schema.spec.command}-${schema.spec.resources.requests.memory}-${schema.spec.resources.requests.cpu}-${schema.spec.resources.limits.memory}-${schema.spec.resources.limits.cpu}-${schema.spec.configPath}-${schema.spec.secret.mountPath}-${schema.spec.secret.mountKey}-${schema.spec.secret.envVar}-${schema.spec.storageSize}"
+                kro.run/spec-inputs: "${schema.spec.image}-${string(schema.spec.port)}-${schema.spec.command}-${schema.spec.resources.requests.memory}-${schema.spec.resources.requests.cpu}-${schema.spec.resources.limits.memory}-${schema.spec.resources.limits.cpu}-${schema.spec.configPath}-${schema.spec.secrets.map(s, s.name + s.mountPath + s.mountKey).join('-')}-${schema.spec.storageSize}"
+                kro.run/depends-on-secrets: "${externalsecret.metadata.name}"
             spec:
               automountServiceAccountToken: false
               securityContext:
@@ -158,9 +161,7 @@ spec:
                     - sh
                     - -c
                     - ${schema.spec.command}
-                  env:
-                    - name: ${schema.spec.secret.envVar}
-                      value: ${schema.spec.secret.mountPath}
+                  env: ${schema.spec.secrets.filter(s, s.envVar != "").map(s, {"name": s.envVar, "value": s.mountPath})}
                   ports:
                     - containerPort: ${schema.spec.port}
                   resources:
@@ -170,29 +171,8 @@ spec:
                     limits:
                       memory: ${schema.spec.resources.limits.memory}
                       cpu: ${schema.spec.resources.limits.cpu}
-                  volumeMounts:
-                    - mountPath: ${schema.spec.configPath}
-                      name: agent-data
-                    - mountPath: ${schema.spec.secret.mountPath}
-                      name: agent-config
-                      subPath: ${schema.spec.secret.mountKey}
-                      readOnly: true
-              volumes:
-                - name: agent-data
-                  ephemeral:
-                    volumeClaimTemplate:
-                      spec:
-                        accessModes:
-                          - ReadWriteOnce
-                        resources:
-                          requests:
-                            storage: ${schema.spec.storageSize}
-                - name: agent-config
-                  secret:
-                    secretName: ${schema.metadata.name}-config
-                    items:
-                      - key: ${schema.spec.secret.mountKey}
-                        path: ${schema.spec.secret.mountKey}
+                  volumeMounts: ${[{"mountPath": schema.spec.configPath, "name": "agent-data"}] + schema.spec.secrets.map(s, {"mountPath": s.mountPath, "name": "secret-" + s.name, "subPath": s.mountKey, "readOnly": true})}
+              volumes: ${[{"name": "agent-data", "ephemeral": {"volumeClaimTemplate": {"spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": schema.spec.storageSize}}}}}}] + schema.spec.secrets.map(s, {"name": "secret-" + s.name, "secret": {"secretName": schema.metadata.name + "-" + s.name, "items": [{"key": s.mountKey, "path": s.mountKey}]}})}
 
     # --- SandboxClaim (always) ---
     - id: sandboxclaim
@@ -225,15 +205,17 @@ spec:
               port: ${schema.spec.port}
               targetPort: ${schema.spec.port}
 
-    # --- ExternalSecret (1Password, when configured) ---
+    # --- ExternalSecrets (1Password, one per secret) ---
     - id: externalsecret
-      includeWhen:
-        - ${schema.spec.secret.onePasswordItem != ""}
+      forEach:
+        - secret: ${schema.spec.secrets}
+      readyWhen:
+        - ${externalsecret.status.conditions.exists(c, c.type == "Ready" && c.status == "True")}
       template:
         apiVersion: external-secrets.io/v1
         kind: ExternalSecret
         metadata:
-          name: ${schema.metadata.name}-config
+          name: ${schema.metadata.name}-${secret.name}
           namespace: ${schema.metadata.namespace}
         spec:
           refreshInterval: 1h
@@ -241,13 +223,13 @@ spec:
             kind: ClusterSecretStore
             name: onepassword-connect
           target:
-            name: ${schema.metadata.name}-config
+            name: ${schema.metadata.name}-${secret.name}
             creationPolicy: Owner
           data:
-            - secretKey: ${schema.spec.secret.mountKey}
+            - secretKey: ${secret.mountKey}
               remoteRef:
-                key: ${schema.spec.secret.onePasswordItem}
-                property: ${schema.spec.secret.property}
+                key: ${secret.onePasswordItem}
+                property: ${secret.property}
 
     # --- Standalone Gateway (per-agent, when mode != shared) ---
     - id: gateway

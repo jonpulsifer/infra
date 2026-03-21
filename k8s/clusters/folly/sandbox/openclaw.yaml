@@ -18,9 +18,10 @@ spec:
       cpu: 4000m
       memory: 8Gi
   command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
-  secret:
-    onePasswordItem: openclaw-config
-    property: config.json5
-    mountPath: /home/agent/.openclaw/config.json5
-    mountKey: config.json5
-    envVar: OPENCLAW_CONFIG_PATH
+  secrets:
+    - name: config
+      onePasswordItem: openclaw-config
+      property: config.json5
+      mountPath: /home/agent/.openclaw/config.json5
+      mountKey: config.json5
+      envVar: OPENCLAW_CONFIG_PATH
