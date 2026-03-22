@@ -32,7 +32,7 @@ spec:
       - "self-hosted"
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
-    minRunners: 0
+    minRunners: 1
     maxRunners: 5
     template:
       spec:

@@ -26,14 +26,14 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: ts-folly
+    runnerScaleSetName: ts-offsite
     scaleSetLabels:
-      - "folly"
+      - "offsite"
       - "self-hosted"
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
     minRunners: 1
-    maxRunners: 20
+    maxRunners: 5
     template:
       spec:
         containers:
