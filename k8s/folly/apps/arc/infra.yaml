@@ -26,7 +26,10 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: arc-infra-folly
+    runnerScaleSetName: infra-folly
+    scaleSetLabels:
+      - "folly"
+      - "self-hosted"
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
     minRunners: 0

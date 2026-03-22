@@ -2,7 +2,7 @@
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: argocd
+  name: ts
   namespace: arc
 spec:
   interval: 24h
@@ -26,7 +26,10 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: argocd-ts
+    runnerScaleSetName: ts-folly
+    scaleSetLabels:
+      - "folly"
+      - "self-hosted"
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
     minRunners: 1

@@ -26,7 +26,10 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: arc-ts
+    runnerScaleSetName: ts-offsite
+    scaleSetLabels:
+      - "offsite"
+      - "self-hosted"
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
     minRunners: 1
