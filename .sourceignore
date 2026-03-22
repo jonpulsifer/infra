@@ -1,10 +1,16 @@
 # See https://toolkit.fluxcd.io/components/source/gitrepositories/#excluding-files
+.agents/
+.claude/
 .github/
 .gitignore
 .sops.yaml
+/argo/
 /cloudflare/
 /gcp/
 /rpi/
+/nix/
+/result/
+/systems/
 /unifi/
 /vault/
 /workspace/
