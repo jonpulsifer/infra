@@ -1,0 +1,29 @@
+image: ""
+command: "sleep infinity"
+port: 8080
+replicas: 1
+hostname: ""
+sandbox: true
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 100m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+ingress:
+  enabled: true
+
+database:
+  enabled: false
+  instances: 1
+  size: 1Gi
+  name: app
+  migration:
+    enabled: false
+    command: "echo 'no migration configured'"
+
+networkPolicy:
+  enabled: false

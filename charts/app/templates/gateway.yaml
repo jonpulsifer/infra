@@ -1,0 +1,26 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: {{ include "app.fullname" . }}-gateway
+  namespace: {{ include "app.fullname" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http-gateway
+      protocol: HTTP
+      port: 80
+      hostname: {{ .Values.hostname }}
+    - name: tls-gateway
+      protocol: HTTPS
+      port: 443
+      hostname: {{ .Values.hostname }}
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: {{ .Values.hostname }}
+{{- end }}

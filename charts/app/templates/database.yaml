@@ -1,0 +1,23 @@
+{{- if .Values.database.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "app.databaseName" . }}
+  namespace: {{ include "app.fullname" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.database.instances }}
+  enableSuperuserAccess: false
+  storage:
+    storageClass: local-path
+    size: {{ .Values.database.size }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+      encoding: UTF8
+      localeCollate: C
+      localeCType: C
+      dataChecksums: true
+{{- end }}
