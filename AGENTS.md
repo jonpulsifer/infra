@@ -69,7 +69,7 @@ flux get kustomizations -A
 flux reconcile kustomization <name> -n flux-system
 
 # Decrypt a SOPS secret for inspection
-sops -d k8s/clusters/folly/networking/tailscale/secret.sops.yaml
+sops -d k8s/folly/networking/tailscale/secret.sops.yaml
 ```
 
 ### Secrets (SOPS)
@@ -78,10 +78,10 @@ SOPS encrypts `data` and `stringData` fields in files matching `k8s/.*\.sops\.ya
 
 ```bash
 # Edit an encrypted file
-sops k8s/clusters/folly/config/cluster-secrets.sops.yaml
+sops k8s/folly/config/cluster-secrets.sops.yaml
 
 # Encrypt a new file (must match path regex in .sops.yaml)
-sops -e -i k8s/clusters/<cluster>/<path>.sops.yaml
+sops -e -i k8s/<cluster>/<path>.sops.yaml
 ```
 
 ## Architecture
@@ -102,8 +102,8 @@ Hosts fall into two groups: Kubernetes nodes (folly cluster: nuc/optiplex/riptid
 
 Two clusters managed with FluxCD kustomizations:
 
-- `k8s/clusters/folly/` – primary on-site cluster
-- `k8s/clusters/offsite/` – backup cluster
+- `k8s/folly/` – primary on-site cluster
+- `k8s/offsite/` – backup cluster
 
 Each cluster directory has `flux-system/` (FluxCD source-of-truth kustomizations), `networking/` (Cilium, cert-manager, Cloudflare tunnel, Tailscale, Gateway API, external-dns), `monitoring/` (kube-prometheus-stack, Loki, Grafana, promtail), `nodes/` (Intel device plugins, node-feature-discovery), and `storage/`.
 

@@ -5,10 +5,10 @@ description: Add or modify shared resources across folly and offsite k8s cluster
 
 ## Shared Base Pattern
 
-`k8s/clusters/base/` holds resources shared by both clusters. Each shared component is a directory with its own `kustomization.yaml`.
+`k8s/base/` holds resources shared by both clusters. Each shared component is a directory with its own `kustomization.yaml`.
 
 ```
-k8s/clusters/base/
+k8s/base/
 ├── kustomization.yaml              # cluster-runtimeclass
 ├── monitoring/
 │   ├── kustomization.yaml
@@ -27,7 +27,7 @@ k8s/clusters/base/
 
 ## Adding a New Shared Resource
 
-1. Create `k8s/clusters/base/<category>/<component>/kustomization.yaml` listing the resource files
+1. Create `k8s/base/<category>/<component>/kustomization.yaml` listing the resource files
 2. Templatize cluster-specific values with `${CLUSTER_NAME}`, `${SECRET_DOMAIN}`, or other vars from `cluster-settings`/`cluster-secrets`
 3. In each cluster's kustomization, reference the base directory:
    ```yaml
@@ -37,8 +37,8 @@ k8s/clusters/base/
 4. Add cluster-specific patches in the overlay kustomization if needed
 5. Validate both clusters:
    ```bash
-   kubectl kustomize k8s/clusters/folly/<category>/
-   kubectl kustomize k8s/clusters/offsite/<category>/
+   kubectl kustomize k8s/folly/<category>/
+   kubectl kustomize k8s/offsite/<category>/
    ```
 
 ## Key Constraints
@@ -55,10 +55,10 @@ Some resources are shared by pointing offsite's Flux Kustomization at folly's di
 
 | Resource                  | Flux Kustomization path              |
 |---------------------------|--------------------------------------|
-| HelmRepository sources    | `./k8s/clusters/folly/sources`       |
-| Sandbox apps              | `./k8s/clusters/folly/sandbox`       |
-| External Secrets Operator | `./k8s/clusters/folly/external-secrets-operator` |
-| External Secrets          | `./k8s/clusters/folly/external-secrets` |
+| HelmRepository sources    | `./k8s/folly/sources`       |
+| Sandbox apps              | `./k8s/folly/sandbox`       |
+| External Secrets Operator | `./k8s/folly/external-secrets-operator` |
+| External Secrets          | `./k8s/folly/external-secrets` |
 
 This works because Flux resolves paths relative to the git repo root, not the kustomization file.
 

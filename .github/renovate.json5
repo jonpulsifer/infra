@@ -176,7 +176,7 @@
     // Block gateway-api updates (unsupported)
     {
       matchManagers: ['flux'],
-      matchFileNames: ['k8s/clusters/folly/sources/git/gateway-api.yaml'],
+      matchFileNames: ['k8s/folly/sources/git/gateway-api.yaml'],
       enabled: false,
     },
   ],

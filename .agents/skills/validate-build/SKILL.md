@@ -20,15 +20,15 @@ Build the **kustomization root that includes your change** (the directory with `
 Use `kubectl kustomize` (kustomize is not a standalone binary in this flake):
 
 ```bash
-kubectl kustomize k8s/clusters/folly/sandbox
-kubectl kustomize k8s/clusters/offsite/monitoring
+kubectl kustomize k8s/folly/sandbox
+kubectl kustomize k8s/offsite/monitoring
 ```
 
-When validating shared base changes, build **both** clusters since both reference `k8s/clusters/base/`:
+When validating shared base changes, build **both** clusters since both reference `k8s/base/`:
 
 ```bash
 for cluster in folly offsite; do
-  kubectl kustomize "k8s/clusters/$cluster/networking/cert-manager/" && echo "OK: $cluster"
+  kubectl kustomize "k8s/$cluster/networking/cert-manager/" && echo "OK: $cluster"
 done
 ```
 

@@ -6,7 +6,7 @@ description: Work with Kubernetes manifests and GitOps workflows for the folly a
 ## Cluster Structure
 
 ```
-k8s/clusters/
+k8s/
   base/      # Shared resources referenced by both clusters
   folly/     # Primary on-site (nuc, optiplex, riptide, 800g2)
   offsite/   # Backup cluster (oldschool, retrofit)
@@ -50,10 +50,10 @@ Files matching `*.sops.yaml` are encrypted at rest. FluxCD decrypts via the clus
 
 ```bash
 # View/edit
-sops k8s/clusters/folly/networking/tailscale/secret.sops.yaml
+sops k8s/folly/networking/tailscale/secret.sops.yaml
 
 # Encrypt new file (must match path regex in .sops.yaml)
-sops -e -i k8s/clusters/<cluster>/<path>.sops.yaml
+sops -e -i k8s/<cluster>/<path>.sops.yaml
 ```
 
 Encrypted fields: `data` and `stringData` only (per `.sops.yaml`).
