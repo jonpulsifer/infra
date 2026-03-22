@@ -145,3 +145,4 @@ Available skills:
 - `nixos-deploy` — build, deploy, and roll back NixOS hosts
 - `terraform` — Terraform workflow, module layout, CI behaviour
 - `kubernetes-gitops` — FluxCD reconciliation, networking, SOPS secrets
+- `multi-cluster` — Add or modify shared resources across folly and offsite clusters using the base/ pattern

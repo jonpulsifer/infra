@@ -1,0 +1,60 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns
+  namespace: external-dns
+spec:
+  interval: 24h
+  chart:
+    spec:
+      chart: external-dns
+      version: 1.20.0
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+        namespace: flux-system
+      interval: 24h
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: cilium
+      namespace: kube-system
+  values:
+    interval: 5m
+    provider: cloudflare
+    env:
+      - name: CF_API_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: external-dns-cloud-credentials
+            key: api-token
+    extraArgs: []
+      # - --cloudflare-proxied
+      # - --annotation-filter=external-dns/is-public in (true)
+    policy: sync
+    sources:
+      - crd
+      - node
+      - ingress
+      - service
+      - gateway-httproute
+      - gateway-tlsroute
+      # - gateway-tcproute
+      # - gateway-udproute
+    txtPrefix: "k8s."
+    txtOwnerId: "${CLUSTER_NAME}"
+    domainFilters:
+      - "${SECRET_DOMAIN}"
+      - "${GATEWAY_ZONE}"
+    resources:
+      requests:
+        memory: 100Mi
+        cpu: 25m
+      limits:
+        memory: 250Mi

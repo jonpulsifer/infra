@@ -7,11 +7,16 @@ description: Work with Kubernetes manifests and GitOps workflows for the folly a
 
 ```
 k8s/clusters/
+  base/      # Shared resources referenced by both clusters
   folly/     # Primary on-site (nuc, optiplex, riptide, 800g2)
   offsite/   # Backup cluster (oldschool, retrofit)
 ```
 
-Each cluster contains: `flux-system/`, `networking/`, `monitoring/`, `nodes/`, `storage/`, `sources/`.
+Each cluster contains: `flux-system/`, `networking/`, `monitoring/`, `nodes/`, `storage/`.
+
+`base/` holds shared helm-releases (cert-manager, tailscale, external-dns, vector) used by both clusters via kustomize directory references. Cluster-specific values use Flux `postBuild` substitution with variables like `${CLUSTER_NAME}` from each cluster's `cluster-settings` ConfigMap.
+
+Both clusters share `sources/` (HelmRepository definitions) and `sandbox/` from folly's directories via Flux Kustomization path references. Offsite also shares `external-secrets-operator/` and `external-secrets/` from folly.
 
 ## Making Changes
 
