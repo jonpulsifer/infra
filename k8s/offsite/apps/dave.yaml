@@ -1,0 +1,41 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: dave
+  namespace: agents-sandbox
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: charts/ai-agent
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
+  values:
+    image: docker.io/jonpulsifer/ai-agents:latest
+    port: 18789
+    hostname: dave.lolwtf.ca
+    storageSize: 2Gi
+    command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 8Gi
+        cpu: 4000m
+    npmTools:
+      - "@moonpay/cli"
+    ingress:
+      enabled: true
+      mode: shared
+      forwardedUser: jonathan
+    secrets:
+      - name: config
+        onePasswordItem: openclaw-config
+        property: config.json5
+        mountPath: /home/agent/.openclaw/config.json5
+        mountKey: config.json5
+        envVar: OPENCLAW_CONFIG_PATH

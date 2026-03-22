@@ -6,16 +6,10 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./k8s/base/platform/sandbox
+  path: ./k8s/base/platform/agent-sandbox
   prune: true
   sourceRef:
     kind: GitRepository
     name: infra
-  decryption:
-    provider: sops
-    secretRef:
-      name: sops-age
   dependsOn:
-    - name: external-secrets
-    - name: config
-    - name: agent-sandbox-controller
+    - name: sources

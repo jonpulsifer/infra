@@ -4,4 +4,3 @@ kind: Kustomization
 resources:
   - agent-sandbox.yaml
   - agents-sandbox-namespace.yaml
-  - walter.yaml

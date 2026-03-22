@@ -5,6 +5,7 @@ resources:
   - arc
   - atlantis
   - descheduler
+  - dave.yaml
   - reloader
 patches:
   - target:

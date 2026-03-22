@@ -17,6 +17,7 @@ resources:
   - redis
   - reloader
   # - satisfactory
+  - walter.yaml
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
