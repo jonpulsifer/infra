@@ -24,11 +24,14 @@ spec:
       {{- if .Values.npmTools }}
       initContainers:
         - name: install-npm-tools
-          image: node:22-alpine
+          image: node:24-alpine
           command:
             - sh
             - -c
             - npm install -g --prefix /home/agent/.local {{ .Values.npmTools | join " " }}
+          env:
+            - name: HOME
+              value: /tmp
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
