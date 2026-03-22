@@ -42,7 +42,7 @@
   };
 
   system = {
-    stateVersion = "25.05";
+    stateVersion = "25.11";
     autoUpgrade = {
       enable = lib.mkDefault true;
       flake = "github.com:jonpulsifer/infra";

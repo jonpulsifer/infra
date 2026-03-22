@@ -27,8 +27,6 @@
 
   i18n.defaultLocale = "en_US.UTF-8";
 
-  programs.ssh.startAgent = true;
-
   # resolf.conf is managed by WSL (wsl.wslConf.network.generateResolvConf)
   services.resolved.enable = lib.mkForce false;
 
@@ -40,5 +38,5 @@
   programs.nix-ld.enable = true;
 
   programs.zsh.enable = true;
-  system.stateVersion = lib.mkDefault "25.05";
+  system.stateVersion = "25.11";
 }
