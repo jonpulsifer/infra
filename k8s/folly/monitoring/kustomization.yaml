@@ -7,7 +7,6 @@ resources:
   - grafana-dashboards
  # - local-node-exporters.yaml
   - loki.yaml
-  - metrics-server.yaml
  # - picow.yaml
   - ../../base/monitoring
  # - screenpi4.yaml

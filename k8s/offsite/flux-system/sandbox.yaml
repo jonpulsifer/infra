@@ -6,7 +6,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./k8s/folly/sandbox
+  path: ./k8s/base/platform/sandbox
   prune: true
   sourceRef:
     kind: GitRepository
@@ -18,3 +18,4 @@ spec:
   dependsOn:
     - name: external-secrets
     - name: config
+    - name: agent-sandbox-controller
