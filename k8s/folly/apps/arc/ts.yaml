@@ -26,9 +26,9 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: ts-offsite
+    runnerScaleSetName: ts-folly
     scaleSetLabels:
-      - "offsite"
+      - "folly"
       - "self-hosted"
     githubConfigUrl: https://github.com/jonpulsifer/ts
     githubConfigSecret: arc
