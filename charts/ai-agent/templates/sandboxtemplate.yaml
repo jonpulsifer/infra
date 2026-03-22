@@ -104,24 +104,12 @@ spec:
           emptyDir: {}
         {{- end }}
         - name: agent-config
-          ephemeral:
-            volumeClaimTemplate:
-              spec:
-                accessModes:
-                  - ReadWriteOnce
-                resources:
-                  requests:
-                    storage: {{ .Values.storageSize }}
+          persistentVolumeClaim:
+            claimName: {{ include "ai-agent.fullname" . }}-agent-config
         {{- if not .Values.secrets }}
         - name: agent-workspace
-          ephemeral:
-            volumeClaimTemplate:
-              spec:
-                accessModes:
-                  - ReadWriteOnce
-                resources:
-                  requests:
-                    storage: {{ .Values.storageSize }}
+          persistentVolumeClaim:
+            claimName: {{ include "ai-agent.fullname" . }}-agent-workspace
         {{- end }}
         {{- range .Values.secrets }}
         - name: secret-{{ .name }}
