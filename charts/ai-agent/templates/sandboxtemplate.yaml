@@ -21,6 +21,26 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      {{- if .Values.npmTools }}
+      initContainers:
+        - name: install-npm-tools
+          image: node:22-alpine
+          command:
+            - sh
+            - -c
+            - npm install -g --prefix /home/agent/.local {{ .Values.npmTools | join " " }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /home/agent/.local
+              name: agent-npm-tools
+      {{- end }}
       containers:
         - name: agent
           image: {{ .Values.image }}
@@ -39,8 +59,12 @@ spec:
             - -c
             - {{ .Values.command | quote }}
           {{- end }}
-          {{- if .Values.secrets }}
+          {{- if or .Values.secrets .Values.npmTools }}
           env:
+            {{- if .Values.npmTools }}
+            - name: PATH
+              value: /home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            {{- end }}
             {{- range .Values.secrets }}
             {{- if .envVar }}
             - name: {{ .envVar }}
@@ -60,6 +84,10 @@ spec:
           volumeMounts:
             - mountPath: /home/agent/config
               name: agent-config
+            {{- if .Values.npmTools }}
+            - mountPath: /home/agent/.local
+              name: agent-npm-tools
+            {{- end }}
             {{- if not .Values.secrets }}
             - mountPath: /home/agent/workspace
               name: agent-workspace
@@ -71,6 +99,10 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        {{- if .Values.npmTools }}
+        - name: agent-npm-tools
+          emptyDir: {}
+        {{- end }}
         - name: agent-config
           ephemeral:
             volumeClaimTemplate:

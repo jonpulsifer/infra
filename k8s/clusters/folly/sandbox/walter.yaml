@@ -26,6 +26,8 @@ spec:
       limits:
         memory: 8Gi
         cpu: 4000m
+    npmTools:
+      - "@moonpay/cli"
     ingress:
       enabled: true
       mode: shared

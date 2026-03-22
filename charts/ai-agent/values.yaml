@@ -17,6 +17,9 @@ ingress:
   forwardedUser: ""
   mode: shared
 
+npmTools: []
+# - "@moonpay/cli"
+
 secrets: []
 # - name: config
 #   onePasswordItem: my-app-config
