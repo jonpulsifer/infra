@@ -16,7 +16,6 @@ let
     python3
     sops
     terraform
-    vault
   ];
 in
 mkShell {
