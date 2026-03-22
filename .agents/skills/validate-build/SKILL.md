@@ -20,11 +20,10 @@ Build the **kustomization root that includes your change** (the directory with `
 Examples:
 
 ```bash
-kustomize build k8s/clusters/folly/kro
 kustomize build k8s/clusters/folly/sandbox
 ```
 
-If `kustomize build` fails with YAML errors, common causes: unquoted `:` inside plain scalars (e.g. CEL ternaries `? a : b` in manifests—wrap the whole value in double quotes).
+If `kustomize build` fails with YAML errors, check for unquoted `:` inside plain scalars.
 
 For GitOps behaviour, SOPS, and Flux, see the `kubernetes-gitops` skill.
 

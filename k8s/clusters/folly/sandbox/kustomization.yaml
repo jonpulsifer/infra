@@ -4,6 +4,4 @@ kind: Kustomization
 resources:
   - agent-sandbox.yaml
   - agents-sandbox-namespace.yaml
-  - openclaw.yaml
-  - ai-agents-app.yaml
   - walter.yaml

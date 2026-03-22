@@ -13,7 +13,6 @@ spec:
     name: infra
   dependsOn:
     - name: monitoring
-    - name: kro
   decryption:
     provider: sops
     secretRef:

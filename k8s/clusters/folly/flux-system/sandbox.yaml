@@ -18,5 +18,4 @@ spec:
   dependsOn:
     - name: external-secrets
     - name: config
-    - name: kro
     - name: agent-sandbox-controller
