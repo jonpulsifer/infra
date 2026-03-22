@@ -10,7 +10,6 @@ resources:
   - falco
   - jellyfin.yaml
   - k6
-  - nix-cache.yaml
   - open-webui
   - postgres
   - redis
