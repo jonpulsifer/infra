@@ -6,7 +6,8 @@ metadata:
   name: onepassword-connect
   namespace: external-secrets
 spec:
-  interval: 24h
+  interval: 1m0s
+  maxHistory: 2
   chart:
     spec:
       chart: connect
@@ -15,6 +16,7 @@ spec:
         kind: HelmRepository
         name: onepassword
         namespace: flux-system
+      interval: 5m0s
   dependsOn:
     - name: external-secrets
   values:

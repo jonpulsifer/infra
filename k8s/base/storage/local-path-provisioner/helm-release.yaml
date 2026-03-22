@@ -5,7 +5,8 @@ metadata:
   name: local-path-provisioner
   namespace: local-path-provisioner
 spec:
-  interval: 24h
+  interval: 1m0s
+  maxHistory: 2
   chart:
     spec:
       chart: ./deploy/chart/local-path-provisioner
@@ -14,6 +15,7 @@ spec:
         kind: GitRepository
         name: local-path-provisioner
         namespace: flux-system
+      interval: 5m0s
   install:
     createNamespace: true
     remediation:

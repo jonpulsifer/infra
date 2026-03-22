@@ -5,7 +5,8 @@ metadata:
   name: vector
   namespace: monitoring
 spec:
-  interval: 24h
+  interval: 1m0s
+  maxHistory: 2
   chart:
     spec:
       chart: vector
@@ -14,7 +15,7 @@ spec:
         kind: HelmRepository
         name: vector
         namespace: flux-system
-      interval: 24h
+      interval: 5m0s
   install:
     createNamespace: true
     remediation:

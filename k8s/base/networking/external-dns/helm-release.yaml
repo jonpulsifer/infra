@@ -5,7 +5,8 @@ metadata:
   name: external-dns
   namespace: external-dns
 spec:
-  interval: 24h
+  interval: 1m0s
+  maxHistory: 2
   chart:
     spec:
       chart: external-dns
@@ -14,7 +15,7 @@ spec:
         kind: HelmRepository
         name: external-dns
         namespace: flux-system
-      interval: 24h
+      interval: 5m0s
   install:
     createNamespace: true
     remediation:

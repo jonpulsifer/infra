@@ -8,7 +8,8 @@ metadata:
   name: external-secrets
   namespace: external-secrets
 spec:
-  interval: 24h
+  interval: 1m0s
+  maxHistory: 2
   chart:
     spec:
       chart: external-secrets
@@ -18,5 +19,6 @@ spec:
         kind: HelmRepository
         name: external-secrets
         namespace: flux-system
+      interval: 5m0s
   values:
     installCRDs: true
