@@ -24,8 +24,10 @@ No modules.
 |------|------|
 | [google-beta_google_project_service_identity.pubsub](https://registry.terraform.io/providers/hashicorp/google-beta/latest/docs/resources/google_project_service_identity) | resource |
 | [google_bigquery_data_transfer_config.anomaly_clusters](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_data_transfer_config) | resource |
+| [google_bigquery_data_transfer_config.outlier_detection](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_data_transfer_config) | resource |
 | [google_bigquery_dataset.audit_anomalies](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_dataset) | resource |
 | [google_bigquery_table.anomalies](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_table) | resource |
+| [google_bigquery_table.outliers](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/bigquery_table) | resource |
 | [google_cloud_run_v2_service.audit_pipeline](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/cloud_run_v2_service) | resource |
 | [google_cloud_run_v2_service_iam_member.pubsub_invoker](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/cloud_run_v2_service_iam_member) | resource |
 | [google_org_policy_policy.allow_all_domains](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
