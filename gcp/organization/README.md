@@ -11,7 +11,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_google"></a> [google](#provider\_google) | 7.13.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 7.24.0 |
 
 ## Modules
 
@@ -34,6 +34,7 @@
 | [google_folder.dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
 | [google_folder.hidden](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
 | [google_folder.production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
+| [google_logging_organization_sink.audit_logs](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/logging_organization_sink) | resource |
 | [google_org_policy_policy.gcp_restrictCmekCryptoKeyProjects_dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.gcp_restrictCmekCryptoKeyProjects_production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.iam_serviceAccountKeyExpiryHours](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
@@ -51,5 +52,7 @@ No inputs.
 
 ## Outputs
 
-No outputs.
+| Name | Description |
+|------|-------------|
+| <a name="output_audit_sink_writer_identity"></a> [audit\_sink\_writer\_identity](#output\_audit\_sink\_writer\_identity) | Writer identity for the audit log sink — grant roles/pubsub.publisher on the lolcorp audit-log-ingest topic |
 <!-- END_TF_DOCS -->
