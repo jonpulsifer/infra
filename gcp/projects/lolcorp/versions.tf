@@ -7,7 +7,11 @@ locals {
 provider "google" {
   project = local.project
   region  = local.region
-  zone    = local.zone
+}
+
+provider "google-beta" {
+  project = local.project
+  region  = local.region
 }
 
 terraform {
@@ -19,7 +23,11 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "~> 7.24.0"
+      version = "~> 7.25"
+    }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 7.25"
     }
   }
   required_version = ">= 1.2.3"

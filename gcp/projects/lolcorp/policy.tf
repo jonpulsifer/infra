@@ -19,7 +19,7 @@ resource "google_org_policy_policy" "allowed_locations" {
     inherit_from_parent = true
     rules {
       values {
-        allowed_values = ["is:US"]
+        allowed_values = ["in:us-central1-locations", "is:US", "is:us"]
       }
     }
   }
