@@ -1,4 +1,5 @@
 [tools]
+gcloud = "latest"
 terraform = "latest"
 
 [tasks.devshell]

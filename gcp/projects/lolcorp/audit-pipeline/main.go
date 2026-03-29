@@ -199,7 +199,7 @@ func toTOON(a AuditEntry) string {
 func analyzeWithGemini(ctx context.Context, toonPayload string) (*AnomalyResult, error) {
 	project := getEnv("GCP_PROJECT", "")
 	location := getEnv("VERTEX_LOCATION", "us-central1")
-	model := getEnv("VERTEX_MODEL", "gemini-1.5-flash")
+	model := getEnv("VERTEX_MODEL", "gemini-2.5-flash-lite")
 
 	client, err := genai.NewClient(ctx, project, location)
 	if err != nil {
