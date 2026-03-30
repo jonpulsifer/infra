@@ -1,0 +1,23 @@
+{{- $all := dict }}
+{{- range $k, $v := .mcp_servers }}{{ $_ := set $all $k $v }}{{ end }}
+{{- if eq .chezmoi.username "jpulsifer" }}
+{{- range $k, $v := .mcp_servers_work }}{{ $_ := set $all $k $v }}{{ end }}
+{{- end }}
+{
+{{- $keys := keys $all | sortAlpha }}
+{{- range $i, $name := $keys }}
+{{-   $srv := get $all $name }}
+{{-   if $i }},{{ end }}
+{{-   if hasKey $srv "url" }}
+  "{{ $name }}": {
+    "type": "{{ $srv.type }}",
+    "url": "{{ $srv.url }}"
+  }
+{{-   else }}
+  "{{ $name }}": {
+    "command": "{{ $srv.command }}",
+    "args": {{ toJson $srv.args }}
+  }
+{{-   end }}
+{{- end }}
+}

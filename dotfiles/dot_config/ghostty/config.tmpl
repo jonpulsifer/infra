@@ -1,0 +1,12 @@
+# Ghostty — former home/darwin.nix + Linux package
+background-blur = true
+background-opacity = 0.9
+bold-is-bright = true
+font-family = "CaskaydiaCove Nerd Font"
+font-size = 12
+font-thicken = false
+theme = "Argonaut"
+{{- if eq .chezmoi.os "darwin" }}
+
+keybind = global:cmd+backquote=toggle_quick_terminal
+{{- end }}

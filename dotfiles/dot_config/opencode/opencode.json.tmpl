@@ -1,0 +1,26 @@
+{{- $all := dict }}
+{{- range $k, $v := .mcp_servers }}{{ $_ := set $all $k $v }}{{ end }}
+{{- if eq .chezmoi.username "jpulsifer" }}
+{{- range $k, $v := .mcp_servers_work }}{{ $_ := set $all $k $v }}{{ end }}
+{{- end }}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+{{- $keys := keys $all | sortAlpha }}
+{{- range $i, $name := $keys }}
+{{-   $srv := get $all $name }}
+{{-   if $i }},{{ end }}
+{{-   if hasKey $srv "url" }}
+    "{{ $name }}": {
+      "type": "remote",
+      "url": "{{ $srv.url }}"
+    }
+{{-   else }}
+    "{{ $name }}": {
+      "type": "local",
+      "command": {{ toJson (prepend $srv.args $srv.command) }}
+    }
+{{-   end }}
+{{- end }}
+  }
+}

@@ -1,0 +1,40 @@
+---
+name: personal-context
+description: Personal coding preferences and context for {{ .chezmoi.username }}. Use when you need to understand my background, preferred languages, tools, and coding style.
+---
+
+# About Me
+
+I'm {{ .chezmoi.username }}, a Security Engineer focused on Cloud and Infrastructure Security.
+
+My interests include cloud-security, infrastructure-security, platform-engineering, automation, infrastructure-as-code.
+
+## Languages
+
+- go
+- typescript
+- python
+- rust
+
+## Tools & Technologies
+
+- git
+- tmux
+- mise
+- kubernetes
+- chezmoi
+
+## Preferences
+
+- Communication: concise and direct
+- use markdown, prefer code examples
+- Git: conventional commits, signed, with DCO sign-off (-s)
+- PRs: NEVER commit to main/master/default branch. Always prefer PRs against main using gh CLI, monitor for ci/cd pipelines
+- write tests for new functionality
+
+## Review Process
+
+After making changes, spawn subagents to review:
+1. **security-review** - audit security configurations and vulnerabilities
+2. **code-review** - verify functionality and correctness
+3. **lint-format** - check style, linting, and formatting

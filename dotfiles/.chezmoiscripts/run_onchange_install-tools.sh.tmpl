@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+if ! command -v mise >/dev/null 2>&1; then
+  echo "chezmoi: mise not found; run chezmoi apply again after run_once_install-mise" >&2
+  exit 0
+fi
+export MISE_NODE_COMPILE=false
+mise trust -y "${HOME}/.config/mise/config.toml" 2>/dev/null || true
+mise install

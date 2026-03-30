@@ -1,0 +1,37 @@
+mcp_servers:
+  nixos:
+    command: docker
+    args:
+      - run
+      - --rm
+      - -i
+      - ghcr.io/utensils/mcp-nixos
+  gcloud:
+    command: npx
+    args:
+      - -y
+      - "@google-cloud/gcloud-mcp"
+  terraform:
+    command: docker
+    args:
+      - run
+      - -i
+      - --rm
+      - hashicorp/terraform-mcp-server
+  shadcn:
+    command: npx
+    args:
+      - shadcn@latest
+      - mcp
+
+mcp_servers_work:
+  moonpay:
+    command: mp
+    args:
+      - mcp
+  notion:
+    type: http
+    url: https://mcp.notion.com/mcp
+  linear:
+    type: http
+    url: https://mcp.linear.app/mcp

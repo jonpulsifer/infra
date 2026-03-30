@@ -1,0 +1,25 @@
+name: dotfiles
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install chezmoi
+        run: mkdir -p ~/.local/bin && curl -fsSL https://get.chezmoi.io | sh -s -- -b ~/.local/bin
+      - name: Chezmoi dry-run
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p ~/.local/share && ln -sfn "${{ github.workspace }}" ~/.local/share/chezmoi
+          chezmoi apply --dry-run
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck dot_local/bin/executable_yeet dot_local/bin/executable_sssh .chezmoiscripts/run_once_install-mise.sh

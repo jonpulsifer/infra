@@ -1,0 +1,42 @@
+[tools]
+chezmoi = "latest"
+shellcheck = "latest"
+shfmt = "latest"
+
+# helper: find bash/sh scripts (excludes python, etc.)
+[tasks._scripts]
+description = "List shell scripts in this repo"
+hide = true
+run = """
+grep -rl '^#!/usr/bin/env bash' dot_local/bin/executable_* .chezmoiscripts/*.sh 2>/dev/null
+"""
+
+[tasks.format]
+description = "Format shell scripts with shfmt"
+run = """
+mise run _scripts | xargs shfmt -w -i 2 -ci -bn
+"""
+
+[tasks."format:check"]
+description = "Check shell script formatting (no writes)"
+run = """
+mise run _scripts | xargs shfmt -d -i 2 -ci -bn
+"""
+
+[tasks.lint]
+description = "Lint shell scripts with shellcheck"
+run = """
+mise run _scripts | xargs shellcheck
+"""
+
+[tasks.check]
+description = "Run format check and lint"
+depends = ["format:check", "lint"]
+
+[tasks.diff]
+description = "Show chezmoi diff"
+run = "chezmoi diff"
+
+[tasks.dry-run]
+description = "Dry-run chezmoi apply"
+run = "chezmoi apply --dry-run"

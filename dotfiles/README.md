@@ -1,74 +1,39 @@
 # dotfiles
 
-Nix flake-based [home-manager](https://github.com/nix-community/home-manager) dotfiles. Shell environment, configuration, and personality — not development tools.
-
-![glamanonymous](/glamanon.jpeg)
+[chezmoi](https://www.chezmoi.io/) + [mise](https://mise.jdx.dev/) — shell environment, editor, multiplexer, git, AI agents, SSH, and security tooling. One unified config; **work** uses username `jpulsifer` (MoonPay git + extra MCP servers); **personal** uses `jawn`.
 
 ## Philosophy
 
-These dotfiles manage **configuration only**: shell (zsh), editor (vim), multiplexer (tmux), git, AI agents, SSH, and security tools. Development tools (language runtimes, cloud CLIs, infrastructure tools) are **not** installed globally.
+These dotfiles manage **configuration and CLI tooling** you want everywhere. Project-specific language stacks still belong in per-repo **mise** (`mise.toml`) or other project tools.
 
-Instead, dev tools are provisioned per-project via:
+## Install
 
-- **[mise](https://mise.jdx.dev)** — polyglot runtime manager, available everywhere via `basic.nix`
-- **[Nix dev shells](https://nix.dev/tutorials/first-steps/dev-environment)** — reproducible, per-project environments via `flake.nix`
+1. Install [chezmoi](https://www.chezmoi.io/install/) and [mise](https://mise.jdx.dev/) (or let `run_once_install-mise` install mise on first apply).
+2. Clone this repo and point chezmoi at it (or use `chezmoi init --apply <repo>`).
+3. `chezmoi apply`
 
-## Configurations
-
-| Name       | System         | Profile                                              |
-|------------|----------------|------------------------------------------------------|
-| `full`     | x86_64-linux   | Full workstation (AI agents, SSH, security tools)     |
-| `basic`    | x86_64-linux   | Base shell personality (git, zsh, tmux, vim, mise)    |
-| `arm`      | aarch64-linux  | Base shell personality (ARM)                          |
-| `homebook` | aarch64-darwin | Full workstation + macOS (Ghostty, fonts)             |
-| `work`     | aarch64-darwin | Work profile (MoonPay, 1Password SSH, Homebrew)       |
-| `pulse`    | x86_64-linux   | Minimal container (git + zsh only)                    |
-
-## Installation
-
-Install [Nix](https://determinate.systems/nix-installer/):
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
-```
-
-### Linux
-
-```bash
-nix run
-```
+On first apply, scripts install mise (if missing), run `mise install` for `~/.config/mise/config.toml`, optionally install the OpenCode CLI, and merge AI agent JSON (Claude/Cursor) via `.chezmoiscripts/`.
 
 ### macOS
 
+Install [Homebrew](https://brew.sh/). Ghostty is configured under `~/.config/ghostty/config`; install the app via Homebrew Cask if you use it.
+
+## Layout
+
+| Path | Purpose |
+|------|---------|
+| `dot_gitconfig.tmpl`, MCP `*.tmpl` | Work machine = user `jpulsifer` (git URL rewrites, extra MCP, Homebrew block); else `jawn` |
+| `.chezmoiexternal.yaml` | kube-ps1 + k8s-workflow-utils archives |
+| `dot_config/mise/config.toml.tmpl` | Global mise tools |
+| `dot_config/zsh/` | Zsh; plugins via [`.chezmoiexternal.yaml`](.chezmoiexternal.yaml) (pure, fzf-tab, autosuggestions, syntax-highlighting) |
+| `private_dot_local/private_bin/` | Shell helpers (`yeet`, `tm`, …) |
+| `skills/` | Agent skills source; wrappers deploy to `~/.agents`, `~/.claude`, `~/.config/opencode` |
+
+## Validation
+
 ```bash
-nix build github:jonpulsifer/dotfiles#darwinConfigurations.$(hostname).system
-./result/sw/bin/darwin-rebuild switch --flake .
-```
-
-## What's included
-
-**Base (all profiles):** git, zsh (pure prompt, fzf, syntax highlighting), tmux, vim, mise, bat, delta, eza, ripgrep, fzf, btop, fd, jq
-
-**Full workstation adds:** AI agent tooling (Claude Code, Cursor, OpenCode, Gemini + MCP servers), SSH config, 1Password CLI, age, sops, GPG
-
-## Dev tools
-
-To get development tools in a project, add a `.mise.toml`:
-
-```toml
-[tools]
-go = "latest"
-node = "22"
-kubectl = "latest"
-terraform = "1.12"
-```
-
-Or use a Nix dev shell in your project's `flake.nix`:
-
-```nix
-devShells.default = pkgs.mkShell {
-  packages = with pkgs; [ go gopls nodejs kubectl ];
-};
+chezmoi apply --dry-run
+shellcheck private_dot_local/private_bin/executable_* .chezmoiscripts/run_once_*.sh .chezmoiscripts/run_once_install-opencode.sh 2>/dev/null || true
 ```
 
 ## Credits
