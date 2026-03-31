@@ -48,11 +48,10 @@
 [url "git@github.com:moonpay/"]
 	insteadOf = git@github.com:MoonPay/
 	insteadOf = https://github.com/moonpay/
-{{- else }}
+{{- end }}
 
 [url "git@github.com:jonpulsifer/"]
 	insteadOf = https://github.com/jonpulsifer/
-{{- end }}
 
 {{- if and (eq .chezmoi.username "jpulsifer") (eq .chezmoi.os "darwin") }}
 
