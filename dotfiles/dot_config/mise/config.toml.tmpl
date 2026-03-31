@@ -3,7 +3,6 @@ experimental = true
 
 [tools]
 bat = "latest"
-btop = "latest"
 delta = "latest"
 eza = "latest"
 fd = "latest"
@@ -20,10 +19,11 @@ node = "lts"
 
 # kube
 kubectl = "latest"
+helm = "latest"
 k9s = "latest"
 kubecolor = "latest"
 
-# ai bits
-claude-code = "latest"
-gemini-cli = "latest"
-opencode = "latest"
+{{- if eq .chezmoi.os "linux" -}}
+# linux only
+btop = "latest"
+{{- end }}
