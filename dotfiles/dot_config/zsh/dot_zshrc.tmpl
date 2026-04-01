@@ -125,12 +125,19 @@ bindkey "^[[1;5D" backward-word
 # --- Kubernetes prompt + kubecolor (optional) ---
 if command -v kubectl >/dev/null 2>&1 && [[ -r "$HOME/.local/share/zsh/plugins/kube-ps1/kube-ps1.sh" ]]; then
   source "$HOME/.local/share/zsh/plugins/kube-ps1/kube-ps1.sh"
+
+  # Load kubectl completions before aliasing to kubecolor
+  source <(kubectl completion zsh)
   alias kubectl="kubecolor"
-  compdef kubecolor=kubectl 2>/dev/null || true
+  compdef kubecolor=kubectl
+  compdef k=kubectl
+  compdef kube=kubectl
+
   export KUBE_PS1_PREFIX="" KUBE_PS1_SUFFIX="" KUBE_PS1_SEPARATOR="" KUBE_PS1_SYMBOL_PADDING="true"
   export RPS1='$(kube_ps1)'
 fi
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
 
 logs() {
   FZF_DEFAULT_COMMAND="kubectl get pods --all-namespaces" \
@@ -145,10 +152,6 @@ logs() {
       --preview 'kubectl logs --follow --all-containers --tail=10000 --namespace {1} {2}' "$@"
 }
 
-# k8s-workflow-utils completions (optional)
-[[ -r "$HOME/.local/share/zsh/plugins/k8s-workflow-utils/completions/k8s-workflow-utils.zsh" ]] && \
-  source "$HOME/.local/share/zsh/plugins/k8s-workflow-utils/completions/k8s-workflow-utils.zsh"
-
 # --- Aliases (from former basic.nix) ---
 alias ls='eza'
 alias ll='eza -l'
@@ -156,13 +159,8 @@ alias la='eza -la'
 alias htop='btop; echo "stop using [h]top, prefer btop"'
 alias tree='eza --tree'
 alias diff=delta
-alias chctx='kubectl ctx'
-alias chns='kubectl ns'
+alias chctx='kubectx'
+alias chns='kubens'
 alias kube=kubectl
 alias k=kube
 alias boop='git boop'
-
-# --- macOS login path for completions ---
-{{ if eq .chezmoi.os "darwin" -}}
-fpath[1,0]="/opt/homebrew/share/zsh/site-functions"
-{{ end -}}
