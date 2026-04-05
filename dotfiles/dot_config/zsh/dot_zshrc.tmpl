@@ -3,7 +3,7 @@
 export ZDOTDIR="${ZDOTDIR:-$HOME/.config/zsh}"
 
 # --- PATH: user scripts first, then mise shims ---
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate zsh)"
   export MISE_NODE_COMPILE=false
