@@ -6,3 +6,12 @@ brew "mise"
 brew "awscli"
 cask "gcloud-cli"
 cask "docker-desktop"
+
+# ai homies
+cask "claude-code"
+
+tap "anomalyco/tap"
+brew "opencode"
+
+tap "PeonPing/tap"
+brew "peon-ping"
