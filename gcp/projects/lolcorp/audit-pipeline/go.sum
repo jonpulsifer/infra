@@ -9,6 +9,8 @@ cloud.google.com/go/aiplatform v1.120.0 h1:jKWTpEs+xoUhDa1FMdSuhMcEQYyUiMdufGyX3
 cloud.google.com/go/aiplatform v1.120.0/go.mod h1:6mDthfmy0oS1EQhVFdijoxkVdI2+HIZkpuGTBpedeCg=
 cloud.google.com/go/aiplatform v1.121.0 h1:8y8sNfVAW1DVhFbSbI7d8rrqBGGJFk6EoV6atidlyQc=
 cloud.google.com/go/aiplatform v1.121.0/go.mod h1:juMdDWeNphHV40KhWdN+563zNCOKNmLJjk5D2TA43ls=
+cloud.google.com/go/aiplatform v1.122.0 h1:l9euMxde3/yL/txA1ngCM6zyTSXbjmos/OtUXDAeqhw=
+cloud.google.com/go/aiplatform v1.122.0/go.mod h1:Z0QhICmtYNxf0fbl/axHrVXCGcfdYuedH5NK+GwVu1I=
 cloud.google.com/go/auth v0.11.0 h1:Ic5SZz2lsvbYcWT5dfjNWgw6tTlGi2Wc8hyQSC9BstA=
 cloud.google.com/go/auth v0.11.0/go.mod h1:xxA5AqpDrvS+Gkmo9RqrGGRh6WSNKKOXhY3zNOr38tI=
 cloud.google.com/go/auth v0.18.2 h1:+Nbt5Ev0xEqxlNjd6c+yYUeosQ5TtEUaNcN/3FozlaM=
@@ -55,6 +57,8 @@ cloud.google.com/go/vertexai v0.17.0 h1:jnMsFEgi4cWAECvuP0YhHnvEnhHl8B3dIQh5qgaH
 cloud.google.com/go/vertexai v0.17.0/go.mod h1:WSmxmxzYvzWEMB8vxQ7S5huioo0UwtrG9d//Jm8Npxo=
 cloud.google.com/go/vertexai v0.18.0 h1:n5s4M177FGjUIMQE4UhNTipJfx9xnZZbcra4w8VE0D8=
 cloud.google.com/go/vertexai v0.18.0/go.mod h1:6ZrIvEstBsJRDYQMqtNxuThAoDYLDFNkasrWtj04rjc=
+cloud.google.com/go/vertexai v0.19.0 h1:s2ycqpWiLtydvs8u86fwFG1P4ovdHmiYtSZ2Qtd9vnM=
+cloud.google.com/go/vertexai v0.19.0/go.mod h1:LDCXm7/7mi+MdbwhSSZ/qvNSqxvrGiwqUeC/OBlC3oY=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/apache/arrow/go/v15 v15.0.2 h1:60IliRbiyTWCWjERBCkO1W4Qun9svcYoZrSLcyOsMLE=
 github.com/apache/arrow/go/v15 v15.0.2/go.mod h1:DGXsR3ajT524njufqf95822i+KTh+yea1jass9YXgjA=
@@ -290,6 +294,8 @@ google.golang.org/genai v1.50.0 h1:yHKV/vjoeN9PJ3iF0ur4cBZco4N3Kl7j09rMq7XSoWk=
 google.golang.org/genai v1.50.0/go.mod h1:A3kkl0nyBjyFlNjgxIwKq70julKbIxpSxqKO5gw/gmk=
 google.golang.org/genai v1.52.0 h1:ekVIxWHtLUNbt+v0WWi4j3JT4yrHDEbysMcHQcaCQoI=
 google.golang.org/genai v1.52.0/go.mod h1:A3kkl0nyBjyFlNjgxIwKq70julKbIxpSxqKO5gw/gmk=
+google.golang.org/genai v1.52.1 h1:dYoljKtLDXMiBdVaClSJ/ZPwZ7j1N0lGjMhwOKOQUlk=
+google.golang.org/genai v1.52.1/go.mod h1:A3kkl0nyBjyFlNjgxIwKq70julKbIxpSxqKO5gw/gmk=
 google.golang.org/genproto v0.0.0-20180817151627-c66870c02cf8/go.mod h1:JiN7NxoALGmiZfu7CAH4rXhgtRTLTxftemlI0sWmxmc=
 google.golang.org/genproto v0.0.0-20190819201941-24fa4b261c55/go.mod h1:DMBHOl98Agz4BDEuKkezgsaosCRResVns1a3J2ZsMNc=
 google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013/go.mod h1:NbSheEEYHJ7i3ixzK3sjbqSGDJWnxyFXZblF3eUsNvo=

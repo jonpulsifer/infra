@@ -4,12 +4,12 @@ go 1.25.0
 
 require (
 	cloud.google.com/go/bigquery v1.76.0
-	cloud.google.com/go/vertexai v0.18.0
+	cloud.google.com/go/vertexai v0.19.0
 )
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/aiplatform v1.121.0 // indirect
+	cloud.google.com/go/aiplatform v1.122.0 // indirect
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
@@ -53,7 +53,7 @@ require (
 	golang.org/x/tools v0.42.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/api v0.275.0 // indirect
-	google.golang.org/genai v1.52.0 // indirect
+	google.golang.org/genai v1.52.1 // indirect
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
