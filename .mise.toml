@@ -1,4 +1,8 @@
 [tools]
+bat = "latest"
+delta = "latest"
+eza = "latest"
+fzf = "latest"
 gcloud = "latest"
 terraform = "latest"
 

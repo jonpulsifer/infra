@@ -10,21 +10,12 @@
     };
     unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
-    home-manager = {
-      url = "github:nix-community/home-manager/release-25.11";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     hosts = {
       url = "github:StevenBlack/hosts";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # my repositories
-    dotfiles = {
-      url = "github:jonpulsifer/dotfiles";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     ddnsd = {
       url = "github:jonpulsifer/ddnsd";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -44,8 +35,6 @@
     {
       self,
       ddnsd,
-      dotfiles,
-      home-manager,
       hosts,
       nixpkgs,
       nixos-hardware,

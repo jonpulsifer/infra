@@ -16,9 +16,6 @@
 
   nixpkgs.config.allowUnfree = true;
 
-  # Full dev stack (same as WSL image)
-  home-manager.users.jawn = inputs.dotfiles.homeModules.full;
-
   # Container identity
   networking.hostName = "pulse";
 

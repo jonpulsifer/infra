@@ -23,17 +23,12 @@
     docker-desktop.enable = true;
   };
 
-  home-manager.users.jawn = lib.mkForce inputs.dotfiles.homeModules.full;
-
   i18n.defaultLocale = "en_US.UTF-8";
 
   # resolf.conf is managed by WSL (wsl.wslConf.network.generateResolvConf)
   services.resolved.enable = lib.mkForce false;
 
-  # https://nix-community.github.io/NixOS-WSL/how-to/vscode.html
-  environment.systemPackages = [
-    pkgs.wget
-  ];
+  environment.systemPackages = [ pkgs.python3 pkgs.pipx ];
 
   programs.nix-ld.enable = true;
 

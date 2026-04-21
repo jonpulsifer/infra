@@ -7,6 +7,7 @@ let
     argocd
     cilium-cli
     fluxcd
+    git
     google-cloud-sdk
     kubectl
     kubernetes-helm
