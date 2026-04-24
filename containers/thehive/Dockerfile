@@ -1,4 +1,4 @@
-FROM ubuntu:noble
+FROM ubuntu:resolute
 LABEL maintainer=jonathan@pulsifer.ca \
       ca.pulsifer.os=linux \
       ca.pulsifer.distro=ubuntu \

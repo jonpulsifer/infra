@@ -1,4 +1,4 @@
-FROM ubuntu:noble
+FROM ubuntu:resolute
 
 ENV PACKAGES build-essential libncurses-dev bison flex libssl-dev libelf-dev
 
