@@ -2,7 +2,7 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: descheduler
-  namespace: kube-system
+  namespace: descheduler
 spec:
   interval: 24h
   chart:
@@ -25,61 +25,186 @@ spec:
     keepHistory: false
   values:
     kind: Deployment
-    schedule: "*/5 * * * *"
+    deschedulingInterval: 30m
     deschedulerPolicy:
-      strategies:
-        RemovePodsHavingTooManyRestarts:
-          enabled: true
-          params:
-            podsHavingTooManyRestarts:
-              podRestartThreshold: 5
-              includingInitContainers: true
-        RemovePodsViolatingTopologySpreadConstraint:
-          enabled: true
-          params:
-            includeSoftConstraints: true
-        PodLifeTime:
-          enabled: true
-          params:
-            podLifeTime:
-              states:
-                - Pending
-                - PodInitializing
-                - ContainerCreating
-              maxPodLifeTimeSeconds: 1800
-        RemoveFailedPods:
-          enabled: true
-          params:
-            failedPods:
-              reasons:
-                - NodeShutdown
-                - ImagePullBackOff
-                - CreateContainerConfigError
-              includingInitContainers: true
-              excludeOwnerKinds:
-                - Job
-              minPodLifetimeSeconds: 1800
-        RemoveDuplicates:
-          enabled: true
-        RemovePodsViolatingNodeTaints:
-          enabled: true
-        RemovePodsViolatingNodeAffinity:
-          enabled: true
-          params:
-            nodeAffinityType:
-              - requiredDuringSchedulingIgnoredDuringExecution
-        RemovePodsViolatingInterPodAntiAffinity:
-          enabled: true
-        LowNodeUtilization:
-          enabled: true
-          params:
-            nodeResourceUtilizationThresholds:
-              thresholds:
-                cpu: 35
-                memory: 35
-              targetThresholds:
-                cpu: 40
-                memory: 40
+      maxNoOfPodsToEvictPerNode: 2
+      maxNoOfPodsToEvictPerNamespace: 2
+      maxNoOfPodsToEvictTotal: 4
+      profiles:
+        - name: default
+          pluginConfig:
+            - name: DefaultEvictor
+              args:
+                nodeFit: true
+                minPodAge: 10m
+                noEvictionPolicy: Mandatory
+                podProtections:
+                  defaultDisabled:
+                    - FailedBarePods
+                  extraEnabled:
+                    - PodsWithPVC
+            - name: RemoveFailedPods
+              args:
+                reasons:
+                  - Evicted
+                  - NodeShutdown
+                includingInitContainers: true
+                excludeOwnerKinds:
+                  - Job
+                minPodLifetimeSeconds: 3600
+            - name: PodLifeTime
+              args:
+                namespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+                maxPodLifeTimeSeconds: 3600
+                states:
+                  - Pending
+                  - PodInitializing
+                  - ContainerCreating
+                  - ImagePullBackOff
+                  - ErrImagePull
+                  - ErrImageNeverPull
+                  - CreateContainerConfigError
+            - name: RemovePodsHavingTooManyRestarts
+              args:
+                namespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+                podRestartThreshold: 20
+                includingInitContainers: true
+                states:
+                  - CrashLoopBackOff
+            - name: RemovePodsViolatingNodeTaints
+              args:
+                namespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+            - name: RemovePodsViolatingNodeAffinity
+              args:
+                namespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+                nodeAffinityType:
+                  - requiredDuringSchedulingIgnoredDuringExecution
+            - name: RemovePodsViolatingInterPodAntiAffinity
+              args:
+                namespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+            - name: RemoveDuplicates
+              args:
+                namespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+            - name: RemovePodsViolatingTopologySpreadConstraint
+              args:
+                namespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+                constraints:
+                  - DoNotSchedule
+            - name: LowNodeUtilization
+              args:
+                thresholds:
+                  cpu: 20
+                  memory: 20
+                  pods: 20
+                targetThresholds:
+                  cpu: 70
+                  memory: 70
+                  pods: 65
+                evictionLimits:
+                  node: 1
+                evictableNamespaces:
+                  exclude:
+                    - cert-manager
+                    - cloudflare
+                    - descheduler
+                    - external-dns
+                    - external-secrets
+                    - flux-system
+                    - kube-system
+                    - local-path-provisioner
+                    - monitoring
+                    - tailscale
+          plugins:
+            deschedule:
+              enabled:
+                - RemoveFailedPods
+                - PodLifeTime
+                - RemovePodsHavingTooManyRestarts
+                - RemovePodsViolatingNodeTaints
+                - RemovePodsViolatingNodeAffinity
+                - RemovePodsViolatingInterPodAntiAffinity
+            balance:
+              enabled:
+                - RemoveDuplicates
+                - RemovePodsViolatingTopologySpreadConstraint
+                - LowNodeUtilization
     service:
       enabled: true
     serviceMonitor:
