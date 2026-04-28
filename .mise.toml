@@ -2,6 +2,7 @@
 bat = "latest"
 delta = "latest"
 eza = "latest"
+flux2 = "latest"
 fzf = "latest"
 gcloud = "latest"
 terraform = "latest"
