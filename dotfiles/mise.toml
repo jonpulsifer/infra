@@ -2,6 +2,7 @@
 chezmoi = "latest"
 shellcheck = "latest"
 shfmt = "latest"
+vim = "latest"
 
 # helper: find bash/sh scripts (excludes python, etc.)
 [tasks._scripts]
