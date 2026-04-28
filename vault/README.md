@@ -10,7 +10,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.8.0 |
+| <a name="provider_vault"></a> [vault](#provider\_vault) | 5.9.0 |
 
 ## Modules
 
