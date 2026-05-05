@@ -1,4 +1,4 @@
-FROM ghcr.io/runatlantis/atlantis:v0.42.0@sha256:a8873d7281491407249ffbd9d0f55fc5829f6ab7f7152643da05857c32f606a9
+FROM ghcr.io/runatlantis/atlantis:v0.43.0@sha256:eb08c9823713256cf5e5198666ae059e104ca3ec92ed500f1bd6f21aa2e1a3fc
 USER root
 RUN echo https://downloads.1password.com/linux/alpinelinux/stable/ >> /etc/apk/repositories && \
     wget https://downloads.1password.com/linux/keys/alpinelinux/support@1password.com-61ddfc31.rsa.pub -P /etc/apk/keys && \
