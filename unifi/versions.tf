@@ -13,10 +13,6 @@ terraform {
       source  = "ubiquiti-community/unifi"
       version = "~> 0.41"
     }
-    vault = {
-      source  = "hashicorp/vault"
-      version = "~> 5.0"
-    }
     onepassword = {
       source  = "1password/onepassword"
       version = "~> 3.0"
@@ -38,10 +34,6 @@ ephemeral "onepassword_item" "unifi" {
   uuid  = "lb532zq5efzs3y3xlfbdk2kace"
 }
 
-ephemeral "onepassword_item" "vault" {
-  vault = local.vault_id
-  uuid  = "jjojlizpb5p4slytyw2a4llx3m"
-}
 
 provider "onepassword" {
   # export OP_SERVICE_ACCOUNT_TOKEN=$(op item get 'Service Account Auth Token: Nixos' --fields=token --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
@@ -60,17 +52,6 @@ provider "unifi" {
   api_url        = ephemeral.onepassword_item.unifi.url
   allow_insecure = true
   site           = "default"
-}
-
-provider "vault" {
-  # vault login -method=userpass username=terraform password=$(op item get vault --fields=password --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
-  auth_login_userpass {
-    username = ephemeral.onepassword_item.vault.username
-    password = ephemeral.onepassword_item.vault.password
-  }
-  address            = ephemeral.onepassword_item.vault.url # VAULT_ADDR
-  add_address_to_env = true
-  skip_tls_verify    = true
 }
 
 # terraform apply -target=unifi_user.import

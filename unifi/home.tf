@@ -31,14 +31,15 @@ data "unifi_ap_group" "all_aps" {
   name = "All APs"
 }
 
-data "vault_generic_secret" "wifi" {
-  path = "home/wifi"
+data "onepassword_item" "wifi" {
+  vault = local.vault_id
+  uuid  = "a2etujelxm3zqseawe3phxtyc4"
 }
 
 resource "unifi_wlan" "fml" {
   name       = local.fml_wlan
   security   = "wpapsk"
-  passphrase = data.vault_generic_secret.wifi.data[local.fml_wlan]
+  passphrase = data.onepassword_item.wifi.password
 
   ap_group_ids = [
     data.unifi_ap_group.all_aps.id,
