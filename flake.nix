@@ -53,7 +53,10 @@
         optiplex = {
           tags = [ "folly" ];
           module = "k8s-node";
-          modules = [ { config.services.k8s.role = "control-plane"; } ];
+          modules = [{
+            config.services.k8s.role = "control-plane";
+            config.services.k8s.network = "folly";
+          }];
         };
         riptide = {
           tags = [ "folly" ];
@@ -72,7 +75,10 @@
         retrofit = {
           tags = [ "offsite" ];
           module = "k8s-node";
-          modules = [ { config.services.k8s.role = "control-plane"; } ];
+          modules = [{
+            config.services.k8s.role = "control-plane";
+            config.services.k8s.network = "offsite";
+          }];
         };
 
         # raspberry pis
