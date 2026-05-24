@@ -134,12 +134,14 @@
         commitMessageTopic: '{{{groupName}}} group',
       },
     },
-    // Terraform
+    // Terraform — refresh .terraform.lock.hcl alongside provider bumps so
+    // Atlantis (which runs `terraform init` without -upgrade) doesn't choke.
     {
       matchManagers: ['terraform'],
       groupName: 'terraform {{depName}}',
       automerge: true,
       automergeType: 'pr',
+      postUpdateOptions: ['terraformLock'],
     },
     // Flux helm charts
     {

@@ -13,7 +13,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.19.0 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.19.1 |
 | <a name="provider_google"></a> [google](#provider\_google) | 7.30.0 |
 | <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.30.0 |
 
