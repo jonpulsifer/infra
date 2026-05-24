@@ -4,6 +4,7 @@ import rego.v1
 
 atlantis_users := {
     "jonpulsifer",
+    "rowbutt",
     "renovate[bot]",
 }
 
