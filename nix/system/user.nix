@@ -27,4 +27,23 @@ in
       gnupg
     ];
   };
+
+  users.users.rowbutt = {
+    uid = 1339;
+    isNormalUser = true;
+    extraGroups = [
+      "wheel"
+      "tty"
+    ]
+    ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
+    openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKhYENJ/NOSUFerGNB5eIxjxeMNhmosbX62hLgZKNbUp"
+    ];
+    shell = pkgs.zsh;
+    packages = with pkgs; [
+      git
+      unzip
+      gnupg
+    ];
+  };
 }
