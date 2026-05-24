@@ -10,6 +10,7 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 ├── k8s/           # Kubernetes manifests and configurations
 ├── gcp/           # Google Cloud Platform (Terraform)
 ├── cloudflare/    # Cloudflare DNS and security (Terraform)
+├── tailscale/     # Tailscale tailnet configuration (Terraform)
 ├── argo/          # ArgoCD applications
 ├── vault/         # HashiCorp Vault configurations
 ├── unifi/         # UniFi network controller configs
@@ -99,6 +100,10 @@ Managed with:
 - DNS management
 - Security policies
 - Access controls
+
+**Tailscale** (`tailscale/`):
+- Tailnet policy, DNS, contacts, and settings
+- Device authorization, key expiry, and tag state
 
 ## 🛠️ Technology Stack
 

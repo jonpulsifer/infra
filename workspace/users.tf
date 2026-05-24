@@ -2,6 +2,11 @@ locals {
   username = "jawn"
 }
 
+data "onepassword_item" "google_workspace_agent_user" {
+  vault = local.vault_id
+  title = "Google Workspace agent user"
+}
+
 resource "googleworkspace_user" "me" {
   primary_email = "jonathan@pulsifer.ca"
   name {
@@ -47,10 +52,24 @@ resource "googleworkspace_user" "terraform" {
   }
 }
 
-resource "googleworkspace_user" "vault" {
-  primary_email = "vault@pulsifer.ca"
+resource "googleworkspace_user" "agent" {
+  primary_email = "agent@pulsifer.ca"
+  password      = data.onepassword_item.google_workspace_agent_user.password
+
   name {
-    given_name  = "HashiCorp"
-    family_name = "Vault"
+    given_name  = "Agent"
+    family_name = "Account"
+  }
+
+  lifecycle {
+    ignore_changes = [
+      password,
+      recovery_email,
+      aliases,
+      addresses,
+      phones,
+      organizations,
+      external_ids,
+    ]
   }
 }

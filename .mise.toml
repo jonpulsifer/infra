@@ -29,14 +29,14 @@ run = "nix develop -c terraform fmt -recursive"
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
-  "nix develop -c bash -lc 'for d in argo cloudflare unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done'",
+  "nix develop -c bash -lc 'for d in argo cloudflare tailscale unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done'",
 ]
 
 [tasks."tf:validate"]
 description = "Validate Terraform modules"
 depends = ["tf:init"]
 run = [
-  "nix develop -c bash -lc 'for d in argo cloudflare unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done'",
+  "nix develop -c bash -lc 'for d in argo cloudflare tailscale unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done'",
 ]
 
 [tasks."tf:plan"]
