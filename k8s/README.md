@@ -7,12 +7,12 @@ No requirements.
 
 | Name | Version |
 |------|---------|
-| <a name="provider_github"></a> [github](#provider\_github) | 6.6.0 |
-| <a name="provider_helm"></a> [helm](#provider\_helm) | 3.1.1 |
-| <a name="provider_helm.offsite"></a> [helm.offsite](#provider\_helm.offsite) | 3.1.1 |
-| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.37.1 |
-| <a name="provider_kubernetes.offsite"></a> [kubernetes.offsite](#provider\_kubernetes.offsite) | 2.37.1 |
-| <a name="provider_tls"></a> [tls](#provider\_tls) | 4.1.0 |
+| <a name="provider_github"></a> [github](#provider\_github) | 6.12.1 |
+| <a name="provider_helm"></a> [helm](#provider\_helm) | 3.1.2 |
+| <a name="provider_helm.offsite"></a> [helm.offsite](#provider\_helm.offsite) | 3.1.2 |
+| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 3.1.0 |
+| <a name="provider_kubernetes.offsite"></a> [kubernetes.offsite](#provider\_kubernetes.offsite) | 3.1.0 |
+| <a name="provider_tls"></a> [tls](#provider\_tls) | 4.3.0 |
 
 ## Modules
 

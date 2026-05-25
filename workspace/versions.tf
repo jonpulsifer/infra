@@ -4,6 +4,7 @@ locals {
   region                    = "northamerica-northeast2"
   zone                      = join("-", [local.region, "a"])
   terraform_service_account = "terraform@${local.project}.iam.gserviceaccount.com"
+  vault_id                  = "ib23znjeikv74p37f6mbfk7uya"
   use_direct_credentials    = fileexists("/run/secrets/terraform.json")
   admin_scopes = [
     "https://www.googleapis.com/auth/admin.directory.domain",
@@ -54,5 +55,11 @@ terraform {
       source  = "hashicorp/googleworkspace"
       version = "~> 0.7"
     }
+    onepassword = {
+      source  = "1password/onepassword"
+      version = "~> 3.0"
+    }
   }
 }
+
+provider "onepassword" {}

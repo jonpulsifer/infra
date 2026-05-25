@@ -22,6 +22,12 @@ resource "googleworkspace_group_members" "cloud" {
     role              = "MEMBER"
     delivery_settings = "NONE"
   }
+
+  members {
+    email             = googleworkspace_user.agent.primary_email
+    role              = "MEMBER"
+    delivery_settings = "NONE"
+  }
 }
 
 resource "googleworkspace_group_settings" "cloud" {
