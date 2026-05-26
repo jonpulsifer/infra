@@ -24,7 +24,7 @@
       ];
     };
   };
-  
+
   # get the hostname from gce
   networking.hostName = lib.mkForce "";
   system.stateVersion = lib.mkDefault "25.05";

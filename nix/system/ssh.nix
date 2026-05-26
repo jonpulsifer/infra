@@ -14,14 +14,14 @@
       rev = inputs.self.shortRev or "dirty";
     in
     ''
-             o8o
-             `"'
-ooo. .oo.   oooo  oooo    ooo  .ooooo.   .oooo.o
-`888P"Y88b  `888   `88b..8P'  d88' `88b d88(  "8
- 888   888   888     Y888'    888   888 `"Y88b.
- 888   888   888   .o8"'88b   888   888 o.  )88b
-o888o o888o o888o o88'   888o `Y8bod8P' 8""888P'
- ${hostName}  ${buildDate}  ${rev}
+                   o8o
+                   `"'
+      ooo. .oo.   oooo  oooo    ooo  .ooooo.   .oooo.o
+      `888P"Y88b  `888   `88b..8P'  d88' `88b d88(  "8
+       888   888   888     Y888'    888   888 `"Y88b.
+       888   888   888   .o8"'88b   888   888 o.  )88b
+      o888o o888o o888o o88'   888o `Y8bod8P' 8""888P'
+       ${hostName}  ${buildDate}  ${rev}
     '';
   programs.ssh.startAgent = true;
 

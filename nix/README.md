@@ -21,20 +21,18 @@ nix/
 ### Kubernetes Clusters
 
 **Folly Cluster** (on-site):
-- `nuc` - Intel NUC (control-plane)
-- `optiplex` - Dell OptiPlex
-- `riptide` - Worker node
-- `800g2` - HP EliteDesk 800 G2
+- `optiplex` - control-plane
+- `riptide` - worker
 
 **Offsite Cluster**:
-- `oldschool` - Offsite control-plane
-- `retrofit` - Offsite worker
+- `oldschool` - worker (github-runner, yarr, docker)
+- `retrofit` - control-plane
 
 ### Raspberry Pi Systems
 
 - `cloudpi4` - Cloud services Pi
 - `homepi4` - Home automation Pi
-- `screenpi4` - Display/kiosk Pi
+- `weatherpi4` - Display/kiosk Pi
 
 ### Installation Images
 
@@ -113,10 +111,7 @@ nixos-rebuild boot --use-remote-sudo --target-host nixos.pirate-musical.ts.net -
 
 Reusable configuration profiles in `profiles/`:
 
-- **`rpi.nix`** - Raspberry Pi 4 hardware profile
-- **`wsl.nix`** - WSL-specific configuration
-- **`iso.nix`** - Live ISO environment
-- **`gce.nix`** - Google Compute Engine optimizations
+- **`k8s-node.nix`** - Shared x86 Kubernetes node base (hardware, k8s, ethtool offload)
 
 ## 🔧 Services
 
@@ -165,24 +160,23 @@ SSH keys are automatically imported from GitHub:
 1. Create a new file in `hosts/<hostname>.nix`:
 
 ```nix
-{ config, name, ... }:
+{ name, ... }:
 {
   imports = [
-    ../hardware/x86
-    ../services/common.nix
+    ../profiles/k8s-node.nix # for k8s nodes; otherwise ../hardware/x86 ../services/common.nix
   ];
-  
+
   networking.hostName = name;
   # Add host-specific configuration
 }
 ```
 
-2. Add to `flake.nix` outputs:
+2. Add to `flake.nix` `baseHostsSpec` with metadata only (tags, system, or profile):
 
 ```nix
-nixosConfigurations = builtins.mapAttrs mkSystem {
+baseHostsSpec = {
   # ... existing hosts
-  newhostname = { };
+  newhostname = { tags = [ "folly" ]; };
 };
 ```
 

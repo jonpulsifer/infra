@@ -15,13 +15,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # my repositories
     ddnsd = {
       url = "github:jonpulsifer/ddnsd";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # ssh keys
     keys = {
       url = "https://github.com/jonpulsifer.keys";
       flake = false;
@@ -31,173 +29,112 @@
       flake = false;
     };
   };
+
   outputs =
-    {
-      self,
-      ddnsd,
-      hosts,
-      nixpkgs,
-      nixos-hardware,
-      nixos-wsl,
-      keys,
-      wannabekeys,
-      unstable,
-      ...
-    }@inputs:
+    inputs@{ nixpkgs, ... }:
     let
-      inherit (nixpkgs.lib) genAttrs nixosSystem filterAttrs;
-      forAllSystems = f: genAttrs [ "x86_64-linux" "aarch64-linux" ] (system: f system);
+      lib = nixpkgs.lib;
+      inherit (lib) genAttrs nixosSystem;
 
-      baseHostsSpec = {
-        # kubernetes cluster (folly)
-        optiplex = {
-          tags = [ "folly" ];
-          module = "k8s-node";
-          modules = [{
-            config.services.k8s.role = "control-plane";
-            config.services.k8s.network = "folly";
-          }];
-        };
-        riptide = {
-          tags = [ "folly" ];
-          module = "k8s-node";
-        };
-        k8s-node = {
-          tags = [ "folly" ];
-          netboot = true;
-        };
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+      forAllSystems = f: genAttrs systems (system: f system);
 
-        # kubernetes cluster (offsite)
-        oldschool = {
-          tags = [ "offsite" ];
-          module = "k8s-node";
-        };
-        retrofit = {
-          tags = [ "offsite" ];
-          module = "k8s-node";
-          modules = [{
-            config.services.k8s.role = "control-plane";
-            config.services.k8s.network = "offsite";
-          }];
-        };
+      inherit (import ./nix/lib/mkHost.nix {
+        inherit lib nixosSystem inputs;
+      })
+        mkHost
+        mkImage;
 
-        # raspberry pis
-        cloudpi4 = {
-          system = "aarch64-linux";
-        };
-        homepi4 = {
-          system = "aarch64-linux";
-        };
-        weatherpi4 = {
-          system = "aarch64-linux";
-        };
+      deployHosts = [
+        "optiplex"
+        "riptide"
+        "oldschool"
+        "retrofit"
+        "cloudpi4"
+        "homepi4"
+        "weatherpi4"
+        "oldboy"
+      ];
 
-        # google cloud
-        oldboy = {
-          tags = [ "gcp" ];
-        };
-
-        # images
-        wsl = {
-          profile = "images";
-        };
-        iso = {
-          profile = "images";
-        };
-        gce = {
-          profile = "images";
-        };
-
-        container = {
-          profile = "images";
-        };
-        netboot = {
-          profile = "images";
-        };
-      };
-
-      netbootHosts = builtins.attrNames (filterAttrs (_: cfg: cfg.netboot or false) baseHostsSpec);
-
-      mkNetboot = host: {
-        profile = "images";
-        moduleDir = "hosts";
-        module = host;
-        modules = [
-          (
-            { modulesPath, ... }:
-            {
-              imports = [ (modulesPath + "/installer/netboot/netboot-minimal.nix") ];
-            }
-          )
-        ];
-      };
-
-      mkSystem =
-        name: config:
-        let
-          system = config.system or "x86_64-linux";
-          moduleDir = config.moduleDir or (config.profile or "hosts");
-          moduleName = config.module or name;
-          modules = [ ./nix/${moduleDir}/${moduleName}.nix ] ++ (config.modules or [ ]);
-          tags = config.tags or [ ];
-        in
-        nixosSystem {
-          inherit system modules;
-          specialArgs = { inherit name inputs tags; };
-        };
-
-      hostsSpec =
-        baseHostsSpec
-        // builtins.listToAttrs (
-          map (host: {
-            name = "${host}-netboot";
-            value = mkNetboot host;
-          }) netbootHosts
-        );
+      legacyPackages = forAllSystems (
+        system:
+        import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        }
+      );
     in
     rec {
-      nixosConfigurations = builtins.mapAttrs mkSystem hostsSpec;
+      nixosConfigurations = {
+        optiplex = mkHost "optiplex" {
+          tags = [ "folly" ];
+          role = "control-plane";
+        };
+        riptide = mkHost "riptide" {
+          tags = [ "folly" ];
+        };
+
+        oldschool = mkHost "oldschool" {
+          tags = [ "offsite" ];
+          imports = [
+            ./nix/system/quiker.nix
+            ./nix/services/github-runner.nix
+            ./nix/services/yarr.nix
+          ];
+          extraConfig = {
+            virtualisation.docker.enable = true;
+          };
+        };
+        retrofit = mkHost "retrofit" {
+          tags = [ "offsite" ];
+          role = "control-plane";
+        };
+
+        cloudpi4 = mkHost "cloudpi4" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/cloudpi4.nix ];
+        };
+        homepi4 = mkHost "homepi4" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/homepi4.nix ];
+        };
+        weatherpi4 = mkHost "weatherpi4" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/weatherpi4.nix ];
+        };
+
+        oldboy = mkHost "oldboy" {
+          tags = [ "gcp" ];
+          modules = [ ./nix/hosts/oldboy.nix ];
+        };
+
+        wsl = mkImage ./nix/images/wsl.nix;
+        iso = mkImage ./nix/images/iso.nix;
+        gce = mkImage ./nix/images/gce.nix;
+        container = mkImage ./nix/images/container.nix;
+        netboot = mkImage ./nix/images/netboot.nix;
+      };
 
       packages = {
-        x86_64-linux =
-          let
-            mkNetbootPackage =
-              host:
-              legacyPackages.x86_64-linux.symlinkJoin {
-                name = "netboot-${host}";
-                paths = with nixosConfigurations."${host}-netboot".config.system.build; [
-                  netbootRamdisk
-                  kernel
-                  netbootIpxeScript
-                ];
-                preferLocalBuild = true;
-              };
-
-            netbootPackages = builtins.listToAttrs (
-              map (host: {
-                name = "netboot-${host}";
-                value = mkNetbootPackage host;
-              }) netbootHosts
-            );
-          in
-          {
-            iso = nixosConfigurations.iso.config.system.build.isoImage;
-            wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
-            container = nixosConfigurations.container.config.system.build.tarball;
-            gce = nixosConfigurations.gce.config.system.build.googleComputeImage;
-            oldboy = nixosConfigurations.oldboy.config.system.build.googleComputeImage;
-
-            netboot = legacyPackages.x86_64-linux.symlinkJoin {
-              name = "netboot";
-              paths = with nixosConfigurations.netboot.config.system.build; [
-                netbootRamdisk
-                kernel
-                netbootIpxeScript
-              ];
-              preferLocalBuild = true;
-            };
-          }
-          // netbootPackages;
+        x86_64-linux = {
+          iso = nixosConfigurations.iso.config.system.build.isoImage;
+          wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
+          container = nixosConfigurations.container.config.system.build.tarball;
+          gce = nixosConfigurations.gce.config.system.build.googleComputeImage;
+          oldboy = nixosConfigurations.oldboy.config.system.build.googleComputeImage;
+          netboot = legacyPackages.x86_64-linux.symlinkJoin {
+            name = "netboot";
+            paths = with nixosConfigurations.netboot.config.system.build; [
+              netbootRamdisk
+              kernel
+              netbootIpxeScript
+            ];
+            preferLocalBuild = true;
+          };
+        };
         aarch64-linux = {
           cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
@@ -205,13 +142,7 @@
         };
       };
 
-      legacyPackages = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
-        system:
-        import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-        }
-      );
+      inherit legacyPackages;
 
       formatter = forAllSystems (system: legacyPackages.${system}.nixfmt-tree);
 
@@ -223,12 +154,9 @@
 
       apps = forAllSystems (
         system:
-        let
+        (import ./nix/lib/apps.nix).mkApps {
           pkgs = legacyPackages.${system};
-          appsLib = import ./nix/lib/apps.nix;
-        in
-        appsLib.mkApps {
-          inherit pkgs hostsSpec nixosConfigurations;
+          inherit deployHosts nixosConfigurations;
         }
       );
     };

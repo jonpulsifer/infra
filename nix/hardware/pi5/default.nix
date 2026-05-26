@@ -28,38 +28,40 @@
     ];
   };
 
-  boot = let
-    linux_rpi5 = pkgs.unstable.linux_rpi4.override {
-      rpiVersion = 5;
-      argsOverride.defconfig = "bcm2712_defconfig";
-    };
-  in {
-    kernelPackages = lib.mkForce linux_rpi5;
-    # kernelParams = [
-    #   "console=tty0"
-    #   "cma=256M"
-    #   "cgroup_enable=cpuset"
-    #   "cgroup_enable=memory"
-    # ];
-    supportedFilesystems = [
-      "ext4"
-      "vfat"
-    ];
+  boot =
+    let
+      linux_rpi5 = pkgs.unstable.linux_rpi4.override {
+        rpiVersion = 5;
+        argsOverride.defconfig = "bcm2712_defconfig";
+      };
+    in
+    {
+      kernelPackages = lib.mkForce linux_rpi5;
+      # kernelParams = [
+      #   "console=tty0"
+      #   "cma=256M"
+      #   "cgroup_enable=cpuset"
+      #   "cgroup_enable=memory"
+      # ];
+      supportedFilesystems = [
+        "ext4"
+        "vfat"
+      ];
 
-    # this runs out of space sometimes
-    tmp = {
-      useTmpfs = false;
-    };
+      # this runs out of space sometimes
+      tmp = {
+        useTmpfs = false;
+      };
 
-    consoleLogLevel = 7;
+      consoleLogLevel = 7;
 
-    loader = {
-      # we legacy boot
-      systemd-boot.enable = false;
-      efi.canTouchEfiVariables = false;
-      timeout = lib.mkForce 1;
+      loader = {
+        # we legacy boot
+        systemd-boot.enable = false;
+        efi.canTouchEfiVariables = false;
+        timeout = lib.mkForce 1;
+      };
     };
-  };
 
   # Required for the Wireless firmware
   hardware.enableRedistributableFirmware = true;
