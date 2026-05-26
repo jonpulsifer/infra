@@ -28,7 +28,10 @@
   # resolf.conf is managed by WSL (wsl.wslConf.network.generateResolvConf)
   services.resolved.enable = lib.mkForce false;
 
-  environment.systemPackages = [ pkgs.python3 pkgs.pipx ];
+  environment.systemPackages = [
+    pkgs.python3
+    pkgs.pipx
+  ];
 
   programs.nix-ld.enable = true;
 

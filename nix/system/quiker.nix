@@ -20,6 +20,4 @@ in
     openssh.authorizedKeys.keys = sshKeys;
     shell = pkgs.zsh;
   };
-    xdg.enable = true;
-  };
 }

@@ -1,41 +1,25 @@
 {
   config,
-  lib,
   pkgs,
   name,
-  inputs,
   ...
 }:
 {
   imports = [
     ../hardware/x86
     ../services/common.nix
-    ../system/quiker.nix
     ../services/k8s
-    ../services/github-runner.nix
-    ../services/yarr.nix
   ];
 
-  networking.hostName = name;
-  # networking.wireless = {
-  #   enable = true;
-  #   networks = {
-  #     Goggly = {
-  #       pskRaw = "c1e6a7dd93cd062b1b0e1f394b54f5a80ce63de04e9d9478f87312f8099df864";
-  #     };
-  #     # Goggly2 = {
-  #     #   pskRaw = "fd6e6e6bbb22865a53302494040e6e3799a2f097a8321152e264c568bc16b3d5";
-  #     # };
-  #   };
-  # };
+  boot.initrd.availableKernelModules = [ "nvme" ];
+  boot.kernelModules = [ "kvm-intel" ];
 
-  services.k8s = {
-    enable = true;
-    network = "offsite";
-  };
+  services.k8s.enable = true;
+  networking.hostName = name;
 
   systemd.services.tailscale-transport-layer-offloads = {
     # https://tailscale.com/kb/1320/performance-best-practices#ethtool-configuration.
+    enable = config.services.tailscale.enable;
     description = "Linux optimizations for subnet routers and exit nodes";
     after = [ "network.target" ];
     serviceConfig = {
@@ -44,6 +28,4 @@
     };
     wantedBy = [ "default.target" ];
   };
-
-  virtualisation.docker.enable = true;
 }

@@ -2,7 +2,7 @@
   mkApps =
     {
       pkgs,
-      hostsSpec,
+      deployHosts,
       nixosConfigurations,
     }:
     let
@@ -11,9 +11,7 @@
         program = "${(pkgs.writeShellScriptBin name text)}/bin/${name}";
       };
 
-      # Filter out configurations that are images (profile == "images")
-      realHosts = pkgs.lib.filterAttrs (_: config: (config.profile or "") != "images") hostsSpec;
-      hostNames = builtins.attrNames realHosts;
+      hostNames = deployHosts;
 
       # Generic SSH runner: nix run . -- <command>
       # Runs on ALL hosts
@@ -28,7 +26,7 @@
         NC='\033[0m' # No Color
 
         HOSTS="${builtins.concatStringsSep " " hostNames}"
-        
+
         for HOST in $HOSTS; do
           # Run in background to parallelize? User example implied sequence or at least grouped output.
           # Sequential is cleaner for reading.
@@ -50,11 +48,15 @@
       '';
 
       # Host specific runners: nix run .#<host> -- <command>
-      hostApps = builtins.mapAttrs (name: _: mkApp "ssh-${name}" ''
-        exec ${pkgs.openssh}/bin/ssh -o ConnectTimeout=5 -t "${name}.pirate-musical.ts.net" "$@"
-      '') realHosts;
+      hostApps = pkgs.lib.genAttrs deployHosts (
+        name:
+        mkApp "ssh-${name}" ''
+          exec ${pkgs.openssh}/bin/ssh -o ConnectTimeout=5 -t "${name}.pirate-musical.ts.net" "$@"
+        ''
+      );
     in
     {
       default = sshApp;
-    } // hostApps;
+    }
+    // hostApps;
 }
