@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Output a JSON string list of unique directories containing changed files matching the patterns
-      directories: ${{ steps.changed-directories.outputs.all_changed_files }} 
+      directories: ${{ steps.expand-directories.outputs.directories }}
       # Output 'true' or 'false' as a string
       any_changed: ${{ steps.changed-directories.outputs.any_changed }}
     steps:
@@ -44,6 +44,29 @@ jobs:
           files: |
             **/*.tf
             **/.terraform.lock.hcl
+      - name: Expand Terraform root directories
+        id: expand-directories
+        if: steps.changed-directories.outputs.any_changed == 'true'
+        env:
+          CHANGED_DIRECTORIES: ${{ steps.changed-directories.outputs.all_changed_files }}
+        run: |
+          set -euo pipefail
+
+          declare -A directories=()
+          while IFS= read -r dir; do
+            while [[ -n "$dir" && "$dir" != "." ]]; do
+              if compgen -G "$dir/*.tf" > /dev/null; then
+                directories["$dir"]=1
+              fi
+              if [[ "$dir" != */* ]]; then
+                break
+              fi
+              dir="${dir%/*}"
+            done
+          done < <(jq -r '.[]' <<< "$CHANGED_DIRECTORIES")
+
+          matrix="$(printf '%s\n' "${!directories[@]}" | sort | jq -R -s -c 'split("\n")[:-1]')"
+          echo "directories=$matrix" >> "$GITHUB_OUTPUT"
 
   validate:
     needs: [changed-directories]

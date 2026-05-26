@@ -19,6 +19,7 @@ ingress:
 
 npmTools: []
 # - "@moonpay/cli"
+npmInstallImage: node:24-bookworm
 
 secrets: []
 # - name: config

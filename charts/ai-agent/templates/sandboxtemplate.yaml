@@ -24,7 +24,7 @@ spec:
       {{- if .Values.npmTools }}
       initContainers:
         - name: install-npm-tools
-          image: node:24-alpine
+          image: {{ .Values.npmInstallImage | quote }}
           command:
             - sh
             - -c
@@ -32,6 +32,8 @@ spec:
           env:
             - name: HOME
               value: /tmp
+            - name: NPM_CONFIG_CACHE
+              value: /tmp/.npm
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
