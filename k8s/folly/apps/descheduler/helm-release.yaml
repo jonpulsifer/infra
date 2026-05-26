@@ -72,7 +72,6 @@ spec:
                   - ContainerCreating
                   - ImagePullBackOff
                   - ErrImagePull
-                  - ErrImageNeverPull
                   - CreateContainerConfigError
             - name: RemovePodsHavingTooManyRestarts
               args:
