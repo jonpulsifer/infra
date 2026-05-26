@@ -15,6 +15,9 @@
   ],
   dependencyDashboardTitle: 'Renovate Dashboard',
   dependencyDashboard: true,
+  lockFileMaintenance: {
+    enabled: true,
+  },
   suppressNotifications: [
     'prEditedNotification',
     'prIgnoreNotification',
@@ -134,14 +137,25 @@
         commitMessageTopic: '{{{groupName}}} group',
       },
     },
-    // Terraform — refresh .terraform.lock.hcl alongside provider bumps so
-    // Atlantis (which runs `terraform init` without -upgrade) doesn't choke.
+    // Terraform Google providers are coupled across root stacks and child modules.
+    // Keep GA and Beta on one branch so Atlantis does not see mixed constraints.
     {
       matchManagers: ['terraform'],
-      groupName: 'terraform {{depName}}',
+      matchDatasources: ['terraform-provider'],
+      matchPackageNames: ['google', 'google-beta'],
+      groupName: 'terraform google providers',
+      rangeStrategy: 'update-lockfile',
       automerge: true,
       automergeType: 'pr',
-      postUpdateOptions: ['terraformLock'],
+    },
+    // Terraform provider bumps are low-risk after validation; lockfiles are
+    // maintained by Renovate's Terraform lock file support, not postUpdateOptions.
+    {
+      matchManagers: ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      rangeStrategy: 'update-lockfile',
+      automerge: true,
+      automergeType: 'pr',
     },
     // Flux helm charts
     {
