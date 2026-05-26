@@ -11,6 +11,8 @@ in
 {
   programs.zsh.enable = true;
   users.mutableUsers = false;
+  users.users.root.hashedPassword = "$6$MyfHzd0UhaiNWR2.$e3CjotacfdkRzNBs/AyIGLkneJCeIZcIVd2zLm5cEoJbSCpKB2ilEAIBtqZQl6xiNgngoFH6dyqyabhwjYVQU/";
+
   users.users.jawn = {
     uid = lib.mkForce 1337;
     isNormalUser = true;
