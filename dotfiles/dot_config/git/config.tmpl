@@ -23,9 +23,6 @@
 	whitespace = trailing-space,space-before-tab
 	excludesfile = ~/.config/git/ignore
 
-[format]
-	signOff = true
-
 {{- if not $isCurrentWSL }}
 [gpg]
 	format = ssh
@@ -68,7 +65,7 @@
 
 [alias]
 	ad = add
-	boop = commit -s --allow-empty -m '🫵 boop'
+	boop = commit --allow-empty -m '🫵 boop'
 	letsgo = lfg
 	lfg = "!branch=$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@'); git checkout $branch && git pull --rebase"
 	lol = log --graph --decorate --pretty=oneline --abbrev-commit --all
