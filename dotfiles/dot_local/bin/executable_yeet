@@ -106,7 +106,7 @@ if [[ -z "$COMMIT_MSG" ]]; then
   err "Failed to generate commit message (empty output from opencode)."
 fi
 
-git commit -s -m "$COMMIT_MSG"
+git commit -m "$COMMIT_MSG"
 
 # Default branch: commit only (no push / PR).
 if [[ "$current_branch" == "$repo_default" ]]; then

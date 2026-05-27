@@ -27,7 +27,7 @@ shellcheck dot_local/bin/executable_* .chezmoiscripts/*.sh
 
 ## Git workflow
 
-Commits signed (SSH), Conventional Commits, DCO sign-off. Do not commit directly to `main` — use PRs (`gh pr create`).
+Commits signed (SSH) with Conventional Commits. Do not commit directly to `main` — use PRs (`gh pr create`).
 
 ## MCP definitions
 
