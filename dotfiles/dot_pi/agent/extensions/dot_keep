@@ -1,0 +1,2 @@
+This file keeps ~/.pi/agent/extensions managed by chezmoi.
+Pi ignores it because only *.ts files and */index.ts entries are auto-discovered as extensions.
