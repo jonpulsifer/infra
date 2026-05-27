@@ -64,8 +64,11 @@ spec:
             - -c
             - {{ .Values.command | quote }}
           {{- end }}
-          {{- if or .Values.secrets .Values.npmTools }}
           env:
+            - name: OPENCLAW_STATE_DIR
+              value: /home/agent/config/.openclaw
+            - name: OPENCLAW_NO_RESPAWN
+              value: "1"
             {{- if .Values.npmTools }}
             - name: PATH
               value: /home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -76,7 +79,6 @@ spec:
               value: {{ .mountPath }}
             {{- end }}
             {{- end }}
-          {{- end }}
           ports:
             - containerPort: {{ .Values.port }}
           resources:
