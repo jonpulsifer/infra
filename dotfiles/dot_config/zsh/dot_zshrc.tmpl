@@ -84,7 +84,14 @@ export FZF_DEFAULT_OPTS="\
 --color=fg+:#f8f8f2,bg+:#282a36,hl+:#bd93f9 \
 --color=info:#ffb86c,prompt:#50fa7b,pointer:#ff79c6 \
 --color=marker:#ff79c6,spinner:#ffb86c,header:#6272a4"
+# History widget (Up / Ctrl-R): prompt-at-bottom, shrink to content (max ~40%)
+export FZF_CTRL_R_OPTS="--layout=default --height=~40%"
 export FZF_DEFAULT_COMMAND="fd --type f 2>/dev/null || find ."
+# Ctrl-T (paste file path): bat preview; ctrl-/ toggles the preview pane
+export FZF_CTRL_T_OPTS="--preview 'bat --style=numbers --color=always --line-range=:200 {} 2>/dev/null' --bind 'ctrl-/:toggle-preview'"
+# Alt-C (cd into dir): eza tree preview; fd lists dirs (respects .gitignore)
+export FZF_ALT_C_COMMAND="fd --type d --exclude .git 2>/dev/null || find . -type d"
+export FZF_ALT_C_OPTS="--preview 'eza --tree --level=2 --color=always {} 2>/dev/null' --bind 'ctrl-/:toggle-preview'"
 if command -v fzf >/dev/null 2>&1; then
   # shellcheck disable=SC1090
   source <(fzf --zsh 2>/dev/null) || true
