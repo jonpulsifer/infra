@@ -1,3 +1,4 @@
+{{- $isCurrentWSL := and (eq .chezmoi.hostname "nixos") (eq .chezmoi.os "linux") (contains "microsoft" .chezmoi.kernel.osrelease) -}}
 [user]
 	name = Jonathan Pulsifer
 {{- if eq .chezmoi.username "jpulsifer" }}
@@ -5,7 +6,11 @@
 	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay
 {{- else }}
 	email = jonathan@pulsifer.ca
+{{- if $isCurrentWSL }}
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
+{{- else }}
 	signingkey = ~/.ssh/id_ed25519
+{{- end }}
 {{- end }}
 
 [github]
@@ -21,8 +26,10 @@
 [format]
 	signOff = true
 
+{{- if not $isCurrentWSL }}
 [gpg]
 	format = ssh
+{{- end }}
 
 [help]
 	autocorrect = 1
@@ -96,6 +103,13 @@
 	reposize = "!du -sh .git"
 	files-by-author = "!git log --author=\"$1\" --name-only --pretty=format: | sort | uniq"
 	check-perms = "!git ls-files -s | awk '{ if (substr($1,1,3) ~ /75[0-7]/) print $2 \" \" $4 }'"
+
+{{ if $isCurrentWSL }}[gpg]
+	format = ssh
+
+[gpg "ssh"]
+	program = "/mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe"
+{{- end }}
 
 [commit]
 	gpgSign = true
