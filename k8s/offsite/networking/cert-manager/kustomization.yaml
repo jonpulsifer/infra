@@ -4,3 +4,5 @@ resources:
   - namespace.yaml
   - ../../../base/networking/cert-manager
   - cloudflare-secret.sops.yaml
+  - certificates/gateway.yaml
+  - certificates/dave.yaml
