@@ -133,7 +133,7 @@ data "tailscale_device" "devices" {
 
 resource "tailscale_device_authorization" "devices" {
   for_each   = local.devices
-  device_id  = data.tailscale_device.devices[each.key].id
+  device_id  = data.tailscale_device.devices[each.key].node_id
   authorized = true
 }
 
@@ -143,7 +143,7 @@ resource "tailscale_device_authorization" "devices" {
 
 resource "tailscale_device_key" "devices" {
   for_each            = local.devices
-  device_id           = data.tailscale_device.devices[each.key].id
+  device_id           = data.tailscale_device.devices[each.key].node_id
   key_expiry_disabled = each.value.key_expiry_disabled
 }
 
@@ -153,6 +153,6 @@ resource "tailscale_device_key" "devices" {
 
 resource "tailscale_device_tags" "devices" {
   for_each  = { for k, v in local.devices : k => v if length(v.tags) > 0 }
-  device_id = data.tailscale_device.devices[each.key].id
+  device_id = data.tailscale_device.devices[each.key].node_id
   tags      = each.value.tags
 }
