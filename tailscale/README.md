@@ -24,7 +24,7 @@ terraform apply
 
 | Name | Version |
 |------|---------|
-| <a name="provider_tailscale"></a> [tailscale](#provider\_tailscale) | 0.29.1 |
+| <a name="provider_tailscale"></a> [tailscale](#provider\_tailscale) | 0.29.2 |
 
 ## Modules
 
@@ -36,72 +36,12 @@ No modules.
 |------|------|
 | [tailscale_acl.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/acl) | resource |
 | [tailscale_contacts.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/contacts) | resource |
-| [tailscale_device_authorization.atomic](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.chromebook_a288](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.cloudpi4](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.craftbook_air](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.desktop_g7i75ls](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.device_800g2](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.folly_k8s_lan_router_0](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.folly_k8s_lan_router_0_npazfyuw](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.homepi4](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.localhost](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.nuc](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.offsite_k8s_lan_router_0](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.oldboy](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.oldschool](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.optiplex](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.retrofit](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.riptide](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.rosie](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.spore](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.tailscale_operator](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.tailscale_operator_nmzwhs8h](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.tailscale_operator_ntmt4w6m](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.tallboy](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.tinytower](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_authorization.weatherpi4](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
-| [tailscale_device_key.atomic](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.chromebook_a288](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.cloudpi4](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.craftbook_air](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.desktop_g7i75ls](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.device_800g2](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.folly_k8s_lan_router_0](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.folly_k8s_lan_router_0_npazfyuw](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.homepi4](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.localhost](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.nuc](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.offsite_k8s_lan_router_0](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.oldboy](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.oldschool](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.optiplex](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.retrofit](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.riptide](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.rosie](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.spore](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.tailscale_operator](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.tailscale_operator_nmzwhs8h](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.tailscale_operator_ntmt4w6m](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.tallboy](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.tinytower](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_key.weatherpi4](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
-| [tailscale_device_tags.desktop_g7i75ls](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.device_800g2](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.folly_k8s_lan_router_0](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.folly_k8s_lan_router_0_npazfyuw](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.nuc](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.offsite_k8s_lan_router_0](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.oldschool](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.optiplex](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.retrofit](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.riptide](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.spore](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.tailscale_operator](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.tailscale_operator_nmzwhs8h](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
-| [tailscale_device_tags.tailscale_operator_ntmt4w6m](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
+| [tailscale_device_authorization.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
+| [tailscale_device_key.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
+| [tailscale_device_tags.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
 | [tailscale_dns_configuration.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/dns_configuration) | resource |
 | [tailscale_tailnet_settings.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/tailnet_settings) | resource |
+| [tailscale_device.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/data-sources/device) | data source |
 
 ## Inputs
 
