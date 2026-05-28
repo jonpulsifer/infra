@@ -1,5 +1,16 @@
 # ---------------------------------------------------------------------------
-# Data sources: look up all devices by hostname to avoid hardcoded IDs
+# Tailnet domain — used to build MagicDNS FQDNs for device lookups.
+# All devices are reachable at <hostname>.<tailnet_domain>.
+# ---------------------------------------------------------------------------
+
+locals {
+  tailnet_domain = "pirate-musical.ts.net"
+}
+
+# ---------------------------------------------------------------------------
+# Data sources: look up all devices by FQDN to avoid hardcoded IDs.
+# The tailscale_device data source matches against the MagicDNS hostname;
+# short names do not resolve — always use <hostname>.<tailnet_domain>.
 # ---------------------------------------------------------------------------
 
 data "tailscale_devices" "all" {
@@ -14,103 +25,107 @@ data "tailscale_devices" "all" {
 # even if some are not yet in the tailnet.
 
 data "tailscale_device" "device_800g2" {
-  name = "800g2"
+  name = "800g2.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "atomic" {
-  name = "atomic"
+  name = "atomic.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "chromebook_a288" {
-  name = "Chromebook_A288"
+  name = "chromebook-a288.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "cloudpi4" {
-  name = "cloudpi4"
+  name = "cloudpi4.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "craftbook_air" {
-  name = "Craftbook Air"
+  name = "craftbook-air.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "desktop_g7i75ls" {
-  name = "DESKTOP-G7I75LS"
+  name = "desktop-g7i75ls.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "folly_k8s_lan_router_0" {
-  name = "folly-k8s-lan-router-0"
+  name = "folly-k8s-lan-router-0.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "folly_k8s_lan_router_0_npazfyuw" {
-  name = "folly-k8s-lan-router-0" # appears twice in tailnet with different IDs
+  # Second instance of folly-k8s-lan-router-0; Tailscale deduplicates with a
+  # numeric suffix — verify the actual MagicDNS name in the Tailscale console.
+  name = "folly-k8s-lan-router-0-1.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "homepi4" {
-  name = "homepi4"
+  name = "homepi4.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "localhost" {
-  name = "localhost"
+  name = "localhost.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "nuc" {
-  name = "nuc"
+  name = "nuc.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "offsite_k8s_lan_router_0" {
-  name = "offsite-k8s-lan-router-0"
+  name = "offsite-k8s-lan-router-0.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "oldboy" {
-  name = "oldboy"
+  name = "oldboy.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "oldschool" {
-  name = "oldschool"
+  name = "oldschool.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "optiplex" {
-  name = "optiplex"
+  name = "optiplex.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "retrofit" {
-  name = "retrofit"
+  name = "retrofit.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "riptide" {
-  name = "riptide"
+  name = "riptide.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "rosie" {
-  name = "rosie"
+  name = "rosie.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "spore" {
-  name = "spore"
+  name = "spore.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "tailscale_operator_1" {
-  name = "tailscale-operator"
+  name = "tailscale-operator.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "tailscale_operator_2" {
-  name = "tailscale-operator" # appears twice in tailnet with different IDs
+  # Second instance; verify actual MagicDNS name in the Tailscale console.
+  name = "tailscale-operator-1.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "tailscale_operator_3" {
-  name = "tailscale-operator" # appears three times in tailnet with different IDs
+  # Third instance; verify actual MagicDNS name in the Tailscale console.
+  name = "tailscale-operator-2.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "tallboy" {
-  name = "tallboy"
+  name = "tallboy.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "tinytower" {
-  name = "tinytower"
+  name = "tinytower.${local.tailnet_domain}"
 }
 
 data "tailscale_device" "weatherpi4" {
-  name = "weatherpi4"
+  name = "weatherpi4.${local.tailnet_domain}"
 }
 
 # ---------------------------------------------------------------------------
