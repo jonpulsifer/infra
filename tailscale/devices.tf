@@ -62,10 +62,6 @@ data "tailscale_device" "homepi4" {
   name = "homepi4.${local.tailnet_domain}"
 }
 
-data "tailscale_device" "localhost" {
-  name = "localhost.${local.tailnet_domain}"
-}
-
 data "tailscale_device" "nuc" {
   name = "nuc.${local.tailnet_domain}"
 }
@@ -176,11 +172,6 @@ resource "tailscale_device_authorization" "folly_k8s_lan_router_0_npazfyuw" {
 
 resource "tailscale_device_authorization" "homepi4" {
   device_id  = data.tailscale_device.homepi4.id
-  authorized = true
-}
-
-resource "tailscale_device_authorization" "localhost" {
-  device_id  = data.tailscale_device.localhost.id
   authorized = true
 }
 
@@ -306,11 +297,6 @@ resource "tailscale_device_key" "folly_k8s_lan_router_0_npazfyuw" {
 resource "tailscale_device_key" "homepi4" {
   device_id           = data.tailscale_device.homepi4.id
   key_expiry_disabled = true
-}
-
-resource "tailscale_device_key" "localhost" {
-  device_id           = data.tailscale_device.localhost.id
-  key_expiry_disabled = false
 }
 
 resource "tailscale_device_key" "nuc" {
