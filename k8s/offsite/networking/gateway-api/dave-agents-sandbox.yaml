@@ -7,6 +7,10 @@ metadata:
   name: agents-sandbox-to-default-gateway
   namespace: agents-sandbox
 spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: default
   to:
     - group: ""
       kind: Service
