@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------------
+# Tailscale tailnet-wide resources
+# ---------------------------------------------------------------------------
+
 resource "tailscale_acl" "this" {
   acl = file("${path.module}/policy.hujson")
 }
@@ -35,5 +39,4 @@ resource "tailscale_contacts" "this" {
   security {
     email = "jonathan@pulsifer.ca"
   }
-
 }
