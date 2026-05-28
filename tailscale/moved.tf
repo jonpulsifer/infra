@@ -97,12 +97,12 @@ moved {
 }
 
 moved {
-  from = tailscale_device_authorization.tailscale_operator
+  from = tailscale_device_authorization.tailscale_operator_nmzwhs8h
   to   = tailscale_device_authorization.devices["tailscale-operator"]
 }
 
 moved {
-  from = tailscale_device_authorization.tailscale_operator_nmzwhs8h
+  from = tailscale_device_authorization.tailscale_operator
   to   = tailscale_device_authorization.devices["tailscale-operator-1"]
 }
 
@@ -219,12 +219,12 @@ moved {
 }
 
 moved {
-  from = tailscale_device_key.tailscale_operator
+  from = tailscale_device_key.tailscale_operator_nmzwhs8h
   to   = tailscale_device_key.devices["tailscale-operator"]
 }
 
 moved {
-  from = tailscale_device_key.tailscale_operator_nmzwhs8h
+  from = tailscale_device_key.tailscale_operator
   to   = tailscale_device_key.devices["tailscale-operator-1"]
 }
 
@@ -306,12 +306,12 @@ moved {
 }
 
 moved {
-  from = tailscale_device_tags.tailscale_operator
+  from = tailscale_device_tags.tailscale_operator_nmzwhs8h
   to   = tailscale_device_tags.devices["tailscale-operator"]
 }
 
 moved {
-  from = tailscale_device_tags.tailscale_operator_nmzwhs8h
+  from = tailscale_device_tags.tailscale_operator
   to   = tailscale_device_tags.devices["tailscale-operator-1"]
 }
 
