@@ -73,6 +73,11 @@
 		},
 		{
 			"src": ["autogroup:owner"],
+			"dst": ["ipset:k8s-offsite-lb"],
+			"ip":  ["*"],
+		},
+		{
+			"src": ["autogroup:owner"],
 			"dst": ["autogroup:owner"],
 			"ip":  ["*"],
 		},
