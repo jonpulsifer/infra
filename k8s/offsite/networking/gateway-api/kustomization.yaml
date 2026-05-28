@@ -9,3 +9,4 @@ resources:
   - prowlarr.yaml
   - bazarr.yaml
   - dave-agents-sandbox.yaml
+  - dnsendpoint-dave.yaml

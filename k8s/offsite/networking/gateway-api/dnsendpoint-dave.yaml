@@ -1,0 +1,13 @@
+---
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: dave-ai-agent
+  namespace: default
+spec:
+  endpoints:
+    - dnsName: dave.${SECRET_DOMAIN}
+      recordType: A
+      targets:
+        - 10.89.0.66
+      recordTTL: 300
