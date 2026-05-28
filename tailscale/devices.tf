@@ -13,7 +13,7 @@ data "tailscale_devices" "all" {
 # actually referenced by a resource, so referencing all of them is safe
 # even if some are not yet in the tailnet.
 
-data "tailscale_device" "800g2" {
+data "tailscale_device" "device_800g2" {
   name = "800g2"
 }
 
@@ -119,8 +119,8 @@ data "tailscale_device" "weatherpi4" {
 # by name and never hardcode IDs in resource blocks.
 # ---------------------------------------------------------------------------
 
-resource "tailscale_device_authorization" "800g2" {
-  device_id  = data.tailscale_device.800g2.id
+resource "tailscale_device_authorization" "device_800g2" {
+  device_id  = data.tailscale_device.device_800g2.id
   authorized = true
 }
 
@@ -248,8 +248,8 @@ resource "tailscale_device_authorization" "weatherpi4" {
 # Device keys: controls key expiry
 # ---------------------------------------------------------------------------
 
-resource "tailscale_device_key" "800g2" {
-  device_id           = data.tailscale_device.800g2.id
+resource "tailscale_device_key" "device_800g2" {
+  device_id           = data.tailscale_device.device_800g2.id
   key_expiry_disabled = true
 }
 
@@ -378,8 +378,8 @@ resource "tailscale_device_key" "weatherpi4" {
 # Only devices that should have tags are included.
 # ---------------------------------------------------------------------------
 
-resource "tailscale_device_tags" "800g2" {
-  device_id = data.tailscale_device.800g2.id
+resource "tailscale_device_tags" "device_800g2" {
+  device_id = data.tailscale_device.device_800g2.id
   tags      = ["tag:folly"]
 }
 
