@@ -16,3 +16,4 @@ tmp
 temp
 .claude/worktrees/
 .claude/settings.local.json
+.agent/

@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: Security audit subagent. Spawn this to review code changes for security vulnerabilities, misconfigurations, secrets exposure, and cloud security best practices. Use after making any infrastructure, configuration, or code changes.
+description: Use after changes to IAM, networking, secrets, Kubernetes manifests, Terraform, cloud configs, or auth code. Deep security audit for cloud/infra/k8s — secrets exposure, IAM least-privilege, network exposure, container hardening, injection vectors. Complements (does not replace) the general `reviewer` skill.
 ---
 
 # Security Review
