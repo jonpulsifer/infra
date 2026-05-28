@@ -1,0 +1,13 @@
+---
+# Allow the cluster-gateway in `default` to route to services in `agents-sandbox`
+# for the dave-ai-agent HTTPRoute.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: agents-sandbox-to-default-gateway
+  namespace: agents-sandbox
+spec:
+  to:
+    - group: ""
+      kind: Service
+      name: dave-ai-agent

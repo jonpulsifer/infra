@@ -12,6 +12,27 @@ spec:
       protocol: HTTP
       port: 80
       allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: agents-sandbox
+        kinds:
+          - kind: HTTPRoute
+    - name: dave-tls
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "dave.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: agents-sandbox
         kinds:
           - kind: HTTPRoute
     - name: bittorrent-tls
