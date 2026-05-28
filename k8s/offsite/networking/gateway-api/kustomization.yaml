@@ -8,3 +8,4 @@ resources:
   - radarr.yaml
   - prowlarr.yaml
   - bazarr.yaml
+  - dave-agents-sandbox.yaml
