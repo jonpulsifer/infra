@@ -59,7 +59,88 @@
     },
   ],
   packageRules: [
+    // ============================================================
+    // Terraform providers — group by kind, not by stack
+    // Keep major+minor together so we don't get PR-per-update-type
+    // ============================================================
+    {
+      description: 'Terraform: all providers use update-lockfile, automerge',
+      matchManagers:   ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      rangeStrategy:      'update-lockfile',
+      separateMajorMinor: false,
+      automerge:          true,
+    },
+    // Google GA + Beta must travel together; group across all stacks so
+    // Atlantis sees a single combined constraint change per bump.
+    {
+      description:      'Terraform Google providers (GA + Beta) — single PR',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^google$', '^google-beta$'],
+      groupName:       'terraform google providers',
+      groupSlug:       'terraform-google-providers',
+    },
+    // Per-provider grouping for the rest of the terraform ecosystem
+    {
+      description:      'Terraform Cloudflare provider',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^cloudflare$'],
+      groupName: 'terraform cloudflare provider',
+      groupSlug: 'terraform-cloudflare-provider',
+    },
+    {
+      description:      'Terraform Tailscale provider',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^tailscale$'],
+      groupName: 'terraform tailscale provider',
+      groupSlug: 'terraform-tailscale-provider',
+    },
+    {
+      description:      'Terraform Unifi provider',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^unifi$'],
+      groupName: 'terraform unifi provider',
+      groupSlug: 'terraform-unifi-provider',
+    },
+    {
+      description:      'Terraform Vault provider',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^vault$'],
+      groupName: 'terraform vault provider',
+      groupSlug: 'terraform-vault-provider',
+    },
+    {
+      description:      'Terraform Kubernetes + Helm providers',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^kubernetes$', '^helm$'],
+      groupName: 'terraform k8s providers',
+      groupSlug: 'terraform-k8s-providers',
+    },
+    {
+      description:      'Terraform GitHub providers',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^github$', '^googleworkspace$'],
+      groupName: 'terraform github providers',
+      groupSlug: 'terraform-github-providers',
+    },
+    {
+      description:      'Terraform 1Password provider',
+      matchManagers:    ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      matchPackagePatterns: ['^onepassword$'],
+      groupName: 'terraform 1password provider',
+      groupSlug: 'terraform-1password-provider',
+    },
+    // ============================================================
     // Semantic commit formatting
+    // ============================================================
     {
       matchUpdateTypes: ['major'],
       semanticCommitType: 'feat',
@@ -98,7 +179,15 @@
       semanticCommitScope: 'github-action',
       commitMessageTopic: 'action {{depName}}',
     },
+    {
+      matchManagers: ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      semanticCommitScope: 'terraform-provider',
+      commitMessageTopic: 'provider {{depName}}',
+    },
+    // ============================================================
     // Labels
+    // ============================================================
     {
       matchUpdateTypes: ['major'],
       labels: ['type/major'],
@@ -127,69 +216,57 @@
       matchManagers: ['github-actions'],
       addLabels: ['renovate/github-action'],
     },
+    {
+      matchManagers: ['terraform'],
+      matchDatasources: ['terraform-provider'],
+      addLabels: ['renovate/terraform-provider'],
+    },
+    // ============================================================
     // Grouping
+    // ============================================================
     {
       description: 'Actions Runner Controller Group',
       groupName: 'actions-runner-controller',
       matchDatasources: ['docker', 'helm'],
-      matchPackageNames: ['/gha-runner-scale-set-controller/', '/gha-runner-scale-set/'],
-      group: {
-        commitMessageTopic: '{{{groupName}}} group',
-      },
+      matchPackagePatterns: ['gha-runner-scale-set-controller', 'gha-runner-scale-set'],
     },
-    // Terraform Google providers are coupled across root stacks and child modules.
-    // Keep GA and Beta on one branch so Atlantis does not see mixed constraints.
-    {
-      matchManagers: ['terraform'],
-      matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['google', 'google-beta'],
-      groupName: 'terraform google providers',
-      rangeStrategy: 'update-lockfile',
-      automerge: true,
-      automergeType: 'pr',
-    },
-    // Terraform provider bumps are low-risk after validation; lockfiles are
-    // maintained by Renovate's Terraform lock file support, not postUpdateOptions.
-    {
-      matchManagers: ['terraform'],
-      matchDatasources: ['terraform-provider'],
-      rangeStrategy: 'update-lockfile',
-      automerge: true,
-      automergeType: 'pr',
-    },
+    // ============================================================
     // Flux helm charts
+    // ============================================================
     {
       matchManagers: ['flux'],
       matchUpdateTypes: ['minor', 'patch'],
       automerge: true,
-      automergeType: 'pr',
     },
-    // GitHub Actions auto-merge
+    // ============================================================
+    // GitHub Actions
+    // ============================================================
     {
       description: 'Auto-merge GitHub Actions',
       matchManagers: ['github-actions'],
       automerge: true,
-      automergeType: 'branch',
       matchUpdateTypes: ['minor', 'patch', 'digest'],
       minimumReleaseAge: '3 days',
     },
     {
       description: 'Auto-merge trusted GitHub Actions',
       matchManagers: ['github-actions'],
-      matchPackageNames: ['/^actions\\//', '/^renovatebot\\//'],
+      matchPackagePatterns: ['^actions/', '^renovatebot/'],
       automerge: true,
-      automergeType: 'branch',
       matchUpdateTypes: ['minor', 'patch', 'digest'],
       minimumReleaseAge: '1 minute',
     },
-    // Nix flake dotfiles
+    // ============================================================
+    // Nix
+    // ============================================================
     {
       matchManagers: ['nix'],
       matchPackageNames: ['dotfiles'],
       automerge: true,
-      automergeType: 'pr',
     },
-    // Block gateway-api updates (unsupported)
+    // ============================================================
+    // Blocked
+    // ============================================================
     {
       matchManagers: ['flux'],
       matchFileNames: ['k8s/folly/sources/git/gateway-api.yaml'],
