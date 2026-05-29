@@ -72,10 +72,13 @@
     rec {
       nixosConfigurations = {
         optiplex = mkHost "optiplex" {
-          tags = [ "folly" ];
           role = "control-plane";
+          tags = [ "folly" ];
         };
         riptide = mkHost "riptide" {
+          tags = [ "folly" ];
+        };
+        shale = mkHost "shale" {
           tags = [ "folly" ];
         };
 
