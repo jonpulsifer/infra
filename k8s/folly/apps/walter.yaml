@@ -26,6 +26,8 @@ spec:
       limits:
         memory: 8Gi
         cpu: 4000m
+    npmInstallImage: node:24-bookworm
+    workspaceDir: /home/agent/config/workspace
     npmTools:
       - "@moonpay/cli"
     ingress:

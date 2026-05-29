@@ -54,7 +54,8 @@ spec:
               - *prom
         pathType: Prefix
       prometheusSpec:
-        retention: 90d
+        retention: 30d
+        retentionSize: 40GB
         additionalScrapeConfigs:
           - job_name: node-exporter
             scrape_interval: 30s
@@ -80,7 +81,7 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  storage: 75Gi
+                  storage: 50Gi
     grafana:
       admin:
         existingSecret: grafana-admin-user
