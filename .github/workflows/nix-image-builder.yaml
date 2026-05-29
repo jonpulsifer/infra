@@ -29,7 +29,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f # main
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
