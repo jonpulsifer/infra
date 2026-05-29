@@ -1,0 +1,10 @@
+{
+  "archives": {
+    "linux_amd64": {
+      "hashes": [
+        "h1:35PCpSNLVubReT1imwfC+FpIP5gQWx+rvG4njkXkZKM="
+      ],
+      "url": "terraform-provider-onepassword_3.3.1_linux_amd64.zip"
+    }
+  }
+}

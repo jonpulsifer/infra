@@ -1,0 +1,10 @@
+{
+  "archives": {
+    "linux_amd64": {
+      "hashes": [
+        "h1:mopYISyLkUVUwMjJbuPenxIUVDrna1/7ACB1hfMfciU="
+      ],
+      "url": "terraform-provider-cloudflare_5.19.1_linux_amd64.zip"
+    }
+  }
+}
