@@ -57,6 +57,20 @@
       ],
       datasourceTemplate: '{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}',
     },
+    {
+      customType: 'regex',
+      description: 'Image overrides inside Flux Kustomization JSON6902 patches',
+      managerFilePatterns: [
+        '/k8s/.+\\.ya?ml$/',
+      ],
+      matchStrings: [
+        // # renovate: datasource=docker
+        // value: registry.k8s.io/owner/image:v1.2.3
+        '# renovate: datasource=(?<datasource>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n\\s*value:\\s*(?<depName>[^:\\s]+):(?<currentValue>\\S+)',
+      ],
+      datasourceTemplate: '{{#if datasource}}{{{datasource}}}{{else}}docker{{/if}}',
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}',
+    },
   ],
   packageRules: [
     // ============================================================
