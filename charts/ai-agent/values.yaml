@@ -3,6 +3,7 @@ port: 8080
 hostname: ""
 storageSize: 2Gi
 command: ""
+workspaceDir: ""
 
 resources:
   requests:
