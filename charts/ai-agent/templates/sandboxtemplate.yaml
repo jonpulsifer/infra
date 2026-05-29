@@ -69,6 +69,10 @@ spec:
               value: /home/agent/config/.openclaw
             - name: OPENCLAW_NO_RESPAWN
               value: "1"
+            {{- if .Values.workspaceDir }}
+            - name: OPENCLAW_WORKSPACE_DIR
+              value: {{ .Values.workspaceDir }}
+            {{- end }}
             {{- if .Values.npmTools }}
             - name: PATH
               value: /home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

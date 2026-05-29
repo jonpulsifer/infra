@@ -32,6 +32,7 @@ spec:
       enabled: true
       mode: shared
       forwardedUser: jonathan
+    workspaceDir: /home/agent/config/workspace
     secrets:
       - name: config
         onePasswordItem: openclaw-config
