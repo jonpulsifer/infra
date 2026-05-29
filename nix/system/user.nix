@@ -40,6 +40,7 @@ in
     ++ lib.optionals (config.virtualisation.docker.enable) [ "docker" ];
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKhYENJ/NOSUFerGNB5eIxjxeMNhmosbX62hLgZKNbUp"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBEjjytlZ6wzNpjkYNVPZm631HvbfqQu94FsoiNflUO1 rowbutt@homelab"
     ];
     shell = pkgs.zsh;
     packages = with pkgs; [
