@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# yeet: OpenCode commit message + optional gh pr create (gh-aipr style).
+# yeet: commit message + optional gh pr create (gh-aipr style).
+# Prefers `pi -p` to generate the message; falls back to a randomly
+# generated whimsical message when pi is unavailable.
 # Stage changes first; this script never runs git add.
 #
-# Env: YEET_OPENCODE_MODEL, YEET_OPENCODE_ATTACH, YEET_DIFF_MAX (default 256KiB),
+# Env: YEET_PI_MODEL (passed to pi --model), YEET_DIFF_MAX (default 256KiB),
 # YEET_PR_DIFF_MAX (default same as YEET_DIFF_MAX for PR body generation).
 
 err() {
@@ -62,50 +64,53 @@ else
   diff_context=$(git diff --cached)
 fi
 
-if ! command -v opencode &>/dev/null; then
-  err "opencode is not on PATH (required for yeet)."
-fi
+have_pi() { command -v pi &>/dev/null; }
 
-model=${YEET_OPENCODE_MODEL:-opencode-go/minimax-m2.7}
-commit_prompt="Generate a single-line conventional commit message for the following staged diff. Use imperative mood. Output only the subject line, no markdown, no quotes, no explanation."
-
-# OpenCode auto-loads any .ts/.js in ~/.config/opencode/plugins/ (peon-ping lives there).
-# Redirecting OPENCODE_CONFIG_DIR to a throwaway empty dir prevents plugin discovery entirely.
-run_opencode() {
+# pi -p: non-interactive, no tools, ephemeral session, no context files.
+# Reads the diff/body from stdin and merges it with the prompt arg.
+run_pi() {
   local prompt=$1
   local body=$2
-  (
-    tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/yeet-oc.XXXXXX")
-    trap 'rm -rf "$tmpdir"' EXIT
-    export OPENCODE_CONFIG_DIR="$tmpdir"
-    export OPENCODE_DISABLE_AUTOUPDATE=${OPENCODE_DISABLE_AUTOUPDATE:-1}
-    export OPENCODE_DISABLE_MODELS_FETCH=${OPENCODE_DISABLE_MODELS_FETCH:-1}
-    export OPENCODE_DISABLE_CLAUDE_CODE=${OPENCODE_DISABLE_CLAUDE_CODE:-1}
-
-    variant_args=()
-    [[ -n "${YEET_OPENCODE_VARIANT:-}" ]] && variant_args+=(--variant "$YEET_OPENCODE_VARIANT")
-
-    full_input=$(printf '%s\n\n%s' "$prompt" "$body")
-    if [[ -n "${YEET_OPENCODE_ATTACH:-}" ]]; then
-      printf '%s' "$full_input" | opencode run -m "$model" "${variant_args[@]}" --attach "$YEET_OPENCODE_ATTACH" -
-    else
-      printf '%s' "$full_input" | opencode run -m "$model" "${variant_args[@]}" -
-    fi
-  )
+  local model_args=()
+  [[ -n "${YEET_PI_MODEL:-}" ]] && model_args+=(--model "$YEET_PI_MODEL")
+  printf '%s' "$body" | pi -p --no-tools --no-session -nc --thinking off "${model_args[@]}" "$prompt"
 }
 
-info "Generating commit message (${model})..."
-commit_raw=$(run_opencode "$commit_prompt" "$diff_context")
-COMMIT_MSG=$(printf '%s' "$commit_raw" | head -n1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-COMMIT_MSG=${COMMIT_MSG#\`}
-COMMIT_MSG=${COMMIT_MSG%\`}
-COMMIT_MSG=${COMMIT_MSG#\"}
-COMMIT_MSG=${COMMIT_MSG%\"}
+# Whimsical-but-technical fallback when pi is unavailable.
+random_commit() {
+  local types=(feat fix chore refactor perf style)
+  local verbs=(yeet summon conjure wrangle quantize defrag entangle nudge bless reticulate)
+  local nouns=(
+    "the staging area" "a handful of bytes" "the void" "stray photons"
+    "the entropy pool" "dangling pointers" "the heap" "some quantum state"
+    "the commit graph" "rogue semicolons" "the splines" "a few electrons"
+  )
+  local t=${types[RANDOM % ${#types[@]}]}
+  local v=${verbs[RANDOM % ${#verbs[@]}]}
+  local n=${nouns[RANDOM % ${#nouns[@]}]}
+  printf '%s: %s %s' "$t" "$v" "$n"
+}
 
-if [[ -z "$COMMIT_MSG" ]]; then
-  err "Failed to generate commit message (empty output from opencode)."
+commit_prompt="Generate a single-line conventional commit message for the staged diff provided on stdin. Use imperative mood. Output only the subject line, no markdown, no quotes, no explanation."
+
+if have_pi; then
+  info "Generating commit message (pi)..."
+  commit_raw=$(run_pi "$commit_prompt" "$diff_context")
+  COMMIT_MSG=$(printf '%s' "$commit_raw" | head -n1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  COMMIT_MSG=${COMMIT_MSG#\`}
+  COMMIT_MSG=${COMMIT_MSG%\`}
+  COMMIT_MSG=${COMMIT_MSG#\"}
+  COMMIT_MSG=${COMMIT_MSG%\"}
+  if [[ -z "$COMMIT_MSG" ]]; then
+    info "pi returned an empty message; falling back to a random one."
+    COMMIT_MSG=$(random_commit)
+  fi
+else
+  info "pi not found; generating a random commit message."
+  COMMIT_MSG=$(random_commit)
 fi
 
+info "Commit message: ${COMMIT_MSG}"
 git commit -m "$COMMIT_MSG"
 
 # Default branch: commit only (no push / PR).
@@ -132,7 +137,7 @@ if ((pr_diff_bytes > PR_DIFF_MAX)); then
   pr_diff=$(printf '%s' "$pr_diff" | head -c "$PR_DIFF_MAX")
 fi
 
-pr_prompt="You are helping open a GitHub pull request. Given the commit list and diff below, write a concise PR description in Markdown.
+pr_prompt="You are helping open a GitHub pull request. The commit list and diff are provided on stdin. Write a concise PR description in Markdown.
 Use these sections exactly:
 ## Summary
 ## Changes
@@ -140,9 +145,13 @@ No title line — body only. Be specific; no filler."
 
 pr_input=$(printf 'Commits:\n%s\n\nDiff (against %s):\n%s' "$commit_log" "$upstream_ref" "$pr_diff")
 
-info "Generating PR description (${model})..."
-body_raw=$(run_opencode "$pr_prompt" "$pr_input")
-PR_BODY=$(printf '%s' "$body_raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+if have_pi; then
+  info "Generating PR description (pi)..."
+  body_raw=$(run_pi "$pr_prompt" "$pr_input")
+  PR_BODY=$(printf '%s' "$body_raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+else
+  PR_BODY=""
+fi
 if [[ -z "$PR_BODY" ]]; then
   PR_BODY="PR opened with yeet. Title: ${COMMIT_MSG}"
 fi
