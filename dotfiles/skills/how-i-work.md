@@ -12,7 +12,6 @@ User preferences for AI coding agents. Per-repo `AGENTS.md` overrides anything h
 
 - Conventional Commits.
 - All commits signed (SSH).
-- DCO sign-off (`-s`) on every commit.
 - **Never** commit to `main` / `master` / default branch. Always open a PR via `gh` and watch CI.
 
 ## Quality bar
