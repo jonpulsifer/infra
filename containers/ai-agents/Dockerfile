@@ -1,5 +1,5 @@
 # ── Stage 1: Build ghostty-web (WASM + JS) ──────────────────
-FROM node:24-slim AS ghostty-builder
+FROM node:24-bookworm-slim AS ghostty-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git unzip xz-utils \
@@ -20,7 +20,7 @@ RUN git clone --recurse-submodules --depth 1 --branch ${GHOSTTY_WEB_VERSION} \
 RUN bun install && bun run build
 
 # ── Stage 2: Build native PTY dependencies ───────────────────
-FROM node:24-slim AS pty-builder
+FROM node:24-bookworm-slim AS pty-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ \
@@ -41,7 +41,10 @@ COPY build.ts ./
 RUN bun run build
 
 # ── Stage 4: Final image ────────────────────────────────────
-FROM node:24-slim
+# Base + init follow the upstream openclaw Docker guidance
+# (https://docs.openclaw.ai/install/docker): node:24-bookworm-slim with tini
+# as PID 1 for signal handling and zombie reaping (the PTY layer spawns shells).
+FROM node:24-bookworm-slim
 
 RUN apt-get update && apt-get -y upgrade && \
     apt-get install -y --no-install-recommends \
@@ -54,6 +57,7 @@ RUN apt-get update && apt-get -y upgrade && \
       openssh-client \
       procps \
       ripgrep \
+      tini \
       unzip \
       wget \
       xz-utils \
@@ -68,11 +72,22 @@ RUN apt-get update && apt-get -y upgrade && \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g \
-      bun \
+# bun runtime — reuse the binary from the frontend build stage (oven/bun)
+COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
+
+# Agent CLIs, installed globally with bun (not npm).
+# BUN_INSTALL=/usr/local makes bun write bin shims to /usr/local/bin — always
+# on PATH, including when the chart overrides PATH for npmTools — and packages
+# under /usr/local/install/global. We ship the latest openclaw and then assert
+# its prebuilt Control UI is present, so a bad upstream release fails the build
+# instead of serving 503s at runtime.
+ENV BUN_INSTALL=/usr/local
+RUN bun add -g \
       @anthropic-ai/claude-code \
       opencode-ai \
-      openclaw
+      openclaw \
+ && bun add -g --ignore-scripts @earendil-works/pi-coding-agent \
+ && test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
 
 # ghostty-web runtime assets
 COPY --from=ghostty-builder /build/dist /opt/ghostty-web/dist
@@ -102,4 +117,4 @@ USER agent:agent
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["node", "/opt/ghostty-web/server.js"]
+ENTRYPOINT ["/usr/bin/tini", "--", "node", "/opt/ghostty-web/server.js"]
