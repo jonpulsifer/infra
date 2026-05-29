@@ -8,16 +8,20 @@
 
   hardware.enableRedistributableFirmware = lib.mkDefault true;
   hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
+  systemd.tpm2.enable = lib.mkDefault false;
   powerManagement.cpuFreqGovernor = lib.mkDefault "ondemand";
 
   boot = {
-    initrd.availableKernelModules = [
-      "xhci_pci"
-      "ahci"
-      "usbhid"
-      "usb_storage"
-    ];
-    initrd.kernelModules = [ ];
+    initrd = {
+      availableKernelModules = [
+        "xhci_pci"
+        "ahci"
+        "usbhid"
+        "usb_storage"
+      ];
+      kernelModules = [ ];
+      systemd.tpm2.enable = lib.mkDefault false;
+    };
 
     kernelPackages = lib.mkDefault pkgs.linuxPackages_latest;
     kernelModules = [ ];
