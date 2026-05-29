@@ -1,15 +1,18 @@
 {
   config,
   lib,
+  name ? "k8s-node",
+  tags ? [ "folly" ],
   modulesPath,
   ...
 }:
 {
   imports = [
     (modulesPath + "/installer/netboot/netboot-minimal.nix")
-    ../hardware/x86
-    ../services/common.nix
+    ../profiles/k8s-node.nix
   ];
+
+  networking.hostName = name;
 
   users.users = {
     # Remove initialHashedPassword for root and nixos
@@ -20,9 +23,7 @@
   networking.useDHCP = lib.mkForce true;
   networking.useNetworkd = lib.mkForce true;
   networking.networkmanager.enable = lib.mkForce false;
-
-  networking.hostName = "nixos-netboot";
-  networking.wireless.enable = true;
+  networking.wireless.enable = false;
 
   # why is this a thing that exists
   services.openssh.settings.PermitRootLogin = lib.mkForce "no";
