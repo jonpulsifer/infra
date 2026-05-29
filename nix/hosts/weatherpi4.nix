@@ -1,6 +1,5 @@
 {
   config,
-  pkgs,
   name,
   ...
 }:
@@ -24,17 +23,6 @@
         pskRaw = "fd6e6e6bbb22865a53302494040e6e3799a2f097a8321152e264c568bc16b3d5";
       };
     };
-  };
-
-  systemd.services.tailscale-transport-layer-offloads = {
-    # https://tailscale.com/kb/1320/performance-best-practices#ethtool-configuration.
-    description = "Linux optimizations for subnet routers and exit nodes";
-    after = [ "network.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${pkgs.ethtool}/sbin/ethtool -K wlan0 rx-udp-gro-forwarding on rx-gro-list off";
-    };
-    wantedBy = [ "default.target" ];
   };
 
   services.kiosk = {

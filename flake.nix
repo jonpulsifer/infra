@@ -42,11 +42,13 @@
       ];
       forAllSystems = f: genAttrs systems (system: f system);
 
-      inherit (import ./nix/lib/mkHost.nix {
-        inherit lib nixosSystem inputs;
-      })
+      inherit
+        (import ./nix/lib/mkHost.nix {
+          inherit lib nixosSystem inputs;
+        })
         mkHost
-        mkImage;
+        mkImage
+        ;
 
       deployHosts = [
         "optiplex"

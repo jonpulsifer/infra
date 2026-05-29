@@ -15,7 +15,13 @@ description: Build, validate, and deploy NixOS host configurations in this infra
    nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
    ```
 
-3. **Deploy** — prefer `boot` for remote/headless hosts (activates on next reboot):
+3. **Run commands on a host**:
+   ```bash
+   nix run .#<hostname> -- date
+   nix run .#<hostname> -- <command> [args...]
+   ```
+
+4. **Deploy** — prefer `boot` for remote/headless hosts (activates on next reboot):
    ```bash
    # Safe (next reboot)
    nixos-rebuild boot --use-remote-sudo --target-host <hostname> --flake .#<hostname>
@@ -24,7 +30,7 @@ description: Build, validate, and deploy NixOS host configurations in this infra
    nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-sudo
    ```
 
-4. **Rollback**:
+5. **Rollback**:
    ```bash
    sudo nixos-rebuild switch --rollback
    ```

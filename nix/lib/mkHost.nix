@@ -11,8 +11,10 @@ let
 
   clusterNetwork =
     tags:
-    let found = lib.findFirst (tag: lib.elem tag clusterNetworks) null tags;
-    in if found != null then found else throw "k8s host requires tags = [ \"folly\" ] or [ \"offsite\" ]";
+    let
+      found = lib.findFirst (tag: lib.elem tag clusterNetworks) null tags;
+    in
+    if found != null then found else throw "k8s host requires tags = [ \"folly\" ] or [ \"offsite\" ]";
 
   k8sModule =
     name: cfg:
@@ -38,18 +40,15 @@ in
     let
       system = cfg.system or "x86_64-linux";
       tags = cfg.tags or [ ];
-      modules =
-        if cfg ? modules then
-          cfg.modules
-        else
-          [ (k8sModule name cfg) ];
+      modules = if cfg ? modules then cfg.modules else [ (k8sModule name cfg) ];
     in
     nixosSystem {
       inherit system modules;
       specialArgs = { inherit inputs name tags; };
     };
 
-  mkImage = module:
+  mkImage =
+    module:
     nixosSystem {
       system = "x86_64-linux";
       modules = [ module ];
