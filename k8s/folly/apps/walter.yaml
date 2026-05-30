@@ -9,6 +9,7 @@ spec:
   chart:
     spec:
       chart: charts/ai-agent
+      reconcileStrategy: Revision
       sourceRef:
         kind: GitRepository
         name: infra
