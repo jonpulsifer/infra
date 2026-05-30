@@ -28,6 +28,7 @@ spec:
           image: wolveix/satisfactory-server
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           ports:
@@ -84,6 +85,11 @@ spec:
           volumeMounts:
             - name: satisfactory-data
               mountPath: /config
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: satisfactory-data

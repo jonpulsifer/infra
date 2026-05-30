@@ -30,8 +30,8 @@ spec:
               gpu.intel.com/i915: 1
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
-              add: ["SYS_ADMIN"]
               drop: ["ALL"]
             privileged: false
           volumeMounts:
@@ -43,7 +43,15 @@ spec:
               readOnly: false
             - name: hardware-acceleration
               mountPath: /dev/dri
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: jellyfin-config
           persistentVolumeClaim:
             claimName: jellyfin-config

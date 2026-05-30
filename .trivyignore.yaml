@@ -1,0 +1,19 @@
+# Trivy misconfiguration suppressions — documented, intentional risk acceptance.
+# Loaded in CI via TRIVY_IGNOREFILE (see .github/workflows/trivy.yml).
+# Path globs cover both whole-dir scans (e.g. "pbx/pbx.yaml") and per-app
+# matrix scans (e.g. "pbx.yaml"), since scan-ref varies with what changed.
+misconfigurations:
+  # pbx (Asterisk SIP/PBX) is a telephony workload that legitimately requires:
+  #   - host ports for SIP signalling (UDP/TCP 5060/5061) — KSV-0024
+  #   - root + a writable runtime for Asterisk state/spool/logs — KSV-0014, KSV-0118
+  # Hardening these into non-root / read-only would break call handling, so they
+  # are accepted rather than "fixed".
+  - id: AVD-KSV-0024
+    paths: ["**/pbx.yaml", "pbx.yaml"]
+    statement: "Asterisk SIP needs host ports to receive VoIP traffic on the node."
+  - id: AVD-KSV-0014
+    paths: ["**/pbx.yaml", "pbx.yaml"]
+    statement: "Asterisk writes runtime state/spool/logs; read-only rootfs is impractical."
+  - id: AVD-KSV-0118
+    paths: ["**/pbx.yaml", "pbx.yaml"]
+    statement: "Asterisk telephony container runs as root by design."
