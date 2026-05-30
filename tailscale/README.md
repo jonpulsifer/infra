@@ -38,6 +38,7 @@ No modules.
 | [tailscale_contacts.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/contacts) | resource |
 | [tailscale_device_authorization.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_authorization) | resource |
 | [tailscale_device_key.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_key) | resource |
+| [tailscale_device_subnet_routes.connector](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_subnet_routes) | resource |
 | [tailscale_device_tags.devices](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/device_tags) | resource |
 | [tailscale_dns_configuration.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/dns_configuration) | resource |
 | [tailscale_tailnet_settings.this](https://registry.terraform.io/providers/tailscale/tailscale/latest/docs/resources/tailnet_settings) | resource |
