@@ -10,6 +10,11 @@
     };
     unstable.url = "github:nixos/nixpkgs/nixos-unstable";
 
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     hosts = {
       url = "github:StevenBlack/hosts";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -74,12 +79,15 @@
         optiplex = mkHost "optiplex" {
           role = "control-plane";
           tags = [ "folly" ];
+          extraConfig.homelab.disko.device = "/dev/sda";
         };
         riptide = mkHost "riptide" {
           tags = [ "folly" ];
+          extraConfig.homelab.disko.device = "/dev/nvme0n1";
         };
         shale = mkHost "shale" {
           tags = [ "folly" ];
+          extraConfig.homelab.disko.device = "/dev/sda";
         };
 
         oldschool = mkHost "oldschool" {
@@ -91,11 +99,13 @@
           ];
           extraConfig = {
             virtualisation.docker.enable = true;
+            homelab.disko.device = "/dev/sda";
           };
         };
         retrofit = mkHost "retrofit" {
           tags = [ "offsite" ];
           role = "control-plane";
+          extraConfig.homelab.disko.device = "/dev/sda";
         };
 
         cloudpi4 = mkHost "cloudpi4" {

@@ -41,24 +41,9 @@
     ];
   };
 
-  fileSystems."/boot" = {
-    device = "/dev/disk/by-label/boot";
-    fsType = "vfat";
-  };
-
-  fileSystems."/" = lib.mkDefault {
-    device = "/dev/disk/by-label/nixos";
-    fsType = "ext4";
-  };
-
-  fileSystems."/mnt/disks" = {
-    device = "/dev/disk/by-label/storage";
-    fsType = "ext4";
-    options = [
-      "nofail"
-      "relatime"
-    ];
-  };
+  # Disk layout and fileSystems are declared by disko (see ../../disko) for
+  # k8s nodes. The install ISO imports this hardware module too but gets its
+  # root filesystem from installation-cd-minimal.nix, so nothing is declared here.
 
   swapDevices = [ ];
 }

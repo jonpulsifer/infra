@@ -1,15 +1,46 @@
 {
   config,
   lib,
+  pkgs,
+  inputs,
   modulesPath,
   ...
 }:
+let
+  disko = inputs.disko.packages.${pkgs.system}.disko;
+
+  homelab-install = pkgs.writeShellApplication {
+    name = "homelab-install";
+    runtimeInputs = [
+      disko
+      pkgs.nixos-install-tools
+      pkgs.util-linux
+    ];
+    text = builtins.readFile ./homelab-install.sh;
+  };
+in
 {
   imports = [
     (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix")
     ../hardware/x86
     ../services/common.nix
   ];
+
+  # Provisioning tooling + instructions baked into the live image.
+  environment.systemPackages = [
+    disko
+    homelab-install
+  ];
+
+  environment.etc."README".source = ./INSTALL.md;
+
+  users.motd = ''
+
+    === jonpulsifer/infra live installer ===
+    Install a host:   sudo homelab-install <host>
+    Full guide:       less /etc/README
+    Hosts:            optiplex riptide shale oldschool retrofit
+  '';
 
   users.users = {
     # Remove initialHashedPassword for root and nixos
