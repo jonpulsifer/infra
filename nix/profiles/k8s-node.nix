@@ -5,6 +5,7 @@
 {
   imports = [
     ../hardware/x86
+    ../disko
     ../services/common.nix
     ../services/k8s
   ];
