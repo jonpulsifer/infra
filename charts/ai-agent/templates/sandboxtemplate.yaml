@@ -114,6 +114,13 @@ spec:
               value: {{ .mountPath }}
             {{- end }}
             {{- end }}
+            {{- range .Values.envSecrets }}
+            - name: {{ .envVar }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-agent.fullname" $ }}-{{ .name }}
+                  key: {{ default .envVar .secretKey }}
+            {{- end }}
             {{- range .Values.configFiles }}
             {{- if .envVar }}
             - name: {{ .envVar }}

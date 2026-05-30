@@ -39,6 +39,15 @@ secrets: []
 #   mountKey: config.json
 #   envVar: CONFIG_PATH
 
+# envSecrets: secret values synced from 1Password via ExternalSecret and
+# projected directly into the agent container environment.
+envSecrets: []
+# - name: op-service-account-token
+#   envVar: OP_SERVICE_ACCOUNT_TOKEN
+#   onePasswordItem: "Service Account Auth Token: rowbutt"
+#   property: credential
+#   secretKey: token
+
 # configFiles: non-secret config. Rendered into a ConfigMap and copied into the
 # config PVC at startup (writable by the agent). Use this when the config has no
 # secrets; deliver any secrets the agent needs separately (e.g. via .env/secrets).

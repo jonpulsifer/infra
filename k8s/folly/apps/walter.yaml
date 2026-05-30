@@ -32,6 +32,12 @@ spec:
       enabled: false
     npmTools:
       - "@moonpay/cli"
+    envSecrets:
+      - name: op-service-account-token
+        envVar: OP_SERVICE_ACCOUNT_TOKEN
+        onePasswordItem: "Service Account Auth Token: rowbutt"
+        property: credential
+        secretKey: token
     ingress:
       enabled: true
       mode: shared
