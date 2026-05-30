@@ -17,7 +17,7 @@ spec:
     image: docker.io/jonpulsifer/ai-agents:latest
     port: 18789
     hostname: walter.lolwtf.ca
-    storageSize: 2Gi
+    storageSize: 10Gi
     command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
     resources:
       requests:
@@ -28,6 +28,8 @@ spec:
         cpu: 4000m
     npmInstallImage: node:24-bookworm
     workspaceDir: /home/agent/config/workspace
+    workspaceVolume:
+      enabled: false
     npmTools:
       - "@moonpay/cli"
     ingress:
