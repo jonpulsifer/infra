@@ -21,16 +21,16 @@ locals {
     folly-connector = {
       device_key = "folly-k8s-lan-router-0"
       routes = [
-        "10.0.0.0/9",      # Cilium native routing CIDR — covers all folly k8s IPs
-        "10.3.0.64/26",    # folly LB range — ArgoCD lives at 10.3.0.70
+        "10.0.0.0/9",   # Cilium native routing CIDR — covers all folly k8s IPs
+        "10.3.0.64/26", # folly LB range — ArgoCD lives at 10.3.0.70
       ]
     }
     offsite-connector = {
       device_key = "offsite-k8s-lan-router-0"
       routes = [
-        "10.89.0.0/28",    # Cilium native routing CIDR
-        "10.89.0.64/26",   # offsite LB range
-        "192.168.2.0/24",  # offsite LAN
+        "10.89.0.0/28",   # Cilium native routing CIDR
+        "10.89.0.64/26",  # offsite LB range
+        "192.168.2.0/24", # offsite LAN
       ]
     }
   }
