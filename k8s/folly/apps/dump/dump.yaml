@@ -19,10 +19,25 @@ spec:
         app.kubernetes.io/name: dump
         app.kubernetes.io/part-of: dump
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: dump
         image: nginx:alpine
         imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
         ports:
         - containerPort: 8080
           protocol: TCP
@@ -32,10 +47,22 @@ spec:
           mountPath: /var/lib/dump
         - name: nginx-config
           mountPath: /etc/nginx/conf.d
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: nginx-run
+          mountPath: /var/run
+        - name: tmp
+          mountPath: /tmp
       volumes:
       - name: nginx-config
         configMap:
           name: nginx-config
+      - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-run
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
   volumeClaimTemplates:
   - metadata:
       name: dump-data
