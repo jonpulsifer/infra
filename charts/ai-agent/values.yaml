@@ -5,6 +5,12 @@ storageSize: 2Gi
 command: ""
 workspaceDir: ""
 
+# Dedicated scratch workspace PVC mounted at /home/agent/workspace.
+# Leave disabled when the agent keeps its workspace on the config PVC
+# (set workspaceDir to a path under /home/agent/config instead).
+workspaceVolume:
+  enabled: false
+
 resources:
   requests:
     memory: 256Mi
@@ -21,7 +27,10 @@ ingress:
 npmTools: []
 # - "@moonpay/cli"
 npmInstallImage: node:24-bookworm
+configInstallImage: busybox:1.37.0
 
+# secrets: config that CONTAINS secret material. Synced from 1Password via an
+# ExternalSecret (refreshInterval: 1h keeps it up to date) and mounted read-only.
 secrets: []
 # - name: config
 #   onePasswordItem: my-app-config
@@ -29,3 +38,15 @@ secrets: []
 #   mountPath: /config/config.json
 #   mountKey: config.json
 #   envVar: CONFIG_PATH
+
+# configFiles: non-secret config. Rendered into a ConfigMap and copied into the
+# config PVC at startup (writable by the agent). Use this when the config has no
+# secrets; deliver any secrets the agent needs separately (e.g. via .env/secrets).
+# A checksum annotation rolls the sandbox when content changes.
+configFiles: []
+# - name: config
+#   mountPath: /config/config.json
+#   mountKey: config.json
+#   envVar: CONFIG_PATH
+#   content: |
+#     {}

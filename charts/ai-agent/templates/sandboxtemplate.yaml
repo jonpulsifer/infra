@@ -12,6 +12,10 @@ spec:
       labels:
         {{- include "ai-agent.selectorLabels" . | nindent 8 }}
         sandbox: {{ include "ai-agent.fullname" . }}
+      {{- if .Values.configFiles }}
+      annotations:
+        checksum/config: {{ toYaml .Values.configFiles | sha256sum }}
+      {{- end }}
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -21,8 +25,34 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      {{- if .Values.npmTools }}
+      {{- if or .Values.npmTools .Values.configFiles }}
       initContainers:
+        {{- range .Values.configFiles }}
+        - name: install-config-{{ .name }}
+          image: {{ $.Values.configInstallImage | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p "$(dirname {{ .mountPath | quote }})"
+              cp {{ printf "/config-src/%s" .mountKey | quote }} {{ .mountPath | quote }}
+              chmod 0640 {{ .mountPath | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /home/agent/config
+              name: agent-config
+            - mountPath: /config-src
+              name: config-{{ .name }}
+        {{- end }}
+        {{- if .Values.npmTools }}
         - name: install-npm-tools
           image: {{ .Values.npmInstallImage | quote }}
           command:
@@ -45,6 +75,7 @@ spec:
           volumeMounts:
             - mountPath: /home/agent/.local
               name: agent-npm-tools
+        {{- end }}
       {{- end }}
       containers:
         - name: agent
@@ -83,6 +114,12 @@ spec:
               value: {{ .mountPath }}
             {{- end }}
             {{- end }}
+            {{- range .Values.configFiles }}
+            {{- if .envVar }}
+            - name: {{ .envVar }}
+              value: {{ .mountPath }}
+            {{- end }}
+            {{- end }}
           ports:
             - containerPort: {{ .Values.port }}
           resources:
@@ -99,7 +136,7 @@ spec:
             - mountPath: /home/agent/.local
               name: agent-npm-tools
             {{- end }}
-            {{- if not .Values.secrets }}
+            {{- if .Values.workspaceVolume.enabled }}
             - mountPath: /home/agent/workspace
               name: agent-workspace
             {{- end }}
@@ -117,7 +154,7 @@ spec:
         - name: agent-config
           persistentVolumeClaim:
             claimName: {{ include "ai-agent.fullname" . }}-agent-config
-        {{- if not .Values.secrets }}
+        {{- if .Values.workspaceVolume.enabled }}
         - name: agent-workspace
           persistentVolumeClaim:
             claimName: {{ include "ai-agent.fullname" . }}-agent-workspace
@@ -126,6 +163,14 @@ spec:
         - name: secret-{{ .name }}
           secret:
             secretName: {{ include "ai-agent.fullname" $ }}-{{ .name }}
+            items:
+              - key: {{ .mountKey }}
+                path: {{ .mountKey }}
+        {{- end }}
+        {{- range .Values.configFiles }}
+        - name: config-{{ .name }}
+          configMap:
+            name: {{ include "ai-agent.fullname" $ }}-{{ .name }}
             items:
               - key: {{ .mountKey }}
                 path: {{ .mountKey }}

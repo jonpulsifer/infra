@@ -11,7 +11,7 @@ spec:
   resources:
     requests:
       storage: {{ .Values.storageSize }}
-{{- if not .Values.secrets }}
+{{- if .Values.workspaceVolume.enabled }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

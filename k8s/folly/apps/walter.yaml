@@ -34,10 +34,25 @@ spec:
       enabled: true
       mode: shared
       forwardedUser: jonathan
-    secrets:
+    configFiles:
       - name: config
-        onePasswordItem: openclaw-config
-        property: config.json5
-        mountPath: /home/agent/.openclaw/config.json5
+        mountPath: /home/agent/config/openclaw-config.json5
         mountKey: config.json5
         envVar: OPENCLAW_CONFIG_PATH
+        content: |
+          {
+            gateway: {
+              trustedProxies: ["10.3.0.0/24", "10.100.0.0/20"],
+              auth: {
+                mode: "trusted-proxy",
+                trustedProxy: {
+                  userHeader: "x-forwarded-user",
+                  allowUsers: ["jonathan"]
+                }
+              },
+              controlUi: {
+                allowedOrigins: ["https://walter.lolwtf.ca"],
+                dangerouslyDisableDeviceAuth: true
+              }
+            }
+          }

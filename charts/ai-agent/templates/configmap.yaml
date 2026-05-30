@@ -1,0 +1,13 @@
+{{- range .Values.configFiles }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ai-agent.fullname" $ }}-{{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" $ | nindent 4 }}
+data:
+  {{ .mountKey }}: |-
+    {{- .content | nindent 4 }}
+{{- end }}
