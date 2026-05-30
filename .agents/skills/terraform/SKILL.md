@@ -18,12 +18,20 @@ unifi/                  # VLANs, BGP, clients
 
 ## Standard Workflow
 
+Applies run through **Atlantis on the PR**, not locally. Open a PR with your `.tf`
+changes; Atlantis autoplans on the changed module(s). Review the plan comment, then
+comment `atlantis apply` — a successful apply automerges the PR.
+
 ```bash
 cd <module-dir>
 terraform init
-terraform plan
-terraform apply
+terraform plan     # local inspection only
 ```
+
+Do **not** run `terraform apply` against remote state — it races Atlantis and causes
+state lock contention / drift. CI (`terraform.yml`) only validates; Atlantis is the
+only thing that applies. See `kubernetes-gitops` for the Atlantis ↔ ArgoCD auth and
+token-rotation details.
 
 ## Validation (no backend)
 

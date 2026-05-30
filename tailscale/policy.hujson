@@ -46,8 +46,8 @@
 		"tag:k8s-operator": [],
 		"tag:k8s-folly":    ["tag:k8s-operator"],
 		"tag:k8s-offsite":  ["tag:k8s-operator"],
-		"tag:folly":        ["tag:k8s-operator", "autogroup:owner"],
-		"tag:offsite":      ["tag:k8s-operator", "autogroup:owner"],
+		"tag:folly":        ["tag:k8s-operator"],
+		"tag:offsite":      ["tag:k8s-operator"],
 	},
 
 	"grants": [

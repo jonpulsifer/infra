@@ -15,6 +15,14 @@ nix develop
 # Provides: kubectl, helm, terraform, vault, sops, fluxcd, cilium-cli, gcloud, nixos-rebuild
 ```
 
+## How Changes Ship (GitOps + Atlantis)
+
+This repo is GitOps-first: author desired state in git and let the operators apply it. Do not mutate live infra directly.
+
+- **Terraform** (`gcp/`, `cloudflare/`, `vault/`, `argo/`, `unifi/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
+- **Kubernetes** (`k8s/**`): changes deploy via **Flux** (and **ArgoCD** for apps sourced from external repos) on merge to `main`. Commit manifests; **never `kubectl apply`** to author state. `kubectl`, `flux get`, and `flux reconcile` are for inspection or forcing a sync. Use explicit contexts (`--context folly` / `--context offsite`) and namespaces.
+- **NixOS** (`nix/**`): `nixos-rebuild` is the apply path (see Key Commands). State changes that may mutate live hosts should be called out before running.
+
 ## Key Commands
 
 ### Nix / NixOS
@@ -47,8 +55,7 @@ sudo nixos-rebuild switch --rollback
 ```bash
 cd <module-dir>   # e.g. gcp/projects/homelab-ng, cloudflare, vault, argo, unifi
 terraform init
-terraform plan
-terraform apply
+terraform plan    # local inspection only — applies go through Atlantis on the PR (see "How Changes Ship")
 
 # Format (CI auto-formats on merge to main)
 terraform fmt -recursive

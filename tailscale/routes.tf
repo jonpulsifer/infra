@@ -19,9 +19,8 @@
 locals {
   connector_routes = {
     folly-connector = {
-      device_key = "folly-k8s-lan-router-0"
+      device_key = "folly-k8s-lan-router-0-1"
       routes = [
-        "10.0.0.0/9",   # Cilium native routing CIDR — covers all folly k8s IPs
         "10.3.0.64/26", # folly LB range — ArgoCD lives at 10.3.0.70
       ]
     }

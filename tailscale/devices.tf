@@ -13,10 +13,6 @@ locals {
   tailnet_domain = "pirate-musical.ts.net"
 
   devices = {
-    "800g2" = {
-      key_expiry_disabled = true
-      tags                = ["tag:folly"]
-    }
     "atomic" = {
       key_expiry_disabled = true
       tags                = []
@@ -36,13 +32,6 @@ locals {
     "desktop-g7i75ls" = {
       key_expiry_disabled = true
       tags                = ["tag:offsite"]
-    }
-    # folly-k8s-lan-router-0 appears twice in the tailnet (current + stale
-    # registration from a previous connector pod). The second entry uses
-    # Tailscale's numeric deduplication suffix; verify in the console if wrong.
-    "folly-k8s-lan-router-0" = {
-      key_expiry_disabled = true
-      tags                = ["tag:folly", "tag:k8s", "tag:k8s-folly"]
     }
     "folly-k8s-lan-router-0-1" = {
       key_expiry_disabled = true
@@ -92,10 +81,6 @@ locals {
     # stale third registration. Tailscale deduplicates with numeric suffixes;
     # verify actual MagicDNS names in the console if these fail to resolve.
     "tailscale-operator" = {
-      key_expiry_disabled = true
-      tags                = ["tag:k8s-operator"]
-    }
-    "tailscale-operator-1" = {
       key_expiry_disabled = true
       tags                = ["tag:k8s-operator"]
     }
