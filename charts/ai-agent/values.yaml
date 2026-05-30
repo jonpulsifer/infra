@@ -27,7 +27,7 @@ ingress:
 npmTools: []
 # - "@moonpay/cli"
 npmInstallImage: node:24-bookworm
-configInstallImage: busybox:1.37.0
+configInstallImage: busybox:1.38.0
 
 # secrets: config that CONTAINS secret material. Synced from 1Password via an
 # ExternalSecret (refreshInterval: 1h keeps it up to date) and mounted read-only.
