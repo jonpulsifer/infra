@@ -4,6 +4,7 @@ _.file = '.env'
 [tools]
 1password-cli = "latest"
 bat = "latest"
+cilium-cli = "latest"
 delta = "latest"
 eza = "latest"
 flux2 = "latest"
