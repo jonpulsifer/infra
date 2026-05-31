@@ -35,6 +35,14 @@ spec:
     enableIPv4Masquerade: true
     bpf:
       masquerade: true
+    ipMasqAgent:
+      enabled: true
+      config:
+        nonMasqueradeCIDRs:
+          - 10.3.0.0/24
+          - 10.10.0.0/16
+          - ${CILIUM_POD_CIDR}
+        masqLinkLocal: false
     ipam:
       mode: multi-pool
     enableXTSocketFallback: false
