@@ -1,3 +1,4 @@
+{{- $persistHome := eq .Values.agentHomeMountPath "/home/agent" -}}
 apiVersion: extensions.agents.x-k8s.io/v1alpha1
 kind: SandboxTemplate
 metadata:
@@ -47,7 +48,7 @@ spec:
               drop:
                 - ALL
           volumeMounts:
-            - mountPath: /home/agent/config
+            - mountPath: {{ $.Values.agentHomeMountPath }}
               name: agent-config
             - mountPath: /config-src
               name: config-{{ .name }}
@@ -73,8 +74,13 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            {{- if $persistHome }}
+            - mountPath: {{ .Values.agentHomeMountPath }}
+              name: agent-config
+            {{- else }}
             - mountPath: /home/agent/.local
               name: agent-npm-tools
+            {{- end }}
         {{- end }}
       {{- end }}
       containers:
@@ -97,7 +103,7 @@ spec:
           {{- end }}
           env:
             - name: OPENCLAW_STATE_DIR
-              value: /home/agent/config/.openclaw
+              value: {{ .Values.openclawStateDir }}
             - name: OPENCLAW_NO_RESPAWN
               value: "1"
             {{- if .Values.workspaceDir }}
@@ -137,9 +143,9 @@ spec:
               memory: {{ .Values.resources.limits.memory }}
               cpu: {{ .Values.resources.limits.cpu }}
           volumeMounts:
-            - mountPath: /home/agent/config
+            - mountPath: {{ .Values.agentHomeMountPath }}
               name: agent-config
-            {{- if .Values.npmTools }}
+            {{- if and .Values.npmTools (not $persistHome) }}
             - mountPath: /home/agent/.local
               name: agent-npm-tools
             {{- end }}
@@ -154,7 +160,7 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
-        {{- if .Values.npmTools }}
+        {{- if and .Values.npmTools (not $persistHome) }}
         - name: agent-npm-tools
           emptyDir: {}
         {{- end }}
