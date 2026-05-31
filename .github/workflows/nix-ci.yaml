@@ -23,7 +23,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f # main
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-      - uses: DeterminateSystems/flake-checker-action@ba1df9ab06e525ea302f2a56f5e182f33cfd14fa # main
+      - uses: DeterminateSystems/flake-checker-action@89c01715e5d0dfdc0a1bfe9d59891ee4945c1483 # main
       - run: nix flake check
   nixos:
     runs-on: ubuntu-latest
