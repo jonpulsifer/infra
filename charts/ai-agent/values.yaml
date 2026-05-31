@@ -32,6 +32,14 @@ ingress:
 npmTools: []
 # - "@moonpay/cli"
 npmInstallImage: node:24-bookworm
+npmToolInstaller: npm
+
+# OpenClaw plugins to install into OPENCLAW_STATE_DIR before the gateway starts.
+# Use this for plugins that must survive restarts, e.g. chat channel bridges.
+openclawPlugins: []
+# - "@openclaw/slack@2026.5.20"
+# - "@openclaw/discord@2026.5.22"
+
 configInstallImage: busybox:1.38.0
 
 # secrets: config that CONTAINS secret material. Synced from 1Password via an

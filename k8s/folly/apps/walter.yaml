@@ -27,7 +27,8 @@ spec:
       limits:
         memory: 8Gi
         cpu: 4000m
-    npmInstallImage: node:24-bookworm
+    npmInstallImage: oven/bun:1
+    npmToolInstaller: bun
     agentHomeMountPath: /home/agent
     openclawStateDir: /home/agent/.openclaw
     workspaceDir: /home/agent/workspace
@@ -35,6 +36,10 @@ spec:
       enabled: false
     npmTools:
       - "@moonpay/cli"
+    openclawPlugins:
+      - "@openclaw/slack@2026.5.20"
+      - "@openclaw/discord@2026.5.22"
+      - "@openclaw/codex"
     envSecrets:
       - name: op-service-account-token
         envVar: OP_SERVICE_ACCOUNT_TOKEN

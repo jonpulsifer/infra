@@ -26,7 +26,7 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      {{- if or .Values.npmTools .Values.configFiles }}
+      {{- if or .Values.npmTools .Values.configFiles .Values.openclawPlugins }}
       initContainers:
         {{- range .Values.configFiles }}
         - name: install-config-{{ .name }}
@@ -59,12 +59,23 @@ spec:
           command:
             - sh
             - -c
+            {{- if eq .Values.npmToolInstaller "bun" }}
+            - bun add --global {{ .Values.npmTools | join " " }}
+            {{- else }}
             - npm install -g --prefix /home/agent/.local {{ .Values.npmTools | join " " }}
+            {{- end }}
           env:
             - name: HOME
               value: /tmp
+            {{- if eq .Values.npmToolInstaller "bun" }}
+            - name: BUN_INSTALL
+              value: /home/agent/.local
+            - name: BUN_INSTALL_CACHE_DIR
+              value: /tmp/.bun
+            {{- else }}
             - name: NPM_CONFIG_CACHE
               value: /tmp/.npm
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -81,6 +92,38 @@ spec:
             - mountPath: /home/agent/.local
               name: agent-npm-tools
             {{- end }}
+        {{- end }}
+        {{- if .Values.openclawPlugins }}
+        - name: install-openclaw-plugins
+          image: {{ .Values.image | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              {{- range .Values.openclawPlugins }}
+              openclaw plugins install --force {{ . | quote }}
+              {{- end }}
+          env:
+            - name: HOME
+              value: /home/agent
+            - name: OPENCLAW_STATE_DIR
+              value: {{ .Values.openclawStateDir }}
+            {{- if .Values.workspaceDir }}
+            - name: OPENCLAW_WORKSPACE_DIR
+              value: {{ .Values.workspaceDir }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: {{ .Values.agentHomeMountPath }}
+              name: agent-config
         {{- end }}
       {{- end }}
       containers:
@@ -102,6 +145,8 @@ spec:
             - {{ .Values.command | quote }}
           {{- end }}
           env:
+            - name: HOME
+              value: /home/agent
             - name: OPENCLAW_STATE_DIR
               value: {{ .Values.openclawStateDir }}
             - name: OPENCLAW_NO_RESPAWN
