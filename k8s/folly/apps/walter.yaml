@@ -27,8 +27,7 @@ spec:
       limits:
         memory: 8Gi
         cpu: 4000m
-    npmInstallImage: oven/bun:1
-    npmToolInstaller: bun
+    npmInstallImage: node:24-bookworm
     agentHomeMountPath: /home/agent
     openclawStateDir: /home/agent/.openclaw
     workspaceDir: /home/agent/workspace
