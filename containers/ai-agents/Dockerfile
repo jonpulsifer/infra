@@ -79,10 +79,6 @@ RUN apt-get update && apt-get -y upgrade && \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# mise (runtime version manager — kubectl, helm, k9s, etc. on demand)
-RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh
-ENV PATH="/root/.local/bin:$PATH"
-
 # 1Password CLI
 RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
       gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg && \
@@ -138,6 +134,11 @@ VOLUME /home/agent
 EXPOSE 8080
 EXPOSE 18789
 USER agent:agent
+
+# Install mise for the agent user (kubectl, helm, k9s, etc. on demand)
+ENV HOME=/home/agent
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh
+ENV PATH="/home/agent/.local/bin:$PATH"
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
