@@ -1,21 +1,24 @@
 ---
 name: submit-pr
-description: Use when the user says "open a PR", "submit a PR", "ship it", or after implementation+review is done. Runs pre-flight checks (lint, suggest review), seeds PR body from .agent/context/context.md when present, pushes branch, and opens a PR via gh against main. Never commits to main.
+description: Use when the user says "open a PR", "submit a PR", "ship it", or after implementation+review is done. Creates a feature branch when needed, commits relevant changes in sensible signed commits, runs pre-flight checks, seeds PR body from .agent/context/context.md when present, pushes branch, and opens a PR via gh against main. Never commits to main.
 ---
 
 # Submit Pull Request
 
-Open a well-formed GitHub PR for the current branch. You assume edits are committed; if not, surface what's uncommitted and stop.
+Open a well-formed GitHub PR for the current work. The skill may create a branch and commit pending relevant changes, but must never commit directly to `main` / `master` / the default branch.
 
 ## Pre-flight
 
 Run in order. Stop and report if any fails.
 
-1. **Branch check** — never PR from `main`/`master`/default. If on one, stop and tell the user to make a branch.
-2. **Clean tree** — `git status --porcelain` must be empty. If not, list the unstaged/uncommitted files and stop.
-3. **Lint pass** — run `/skill:lint-format` (or invoke its workflow inline) on changed files. Report; don't block on warnings unless the user asked for strict mode.
-4. **Review suggestion** — if `git log <base>..HEAD` shows changes that weren't reviewed (no recent `reviewer` output in chat), suggest running `/skill:reviewer` first. Wait for go-ahead.
-5. **Sync with base** — `git fetch origin && git rebase origin/main` (or the repo's default branch).
+1. **Discover base/default branch** — run `git fetch origin` and derive the base with `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`; default to `main` if unavailable.
+2. **Branch check / creation** — never PR from `main`/`master`/default. If currently on one, create and switch to a new descriptive branch before staging anything (for example `fix/<short-summary>` or `feat/<short-summary>`). If already on a feature branch, stay there.
+3. **Inspect pending changes** — run `git status --short` and `git diff --stat`. If there are pending changes, identify the files relevant to the user's request. Do not stage unrelated files, generated scratch files, `.agent/`, secrets, or local-only changes unless explicitly requested.
+4. **Lint pass** — run `/skill:lint-format` (or invoke its workflow inline) on the relevant changed files. Report; don't block on warnings unless the user asked for strict mode.
+5. **Commit pending relevant changes** — group related files into sensible conventional commits. Stage only the files for each logical commit and use signed commits (`git commit -S -m "<type>(<scope>): <subject>"`). If changes are unrelated or ambiguous, stop and ask how to split them.
+6. **Clean tree check** — `git status --porcelain` must be empty after committing relevant changes. If unrelated/untracked files remain, list them and ask whether to ignore, commit, or remove before proceeding.
+7. **Review suggestion** — if `git log <base>..HEAD` shows changes that weren't reviewed (no recent `reviewer` output in chat), suggest running `/skill:reviewer` first. Wait for go-ahead.
+8. **Sync with base** — `git fetch origin && git rebase origin/<base>`.
 
 ## PR Body
 
