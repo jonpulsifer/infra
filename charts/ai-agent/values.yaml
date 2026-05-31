@@ -4,6 +4,11 @@ hostname: ""
 storageSize: 2Gi
 command: ""
 workspaceDir: ""
+openclawStateDir: /home/agent/config/.openclaw
+
+# Path where the existing *-agent-config PVC is mounted. Keep the default for
+# config-only persistence, or set to /home/agent to persist the whole home dir.
+agentHomeMountPath: /home/agent/config
 
 # Dedicated scratch workspace PVC mounted at /home/agent/workspace.
 # Leave disabled when the agent keeps its workspace on the config PVC

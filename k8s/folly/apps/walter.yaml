@@ -28,7 +28,9 @@ spec:
         memory: 8Gi
         cpu: 4000m
     npmInstallImage: node:24-bookworm
-    workspaceDir: /home/agent/config/workspace
+    agentHomeMountPath: /home/agent
+    openclawStateDir: /home/agent/.openclaw
+    workspaceDir: /home/agent/workspace
     workspaceVolume:
       enabled: false
     npmTools:
