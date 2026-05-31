@@ -7,6 +7,7 @@ metadata:
     app.kubernetes.io/name: jellyfin
     app.kubernetes.io/part-of: jellyfin
 spec:
+  replicas: 1
   selector:
     matchLabels: *labels
   template:
