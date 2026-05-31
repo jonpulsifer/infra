@@ -2,6 +2,7 @@
 # Tailscale tailnet-wide resources
 # ---------------------------------------------------------------------------
 
+# Touch to trigger Atlantis plan on policy.hujson changes
 resource "tailscale_acl" "this" {
   acl = file("${path.module}/policy.hujson")
 }
