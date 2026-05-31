@@ -56,8 +56,15 @@ RUN apt-get update && apt-get -y upgrade && \
       make \
       openssh-client \
       procps \
+      iputils-ping \
+      iperf3 \
+      net-tools \
+      ncat \
+      nmap \
       ripgrep \
+      tcpdump \
       tini \
+      traceroute \
       unzip \
       wget \
       xz-utils \
@@ -71,6 +78,10 @@ RUN apt-get update && apt-get -y upgrade && \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
+
+# mise (runtime version manager — kubectl, helm, k9s, etc. on demand)
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 # 1Password CLI
 RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
