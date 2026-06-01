@@ -1,17 +1,39 @@
-# Manage your dotfiles across multiple diverse machines, securely
+# bootstrap
 brew "chezmoi"
 brew "mise"
+brew "git"
+
+# shell and developer tools
+brew "cloudflared"
+brew "jq"
+brew "nvm"
+brew "pre-commit"
+brew "ruby"
+brew "uv"
+brew "watchman"
 
 # cloud and containers
 brew "awscli"
 cask "gcloud-cli"
 cask "docker-desktop"
 
-# ai homies
-cask "claude-code"
+# kubernetes
+brew "helm"
+brew "k9s"
 
-tap "anomalyco/tap"
+# terraform
+brew "tenv"
+brew "terraform-docs"
+brew "tflint"
+
+# ai homies
+cask "1password-cli"
+cask "claude-code"
 brew "opencode"
 
-tap "PeonPing/tap"
-brew "peon-ping"
+tap "peonping/tap"
+brew "peonping/tap/peon-ping"
+
+# apps and fonts
+cask "font-caskaydia-cove-nerd-font"
+cask "secretive"

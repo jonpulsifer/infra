@@ -12,7 +12,7 @@ These dotfiles manage **configuration and CLI tooling** you want everywhere. Pro
 2. Clone this repo and point chezmoi at it (or use `chezmoi init --apply <repo>`).
 3. `chezmoi apply`
 
-On first apply, scripts install mise (if missing), run `mise install` for `~/.config/mise/config.toml`, optionally install the OpenCode CLI, and merge AI agent JSON (Claude/Cursor) via `.chezmoiscripts/`.
+On first apply, scripts install mise (if missing), run `brew bundle install --no-upgrade --file Brewfile` on macOS, run `mise install` for `~/.config/mise/config.toml`, and merge AI agent JSON (Claude/Cursor) via `.chezmoiscripts/`.
 
 ### macOS
 
