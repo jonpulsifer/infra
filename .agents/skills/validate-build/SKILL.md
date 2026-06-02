@@ -7,17 +7,17 @@ description: >-
 
 ## Environment
 
-Tools come from the flake. Prefer the dev shell so `kustomize`, `terraform`, etc. are on `PATH`:
+Prefer `mise` for portable repo tooling. Use the Nix dev shell only for Nix-specific builds or formatters.
 
 ```bash
-nix develop
+mise install
 ```
 
 ## Kubernetes / Kustomize
 
 Build the **kustomization root that includes your change** (the directory with `kustomization.yaml` that lists your file, or a parent Flux kustomization).
 
-Use `kubectl kustomize` (kustomize is not a standalone binary in this flake):
+Use either `kubectl kustomize` or the mise-managed standalone `kustomize`:
 
 ```bash
 kubectl kustomize k8s/folly/sandbox
