@@ -21,13 +21,14 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 
 ### Development Environment
 
-This repository uses Nix flakes for a reproducible development environment:
+This repository uses `mise` for portable repo tooling and Nix flakes for NixOS-specific workflows:
 
 ```bash
-# Enter development shell with all tools
-nix develop
+# Install portable tools
+mise install
 
-# Tools included: kubectl, helm, terraform, vault, sops, fluxcd, cilium-cli, gcloud, mise
+# Optional: enter the full Nix development shell
+nix develop
 ```
 
 **Preferred task runner: `mise`**

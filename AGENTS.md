@@ -8,11 +8,19 @@ Multi-layer homelab infrastructure managed as code: NixOS bare metal hosts, Kube
 
 ## Development Environment
 
-All tools are provided by the Nix flake. Enter the shell before doing anything:
+Prefer `mise` for portable repo tooling:
+
+```bash
+mise install
+```
+
+This provides common Kubernetes, Terraform, SOPS, Vault, and cloud CLIs without
+requiring a Nix-capable host. Use the Nix flake for NixOS-specific builds,
+formatting, and deploy workflows:
 
 ```bash
 nix develop
-# Provides: kubectl, helm, terraform, vault, sops, fluxcd, cilium-cli, gcloud, nixos-rebuild
+# Provides: nixos-rebuild and the full Nix development shell
 ```
 
 ## How Changes Ship (GitOps + Atlantis)
