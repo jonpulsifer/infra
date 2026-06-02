@@ -10,7 +10,6 @@ CANONICAL_DIR="$HOME/.agents/skills"
 SCAN_DIRS=(
   "$HOME/.pi/agent/skills"
   "$HOME/.codex/skills"
-  "$HOME/.cursor/skills-cursor"
 )
 BACKFILL_DIRS=(
   "$HOME/.claude/skills"
