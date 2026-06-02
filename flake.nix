@@ -58,6 +58,7 @@
       deployHosts = [
         "optiplex"
         "riptide"
+        "shale"
         "oldschool"
         "retrofit"
         "cloudpi4"
