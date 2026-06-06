@@ -81,6 +81,7 @@ spec:
         owners:
           users:
             - jonpulsifer
+            - rowbutt
         policy_sets:
           - name: Super Duper Policy Set
             path: /home/atlantis/policies/
