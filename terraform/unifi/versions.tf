@@ -11,7 +11,7 @@ terraform {
     unifi = {
       # overridden in ~/.terraformrc
       source  = "ubiquiti-community/unifi"
-      version = "~> 0.41"
+      version = "~> 0.42"
     }
     onepassword = {
       source  = "1password/onepassword"
