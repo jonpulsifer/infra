@@ -1,0 +1,273 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8642
+      targetPort: 8642
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hermes-data
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: hermes-slack-tokens
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: hermes-slack-tokens
+    creationPolicy: Owner
+  data:
+    - secretKey: bot-token
+      remoteRef:
+        key: "Slack Bot Token: Hermes"
+        property: bot-token
+    - secretKey: app-token
+      remoteRef:
+        key: "Slack App Token: Hermes"
+        property: app-token
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: hermes-discord-token
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: hermes-discord-token
+    creationPolicy: Owner
+  data:
+    - secretKey: bot-token
+      remoteRef:
+        key: "Discord Bot Token: Hermes"
+        property: bot-token
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: hermes-elevenlabs-api-key
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: hermes-elevenlabs-api-key
+    creationPolicy: Owner
+  data:
+    - secretKey: api-key
+      remoteRef:
+        key: "ElevenLabs API Key: Hermes"
+        property: api-key
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: hermes-openrouter-api-key
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: hermes-openrouter-api-key
+    creationPolicy: Owner
+  data:
+    - secretKey: api-key
+      remoteRef:
+        key: "hermes openrouter api key"
+        property: api-key
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes
+      app.kubernetes.io/part-of: hermes
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes
+        app.kubernetes.io/part-of: hermes
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1337
+        runAsGroup: 1337
+        fsGroup: 1337
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hermes
+          image: nousresearch/hermes-agent:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Ensure data directory exists with proper permissions
+              mkdir -p /opt/data
+              chmod 755 /opt/data
+              # Run hermes gateway under s6-overlay supervisor
+              exec /usr/bin/s6-overlay s6-svscan /etc/s6-overlay/s6-rc.d
+          ports:
+            - containerPort: 8642
+              protocol: TCP
+          env:
+            # 1Password service account token (synced via ExternalSecret)
+            - name: OP_SERVICE_ACCOUNT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: op-service-account-token
+                  key: token
+            # Slack tokens (from ExternalSecret)
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-slack-tokens
+                  key: bot-token
+            - name: SLACK_APP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-slack-tokens
+                  key: app-token
+            # Slack channels: general, chores, CARBAMA05 (CARBAMA05 is a private channel ID)
+            - name: SLACK_CHANNEL_GENERAL
+              value: "#general"
+            - name: SLACK_CHANNEL_CHORES
+              value: "#chores"
+            - name: SLACK_CHANNEL_CARBAMA05
+              value: "CARBAMA05"
+            # Slack bot requires mention (except allowlisted user UAR78LSKC)
+            - name: SLACK_REQUIRE_MENTION
+              value: "true"
+            - name: SLACK_ALLOWED_USER
+              value: "UAR78LSKC"
+            # Discord token (from ExternalSecret)
+            - name: DISCORD_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-discord-token
+                  key: bot-token
+            - name: DISCORD_GUILD_ID
+              value: "1509024936717455381"
+            - name: DISCORD_CHANNEL_GENERAL
+              value: "1509024937422356532"
+            - name: DISCORD_CHANNEL_OTHER
+              value: "1509024937422356533"
+            - name: DISCORD_ALLOWED_USER
+              value: "308072071949320204"
+            # ElevenLabs API key (from ExternalSecret)
+            - name: ELEVENLABS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-elevenlabs-api-key
+                  key: api-key
+            # OpenRouter LLM configuration (OpenCode model via OpenRouter)
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-openrouter-api-key
+                  key: api-key
+            - name: LLM_PROVIDER
+              value: "openrouter"
+            - name: LLM_MODEL
+              value: "opencode-go/minimax-m2.7"
+            - name: OPENROUTER_BASE_URL
+              value: "https://openrouter.ai/api/v1"
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 100m
+            limits:
+              memory: 1Gi
+              cpu: 2000m
+          volumeMounts:
+            - name: hermes-data
+              mountPath: /opt/data
+      volumes:
+        - name: hermes-data
+          persistentVolumeClaim:
+            claimName: hermes-data
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: hermes-http-route
+  namespace: agents-sandbox
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/part-of: hermes
+spec:
+  parentRefs:
+    - name: cluster-gateway
+      namespace: default
+  hostnames:
+    - "hermes.lolwtf.ca"
+  rules:
+    - backendRefs:
+        - name: hermes
+          port: 8642
