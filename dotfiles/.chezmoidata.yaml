@@ -1,3 +1,24 @@
+git:
+  name: Jonathan Pulsifer
+  github_user: jonpulsifer
+  work_username: jpulsifer
+  identity:
+    work:
+      email: jonathan@moonpay.com
+      signingkey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay
+    personal:
+      email: jonathan@pulsifer.ca
+      signingkey: ~/.ssh/id_ed25519
+      signingkey_wsl: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
+  moonpay:
+    ssh_prefix: git@github.com:moonpay/
+    instead_of:
+      - git@github.com:MoonPay/
+      - https://github.com/moonpay/
+  gpg:
+    darwin_program: /Applications/1Password.app/Contents/MacOS/op-ssh-sign
+    wsl_program: /mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe
+
 mcp_servers:
   nixos:
     command: docker

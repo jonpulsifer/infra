@@ -1,20 +1,26 @@
-{{- $isCurrentWSL := and (eq .chezmoi.hostname "nixos") (eq .chezmoi.os "linux") (contains "microsoft" .chezmoi.kernel.osrelease) -}}
+{{- $isWSL := and (eq .chezmoi.os "linux") (or (contains "microsoft" .chezmoi.kernel.osrelease) (contains "WSL" .chezmoi.kernel.osrelease)) -}}
+{{- $isWork := eq .chezmoi.username .git.work_username -}}
+{{- $identity := .git.identity.personal -}}
+{{- if $isWork -}}
+{{-   $identity = .git.identity.work -}}
+{{- end -}}
+{{- $signingKey := $identity.signingkey -}}
+{{- if and (not $isWork) $isWSL -}}
+{{-   $signingKey = $identity.signingkey_wsl -}}
+{{- end -}}
+{{- $gpgProgram := "" -}}
+{{- if and $isWork (eq .chezmoi.os "darwin") -}}
+{{-   $gpgProgram = .git.gpg.darwin_program -}}
+{{- else if $isWSL -}}
+{{-   $gpgProgram = .git.gpg.wsl_program -}}
+{{- end -}}
 [user]
-	name = Jonathan Pulsifer
-{{- if eq .chezmoi.username "jpulsifer" }}
-	email = jonathan@moonpay.com
-	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay
-{{- else }}
-	email = jonathan@pulsifer.ca
-{{- if $isCurrentWSL }}
-	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
-{{- else }}
-	signingkey = ~/.ssh/id_ed25519
-{{- end }}
-{{- end }}
+	name = {{ .git.name }}
+	email = {{ $identity.email }}
+	signingkey = {{ $signingKey }}
 
 [github]
-	user = jonpulsifer
+	user = {{ .git.github_user }}
 
 [color]
 	ui = true
@@ -23,7 +29,7 @@
 	whitespace = trailing-space,space-before-tab
 	excludesfile = ~/.config/git/ignore
 
-{{- if not $isCurrentWSL }}
+{{- if not $isWSL }}
 [gpg]
 	format = ssh
 {{- end }}
@@ -47,21 +53,16 @@
 [push]
 	default = current
 
-{{- if eq .chezmoi.username "jpulsifer" }}
+{{- if $isWork }}
 
-[url "git@github.com:moonpay/"]
-	insteadOf = git@github.com:MoonPay/
-	insteadOf = https://github.com/moonpay/
+[url "{{ .git.moonpay.ssh_prefix }}"]
+{{- range .git.moonpay.instead_of }}
+	insteadOf = {{ . }}
+{{- end }}
 {{- end }}
 
-[url "git@github.com:jonpulsifer/"]
-	insteadOf = https://github.com/jonpulsifer/
-
-{{- if and (eq .chezmoi.username "jpulsifer") (eq .chezmoi.os "darwin") }}
-
-[gpg "ssh"]
-	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
-{{- end }}
+[url "git@github.com:{{ .git.github_user }}/"]
+	insteadOf = https://github.com/{{ .git.github_user }}/
 
 [alias]
 	ad = add
@@ -101,11 +102,16 @@
 	files-by-author = "!git log --author=\"$1\" --name-only --pretty=format: | sort | uniq"
 	check-perms = "!git ls-files -s | awk '{ if (substr($1,1,3) ~ /75[0-7]/) print $2 \" \" $4 }'"
 
-{{ if $isCurrentWSL }}[gpg]
+{{- if or $isWSL $gpgProgram }}
+{{- if $isWSL }}
+[gpg]
 	format = ssh
 
+{{- end }}
+{{- if $gpgProgram }}
 [gpg "ssh"]
-	program = "/mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe"
+	program = {{ $gpgProgram | quote }}
+{{- end }}
 {{- end }}
 
 [commit]

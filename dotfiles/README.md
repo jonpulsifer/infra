@@ -8,9 +8,15 @@ These dotfiles manage **configuration and CLI tooling** you want everywhere. Pro
 
 ## Install
 
-1. Install [chezmoi](https://www.chezmoi.io/install/) and [mise](https://mise.jdx.dev/) (or let `run_once_install-mise` install mise on first apply).
-2. Clone this repo and point chezmoi at it (or use `chezmoi init --apply <repo>`).
-3. `chezmoi apply`
+Clone this repo and run `./install` (installs [mise](https://mise.jdx.dev/) if needed, runs `mise install` from `mise.toml` for chezmoi and repo tools, symlinks the source tree, then `chezmoi apply`).
+
+Or manually:
+
+1. Install [mise](https://mise.jdx.dev/) (or let `run_once_install-mise` install it on first `chezmoi apply`).
+2. `mise install` in this repo (installs chezmoi from `mise.toml`).
+3. Clone and point chezmoi at the repo (or use `chezmoi init --apply <repo>`), then `chezmoi apply`.
+
+On Linux, if your login shell is not zsh, the install script warns and offers `chsh -s $(command -v zsh) $USER`.
 
 On first apply, scripts install mise (if missing), run `brew bundle install --no-upgrade --file Brewfile` on macOS, run `mise install` for `~/.config/mise/config.toml`, and merge AI agent JSON (Claude/Cursor) via `.chezmoiscripts/`.
 
