@@ -110,6 +110,11 @@ RUN bun add -g \
  && bun add -g --ignore-scripts @earendil-works/pi-coding-agent \
  && test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
 
+# Install mise system-wide so it survives the /home/agent runtime volume mount.
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
+      | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
+    && echo 'eval "$(/usr/local/bin/mise activate bash)"' >> /etc/bash.bashrc
+
 # ghostty-web runtime assets
 COPY --from=ghostty-builder /build/dist /opt/ghostty-web/dist
 COPY --from=ghostty-builder /build/ghostty-vt.wasm /opt/ghostty-web/ghostty-vt.wasm
@@ -135,10 +140,7 @@ EXPOSE 8080
 EXPOSE 18789
 USER agent:agent
 
-# Install mise for the agent user (kubectl, helm, k9s, etc. on demand)
 ENV HOME=/home/agent
-RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run | sh
-ENV PATH="/home/agent/.local/bin:$PATH"
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
