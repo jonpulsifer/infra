@@ -9,7 +9,6 @@ namespace: atlantis
 configMapGenerator:
   - name: policies
     files:
-      - policies/default-deny.rego
       - policies/only-me.rego
       - policies/only-me.json
   - name: plan-hook

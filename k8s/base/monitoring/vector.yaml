@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: vector
-      version: 0.52.0
+      version: 0.56.0
       sourceRef:
         kind: HelmRepository
         name: vector
@@ -34,7 +34,7 @@ spec:
       enabled: true
     image:
       repository: docker.io/timberio/vector
-      tag: 0.55.0-debian
+      tag: 0.56.0-debian
     extraVolumes:
       - name: journal
         hostPath:
