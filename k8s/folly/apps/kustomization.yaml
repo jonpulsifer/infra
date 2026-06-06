@@ -15,6 +15,7 @@ resources:
   - redis
   - reloader
   # - satisfactory
+  - hermes
   - walter.yaml
 patches:
   - target:

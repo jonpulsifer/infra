@@ -1,0 +1,105 @@
+# =============================================================================
+# Hermes Agent — HelmRelease
+# =============================================================================
+#
+# IMPORTANT: Before deploying, ensure the following 1Password items exist in
+# the "Homelab" vault with the properties listed below. The ExternalSecrets
+# below reference these items and will fail to sync until they are created:
+#
+#   1. "hermes slack bot token"  — property: "bot-token"
+#   2. "hermes slack app token"  — property: "app-token"
+#   3. "hermes openrouter api key" — property: "api-key"
+#
+# Existing 1Password items used:
+#   - "rowbutt discord bot token"        — property: "credential"
+#   - "rowbutt elevenlabs api key"       — property: "credential"
+#   - "Service Account Auth Token: rowbutt" — property: "credential"
+# =============================================================================
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: hermes
+  namespace: agents-sandbox
+spec:
+  interval: 5m0s
+  chart:
+    spec:
+      chart: ../../../../charts/ai-agent
+      version: ">=0.1.0"
+      interval: 10m0s
+  values:
+    image: nousresearch/hermes-agent:latest
+    port: 8642
+    hermes:
+      enabled: true
+      dataVolume:
+        enabled: true
+        storageSize: 5Gi
+      env:
+        - name: LLM_PROVIDER
+          value: "openrouter"
+        - name: LLM_MODEL
+          value: "opencode-go/minimax-m2.7"
+        - name: OPENROUTER_BASE_URL
+          value: "https://openrouter.ai/api/v1"
+        - name: SLACK_CHANNEL_GENERAL
+          value: "#general"
+        - name: SLACK_CHANNEL_CHORES
+          value: "#chores"
+        - name: SLACK_CHANNEL_CARBAMA05
+          value: "CARBAMA05"
+        - name: SLACK_REQUIRE_MENTION
+          value: "true"
+        - name: SLACK_ALLOWED_USER
+          value: "UAR78LSKC"
+        - name: DISCORD_GUILD_ID
+          value: "1509024936717455381"
+        - name: DISCORD_CHANNEL_GENERAL
+          value: "1509024937422356532"
+        - name: DISCORD_CHANNEL_OTHER
+          value: "1509024937422356533"
+        - name: DISCORD_ALLOWED_USER
+          value: "308072071949320204"
+    envSecrets:
+      # OP service account token (reused from existing ExternalSecret)
+      - name: op-service-account-token
+        envVar: OP_SERVICE_ACCOUNT_TOKEN
+        onePasswordItem: "Service Account Auth Token: rowbutt"
+        property: credential
+        secretKey: token
+      # Slack tokens
+      - name: hermes-slack-tokens
+        envVar: SLACK_BOT_TOKEN
+        onePasswordItem: "hermes slack bot token"
+        property: bot-token
+        secretKey: bot-token
+      - name: hermes-slack-tokens
+        envVar: SLACK_APP_TOKEN
+        onePasswordItem: "hermes slack app token"
+        property: app-token
+        secretKey: app-token
+      # Discord token
+      - name: hermes-discord-token
+        envVar: DISCORD_BOT_TOKEN
+        onePasswordItem: "rowbutt discord bot token"
+        property: credential
+        secretKey: bot-token
+      # ElevenLabs API key
+      - name: hermes-elevenlabs-api-key
+        envVar: ELEVENLABS_API_KEY
+        onePasswordItem: "rowbutt elevenlabs api key"
+        property: credential
+        secretKey: api-key
+      # OpenRouter API key
+      - name: hermes-openrouter-api-key
+        envVar: OPENROUTER_API_KEY
+        onePasswordItem: "hermes openrouter api key"
+        property: api-key
+        secretKey: api-key
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 1Gi
+        cpu: 2000m

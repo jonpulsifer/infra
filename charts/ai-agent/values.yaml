@@ -61,6 +61,18 @@ envSecrets: []
 #   property: credential
 #   secretKey: token
 
+# hermes: when enabled, the chart generates a native Kubernetes Deployment
+# instead of (or in addition to) the SandboxTemplate. Use this for the Hermes
+# Agent which runs as a plain long-running process, not via the sandbox
+# controller.
+hermes:
+  enabled: false
+  dataVolume:
+    enabled: true
+    storageSize: 5Gi
+  env: []
+  configFiles: []
+
 # configFiles: non-secret config. Rendered into a ConfigMap and copied into the
 # config PVC at startup (writable by the agent). Use this when the config has no
 # secrets; deliver any secrets the agent needs separately (e.g. via .env/secrets).

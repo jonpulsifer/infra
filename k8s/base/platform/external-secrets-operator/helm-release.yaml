@@ -10,6 +10,9 @@ metadata:
 spec:
   interval: 1m0s
   maxHistory: 2
+  # Avoid Helm timeout waiting for CRD rollout during upgrades — ESO deploys
+  # CRDs via installCRDs:true which can exceed the default Helm wait window.
+  disableWait: true
   chart:
     spec:
       chart: external-secrets
