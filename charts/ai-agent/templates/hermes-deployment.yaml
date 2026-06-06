@@ -1,0 +1,110 @@
+{{- if .Values.hermes.enabled -}}
+# Hermes Agent Deployment — replaces the SandboxTemplate when hermes.enabled=true
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ai-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "ai-agent.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.port }}
+      targetPort: {{ .Values.port }}
+---
+# PVC for /opt/data
+{{- if .Values.hermes.dataVolume.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ai-agent.fullname" . }}-hermes-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: {{ .Values.hermes.dataVolume.storageSize | default "5Gi" }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ai-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ai-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ai-agent.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: {{ .Values.image }}
+          imagePullPolicy: IfNotPresent
+          command: ["/opt/hermes/.venv/bin/hermes"]
+          args: ["gateway", "run"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: {{ .Values.port }}
+              protocol: TCP
+          env:
+            - name: HOME
+              value: /opt/hermes
+            # Inject envSecrets (1Password-backed ExternalSecrets)
+            {{- range .Values.envSecrets }}
+            - name: {{ .envVar }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-agent.fullname" $ }}-{{ .name }}
+                  key: {{ default .envVar .secretKey }}
+            {{- end }}
+            # Inject hermes-specific literal env vars
+            {{- range .Values.hermes.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.hermes.dataVolume.enabled }}
+            - name: hermes-data
+              mountPath: /opt/data
+            {{- end }}
+            - name: hermes-home
+              mountPath: /opt/hermes
+      volumes:
+        {{- if .Values.hermes.dataVolume.enabled }}
+        - name: hermes-data
+          persistentVolumeClaim:
+            claimName: {{ include "ai-agent.fullname" . }}-hermes-data
+        {{- end }}
+        - name: hermes-home
+          emptyDir: {}
+{{- end }}

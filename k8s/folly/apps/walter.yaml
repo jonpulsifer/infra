@@ -36,7 +36,6 @@ spec:
     npmTools:
       - "@moonpay/cli"
     openclawPlugins:
-      - "@openclaw/slack@2026.5.20"
       - "@openclaw/discord@2026.5.22"
       - "@openclaw/codex"
     envSecrets:
