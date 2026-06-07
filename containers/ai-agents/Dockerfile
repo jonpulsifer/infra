@@ -103,12 +103,15 @@ COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
 # its prebuilt Control UI is present, so a bad upstream release fails the build
 # instead of serving 503s at runtime.
 ENV BUN_INSTALL=/usr/local
-RUN bun add -g \
-      @anthropic-ai/claude-code \
-      opencode-ai \
-      openclaw \
- && bun add -g --ignore-scripts @earendil-works/pi-coding-agent \
- && test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
+# renovate: datasource=npm versioning=npm; packageName=@anthropic-ai/claude-code
+RUN bun add -g @anthropic-ai/claude-code
+# renovate: datasource=npm versioning=npm; packageName=opencode-ai
+RUN bun add -g opencode-ai
+# renovate: datasource=npm versioning=npm; packageName=openclaw
+RUN bun add -g openclaw
+# renovate: datasource=npm versioning=npm; packageName=@earendil-works/pi-coding-agent
+RUN bun add -g --ignore-scripts @earendil-works/pi-coding-agent
+RUN test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
 
 # Install mise system-wide so it survives the /home/agent runtime volume mount.
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
