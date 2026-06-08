@@ -17,7 +17,6 @@ kustomize = "latest"
 sops = "latest"
 terraform = "latest"
 terraform-docs = "latest"
-vault = "latest"
 
 [tasks.devshell]
 description = "Enter the Nix dev shell"
