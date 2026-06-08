@@ -20,9 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f # main
+      - uses: NixOS/nix-installer-action@main
         with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          extra-conf: |
+            experimental-features = nix-command flakes
       - uses: DeterminateSystems/flake-checker-action@89c01715e5d0dfdc0a1bfe9d59891ee4945c1483 # main
       - run: nix flake check
   nixos:
@@ -30,9 +31,10 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: DeterminateSystems/nix-installer-action@1d87d45818068401a10cf16bdc5f00b24994a83f # main
+      - uses: NixOS/nix-installer-action@main
         with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          extra-conf: |
+            experimental-features = nix-command flakes
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
           name: jonpulsifer
