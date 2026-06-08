@@ -11,12 +11,11 @@ You run the linters and formatters this repo *actually configures*. You don't in
 
 Inspect, in order, and prefer whatever's listed:
 
-1. **`mise.toml` / `.tool-versions`** — pinned tool versions in this repo. Anything here is fair game.
-2. **`package.json` scripts** — if `scripts.lint`, `scripts.format`, `scripts.check`, `scripts.typecheck` exist, prefer `npm run <script>` (or `pnpm`/`yarn`/`bun` based on the lockfile) over invoking the tool directly.
-3. **`pyproject.toml`** — read `[tool.*]` sections (`ruff`, `black`, `mypy`, `isort`). Run only what's configured.
-4. **Tool-specific config files** — `.golangci.yml`, `biome.json`, `.eslintrc*`, `.prettierrc*`, `.tflint.hcl`, `.markdownlint*`, `.yamllint*`, `.shellcheckrc`, `.editorconfig`, etc. Presence implies use.
-5. **Language manifests** — `go.mod` → `gofmt`/`go vet`; `Cargo.toml` → `cargo fmt`/`cargo clippy`; `*.tf` → `terraform fmt`; `*.sh` → `shellcheck` if available.
-6. **Repo-specific scripts** — a `Makefile`, `justfile`, or `Taskfile.yml` target named `lint`/`fmt`/`check`/`ci` is often the right entry point. Prefer it.
+1. **`mise.toml` / `.mise.toml`** — pinned tool versions in this repo. Anything here is fair game.
+2. **`package.json` or other package-manager scripts** — if `scripts.lint`, `scripts.format`, `scripts.check`, `scripts.typecheck` exist, prefer `bun run <script>` (discover the package manager using its lockfile), over invoking the tool directly.
+3. **Tool-specific config files** — `.golangci.yml`, `biome.json`, `.eslintrc*`, `.prettierrc*`, `.tflint.hcl`, `.markdownlint*`, `.yamllint*`, `.shellcheckrc`, `.editorconfig`, etc. Presence implies use.
+4. **Language manifests** — `go.mod` → `gofmt`/`go vet`; `Cargo.toml` → `cargo fmt`/`cargo clippy`; `*.tf` → `terraform fmt`; `*.sh` → `shellcheck` if available.
+5. **Repo-specific scripts** — a `Makefile`, `justfile`, or `Taskfile.yml` target named `lint`/`fmt`/`check`/`ci` is often the right entry point. Prefer it. Probably still `mise` though.
 
 If you find tooling config that isn't in the lists above, run it anyway — the config's existence is the signal. Report what you ran.
 
@@ -52,8 +51,8 @@ Full-repo run only when:
 - Other: shellcheck (3 changed shell scripts)
 
 ## Ran
-- `npm run format` — ok
-- `npm run lint` — ok
+- `pnpm run format` — ok
+- `pnpm run lint` — ok
 - `shellcheck dot_local/bin/executable_agent-skills` — 0 findings
 
 ## Auto-fixed

@@ -26,7 +26,6 @@ kubectx = "latest"
 kubens = "latest"
 krew = "latest"
 
-{{- if eq .chezmoi.os "linux" -}}
-# linux only
+{{- if eq .chezmoi.os "linux" }}
 btop = "latest"
 {{- end }}

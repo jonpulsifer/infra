@@ -5,14 +5,16 @@ description: Use when the user says "open a PR", "submit a PR", "ship it", or af
 
 # Submit Pull Request
 
-Open a well-formed GitHub PR for the current work. The skill may create a branch and commit pending relevant changes, but must never commit directly to `main` / `master` / the default branch.
+Open a well-formed GitHub PR for the current work.
+
+We prefer "GitHub Flow", small feature branches off the latest remote default repository branch, usually "main". The skill may create a branch and commit pending relevant changes, but must never commit directly to `main` / `master` / the default branch.
 
 ## Pre-flight
 
 Run in order. Stop and report if any fails.
 
 1. **Discover base/default branch** — run `git fetch origin` and derive the base with `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'`; default to `main` if unavailable.
-2. **Branch check / creation** — never PR from `main`/`master`/default. If currently on one, create and switch to a new descriptive branch before staging anything (for example `fix/<short-summary>` or `feat/<short-summary>`). If already on a feature branch, stay there.
+2. **Branch check / creation** — never PR from `main`/`master`/default. If currently on one, create and switch to a new descriptive branch before staging anything (for example `fix/<short-summary>` or `feat/<short-summary>`). If already on a feature branch, and it is related to the current work, stay there. Otherwise consider it dirty and 
 3. **Inspect pending changes** — run `git status --short` and `git diff --stat`. If there are pending changes, identify the files relevant to the user's request. Do not stage unrelated files, generated scratch files, `.agent/`, secrets, or local-only changes unless explicitly requested.
 4. **Lint pass** — run `/skill:lint-format` (or invoke its workflow inline) on the relevant changed files. Report; don't block on warnings unless the user asked for strict mode.
 5. **Commit pending relevant changes** — group related files into sensible conventional commits. Stage only the files for each logical commit and use signed commits (`git commit -S -m "<type>(<scope>): <subject>"`). If changes are unrelated or ambiguous, stop and ask how to split them.
