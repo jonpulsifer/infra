@@ -50,25 +50,36 @@ RUN apt-get update && apt-get -y upgrade && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
+      dnsutils \
       git \
       gnupg \
       jq \
+      iproute2 \
       make \
       openssh-client \
+      lsof \
       procps \
       iputils-ping \
       iperf3 \
       net-tools \
       ncat \
       nmap \
+      fzf \
+      bat \
+      fd-find \
+      rsync \
       ripgrep \
+      strace \
+      tree \
       tcpdump \
       tini \
       traceroute \
+      yq \
       unzip \
       wget \
       xz-utils \
       zip \
+      man-db \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/github-cli.gpg \
@@ -78,6 +89,9 @@ RUN apt-get update && apt-get -y upgrade && \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/batcat /usr/local/bin/bat \
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
 # 1Password CLI
 RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
@@ -103,17 +117,26 @@ COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
 # its prebuilt Control UI is present, so a bad upstream release fails the build
 # instead of serving 503s at runtime.
 ENV BUN_INSTALL=/usr/local
-RUN bun add -g \
-      @anthropic-ai/claude-code \
-      opencode-ai \
-      openclaw \
- && bun add -g --ignore-scripts @earendil-works/pi-coding-agent \
- && test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
+# renovate: datasource=npm versioning=npm; packageName=@anthropic-ai/claude-code
+RUN bun add -g @anthropic-ai/claude-code
+# renovate: datasource=npm versioning=npm; packageName=opencode-ai
+RUN bun add -g opencode-ai
+# renovate: datasource=npm versioning=npm; packageName=openclaw
+RUN bun add -g openclaw
+# renovate: datasource=npm versioning=npm; packageName=@earendil-works/pi-coding-agent
+RUN bun add -g --ignore-scripts @earendil-works/pi-coding-agent
+RUN test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
 
 # Install mise system-wide so it survives the /home/agent runtime volume mount.
+# MISE_INSTALL_PATH: where the mise binary itself lives (on PATH already).
+# MISE_SHIMS_DIR: where tool shims live — put them in /usr/local/bin so they're on
+#   PATH for non-interactive shells (exec, cron, etc.) too, not just interactive bash.
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
-      | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
-    && echo 'eval "$(/usr/local/bin/mise activate bash)"' >> /etc/bash.bashrc
+      | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_SHIMS_DIR=/usr/local/bin sh \
+    && echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> /etc/bash.bashrc \
+    && echo 'eval "$(/usr/local/bin/mise activate bash)"' >> /etc/bash.bashrc \
+    && mkdir -p /etc/profile.d \
+    && echo 'export PATH="${HOME}/.local/bin:/usr/local/bin:${PATH}"' > /etc/profile.d/mise.sh
 
 # ghostty-web runtime assets
 COPY --from=ghostty-builder /build/dist /opt/ghostty-web/dist
@@ -125,6 +148,8 @@ COPY --from=frontend-builder /build/dist /opt/ghostty-web/app
 
 # Server
 COPY server.js /opt/ghostty-web/server.js
+COPY agent-snapshot.sh /usr/local/bin/agent-snapshot
+RUN chmod 0755 /usr/local/bin/agent-snapshot
 
 # Agent user (non-root, dedicated to agent workloads)
 RUN groupadd -g 1337 agent \
