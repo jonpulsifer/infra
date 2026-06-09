@@ -72,30 +72,30 @@ spec:
         property: credential
         secretKey: token
       # Slack tokens
-      - name: hermes-slack-tokens
+      - name: hermes-secret-slack-tokens
         envVar: SLACK_BOT_TOKEN
         onePasswordItem: "hermes slack bot token"
         property: bot-token
         secretKey: bot-token
-      - name: hermes-slack-tokens
+      - name: hermes-secret-slack-tokens
         envVar: SLACK_APP_TOKEN
         onePasswordItem: "hermes slack app token"
         property: app-token
         secretKey: app-token
       # Discord token
-      - name: hermes-discord-token
+      - name: hermes-secret-discord-token
         envVar: DISCORD_BOT_TOKEN
         onePasswordItem: "rowbutt discord bot token"
         property: credential
         secretKey: bot-token
       # ElevenLabs API key
-      - name: hermes-elevenlabs-api-key
+      - name: hermes-secret-elevenlabs-api-key
         envVar: ELEVENLABS_API_KEY
         onePasswordItem: "rowbutt elevenlabs api key"
         property: credential
         secretKey: api-key
       # OpenRouter API key
-      - name: hermes-openrouter-api-key
+      - name: hermes-secret-openrouter-api-key
         envVar: OPENROUTER_API_KEY
         onePasswordItem: "hermes openrouter api key"
         property: api-key
