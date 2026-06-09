@@ -34,6 +34,8 @@ spec:
   values:
     image: nousresearch/hermes-agent:latest
     port: 8642
+    ingress:
+      enabled: false
     hermes:
       enabled: true
       dataVolume:
