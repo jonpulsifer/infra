@@ -37,6 +37,10 @@ jobs:
           skipPush: ${{ github.ref != 'refs/heads/main' }}
       - run: nix build .#${{ inputs.image }}
 
+      - name: Build WSL tarball
+        if: ${{ inputs.image == 'wsl' }}
+        run: sudo ./result/bin/nixos-wsl-tarball-builder ./nixos.wsl
+
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' || inputs.image == 'wsl' }}
         with:
@@ -51,6 +55,7 @@ jobs:
           destination: homelab-ng-free
           parent: false
           gzip: false
+          process_gcloudignore: false
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ contains(inputs.image, 'pi4') }}
@@ -71,11 +76,11 @@ jobs:
       - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3
         if: ${{ inputs.image == 'wsl' }}
         with:
-          path: result
-          glob: "*.tar.gz"
+          path: nixos.wsl
           destination: homelab-ng-free
           parent: false
           gzip: false
+          process_gcloudignore: false
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ inputs.image == 'container' }}
