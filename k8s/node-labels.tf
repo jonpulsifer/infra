@@ -8,6 +8,10 @@ locals {
       "node-role.kubernetes.io/worker" = ""
       "bgp-enabled"                    = "true"
     },
+    "shale" = {
+      "node-role.kubernetes.io/worker" = ""
+      "bgp-enabled"                    = "true"
+    },
     "optiplex" = {
       "node-role.kubernetes.io/control-plane" = ""
       "bgp-enabled"                           = "true"
@@ -34,4 +38,3 @@ resource "kubernetes_labels" "nodes" {
   }
   labels = each.value
 }
-
