@@ -56,6 +56,15 @@ jobs:
           git clone https://github.com/jonpulsifer/dotfiles.git "${chezmoi_source}"
           nix build .#legacyPackages.x86_64-linux.chezmoi -o chezmoi-result
 
+          # Seed chezmoi's config data map and override the kernel release there.
+          # chezmoi 2.66.x can panic when --override-data is used with no config data.
+          cat > "${chezmoi_runtime}/chezmoi.yaml" <<'EOF'
+          data:
+            chezmoi:
+              kernel:
+                osrelease: microsoft-standard-WSL2
+          EOF
+
           HOME="${wsl_home}" \
             USER="${wsl_user}" \
             LOGNAME="${wsl_user}" \
@@ -65,7 +74,6 @@ jobs:
               --cache "${chezmoi_runtime}/cache" \
               --persistent-state "${chezmoi_runtime}/state.db" \
               --config "${chezmoi_runtime}/chezmoi.yaml" \
-              --override-data '{"chezmoi":{"kernel":{"osrelease":"microsoft-standard-WSL2"}}}' \
               --refresh-externals=always \
               apply --exclude scripts --force --no-tty
 
