@@ -128,9 +128,15 @@ RUN bun add -g --ignore-scripts @earendil-works/pi-coding-agent
 RUN test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
 
 # Install mise system-wide so it survives the /home/agent runtime volume mount.
+# MISE_INSTALL_PATH: where the mise binary itself lives (on PATH already).
+# MISE_SHIMS_DIR: where tool shims live — put them in /usr/local/bin so they're on
+#   PATH for non-interactive shells (exec, cron, etc.) too, not just interactive bash.
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
-      | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
-    && echo 'eval "$(/usr/local/bin/mise activate bash)"' >> /etc/bash.bashrc
+      | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_SHIMS_DIR=/usr/local/bin sh \
+    && echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> /etc/bash.bashrc \
+    && echo 'eval "$(/usr/local/bin/mise activate bash)"' >> /etc/bash.bashrc \
+    && mkdir -p /etc/profile.d \
+    && echo 'export PATH="${HOME}/.local/bin:/usr/local/bin:${PATH}"' > /etc/profile.d/mise.sh
 
 # ghostty-web runtime assets
 COPY --from=ghostty-builder /build/dist /opt/ghostty-web/dist
