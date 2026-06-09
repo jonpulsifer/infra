@@ -27,6 +27,10 @@ spec:
       chart: ../../../../charts/ai-agent
       version: ">=0.1.0"
       interval: 10m0s
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
   values:
     image: nousresearch/hermes-agent:latest
     port: 8642
