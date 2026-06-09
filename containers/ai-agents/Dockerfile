@@ -50,25 +50,36 @@ RUN apt-get update && apt-get -y upgrade && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
+      dnsutils \
       git \
       gnupg \
       jq \
+      iproute2 \
       make \
       openssh-client \
+      lsof \
       procps \
       iputils-ping \
       iperf3 \
       net-tools \
       ncat \
       nmap \
+      fzf \
+      bat \
+      fd-find \
+      rsync \
       ripgrep \
+      strace \
+      tree \
       tcpdump \
       tini \
       traceroute \
+      yq \
       unzip \
       wget \
       xz-utils \
       zip \
+      man-db \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/github-cli.gpg \
@@ -78,6 +89,9 @@ RUN apt-get update && apt-get -y upgrade && \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/batcat /usr/local/bin/bat \
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
 # 1Password CLI
 RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
@@ -128,6 +142,8 @@ COPY --from=frontend-builder /build/dist /opt/ghostty-web/app
 
 # Server
 COPY server.js /opt/ghostty-web/server.js
+COPY agent-snapshot.sh /usr/local/bin/agent-snapshot
+RUN chmod 0755 /usr/local/bin/agent-snapshot
 
 # Agent user (non-root, dedicated to agent workloads)
 RUN groupadd -g 1337 agent \
