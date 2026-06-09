@@ -27,10 +27,6 @@ spec:
       chart: ../../../../charts/ai-agent
       version: ">=0.1.0"
       interval: 10m0s
-      sourceRef:
-        kind: GitRepository
-        name: infra
-        namespace: flux-system
   values:
     image: nousresearch/hermes-agent:latest
     port: 8642
@@ -71,35 +67,6 @@ spec:
         onePasswordItem: "Service Account Auth Token: rowbutt"
         property: credential
         secretKey: token
-      # Slack tokens
-      - name: hermes-slack-tokens
-        envVar: SLACK_BOT_TOKEN
-        onePasswordItem: "hermes slack bot token"
-        property: bot-token
-        secretKey: bot-token
-      - name: hermes-slack-tokens
-        envVar: SLACK_APP_TOKEN
-        onePasswordItem: "hermes slack app token"
-        property: app-token
-        secretKey: app-token
-      # Discord token
-      - name: hermes-discord-token
-        envVar: DISCORD_BOT_TOKEN
-        onePasswordItem: "rowbutt discord bot token"
-        property: credential
-        secretKey: bot-token
-      # ElevenLabs API key
-      - name: hermes-elevenlabs-api-key
-        envVar: ELEVENLABS_API_KEY
-        onePasswordItem: "rowbutt elevenlabs api key"
-        property: credential
-        secretKey: api-key
-      # OpenRouter API key
-      - name: hermes-openrouter-api-key
-        envVar: OPENROUTER_API_KEY
-        onePasswordItem: "hermes openrouter api key"
-        property: api-key
-        secretKey: api-key
     resources:
       requests:
         memory: 256Mi
