@@ -25,7 +25,7 @@ spec:
   chart:
     spec:
       chart: ../../../../charts/ai-agent
-      version: ">=0.1.0"
+      version: ">=0.1.2"
       interval: 10m0s
       sourceRef:
         kind: GitRepository
