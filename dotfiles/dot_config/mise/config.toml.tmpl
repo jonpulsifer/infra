@@ -13,11 +13,7 @@ ripgrep = "latest"
 sd = "latest"
 1password-cli = "latest"
 
-# javascript
-bun = "latest"
-node = "lts"
-
-# kube
+# cloud stuff
 kubectl = "latest"
 helm = "latest"
 k9s = "latest"
@@ -28,4 +24,6 @@ krew = "latest"
 
 {{- if eq .chezmoi.os "linux" }}
 btop = "latest"
+gcloud = "latest"
+neovim = "latest"
 {{- end }}
