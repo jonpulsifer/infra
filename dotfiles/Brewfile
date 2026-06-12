@@ -28,7 +28,7 @@ brew "tflint"
 
 # ai homies
 cask "1password-cli"
-cask "claude-code"
+cask "claude-code@latest"
 brew "opencode"
 
 tap "peonping/tap"
