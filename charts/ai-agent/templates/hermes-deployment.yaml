@@ -52,17 +52,22 @@ spec:
         {{- include "ai-agent.selectorLabels" . | nindent 8 }}
     spec:
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
+        # Hermes must run as root (or its own UID 10000). s6-overlay stage2-hook.sh
+        # rejects arbitrary UIDs. Run as root here; stage2-hook remaps to hermes
+        # UID internally via HERMES_UID/HERMES_GID env vars.
+        runAsNonRoot: false
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: agent
           image: {{ .Values.image }}
           imagePullPolicy: IfNotPresent
-          command: ["/opt/hermes/.venv/bin/hermes"]
+          # Use native s6-overlay entrypoint (PID 1 = /init, then main-wrapper.sh).
+          # main-wrapper.sh handles UID remap, npm install, and drop to hermes user.
+          # Bypassing this with a hardcoded command breaks the entire bootstrap.
           args: ["gateway", "run"]
           securityContext:
             allowPrivilegeEscalation: false
@@ -76,7 +81,17 @@ spec:
               protocol: TCP
           env:
             - name: HOME
-              value: /opt/hermes
+              value: /opt/data
+            - name: HERMES_HOME
+              value: /opt/data
+            - name: HERMES_UID
+              value: "1000"
+            - name: HERMES_GID
+              value: "1000"
+            - name: HERMES_TUI_DIR
+              value: /opt/hermes/ui-tui
+            - name: PLAYWRIGHT_BROWSERS_PATH
+              value: /opt/hermes/.playwright
             # Inject envSecrets (1Password-backed ExternalSecrets)
             {{- range .Values.envSecrets }}
             - name: {{ .envVar }}
@@ -97,14 +112,10 @@ spec:
             - name: hermes-data
               mountPath: /opt/data
             {{- end }}
-            - name: hermes-home
-              mountPath: /opt/hermes
       volumes:
         {{- if .Values.hermes.dataVolume.enabled }}
         - name: hermes-data
           persistentVolumeClaim:
             claimName: {{ include "ai-agent.fullname" . }}-hermes-data
         {{- end }}
-        - name: hermes-home
-          emptyDir: {}
 {{- end }}
