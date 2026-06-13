@@ -62,8 +62,7 @@ spec:
         - name: agent
           image: {{ .Values.image }}
           imagePullPolicy: IfNotPresent
-          command: ["/opt/hermes/.venv/bin/hermes"]
-          args: ["gateway", "run"]
+          command: ["/bin/sh", "-c", "openclaw gateway --bind=lan --port {{ .Values.port }} --allow-unconfigured --verbose"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -76,7 +75,13 @@ spec:
               protocol: TCP
           env:
             - name: HOME
-              value: /opt/hermes
+              value: /home/agent
+            - name: OPENCLAW_STATE_DIR
+              value: /home/agent/.openclaw
+            - name: OPENCLAW_NO_RESPAWN
+              value: "1"
+            - name: OPENCLAW_WORKSPACE_DIR
+              value: /home/agent/workspace
             # Inject envSecrets (1Password-backed ExternalSecrets)
             {{- range .Values.envSecrets }}
             - name: {{ .envVar }}

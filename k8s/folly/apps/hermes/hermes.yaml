@@ -32,10 +32,17 @@ spec:
         name: infra
         namespace: flux-system
   values:
-    image: nousresearch/hermes-agent:latest
+    image: docker.io/jonpulsifer/ai-agents:latest
     port: 8642
+    hostname: hermes.lolwtf.ca
+    agentHomeMountPath: /home/agent
+    openclawStateDir: /home/agent/.openclaw
+    workspaceDir: /home/agent/workspace
+    command: "openclaw gateway --bind=lan --port 8642 --allow-unconfigured --verbose"
     ingress:
-      enabled: false
+      enabled: true
+      mode: shared
+      forwardedUser: hermes
     hermes:
       enabled: true
       dataVolume:
