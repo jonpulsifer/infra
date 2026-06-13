@@ -6,9 +6,9 @@
 # the "Homelab" vault with the properties listed below. The ExternalSecrets
 # below reference these items and will fail to sync until they are created:
 #
-#   1. "hermes slack bot token"  — property: "bot-token"
-#   2. "hermes slack app token"  — property: "app-token"
-#   3. "hermes openrouter api key" — property: "api-key"
+#   1. "rowbutt slack bot token"  — property: "credential"
+#   2. "rowbutt slack app token"  — property: "credential"
+#   3. "rowbutt openrouter api key" — property: "credential"
 #
 # Existing 1Password items used:
 #   - "rowbutt discord bot token"        — property: "credential"
@@ -73,6 +73,25 @@ spec:
         onePasswordItem: "Service Account Auth Token: rowbutt"
         property: credential
         secretKey: token
+      # Slack tokens (ExternalSecret: hermes-ext-slack-tokens → hermes-secret-slack-tokens)
+      - name: hermes-secret-slack-tokens
+        envVar: SLACK_BOT_TOKEN
+        property: bot-token
+      - name: hermes-secret-slack-tokens
+        envVar: SLACK_APP_TOKEN
+        property: app-token
+      # Discord bot token (ExternalSecret: hermes-ext-discord-token → hermes-secret-discord-token)
+      - name: hermes-secret-discord-token
+        envVar: DISCORD_BOT_TOKEN
+        property: bot-token
+      # ElevenLabs API key (ExternalSecret: hermes-ext-elevenlabs-api-key → hermes-secret-elevenlabs-api-key)
+      - name: hermes-secret-elevenlabs-api-key
+        envVar: ELEVENLABS_API_KEY
+        property: api-key
+      # OpenRouter API key (ExternalSecret: hermes-ext-openrouter-api-key → hermes-secret-openrouter-api-key)
+      - name: hermes-secret-openrouter-api-key
+        envVar: OPENROUTER_API_KEY
+        property: api-key
     resources:
       requests:
         memory: 256Mi
