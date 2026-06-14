@@ -2,10 +2,10 @@
   description = "the homelab";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
     nixos-hardware.url = "github:nixos/nixos-hardware";
     nixos-wsl = {
-      url = "github:nix-community/NixOS-WSL/release-25.11";
+      url = "github:nix-community/NixOS-WSL/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     unstable.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -25,8 +25,17 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    mise = {
+      url = "github:jdx/mise";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     keys = {
       url = "https://github.com/jonpulsifer.keys";
+      flake = false;
+    };
+    rowbuttkeys = {
+      url = "https://github.com/rowbutt.keys";
       flake = false;
     };
     wannabekeys = {

@@ -28,6 +28,7 @@
   services.resolved.enable = lib.mkForce false;
 
   environment.systemPackages = [
+    pkgs.wget
     pkgs.python3
     pkgs.pipx
   ];
@@ -35,5 +36,5 @@
   programs.nix-ld.enable = true;
 
   programs.zsh.enable = true;
-  system.stateVersion = "25.11";
+  system.stateVersion = "26.05";
 }

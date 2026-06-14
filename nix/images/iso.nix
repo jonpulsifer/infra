@@ -7,7 +7,7 @@
   ...
 }:
 let
-  disko = inputs.disko.packages.${pkgs.system}.disko;
+  disko = inputs.disko.packages.${pkgs.stdenv.hostPlatform.system}.disko;
 
   homelab-install = pkgs.writeShellApplication {
     name = "homelab-install";

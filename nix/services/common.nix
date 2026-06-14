@@ -6,6 +6,7 @@
 }:
 {
   imports = [
+    ../system/chezmoi.nix
     ../system/ddnsd.nix
     ../system/nixos.nix
     ../system/ssh.nix

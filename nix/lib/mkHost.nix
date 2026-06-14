@@ -40,10 +40,15 @@ in
     let
       system = cfg.system or "x86_64-linux";
       tags = cfg.tags or [ ];
+      baseModules = [
+        ../system/ssh.nix
+        ../system/user.nix
+      ];
       modules = if cfg ? modules then cfg.modules else [ (k8sModule name cfg) ];
     in
     nixosSystem {
-      inherit system modules;
+      inherit system;
+      modules = baseModules ++ modules;
       specialArgs = { inherit inputs name tags; };
     };
 

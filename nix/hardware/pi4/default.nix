@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  pkgs,
   inputs,
   modulesPath,
   ...
@@ -29,7 +28,7 @@
   };
 
   boot = {
-    kernelPackages = lib.mkForce pkgs.linuxPackages_rpi4;
+    zfs.forceImportRoot = false;
     kernelParams = [
       "console=tty0"
       "cma=256M"

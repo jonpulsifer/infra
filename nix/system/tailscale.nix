@@ -39,7 +39,7 @@ in
   # dnssec = false is required for tailscale to work
   services.resolved = {
     enable = true;
-    dnssec = "false";
+    settings.Resolve.DNSSEC = "false";
   };
 
   services.tailscale =
