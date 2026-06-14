@@ -24,6 +24,10 @@ krew = "latest"
 
 {{- if eq .chezmoi.os "linux" }}
 btop = "latest"
-gcloud = "latest"
 neovim = "latest"
+{{- if contains "microsoft" .chezmoi.kernel.osrelease }}
+gcloud = "latest"
+claude-code = "latest"
+pi = "latest"
+{{- end }}
 {{- end }}
