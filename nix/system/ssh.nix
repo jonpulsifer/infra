@@ -40,9 +40,6 @@ in
   services.getty.greetingLine = warning;
   services.getty.helpLine = "";
 
-  # Pre-auth SSH banner (mirrors the console warning).
-  services.openssh.banner = warning;
-
   # Post-auth, SSH-only login banner: hostname · build date · rev, with a live
   # load average coloured green (chill) -> yellow (busy) -> red (cooking).
   environment.loginShellInit = ''
@@ -73,6 +70,8 @@ in
       KbdInteractiveAuthentication = false;
       PasswordAuthentication = false;
       PermitRootLogin = "no";
+      # Pre-auth SSH banner (mirrors the console warning).
+      Banner = pkgs.writeText "ssh-banner" warning;
     };
 
     hostKeys = [
