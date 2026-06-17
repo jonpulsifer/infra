@@ -71,7 +71,7 @@ in
       PasswordAuthentication = false;
       PermitRootLogin = "no";
       # Pre-auth SSH banner (mirrors the console warning).
-      Banner = pkgs.writeText "ssh-banner" warning;
+      Banner = "${pkgs.writeText "ssh-banner" warning}";
     };
 
     hostKeys = [
