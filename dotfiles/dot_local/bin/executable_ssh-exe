@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# WSL: Windows OpenSSH (1Password agent, shared keys with git signing).
+# Elsewhere: passthrough to system ssh.
+if [[ -f /proc/sys/kernel/osrelease ]] &&
+  grep -qiE 'microsoft|wsl' /proc/sys/kernel/osrelease &&
+  command -v ssh.exe &>/dev/null; then
+  exec ssh.exe "$@"
+fi
+
+exec /usr/bin/ssh "$@"

@@ -1,0 +1,13 @@
+{
+  "lastChangelogVersion": "0.78.0",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "defaultThinkingLevel": "high",
+  "hideThinkingBlock": false,
+  "theme": "hipster-night",
+  "quietStartup": true,
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "enableInstallTelemetry": false
+}

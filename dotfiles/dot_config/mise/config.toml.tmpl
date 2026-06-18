@@ -1,0 +1,33 @@
+[settings]
+experimental = true
+
+[tools]
+bat = "latest"
+delta = "latest"
+eza = "latest"
+fd = "latest"
+fzf = "latest"
+gh = "latest"
+jq = "latest"
+ripgrep = "latest"
+sd = "latest"
+1password-cli = "latest"
+
+# cloud stuff
+kubectl = "latest"
+helm = "latest"
+k9s = "latest"
+kubecolor = "latest"
+kubectx = "latest"
+kubens = "latest"
+krew = "latest"
+
+{{- if eq .chezmoi.os "linux" }}
+btop = "latest"
+neovim = "latest"
+{{- if contains "microsoft" .chezmoi.kernel.osrelease }}
+gcloud = "latest"
+claude-code = "latest"
+pi = "latest"
+{{- end }}
+{{- end }}

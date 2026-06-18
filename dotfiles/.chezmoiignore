@@ -1,0 +1,21 @@
+# Repository metadata/docs that should not be installed into $HOME.
+LICENSE
+README.md
+install
+glamanon.jpeg
+.gitignore
+.github/
+.tools/
+
+# Agent instructions are for this repository only.
+AGENT.md
+AGENTS.md
+CLAUDE.md
+
+# Development-only sources/templates used by this repo.
+Brewfile
+mise.toml
+skills/
+
+# Local agent state; managed Claude config lives under dot_claude/.
+.claude/settings.local.json

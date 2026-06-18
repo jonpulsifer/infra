@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# yeet: commit message + optional gh pr create (gh-aipr style).
+# Prefers `pi -p` to generate the message; falls back to a randomly
+# generated whimsical message when pi is unavailable.
+# Stage changes first; this script never runs git add.
+#
+# Env: YEET_PI_MODEL (passed to pi --model), YEET_DIFF_MAX (default 256KiB),
+# YEET_PR_DIFF_MAX (default same as YEET_DIFF_MAX for PR body generation).
+
+err() {
+  echo "yeet error: $*" >&2
+  exit 1
+}
+info() { echo "yeet: $*" >&2; }
+
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+  err "Not in a git repository."
+fi
+
+if git diff --cached --quiet; then
+  err "No changes staged. Stage files with git add, then run yeet again."
+fi
+
+current_branch=$(git branch --show-current)
+if [[ -z "$current_branch" ]]; then
+  err "Detached HEAD is not supported. Checkout a branch first."
+fi
+
+default_branch() {
+  local b
+  b=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||' || true)
+  if [[ -n "$b" ]]; then
+    printf '%s' "$b"
+    return
+  fi
+  if command -v gh &>/dev/null && gh repo view &>/dev/null; then
+    b=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name // empty' 2>/dev/null || true)
+    if [[ -n "$b" ]]; then
+      printf '%s' "$b"
+      return
+    fi
+  fi
+  for cand in main master; do
+    if git show-ref --verify --quiet "refs/remotes/origin/${cand}" 2>/dev/null; then
+      printf '%s' "$cand"
+      return
+    fi
+  done
+  printf '%s' "main"
+}
+
+repo_default=$(default_branch)
+
+DIFF_MAX=${YEET_DIFF_MAX:-$((256 * 1024))}
+PR_DIFF_MAX=${YEET_PR_DIFF_MAX:-$DIFF_MAX}
+
+diff_bytes=$(git diff --cached | wc -c | tr -d ' ')
+if ((diff_bytes > DIFF_MAX)); then
+  info "warning: staged diff is ${diff_bytes} bytes; truncating to ${DIFF_MAX} bytes for the model"
+  diff_context=$(git diff --cached | head -c "$DIFF_MAX")
+else
+  diff_context=$(git diff --cached)
+fi
+
+have_pi() { command -v pi &>/dev/null; }
+
+# pi -p: non-interactive, no tools, ephemeral session, no context files.
+# Reads the diff/body from stdin and merges it with the prompt arg.
+run_pi() {
+  local prompt=$1
+  local body=$2
+  local model_args=()
+  [[ -n "${YEET_PI_MODEL:-}" ]] && model_args+=(--model "$YEET_PI_MODEL")
+  printf '%s' "$body" | pi -p --no-tools --no-session -nc --thinking off "${model_args[@]}" "$prompt"
+}
+
+# Whimsical-but-technical fallback when pi is unavailable.
+random_commit() {
+  local types=(feat fix chore refactor perf style)
+  local verbs=(yeet summon conjure wrangle quantize defrag entangle nudge bless reticulate)
+  local nouns=(
+    "the staging area" "a handful of bytes" "the void" "stray photons"
+    "the entropy pool" "dangling pointers" "the heap" "some quantum state"
+    "the commit graph" "rogue semicolons" "the splines" "a few electrons"
+  )
+  local t=${types[RANDOM % ${#types[@]}]}
+  local v=${verbs[RANDOM % ${#verbs[@]}]}
+  local n=${nouns[RANDOM % ${#nouns[@]}]}
+  printf '%s: %s %s' "$t" "$v" "$n"
+}
+
+commit_prompt="Generate a single-line conventional commit message for the staged diff provided on stdin. Use imperative mood. Output only the subject line, no markdown, no quotes, no explanation."
+
+if have_pi; then
+  info "Generating commit message (pi)..."
+  commit_raw=$(run_pi "$commit_prompt" "$diff_context")
+  COMMIT_MSG=$(printf '%s' "$commit_raw" | head -n1 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  COMMIT_MSG=${COMMIT_MSG#\`}
+  COMMIT_MSG=${COMMIT_MSG%\`}
+  COMMIT_MSG=${COMMIT_MSG#\"}
+  COMMIT_MSG=${COMMIT_MSG%\"}
+  if [[ -z "$COMMIT_MSG" ]]; then
+    info "pi returned an empty message; falling back to a random one."
+    COMMIT_MSG=$(random_commit)
+  fi
+else
+  info "pi not found; generating a random commit message."
+  COMMIT_MSG=$(random_commit)
+fi
+
+info "Commit message: ${COMMIT_MSG}"
+git commit -m "$COMMIT_MSG"
+
+# Default branch: commit only (no push / PR).
+if [[ "$current_branch" == "$repo_default" ]]; then
+  info "Committed on default branch '${repo_default}'."
+  exit 0
+fi
+
+if ! command -v gh &>/dev/null; then
+  err "gh is required when not on the default branch."
+fi
+
+# Resolve upstream ref for diff vs default branch (gh-aipr style).
+upstream_ref="origin/${repo_default}"
+if ! git rev-parse --verify "$upstream_ref" &>/dev/null; then
+  upstream_ref="$repo_default"
+fi
+
+commit_log=$(git log --oneline "${upstream_ref}..HEAD" 2>/dev/null || git log --oneline -30)
+pr_diff=$(git diff "${upstream_ref}...HEAD" 2>/dev/null || git diff "HEAD~1..HEAD")
+pr_diff_bytes=$(printf '%s' "$pr_diff" | wc -c | tr -d ' ')
+if ((pr_diff_bytes > PR_DIFF_MAX)); then
+  info "warning: branch diff is ${pr_diff_bytes} bytes; truncating to ${PR_DIFF_MAX} bytes for PR body"
+  pr_diff=$(printf '%s' "$pr_diff" | head -c "$PR_DIFF_MAX")
+fi
+
+pr_prompt="You are helping open a GitHub pull request. The commit list and diff are provided on stdin. Write a concise PR description in Markdown.
+Use these sections exactly:
+## Summary
+## Changes
+No title line — body only. Be specific; no filler."
+
+pr_input=$(printf 'Commits:\n%s\n\nDiff (against %s):\n%s' "$commit_log" "$upstream_ref" "$pr_diff")
+
+if have_pi; then
+  info "Generating PR description (pi)..."
+  body_raw=$(run_pi "$pr_prompt" "$pr_input")
+  PR_BODY=$(printf '%s' "$body_raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+else
+  PR_BODY=""
+fi
+if [[ -z "$PR_BODY" ]]; then
+  PR_BODY="PR opened with yeet. Title: ${COMMIT_MSG}"
+fi
+
+repo_owner=$(gh repo view --json nameWithOwner --jq '.nameWithOwner | split("/")[0]' 2>/dev/null || true)
+if [[ -z "$repo_owner" ]]; then
+  err "Could not determine repository owner (gh repo view failed)."
+fi
+push_branch=$(git branch --show-current)
+pr_head="${repo_owner}:${push_branch}"
+
+info "Pushing branch..."
+git push -u origin HEAD
+
+pr_count=$(gh pr list --head "$pr_head" --json number --jq 'length' 2>/dev/null || echo "0")
+if [[ -z "$pr_count" ]]; then
+  pr_count=0
+fi
+
+if ((pr_count > 0)); then
+  info "Open PR already exists for ${pr_head}; skipping gh pr create."
+  exit 0
+fi
+
+info "Creating pull request..."
+body_file=$(mktemp "${TMPDIR:-/tmp}/yeet-pr-body.XXXXXX")
+trap 'rm -f "$body_file"' EXIT
+printf '%s' "$PR_BODY" >"$body_file"
+gh pr create --title "$COMMIT_MSG" --body-file "$body_file" "$@"
+trap - EXIT
+rm -f "$body_file"
