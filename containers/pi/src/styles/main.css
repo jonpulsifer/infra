@@ -1,0 +1,111 @@
+@import "tailwindcss";
+@import "./fonts.css";
+
+@theme {
+  --color-bg: #0a0a0f;
+  --color-surface: #18181b;
+  --color-border: #27272a;
+  --color-border-hover: #3f3f46;
+  --color-text: #e4e4e7;
+  --color-text-muted: #71717a;
+  --color-text-dim: #52525b;
+  --color-text-bright: #fafafa;
+  --font-sans: 'Geist', 'Inter', system-ui, sans-serif;
+}
+
+/* Complex styles that don't map cleanly to utilities */
+@layer components {
+  .text-gradient {
+    background: linear-gradient(135deg, #e4e4e7, #a1a1aa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .tool-card {
+    @apply bg-surface border border-border rounded-xl py-7 px-5 cursor-pointer no-underline text-inherit flex flex-col items-center gap-3;
+    transition: all 0.2s ease;
+  }
+
+  .tool-card:hover {
+    @apply border-border-hover -translate-y-0.5;
+    background: #1f1f23;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  }
+
+  .tool-card:active {
+    @apply translate-y-0;
+  }
+
+  .tool-icon {
+    @apply text-3xl w-14 h-14 flex items-center justify-center rounded-xl overflow-hidden;
+    background: #27272a;
+  }
+
+  .tool-icon img {
+    @apply w-full h-full object-contain p-2;
+  }
+
+  /* Terminal toolbar */
+  .toolbar {
+    @apply h-10 min-h-10 bg-surface border-b border-border flex items-center px-3 gap-3 z-10;
+  }
+
+  .back-btn {
+    @apply text-text-muted no-underline text-lg flex items-center py-1 px-2 rounded-md;
+    transition: all 0.15s;
+  }
+
+  .back-btn:hover {
+    @apply text-text-dim;
+    color: #a1a1aa;
+    background: #27272a;
+  }
+
+  .font-picker {
+    @apply appearance-none border border-border-hover rounded-md py-0.5 px-2 text-xs font-sans cursor-pointer outline-none;
+    background: #27272a;
+    color: #a1a1aa;
+    transition: all 0.15s;
+  }
+
+  .font-picker:hover {
+    @apply text-text;
+    border-color: #52525b;
+  }
+
+  .font-picker:focus {
+    border-color: #60a5fa;
+  }
+
+  .status-dot {
+    @apply w-1.5 h-1.5 rounded-full;
+    background: #52525b;
+    transition: background 0.3s;
+  }
+
+  .status-dot.connected { background: #22c55e; }
+  .status-dot.connecting { background: #eab308; animation: pulse 1.2s infinite; }
+  .status-dot.disconnected { background: #ef4444; }
+
+  .session-ended {
+    @apply hidden absolute inset-0 z-20 items-center justify-center flex-col gap-4;
+    background: rgba(10, 10, 15, 0.92);
+  }
+
+  .session-ended.visible { @apply flex; }
+
+  .session-ended a {
+    @apply no-underline py-2 px-5 rounded-lg text-sm font-semibold;
+    color: #0a0a0f;
+    background: #e4e4e7;
+    transition: background 0.15s;
+  }
+
+  .session-ended a:hover { background: #fafafa; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
