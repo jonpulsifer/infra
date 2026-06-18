@@ -12,6 +12,7 @@
     ../system/ssh.nix
     ../system/tailscale.nix
     ../system/user.nix
+    ../profiles/mcp-nixos.nix
   ];
 
   networking = {
@@ -61,4 +62,9 @@
   services.cron.enable = true;
 
   users.mutableUsers = lib.mkDefault false;
+
+  # Enable mcp-nixos MCP server on all homelab hosts.
+  # Exposes the `mcp-nixos` CLI and writes ~/.pi/agent/mcp.json for the pi
+  # coding agent so AI assistants stop hallucinating NixOS package names.
+  programs.mcp-nixos.enable = true;
 }

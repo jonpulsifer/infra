@@ -30,6 +30,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    mcp-nixos = {
+      url = "github:utensils/mcp-nixos";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     keys = {
       url = "https://github.com/jonpulsifer.keys";
       flake = false;
@@ -82,7 +87,7 @@
           inherit system;
           config.allowUnfree = true;
         }
-      );
+      ) // { inherit (inputs) mcp-nixos; };
     in
     rec {
       nixosConfigurations = {
