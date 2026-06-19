@@ -1,5 +1,5 @@
 module "network" {
-  source = "github.com/jonpulsifer/terraform-modules/gce-vpc"
+  source = "../../../modules/gce-vpc"
   providers = {
     google      = google.free-tier
     google-beta = google-beta.free-tier

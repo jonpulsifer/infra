@@ -21,7 +21,7 @@
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_network"></a> [network](#module\_network) | github.com/jonpulsifer/terraform-modules/gce-vpc | n/a |
+| <a name="module_network"></a> [network](#module\_network) | ../../../modules/gce-vpc | n/a |
 
 ## Resources
 
