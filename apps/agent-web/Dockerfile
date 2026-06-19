@@ -1,5 +1,13 @@
-# pi — openclaw agent with ghostty-web terminal UI
-# Multi-stage: ghostty-builder (zig+wasm), pty-builder (node-pty), frontend-builder, final
+# apps/agent-web — ghostty-web terminal + PTY server + openclaw gateway.
+#
+# Build context is the REPO ROOT (the frontend lives in packages/agent-web-ui).
+# Two images are produced from this one Dockerfile via --build-arg AGENT_SET:
+#   AGENT_SET=full  -> docker.io/jonpulsifer/ai-agents (claude-code, opencode, pi, openclaw)
+#   AGENT_SET=pi    -> docker.io/jonpulsifer/pi         (openclaw only)
+#
+#   docker build -f apps/agent-web/Dockerfile --build-arg AGENT_SET=full .
+
+# ── Stage 1: Build ghostty-web (WASM + JS) ──────────────────
 FROM node:24-bookworm-slim AS ghostty-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,40 +42,53 @@ RUN npm install @lydell/node-pty ws
 FROM oven/bun:latest AS frontend-builder
 
 WORKDIR /build
-COPY package.json bun.lock ./
+COPY packages/agent-web-ui/package.json packages/agent-web-ui/bun.lock ./
 RUN bun install --frozen-lockfile
-COPY src/ src/
-COPY public/ public/
-COPY build.ts ./
+COPY packages/agent-web-ui/src/ src/
+COPY packages/agent-web-ui/public/ public/
+COPY packages/agent-web-ui/build.ts ./
 RUN bun run build
 
 # ── Stage 4: Final image ────────────────────────────────────
+# Base + init follow the upstream openclaw Docker guidance
+# (https://docs.openclaw.ai/install/docker): node:24-bookworm-slim with tini
+# as PID 1 for signal handling and zombie reaping (the PTY layer spawns shells).
 FROM node:24-bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       dnsutils \
       git \
       gnupg \
-      iproute2 \
       jq \
-      lsof \
+      iproute2 \
       make \
-      man-db \
+      openssh-client \
+      lsof \
       procps \
-      ripgrep \
+      iputils-ping \
+      iperf3 \
+      net-tools \
+      ncat \
+      nmap \
+      fzf \
+      bat \
+      fd-find \
       rsync \
+      ripgrep \
       strace \
+      tree \
+      tcpdump \
       tini \
+      traceroute \
+      yq \
       unzip \
       wget \
       xz-utils \
       zip \
-      fzf \
-      bat \
-      fd-find \
-      yq \
+      man-db \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/github-cli.gpg \
@@ -95,13 +116,36 @@ RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
     apt-get update && apt-get install -y --no-install-recommends 1password-cli && \
     rm -rf /var/lib/apt/lists/*
 
-# bun runtime + openclaw (NO claude, NO opencode)
-ENV BUN_INSTALL=/usr/local
+# bun runtime — reuse the binary from the frontend build stage (oven/bun)
 COPY --from=frontend-builder /usr/local/bin/bun /usr/local/bin/bun
-RUN bun add -g openclaw \
- && test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
 
-# mise — shims in /usr/local/bin for non-interactive shells
+# Agent CLIs, installed globally with bun (not npm).
+# BUN_INSTALL=/usr/local makes bun write bin shims to /usr/local/bin — always
+# on PATH, including when the chart overrides PATH for npmTools — and packages
+# under /usr/local/install/global. We ship the latest openclaw and then assert
+# its prebuilt Control UI is present, so a bad upstream release fails the build
+# instead of serving 503s at runtime.
+ENV BUN_INSTALL=/usr/local
+
+# openclaw is the gateway and is installed in every variant.
+# renovate: datasource=npm versioning=npm; packageName=openclaw
+RUN bun add -g openclaw \
+    && test -f /usr/local/install/global/node_modules/openclaw/dist/control-ui/index.html
+
+# AGENT_SET=full adds the coding-agent CLIs; AGENT_SET=pi ships openclaw only.
+ARG AGENT_SET=full
+# renovate: datasource=npm versioning=npm; packageName=@anthropic-ai/claude-code
+# renovate: datasource=npm versioning=npm; packageName=opencode-ai
+# renovate: datasource=npm versioning=npm; packageName=@earendil-works/pi-coding-agent
+RUN if [ "$AGENT_SET" = "full" ]; then \
+      bun add -g @anthropic-ai/claude-code opencode-ai \
+      && bun add -g --ignore-scripts @earendil-works/pi-coding-agent ; \
+    fi
+
+# Install mise system-wide so it survives the /home/agent runtime volume mount.
+# MISE_INSTALL_PATH: where the mise binary itself lives (on PATH already).
+# MISE_SHIMS_DIR: where tool shims live — put them in /usr/local/bin so they're on
+#   PATH for non-interactive shells (exec, cron, etc.) too, not just interactive bash.
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
       | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_SHIMS_DIR=/usr/local/bin sh \
     && echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> /etc/bash.bashrc \
@@ -113,24 +157,29 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
 COPY --from=ghostty-builder /build/dist /opt/ghostty-web/dist
 COPY --from=ghostty-builder /build/ghostty-vt.wasm /opt/ghostty-web/ghostty-vt.wasm
 COPY --from=pty-builder /build/node_modules /opt/ghostty-web/node_modules
+
+# Frontend build output (HTML, CSS, JS, icons, fonts)
 COPY --from=frontend-builder /build/dist /opt/ghostty-web/app
 
-# Server
-COPY server.js /opt/ghostty-web/server.js
+# Server + helpers
+COPY packages/agent-web-ui/server.js /opt/ghostty-web/server.js
+COPY apps/agent-web/agent-snapshot.sh /usr/local/bin/agent-snapshot
+RUN chmod 0755 /usr/local/bin/agent-snapshot
 
-# Agent user
+# Agent user (non-root, dedicated to agent workloads)
 RUN groupadd -g 1337 agent \
     && useradd -m -u 1337 -g agent -s /bin/bash agent
 
 WORKDIR /home/agent
 RUN chown -R agent:agent /home/agent
 
+# Persist agent home (tool configs, shell history, openclaw state, etc.)
 VOLUME /home/agent
 
 EXPOSE 8080
 EXPOSE 18789
-
 USER agent:agent
+
 ENV HOME=/home/agent
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

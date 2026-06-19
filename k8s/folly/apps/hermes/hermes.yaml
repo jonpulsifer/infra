@@ -24,7 +24,7 @@ spec:
   interval: 5m0s
   chart:
     spec:
-      chart: ../../../../charts/ai-agent
+      chart: packages/charts/ai-agent
       version: ">=0.1.2"
       interval: 10m0s
       sourceRef:

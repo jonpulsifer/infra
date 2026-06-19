@@ -8,7 +8,7 @@ spec:
   interval: 1h
   chart:
     spec:
-      chart: charts/ai-agent
+      chart: packages/charts/ai-agent
       reconcileStrategy: Revision
       sourceRef:
         kind: GitRepository

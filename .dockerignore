@@ -1,0 +1,12 @@
+# Root build context is used only by apps/agent-web (context = repo root so the
+# Dockerfile can pull source from packages/agent-web-ui). Ship just those trees;
+# everything else (k8s, terraform, nix, .git, build output) stays out of context.
+*
+!apps
+!packages
+
+# Even within the whitelisted trees, never send dependency/build artifacts.
+**/node_modules
+**/dist
+**/.cache
+**/*.log

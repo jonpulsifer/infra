@@ -8,7 +8,7 @@ spec:
   interval: 1h
   chart:
     spec:
-      chart: charts/app
+      chart: packages/charts/app
       sourceRef:
         kind: GitRepository
         name: infra

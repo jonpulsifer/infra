@@ -4,6 +4,11 @@
 .github/
 .gitignore
 .sops.yaml
+.dockerignore
+package.json
+# container source — Flux only needs k8s manifests + packages/charts
+/apps/
+/images/
 /argo/
 /cloudflare/
 /gcp/
