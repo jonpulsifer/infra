@@ -180,3 +180,20 @@ alias chns='kubens'
 alias kube=kubectl
 alias k=kube
 alias boop='git boop'
+
+# Merge another GitHub repo into the current monorepo as a subdirectory,
+# preserving full history via git-filter-repo. Run from the monorepo root.
+# Usage: monorepo-merge <repo-name>   e.g. monorepo-merge containers
+monorepo-merge() {
+  local repo="$1" top branch
+  [[ -n "$repo" ]] || { echo "usage: monorepo-merge <repo-name>" >&2; return 2; }
+  top="$(pwd)"
+  gh repo clone "jonpulsifer/${repo}" "/tmp/${repo}" || return 1
+  branch="$(git -C "/tmp/${repo}" branch --show-current)"
+  ( cd "/tmp/${repo}" && git filter-repo --to-subdirectory-filter "${repo}" ) || return 1
+  git -C "${top}" remote add "temp-${repo}" "/tmp/${repo}"
+  git -C "${top}" fetch "temp-${repo}"
+  git -C "${top}" merge "temp-${repo}/${branch}" --allow-unrelated-histories -m "Merge ${repo}"
+  git -C "${top}" remote remove "temp-${repo}"
+  rm -rf "/tmp/${repo}"
+}

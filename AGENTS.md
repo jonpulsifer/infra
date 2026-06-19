@@ -143,13 +143,13 @@ Each directory is a standalone Terraform module. CI validates and auto-formats o
 
 ## Dotfiles Integration
 
-Home-manager user config is pulled from `github:jonpulsifer/dotfiles` via the `dotfiles` flake input. The relevant outputs consumed here are:
+Dotfiles live in-repo under `dotfiles/` (formerly the standalone `jonpulsifer/dotfiles` repo, merged in via `git filter-repo`). They are **chezmoi-managed**, not a flake input — there is no `dotfiles` flake input and no home-manager.
 
-- `dotfiles.homeModules.basic` — base home-manager config for all standard hosts (`nix/system/user.nix`)
-- `dotfiles.homeModules.full` — full dev stack for WSL image (`nix/images/wsl.nix`)
-- `dotfiles.overlays.default` — package overlays (includes `llm-agents.nix`, `shell-utils`)
+- The repo-root `.chezmoiroot` contains `dotfiles`, so chezmoi treats the `dotfiles/` subdirectory as its source root.
+- On NixOS hosts, `nix/system/chezmoi.nix` runs `chezmoi init github:jonpulsifer/infra` then `chezmoi apply` in an activation script (for the `jawn` user). `infra` is a public repo, so this clones without credentials.
+- The WSL image (`.github/workflows/nix-image-builder.yaml`) clones `github:jonpulsifer/infra` into the staged `~/.local/share/chezmoi` and applies via chezmoi, which honours `.chezmoiroot`.
 
-The dotfiles flake no longer exports `nixosModules` — use `homeModules` instead.
+Editing dotfiles (e.g. zsh config in `dotfiles/dot_config/zsh/`) ships to hosts on the next `chezmoi apply` / rebuild — no separate repo to update.
 
 ## Skills
 

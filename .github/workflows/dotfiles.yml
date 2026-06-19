@@ -2,8 +2,14 @@ name: dotfiles
 on:
   push:
     branches: [main]
+    paths:
+      - 'dotfiles/**'
+      - '.github/workflows/dotfiles.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'dotfiles/**'
+      - '.github/workflows/dotfiles.yml'
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,9 +23,10 @@ jobs:
       - name: Chezmoi dry-run
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          mkdir -p ~/.local/share && ln -sfn "${{ github.workspace }}" ~/.local/share/chezmoi
+          mkdir -p ~/.local/share && ln -sfn "${{ github.workspace }}/dotfiles" ~/.local/share/chezmoi
           chezmoi apply --dry-run
       - name: Shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          cd dotfiles
           shellcheck install dot_local/bin/executable_yeet dot_local/bin/executable_sssh .chezmoiscripts/run_once_install-mise.sh

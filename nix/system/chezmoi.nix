@@ -6,7 +6,9 @@
 }:
 let
   user = config.users.users.jawn;
-  dotfilesRepo = "github:jonpulsifer/dotfiles";
+  # Dotfiles now live in this monorepo under dotfiles/; the repo-root
+  # .chezmoiroot points chezmoi at that subdirectory.
+  dotfilesRepo = "github:jonpulsifer/infra";
 in
 lib.mkIf (user.isNormalUser or false) {
   environment.systemPackages = [ pkgs.chezmoi ];

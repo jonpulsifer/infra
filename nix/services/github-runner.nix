@@ -31,10 +31,6 @@ let
 in
 {
   services.github-runners = {
-    dotfiles = mkRunner {
-      repo = "dotfiles";
-      extraPackages = [ pkgs.cachix ];
-    };
     infra = mkRunner {
       repo = "infra";
       extraPackages = [ pkgs.cachix ];
@@ -43,6 +39,5 @@ in
   };
   nix.settings.trusted-users = [
     "github-runner-infra"
-    "github-runner-dotfiles"
   ];
 }

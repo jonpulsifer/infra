@@ -52,8 +52,11 @@ jobs:
           chezmoi_source="${staged_home}/.local/share/chezmoi"
           chezmoi_runtime="${PWD}/.cache/chezmoi"
 
-          mkdir -p "$(dirname "${chezmoi_source}")" "${chezmoi_runtime}"
-          git clone https://github.com/jonpulsifer/dotfiles.git "${chezmoi_source}"
+          mkdir -p "${chezmoi_source}" "${chezmoi_runtime}"
+          # Dotfiles are part of this repo (dotfiles/), already on disk from the
+          # checkout — seed the image's chezmoi source from it instead of
+          # re-cloning over the network.
+          cp -a "${GITHUB_WORKSPACE}/dotfiles/." "${chezmoi_source}/"
           nix build .#legacyPackages.x86_64-linux.chezmoi -o chezmoi-result
 
           # Seed chezmoi's config data map and override the kernel release there.
