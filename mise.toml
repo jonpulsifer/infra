@@ -50,6 +50,12 @@ run = [
   "bash -lc 'for d in terraform/argo terraform/cloudflare terraform/tailscale terraform/unifi terraform/vault terraform/google-workspace terraform/k8s terraform/gcp/organization terraform/gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done'",
 ]
 
+[tasks."tf:docs"]
+description = "Regenerate terraform-docs READMEs (inject) for every module with TF_DOCS markers"
+run = [
+  "bash -lc 'grep -rl BEGIN_TF_DOCS terraform --include=README.md | xargs -r -n1 dirname | sort -u | while read -r d; do echo \"==> $d\"; terraform-docs markdown table --output-file README.md --output-mode inject \"$d\" >/dev/null; done'",
+]
+
 [tasks."tf:plan"]
 description = "Run Terraform plan for one module (set TF_DIR)"
 run = [
