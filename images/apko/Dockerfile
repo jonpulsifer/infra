@@ -1,3 +1,5 @@
+# apko CLI image: needs root to set arbitrary file ownership in the OCI rootfs it builds.
+# trivy:ignore:AVD-DS-0002
 FROM alpine:edge
 # RUN apk add --no-cache apko
 ARG APKO_VERSION=0.6.0

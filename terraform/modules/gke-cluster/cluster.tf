@@ -63,10 +63,16 @@ resource "google_container_cluster" "lab" {
     master_ipv4_cidr_block  = local.master_cidr
   }
 
+  # Restrict control-plane access to explicitly authorized CIDRs (display_name => cidr).
+  # Default is empty: combined with enable_private_endpoint the control plane is not
+  # reachable from the public internet. Never default this to 0.0.0.0/0.
   master_authorized_networks_config {
-    cidr_blocks {
-      cidr_block   = "0.0.0.0/0"
-      display_name = "internetz"
+    dynamic "cidr_blocks" {
+      for_each = var.master_authorized_networks
+      content {
+        display_name = cidr_blocks.key
+        cidr_block   = cidr_blocks.value
+      }
     }
   }
 
