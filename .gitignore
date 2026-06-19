@@ -4,7 +4,6 @@
 result
 *.iso
 *.img
-systems/ubuntu/build
 *.backup
 *.wsl
 *.zstd
