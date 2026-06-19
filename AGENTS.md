@@ -146,7 +146,7 @@ Every Terraform root module lives under `terraform/`; each is a standalone modul
 
 First-party code and container/image builds, separate from the infra layers:
 
-- `apps/` – deployable services: `agent-web` (one Dockerfile, `--build-arg AGENT_SET={full,pi}`, publishes the `ai-agents` and `pi` images), `hermes`, `minecraft`, `thehive`, `cortex`, and `tidbyt` (Starlark/Pixlet Tidbyt apps)
+- `apps/` – deployable services: `agent-web` (one Dockerfile, `--build-arg AGENT_SET={full,pi}`, publishes the `ai-agents` and `pi` images), `hermes`, `minecraft`, `thehive`, `cortex`, `tidbyt` (Starlark/Pixlet Tidbyt apps), `ddnsd` (Go Cloudflare DDNS daemon, consumed by NixOS hosts via `nix/system/ddnsd.nix`), and `view-counter` (Go GCP Cloud Function deployed via `.github/workflows/view-counter.yml`)
 - `packages/` – reusable building blocks: `agent-web-ui` (shared TS/Bun frontend + PTY server, a root Bun workspace member) and `charts/` (the `app` and `ai-agent` Helm charts; Flux HelmReleases reference them as `packages/charts/<name>` against the `infra` GitRepository)
 - `images/` – base & tool OCI images (`base`, `openclaw`, `kubectl`, `atlantis`, `actions-runner`, …) plus `cloudlab-linux` (Packer/preseed VM-image build tooling)
 
@@ -179,3 +179,4 @@ Available skills:
 - `terraform` — Terraform workflow, module layout, CI behaviour
 - `kubernetes-gitops` — FluxCD reconciliation, networking, SOPS secrets
 - `multi-cluster` — Add or modify shared resources across folly and offsite clusters using the base/ pattern
+- `onboard-repo` — Vendor an external jonpulsifer repo into apps/packages/images with history, then rewire its consumers
