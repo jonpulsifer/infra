@@ -117,7 +117,7 @@ Reusable configuration profiles in `profiles/`:
 
 Custom service modules in `services/`:
 
-- **`k8s/`** - Kubernetes cluster configuration
+- **`k8s/`** - NixOS service helpers for Kubernetes (Cilium CNI, Longhorn storage, gVisor runtime) — not the cluster manifests, which live in `clusters/`
 - **`common.nix`** - Base server configuration with SSH, Tailscale, monitoring
 - **`jellyfin.nix`** - Media server
 - **`github-runner.nix`** - Self-hosted GitHub Actions runners
