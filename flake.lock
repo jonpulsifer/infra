@@ -1,25 +1,5 @@
 {
   "nodes": {
-    "ddnsd": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1765933034,
-        "narHash": "sha256-VQ0U0zr9FiKC1sNGnl7YwckHhlrpGcV5sJebm45MpEw=",
-        "owner": "jonpulsifer",
-        "repo": "ddnsd",
-        "rev": "c6434ba3ea72e65980b7b9089768ad34e3a9cbf2",
-        "type": "github"
-      },
-      "original": {
-        "owner": "jonpulsifer",
-        "repo": "ddnsd",
-        "type": "github"
-      }
-    },
     "disko": {
       "inputs": {
         "nixpkgs": [
@@ -198,7 +178,6 @@
     },
     "root": {
       "inputs": {
-        "ddnsd": "ddnsd",
         "disko": "disko",
         "hosts": "hosts",
         "keys": "keys",

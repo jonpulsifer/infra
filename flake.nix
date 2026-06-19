@@ -20,11 +20,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    ddnsd = {
-      url = "github:jonpulsifer/ddnsd";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     mise = {
       url = "github:jdx/mise";
       inputs.nixpkgs.follows = "nixpkgs";

@@ -2,16 +2,17 @@
   config,
   lib,
   pkgs,
-  inputs,
   ...
 }:
 {
+  # ddnsd source is vendored in-repo under apps/ddnsd; the module and package
+  # build expression live alongside it rather than coming from a flake input.
   imports = [
-    inputs.ddnsd.nixosModules.default
+    ../../apps/ddnsd/module.nix
   ];
 
   nixpkgs.overlays = [
-    inputs.ddnsd.overlays.pkgs
+    (import ../overlays/ddnsd.nix)
   ];
 
   services.ddnsd = {
