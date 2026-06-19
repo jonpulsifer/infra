@@ -53,7 +53,7 @@ variable "node_metadata" {
 
 variable "metadata_cos" {
   description = "GCE instance metadata pairs assigned to the instances in the group"
-  type        = map
+  type        = map(any)
   default = {
     disable-legacy-endpoints = "true"
     enable-guest-attributes  = "false"
@@ -64,7 +64,7 @@ variable "metadata_cos" {
 
 variable "metadata_ubuntu" {
   description = "GCE instance metadata pairs assigned to the instances in the group"
-  type        = map
+  type        = map(any)
   default = {
     disable-legacy-endpoints = "true"
     enable-guest-attributes  = "true"
@@ -74,17 +74,17 @@ variable "metadata_ubuntu" {
 }
 
 variable "taints" {
-  type    = list
+  type    = list(any)
   default = []
 }
 
 variable "tags" {
-  type    = list
+  type    = list(any)
   default = []
 }
 
 variable "labels" {
-  type    = map
+  type    = map(any)
   default = {}
 }
 

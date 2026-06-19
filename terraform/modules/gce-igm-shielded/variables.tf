@@ -92,7 +92,7 @@ variable "protocol" {
 }
 
 variable "target_pools" {
-  type        = list
+  type        = list(any)
   description = "List of the target pools this igm belongs to"
   default     = []
 }

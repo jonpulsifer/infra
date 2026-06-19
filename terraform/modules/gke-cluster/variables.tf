@@ -114,7 +114,7 @@ variable "kubernetes_version" {
 
 variable "network_config" {
   description = "VPC network configuration for the cluster"
-  type        = map
+  type        = map(any)
 
   default = {
     enable_natgw   = false
@@ -130,12 +130,12 @@ variable "network_config" {
 
 variable "master_authorized_networks" {
   description = "Map of cidrs that can access the master network"
-  type        = map
+  type        = map(any)
   default     = {}
 }
 
 variable "labels" {
   description = "List of Kubernetes labels to apply to the nodes"
-  type        = map
+  type        = map(any)
   default     = {}
 }
