@@ -1,3 +1,5 @@
+# Base Ubuntu OS image that other images extend; consumers set their own USER.
+# trivy:ignore:AVD-DS-0002
 # https://github.com/tianon/docker-brew-ubuntu-core
 FROM scratch
 ADD ubuntu-jammy-oci-amd64-root.tar.gz /
