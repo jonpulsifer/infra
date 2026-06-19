@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "k8s/apps/**/argo/**"
-      - "argo/**"
+      - "clusters/**/argo/**"
+      - "terraform/argo/**"
 
 jobs:
   diff-preview:
