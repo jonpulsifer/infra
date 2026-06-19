@@ -1,6 +1,6 @@
-# litebrite
+# tidbyt
 
-This repo is where you'll find the little applications I built for my [Tidbyt][tidbyt].
+The little applications I built for my [Tidbyt][tidbyt] (formerly the standalone `litebrite` repo).
 
 The applications are written in [Starlark][starlark] and compiled with [Pixlet][pixlet]. Learn more at [tidbyt.dev](https://tidbyt.dev/).
 
