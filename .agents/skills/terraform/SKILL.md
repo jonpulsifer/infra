@@ -1,19 +1,23 @@
 ---
 name: terraform
-description: Work with Terraform modules in this infra repo (gcp, cloudflare, vault, argo, unifi). Covers workflow, CI behaviour, and module layout.
+description: Work with Terraform modules in this infra repo (everything under terraform/: gcp, cloudflare, vault, argo, unifi, tailscale, google-workspace, k8s). Covers workflow, CI behaviour, and module layout.
 ---
 
 ## Module Layout
 
-Each subdirectory is an independent root module with its own state:
+All Terraform lives under `terraform/`. Each subdirectory below is an independent root module with its own state:
 
 ```
-gcp/organization/       # org-level IAM, folders, billing
-gcp/projects/<name>/    # per-project resources
-cloudflare/             # DNS, tunnels, security rules
-vault/                  # auth backends, PKI, policies
-argo/                   # ArgoCD application definitions
-unifi/                  # VLANs, BGP, clients
+terraform/gcp/organization/       # org-level IAM, folders, billing
+terraform/gcp/projects/<name>/    # per-project resources
+terraform/cloudflare/             # DNS, tunnels, security rules
+terraform/vault/                  # auth backends, PKI, policies
+terraform/argo/                   # ArgoCD application definitions
+terraform/unifi/                  # VLANs, BGP, clients
+terraform/tailscale/              # devices, routes, ACL policy
+terraform/google-workspace/       # Workspace users, groups, domains
+terraform/k8s/                    # Flux bootstrap for both clusters
+terraform/modules/                # reusable modules consumed via relative paths
 ```
 
 ## Standard Workflow
@@ -23,7 +27,7 @@ changes; Atlantis autoplans on the changed module(s). Review the plan comment, t
 comment `atlantis apply` — a successful apply automerges the PR.
 
 ```bash
-cd <module-dir>
+cd terraform/<module-dir>
 terraform init
 terraform plan     # local inspection only
 ```
@@ -57,5 +61,6 @@ terraform fmt -recursive
 ## Notes
 
 - Terraform state is remote; `.tfstate` files are gitignored.
-- `gcp/organization/` manages the GCP org hierarchy — changes affect all projects.
-- `cloudflare/` Tunnel modules control external ingress for folly and offsite clusters.
+- `terraform/gcp/organization/` manages the GCP org hierarchy — changes affect all projects.
+- `terraform/cloudflare/` Tunnel modules control external ingress for folly and offsite clusters.
+- `terraform/modules/` are reusable (no backend); root modules reference them via relative paths (e.g. homelab-ng → `../../../modules/gce-vpc`).
