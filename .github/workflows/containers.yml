@@ -45,6 +45,11 @@ jobs:
             watch: |
               apps/agent-web/**
               packages/agent-web-ui/**
+          # apps/ddnsd: Go Cloudflare dynamic-DNS daemon. Consumed by NixOS
+          # hosts via nix/system/ddnsd.nix; the image is published for parity.
+          - image: ddnsd
+            context: apps/ddnsd
+            watch: apps/ddnsd/**
           # Tool/base images build from their own directory.
           - image: bashcurljq
             context: images/bashcurljq

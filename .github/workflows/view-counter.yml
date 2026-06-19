@@ -1,0 +1,41 @@
+name: view-counter
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/view-counter/**'
+      - '.github/workflows/view-counter.yml'
+
+concurrency:
+  group: view-counter-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
+          service_account: github-actions@homelab-ng.iam.gserviceaccount.com
+
+      - id: deploy
+        uses: google-github-actions/deploy-cloud-functions@ab10d6b9be21630aafc15ced4c464c16cd6640d6 # v4
+        with:
+          name: view-counter
+          # 2nd-gen (Cloud Run) function on the latest Go runtime.
+          runtime: go126
+          region: northamerica-northeast1
+          source_dir: apps/view-counter
+          entry_point: ViewCounter
+          project_id: homelab-ng
+          service_account: view-counter@homelab-ng.iam.gserviceaccount.com
+          environment_variables: GCP_PROJECT=homelab-ng
