@@ -4,28 +4,61 @@ on:
     branches:
       - main
     paths:
-      - 'containers/**'
+      - 'apps/**'
+      - 'packages/**'
+      - 'images/**'
       - '.github/workflows/containers.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'containers/**'
+      - 'apps/**'
+      - 'packages/**'
+      - 'images/**'
       - '.github/workflows/containers.yml'
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        container: ["ai-agents", "bashcurljq", "kubectl", "actions-runner", "atlantis"]
+        include:
+          # apps/agent-web produces two images from one Dockerfile (context = repo
+          # root so it can pull source from packages/agent-web-ui).
+          - image: ai-agents
+            context: .
+            file: apps/agent-web/Dockerfile
+            build-args: AGENT_SET=full
+            watch: |
+              apps/agent-web/**
+              packages/agent-web-ui/**
+          - image: pi
+            context: .
+            file: apps/agent-web/Dockerfile
+            build-args: AGENT_SET=pi
+            watch: |
+              apps/agent-web/**
+              packages/agent-web-ui/**
+          # Tool/base images build from their own directory.
+          - image: bashcurljq
+            context: images/bashcurljq
+            watch: images/bashcurljq/**
+          - image: kubectl
+            context: images/kubectl
+            watch: images/kubectl/**
+          - image: actions-runner
+            context: images/actions-runner
+            watch: images/actions-runner/**
+          - image: atlantis
+            context: images/atlantis
+            watch: images/atlantis/**
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - id: changed-files
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
-          files: |
-            containers/${{ matrix.container }}/**
+          files: ${{ matrix.watch }}
       - name: Set up QEMU
         if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
@@ -43,17 +76,19 @@ jobs:
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
         id: meta
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.container }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image }}
           flavor: |
             latest=true
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
-      - name: Build and push ${{ matrix.container }}
+      - name: Build and push ${{ matrix.image }}
         if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
           push: ${{ github.event_name != 'pull_request' }}
-          context: containers/${{ matrix.container }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.build-args }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

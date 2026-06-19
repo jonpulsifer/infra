@@ -2,7 +2,7 @@
   "mcpServers": {
     "nixos": {
       "command": "nix",
-      "args": ["run", "github:utensils/mcp-nixos", "--"]
+      "args": ["run", "github:utensils/mcp-nixos/0ef99b6a5674e60ca315dc55a0f458673bb1e4fa", "--"]
     }
   }
 }

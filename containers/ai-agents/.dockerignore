@@ -1,9 +1,0 @@
-node_modules
-dist
-.cache
-.git
-*.log
-*.md
-.gitignore
-.dockerignore
-tsconfig.json

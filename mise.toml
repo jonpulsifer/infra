@@ -40,14 +40,14 @@ run = "terraform fmt -recursive"
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
-  "bash -lc 'for d in argo cloudflare tailscale unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done'",
+  "bash -lc 'for d in terraform/argo terraform/cloudflare terraform/tailscale terraform/unifi terraform/vault terraform/google-workspace terraform/k8s terraform/gcp/organization terraform/gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done'",
 ]
 
 [tasks."tf:validate"]
 description = "Validate Terraform modules"
 depends = ["tf:init"]
 run = [
-  "bash -lc 'for d in argo cloudflare tailscale unifi vault gcp/organization gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done'",
+  "bash -lc 'for d in terraform/argo terraform/cloudflare terraform/tailscale terraform/unifi terraform/vault terraform/google-workspace terraform/k8s terraform/gcp/organization terraform/gcp/projects/*; do [ -d \"$d\" ] || continue; echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done'",
 ]
 
 [tasks."tf:plan"]

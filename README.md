@@ -7,14 +7,13 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 ```
 .
 ├── nix/           # NixOS configurations for bare metal hosts
-├── k8s/           # Kubernetes manifests and configurations
-├── gcp/           # Google Cloud Platform (Terraform)
-├── cloudflare/    # Cloudflare DNS and security (Terraform)
-├── tailscale/     # Tailscale tailnet configuration (Terraform)
-├── argo/          # ArgoCD applications
-├── vault/         # HashiCorp Vault configurations
-├── unifi/         # UniFi network controller configs
-└── workspace/     # Development workspace utilities
+├── clusters/      # Kubernetes GitOps manifests (folly, offsite, base) — FluxCD
+├── terraform/     # All Terraform: gcp, cloudflare, tailscale, argo, vault,
+│                  #   unifi, google-workspace, k8s (Flux bootstrap), modules/
+├── apps/          # Deployable first-party services (agent-web, hermes, tidbyt, …)
+├── packages/      # Shared building blocks (agent-web-ui, charts/)
+├── images/        # Base & tool OCI images + cloudlab-linux VM build tooling
+└── dotfiles/      # chezmoi-managed dotfiles
 ```
 
 ## 🚀 Quick Start
@@ -61,10 +60,9 @@ See [`nix/README.md`](./nix/README.md) for detailed NixOS documentation.
 ### Terraform Infrastructure
 
 ```bash
-cd gcp/projects/<project>
+cd terraform/gcp/projects/<project>
 terraform init
-terraform plan
-terraform apply
+terraform plan          # local inspection only — applies run through Atlantis on the PR
 ```
 
 ## 🏗️ Infrastructure Components
@@ -91,18 +89,18 @@ Managed with:
 
 ### Cloud Resources
 
-**Google Cloud Platform** (`gcp/`):
+**Google Cloud Platform** (`terraform/gcp/`):
 - Compute instances
 - Cloud DNS
 - IAM and service accounts
 - Project configurations
 
-**Cloudflare** (`cloudflare/`):
+**Cloudflare** (`terraform/cloudflare/`):
 - DNS management
 - Security policies
 - Access controls
 
-**Tailscale** (`tailscale/`):
+**Tailscale** (`terraform/tailscale/`):
 - Tailnet policy, DNS, contacts, and settings
 - Device authorization, key expiry, and tag state
 
@@ -121,23 +119,14 @@ Managed with:
 ### `nix/` - NixOS Configuration
 Flake-based NixOS configurations for all physical and virtual machines. Modular structure with reusable profiles, services, and system configurations.
 
-### `k8s/` - Kubernetes Manifests
-Application deployments, services, and configurations for Kubernetes clusters.
+### `clusters/` - Kubernetes Manifests
+FluxCD GitOps manifests for the `folly` and `offsite` clusters, with shared resources in `clusters/base/`. The Flux bootstrap itself is Terraform (`terraform/k8s/`).
 
-### `gcp/` - Google Cloud
-Terraform configurations for GCP resources organized by project.
+### `terraform/` - Cloud, Network & Bootstrap
+All Terraform root modules: `gcp/` (resources by project), `cloudflare/` (DNS & security), `tailscale/`, `argo/` (ArgoCD apps), `vault/` (policies), `unifi/` (network controller), `google-workspace/`, and `k8s/` (Flux bootstrap). Reusable modules live in `terraform/modules/`.
 
-### `cloudflare/` - DNS & CDN
-Terraform-managed DNS records and Cloudflare security policies.
-
-### `argo/` - GitOps Applications
-ArgoCD application definitions for declarative Kubernetes deployments.
-
-### `vault/` - Secrets Management
-HashiCorp Vault policies and configurations.
-
-### `unifi/` - Network Controller
-UniFi network device configurations and settings.
+### `apps/`, `packages/`, `images/` - Code & Builds
+First-party services (`apps/`), shared libraries and Helm charts (`packages/`), and base/tool container + VM images (`images/`).
 
 ## 🔐 Security
 

@@ -2,7 +2,7 @@
 name: validate-build
 description: >-
   Verify this repo builds and validates cleanly before commit: Kustomize
-  overlays. Use after editing k8s/
+  overlays. Use after editing clusters/
 ---
 
 ## Environment
@@ -20,15 +20,15 @@ Build the **kustomization root that includes your change** (the directory with `
 Use either `kubectl kustomize` or the mise-managed standalone `kustomize`:
 
 ```bash
-kubectl kustomize k8s/folly/sandbox
-kubectl kustomize k8s/offsite/monitoring
+kubectl kustomize clusters/folly/sandbox
+kubectl kustomize clusters/offsite/monitoring
 ```
 
-When validating shared base changes, build **both** clusters since both reference `k8s/base/`:
+When validating shared base changes, build **both** clusters since both reference `clusters/base/`:
 
 ```bash
 for cluster in folly offsite; do
-  kubectl kustomize "k8s/$cluster/networking/cert-manager/" && echo "OK: $cluster"
+  kubectl kustomize "clusters/$cluster/networking/cert-manager/" && echo "OK: $cluster"
 done
 ```
 
@@ -38,4 +38,4 @@ If `kubectl kustomize` fails with YAML errors, check for unquoted `:` inside pla
 
 For GitOps behaviour, SOPS, and Flux, see the `kubernetes-gitops` skill.
 
-CI also runs Terraform validation on changed modules and Trivy on `k8s/**` and `.tf`; local commands above catch most merge-blocking issues faster.
+CI also runs Terraform validation on changed modules and Trivy on `clusters/**` and `.tf`; local commands above catch most merge-blocking issues faster.

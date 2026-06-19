@@ -5,11 +5,11 @@ on:
       - main
     paths:
       - '**/*.tf'
-      - 'k8s/**'
+      - 'clusters/**'
   pull_request:
     paths:
       - '**/*.tf'
-      - 'k8s/**'
+      - 'clusters/**'
 
 jobs:
   changed-directories:

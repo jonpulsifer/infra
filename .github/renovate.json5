@@ -25,17 +25,17 @@
   rebaseWhen: 'conflicted',
   flux: {
     managerFilePatterns: [
-      '/k8s/.+\\.ya?ml$/',
+      '/clusters/.+\\.ya?ml$/',
     ],
   },
   'helm-values': {
     managerFilePatterns: [
-      '/k8s/.+\\.ya?ml$/',
+      '/clusters/.+\\.ya?ml$/',
     ],
   },
   kubernetes: {
     managerFilePatterns: [
-      '/k8s/.+\\.ya?ml$/',
+      '/clusters/.+\\.ya?ml$/',
     ],
   },
   nix: {
@@ -61,7 +61,7 @@
       customType: 'regex',
       description: 'Image overrides inside Flux Kustomization JSON6902 patches',
       managerFilePatterns: [
-        '/k8s/.+\\.ya?ml$/',
+        '/clusters/.+\\.ya?ml$/',
       ],
       matchStrings: [
         // # renovate: datasource=docker
@@ -283,7 +283,7 @@
     // ============================================================
     {
       matchManagers: ['flux'],
-      matchFileNames: ['k8s/folly/sources/git/gateway-api.yaml'],
+      matchFileNames: ['clusters/folly/sources/git/gateway-api.yaml'],
       enabled: false,
     },
   ],

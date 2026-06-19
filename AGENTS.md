@@ -27,8 +27,8 @@ nix develop
 
 This repo is GitOps-first: author desired state in git and let the operators apply it. Do not mutate live infra directly.
 
-- **Terraform** (`gcp/`, `cloudflare/`, `vault/`, `argo/`, `unifi/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
-- **Kubernetes** (`k8s/**`): changes deploy via **Flux** (and **ArgoCD** for apps sourced from external repos) on merge to `main`. Commit manifests; **never `kubectl apply`** to author state. `kubectl`, `flux get`, and `flux reconcile` are for inspection or forcing a sync. Use explicit contexts (`--context folly` / `--context offsite`) and namespaces.
+- **Terraform** (everything under `terraform/`: `gcp/`, `cloudflare/`, `vault/`, `argo/`, `unifi/`, `tailscale/`, `google-workspace/`, `k8s/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
+- **Kubernetes** (`clusters/**`): changes deploy via **Flux** (and **ArgoCD** for apps sourced from external repos) on merge to `main`. Commit manifests; **never `kubectl apply`** to author state. `kubectl`, `flux get`, and `flux reconcile` are for inspection or forcing a sync. Use explicit contexts (`--context folly` / `--context offsite`) and namespaces.
 - **NixOS** (`nix/**`): `nixos-rebuild` is the apply path (see Key Commands). State changes that may mutate live hosts should be called out before running.
 
 ## Key Commands
@@ -61,7 +61,7 @@ sudo nixos-rebuild switch --rollback
 ### Terraform
 
 ```bash
-cd <module-dir>   # e.g. gcp/projects/homelab-ng, cloudflare, vault, argo, unifi
+cd terraform/<module-dir>   # e.g. terraform/gcp/projects/homelab-ng, terraform/cloudflare, terraform/vault
 terraform init
 terraform plan    # local inspection only — applies go through Atlantis on the PR (see "How Changes Ship")
 
@@ -84,19 +84,19 @@ flux get kustomizations -A
 flux reconcile kustomization <name> -n flux-system
 
 # Decrypt a SOPS secret for inspection
-sops -d k8s/folly/networking/tailscale/secret.sops.yaml
+sops -d clusters/folly/networking/tailscale/secret.sops.yaml
 ```
 
 ### Secrets (SOPS)
 
-SOPS encrypts `data` and `stringData` fields in files matching `k8s/.*\.sops\.ya?ml`. The age key must be available.
+SOPS encrypts `data` and `stringData` fields in files matching `clusters/.*\.sops\.ya?ml`. The age key must be available.
 
 ```bash
 # Edit an encrypted file
-sops k8s/folly/config/cluster-secrets.sops.yaml
+sops clusters/folly/config/cluster-secrets.sops.yaml
 
 # Encrypt a new file (must match path regex in .sops.yaml)
-sops -e -i k8s/<cluster>/<path>.sops.yaml
+sops -e -i clusters/<cluster>/<path>.sops.yaml
 ```
 
 ## Architecture
@@ -113,32 +113,50 @@ NixOS configurations for all physical hosts, declared in `flake.nix`. Host confi
 
 Hosts fall into two groups: Kubernetes nodes (folly cluster: nuc/optiplex/riptide/800g2; offsite cluster: oldschool/retrofit) and standalone Pis (cloudpi4, homepi4, screenpi4).
 
-### Layer 2 – Kubernetes: `k8s/`
+### Layer 2 – Kubernetes: `clusters/`
 
 Two clusters managed with FluxCD kustomizations:
 
-- `k8s/folly/` – primary on-site cluster
-- `k8s/offsite/` – backup cluster
+- `clusters/folly/` – primary on-site cluster
+- `clusters/offsite/` – backup cluster
+- `clusters/base/` – resources shared by both clusters (referenced by path from each)
 
 Each cluster directory has `flux-system/` (FluxCD source-of-truth kustomizations), `networking/` (Cilium, cert-manager, Cloudflare tunnel, Tailscale, Gateway API, external-dns), `monitoring/` (kube-prometheus-stack, Loki, Grafana, promtail), `nodes/` (Intel device plugins, node-feature-discovery), and `storage/`.
 
 Cilium provides CNI + BGP load balancer (pools defined in `networking/cilium/ip-pools.yaml`). The Gateway API (`networking/gateway-api/`) handles ingress via a `cluster-gateway` with Cloudflare Tunnel as the external entry point.
 
-### Layer 3 – Cloud & Network: `gcp/`, `cloudflare/`, `vault/`, `argo/`, `unifi/`
+The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives in `terraform/k8s/` — not in `clusters/`.
 
-Each directory is a standalone Terraform module. CI validates and auto-formats on push to `main`.
+### Layer 3 – Cloud & Network: `terraform/`
 
-- `gcp/organization/` – org-level IAM, folders, projects, billing
-- `gcp/projects/<name>/` – per-project resources (homelab-ng, firebees, lolcorp, etc.)
-- `cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
-- `vault/` – AppRole/GCP/JWT auth backends, PKI, policies
-- `argo/` – ArgoCD application definitions (Terraform-managed)
-- `unifi/` – VLANs, BGP config, client management
+Every Terraform root module lives under `terraform/`; each is a standalone module. CI validates and auto-formats on push to `main`.
+
+- `terraform/gcp/organization/` – org-level IAM, folders, projects, billing
+- `terraform/gcp/projects/<name>/` – per-project resources (homelab-ng, firebees, lolcorp, etc.)
+- `terraform/cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
+- `terraform/vault/` – AppRole/GCP/JWT auth backends, PKI, policies
+- `terraform/argo/` – ArgoCD application definitions (Terraform-managed)
+- `terraform/unifi/` – VLANs, BGP config, client management
+- `terraform/tailscale/` – devices, routes, ACL policy
+- `terraform/google-workspace/` – Google Workspace users, groups, domains
+- `terraform/k8s/` – Flux bootstrap for both clusters
+- `terraform/modules/` – reusable modules (gce-vpc, gke-cluster, gke-nodepool, …) consumed by the roots via relative paths
+
+### Layer 4 – Applications, Packages & Images
+
+First-party code and container/image builds, separate from the infra layers:
+
+- `apps/` – deployable services: `agent-web` (one Dockerfile, `--build-arg AGENT_SET={full,pi}`, publishes the `ai-agents` and `pi` images), `hermes`, `minecraft`, `thehive`, `cortex`, and `tidbyt` (Starlark/Pixlet Tidbyt apps)
+- `packages/` – reusable building blocks: `agent-web-ui` (shared TS/Bun frontend + PTY server, a root Bun workspace member) and `charts/` (the `app` and `ai-agent` Helm charts; Flux HelmReleases reference them as `packages/charts/<name>` against the `infra` GitRepository)
+- `images/` – base & tool OCI images (`base`, `openclaw`, `kubectl`, `atlantis`, `actions-runner`, …) plus `cloudlab-linux` (Packer/preseed VM-image build tooling)
+
+`containers.yml` builds the images on changes under `apps/`, `packages/`, or `images/`.
 
 ### CI/CD
 
-- **`terraform.yml`**: validates changed `.tf` files, then auto-formats and regenerates terraform-docs on merge to `main`
-- **`trivy.yml`**: scans `.tf` and `k8s/**` for CRITICAL/HIGH IaC vulnerabilities
+- **`terraform.yml`**: validates changed `.tf` files (discovered dynamically), then auto-formats and regenerates terraform-docs on merge to `main`
+- **`trivy.yml`**: scans `.tf` and `clusters/**` for CRITICAL/HIGH IaC vulnerabilities
+- **`containers.yml`**: builds container images from `apps/`, `packages/`, `images/`
 - **Renovate**: opens PRs for Helm chart, container image, and Terraform provider updates automatically
 
 ## Dotfiles Integration

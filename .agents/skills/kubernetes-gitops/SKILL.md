@@ -6,7 +6,7 @@ description: Work with Kubernetes manifests and GitOps workflows for the folly a
 ## Cluster Structure
 
 ```
-k8s/
+clusters/
   base/      # Shared resources referenced by both clusters
   folly/     # Primary on-site (nuc, optiplex, riptide, 800g2)
   offsite/   # Backup cluster (oldschool, retrofit)
@@ -20,7 +20,7 @@ Both clusters share `sources/` (HelmRepository definitions) and `sandbox/` from 
 
 ## Making Changes
 
-Changes to `k8s/` deploy automatically via FluxCD when merged to `main`.
+Changes to `clusters/` deploy automatically via FluxCD when merged to `main`.
 
 ```bash
 # Check reconciliation status
@@ -50,10 +50,10 @@ Files matching `*.sops.yaml` are encrypted at rest. FluxCD decrypts via the clus
 
 ```bash
 # View/edit
-sops k8s/folly/networking/tailscale/secret.sops.yaml
+sops clusters/folly/networking/tailscale/secret.sops.yaml
 
 # Encrypt new file (must match path regex in .sops.yaml)
-sops -e -i k8s/<cluster>/<path>.sops.yaml
+sops -e -i clusters/<cluster>/<path>.sops.yaml
 ```
 
 Encrypted fields: `data` and `stringData` only (per `.sops.yaml`).
@@ -64,12 +64,12 @@ Atlantis (offsite) connects to ArgoCD (folly) to verify Terraform plans against 
 
 | Component | Location | Account |
 |-----------|----------|---------|
-| Atlantis HelmRelease | `k8s/offsite/apps/atlantis/helm-release.yaml` | Connects via `ARGOCD_AUTH_TOKEN` |
-| Atlantis secret | `k8s/offsite/apps/atlantis/secret.sops.yaml` | Stores `argocd_token` |
-| ArgoCD config | `k8s/folly/apps/argo/helm-release.yaml` | Defines `accounts.atlantis: apiKey` + RBAC |
+| Atlantis HelmRelease | `clusters/offsite/apps/atlantis/helm-release.yaml` | Connects via `ARGOCD_AUTH_TOKEN` |
+| Atlantis secret | `clusters/offsite/apps/atlantis/secret.sops.yaml` | Stores `argocd_token` |
+| ArgoCD config | `clusters/folly/apps/argo/helm-release.yaml` | Defines `accounts.atlantis: apiKey` + RBAC |
 
 **When the ArgoCD token expires**, `atlantis/plan` checks fail with signature errors (JWT signed with a rotated key). Symptoms:
-- GitHub PR status: `atlantis/plan: argo/default` → FAILURE
+- GitHub PR status: `atlantis/plan: terraform/argo/default` → FAILURE
 - Atlantis logs show gRPC/auth errors against `argo.${SECRET_DOMAIN}:443`
 
 ### Rotating the Token
@@ -92,7 +92,7 @@ RESULT=$(curl -s -X POST "http://localhost:9090/api/v1/account/atlantis/token" \
 NEW_TOKEN=$(echo "$RESULT" | jq -r '.token')
 
 # 4. Update SOPS secret (decrypt → edit → re-encrypt)
-sops k8s/offsite/apps/atlantis/secret.sops.yaml
+sops clusters/offsite/apps/atlantis/secret.sops.yaml
 # Replace the argocd_token value with base64-encoded NEW_TOKEN
 ```
 
