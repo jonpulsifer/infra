@@ -1,0 +1,8 @@
+services:
+  ddnsd:
+    build: .
+    environment:
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+      - CLOUDFLARE_DNS_ZONE=${CLOUDFLARE_DNS_ZONE:-example.com}
+      - CLOUDFLARE_DNS_NAME=${CLOUDFLARE_DNS_NAME:-home}
+    restart: unless-stopped
