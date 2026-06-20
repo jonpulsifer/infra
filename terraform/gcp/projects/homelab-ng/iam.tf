@@ -59,15 +59,21 @@ resource "google_service_account_iam_policy" "github_actions" {
   policy_data        = data.google_iam_policy.github_actions.policy_data
 }
 
-resource "google_project_iam_member" "github_actions_function_admin" {
+resource "google_project_iam_member" "github_actions_run_admin" {
   project = "homelab-ng"
-  role    = "roles/cloudfunctions.admin"
+  role    = "roles/run.admin"
+  member  = google_service_account.github_actions.member
+}
+
+resource "google_project_iam_member" "github_actions_service_usage_consumer" {
+  project = "homelab-ng"
+  role    = "roles/serviceusage.serviceUsageConsumer"
   member  = google_service_account.github_actions.member
 }
 
 resource "google_service_account" "view_counter" {
   account_id   = "view-counter"
-  display_name = "View Counter Cloud Function"
+  display_name = "View Counter Cloud Run Function"
 }
 
 resource "google_service_account_iam_member" "github_actions_view_counter" {

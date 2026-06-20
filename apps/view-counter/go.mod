@@ -5,7 +5,6 @@ go 1.26.4
 require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/GoogleCloudPlatform/functions-framework-go v1.9.2
-	github.com/jonpulsifer/view-counter v0.0.0-20230929001618-37e0ebdd7da0
 	google.golang.org/grpc v1.81.1
 )
 

@@ -2,31 +2,31 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2.6 |
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.3 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.34.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.35.0 |
 | <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 7.34.0 |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.19.1 |
-| <a name="provider_google"></a> [google](#provider\_google) | 7.34.0 |
-| <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.34.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 7.35.0 |
+| <a name="provider_google.free-tier"></a> [google.free-tier](#provider\_google.free-tier) | 7.35.0 |
 
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_network"></a> [network](#module\_network) | ../../../modules/gce-vpc | n/a |
 
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [google_compute_disk.oldboy](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_disk) | resource |
 | [google_compute_image.nixos](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_image) | resource |
 | [google_compute_instance.oldboy](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_instance) | resource |
@@ -56,7 +56,8 @@
 | [google_project_iam_binding.firestore_database_user](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_binding) | resource |
 | [google_project_iam_member.ddnsbot](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_project_iam_member.ddnsd](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
-| [google_project_iam_member.github_actions_function_admin](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
+| [google_project_iam_member.github_actions_run_admin](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
+| [google_project_iam_member.github_actions_service_usage_consumer](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_project_iam_member.vault](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_project_service.service](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_service) | resource |
 | [google_service_account.ddns](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_account) | resource |
