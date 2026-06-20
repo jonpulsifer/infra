@@ -1,0 +1,9 @@
+[
+  {
+    "image": "ai-agents",
+    "context": ".",
+    "file": "apps/agent-web/Dockerfile",
+    "build-args": "AGENT_SET=full",
+    "watch": ["apps/agent-web", "packages/agent-web-ui"]
+  }
+]
