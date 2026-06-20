@@ -44,7 +44,7 @@ data "google_iam_policy" "github_actions" {
   binding {
     role = "roles/iam.workloadIdentityUser"
     members = [
-      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.repository_owner/jonpulsifer"
+      "principal://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/subject/${local.github_actions_subject}"
     ]
   }
 }
