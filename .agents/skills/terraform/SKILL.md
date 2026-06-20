@@ -1,6 +1,9 @@
 ---
 name: terraform
-description: Work with Terraform modules in this infra repo (everything under terraform/: gcp, cloudflare, vault, argo, unifi, tailscale, google-workspace, k8s). Covers workflow, CI behaviour, and module layout.
+description: >-
+  Work with Terraform modules in this infra repo (everything under terraform/:
+  gcp, cloudflare, vault, argo, unifi, tailscale, google-workspace, k8s).
+  Covers workflow, CI behaviour, and module layout.
 ---
 
 ## Module Layout
