@@ -8,6 +8,8 @@ on:
       - 'packages/**'
       - 'images/**'
       - '.github/workflows/containers.yml'
+      - '.github/scripts/detect-containers.sh'
+      - '.github/containers.json'
   pull_request:
     branches:
       - main
@@ -16,6 +18,8 @@ on:
       - 'packages/**'
       - 'images/**'
       - '.github/workflows/containers.yml'
+      - '.github/scripts/detect-containers.sh'
+      - '.github/containers.json'
 
 # Cancel superseded runs on the same ref instead of letting them pile up.
 concurrency:
@@ -23,69 +27,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_changes: ${{ steps.set-matrix.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - id: changed
+        uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
+        with:
+          separator: "\n"
+      - id: set-matrix
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+        run: bash .github/scripts/detect-containers.sh
+
   build:
+    needs: detect
+    if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # apps/agent-web produces two images from one Dockerfile (context = repo
-          # root so it can pull source from packages/agent-web-ui).
-          - image: ai-agents
-            context: .
-            file: apps/agent-web/Dockerfile
-            build-args: AGENT_SET=full
-            watch: |
-              apps/agent-web/**
-              packages/agent-web-ui/**
-          - image: pi
-            context: .
-            file: apps/agent-web/Dockerfile
-            build-args: AGENT_SET=pi
-            watch: |
-              apps/agent-web/**
-              packages/agent-web-ui/**
-          # apps/ddnsd: Go Cloudflare dynamic-DNS daemon. Consumed by NixOS
-          # hosts via nix/system/ddnsd.nix; the image is published for parity.
-          - image: ddnsd
-            context: apps/ddnsd
-            watch: apps/ddnsd/**
-          # Tool/base images build from their own directory.
-          - image: bashcurljq
-            context: images/bashcurljq
-            watch: images/bashcurljq/**
-          - image: kubectl
-            context: images/kubectl
-            watch: images/kubectl/**
-          - image: actions-runner
-            context: images/actions-runner
-            watch: images/actions-runner/**
-          - image: atlantis
-            context: images/atlantis
-            watch: images/atlantis/**
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - id: changed-files
-        uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
-        with:
-          files: ${{ matrix.watch }}
       - name: Set up QEMU
-        if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
       - name: Set up Docker Buildx
-        if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
       - name: Login to DockerHub
         # Only needed for the push (on main); PRs build to validate without pushing,
         # so they don't require — or have access to, from forks — the registry creds.
-        if: steps.changed-files.outputs.any_modified == 'true' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Generate Docker Meta
-        if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
         id: meta
         with:
@@ -95,7 +75,6 @@ jobs:
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
       - name: Build and push ${{ matrix.image }}
-        if: steps.changed-files.outputs.any_modified == 'true'
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
           push: ${{ github.event_name != 'pull_request' }}
