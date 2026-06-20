@@ -155,6 +155,7 @@ resource "google_org_policy_policy" "allowed_locations" {
     rules {
       values {
         allowed_values = [
+          "in:northamerica-northeast1-locations",
           "in:us-east1-locations" # free tier compute engine
         ]
       }
