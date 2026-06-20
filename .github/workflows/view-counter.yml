@@ -61,6 +61,7 @@ jobs:
         name: Deploy
         run: |
           gcloud beta run deploy "$SERVICE" \
+            --endpoint-mode=regional-preferred \
             --project="$PROJECT_ID" \
             --region="$REGION" \
             --source="$RUNNER_TEMP/view-counter-source" \
