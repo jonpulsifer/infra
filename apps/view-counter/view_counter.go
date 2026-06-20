@@ -6,8 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-
 	"strconv"
+	"sync"
 
 	"cloud.google.com/go/firestore"
 	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
@@ -15,16 +15,21 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var client *firestore.Client
+var (
+	defaultStoreMu sync.Mutex
+	defaultStore   counterStore
+)
 
 func init() {
-	projectID := os.Getenv("GCP_PROJECT")
-	var err error
-	client, err = firestore.NewClient(context.Background(), projectID)
-	if err != nil {
-		log.Fatalf("firestore.NewClient: %v", err)
-	}
 	functions.HTTP("ViewCounter", viewCounter)
+}
+
+type counterStore interface {
+	Next(context.Context, string) (int64, error)
+}
+
+type firestoreCounterStore struct {
+	client *firestore.Client
 }
 
 type document struct {
@@ -48,6 +53,7 @@ const (
 	defaultLabelWidth   float32 = 12
 	defaultLabel        string  = "View Count"
 )
+
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="{{.BadgeWidth}}" height="{{.BadgeHeight}}">
     <linearGradient id="b" x2="0" y2="100%">
         <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
@@ -72,76 +78,113 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="{{.BadgeWidth}}" hei
 
 // viewCounter is an HTTP Cloud Function.
 func viewCounter(w http.ResponseWriter, r *http.Request) {
-	t, err := template.New("counter").Parse(svg)
+	store, err := getDefaultStore(r.Context())
 	if err != nil {
+		log.Printf("firestore.NewClient: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	label := defaultLabel
-	urlLabel := r.URL.Query().Get("label")
-	if urlLabel != "" {
-		label = urlLabel
+	viewCounterWithStore(store).ServeHTTP(w, r)
+}
+
+func viewCounterWithStore(store counterStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		t, err := template.New("counter").Parse(svg)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		label := defaultLabel
+		urlLabel := r.URL.Query().Get("label")
+		if urlLabel != "" {
+			label = urlLabel
+		}
+
+		counter, err := store.Next(r.Context(), label)
+		if err != nil {
+			log.Printf("firestore: could not update counter: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		counterStringLength := len(strconv.Itoa(int(counter)))
+		counterWidth := defaultCounterWidth + (float32(counterStringLength) * 5)
+		labelWidth := defaultLabelWidth + (float32(len(label)) * 7)
+
+		svg := imageData{
+			BadgeHeight:   defaultBadgeHeight,
+			BadgeWidth:    labelWidth + counterWidth,
+			Counter:       counter,
+			CounterOffset: labelWidth + (counterWidth / 2),
+			CounterWidth:  counterWidth,
+			Label:         label,
+			LabelOffset:   labelWidth / 2,
+			LabelWidth:    labelWidth,
+		}
+
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		if err := t.Execute(w, svg); err != nil {
+			log.Printf("template: could not render svg: %v", err)
+		}
+	}
+}
+
+func getDefaultStore(ctx context.Context) (counterStore, error) {
+	defaultStoreMu.Lock()
+	defer defaultStoreMu.Unlock()
+
+	if defaultStore != nil {
+		return defaultStore, nil
 	}
 
-	ctx := context.Background()
+	client, err := firestore.NewClient(ctx, projectIDFromEnv())
+	if err != nil {
+		return nil, err
+	}
 
-	collection := "views"
-	doc := client.Collection(collection).Doc(label)
+	defaultStore = &firestoreCounterStore{client: client}
+	return defaultStore, nil
+}
+
+func projectIDFromEnv() string {
+	if projectID := os.Getenv("GOOGLE_CLOUD_PROJECT"); projectID != "" {
+		return projectID
+	}
+
+	return os.Getenv("GCP_PROJECT")
+}
+
+func (s *firestoreCounterStore) Next(ctx context.Context, label string) (int64, error) {
+	doc := s.client.Collection("views").Doc(label)
 
 	snapshot, err := doc.Get(ctx)
-	if err != nil {
-		if status.Code(err) != codes.NotFound {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+	if err != nil && status.Code(err) != codes.NotFound {
+		return 0, err
 	}
 
-	var counter int64
-	if snapshot.Exists() {
+	counter := int64(1)
+	if err == nil && snapshot.Exists() {
 		var current document
-		err = snapshot.DataTo(&current)
-		if err != nil {
-			log.Printf("firestore: could not get data from ref: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+		if err := snapshot.DataTo(&current); err != nil {
+			return 0, err
 		}
-		counter += current.Count
 
+		counter = current.Count + 1
 		_, err := doc.Update(ctx, []firestore.Update{
 			{Path: "count", Value: firestore.Increment(1)},
 		})
 		if err != nil {
-			log.Printf("firestore: could not update record: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+			return 0, err
 		}
 	} else {
-		counter = 1
 		_, err := doc.Set(ctx, map[string]interface{}{"count": counter}, firestore.MergeAll)
 		if err != nil {
-			log.Printf("firestore: could not upsert: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+			return 0, err
 		}
 	}
 
-	counterStringLength := len(strconv.Itoa(int(counter)))
-	counterWidth := defaultCounterWidth + (float32(counterStringLength) * 5)
-	labelWidth := defaultLabelWidth + (float32(len(label)) * 7)
-
-	svg := imageData{
-		BadgeHeight:   defaultBadgeHeight,
-		BadgeWidth:    labelWidth + counterWidth,
-		Counter:       counter,
-		CounterOffset: labelWidth + (counterWidth / 2),
-		CounterWidth:  counterWidth,
-		Label:         label,
-		LabelOffset:   labelWidth / 2,
-		LabelWidth:    labelWidth,
-	}
-
-	w.Header().Set("Content-Type", "image/svg+xml")
-	w.Header().Set("Cache-Control", "no-store, max-age=0")
-	t.Execute(w, svg)
+	return counter, nil
 }

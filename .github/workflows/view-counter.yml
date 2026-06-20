@@ -35,8 +35,6 @@ jobs:
 
       - name: Test
         working-directory: apps/view-counter
-        env:
-          GCP_PROJECT: ${{ env.PROJECT_ID }}
         run: go test ./...
 
       - name: Build deploy artifact
@@ -70,6 +68,6 @@ jobs:
             --base-image="$RUNTIME_BASE_IMAGE" \
             --command=./view-counter \
             --service-account="$RUNTIME_SERVICE_ACCOUNT" \
-            --set-env-vars="GCP_PROJECT=$PROJECT_ID" \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID" \
             --allow-unauthenticated \
             --quiet

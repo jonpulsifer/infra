@@ -1,53 +1,69 @@
 package view_counter
 
 import (
+	"context"
+	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sync"
 	"testing"
 )
 
-func TestViewCounterGet(t *testing.T) {
-	// TODO: make a firestore test :O
-	t.Skip("this test doesn't work with firestore")
+type inMemoryCounterStore struct {
+	mu     sync.Mutex
+	counts map[string]int64
+}
 
-	req := httptest.NewRequest("GET", "/", nil)
+func newInMemoryCounterStore() *inMemoryCounterStore {
+	return &inMemoryCounterStore{counts: map[string]int64{}}
+}
+
+func (s *inMemoryCounterStore) Next(_ context.Context, label string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.counts[label]++
+	return s.counts[label], nil
+}
+
+func TestViewCounterGet(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	t.Setenv("GCP_PROJECT", "")
+
+	handler := viewCounterWithStore(newInMemoryCounterStore())
+
+	body := performRequest(t, handler, "/")
+	assertSVGText(t, body, "1")
+
+	body = performRequest(t, handler, "/")
+	assertSVGText(t, body, "2")
+
+	body = performRequest(t, handler, "/?label=TestLabel")
+	assertSVGText(t, body, "TestLabel")
+	assertSVGText(t, body, "1")
+}
+
+func performRequest(t *testing.T, handler http.Handler, path string) string {
+	t.Helper()
+
+	req := httptest.NewRequest("GET", path, nil)
 	rr := httptest.NewRecorder()
 
-	// make a request
-	viewCounter(rr, req)
+	handler.ServeHTTP(rr, req)
 
-	// validate content type
 	contentType := "image/svg+xml"
 	if got := rr.Header().Get("Content-Type"); got != contentType {
-		t.Errorf("Wrong Content-Type. got: %q, want: %q", got, contentType)
+		t.Fatalf("Wrong Content-Type. got: %q, want: %q", got, contentType)
 	}
 
-	// check that the response body has the svg text "1"
-	r, _ := regexp.Compile("<text.+>1</text>")
-	if got := rr.Body.String(); !r.MatchString(got) {
-		t.Errorf("Could not find SVG text \"1\", got: %q", got)
-	}
+	return rr.Body.String()
+}
 
-	// make another request to increment the counter, check that it is "2"
-	viewCounter(rr, req)
-	r, _ = regexp.Compile("<text.+>2</text>")
-	if got := rr.Body.String(); !r.MatchString(got) {
-		t.Errorf("Could not find SVG text \"2\", got: %q", got)
-	}
+func assertSVGText(t *testing.T, body, text string) {
+	t.Helper()
 
-	// make a request with a new label
-	req = httptest.NewRequest("GET", "/?label=TestLabel", nil)
-	viewCounter(rr, req)
-
-	// check that the response body has the svg text "TestLabel"
-	r, _ = regexp.Compile("<text.+>TestLabel</text>")
-	if got := rr.Body.String(); !r.MatchString(got) {
-		t.Errorf("Could not find SVG text \"TestLabel\", got: %q", got)
-	}
-
-	// check that the response body has the svg text "1"
-	r, _ = regexp.Compile("<text.+>1</text>")
-	if got := rr.Body.String(); !r.MatchString(got) {
-		t.Errorf("Could not find SVG text \"1\", got: %q", got)
+	r := regexp.MustCompile("<text.+>" + regexp.QuoteMeta(text) + "</text>")
+	if !r.MatchString(body) {
+		t.Fatalf("Could not find SVG text %q, got: %q", text, body)
 	}
 }
