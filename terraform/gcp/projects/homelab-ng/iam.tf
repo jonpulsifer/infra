@@ -44,7 +44,7 @@ data "google_iam_policy" "github_actions" {
   binding {
     role = "roles/iam.workloadIdentityUser"
     members = [
-      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.repository_owner/jonpulsifer"
+      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.repository_id/952814997"
     ]
   }
 }
@@ -59,15 +59,21 @@ resource "google_service_account_iam_policy" "github_actions" {
   policy_data        = data.google_iam_policy.github_actions.policy_data
 }
 
-resource "google_project_iam_member" "github_actions_function_admin" {
+resource "google_project_iam_member" "github_actions_run_admin" {
   project = "homelab-ng"
-  role    = "roles/cloudfunctions.admin"
+  role    = "roles/run.admin"
+  member  = google_service_account.github_actions.member
+}
+
+resource "google_project_iam_member" "github_actions_run_source_developer" {
+  project = "homelab-ng"
+  role    = "roles/run.sourceDeveloper"
   member  = google_service_account.github_actions.member
 }
 
 resource "google_service_account" "view_counter" {
   account_id   = "view-counter"
-  display_name = "View Counter Cloud Function"
+  display_name = "View Counter Cloud Run Function"
 }
 
 resource "google_service_account_iam_member" "github_actions_view_counter" {

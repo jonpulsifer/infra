@@ -4,9 +4,10 @@ import (
 	"log"
 	"os"
 
-	// Blank-import the function package so the init() runs
-	_ "github.com/jonpulsifer/view-counter"
 	"github.com/GoogleCloudPlatform/functions-framework-go/funcframework"
+
+	// Blank-import the function package so the init() runs
+	_ "github.com/jonpulsifer/infra/apps/view-counter"
 )
 
 func main() {

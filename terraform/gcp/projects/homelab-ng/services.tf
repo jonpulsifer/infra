@@ -32,6 +32,7 @@ resource "google_project_service" "service" {
     "serviceusage.googleapis.com",
     "storage-api.googleapis.com",
     "storage-component.googleapis.com",
+    "storage.googleapis.com",
     "vision.googleapis.com",
     "websecurityscanner.googleapis.com",
   ])

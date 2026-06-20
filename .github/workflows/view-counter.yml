@@ -7,6 +7,13 @@ on:
       - 'apps/view-counter/**'
       - '.github/workflows/view-counter.yml'
 
+env:
+  PROJECT_ID: homelab-ng
+  REGION: northamerica-northeast1
+  SERVICE: view-counter
+  RUNTIME_BASE_IMAGE: northamerica-northeast1-docker.pkg.dev/serverless-runtimes/google-24/runtimes/go126
+  RUNTIME_SERVICE_ACCOUNT: view-counter@homelab-ng.iam.gserviceaccount.com
+
 concurrency:
   group: view-counter-${{ github.ref }}
   cancel-in-progress: true
@@ -21,21 +28,48 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: apps/view-counter/go.mod
+          cache-dependency-path: apps/view-counter/go.sum
+
+      - name: Test
+        working-directory: apps/view-counter
+        env:
+          GCP_PROJECT: ${{ env.PROJECT_ID }}
+        run: go test ./...
+
+      - name: Build deploy artifact
+        working-directory: apps/view-counter
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p "$RUNNER_TEMP/view-counter-source"
+          go build -trimpath -ldflags="-s -w" -o "$RUNNER_TEMP/view-counter-source/view-counter" ./cmd
+
       - id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
           service_account: github-actions@homelab-ng.iam.gserviceaccount.com
 
-      - id: deploy
-        uses: google-github-actions/deploy-cloud-functions@ab10d6b9be21630aafc15ced4c464c16cd6640d6 # v4
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:
-          name: view-counter
-          # 2nd-gen (Cloud Run) function on the latest Go runtime.
-          runtime: go126
-          region: northamerica-northeast1
-          source_dir: apps/view-counter
-          entry_point: ViewCounter
-          project_id: homelab-ng
-          service_account: view-counter@homelab-ng.iam.gserviceaccount.com
-          environment_variables: GCP_PROJECT=homelab-ng
+          install_components: beta
+
+      - id: deploy
+        name: Deploy
+        run: |
+          gcloud beta run deploy "$SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --source="$RUNNER_TEMP/view-counter-source" \
+            --no-build \
+            --base-image="$RUNTIME_BASE_IMAGE" \
+            --command=./view-counter \
+            --service-account="$RUNTIME_SERVICE_ACCOUNT" \
+            --set-env-vars="GCP_PROJECT=$PROJECT_ID" \
+            --allow-unauthenticated \
+            --quiet
