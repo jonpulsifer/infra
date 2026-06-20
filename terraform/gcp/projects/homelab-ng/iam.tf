@@ -65,6 +65,12 @@ resource "google_project_iam_member" "github_actions_run_admin" {
   member  = google_service_account.github_actions.member
 }
 
+resource "google_project_iam_member" "github_actions_run_source_developer" {
+  project = "homelab-ng"
+  role    = "roles/run.sourceDeveloper"
+  member  = google_service_account.github_actions.member
+}
+
 resource "google_project_iam_member" "github_actions_service_usage_consumer" {
   project = "homelab-ng"
   role    = "roles/serviceusage.serviceUsageConsumer"
