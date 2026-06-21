@@ -7,7 +7,6 @@ spec:
   hostnamePrefix: folly-k8s-lan-router
   subnetRouter:
     advertiseRoutes:
-      - ${CILIUM_NATIVE_ROUTING_CIDR}
       - ${LB_RANGE}
   tags:
     - tag:k8s

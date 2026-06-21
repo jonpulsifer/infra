@@ -83,7 +83,12 @@
 		},
 	],
 
-	"autoApprovers": {"routes": {"192.168.2.0/24": ["tag:k8s-operator"]}},
+	"autoApprovers": {
+		"routes": {
+			"10.3.0.64/26":   ["tag:k8s-folly"],
+			"192.168.2.0/24": ["tag:k8s-operator"],
+		},
+	},
 
 	"ipsets": {
 		"ipset:k8s-offsite-nodes-and-lb": ["add ipset:k8s-offsite-nodes", "add ipset:k8s-offsite-lb"],
