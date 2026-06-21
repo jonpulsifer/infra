@@ -69,7 +69,7 @@ locals {
       key_expiry_disabled = true
       tags                = ["tag:folly"]
     }
-    "rosie" = {
+    "shale" = {
       key_expiry_disabled = false
       tags                = []
     }
