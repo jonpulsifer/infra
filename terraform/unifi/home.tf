@@ -1,15 +1,23 @@
 locals {
-  fml_cidr   = "10.1.0.1/24"
-  fml_domain = "fml.pulsifer.ca"
-  fml_wlan   = "fml"
-  clients    = yamldecode(file("./clients.yaml"))
-  one_day    = "24h"
-  one_week   = "168h"
+  fml_cidr    = "10.1.0.1/24"
+  fml_domain  = "fml.pulsifer.ca"
+  fml_wlan    = "fml"
+  future_cidr = "10.13.37.1/28"
+  iot_cidr    = "10.66.6.1/26"
+  iot_domain  = "iot.fml.pulsifer.ca"
+  clients     = yamldecode(file("./clients.yaml"))
+  one_day     = "24h0m0s"
+  one_week    = "168h0m0s"
 }
 
 resource "unifi_network" "fml" {
-  name   = "Management"
-  subnet = local.fml_cidr
+  name               = "Management"
+  subnet             = local.fml_cidr
+  domain_name        = local.fml_domain
+  setting_preference = "manual"
+  auto_scale         = false
+  lte_lan            = false
+  multicast_dns      = true
 
   dhcp_server = {
     enabled   = true
@@ -21,9 +29,6 @@ resource "unifi_network" "fml" {
     }
   }
 
-  dhcp_relay = {
-    enabled = false
-  }
 }
 
 
@@ -48,74 +53,16 @@ resource "unifi_wlan" "fml" {
   network_id    = unifi_network.fml.id
   user_group_id = unifi_client_qos_rate.unmetered.id
 
-  wlan_band            = "both"
-  bss_transition       = true
-  fast_roaming_enabled = false
-  multicast_enhance    = false
-  uapsd                = true
-  no2ghz_oui           = false
-}
-
-resource "unifi_client" "personal_devices" {
-  for_each               = local.clients.personal-devices
-  name                   = each.key
-  mac                    = each.value.mac
-  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
-  blocked                = lookup(each.value, "blocked", false)
-  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
-  note                   = lookup(each.value, "note", "Managed by terraform")
-  allow_existing         = lookup(each.value, "allow_existing", true)
-  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  network_id             = unifi_network.fml.id
-  qos_rate = {
-    id = unifi_client_qos_rate.unmetered.id
-  }
-}
-
-resource "unifi_client" "computers" {
-  for_each               = merge(local.clients.desktops, local.clients.laptops)
-  name                   = each.key
-  mac                    = each.value.mac
-  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
-  blocked                = lookup(each.value, "blocked", false)
-  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
-  note                   = lookup(each.value, "note", "Managed by terraform")
-  allow_existing         = lookup(each.value, "allow_existing", true)
-  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  network_id             = unifi_network.fml.id
-  qos_rate = {
-    id = unifi_client_qos_rate.unmetered.id
-  }
-}
-
-resource "unifi_client" "iot" {
-  for_each               = local.clients.iot
-  name                   = each.key
-  mac                    = each.value.mac
-  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
-  blocked                = lookup(each.value, "blocked", false)
-  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
-  note                   = lookup(each.value, "note", "Managed by terraform")
-  allow_existing         = lookup(each.value, "allow_existing", true)
-  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  network_id             = unifi_network.fml.id
-  qos_rate = {
-    id = lookup(each.value, "streaming", false) == false ? unifi_client_qos_rate.iot.id : unifi_client_qos_rate.streaming.id
-  }
-}
-
-resource "unifi_client" "cameras" {
-  for_each               = local.clients.cameras
-  name                   = each.key
-  mac                    = each.value.mac
-  local_dns_record       = lookup(each.value, "ip", false) == false ? "" : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.fml_domain)
-  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.fml_cidr, each.value.ip)
-  blocked                = lookup(each.value, "blocked", false)
-  note                   = lookup(each.value, "note", "Managed by terraform")
-  allow_existing         = lookup(each.value, "allow_existing", true)
-  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  network_id             = unifi_network.fml.id
-  qos_rate = {
-    id = unifi_client_qos_rate.unmetered.id
-  }
+  wlan_band                 = "both"
+  wlan_bands                = ["2g", "5g", "6g"]
+  wpa3_support              = true
+  wpa3_transition           = true
+  pmf_mode                  = "optional"
+  minimum_data_rate_2g_kbps = 1000
+  minimum_data_rate_5g_kbps = 6000
+  bss_transition            = true
+  fast_roaming_enabled      = false
+  multicast_enhance         = false
+  uapsd                     = true
+  no2ghz_oui                = false
 }

@@ -5,10 +5,6 @@ locals {
   lab_clients = merge(local.clients.lab, local.clients.rpis)
 }
 
-data "unifi_ap_group" "lab" {
-  name = "Lab"
-}
-
 data "cloudflare_zone" "lab" {
   filter = {
     name   = local.lab_domain
@@ -32,9 +28,15 @@ resource "cloudflare_dns_record" "lab_remote_dns" {
 }
 
 resource "unifi_network" "lab" {
-  name   = "Lab Net"
-  subnet = local.lab_cidr
-  vlan   = 2
+  name               = "Lab Net"
+  subnet             = local.lab_cidr
+  vlan               = 2
+  domain_name        = local.lab_domain
+  setting_preference = "manual"
+  auto_scale         = false
+  lte_lan            = false
+  network_isolation  = true
+  multicast_dns      = false
 
   dhcp_server = {
     enabled   = true
@@ -46,37 +48,26 @@ resource "unifi_network" "lab" {
     }
   }
 
-  dhcp_relay = {
-    enabled = false
-  }
 }
 
 resource "unifi_wlan" "lab" {
-  name              = local.lab_wlan
-  security          = "open"
-  hide_ssid         = true
-  ap_group_ids      = [data.unifi_ap_group.all_aps.id]
-  network_id        = unifi_network.lab.id
-  user_group_id     = unifi_client_qos_rate.unmetered.id
-  multicast_enhance = false
-  bss_transition    = false
-  no2ghz_oui        = false
-  uapsd             = true
-  wlan_band         = "both"
-}
+  name                      = local.lab_wlan
+  security                  = "open"
+  hide_ssid                 = true
+  ap_group_ids              = ["693c98563a6bcc1ba862e1ae"]
+  ap_group_mode             = "devices"
+  network_id                = unifi_network.lab.id
+  user_group_id             = unifi_client_qos_rate.unmetered.id
+  multicast_enhance         = false
+  bss_transition            = false
+  no2ghz_oui                = false
+  uapsd                     = true
+  wlan_band                 = "both"
+  wlan_bands                = ["2g", "5g"]
+  minimum_data_rate_2g_kbps = 1000
+  minimum_data_rate_5g_kbps = 6000
 
-resource "unifi_client" "lab" {
-  for_each               = local.lab_clients
-  name                   = each.key
-  mac                    = each.value.mac
-  local_dns_record       = lookup(each.value, "ip", false) == false ? null : can(regex("^[a-zA-Z0-9]+[a-zA-Z0-9-]*[^-]$", lookup(each.value, "local_dns_record", each.key))) == false ? "" : format("%s.%s", lower(lookup(each.value, "local_dns_record", each.key)), local.lab_domain)
-  fixed_ip               = lookup(each.value, "ip", false) == false ? null : cidrhost(local.lab_cidr, each.value.ip)
-  blocked                = lookup(each.value, "blocked", false)
-  note                   = lookup(each.value, "note", "Managed by terraform")
-  allow_existing         = lookup(each.value, "allow_existing", true)
-  skip_forget_on_destroy = lookup(each.value, "skip_forget_on_destroy", true)
-  network_id             = unifi_network.lab.id
-  qos_rate = {
-    id = unifi_client_qos_rate.unmetered.id
+  lifecycle {
+    ignore_changes = [passphrase]
   }
 }
