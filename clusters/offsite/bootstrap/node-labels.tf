@@ -2,20 +2,10 @@ locals {
   common_labels = {
     terraform-managed = "true"
   }
-
-  nodes_with_labels = {
-    "riptide" = {
-      "node-role.kubernetes.io/worker" = ""
-      "bgp-enabled"                    = "true"
-    },
-    "optiplex" = {
-      "node-role.kubernetes.io/control-plane" = ""
-      "bgp-enabled"                           = "true"
-    },
+  offsite_nodes = {
     "oldschool" = {
       "node-role.kubernetes.io/worker" = ""
       "bgp-enabled"                    = "true"
-
     },
     "retrofit" = {
       "node-role.kubernetes.io/control-plane" = ""
@@ -25,7 +15,7 @@ locals {
 }
 
 resource "kubernetes_labels" "nodes" {
-  for_each = local.nodes_with_labels
+  for_each = local.offsite_nodes
 
   api_version = "v1"
   kind        = "Node"
@@ -34,4 +24,3 @@ resource "kubernetes_labels" "nodes" {
   }
   labels = each.value
 }
-

@@ -19,8 +19,9 @@ terraform/argo/                   # ArgoCD application definitions
 terraform/unifi/                  # VLANs, BGP, clients
 terraform/tailscale/              # devices, routes, ACL policy
 terraform/google-workspace/       # Workspace users, groups, domains
-terraform/k8s/                    # Flux bootstrap for both clusters
 terraform/modules/                # reusable modules consumed via relative paths
+clusters/folly/bootstrap/         # Flux bootstrap for the folly cluster
+clusters/offsite/bootstrap/       # Flux bootstrap for the offsite cluster
 ```
 
 ## Standard Workflow
