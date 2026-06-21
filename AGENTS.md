@@ -164,8 +164,8 @@ First-party code and container/image builds, separate from the infra layers:
 Dotfiles live in-repo under `dotfiles/` (formerly the standalone `jonpulsifer/dotfiles` repo, merged in via `git filter-repo`). They are **chezmoi-managed**, not a flake input — there is no `dotfiles` flake input and no home-manager.
 
 - The repo-root `.chezmoiroot` contains `dotfiles`, so chezmoi treats the `dotfiles/` subdirectory as its source root.
-- On NixOS hosts, `nix/system/chezmoi.nix` runs `chezmoi init github:jonpulsifer/infra` then `chezmoi apply` in an activation script (for the `jawn` user). `infra` is a public repo, so this clones without credentials.
-- The WSL image (`.github/workflows/nix-image-builder.yaml`) clones `github:jonpulsifer/infra` into the staged `~/.local/share/chezmoi` and applies via chezmoi, which honours `.chezmoiroot`.
+- On NixOS hosts, `nix/system/chezmoi.nix` carries the `dotfiles/` tree into the system closure (via the flake source) and runs `chezmoi apply --source <store-path>` in an activation script (for the `jawn` user) — no network clone, and it self-heals on every rebuild/boot. The module is imported on cluster/Pi hosts through `nix/services/common.nix`, and directly by the WSL image (`nix/images/wsl.nix`).
+- The WSL image (`.github/workflows/nix-image-builder.yaml`) builds a plain tarball; dotfiles are applied by that same activation script on first boot, so the workflow does no build-time chezmoi seeding.
 
 Editing dotfiles (e.g. zsh config in `dotfiles/dot_config/zsh/`) ships to hosts on the next `chezmoi apply` / rebuild — no separate repo to update.
 
