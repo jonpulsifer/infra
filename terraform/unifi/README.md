@@ -2,18 +2,18 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.1 |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
-| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.41 |
+| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.52 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.19.1 |
+| ---- | ------- |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.21.0 |
 | <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.3.1 |
-| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.41.25 |
+| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.52.4 |
 
 ## Modules
 
@@ -22,18 +22,15 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [cloudflare_dns_record.k8s_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_dns_record.lab_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
-| [unifi_client.cameras](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
-| [unifi_client.computers](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
-| [unifi_client.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
-| [unifi_client.lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
-| [unifi_client.personal_devices](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client) | resource |
 | [unifi_client_qos_rate.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
 | [unifi_client_qos_rate.streaming](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
 | [unifi_client_qos_rate.unmetered](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
 | [unifi_network.fml](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
+| [unifi_network.future](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
+| [unifi_network.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_network.lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/network) | resource |
 | [unifi_static_route.starlink](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/static_route) | resource |
@@ -43,7 +40,6 @@ No modules.
 | [cloudflare_zone.lab](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/data-sources/zone) | data source |
 | [onepassword_item.wifi](https://registry.terraform.io/providers/1password/onepassword/latest/docs/data-sources/item) | data source |
 | [unifi_ap_group.all_aps](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/data-sources/ap_group) | data source |
-| [unifi_ap_group.lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/data-sources/ap_group) | data source |
 
 ## Inputs
 

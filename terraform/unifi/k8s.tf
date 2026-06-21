@@ -1,20 +1,25 @@
 locals {
   node_cidr = "10.3.0.1/26"
   static_records = {
-    "erx" : cidrhost(local.lab_cidr, 5)
-    "k8s" : cidrhost(local.node_cidr, 10)
-    "nuc" : cidrhost(local.node_cidr, 13)
-    "k8s" : cidrhost(local.node_cidr, 10)
-    "800g2" : cidrhost(local.node_cidr, 11)
-    "riptide" : cidrhost(local.node_cidr, 12)
-    "optiplex" : cidrhost(local.node_cidr, 10)
+    "erx"      = cidrhost(local.lab_cidr, 5)
+    "k8s"      = cidrhost(local.node_cidr, 10)
+    "nuc"      = cidrhost(local.node_cidr, 13)
+    "800g2"    = cidrhost(local.node_cidr, 11)
+    "riptide"  = cidrhost(local.node_cidr, 12)
+    "optiplex" = cidrhost(local.node_cidr, 10)
   }
 }
 
 resource "unifi_network" "k8s" {
-  name   = "Kubernetes"
-  subnet = local.node_cidr
-  vlan   = 8
+  name               = "Kubernetes"
+  subnet             = local.node_cidr
+  vlan               = 8
+  domain_name        = local.lab_domain
+  setting_preference = "manual"
+  auto_scale         = false
+  lte_lan            = false
+  network_isolation  = true
+  multicast_dns      = false
 
   dhcp_server = {
     enabled     = true
@@ -23,14 +28,14 @@ resource "unifi_network" "k8s" {
     stop        = cidrhost(local.node_cidr, 62)
     dns_enabled = true
     dns_servers = ["10.2.0.20"]
+    tftp_server = "10.2.0.11"
     boot = {
-      enabled = false
+      enabled  = true
+      server   = "10.2.0.11"
+      filename = "boot/ipxe.efi"
     }
   }
 
-  dhcp_relay = {
-    enabled = false
-  }
 }
 
 resource "cloudflare_dns_record" "k8s_remote_dns" {
