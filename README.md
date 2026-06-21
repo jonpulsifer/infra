@@ -174,7 +174,7 @@ First-party services (`apps/`), shared libraries and Helm charts (`packages/`), 
 nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
 
 # Deploy remotely
-nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-sudo
+nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
 ```
 
 **Update Kubernetes app**:

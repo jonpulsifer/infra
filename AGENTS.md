@@ -46,10 +46,10 @@ nix fmt
 nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
 
 # Deploy to a remote host immediately
-nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-sudo
+nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
 
 # Deploy safely (activates on next reboot)
-nixos-rebuild boot --use-remote-sudo --target-host <hostname> --flake .#<hostname>
+nixos-rebuild boot --sudo --target-host <hostname> --flake .#<hostname>
 
 # Update all flake inputs
 nix flake update

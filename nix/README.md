@@ -78,7 +78,7 @@ After making changes, rebuild and deploy:
 sudo nixos-rebuild switch --flake .#<hostname>
 
 # Or build remotely and copy (immediate activation)
-nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-sudo
+nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
 ```
 
 #### Remote Rebuilding with Boot
@@ -87,10 +87,10 @@ For safer deployments, especially on remote systems, use `boot` instead of `swit
 
 ```bash
 # Build remotely and prepare for next boot (safer)
-nixos-rebuild boot --use-remote-sudo --target-host <hostname> --flake .#<hostname>
+nixos-rebuild boot --sudo --target-host <hostname> --flake .#<hostname>
 
 # Example: Deploy to oldboy VM via Tailscale
-nixos-rebuild boot --use-remote-sudo --target-host nixos.pirate-musical.ts.net --flake .#oldboy
+nixos-rebuild boot --sudo --target-host nixos.pirate-musical.ts.net --flake .#oldboy
 ```
 
 **Why use remote rebuilding?**

@@ -24,10 +24,10 @@ description: Build, validate, and deploy NixOS host configurations in this infra
 4. **Deploy** — prefer `boot` for remote/headless hosts (activates on next reboot):
    ```bash
    # Safe (next reboot)
-   nixos-rebuild boot --use-remote-sudo --target-host <hostname> --flake .#<hostname>
+   nixos-rebuild boot --sudo --target-host <hostname> --flake .#<hostname>
 
    # Immediate
-   nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --use-remote-sudo
+   nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
    ```
 
 5. **Rollback**:
