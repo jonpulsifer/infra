@@ -3,8 +3,8 @@ locals {
   fml_domain = "fml.pulsifer.ca"
   fml_wlan   = "fml"
   clients    = yamldecode(file("./clients.yaml"))
-  one_day    = 86400
-  one_week   = local.one_day * 7
+  one_day    = "24h"
+  one_week   = "168h"
 }
 
 resource "unifi_network" "fml" {

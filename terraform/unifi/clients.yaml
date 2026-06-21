@@ -144,9 +144,6 @@ desktops:
 laptops:
   Constance's Macbook Pro:
     mac: f0:18:98:54:4b:32
-  Hackbook Pro:
-    mac: 00:00:00:00:00:00
-    dev-id: 4664
   Hackbook Pro Wifi:
     mac: f8:4d:89:81:c0:2d
     dev-id: 4664

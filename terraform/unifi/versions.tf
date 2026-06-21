@@ -9,9 +9,8 @@ terraform {
       version = "~> 5.1"
     }
     unifi = {
-      # overridden in ~/.terraformrc
       source  = "ubiquiti-community/unifi"
-      version = "~> 0.41"
+      version = "~> 0.52"
     }
     onepassword = {
       source  = "1password/onepassword"
