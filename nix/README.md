@@ -50,7 +50,7 @@ Enter the development shell with all required tools:
 nix develop
 ```
 
-This provides: `kubectl`, `helm`, `terraform`, `vault`, `sops`, `fluxcd`, `cilium-cli`, and more.
+This provides: `kubectl`, `helm`, `terraform`, `sops`, `fluxcd`, `cilium-cli`, and more.
 
 ### Building Systems
 
