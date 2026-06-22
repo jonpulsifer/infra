@@ -179,3 +179,4 @@ Available skills:
 - `kubernetes-gitops` — FluxCD reconciliation, networking, SOPS secrets
 - `multi-cluster` — Add or modify shared resources across folly and offsite clusters using the base/ pattern
 - `onboard-repo` — Vendor an external jonpulsifer repo into apps/packages/images with history, then rewire its consumers
+- `unifi-network` — Read-only discovery of the live UniFi homelab network (networks/VLANs, WLANs, devices, clients) via the UDM Pro API, creds from 1Password
