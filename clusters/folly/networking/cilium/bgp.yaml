@@ -60,10 +60,8 @@ spec:
     - advertisementType: Service
       service:
         addresses:
-          - ClusterIP
-          - ExternalIP
           - LoadBalancerIP
       selector:
         matchExpressions:
-          # announce all services on the node
+          # announce all load balancer services on the node
           - { key: bgp, operator: NotIn, values: [lol] }

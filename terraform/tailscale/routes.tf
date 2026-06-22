@@ -21,6 +21,7 @@ locals {
     folly-connector = {
       device_key = "folly-k8s-lan-router-0-1"
       routes = [
+        "10.3.0.0/26",  # folly node range
         "10.3.0.64/26", # folly LB range — ArgoCD lives at 10.3.0.70
       ]
     }
