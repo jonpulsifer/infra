@@ -1,10 +1,50 @@
-.terraform
-*.tfstate
-*.tfplan
+# ─── Nix / NixOS ──────────────────────────────────────────────────────────────
 result
+result*
+*.nixexpr
+*.nixpkgs
 *.iso
 *.img
 *.backup
 *.wsl
 *.zstd
-.claude
+
+# ─── Terraform ───────────────────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+
+# ─── Build Artifacts ─────────────────────────────────────────────────────────
+build/
+dist/
+out/
+*.tgz
+
+# ─── Agent / AI Tooling ──────────────────────────────────────────────────────
+.claude/
+.agents/
+
+# ─── Node / Bun ──────────────────────────────────────────────────────────────
+# Only tracked in sub-packages that need them; root is not a node project
+# node_modules/
+# package-lock.json
+# bun.lockb
+
+# ─── IDE / Editor ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Logs & Reports ───────────────────────────────────────────────────────────
+*.log
+logs/
+coverage/
+*.lcov
