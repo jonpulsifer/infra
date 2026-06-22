@@ -2,7 +2,7 @@
 name: terraform
 description: >-
   Work with Terraform modules in this infra repo (everything under terraform/:
-  gcp, cloudflare, vault, argo, unifi, tailscale, google-workspace, k8s).
+  gcp, cloudflare, argo, unifi, tailscale, google-workspace, k8s).
   Covers workflow, CI behaviour, and module layout.
 ---
 
@@ -14,7 +14,6 @@ All Terraform lives under `terraform/`. Each subdirectory below is an independen
 terraform/gcp/organization/       # org-level IAM, folders, billing
 terraform/gcp/projects/<name>/    # per-project resources
 terraform/cloudflare/             # DNS, tunnels, security rules
-terraform/vault/                  # auth backends, PKI, policies
 terraform/argo/                   # ArgoCD application definitions
 terraform/unifi/                  # VLANs, BGP, clients
 terraform/tailscale/              # devices, routes, ACL policy

@@ -8,7 +8,7 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 .
 ├── nix/           # NixOS configurations for bare metal hosts
 ├── clusters/      # Kubernetes GitOps manifests (folly, offsite, base) — FluxCD
-├── terraform/     # All Terraform: gcp, cloudflare, tailscale, argo, vault,
+├── terraform/     # All Terraform: gcp, cloudflare, tailscale, argo,
 │                  #   unifi, google-workspace, k8s (Flux bootstrap), modules/
 ├── apps/          # Deployable first-party services (agent-web, hermes, tidbyt, …)
 ├── packages/      # Shared building blocks (agent-web-ui, charts/)
@@ -109,7 +109,7 @@ Managed with:
 - **Infrastructure as Code**: Terraform, NixOS
 - **Orchestration**: Kubernetes (NixOS)
 - **GitOps**: ArgoCD, FluxCD
-- **Secrets**: SOPS, HashiCorp Vault
+- **Secrets**: SOPS, 1Password
 - **Networking**: Cilium, Tailscale, UniFi
 - **Monitoring**: Prometheus, Grafana, Loki
 - **CI/CD**: GitHub Actions (self-hosted)
@@ -123,7 +123,7 @@ Flake-based NixOS configurations for all physical and virtual machines. Modular 
 FluxCD GitOps manifests for the `folly` and `offsite` clusters, with shared resources in `clusters/base/`. The Flux bootstrap itself is Terraform (`terraform/k8s/`).
 
 ### `terraform/` - Cloud, Network & Bootstrap
-All Terraform root modules: `gcp/` (resources by project), `cloudflare/` (DNS & security), `tailscale/`, `argo/` (ArgoCD apps), `vault/` (policies), `unifi/` (network controller), `google-workspace/`, and `k8s/` (Flux bootstrap). Reusable modules live in `terraform/modules/`.
+All Terraform root modules: `gcp/` (resources by project), `cloudflare/` (DNS & security), `tailscale/`, `argo/` (ArgoCD apps), `unifi/` (network controller), `google-workspace/`, and `k8s/` (Flux bootstrap). Reusable modules live in `terraform/modules/`.
 
 ### `apps/`, `packages/`, `images/` - Code & Builds
 First-party services (`apps/`), shared libraries and Helm charts (`packages/`), and base/tool container + VM images (`images/`).
@@ -131,7 +131,7 @@ First-party services (`apps/`), shared libraries and Helm charts (`packages/`), 
 ## 🔐 Security
 
 - **Immutable infrastructure** - NixOS ensures declarative system state
-- **Secrets management** - SOPS encryption + Vault
+- **Secrets management** - SOPS encryption + 1Password
 - **Network segmentation** - VLANs and firewall rules via UniFi
 - **Zero-trust networking** - Tailscale mesh VPN
 - **SSH hardening** - Key-based auth only, automated key rotation
@@ -189,6 +189,6 @@ git push
 - **NixOS configs** - Version controlled in this repo
 - **Kubernetes state** - GitOps repo is source of truth
 - **Persistent data** - Automated backups to NAS + cloud storage
-- **Secrets** - Encrypted SOPS files in repo + Vault backups
+- **Secrets** - Encrypted SOPS files in repo + source values in 1Password
 
 **Built with**: NixOS 25.05 • Kubernetes • Terraform • ArgoCD • Love ❤️

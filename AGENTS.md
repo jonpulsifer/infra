@@ -14,7 +14,7 @@ Prefer `mise` for portable repo tooling:
 mise install
 ```
 
-This provides common Kubernetes, Terraform, SOPS, Vault, and cloud CLIs without
+This provides common Kubernetes, Terraform, SOPS, 1Password, and cloud CLIs without
 requiring a Nix-capable host. Use the Nix flake for NixOS-specific builds,
 formatting, and deploy workflows:
 
@@ -27,7 +27,7 @@ nix develop
 
 This repo is GitOps-first: author desired state in git and let the operators apply it. Do not mutate live infra directly.
 
-- **Terraform** (everything under `terraform/`: `gcp/`, `cloudflare/`, `vault/`, `argo/`, `unifi/`, `tailscale/`, `google-workspace/`, `k8s/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
+- **Terraform** (everything under `terraform/`: `gcp/`, `cloudflare/`, `argo/`, `unifi/`, `tailscale/`, `google-workspace/`, `k8s/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
 - **Kubernetes** (`clusters/**`): changes deploy via **Flux** (and **ArgoCD** for apps sourced from external repos) on merge to `main`. Commit manifests; **never `kubectl apply`** to author state. `kubectl`, `flux get`, and `flux reconcile` are for inspection or forcing a sync. Use explicit contexts (`--context folly` / `--context offsite`) and namespaces.
 - **NixOS** (`nix/**`): `nixos-rebuild` is the apply path (see Key Commands). State changes that may mutate live hosts should be called out before running.
 
@@ -61,7 +61,7 @@ sudo nixos-rebuild switch --rollback
 ### Terraform
 
 ```bash
-cd terraform/<module-dir>   # e.g. terraform/gcp/projects/homelab-ng, terraform/cloudflare, terraform/vault
+cd terraform/<module-dir>   # e.g. terraform/gcp/projects/homelab-ng, terraform/cloudflare, terraform/tailscale
 terraform init
 terraform plan    # local inspection only — applies go through Atlantis on the PR (see "How Changes Ship")
 
@@ -134,7 +134,6 @@ Every Terraform root module lives under `terraform/`; each is a standalone modul
 - `terraform/gcp/organization/` – org-level IAM, folders, projects, billing
 - `terraform/gcp/projects/<name>/` – per-project resources (homelab-ng, firebees, lolcorp, etc.)
 - `terraform/cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
-- `terraform/vault/` – AppRole/GCP/JWT auth backends, PKI, policies
 - `terraform/argo/` – ArgoCD application definitions (Terraform-managed)
 - `terraform/unifi/` – VLANs, BGP config, client management
 - `terraform/tailscale/` – devices, routes, ACL policy
