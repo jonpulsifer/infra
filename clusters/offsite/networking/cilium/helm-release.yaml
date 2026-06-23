@@ -46,6 +46,7 @@ spec:
       enabled: true
     envoy:
       enabled: true
+      useOriginalSourceAddress: false
     ingressController:
       enabled: true
       default: true
