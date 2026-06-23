@@ -8,6 +8,7 @@ ipv4NativeRoutingCIDR: 10.3.0.0/26
 enableIPv4Masquerade: true
 bpf:
   masquerade: true
+  tproxy: true
 ipam:
   mode: multi-pool
 enableXTSocketFallback: false
