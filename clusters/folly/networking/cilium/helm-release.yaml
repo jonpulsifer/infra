@@ -54,6 +54,7 @@ spec:
       enabled: true
     envoy:
       enabled: true
+      useOriginalSourceAddress: false
       prometheus:
         enabled: true
         serviceMonitor:
