@@ -15,7 +15,10 @@ spec:
         name: infra
         namespace: flux-system
   values:
-    image: docker.io/jonpulsifer/ai-agents:latest
+    # renovate: image datasource=docker versioning=semver
+    # The tag below is updated by Flux ImageUpdateAutomation (auto) and Renovate (PR-based rollback).
+    # Format: v0.0.0-sha<7-char-sha> — semver-compatible, monotonically increasing.
+    image: docker.io/jonpulsifer/ai-agents:v0.0.0-sha0000000
     port: 18789
     hostname: walter.lolwtf.ca
     storageSize: 10Gi

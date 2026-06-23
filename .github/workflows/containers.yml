@@ -41,6 +41,8 @@ jobs:
       - id: set-matrix
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: bash .github/scripts/detect-containers.sh
 
   build:
@@ -74,6 +76,7 @@ jobs:
             latest=true
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
+            type=raw,value=v0.0.0-{{ sha }},enable=${{ matrix.image == 'ai-agents' }},priority=90
       - name: Build and push ${{ matrix.image }}
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:

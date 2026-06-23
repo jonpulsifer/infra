@@ -1,0 +1,26 @@
+# ImageRepository polls DockerHub for new tags of ai-agents.
+# Interval is intentionally frequent (1m) so Walter updates quickly after a main merge.
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageRepository
+metadata:
+  name: ai-agents
+  namespace: flux-system
+spec:
+  image: docker.io/jonpulsifer/ai-agents
+  interval: 1m0s
+  # secretRef is optional — jonpulsifer/ai-agents is a public image.
+  # Add a dockerhub credentials secret here if you ever switch to a private image.
+---
+# ImagePolicy selects the semver tag matching v0.0.0-*.
+# The container workflow always pushes v0.0.0-sha<hash> on every main merge,
+# giving Renovate a stable semver to compare and a HelmRelease that can be updated.
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImagePolicy
+metadata:
+  name: ai-agents
+  namespace: flux-system
+spec:
+  imageRef: ai-agents
+  policy:
+    semver:
+      range: ">=0.0.0"

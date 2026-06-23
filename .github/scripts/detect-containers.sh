@@ -41,6 +41,13 @@ while IFS= read -r img; do is_build[$img]=1; is_classified[$img]=1; done \
 while IFS= read -r img; do is_classified[$img]=1; done \
   < <(jq -r '.ignore[]' "$manifest")
 
+# On main push events, always include ai-agents so the :latest tag stays fresh.
+# This overrides the path-based detect for this image specifically.
+always_rebuild_ai_agents=false
+if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+  always_rebuild_ai_agents=true
+fi
+
 # Returns 0 if any changed file lives under $1
 path_changed() {
   local watch="$1" f
@@ -80,13 +87,18 @@ for dockerfile in "${dockerfiles[@]}"; do
 
     should_build="$rebuild_all"
     if [[ "$should_build" != "true" ]]; then
-      mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<< "$entry")
-      for watch in "${watches[@]}"; do
-        if path_changed "$watch"; then
-          should_build=true
-          break
-        fi
-      done
+      # ai-agents is always rebuilt on main pushes to keep :latest fresh
+      if [[ "$always_rebuild_ai_agents" == "true" && "$image" == "ai-agents" ]]; then
+        should_build=true
+      else
+        mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<< "$entry")
+        for watch in "${watches[@]}"; do
+          if path_changed "$watch"; then
+            should_build=true
+            break
+          fi
+        done
+      fi
     fi
 
     if [[ "$should_build" == "true" ]]; then

@@ -71,6 +71,20 @@
       datasourceTemplate: '{{#if datasource}}{{{datasource}}}{{else}}docker{{/if}}',
       versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}',
     },
+    {
+      customType: 'regex',
+      description: 'HelmRelease image values with semver-compatible v0.0.0-sha tags',
+      managerFilePatterns: [
+        '/clusters/folly/apps/walter.yaml',
+      ],
+      matchStrings: [
+        // # renovate: image datasource=docker versioning=semver
+        // image: docker.io/jonpulsifer/ai-agents:v0.0.0-sha0000000
+        '# renovate: image datasource=(?<datasource>\\S+) versioning=(?<versioning>\\S+)\\s*\\n\\s*image:\\s*(?<depName>[^:\\s]+):(?<currentValue>\\S+)',
+      ],
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'semver',
+    },
   ],
   packageRules: [
     // ============================================================
