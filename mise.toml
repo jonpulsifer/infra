@@ -4,6 +4,7 @@ _.file = '.env'
 [tools]
 1password-cli = "latest"
 bat = "latest"
+chezmoi = "latest"
 cilium-cli = "latest"
 delta = "latest"
 eza = "latest"
@@ -15,9 +16,12 @@ helm = "latest"
 k9s = "latest"
 kubectl = "latest"
 kustomize = "latest"
+shellcheck = "latest"
+shfmt = "latest"
 sops = "latest"
 terraform = "latest"
 terraform-docs = "latest"
+vim = "latest"
 
 [tasks.devshell]
 description = "Enter the Nix dev shell"
@@ -62,3 +66,48 @@ description = "Run Terraform plan for one module (set TF_DIR)"
 run = [
   "bash -lc 'if [ -z \"$TF_DIR\" ]; then echo \"Set TF_DIR, e.g. TF_DIR=unifi mise run tf:plan\"; exit 1; fi; terraform -chdir=\"$TF_DIR\" init -input=false && terraform -chdir=\"$TF_DIR\" plan'",
 ]
+
+# helper: find bash/sh scripts (excludes python, etc.)
+[tasks._scripts]
+description = "List shell scripts in this repo"
+hide = true
+dir = "dotfiles"
+run = """
+grep -rl '^#!/usr/bin/env bash' dot_local/bin/executable_* .chezmoiscripts/*.sh 2>/dev/null
+"""
+
+[tasks.format]
+description = "Format shell scripts with shfmt"
+dir = "dotfiles"
+run = """
+mise run _scripts | xargs shfmt -w -i 2 -ci -bn
+"""
+
+[tasks."format:check"]
+description = "Check shell script formatting (no writes)"
+dir = "dotfiles"
+run = """
+mise run _scripts | xargs shfmt -d -i 2 -ci -bn
+"""
+
+[tasks.lint]
+description = "Lint shell scripts with shellcheck"
+dir = "dotfiles"
+run = """
+mise run _scripts | xargs shellcheck
+"""
+
+[tasks.check]
+description = "Run format check and lint"
+dir = "dotfiles"
+depends = ["format:check", "lint"]
+
+[tasks.diff]
+description = "Show chezmoi diff"
+dir = "dotfiles"
+run = "chezmoi diff"
+
+[tasks.dry-run]
+description = "Dry-run chezmoi apply"
+dir = "dotfiles"
+run = "chezmoi apply --dry-run"

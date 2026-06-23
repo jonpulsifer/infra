@@ -4,6 +4,11 @@ set -euo pipefail
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHEZMOI_SOURCE="${HOME}/.local/share/chezmoi"
 
+MISE_CONFIG="${SOURCE_DIR}/mise.toml"
+if [[ ! -f "${MISE_CONFIG}" ]]; then
+  MISE_CONFIG="${SOURCE_DIR}/../mise.toml"
+fi
+
 ensure_path() {
   export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH}"
 }
@@ -47,15 +52,15 @@ install_mise() {
 }
 
 install_tools() {
-  echo "Installing tools from mise.toml (chezmoi, …)" >&2
-  mise trust -y "${SOURCE_DIR}/mise.toml"
-  mise install -C "${SOURCE_DIR}"
+  echo "Installing tools from $(basename "${MISE_CONFIG}") (chezmoi, …)" >&2
+  mise trust -y "${MISE_CONFIG}"
+  mise install -C "$(dirname "${MISE_CONFIG}")"
   ensure_path
 }
 
 apply_dotfiles() {
   if ! command -v chezmoi >/dev/null 2>&1; then
-    echo "chezmoi not found after mise install; check ${SOURCE_DIR}/mise.toml" >&2
+    echo "chezmoi not found after mise install; check ${MISE_CONFIG}" >&2
     exit 1
   fi
 
