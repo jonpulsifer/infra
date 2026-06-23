@@ -35,7 +35,6 @@ spec:
     enableIPv4Masquerade: true
     bpf:
       masquerade: true
-      tproxy: true
     ipMasqAgent:
       enabled: true
       config:
@@ -48,7 +47,7 @@ spec:
       mode: multi-pool
     enableXTSocketFallback: false
     endpointRoutes:
-      enabled: false
+      enabled: true
     bgpControlPlane:
       enabled: true
     gatewayAPI:

@@ -8,12 +8,11 @@ ipv4NativeRoutingCIDR: 10.3.0.0/26
 enableIPv4Masquerade: true
 bpf:
   masquerade: true
-  tproxy: true
 ipam:
   mode: multi-pool
 enableXTSocketFallback: false
 endpointRoutes:
-  enabled: false
+  enabled: true
 bgpControlPlane:
   enabled: true
 gatewayAPI:
