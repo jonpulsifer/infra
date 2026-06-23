@@ -35,6 +35,7 @@ spec:
     enableIPv4Masquerade: true
     bpf:
       masquerade: true
+      tproxy: true
     ipMasqAgent:
       enabled: true
       config:
