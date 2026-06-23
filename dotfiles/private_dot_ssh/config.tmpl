@@ -40,8 +40,15 @@ Host compute.*
   ForwardAgent yes
   ChallengeResponseAuthentication yes
 
-Host optiplex riptide nuc 800g2 retrofit offsite
-  ForwardAgent yes
+Host optiplex riptide nuc 800g2
+  CanonicalizeHostname yes
+  CanonicalDomains pirate-musical.ts.net lolwtf.ca
+  CanonicalizeMaxDots 0
+
+Host retrofit offsite shale oldschool oldboy
+  CanonicalizeHostname yes
+  CanonicalDomains pirate-musical.ts.net
+  CanonicalizeMaxDots 0
 
 Host *
   AddKeysToAgent yes
