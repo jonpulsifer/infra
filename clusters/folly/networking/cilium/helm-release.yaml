@@ -48,7 +48,7 @@ spec:
       mode: multi-pool
     enableXTSocketFallback: false
     endpointRoutes:
-      enabled: true
+      enabled: false
     bgpControlPlane:
       enabled: true
     gatewayAPI:
