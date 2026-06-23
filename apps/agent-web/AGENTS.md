@@ -23,4 +23,4 @@ Coding/automation agent with a ghostty-web terminal UI. Full tool stack for agen
 - Ports: 8080 (web terminal), 18789 (openclaw)
 - Runs as uid 1337 (agent)
 - /home/agent is a VOLUME
-- ghostty-web assets at /opt/ghostty-web/
+- ghostty-web assets at /opt/ghostty-web/<!-- ai-agents container build trigger: 20260623-011158 UTC -->
