@@ -66,32 +66,6 @@ spec:
           value: "1509024937422356533"
         - name: DISCORD_ALLOWED_USER
           value: "308072071949320204"
-    envSecrets:
-      # OP service account token (reused from existing ExternalSecret)
-      - name: op-service-account-token
-        envVar: OP_SERVICE_ACCOUNT_TOKEN
-        onePasswordItem: "Service Account Auth Token: rowbutt"
-        property: credential
-        secretKey: token
-      # Slack tokens (ExternalSecret: hermes-ext-slack-tokens → hermes-secret-slack-tokens)
-      - name: hermes-secret-slack-tokens
-        envVar: SLACK_BOT_TOKEN
-        property: bot-token
-      - name: hermes-secret-slack-tokens
-        envVar: SLACK_APP_TOKEN
-        property: app-token
-      # Discord bot token (ExternalSecret: hermes-ext-discord-token → hermes-secret-discord-token)
-      - name: hermes-secret-discord-token
-        envVar: DISCORD_BOT_TOKEN
-        property: bot-token
-      # ElevenLabs API key (ExternalSecret: hermes-ext-elevenlabs-api-key → hermes-secret-elevenlabs-api-key)
-      - name: hermes-secret-elevenlabs-api-key
-        envVar: ELEVENLABS_API_KEY
-        property: api-key
-      # OpenRouter API key (ExternalSecret: hermes-ext-openrouter-api-key → hermes-secret-openrouter-api-key)
-      - name: hermes-secret-openrouter-api-key
-        envVar: OPENROUTER_API_KEY
-        property: api-key
     resources:
       requests:
         memory: 256Mi
