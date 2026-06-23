@@ -15,7 +15,9 @@ spec:
         name: infra
         namespace: flux-system
   values:
-    image: docker.io/jonpulsifer/ai-agents:latest
+    # Flux ImageUpdateAutomation writes the selected SHA tag here via the
+    # Setters strategy. The JSON comment defines the setter name and example value.
+    image: docker.io/jonpulsifer/ai-agents:latest # {"latestImageTag": "sha-abcdef"}
     port: 18789
     hostname: walter.lolwtf.ca
     storageSize: 10Gi

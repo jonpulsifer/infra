@@ -1,0 +1,66 @@
+---
+# Tell Flux to mirror and track the ai-agents image from DockerHub.
+# Flux stores the image metadata so ImagePolicy and ImageUpdateAutomation
+# can query it without hitting DockerHub directly on every reconcile.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: ai-agents
+  namespace: flux-system
+spec:
+  image: docker.io/jonpulsifer/ai-agents
+  interval: 5m
+  # secretRef: dockerhub-credentials # TODO: add DockerHub credentials for higher rate limits
+---
+# ImagePolicy tells Flux HOW to pick a new image tag.
+# We want: always the latest image that was published (i.e. the most recent SHA).
+# The containers.yml workflow tags every build with `type=sha` so the newest
+# SHA tag == the latest successful build.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: ai-agents
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: ai-agents
+  # Only consider tags that look like full SHA hashes.
+  # This excludes 'latest' and any other non-SHA tags.
+  filterTags:
+    pattern: '^[a-f0-9]{40}$'
+  policy:
+    # Alphabetical descending = lexicographically largest SHA = newest commit.
+    alphabetical:
+      order: desc
+---
+# ImageUpdateAutomation tells Flux to write selected image tags back into YAML.
+# It watches walter.yaml (in the infra GitRepository) and patches the image
+# tag whenever the ImagePolicy finds a newer SHA.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: ai-agents
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: infra
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: flux@lolwtf.ca
+        name: flux
+      messageTemplate: |
+        chore(walter): update ai-agents image to {{latestImageTag}}
+
+        Flux ImageUpdateAutomation
+    push:
+      branch: main
+  update:
+    path: ./clusters/folly/apps/walter.yaml
+    strategy: Setters

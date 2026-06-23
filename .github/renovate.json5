@@ -59,9 +59,14 @@
     },
     {
       customType: 'regex',
-      description: 'Image overrides inside Flux Kustomization JSON6902 patches',
+      description: 'Image overrides in non-Flux cluster YAMLs',
+      // Exclude clusters/folly/apps/walter.yaml — Flux ImageUpdateAutomation
+      // owns that file via the Setters strategy. Renovate must not touch it.
       managerFilePatterns: [
         '/clusters/.+\\.ya?ml$/',
+      ],
+      matchFileNames: [
+        '!**/walter.yaml',
       ],
       matchStrings: [
         // # renovate: datasource=docker
