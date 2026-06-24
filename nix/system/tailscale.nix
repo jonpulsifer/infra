@@ -32,9 +32,9 @@ let
   '';
 in
 {
-  environment.systemPackages = with pkgs; [
+  environment.systemPackages = lib.mkIf config.services.tailscale.enable (with pkgs; [
     tailscale
-  ];
+  ]);
 
   # dnssec = false is required for tailscale to work
   services.resolved = {

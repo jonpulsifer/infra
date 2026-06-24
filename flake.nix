@@ -84,14 +84,23 @@
         optiplex = mkHost "optiplex" {
           role = "control-plane";
           tags = [ "folly" ];
+          imports = [
+            ./nix/system/tailscale-disable.nix
+          ];
           extraConfig.homelab.disko.device = "/dev/sda";
         };
         riptide = mkHost "riptide" {
           tags = [ "folly" ];
+          imports = [
+            ./nix/system/tailscale-disable.nix
+          ];
           extraConfig.homelab.disko.device = "/dev/nvme0n1";
         };
         shale = mkHost "shale" {
           tags = [ "folly" ];
+          imports = [
+            ./nix/system/tailscale-disable.nix
+          ];
           extraConfig.homelab.disko.device = "/dev/sda";
         };
 
@@ -99,6 +108,7 @@
           tags = [ "offsite" ];
           imports = [
             ./nix/system/quiker.nix
+            ./nix/system/tailscale-disable.nix
             ./nix/services/github-runner.nix
             ./nix/services/yarr.nix
           ];
@@ -110,6 +120,9 @@
         retrofit = mkHost "retrofit" {
           tags = [ "offsite" ];
           role = "control-plane";
+          imports = [
+            ./nix/system/tailscale-disable.nix
+          ];
           extraConfig.homelab.disko.device = "/dev/sda";
         };
 
