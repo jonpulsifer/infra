@@ -33,10 +33,6 @@ locals {
       key_expiry_disabled = true
       tags                = ["tag:offsite"]
     }
-    "folly-k8s-lan-router-0-1" = {
-      key_expiry_disabled = true
-      tags                = ["tag:folly", "tag:k8s", "tag:k8s-folly"]
-    }
     "homepi4" = {
       key_expiry_disabled = true
       tags                = []
@@ -44,10 +40,6 @@ locals {
     "nuc" = {
       key_expiry_disabled = true
       tags                = ["tag:folly"]
-    }
-    "offsite-k8s-lan-router-0" = {
-      key_expiry_disabled = true
-      tags                = ["tag:k8s", "tag:k8s-offsite", "tag:offsite"]
     }
     "oldboy" = {
       key_expiry_disabled = false
@@ -76,17 +68,6 @@ locals {
     "spore" = {
       key_expiry_disabled = true
       tags                = ["tag:folly"]
-    }
-    # tailscale-operator runs on both clusters (folly + offsite) and may have a
-    # stale third registration. Tailscale deduplicates with numeric suffixes;
-    # verify actual MagicDNS names in the console if these fail to resolve.
-    "tailscale-operator" = {
-      key_expiry_disabled = true
-      tags                = ["tag:k8s-operator"]
-    }
-    "tailscale-operator-2" = {
-      key_expiry_disabled = true
-      tags                = ["tag:k8s-operator"]
     }
     "tallboy" = {
       key_expiry_disabled = true
