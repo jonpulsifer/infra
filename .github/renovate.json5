@@ -23,6 +23,13 @@
     'prIgnoreNotification',
   ],
   rebaseWhen: 'conflicted',
+  // Use GitHub's native auto-merge so PRs merge as soon as required checks
+  // pass, instead of waiting for the next Renovate run.
+  platformAutomerge: true,
+  // Safety net: never auto-merge a release that is less than 3 days old.
+  // Per-manager rules below can opt back in to a faster window.
+  minimumReleaseAge: '3 days',
+  internalChecksFilter: 'strict',
   flux: {
     managerFilePatterns: [
       '/clusters/.+\\.ya?ml$/',
@@ -91,7 +98,7 @@
       description:      'Terraform Google providers (GA + Beta) — single PR',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^google$', '^google-beta$'],
+      matchPackageNames: ['/^google$/', '/^google-beta$/'],
       groupName:       'terraform google providers',
       groupSlug:       'terraform-google-providers',
     },
@@ -100,7 +107,7 @@
       description:      'Terraform Cloudflare provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^cloudflare$'],
+      matchPackageNames: ['/^cloudflare$/'],
       groupName: 'terraform cloudflare provider',
       groupSlug: 'terraform-cloudflare-provider',
     },
@@ -108,7 +115,7 @@
       description:      'Terraform Tailscale provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^tailscale$'],
+      matchPackageNames: ['/^tailscale$/'],
       groupName: 'terraform tailscale provider',
       groupSlug: 'terraform-tailscale-provider',
     },
@@ -116,7 +123,7 @@
       description:      'Terraform Unifi provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^unifi$'],
+      matchPackageNames: ['/^unifi$/'],
       groupName: 'terraform unifi provider',
       groupSlug: 'terraform-unifi-provider',
     },
@@ -124,7 +131,7 @@
       description:      'Terraform Vault provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^vault$'],
+      matchPackageNames: ['/^vault$/'],
       groupName: 'terraform vault provider',
       groupSlug: 'terraform-vault-provider',
     },
@@ -132,7 +139,7 @@
       description:      'Terraform Kubernetes + Helm providers',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^kubernetes$', '^helm$'],
+      matchPackageNames: ['/^kubernetes$/', '/^helm$/'],
       groupName: 'terraform k8s providers',
       groupSlug: 'terraform-k8s-providers',
     },
@@ -140,7 +147,7 @@
       description:      'Terraform GitHub providers',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^github$', '^googleworkspace$'],
+      matchPackageNames: ['/^github$/', '/^googleworkspace$/'],
       groupName: 'terraform github providers',
       groupSlug: 'terraform-github-providers',
     },
@@ -148,7 +155,7 @@
       description:      'Terraform 1Password provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackagePatterns: ['^onepassword$'],
+      matchPackageNames: ['/^onepassword$/'],
       groupName: 'terraform 1password provider',
       groupSlug: 'terraform-1password-provider',
     },
@@ -242,7 +249,7 @@
       description: 'Actions Runner Controller Group',
       groupName: 'actions-runner-controller',
       matchDatasources: ['docker', 'helm'],
-      matchPackagePatterns: ['gha-runner-scale-set-controller', 'gha-runner-scale-set'],
+      matchPackageNames: ['/gha-runner-scale-set-controller/', '/gha-runner-scale-set/'],
     },
     // ============================================================
     // Flux helm charts
@@ -250,6 +257,23 @@
     {
       matchManagers: ['flux'],
       matchUpdateTypes: ['minor', 'patch'],
+      automerge: true,
+    },
+    // ============================================================
+    // Containers & Helm charts — auto-merge low-risk updates
+    // ============================================================
+    {
+      description: 'Auto-merge container & Helm patch + digest updates',
+      matchDatasources: ['docker', 'helm'],
+      matchUpdateTypes: ['patch', 'digest', 'pin', 'pinDigest'],
+      automerge: true,
+    },
+    // ============================================================
+    // Digest updates are always safe to auto-merge
+    // ============================================================
+    {
+      description: 'Auto-merge all digest pins',
+      matchUpdateTypes: ['digest', 'pinDigest'],
       automerge: true,
     },
     // ============================================================
@@ -265,7 +289,7 @@
     {
       description: 'Auto-merge trusted GitHub Actions',
       matchManagers: ['github-actions'],
-      matchPackagePatterns: ['^actions/', '^renovatebot/'],
+      matchPackageNames: ['/^actions\\//', '/^renovatebot\\//'],
       automerge: true,
       matchUpdateTypes: ['minor', 'patch', 'digest'],
       minimumReleaseAge: '1 minute',
