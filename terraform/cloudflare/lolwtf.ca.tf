@@ -24,34 +24,25 @@ module "tunnel_folly" {
   }
 }
 
-module "tunnel_offsite" {
-  source     = "./modules/tunnel"
-  account_id = local.fml_account_id
-  zone_id    = cloudflare_zone.lolwtf_ca.id
-  name       = "offsite"
-  config = {
-    ingress = [
-      {
-        hostname = "offsite.${cloudflare_zone.lolwtf_ca.name}"
-        service  = "http_status:418"
-      },
-      {
-        hostname = "tf.${cloudflare_zone.lolwtf_ca.name}"
-        service  = "http://atlantis.atlantis"
-      },
-      {
-        service = "http_status:418"
-      }
-    ]
-  }
+resource "cloudflare_dns_record" "folly_lolwtf_ca" {
+  zone_id = cloudflare_zone.lolwtf_ca.id
+  name    = "folly.lolwtf.ca"
+  type    = "A"
+  content = "10.3.0.10"
+  proxied = false
+  ttl     = 1
+}
+
+resource "cloudflare_dns_record" "offsite_lolwtf_ca" {
+  zone_id = cloudflare_zone.lolwtf_ca.id
+  name    = "offsite.lolwtf.ca"
+  type    = "A"
+  content = "10.89.0.10"
+  proxied = false
+  ttl     = 1
 }
 
 output "cloudflare_tunnel_token_folly" {
   sensitive = true
   value     = module.tunnel_folly.cloudflare_tunnel_token
-}
-
-output "cloudflare_tunnel_token_offsite" {
-  sensitive = true
-  value     = module.tunnel_offsite.cloudflare_tunnel_token
 }
