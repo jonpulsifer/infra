@@ -3,6 +3,7 @@ _.file = '.env'
 
 [tools]
 1password-cli = "latest"
+age = "latest"
 bat = "latest"
 chezmoi = "latest"
 cilium-cli = "latest"
