@@ -33,6 +33,11 @@ ephemeral "onepassword_item" "unifi" {
   uuid  = "lb532zq5efzs3y3xlfbdk2kace"
 }
 
+ephemeral "onepassword_item" "unifi_offsite" {
+  vault = local.vault_id
+  uuid  = "4bz2i2uy5iylsqpyib54fhm2de"
+}
+
 
 provider "onepassword" {
   # export OP_SERVICE_ACCOUNT_TOKEN=$(op item get 'Service Account Auth Token: Nixos' --fields=token --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
@@ -51,11 +56,6 @@ provider "unifi" {
   api_url        = ephemeral.onepassword_item.unifi.url
   allow_insecure = true
   site           = "default"
-}
-
-ephemeral "onepassword_item" "unifi_offsite" {
-  vault = local.vault_id
-  uuid  = "4bz2i2uy5iylsqpyib54fhm2de"
 }
 
 provider "unifi" {

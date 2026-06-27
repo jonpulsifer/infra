@@ -29,7 +29,7 @@ spec:
       # Default is "**/*.tf*"; also autoplan when the unifi_bgp sidecar configs
       # pulled in via file() change. Scoped to terraform/unifi so a stray .conf
       # elsewhere in the repo doesn't trigger plans.
-      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,terraform/unifi/*.conf"
+      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,terraform/unifi/**/*.conf"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
       GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
