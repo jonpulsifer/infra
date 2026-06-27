@@ -26,9 +26,10 @@ spec:
       ATLANTIS_FAIL_ON_PRE_WORKFLOW_HOOK_ERROR: "true"
       ATLANTIS_WRITE_GIT_CREDS: "true"
       ATLANTIS_AUTOPLAN_MODULES: "true"
-      # Default is "**/*.tf*"; also autoplan when sidecar files referenced by
-      # file() change (e.g. terraform/unifi/bgp-*.conf for the unifi_bgp config).
-      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,**/*.conf"
+      # Default is "**/*.tf*"; also autoplan when the unifi_bgp sidecar configs
+      # pulled in via file() change. Scoped to terraform/unifi so a stray .conf
+      # elsewhere in the repo doesn't trigger plans.
+      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,terraform/unifi/*.conf"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
       GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
