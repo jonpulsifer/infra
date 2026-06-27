@@ -53,29 +53,19 @@ provider "unifi" {
   site           = "default"
 }
 
-# Offsite controller (ucg-max, BGP router-id 10.89.0.1) is a SEPARATE UniFi
-# controller from folly, so it needs its own provider alias + credentials.
-# To enable offsite BGP management (see the commented unifi_bgp.offsite in
-# bgp.tf):
-#   1. Create a local "terraform" admin on the offsite controller.
-#   2. Store its controller URL + password in a 1Password item in the
-#      ${local.vault_id} vault.
-#   3. Replace REPLACE_WITH_OFFSITE_OP_ITEM_UUID below with that item's UUID.
-#   4. Uncomment this ephemeral block, the provider alias, and unifi_bgp.offsite.
-#
-# ephemeral "onepassword_item" "unifi_offsite" {
-#   vault = local.vault_id
-#   uuid  = "REPLACE_WITH_OFFSITE_OP_ITEM_UUID"
-# }
-#
-# provider "unifi" {
-#   alias          = "offsite"
-#   username       = "terraform"
-#   password       = ephemeral.onepassword_item.unifi_offsite.password
-#   api_url        = ephemeral.onepassword_item.unifi_offsite.url
-#   allow_insecure = true
-#   site           = "default"
-# }
+ephemeral "onepassword_item" "unifi_offsite" {
+  vault = local.vault_id
+  uuid  = "4bz2i2uy5iylsqpyib54fhm2de"
+}
+
+provider "unifi" {
+  alias          = "offsite"
+  username       = "terraform"
+  password       = ephemeral.onepassword_item.unifi_offsite.password
+  api_url        = ephemeral.onepassword_item.unifi_offsite.url
+  allow_insecure = true
+  site           = "default"
+}
 
 # terraform apply -target=unifi_user.import
 # data "unifi_user" "import" {

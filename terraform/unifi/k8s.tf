@@ -39,27 +39,6 @@ resource "unifi_network" "k8s" {
 
 }
 
-# Cilium LoadBalancer VIP range (10.3.0.64/26) lives outside the UDM's
-# connected k8s network (10.3.0.0/26) and is announced per-VIP via BGP from the
-# cluster nodes. The /32s land in FRR's BGP RIB but UniFi does not reliably
-# program BGP-learned prefixes into the forwarding/firewall path — only a
-# configured static route makes the range routable (confirmed: manually adding
-# /32 statics was the one state where LB VIPs were reachable). This codifies
-# that workaround as a single /26 nexthop route so the whole pool is routable
-# and firewall-plumbed. The longer-prefix BGP /32s still win for ECMP when they
-# are programmed; this is the floor. Long-term, Cilium cluster mesh replaces it.
-#
-# next_hop is a single node, so it is a soft SPOF for the static fallback path;
-# externalTrafficPolicy: Cluster means that node forwards to wherever the
-# backend actually lives.
-resource "unifi_static_route" "k8s_lb" {
-  type     = "nexthop-route"
-  network  = local.lb_cidr
-  next_hop = cidrhost(local.node_cidr, 10) # optiplex / k8s API VIP
-  name     = "Kubernetes LB"
-  distance = 1
-}
-
 resource "cloudflare_dns_record" "k8s_remote_dns" {
   for_each = local.static_records
 

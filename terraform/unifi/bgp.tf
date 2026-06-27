@@ -23,13 +23,10 @@ resource "unifi_bgp" "folly" {
 
 # Offsite BGP (ucg-max, ASN 64512, router-id 10.89.0.1) — peers with the offsite
 # Cilium cluster (ASN 64513); see clusters/offsite/networking/cilium/bgp.yaml.
-# The offsite gateway is a separate controller, so this uses the "offsite"
-# provider alias. Enable once the offsite credentials are wired up in
-# versions.tf (a terraform user + 1Password item are not set up yet).
-#
-# resource "unifi_bgp" "offsite" {
-#   provider    = unifi.offsite
-#   enabled     = true
-#   description = "Homelab BGP (Cilium <-> offsite ucg-max)"
-#   config      = file("${path.module}/bgp-offsite.conf")
-# }
+# Separate controller, so this uses the "offsite" provider alias.
+resource "unifi_bgp" "offsite" {
+  provider    = unifi.offsite
+  enabled     = true
+  description = "Homelab BGP (Cilium <-> offsite ucg-max)"
+  config      = file("${path.module}/bgp-offsite.conf")
+}
