@@ -1,6 +1,7 @@
 terraform {
   backend "gcs" {
     bucket = "homelab-ng"
+    # prefix kept as terraform/unifi to preserve existing GCS state (path != prefix by design)
     prefix = "terraform/unifi"
   }
   required_providers {

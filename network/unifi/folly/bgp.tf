@@ -17,8 +17,8 @@
 #
 # NOTE: the bgp-*.conf files are pulled in via file() below. Atlantis only
 # autoplans on its autoplan-file-list (ATLANTIS_AUTOPLAN_FILE_LIST in the
-# atlantis HelmRelease), which includes terraform/unifi/**/*.conf so .conf-only
-# edits in this root and terraform/unifi/offsite plan too.
+# atlantis HelmRelease), which includes network/unifi/**/*.conf so .conf-only
+# edits in this root and network/unifi/offsite plan too.
 resource "unifi_bgp" "folly" {
   enabled     = true
   description = "Homelab BGP (Cilium <-> folly udm-pro)"
