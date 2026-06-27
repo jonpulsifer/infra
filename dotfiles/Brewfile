@@ -24,7 +24,6 @@ brew "k9s"
 # terraform
 brew "tenv"
 brew "terraform-docs"
-brew "tflint"
 
 # ai homies
 cask "1password-cli"
