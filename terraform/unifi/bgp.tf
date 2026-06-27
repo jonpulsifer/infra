@@ -17,8 +17,8 @@
 #
 # NOTE: the bgp-*.conf files are pulled in via file() below. Atlantis only
 # autoplans on its autoplan-file-list (ATLANTIS_AUTOPLAN_FILE_LIST in the
-# atlantis HelmRelease), which includes terraform/unifi/*.conf so .conf-only
-# edits plan too.
+# atlantis HelmRelease), which includes terraform/unifi/**/*.conf so .conf-only
+# edits in this root and terraform/unifi/offsite plan too.
 resource "unifi_bgp" "folly" {
   enabled     = true
   description = "Homelab BGP (Cilium <-> folly udm-pro)"
@@ -26,12 +26,10 @@ resource "unifi_bgp" "folly" {
   # site is omitted, so it defaults to the provider's site ("default")
 }
 
-# Offsite BGP (ucg-max, ASN 64512, router-id 10.89.0.1) — peers with the offsite
-# Cilium cluster (ASN 64513); see clusters/offsite/networking/cilium/bgp.yaml.
-# Separate controller, so this uses the "offsite" provider alias.
-resource "unifi_bgp" "offsite" {
-  provider    = unifi.offsite
-  enabled     = true
-  description = "Homelab BGP (Cilium <-> offsite ucg-max)"
-  config      = file("${path.module}/bgp-offsite.conf")
+removed {
+  from = unifi_bgp.offsite
+
+  lifecycle {
+    destroy = false
+  }
 }
