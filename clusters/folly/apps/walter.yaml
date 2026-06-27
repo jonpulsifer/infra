@@ -44,6 +44,10 @@ spec:
         onePasswordItem: "Service Account Auth Token: rowbutt"
         property: credential
         secretKey: token
+    securityContext:
+      allowPrivilegeEscalation: true
+      extraCapabilities:
+        - NET_RAW
     ingress:
       enabled: true
       mode: shared

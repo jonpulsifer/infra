@@ -131,13 +131,17 @@ spec:
           image: {{ .Values.image }}
           imagePullPolicy: IfNotPresent
           securityContext:
-            allowPrivilegeEscalation: false
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
             readOnlyRootFilesystem: false
             seccompProfile:
               type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
+              {{- if .Values.securityContext.extraCapabilities }}
+              add:
+                {{- toYaml .Values.securityContext.extraCapabilities | nindent 16 }}
+              {{- end }}
           {{- if .Values.command }}
           command:
             - sh

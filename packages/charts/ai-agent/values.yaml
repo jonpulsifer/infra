@@ -40,6 +40,13 @@ openclawPlugins: []
 # - "@openclaw/slack@2026.5.20"
 # - "@openclaw/discord@2026.5.22"
 
+# securityContext overrides for the agent container.
+# allowPrivilegeEscalation: set to true to allow setuid binaries (e.g. sudo).
+# extraCapabilities: list of Linux capabilities to add (e.g. NET_RAW for ping).
+securityContext:
+  allowPrivilegeEscalation: false
+  extraCapabilities: []
+
 configInstallImage: busybox:1.38.0
 
 # secrets: config that CONTAINS secret material. Synced from 1Password via an
