@@ -79,6 +79,7 @@ RUN apt-get update && apt-get -y upgrade && \
       rsync \
       ripgrep \
       strace \
+      sudo \
       tree \
       tcpdump \
       tini \
@@ -168,7 +169,9 @@ RUN chmod 0755 /usr/local/bin/agent-snapshot
 
 # Agent user (non-root, dedicated to agent workloads)
 RUN groupadd -g 1337 agent \
-    && useradd -m -u 1337 -g agent -s /bin/bash agent
+    && useradd -m -u 1337 -g agent -s /bin/bash agent \
+    && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
+    && chmod 440 /etc/sudoers.d/agent
 
 WORKDIR /home/agent
 RUN chown -R agent:agent /home/agent
