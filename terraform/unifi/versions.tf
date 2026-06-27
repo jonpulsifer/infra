@@ -10,7 +10,7 @@ terraform {
     }
     unifi = {
       source  = "ubiquiti-community/unifi"
-      version = "~> 0.52"
+      version = "~> 0.53"
     }
     onepassword = {
       source  = "1password/onepassword"
@@ -49,6 +49,20 @@ provider "unifi" {
   # password = "" or UNIFI_PASSWORD env
   # export UNIFI_PASSWORD=$(op item get 'unifi terraform user' --fields=password --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
   api_url        = ephemeral.onepassword_item.unifi.url
+  allow_insecure = true
+  site           = "default"
+}
+
+ephemeral "onepassword_item" "unifi_offsite" {
+  vault = local.vault_id
+  uuid  = "4bz2i2uy5iylsqpyib54fhm2de"
+}
+
+provider "unifi" {
+  alias          = "offsite"
+  username       = "terraform"
+  password       = ephemeral.onepassword_item.unifi_offsite.password
+  api_url        = ephemeral.onepassword_item.unifi_offsite.url
   allow_insecure = true
   site           = "default"
 }
