@@ -14,6 +14,10 @@
 # unifi_bgp is a per-site singleton (v2/api/site/<site>/bgp/config) where the
 # provider's Create and Update are the same POST upsert, so the first apply
 # adopts the already-running config in place — it does not destroy/recreate.
+#
+# NOTE: the bgp-*.conf files are pulled in via file() below. Atlantis only
+# autoplans on its autoplan-file-list (ATLANTIS_AUTOPLAN_FILE_LIST in the
+# atlantis HelmRelease), which includes **/*.conf so .conf-only edits plan too.
 resource "unifi_bgp" "folly" {
   enabled     = true
   description = "Homelab BGP (Cilium <-> folly udm-pro)"
