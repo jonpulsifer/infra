@@ -27,9 +27,13 @@ spec:
       ATLANTIS_WRITE_GIT_CREDS: "true"
       ATLANTIS_AUTOPLAN_MODULES: "true"
       # Default is "**/*.tf*"; also autoplan when the unifi_bgp sidecar configs
-      # pulled in via file() change. Scoped to network/unifi so a stray .conf
-      # elsewhere in the repo doesn't trigger plans.
-      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,network/unifi/**/*.conf"
+      # pulled in via file() change. Use an unanchored "**/*.conf" glob: the
+      # previous "network/unifi/**/*.conf" globstar failed to match the .conf
+      # files and they never autoplanned. This stays safe because Atlantis only
+      # creates a project for a dir that contains .tf — and the only .conf files
+      # in tf roots are network/unifi/{folly,offsite}; other .conf files live in
+      # non-tf dirs (apps/, dotfiles/) so they never trigger a plan.
+      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,**/*.conf"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
       GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
