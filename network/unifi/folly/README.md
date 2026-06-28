@@ -14,15 +14,17 @@ local UniFi gateway (ASN 64512) to announce its pod and LoadBalancer IP pools.
 Cross-site there are **two planes over the same Site Magic WireGuard tunnel
 (`wgsts1000`)**:
 
-- **OSPF (Site Magic, distance 110)** auto-carries the node subnets
-  (`10.3.0.0/26` ⇄ `10.89.0.0/28`). This is the *active* path for node-to-node
-  traffic — it beats iBGP on administrative distance.
-- **iBGP between the gateways (distance 200)**, sourced from the LAN router-ids
-  (`update-source`), carries the things OSPF does *not* share: the Cilium
-  LoadBalancer `/32` VIPs (from the `*.64/26` pools) and the pod CIDRs
-  (`10.100.0.0/20` / `10.101.0.0/20`). The node-subnet prefixes are also
-  advertised here but stay inactive behind OSPF; the `/32` VIPs win on
-  longest-prefix match, so cross-site Service access rides BGP.
+- **iBGP between the gateways**, sourced from the LAN router-ids
+  (`update-source`), carries everything cross-site: the Cilium LoadBalancer
+  `/32` VIPs (from the `*.64/26` pools), the pod CIDRs (`10.100.0.0/20` /
+  `10.101.0.0/20`), and the node subnets (`10.3.0.0/26` ⇄ `10.89.0.0/28`). The
+  iBGP administrative distance is lowered to **105** (`distance bgp 20 105 105`)
+  so it wins over OSPF for the node subnets. This matters because the iBGP plane
+  forwards **pod-sourced** packets, while the OSPF/Site Magic plane only carries
+  the configured site LAN subnets — so pod → remote-node traffic must ride iBGP.
+- **OSPF (Site Magic, distance 110)** also auto-carries the node subnets
+  (`10.3.0.0/26` ⇄ `10.89.0.0/28`), but now sits **behind** iBGP as an automatic
+  backup for node-sourced traffic if the iBGP session drops.
 
 ```mermaid
 flowchart LR
@@ -40,7 +42,7 @@ flowchart LR
         onodes -->|eBGP| ucg
     end
 
-    udm <-->|"Site Magic WireGuard tunnel (wgsts1000)<br/>— OSPF (d110): node subnets /26 ⇄ /28 (active)<br/>— iBGP (d200): LB VIP /32s + pod CIDRs"| ucg
+    udm <-->|"Site Magic WireGuard tunnel (wgsts1000)<br/>— iBGP (d105, preferred): node subnets /26 ⇄ /28 + LB VIP /32s + pod CIDRs<br/>— OSPF (d110, backup): node subnets /26 ⇄ /28"| ucg
 ```
 
 <!-- BEGIN_TF_DOCS -->
