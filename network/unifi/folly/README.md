@@ -11,20 +11,29 @@ The offsite UniFi console is managed separately under `network/unifi/offsite/`.
 Each site runs Cilium (ASN 64513) on its k8s nodes, peering **eBGP** with the
 local UniFi gateway (ASN 64512) to announce its pod and LoadBalancer IP pools.
 
-Cross-site there are **two planes over the same Site Magic WireGuard tunnel
-(`wgsts1000`)**:
+There is a **single inter-site data plane**: the Site Magic WireGuard tunnel
+(`wgsts1000`). Two control-plane protocols run over it, but both next-hops
+resolve *through that same tunnel*, so they are not separate paths:
 
-- **iBGP between the gateways**, sourced from the LAN router-ids
-  (`update-source`), carries everything cross-site: the Cilium LoadBalancer
-  `/32` VIPs (from the `*.64/26` pools), the pod CIDRs (`10.100.0.0/20` /
-  `10.101.0.0/20`), and the node subnets (`10.3.0.0/26` ⇄ `10.89.0.0/28`). The
-  iBGP administrative distance is lowered to **105** (`distance bgp 20 105 105`)
-  so it wins over OSPF for the node subnets. This matters because the iBGP plane
-  forwards **pod-sourced** packets, while the OSPF/Site Magic plane only carries
-  the configured site LAN subnets — so pod → remote-node traffic must ride iBGP.
-- **OSPF (Site Magic, distance 110)** also auto-carries the node subnets
-  (`10.3.0.0/26` ⇄ `10.89.0.0/28`), but now sits **behind** iBGP as an automatic
-  backup for node-sourced traffic if the iBGP session drops.
+- **iBGP between the gateways** (sourced from the LAN router-ids via
+  `update-source`) is the **only** way the Cilium LoadBalancer `/32` VIPs (from
+  the `*.64/26` pools) and the pod CIDRs (`10.100.0.0/20` / `10.101.0.0/20`)
+  cross the sites — OSPF/Site Magic does not carry them.
+- **OSPF (Site Magic)** auto-shares the LAN/node subnets
+  (`10.3.0.0/26` ⇄ `10.89.0.0/28`) and wins the RIB for them; the iBGP copy of
+  the node subnet is an inactive (recursive-next-hop) backup.
+
+Because there is only one tunnel, cross-site **reachability does not depend on
+which protocol wins the RIB** — it depends on the **gateway firewall** allowing
+the full k8s address space across the tunnel. The folly gateway isolates its
+k8s network in a custom **`Lab`** zone (`firewall.tf`), so the cross-site allow
+policies must list the **pod CIDRs and LB VIP pools**, not just the node
+subnets — otherwise pod-sourced packets are dropped on the `Lab → Vpn` forward.
+(That gap was the cause of the "folly pods can't reach offsite nodes" outage;
+node↔node kept working because the node subnets *were* allowed.) The offsite
+console has **no custom firewall policies** — its k8s network sits in the
+default `Internal` zone, whose predefined `Internal ⇄ Vpn` rules already permit
+the traffic.
 
 ```mermaid
 flowchart LR
@@ -42,7 +51,7 @@ flowchart LR
         onodes -->|eBGP| ucg
     end
 
-    udm <-->|"Site Magic WireGuard tunnel (wgsts1000)<br/>— iBGP (d105, preferred): node subnets /26 ⇄ /28 + LB VIP /32s + pod CIDRs<br/>— OSPF (d110, backup): node subnets /26 ⇄ /28"| ucg
+    udm <-->|"Site Magic WireGuard tunnel (wgsts1000) — one data plane<br/>iBGP: LB VIP /32s + pod CIDRs (BGP-only) + node subnets<br/>OSPF: node subnets /26 ⇄ /28 (wins RIB)<br/>cross-site reachability gated by the gateway firewall, not protocol choice"| ucg
 ```
 
 <!-- BEGIN_TF_DOCS -->
