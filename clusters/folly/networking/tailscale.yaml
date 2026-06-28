@@ -8,11 +8,15 @@ spec:
   interval: 1h0m0s
   path: ./clusters/folly/networking/tailscale
   prune: true
-  wait: true
-  timeout: 5m0s
   sourceRef:
     kind: GitRepository
     name: infra
+  # CRDs exist only after the operator HelmRelease is ready; connectors need them.
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: tailscale
+      namespace: tailscale
   decryption:
     provider: sops
     secretRef:
