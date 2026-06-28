@@ -17,10 +17,12 @@ spec:
         namespace: flux-system
       interval: 5m0s
   install:
+    crds: CreateReplace
     createNamespace: true
     remediation:
       retries: 5
   upgrade:
+    crds: CreateReplace
     remediation:
       retries: 5
   dependsOn:
