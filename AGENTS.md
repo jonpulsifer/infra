@@ -23,6 +23,34 @@ nix develop
 # Provides: nixos-rebuild and the full Nix development shell
 ```
 
+### Claude Code on the web
+
+[Claude Code on the web](https://code.claude.com/docs/en/claude-code-on-the-web) runs in a
+freshly-cloned, ephemeral container that ships only `bun`, `go`, and `node`/`npm`. A
+**SessionStart hook** (`.claude/hooks/session-start.sh`, registered in `.claude/settings.json`)
+bootstraps the validation toolchain on session start so linters, `terraform validate`, and tests
+work out of the box. It runs **only** in the web env, **synchronously**, and is idempotent.
+
+It installs `mise` plus a curated set of validation tools — `terraform`, `terraform-docs`,
+`shellcheck`, `shfmt`, `kustomize`, `helm` — and the 1Password CLI (`op`) straight from
+1Password's CDN (mise's `op` backends need an out-of-scope GitHub clone that the web env's
+network policy blocks). The heavier CLIs (`gcloud`, `k9s`, `cilium-cli`, …) and Nix are
+intentionally skipped; run the full `mise install` on demand if you need them.
+
+Environment variables relevant to web sessions:
+
+- `CLAUDE_CODE_REMOTE` — set to `true` by the harness in the web env; the hook keys off it to stay web-only.
+- `CLAUDE_ENV_FILE` — file the hook appends to in order to persist vars into the session (`PATH`, the two below).
+- `CLAUDE_PROJECT_DIR` — repo root, used for the hook path in `.claude/settings.json`.
+- `MISE_YES=1` — non-interactive `mise`.
+- `MISE_TASK_RUN_AUTO_INSTALL=0` — stops `mise run <task>` from auto-installing the *entire*
+  `mise.toml` toolchain (which would fail on the out-of-scope `op` plugin); tasks use the curated tools instead.
+- `OP_SERVICE_ACCOUNT_TOKEN` (optional) — if set, `op` can fetch creds non-interactively; otherwise `op` is present but unauthenticated.
+
+Cluster/state secrets are intentionally **not** provisioned in web sessions: Terraform applies go
+through Atlantis on the PR and `kubectl` is inspection-only with no cluster creds, so validation is
+limited to `init -backend=false && validate`, lint, build, and unit tests.
+
 ## How Changes Ship (GitOps + Atlantis)
 
 This repo is GitOps-first: author desired state in git and let the operators apply it. Do not mutate live infra directly.
