@@ -2,7 +2,9 @@
 # Tailscale tailnet-wide resources
 # ---------------------------------------------------------------------------
 
-# Touch to trigger Atlantis plan on policy.hujson changes
+# Touch to trigger Atlantis plan on policy.hujson changes.
+# Re-applies the offsite k8s subnet-router autoApprovers that merged in #911
+# without an apply, leaving offsite-k8s-lan-router routes stuck pending.
 resource "tailscale_acl" "this" {
   acl = file("${path.module}/policy.hujson")
 }
