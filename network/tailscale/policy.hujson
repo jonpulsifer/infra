@@ -68,7 +68,7 @@
 		},
 		{
 			"src": ["autogroup:owner"],
-			"dst": ["ipset:offsite-bell"],
+			"dst": ["ipset:folly-lan", "ipset:offsite-lan", "ipset:offsite-bell"],
 			"ip":  ["*"],
 		},
 		{
@@ -90,13 +90,19 @@
 
 	"autoApprovers": {
 		"routes": {
+			"10.1.0.0/24":    ["tag:k8s-folly"],
+			"10.2.0.0/24":    ["tag:k8s-folly"],
 			"10.3.0.0/26":    ["tag:k8s-folly"],
 			"10.3.0.64/26":   ["tag:k8s-folly"],
+			"10.89.0.0/28":   ["tag:k8s-offsite"],
+			"10.89.0.64/26":  ["tag:k8s-offsite"],
+			"192.168.1.0/24": ["tag:k8s-offsite"],
 			"192.168.2.0/24": ["tag:k8s-operator"],
 		},
 	},
 
 	"ipsets": {
+		"ipset:folly-lan":                ["add 10.1.0.0/24", "add 10.2.0.0/24"],
 		"ipset:k8s-offsite-nodes-and-lb": ["add ipset:k8s-offsite-nodes", "add ipset:k8s-offsite-lb"],
 		"ipset:k8s-folly-nodes-and-lb":   ["add ipset:k8s-folly-nodes", "add ipset:k8s-folly-lb"],
 		"ipset:offsite-bell":             ["add 192.168.2.0/24"],
@@ -116,6 +122,11 @@
 		{
 			"src":    "jonathan@pulsifer.ca",
 			"accept": ["10.3.0.10:22", "10.3.0.70:443"],
+			"proto":  "tcp",
+		},
+		{
+			"src":    "jonathan@pulsifer.ca",
+			"accept": ["10.1.0.1:443", "10.2.0.20:53", "10.89.0.1:443", "192.168.1.1:443"],
 			"proto":  "tcp",
 		},
 	],

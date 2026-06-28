@@ -23,6 +23,7 @@ resources:
   - prometheus.yaml
   - stakater.yaml
   - stefanprodan.yaml
+  - tailscale.yaml
   - vector.yaml
 patches:
   - target:
