@@ -23,7 +23,12 @@ out/
 *.tgz
 
 # ─── Agent / AI Tooling ──────────────────────────────────────────────────────
-.claude/
+# Ignore local/personal Claude config, but track the shared session-start hook
+# + settings so Claude Code on the web bootstraps the toolchain.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/settings.local.json
 .agents/
 
 # ─── Node / Bun ──────────────────────────────────────────────────────────────
