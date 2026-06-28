@@ -163,6 +163,7 @@ Network fabric — `network/`:
 
 - `network/unifi/folly/` – primary-site UniFi: VLANs, BGP config, client management (state prefix `terraform/unifi`, kept for continuity)
 - `network/unifi/offsite/` – offsite UniFi: networks, WANs, WLANs, BGP (state prefix `terraform/unifi/offsite`)
+  - **Cross-site k8s reachability** (folly ⇄ offsite over the single Site Magic tunnel) is gated by the **gateway firewall**, not the routing protocol: iBGP between the gateways carries the pod CIDRs + LB VIP pools, but a gateway only forwards them if its firewall allows the **full k8s address space** (pod CIDRs + VIP pools, not just node subnets). folly enforces this in `firewall.tf` (custom `Lab` zone); offsite uses the permissive default `Internal` zone. See `network/unifi/folly/README.md`.
 - `network/cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
 - `network/tailscale/` – devices, routes, ACL policy
 

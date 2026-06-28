@@ -7,6 +7,24 @@ State: `gs://homelab-ng/terraform/unifi/offsite`
 This root owns the offsite gateway networks, WANs, WLANs, and BGP/FRR config.
 Applies run through Atlantis on PRs; do not run `terraform apply` locally.
 
+## Cross-site BGP + firewall
+
+The offsite UCG peers **iBGP** (ASN 64512) with the folly UDM (`10.3.0.1`) over
+the Site Magic WireGuard tunnel — see `bgp.conf` and the folly side's
+`network/unifi/folly/README.md` for the full topology. That iBGP session is the
+only thing that carries the LB VIP `/32`s and pod CIDRs between the sites;
+OSPF/Site Magic only auto-shares the LAN/node subnets.
+
+Unlike folly, the offsite console has **no Terraform-managed firewall** and **no
+custom firewall policies** — the Kubernetes network (VLAN 2, `10.89.0.1/28`)
+lives in the default **`Internal`** zone, whose predefined `Internal ⇄ Vpn`
+rules already permit cross-site k8s traffic (pods included). So
+offsite-pod → folly works without extra rules. (Folly needs explicit policies
+only because it isolates its k8s network in a custom `Lab` zone; see
+`network/unifi/folly/firewall.tf`.) If the offsite k8s network is ever moved into
+a custom/isolated zone, mirror folly's cross-site allow policies here — matching
+the **pod CIDRs + VIP pools**, not just the node subnets.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
