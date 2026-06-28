@@ -33,29 +33,23 @@ resource "unifi_firewall_group" "teleport_cidr" {
   members = ["192.168.2.0/24"]
 }
 
-# Cross-site (Site Magic) k8s reachability address-groups.
+# Cross-site (Site Magic) k8s reachability CIDRs.
 #
 # The Site Magic firewall must allow the *full* Kubernetes address space across
 # the tunnel, not just the node subnets. The cross-site allow policies below
 # originally matched on the k8s/nest NETWORKs (node subnets 10.3.0.0/26 and
 # 10.89.0.0/28 only), so node<->node traffic worked but pod-sourced packets
 # (10.100.0.0/20) were dropped at the gateway on the Lab->Vpn forward — pods
-# could not reach the offsite nodes/VIPs and vice-versa. Match on these
-# address-groups instead so the pod CIDRs and Cilium LB VIP pools are permitted.
-resource "unifi_firewall_group" "folly_k8s_cidrs" {
-  name = "Folly k8s CIDRs"
-  type = "address-group"
-  members = [
+# could not reach the offsite nodes/VIPs and vice-versa. Match these CIDR lists
+# inline (matching_target = "IP") so the pod CIDRs and Cilium LB VIP pools are
+# permitted too.
+locals {
+  folly_k8s_cidrs = [
     "10.3.0.0/26",   # nodes (Kubernetes network, VLAN 8)
     "10.3.0.64/26",  # Cilium LB VIP pool
     "10.100.0.0/20", # pod CIDR
   ]
-}
-
-resource "unifi_firewall_group" "nest_k8s_cidrs" {
-  name = "Nest k8s CIDRs"
-  type = "address-group"
-  members = [
+  nest_k8s_cidrs = [
     "10.89.0.0/28",  # offsite nodes
     "10.89.0.64/26", # offsite Cilium LB VIP pool
     "10.101.0.0/20", # offsite pod CIDR
@@ -328,14 +322,14 @@ resource "unifi_firewall_policy" "nest_k8s_to_folly_k8s" {
 
   source = {
     matching_target    = "IP"
-    ip_group_id        = unifi_firewall_group.nest_k8s_cidrs.id
+    ips                = local.nest_k8s_cidrs
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.vpn.id
   }
 
   destination = {
     matching_target    = "IP"
-    ip_group_id        = unifi_firewall_group.folly_k8s_cidrs.id
+    ips                = local.folly_k8s_cidrs
     port_matching_type = "ANY"
     zone_id            = unifi_firewall_zone.lab.id
   }
@@ -353,14 +347,14 @@ resource "unifi_firewall_policy" "folly_k8s_to_nest_k8s" {
 
   source = {
     matching_target    = "IP"
-    ip_group_id        = unifi_firewall_group.folly_k8s_cidrs.id
+    ips                = local.folly_k8s_cidrs
     port_matching_type = "ANY"
     zone_id            = unifi_firewall_zone.lab.id
   }
 
   destination = {
     matching_target    = "IP"
-    ip_group_id        = unifi_firewall_group.nest_k8s_cidrs.id
+    ips                = local.nest_k8s_cidrs
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.vpn.id
   }
