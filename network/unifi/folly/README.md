@@ -4,7 +4,7 @@ Terraform for the primary UniFi side of the homelab: networks/VLANs, WLANs,
 WAN, client QoS, DNS, firewall policies, and the folly gateway's BGP/FRR config
 (`unifi_bgp`, sourced from `bgp-folly.conf`).
 
-The offsite UniFi console is managed separately under `terraform/unifi/offsite/`.
+The offsite UniFi console is managed separately under `network/unifi/offsite/`.
 
 ## BGP topology
 
@@ -35,7 +35,7 @@ flowchart LR
 
     subgraph offsite["offsite site"]
         direction TB
-        ucg["UCG Max<br/>ASN 64512<br/>router-id 10.89.0.1<br/>terraform/unifi/offsite"]
+        ucg["UCG Max<br/>ASN 64512<br/>router-id 10.89.0.1<br/>network/unifi/offsite"]
         onodes["Cilium nodes (ASN 64513)<br/>10.89.0.10 / .11<br/>pods 10.101.0.0/20<br/>LB VIPs 10.89.0.64/26"]
         onodes -->|eBGP| ucg
     end

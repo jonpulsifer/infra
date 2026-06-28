@@ -27,7 +27,7 @@ nix develop
 
 This repo is GitOps-first: author desired state in git and let the operators apply it. Do not mutate live infra directly.
 
-- **Terraform** (everything under `terraform/`: `gcp/`, `cloudflare/`, `argo/`, `unifi/`, `tailscale/`, `google-workspace/`, `k8s/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
+- **Terraform** (network roots under `network/`: `unifi/folly`, `unifi/offsite`, `cloudflare/`, `tailscale/`; the rest under `terraform/`: `gcp/`, `argo/`, `google-workspace/`, `vault/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
 - **Kubernetes** (`clusters/**`): changes deploy via **Flux** (and **ArgoCD** for apps sourced from external repos) on merge to `main`. Commit manifests; **never `kubectl apply`** to author state. `kubectl`, `flux get`, and `flux reconcile` are for inspection or forcing a sync. Use explicit contexts (`--context folly` / `--context offsite`) and namespaces.
 - **NixOS** (`nix/**`): `nixos-rebuild` is the apply path (see Key Commands). State changes that may mutate live hosts should be called out before running.
 
@@ -61,7 +61,7 @@ sudo nixos-rebuild switch --rollback
 ### Terraform
 
 ```bash
-cd terraform/<module-dir>   # e.g. terraform/gcp/projects/homelab-ng, terraform/cloudflare, terraform/tailscale
+cd terraform/<module-dir>   # e.g. terraform/gcp/projects/homelab-ng (network roots live under network/, e.g. network/cloudflare, network/unifi/folly)
 terraform init
 terraform plan    # local inspection only — applies go through Atlantis on the PR (see "How Changes Ship")
 
@@ -127,18 +127,24 @@ Cilium provides CNI + BGP load balancer (pools defined in `networking/cilium/ip-
 
 The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives in `terraform/k8s/` — not in `clusters/`.
 
-### Layer 3 – Cloud & Network: `terraform/`
+### Layer 3 – Cloud & Network: `terraform/` and `network/`
 
-Every Terraform root module lives under `terraform/`; each is a standalone module. CI validates and auto-formats on push to `main`.
+Terraform root modules live under `terraform/` (cloud/identity) and `network/` (the network fabric, brought out front). Each is a standalone module. CI validates and auto-formats on push to `main`.
+
+Network fabric — `network/`:
+
+- `network/unifi/folly/` – primary-site UniFi: VLANs, BGP config, client management (state prefix `terraform/unifi`, kept for continuity)
+- `network/unifi/offsite/` – offsite UniFi: networks, WANs, WLANs, BGP (state prefix `terraform/unifi/offsite`)
+- `network/cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
+- `network/tailscale/` – devices, routes, ACL policy
+
+Cloud & identity — `terraform/`:
 
 - `terraform/gcp/organization/` – org-level IAM, folders, projects, billing
 - `terraform/gcp/projects/<name>/` – per-project resources (homelab-ng, firebees, lolcorp, etc.)
-- `terraform/cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
 - `terraform/argo/` – ArgoCD application definitions (Terraform-managed)
-- `terraform/unifi/` – VLANs, BGP config, client management
-- `terraform/tailscale/` – devices, routes, ACL policy
 - `terraform/google-workspace/` – Google Workspace users, groups, domains
-- `terraform/k8s/` – Flux bootstrap for both clusters
+- `terraform/vault/` – HashiCorp Vault auth, mounts, policies
 - `terraform/modules/` – reusable modules (gce-vpc, gke-cluster, gke-nodepool, …) consumed by the roots via relative paths
 
 ### Layer 4 – Applications, Packages & Images

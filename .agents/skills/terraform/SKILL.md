@@ -1,27 +1,42 @@
 ---
 name: terraform
 description: >-
-  Work with Terraform modules in this infra repo (everything under terraform/:
-  gcp, cloudflare, argo, unifi, tailscale, google-workspace, k8s).
+  Work with Terraform modules in this infra repo. Cloud/identity roots live under
+  terraform/ (gcp, argo, google-workspace, vault); network roots live under
+  network/ (unifi/folly, unifi/offsite, cloudflare, tailscale).
   Covers workflow, CI behaviour, and module layout.
 ---
 
 ## Module Layout
 
-All Terraform lives under `terraform/`. Each subdirectory below is an independent root module with its own state:
+Terraform roots are split by domain: cloud/identity under `terraform/`, the network
+fabric under `network/`. Each subdirectory below is an independent root module with
+its own state:
 
 ```
+# network fabric — network/
+network/unifi/folly/              # primary-site UniFi: VLANs, BGP, clients
+network/unifi/offsite/            # offsite UniFi: networks, WANs, WLANs, BGP
+network/cloudflare/               # DNS, tunnels, security rules
+network/tailscale/                # devices, routes, ACL policy
+
+# cloud & identity — terraform/
 terraform/gcp/organization/       # org-level IAM, folders, billing
 terraform/gcp/projects/<name>/    # per-project resources
-terraform/cloudflare/             # DNS, tunnels, security rules
 terraform/argo/                   # ArgoCD application definitions
-terraform/unifi/                  # VLANs, BGP, clients
-terraform/tailscale/              # devices, routes, ACL policy
 terraform/google-workspace/       # Workspace users, groups, domains
+terraform/vault/                  # Vault auth, mounts, policies
 terraform/modules/                # reusable modules consumed via relative paths
+
+# Flux bootstrap (Terraform, colocated with each cluster)
 clusters/folly/bootstrap/         # Flux bootstrap for the folly cluster
 clusters/offsite/bootstrap/       # Flux bootstrap for the offsite cluster
 ```
+
+> The `network/` roots keep their original GCS state prefixes (`terraform/unifi`,
+> `terraform/unifi/offsite`, `terraform/cloudflare`, `terraform/tailscale`) so the
+> directory move needed no state migration — backend `prefix` intentionally differs
+> from the path.
 
 ## Standard Workflow
 
@@ -65,5 +80,5 @@ terraform fmt -recursive
 
 - Terraform state is remote; `.tfstate` files are gitignored.
 - `terraform/gcp/organization/` manages the GCP org hierarchy — changes affect all projects.
-- `terraform/cloudflare/` Tunnel modules control external ingress for folly and offsite clusters.
+- `network/cloudflare/` Tunnel modules control external ingress for folly and offsite clusters.
 - `terraform/modules/` are reusable (no backend); root modules reference them via relative paths (e.g. homelab-ng → `../../../modules/gce-vpc`).

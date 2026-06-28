@@ -8,8 +8,10 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 .
 ├── nix/           # NixOS configurations for bare metal hosts
 ├── clusters/      # Kubernetes GitOps manifests (folly, offsite, base) — FluxCD
-├── terraform/     # All Terraform: gcp, cloudflare, tailscale, argo,
-│                  #   unifi, google-workspace, k8s (Flux bootstrap), modules/
+├── network/       # Network fabric Terraform: unifi/{folly,offsite},
+│                  #   cloudflare, tailscale
+├── terraform/     # Cloud & identity Terraform: gcp, argo,
+│                  #   google-workspace, vault, modules/
 ├── apps/          # Deployable first-party services (agent-web, hermes, tidbyt, …)
 ├── packages/      # Shared building blocks (agent-web-ui, charts/)
 ├── images/        # Base & tool OCI images + cloudlab-linux VM build tooling
@@ -95,12 +97,12 @@ Managed with:
 - IAM and service accounts
 - Project configurations
 
-**Cloudflare** (`terraform/cloudflare/`):
+**Cloudflare** (`network/cloudflare/`):
 - DNS management
 - Security policies
 - Access controls
 
-**Tailscale** (`terraform/tailscale/`):
+**Tailscale** (`network/tailscale/`):
 - Tailnet policy, DNS, contacts, and settings
 - Device authorization, key expiry, and tag state
 
@@ -122,8 +124,11 @@ Flake-based NixOS configurations for all physical and virtual machines. Modular 
 ### `clusters/` - Kubernetes Manifests
 FluxCD GitOps manifests for the `folly` and `offsite` clusters, with shared resources in `clusters/base/`. The Flux bootstrap itself is Terraform (`terraform/k8s/`).
 
-### `terraform/` - Cloud, Network & Bootstrap
-All Terraform root modules: `gcp/` (resources by project), `cloudflare/` (DNS & security), `tailscale/`, `argo/` (ArgoCD apps), `unifi/` (network controller), `google-workspace/`, and `k8s/` (Flux bootstrap). Reusable modules live in `terraform/modules/`.
+### `network/` - Network Fabric
+Terraform root modules for the network, brought out front: `unifi/folly` and `unifi/offsite` (UniFi controllers — VLANs, BGP, clients), `cloudflare/` (DNS & security), and `tailscale/` (tailnet policy & devices).
+
+### `terraform/` - Cloud & Identity
+Remaining Terraform root modules: `gcp/` (resources by project), `argo/` (ArgoCD apps), `google-workspace/`, and `vault/`. Reusable modules live in `terraform/modules/`.
 
 ### `apps/`, `packages/`, `images/` - Code & Builds
 First-party services (`apps/`), shared libraries and Helm charts (`packages/`), and base/tool container + VM images (`images/`).
