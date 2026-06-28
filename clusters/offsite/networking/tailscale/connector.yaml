@@ -1,0 +1,17 @@
+---
+apiVersion: tailscale.com/v1alpha1
+kind: Connector
+metadata:
+  name: offsite-k8s-lan-router
+spec:
+  replicas: 1
+  hostnamePrefix: offsite-k8s-lan-router
+  subnetRouter:
+    advertiseRoutes:
+      - 192.168.1.0/24
+      - 10.89.0.0/28
+      - ${LB_RANGE}
+  tags:
+    - tag:k8s
+    - tag:k8s-offsite
+    - tag:offsite
