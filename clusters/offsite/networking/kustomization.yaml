@@ -7,7 +7,8 @@ resources:
   - cilium
   - cloudflare
   - external-dns.yaml
-  - tailscale
+  - tailscale.yaml
+  - tailscale-connectors.yaml
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
