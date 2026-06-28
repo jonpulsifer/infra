@@ -41,11 +41,8 @@ spec:
     policy: sync
     sources:
       - crd
-      - node
       - ingress
-      - service
       - gateway-httproute
-      - gateway-tlsroute
       # - gateway-tcproute
       # - gateway-udproute
     txtPrefix: "k8s."
