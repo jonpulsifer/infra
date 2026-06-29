@@ -4,13 +4,8 @@ metadata:
   name: cluster-settings
   namespace: flux-system
 data:
+  # Operational (non-network) knobs. Hand-edited.
+  # Network facts (IPs/CIDRs/ASNs) live in the cluster-topology
+  # ConfigMap (cluster-topology.json) — the network single source of truth.
   TIMEZONE: America/Halifax
-  API_SERVER_IP: 10.3.0.10
-  API_SERVER_PORT: "6443"
   CERT_CLUSTER_ISSUER: letsencrypt-production
-  CILIUM_NATIVE_ROUTING_CIDR: 10.0.0.0/9
-  CILIUM_POD_CIDR: 10.100.0.0/20
-  K8S_NODE_CIDR: 10.3.0.0/26
-  BGP_ROUTER_IP: 10.3.0.1/24
-  CLUSTER_NAME: folly
-  LB_RANGE: 10.3.0.64/26

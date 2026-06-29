@@ -5,7 +5,7 @@
   ...
 }:
 let
-  networks = import ./networks.nix;
+  networks = import ./networks.nix { inherit lib; };
   networkConfig = networks.${config.services.k8s.network};
   cfg = config.services.k8s;
 in

@@ -8,11 +8,11 @@ spec:
       bgp-enabled: "true"
   bgpInstances:
     - name: folly
-      localASN: 64513
+      localASN: ${BGP_CILIUM_ASN}
       peers:
         - name: udm-pro
-          peerASN: 64512
-          peerAddress: 10.3.0.1
+          peerASN: ${BGP_GATEWAY_ASN}
+          peerAddress: ${ROUTER_IP}
           peerConfigRef:
             name: ipv4-peer-config
 ---

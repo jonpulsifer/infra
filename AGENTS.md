@@ -153,7 +153,9 @@ Each cluster directory has `flux-system/` (FluxCD source-of-truth kustomizations
 
 Cilium provides CNI + BGP load balancer (pools defined in `networking/cilium/ip-pools.yaml`). The Gateway API (`networking/gateway-api/`) handles ingress via a `cluster-gateway` with Cloudflare Tunnel as the external entry point.
 
-The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives in `terraform/k8s/` — not in `clusters/`.
+The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives per-cluster in `clusters/<site>/bootstrap/` (e.g. `clusters/folly/bootstrap/bootstrap.tf`).
+
+**Network facts have a single source of truth: the per-cluster `cluster-topology` ConfigMaps at `clusters/<site>/config/cluster-topology.json`** (cluster IPs/CIDRs, API-server endpoints, BGP ASNs/addresses). Each JSON file **is** the Flux ConfigMap (applied as-is — JSON is valid YAML) and doubles as the structured facts every layer reads, so there is no generator. `data` is flat `string→string` (a Flux `substituteFrom` requirement), so lists/numbers are encoded as strings (e.g. `CLUSTER_DNS` is comma-separated, `API_SERVER_PORT` is a string). Do not hardcode these — reference the SSOT: Flux substitutes `${VAR}` from it via `postBuild.substituteFrom`; Nix reads it with `builtins.fromJSON` in `nix/services/k8s/networks.nix` (parsing the port to an int and splitting the DNS list); Terraform roots read it with `jsondecode(file(".../cluster-topology.json")).data` (a `topology.tf` per root). (Not yet migrated: the FRR `*.conf` BGP files and `network/tailscale/policy.hujson` still hold literals.)
 
 ### Layer 3 – Cloud & Network: `terraform/` and `network/`
 
