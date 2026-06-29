@@ -19,6 +19,8 @@ spec:
     substituteFrom:
       - kind: ConfigMap
         name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology
       - kind: Secret
         name: cluster-secrets
 ---
@@ -44,6 +46,8 @@ spec:
     substituteFrom:
       - kind: ConfigMap
         name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology
       - kind: Secret
         name: cluster-secrets
 ---
@@ -69,5 +73,7 @@ spec:
     substituteFrom:
       - kind: ConfigMap
         name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology
       - kind: Secret
         name: cluster-secrets
