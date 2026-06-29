@@ -1,25 +1,23 @@
-{
-  folly = {
-    apiServerIP = "10.3.0.10";
-    apiServerHostname = "k8s.lolwtf.ca";
-    apiServerPort = 6443;
-    podCidr = "10.100.0.0/20";
-    serviceCidr = "10.10.0.0/16";
-    dns = [
-      "10.10.0.254"
-    ];
-    upstreamDns = "10.3.0.1";
-  };
+# Per-cluster Kubernetes network parameters.
+#
+# Sourced from the repo-wide single source of truth: topology/topology.json.
+# Do NOT edit addresses here — change topology/topology.json and they flow into
+# Nix, Terraform, and the Flux cluster-settings ConfigMaps alike. This file only
+# projects the topology onto the attribute shape that nix/services/k8s/default.nix
+# consumes (apiServerIP, apiServerHostname, apiServerPort, podCidr, serviceCidr,
+# dns, upstreamDns).
+let
+  topology = builtins.fromJSON (builtins.readFile ../../../topology/topology.json);
+  inherit (topology) constants;
 
-  offsite = {
-    apiServerIP = "10.89.0.10";
-    apiServerHostname = "offsite.lolwtf.ca";
-    apiServerPort = 6443;
-    podCidr = "10.101.0.0/20";
-    serviceCidr = "10.11.0.0/16";
-    dns = [
-      "10.11.0.254"
-    ];
-    upstreamDns = "10.89.0.1";
+  mkCluster = c: {
+    apiServerIP = c.apiServerIP;
+    apiServerHostname = c.apiServerHostname;
+    apiServerPort = constants.apiServerPort;
+    podCidr = c.podCidr;
+    serviceCidr = c.serviceCidr;
+    dns = c.clusterDns;
+    upstreamDns = c.routerIp;
   };
-}
+in
+builtins.mapAttrs (_name: cluster: mkCluster cluster) topology.clusters
