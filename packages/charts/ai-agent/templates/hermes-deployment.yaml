@@ -51,6 +51,7 @@ spec:
       labels:
         {{- include "ai-agent.selectorLabels" . | nindent 8 }}
     spec:
+      hostUsers: false
       automountServiceAccountToken: false
       securityContext:
         # Hermes must run as root (or its own UID 10000). s6-overlay stage2-hook.sh
@@ -73,18 +74,16 @@ spec:
           securityContext:
             allowPrivilegeEscalation: true
             readOnlyRootFilesystem: false
-            capabilities:
-              drop: ["ALL"]
-              add:
-                - CHOWN
-                - NET_RAW
-                - SETGID
-                - SETUID
             seccompProfile:
               type: RuntimeDefault
           ports:
             - containerPort: {{ .Values.port }}
               protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.port }}
+            periodSeconds: 10
+            failureThreshold: 3
           env:
             - name: HOME
               value: /opt/data
