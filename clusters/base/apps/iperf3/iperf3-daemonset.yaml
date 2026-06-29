@@ -30,6 +30,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -37,10 +39,20 @@ spec:
           image: docker.io/jonpulsifer/netbench:latest@sha256:297a2b717c6818900861e51d8d50fa46695619f57e4b6f13c09bb40520ab26fd
           imagePullPolicy: IfNotPresent
           command: ["iperf3", "--server", "--port", "5201"]
+          env:
+            # iperf3 creates a short-lived stream buffer with mkstemp(3).
+            - name: TMPDIR
+              value: /tmp
           ports:
-            - name: iperf3
+            - name: iperf3-tcp
               containerPort: 5201
               protocol: TCP
+            - name: iperf3-udp
+              containerPort: 5201
+              protocol: UDP
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -52,3 +64,8 @@ spec:
               memory: 32Mi
             limits:
               memory: 128Mi
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi

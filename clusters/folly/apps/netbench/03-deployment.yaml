@@ -25,6 +25,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -38,10 +40,15 @@ spec:
           env:
             - name: NETBENCH_TARGETS_FILE
               value: /etc/netbench/targets.json
+            # iperf3 creates a short-lived stream buffer with mkstemp(3).
+            - name: TMPDIR
+              value: /tmp
           volumeMounts:
             - name: targets
               mountPath: /etc/netbench
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /healthz
@@ -72,3 +79,7 @@ spec:
         - name: targets
           configMap:
             name: netbench-targets
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
