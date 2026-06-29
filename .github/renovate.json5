@@ -38,6 +38,7 @@
   'helm-values': {
     managerFilePatterns: [
       '/clusters/.+\\.ya?ml$/',
+      '/packages/charts/.+\\.ya?ml$/',
     ],
   },
   kubernetes: {

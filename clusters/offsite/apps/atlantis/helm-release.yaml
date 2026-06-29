@@ -16,7 +16,7 @@ spec:
   values:
     image:
       repository: jonpulsifer/atlantis
-      tag: latest
+      tag: latest@sha256:cd45c70637a51f9befa2a4dbd0bcf623a06a01860f36c53d87f4131753e443e9
     orgAllowlist: github.com/jonpulsifer/*
     environment:
       ATLANTIS_AUTOMERGE: "true"
