@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: dump
+  name: dump-nfs
   namespace: dump
   labels:
     app.kubernetes.io/name: dump
@@ -67,8 +67,8 @@ spec:
   - metadata:
       name: dump-data
     spec:
-      accessModes: [ "ReadWriteOnce" ]
-      storageClassName: local-path
+      accessModes: [ "ReadWriteMany" ]
+      storageClassName: nfs
       resources:
         requests:
           storage: 1Gi
