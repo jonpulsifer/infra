@@ -26,11 +26,3 @@ resource "unifi_bgp" "folly" {
   config      = file("${path.module}/bgp-folly.conf")
   # site is omitted, so it defaults to the provider's site ("default")
 }
-
-removed {
-  from = unifi_bgp.offsite
-
-  lifecycle {
-    destroy = false
-  }
-}
