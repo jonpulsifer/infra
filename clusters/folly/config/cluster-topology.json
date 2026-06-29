@@ -8,7 +8,7 @@
   "data": {
     "CLUSTER_NAME": "folly",
     "API_SERVER_IP": "10.3.0.10",
-    "API_SERVER_HOSTNAME": "k8s.lolwtf.ca",
+    "API_SERVER_HOSTNAME": "folly.lolwtf.ca",
     "API_SERVER_PORT": "6443",
     "ROUTER_IP": "10.3.0.1",
     "K8S_NODE_CIDR": "10.3.0.0/26",
