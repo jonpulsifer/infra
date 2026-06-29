@@ -2,18 +2,10 @@
 # Hermes Agent — HelmRelease
 # =============================================================================
 #
-# IMPORTANT: Before deploying, ensure the following 1Password items exist in
-# the "Homelab" vault with the properties listed below. The ExternalSecrets
-# below reference these items and will fail to sync until they are created:
-#
-#   1. "rowbutt slack bot token"  — property: "credential"
-#   2. "rowbutt slack app token"  — property: "credential"
-#   3. "rowbutt openrouter api key" — property: "credential"
-#
-# Existing 1Password items used:
-#   - "rowbutt discord bot token"        — property: "credential"
-#   - "rowbutt elevenlabs api key"       — property: "credential"
-#   - "Service Account Auth Token: rowbutt" — property: "credential"
+# Secrets are rendered by the ai-agent chart from envSecrets below. The
+# referenced 1Password fields are intentionally the existing item fields:
+# Password items use property "password"; the service-account token uses
+# property "credential".
 # =============================================================================
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -25,8 +17,9 @@ spec:
   chart:
     spec:
       chart: packages/charts/ai-agent
-      version: ">=0.1.2"
+      version: ">=0.1.3"
       interval: 10m0s
+      reconcileStrategy: Revision
       sourceRef:
         kind: GitRepository
         name: infra
@@ -36,12 +29,42 @@ spec:
     port: 8642
     ingress:
       enabled: false
+    envSecrets:
+      - name: op-service-account-token
+        envVar: OP_SERVICE_ACCOUNT_TOKEN
+        onePasswordItem: "Service Account Auth Token: rowbutt"
+        property: credential
+        secretKey: token
+      - name: api-server-key
+        envVar: API_SERVER_KEY
+        onePasswordItem: "hermes api server key"
+        property: password
+      - name: openrouter-api-key
+        envVar: OPENROUTER_API_KEY
+        onePasswordItem: "opencode api key"
+        property: password
+      - name: discord-bot-token
+        envVar: DISCORD_BOT_TOKEN
+        onePasswordItem: "rowbutt discord bot token"
+        property: password
+      - name: elevenlabs-api-key
+        envVar: ELEVENLABS_API_KEY
+        onePasswordItem: "rowbutt elevenlabs api key"
+        property: password
     hermes:
       enabled: true
       dataVolume:
         enabled: true
         storageSize: 5Gi
       env:
+        - name: API_SERVER_ENABLED
+          value: "true"
+        - name: API_SERVER_HOST
+          value: "0.0.0.0"
+        - name: API_SERVER_PORT
+          value: "8642"
+        - name: API_SERVER_CORS_ORIGINS
+          value: "https://hermes.${SECRET_DOMAIN}"
         - name: LLM_PROVIDER
           value: "openrouter"
         - name: LLM_MODEL
@@ -56,20 +79,22 @@ spec:
           value: "CARBAMA05"
         - name: SLACK_REQUIRE_MENTION
           value: "true"
-        - name: SLACK_ALLOWED_USER
+        - name: SLACK_ALLOWED_USERS
           value: "UAR78LSKC"
         - name: DISCORD_GUILD_ID
           value: "1509024936717455381"
-        - name: DISCORD_CHANNEL_GENERAL
+        - name: DISCORD_HOME_CHANNEL
           value: "1509024937422356532"
-        - name: DISCORD_CHANNEL_OTHER
-          value: "1509024937422356533"
-        - name: DISCORD_ALLOWED_USER
+        - name: DISCORD_HOME_CHANNEL_NAME
+          value: "#general"
+        - name: DISCORD_FREE_RESPONSE_CHANNELS
+          value: "1509024937422356532,1509024937422356533"
+        - name: DISCORD_ALLOWED_USERS
           value: "308072071949320204"
     resources:
       requests:
-        memory: 256Mi
+        memory: 1Gi
         cpu: 100m
       limits:
-        memory: 1Gi
+        memory: 4Gi
         cpu: 2000m

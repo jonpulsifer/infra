@@ -77,6 +77,7 @@ hermes:
   dataVolume:
     enabled: true
     storageSize: 5Gi
+  shmSizeLimit: 1Gi
   env: []
   configFiles: []
 

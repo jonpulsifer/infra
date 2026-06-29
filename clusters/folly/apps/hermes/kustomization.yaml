@@ -4,4 +4,3 @@ kind: Kustomization
 resources:
   - hermes.yaml
   - gateway.yaml
-  - externalsecrets.yaml
