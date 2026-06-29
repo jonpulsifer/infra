@@ -17,3 +17,11 @@ misconfigurations:
   - id: AVD-KSV-0118
     paths: ["**/pbx.yaml", "pbx.yaml"]
     statement: "Asterisk telephony container runs as root by design."
+  # netbench's iperf3 DaemonSet uses hostNetwork on purpose: it binds each node
+  # at <node-ip>:5201 on its own VLAN so traffic traverses the real wire / VLAN
+  # router / site tunnel rather than the Cilium overlay. That's the whole point
+  # of the benchmark, so the hostNetwork finding is accepted. Scoped to this
+  # uniquely-named manifest so other hostNetwork DaemonSets still get flagged.
+  - id: AVD-KSV-0009
+    paths: ["**/iperf3/iperf3-daemonset.yaml", "iperf3-daemonset.yaml"]
+    statement: "netbench iperf3 server needs hostNetwork to benchmark per-node VLAN paths."
