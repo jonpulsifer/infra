@@ -7,6 +7,7 @@
   imports = [
     ../hardware/pi4
     ../services/common.nix
+    ../services/iperf3.nix
     ../services/kiosk.nix
   ];
 

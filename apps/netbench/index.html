@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>netbench — homelab network benchmarks</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem auto; max-width: 1000px; padding: 0 1rem; line-height: 1.4; }
+      h1 { margin-bottom: 0; }
+      .sub { opacity: 0.7; margin-top: 0.25rem; }
+      fieldset { border: 1px solid #8884; border-radius: 6px; margin: 1rem 0; }
+      .opts { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+      .opts label { display: inline-flex; gap: 0.35rem; align-items: center; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #8883; vertical-align: top; }
+      th { opacity: 0.7; font-weight: 600; }
+      .cat { text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; opacity: 0.6; }
+      button { font: inherit; padding: 0.3rem 0.7rem; border-radius: 5px; border: 1px solid #8886; cursor: pointer; background: #8881; }
+      button:disabled { opacity: 0.5; cursor: wait; }
+      .num { font-variant-numeric: tabular-nums; }
+      .err { color: #d33; }
+      .muted { opacity: 0.55; }
+      input[type="number"] { width: 4rem; font: inherit; }
+    </style>
+  </head>
+  <body>
+    <h1>netbench</h1>
+    <p class="sub">iperf3 throughput / latency across nodes, LANs, and clusters.</p>
+
+    <fieldset>
+      <legend>options</legend>
+      <div class="opts">
+        <label>duration (s) <input id="duration" type="number" value="10" min="1" max="60" /></label>
+        <label>parallel <input id="parallel" type="number" value="1" min="1" max="32" /></label>
+        <label><input id="udp" type="checkbox" /> UDP (loss/jitter)</label>
+        <label><input id="reverse" type="checkbox" /> reverse (download)</label>
+        <button id="runall">Run all</button>
+      </div>
+    </fieldset>
+
+    <table>
+      <thead>
+        <tr>
+          <th>target</th><th>host</th><th></th>
+          <th class="num">↑ Mbps</th><th class="num">↓ Mbps</th>
+          <th class="num">jitter</th><th class="num">loss</th><th class="num">retr</th>
+          <th>when</th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="9" class="muted">loading targets…</td></tr></tbody>
+    </table>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let targets = [];
+
+      function opts() {
+        return {
+          duration: +$("duration").value,
+          parallel: +$("parallel").value,
+          protocol: $("udp").checked ? "udp" : "tcp",
+          reverse: $("reverse").checked,
+        };
+      }
+
+      function fmt(n) { return (n || n === 0) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"; }
+
+      function render() {
+        const tbody = $("rows");
+        tbody.innerHTML = "";
+        if (!targets.length) { tbody.innerHTML = '<tr><td colspan="9" class="muted">no targets configured</td></tr>'; return; }
+        for (const t of targets) {
+          const tr = document.createElement("tr");
+          tr.id = "t-" + t.name;
+          tr.innerHTML = `
+            <td>${t.name}<div class="cat">${t.category || ""}</div></td>
+            <td class="muted">${t.host}:${t.port || 5201}</td>
+            <td><button data-name="${t.name}">Run</button></td>
+            <td class="num up">—</td><td class="num down">—</td>
+            <td class="num jit">—</td><td class="num loss">—</td><td class="num retr">—</td>
+            <td class="when muted"></td>`;
+          tbody.appendChild(tr);
+        }
+        tbody.querySelectorAll("button[data-name]").forEach((b) =>
+          b.addEventListener("click", () => run(b.dataset.name)));
+      }
+
+      async function run(name) {
+        const tr = $("t-" + name);
+        const btn = tr.querySelector("button");
+        btn.disabled = true;
+        tr.querySelector(".when").textContent = "running…";
+        try {
+          const res = await fetch("/api/run", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ target: name, ...opts() }),
+          });
+          const r = await res.json();
+          if (r.error) {
+            tr.querySelector(".when").innerHTML = '<span class="err">' + r.error + "</span>";
+          } else {
+            tr.querySelector(".up").textContent = fmt(r.send_mbps);
+            tr.querySelector(".down").textContent = fmt(r.recv_mbps);
+            tr.querySelector(".jit").textContent = r.protocol === "udp" ? fmt(r.jitter_ms) + " ms" : "—";
+            tr.querySelector(".loss").textContent = r.protocol === "udp" ? fmt(r.lost_percent) + " %" : "—";
+            tr.querySelector(".retr").textContent = r.protocol === "tcp" ? fmt(r.retransmits) : "—";
+            tr.querySelector(".when").textContent = new Date(r.ran_at).toLocaleTimeString();
+          }
+        } catch (e) {
+          tr.querySelector(".when").innerHTML = '<span class="err">' + e + "</span>";
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function runAll() {
+        for (const t of targets) await run(t.name);
+      }
+
+      (async () => {
+        try {
+          targets = await (await fetch("/api/targets")).json();
+        } catch (e) {
+          targets = [];
+        }
+        render();
+        $("runall").addEventListener("click", runAll);
+      })();
+    </script>
+  </body>
+</html>

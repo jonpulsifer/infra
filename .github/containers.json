@@ -3,6 +3,7 @@
   "build": [
     "ai-agents",
     "ddnsd",
+    "netbench",
     "atlantis",
     "actions-runner"
   ],

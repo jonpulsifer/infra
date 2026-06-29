@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: netbench
+  namespace: netbench
+  labels:
+    app.kubernetes.io/name: netbench
+    app.kubernetes.io/part-of: netbench
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: netbench

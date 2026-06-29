@@ -1,0 +1,12 @@
+[
+  { "name": "optiplex",   "host": "optiplex.lolwtf.ca",   "port": 5201, "category": "node",          "description": "folly k8s node (DaemonSet)" },
+  { "name": "riptide",    "host": "riptide.lolwtf.ca",    "port": 5201, "category": "node",          "description": "folly k8s node (DaemonSet)" },
+  { "name": "shale",      "host": "shale.lolwtf.ca",      "port": 5201, "category": "node",          "description": "folly k8s node (DaemonSet)" },
+
+  { "name": "cloudpi4",   "host": "cloudpi4.lolwtf.ca",   "port": 5201, "category": "lan",           "description": "bare Pi (services.iperf3)" },
+  { "name": "homepi4",    "host": "homepi4.lolwtf.ca",    "port": 5201, "category": "lan",           "description": "bare Pi (services.iperf3)" },
+  { "name": "weatherpi4", "host": "weatherpi4.lolwtf.ca", "port": 5201, "category": "lan",           "description": "bare Pi (services.iperf3)" },
+
+  { "name": "oldschool",  "host": "oldschool.lolwtf.ca",  "port": 5201, "category": "cross-cluster", "description": "offsite k8s node (over Site Magic tunnel)" },
+  { "name": "retrofit",   "host": "retrofit.lolwtf.ca",   "port": 5201, "category": "cross-cluster", "description": "offsite k8s node (over Site Magic tunnel)" }
+]

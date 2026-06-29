@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: netbench-targets
+  namespace: netbench
+  labels:
+    app.kubernetes.io/name: netbench
+    app.kubernetes.io/part-of: netbench
+data:
+  # The browser sends a target *name*; netbench maps it to host/port here.
+  # Hosts use <name>.lolwtf.ca so this isn't brittle to IP changes. The node
+  # and cross-cluster servers are the clusters/base/apps/iperf3 DaemonSet
+  # (hostNetwork :5201); the lan servers are NixOS services.iperf3 on the Pis.
+  targets.json: |-
+    [
+      { "name": "optiplex",   "host": "optiplex.lolwtf.ca",   "port": 5201, "category": "node",          "description": "folly k8s node (DaemonSet)" },
+      { "name": "riptide",    "host": "riptide.lolwtf.ca",    "port": 5201, "category": "node",          "description": "folly k8s node (DaemonSet)" },
+      { "name": "shale",      "host": "shale.lolwtf.ca",      "port": 5201, "category": "node",          "description": "folly k8s node (DaemonSet)" },
+
+      { "name": "cloudpi4",   "host": "cloudpi4.lolwtf.ca",   "port": 5201, "category": "lan",           "description": "bare Pi (services.iperf3)" },
+      { "name": "homepi4",    "host": "homepi4.lolwtf.ca",    "port": 5201, "category": "lan",           "description": "bare Pi (services.iperf3)" },
+      { "name": "weatherpi4", "host": "weatherpi4.lolwtf.ca", "port": 5201, "category": "lan",           "description": "bare Pi (services.iperf3)" },
+
+      { "name": "oldschool",  "host": "oldschool.lolwtf.ca",  "port": 5201, "category": "cross-cluster", "description": "offsite k8s node (Site Magic tunnel)" },
+      { "name": "retrofit",   "host": "retrofit.lolwtf.ca",   "port": 5201, "category": "cross-cluster", "description": "offsite k8s node (Site Magic tunnel)" }
+    ]
