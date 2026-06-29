@@ -155,7 +155,7 @@ Cilium provides CNI + BGP load balancer (pools defined in `networking/cilium/ip-
 
 The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives per-cluster in `clusters/<site>/bootstrap/` (e.g. `clusters/folly/bootstrap/bootstrap.tf`).
 
-**Network facts have a single source of truth: `topology/topology.json`** (cluster IPs/CIDRs, API-server endpoints, BGP ASNs/addresses). Do not hardcode these — reference the SSOT. Nix reads it via `builtins.fromJSON` in `nix/services/k8s/networks.nix`; Terraform roots read it via `jsondecode(file(".../topology/topology.json"))` (a `topology.tf` per root); the Flux `cluster-settings` ConfigMaps are generated from it by `topology/generate.sh` (run it after editing, `--check` in CI). See `topology/README.md`. (Not yet migrated: the FRR `*.conf` BGP files and `network/tailscale/policy.hujson` still hold literals.)
+**Network facts have a single source of truth: `topology/topology.json`** (cluster IPs/CIDRs, API-server endpoints, BGP ASNs/addresses). Do not hardcode these — reference the SSOT. Nix reads it via `builtins.fromJSON` in `nix/services/k8s/networks.nix`; Terraform roots read it via `jsondecode(file(".../topology/topology.json"))` (a `topology.tf` per root); the per-cluster Flux `cluster-topology` ConfigMaps (a portable `topology.json` blob plus flat `${VAR}` keys for `postBuild.substituteFrom`) are generated from it by `topology/generate.sh` (run it after editing, `--check` for drift). See `topology/README.md`. (Not yet migrated: the FRR `*.conf` BGP files and `network/tailscale/policy.hujson` still hold literals.)
 
 ### Layer 3 – Cloud & Network: `terraform/` and `network/`
 
