@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: iperf3
+  namespace: iperf3
+  labels:
+    app.kubernetes.io/name: iperf3
+    app.kubernetes.io/part-of: netbench
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: iperf3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: iperf3
+        app.kubernetes.io/part-of: netbench
+    spec:
+      # hostNetwork makes every node reachable at <node-ip>:5201 on its VLAN,
+      # so netbench's static DNS targets resolve and traffic traverses the real
+      # wire (inter-node), the VLAN router (inter-LAN), and the site tunnel
+      # (cross-cluster) rather than the Cilium overlay.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      # Run a server on every node, including any tainted/control-plane nodes.
+      tolerations:
+        - operator: Exists
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: iperf3
+          image: docker.io/jonpulsifer/netbench:latest
+          imagePullPolicy: IfNotPresent
+          command: ["iperf3", "--server", "--port", "5201"]
+          ports:
+            - name: iperf3
+              containerPort: 5201
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netbench
+  namespace: netbench
+  labels:
+    app.kubernetes.io/name: netbench
+    app.kubernetes.io/part-of: netbench
+  annotations:
+    # Restart when the targets ConfigMap changes (netbench reads it at startup).
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: netbench
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: netbench
+        app.kubernetes.io/part-of: netbench
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: netbench
+          image: docker.io/jonpulsifer/netbench:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: NETBENCH_TARGETS_FILE
+              value: /etc/netbench/targets.json
+          volumeMounts:
+            - name: targets
+              mountPath: /etc/netbench
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: targets
+          configMap:
+            name: netbench-targets
