@@ -51,6 +51,7 @@ spec:
       labels:
         {{- include "ai-agent.selectorLabels" . | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
       securityContext:
         # Hermes must run as root (or its own UID 10000). s6-overlay stage2-hook.sh
         # rejects arbitrary UIDs. Run as root here; stage2-hook remaps to hermes
@@ -70,10 +71,15 @@ spec:
           # Bypassing this with a hardcoded command breaks the entire bootstrap.
           args: ["gateway", "run"]
           securityContext:
-            allowPrivilegeEscalation: false
+            allowPrivilegeEscalation: true
             readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
+              add:
+                - CHOWN
+                - NET_RAW
+                - SETGID
+                - SETUID
             seccompProfile:
               type: RuntimeDefault
           ports:
@@ -112,10 +118,20 @@ spec:
             - name: hermes-data
               mountPath: /opt/data
             {{- end }}
+            {{- if .Values.hermes.shmSizeLimit }}
+            - name: dshm
+              mountPath: /dev/shm
+            {{- end }}
       volumes:
         {{- if .Values.hermes.dataVolume.enabled }}
         - name: hermes-data
           persistentVolumeClaim:
             claimName: {{ include "ai-agent.fullname" . }}-hermes-data
+        {{- end }}
+        {{- if .Values.hermes.shmSizeLimit }}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.hermes.shmSizeLimit }}
         {{- end }}
 {{- end }}
