@@ -180,7 +180,7 @@ Cloud & identity — `terraform/`:
 
 First-party code and container/image builds, separate from the infra layers:
 
-- `apps/` – deployable services: `agent-web` (one Dockerfile, `--build-arg AGENT_SET={full,pi}`; publishes the `ai-agents` image — the `pi` variant still builds but is no longer published), `hermes`, `minecraft`, `thehive`, `cortex`, `tidbyt` (Starlark/Pixlet Tidbyt apps), `ddnsd` (Go Cloudflare DDNS daemon, consumed by NixOS hosts via `nix/system/ddnsd.nix`), and `view-counter` (Go GCP Cloud Function deployed via `.github/workflows/view-counter.yml`)
+- `apps/` – deployable services: `agent-web` (one Dockerfile, `--build-arg AGENT_SET={full,pi}`; publishes the `ai-agents` image — the `pi` variant still builds but is no longer published), `hermes`, `minecraft`, `thehive`, `cortex`, `tidbyt` (Starlark/Pixlet Tidbyt apps), `ddnsd` (Go Cloudflare DDNS daemon, consumed by NixOS hosts via `nix/system/ddnsd.nix`), `view-counter` (Go GCP Cloud Function deployed via `.github/workflows/view-counter.yml`), and `netbench` (Go web UI that runs `iperf3` benchmarks across nodes/LANs/clusters; servers are the `clusters/base/apps/iperf3` hostNetwork DaemonSet plus NixOS `services.iperf3` on the bare Pis via `nix/services/iperf3.nix`)
 - `packages/` – reusable building blocks: `agent-web-ui` (shared TS/Bun frontend + PTY server, a root Bun workspace member) and `charts/` (the `app` and `ai-agent` Helm charts; Flux HelmReleases reference them as `packages/charts/<name>` against the `infra` GitRepository)
 - `images/` – base & tool OCI images (`base`, `openclaw`, `bashcurljq`, `atlantis`, `actions-runner`, …) plus `cloudlab-linux` (Packer/preseed VM-image build tooling)
 
