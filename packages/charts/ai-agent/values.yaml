@@ -1,4 +1,4 @@
-image: docker.io/jonpulsifer/ai-agents:latest
+image: docker.io/jonpulsifer/ai-agents:latest@sha256:4d3d5b10b68b9b81b68bae24ab70982ba5853bd858893f676ead8b2ed5685756
 port: 8080
 hostname: ""
 storageSize: 2Gi

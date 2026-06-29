@@ -29,7 +29,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: netbench
-          image: docker.io/jonpulsifer/netbench:latest
+          image: docker.io/jonpulsifer/netbench:latest@sha256:297a2b717c6818900861e51d8d50fa46695619f57e4b6f13c09bb40520ab26fd
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
