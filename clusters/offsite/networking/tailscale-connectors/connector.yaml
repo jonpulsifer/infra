@@ -9,7 +9,7 @@ spec:
   subnetRouter:
     advertiseRoutes:
       - 192.168.1.0/24
-      - 10.89.0.0/28
+      - ${K8S_NODE_CIDR}
       - ${LB_RANGE}
   tags:
     - tag:k8s

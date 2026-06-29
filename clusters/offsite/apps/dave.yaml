@@ -42,7 +42,7 @@ spec:
         content: |
           {
             gateway: {
-              trustedProxies: ["10.89.0.0/28", "10.101.0.0/20"],
+              trustedProxies: ["${K8S_NODE_CIDR}", "${CILIUM_POD_CIDR}"],
               auth: {
                 mode: "trusted-proxy",
                 trustedProxy: {
