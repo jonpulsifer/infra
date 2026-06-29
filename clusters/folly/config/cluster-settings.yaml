@@ -5,7 +5,7 @@ metadata:
   namespace: flux-system
 data:
   # Operational (non-network) knobs. Hand-edited.
-  # Network facts (IPs/CIDRs/ASNs) live in the generated cluster-topology
-  # ConfigMap — source of truth topology/topology.json. See topology/README.md.
+  # Network facts (IPs/CIDRs/ASNs) live in the cluster-topology
+  # ConfigMap (cluster-topology.json) — the network single source of truth.
   TIMEZONE: America/Halifax
   CERT_CLUSTER_ISSUER: letsencrypt-production

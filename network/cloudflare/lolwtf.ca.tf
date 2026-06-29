@@ -46,7 +46,7 @@ resource "cloudflare_dns_record" "folly_lolwtf_ca" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   name    = "folly.lolwtf.ca"
   type    = "A"
-  content = local.topology.clusters.folly.apiServerIP
+  content = local.topology.folly.API_SERVER_IP
   proxied = false
   ttl     = 1
 }
@@ -55,7 +55,7 @@ resource "cloudflare_dns_record" "offsite_lolwtf_ca" {
   zone_id = cloudflare_zone.lolwtf_ca.id
   name    = "offsite.lolwtf.ca"
   type    = "A"
-  content = local.topology.clusters.offsite.apiServerIP
+  content = local.topology.offsite.API_SERVER_IP
   proxied = false
   ttl     = 1
 }

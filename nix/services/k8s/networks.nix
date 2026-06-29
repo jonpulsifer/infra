@@ -1,23 +1,31 @@
 # Per-cluster Kubernetes network parameters.
 #
-# Sourced from the repo-wide single source of truth: topology/topology.json.
-# Do NOT edit addresses here — change topology/topology.json and they flow into
-# Nix, Terraform, and the Flux cluster-settings ConfigMaps alike. This file only
-# projects the topology onto the attribute shape that nix/services/k8s/default.nix
+# Single source of truth: the per-cluster `cluster-topology` ConfigMap manifests
+# under clusters/<site>/config/cluster-topology.json. Those JSON files ARE the
+# Flux ConfigMaps (applied as-is) and double as the structured facts read here
+# and by the Terraform network roots — no generator, one file per cluster.
+#
+# Do NOT edit addresses here: change the cluster-topology.json files and the
+# values flow into Nix, Terraform, and Flux alike. This module only projects the
+# flat ConfigMap data onto the typed attribute shape nix/services/k8s/default.nix
 # consumes (apiServerIP, apiServerHostname, apiServerPort, podCidr, serviceCidr,
-# dns, upstreamDns).
+# dns, upstreamDns). ConfigMap data is string→string, so the port is parsed to an
+# int and the comma-separated DNS list is split back into a list.
+{ lib }:
 let
-  topology = builtins.fromJSON (builtins.readFile ../../../topology/topology.json);
-  inherit (topology) constants;
+  configMapData = path: (builtins.fromJSON (builtins.readFile path)).data;
 
-  mkCluster = c: {
-    apiServerIP = c.apiServerIP;
-    apiServerHostname = c.apiServerHostname;
-    apiServerPort = constants.apiServerPort;
-    podCidr = c.podCidr;
-    serviceCidr = c.serviceCidr;
-    dns = c.clusterDns;
-    upstreamDns = c.routerIp;
+  mkCluster = d: {
+    apiServerIP = d.API_SERVER_IP;
+    apiServerHostname = d.API_SERVER_HOSTNAME;
+    apiServerPort = lib.toInt d.API_SERVER_PORT;
+    podCidr = d.CILIUM_POD_CIDR;
+    serviceCidr = d.SERVICE_CIDR;
+    dns = lib.splitString "," d.CLUSTER_DNS;
+    upstreamDns = d.ROUTER_IP;
   };
 in
-builtins.mapAttrs (_name: cluster: mkCluster cluster) topology.clusters
+{
+  folly = mkCluster (configMapData ../../../clusters/folly/config/cluster-topology.json);
+  offsite = mkCluster (configMapData ../../../clusters/offsite/config/cluster-topology.json);
+}
