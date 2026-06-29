@@ -153,7 +153,9 @@ Each cluster directory has `flux-system/` (FluxCD source-of-truth kustomizations
 
 Cilium provides CNI + BGP load balancer (pools defined in `networking/cilium/ip-pools.yaml`). The Gateway API (`networking/gateway-api/`) handles ingress via a `cluster-gateway` with Cloudflare Tunnel as the external entry point.
 
-The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives in `terraform/k8s/` — not in `clusters/`.
+The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives per-cluster in `clusters/<site>/bootstrap/` (e.g. `clusters/folly/bootstrap/bootstrap.tf`).
+
+**Network facts have a single source of truth: `topology/topology.json`** (cluster IPs/CIDRs, API-server endpoints, BGP ASNs/addresses). Do not hardcode these — reference the SSOT. Nix reads it via `builtins.fromJSON` in `nix/services/k8s/networks.nix`; Terraform roots read it via `jsondecode(file(".../topology/topology.json"))` (a `topology.tf` per root); the Flux `cluster-settings` ConfigMaps are generated from it by `topology/generate.sh` (run it after editing, `--check` in CI). See `topology/README.md`. (Not yet migrated: the FRR `*.conf` BGP files and `network/tailscale/policy.hujson` still hold literals.)
 
 ### Layer 3 – Cloud & Network: `terraform/` and `network/`
 

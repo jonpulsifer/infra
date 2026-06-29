@@ -15,6 +15,7 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 ├── apps/          # Deployable first-party services (agent-web, hermes, tidbyt, …)
 ├── packages/      # Shared building blocks (agent-web-ui, charts/)
 ├── images/        # Base & tool OCI images + cloudlab-linux VM build tooling
+├── topology/      # Network single source of truth (IPs/CIDRs/ASNs) — see topology/README.md
 └── dotfiles/      # chezmoi-managed dotfiles
 ```
 
@@ -122,7 +123,7 @@ Managed with:
 Flake-based NixOS configurations for all physical and virtual machines. Modular structure with reusable profiles, services, and system configurations.
 
 ### `clusters/` - Kubernetes Manifests
-FluxCD GitOps manifests for the `folly` and `offsite` clusters, with shared resources in `clusters/base/`. The Flux bootstrap itself is Terraform (`terraform/k8s/`).
+FluxCD GitOps manifests for the `folly` and `offsite` clusters, with shared resources in `clusters/base/`. The Flux bootstrap itself is Terraform (`clusters/<site>/bootstrap/`).
 
 ### `network/` - Network Fabric
 Terraform root modules for the network, brought out front: `unifi/folly` and `unifi/offsite` (UniFi controllers — VLANs, BGP, clients), `cloudflare/` (DNS & security), and `tailscale/` (tailnet policy & devices).
