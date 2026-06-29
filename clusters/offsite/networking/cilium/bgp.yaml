@@ -12,7 +12,7 @@ spec:
       peers:
         - name: ucg-max
           peerASN: 64512
-          peerAddress: 10.89.0.1
+          peerAddress: ${BGP_ROUTER_IP}
           peerConfigRef:
             name: ipv4-peer-config
 ---

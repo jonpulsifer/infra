@@ -1,6 +1,8 @@
 locals {
-  node_cidr = "10.3.0.1/26"
-  lb_cidr   = "10.3.0.64/26"
+  # node_cidr keeps the gateway-host (.1) form the UniFi network subnet expects;
+  # cidrhost() masks host bits so the static_records/dhcp ranges below are unchanged.
+  node_cidr = "${cidrhost(local.topology.clusters.folly.nodeCidr, 1)}/${split("/", local.topology.clusters.folly.nodeCidr)[1]}"
+  lb_cidr   = local.topology.clusters.folly.lbPool
   static_records = {
     "erx"      = cidrhost(local.lab_cidr, 5)
     "k8s"      = cidrhost(local.node_cidr, 10)

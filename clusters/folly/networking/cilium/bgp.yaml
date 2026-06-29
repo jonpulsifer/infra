@@ -12,7 +12,7 @@ spec:
       peers:
         - name: udm-pro
           peerASN: 64512
-          peerAddress: 10.3.0.1
+          peerAddress: ${BGP_ROUTER_IP}
           peerConfigRef:
             name: ipv4-peer-config
 ---
