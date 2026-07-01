@@ -6,6 +6,14 @@
 # referenced 1Password fields are intentionally the existing item fields:
 # Password items use property "password"; the service-account token uses
 # property "credential".
+#
+# IMPORTANT: hermes-agent now refuses to bind its dashboard (port 9119) to
+# 0.0.0.0 unless a DashboardAuthProvider is registered (the bundled "nous"
+# OAuth plugin only auto-registers when HERMES_DASHBOARD_OAUTH_CLIENT_ID is
+# set, which requires an external Nous Portal account). This HelmRelease
+# uses the bundled dashboard_auth/basic plugin instead. Before deploying,
+# create a "hermes dashboard basic auth" Login item in the Homelab
+# 1Password vault with "username" and "password" fields.
 # =============================================================================
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -50,6 +58,14 @@ spec:
       - name: elevenlabs-api-key
         envVar: ELEVENLABS_API_KEY
         onePasswordItem: "rowbutt elevenlabs api key"
+        property: password
+      - name: dashboard-auth-username
+        envVar: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+        onePasswordItem: "hermes dashboard basic auth"
+        property: username
+      - name: dashboard-auth-password
+        envVar: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+        onePasswordItem: "hermes dashboard basic auth"
         property: password
     hermes:
       enabled: true
