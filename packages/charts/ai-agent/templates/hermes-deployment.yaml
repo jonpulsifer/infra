@@ -16,6 +16,12 @@ spec:
       protocol: TCP
       port: {{ .Values.port }}
       targetPort: {{ .Values.port }}
+    {{- if .Values.hermes.dashboardPort }}
+    - name: dashboard
+      protocol: TCP
+      port: {{ .Values.hermes.dashboardPort }}
+      targetPort: {{ .Values.hermes.dashboardPort }}
+    {{- end }}
 ---
 # PVC for /opt/data
 {{- if .Values.hermes.dataVolume.enabled }}
@@ -79,6 +85,10 @@ spec:
           ports:
             - containerPort: {{ .Values.port }}
               protocol: TCP
+            {{- if .Values.hermes.dashboardPort }}
+            - containerPort: {{ .Values.hermes.dashboardPort }}
+              protocol: TCP
+            {{- end }}
           readinessProbe:
             tcpSocket:
               port: {{ .Values.port }}

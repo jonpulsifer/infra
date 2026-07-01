@@ -30,4 +30,4 @@ spec:
   rules:
     - backendRefs:
         - name: hermes-ai-agent
-          port: 8642
+          port: 9119

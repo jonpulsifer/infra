@@ -78,6 +78,10 @@ hermes:
     enabled: true
     storageSize: 5Gi
   shmSizeLimit: 1Gi
+  # Web dashboard (HERMES_DASHBOARD=1) listens on its own port, separate from
+  # the gateway's OpenAI-compatible API/health port (.Values.port). Set to ""
+  # to disable exposing it (Service/HTTPRoute keep the single API port only).
+  dashboardPort: 9119
   env: []
   configFiles: []
 

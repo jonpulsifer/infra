@@ -39,8 +39,8 @@ spec:
         envVar: API_SERVER_KEY
         onePasswordItem: "hermes api server key"
         property: password
-      - name: openrouter-api-key
-        envVar: OPENROUTER_API_KEY
+      - name: opencode-go-api-key
+        envVar: OPENCODE_GO_API_KEY
         onePasswordItem: "opencode api key"
         property: password
       - name: discord-bot-token
@@ -65,12 +65,14 @@ spec:
           value: "8642"
         - name: API_SERVER_CORS_ORIGINS
           value: "https://hermes.${SECRET_DOMAIN}"
+        - name: HERMES_DASHBOARD
+          value: "1"
         - name: LLM_PROVIDER
-          value: "openrouter"
+          value: "opencode-go"
         - name: LLM_MODEL
-          value: "opencode-go/minimax-m2.7"
-        - name: OPENROUTER_BASE_URL
-          value: "https://openrouter.ai/api/v1"
+          value: "minimax-m3"
+        - name: OPENCODE_GO_BASE_URL
+          value: "https://opencode.ai/zen/go/v1/messages"
         - name: SLACK_CHANNEL_GENERAL
           value: "#general"
         - name: SLACK_CHANNEL_CHORES
