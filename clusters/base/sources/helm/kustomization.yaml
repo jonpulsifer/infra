@@ -17,6 +17,7 @@ resources:
   - jetstack.yaml
   - jonpulsifer.yaml
   - metrics-server.yaml
+  - nfs-subdir-external-provisioner.yaml
   - node-feature-discovery.yaml
   - onepassword.yaml
   - open-webui.yaml
