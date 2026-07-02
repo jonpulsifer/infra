@@ -77,6 +77,12 @@ hermes:
   dataVolume:
     enabled: true
     storageSize: 5Gi
+    # storageClassName: defaults to local-path (RWO, single-node). Set to
+    # "nfs" (or another RWX-capable class) for multi-node / durable storage.
+    # When nil, the rendered PVC omits the field and uses the cluster default.
+    storageClassName: null
+    accessModes:
+      - ReadWriteOnce
   shmSizeLimit: 1Gi
   # Web dashboard (HERMES_DASHBOARD=1) listens on its own port, separate from
   # the gateway's OpenAI-compatible API/health port (.Values.port). Set to ""

@@ -1,0 +1,100 @@
+---
+# nfs-subdir-external-provisioner
+#
+# Adds a real `nfs` StorageClass to the cluster, backed by spore (10.2.0.11).
+# The static `spore` PV (clusters/folly/storage/spore-pv.yaml) keeps working
+# unchanged; this provisioner is for new dynamic PVCs that ask for the `nfs`
+# StorageClass by name. The provisioner creates per-PVC subdirectories under
+# the configured `nfs.path` (default: /nfs/data/k8s-provisioned/ on spore),
+# so dynamic and static volumes are isolated.
+#
+# Required setup on the NFS server (one-time, manual on spore):
+#   1. mkdir -p /nfs/data/k8s-provisioned
+#      chown nobody:nogroup /nfs/data/k8s-provisioned
+#   2. Append to /etc/exports:
+#        /nfs/data/k8s-provisioned/  10.3.0.0/28(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
+#   3. exportfs -arv
+#
+# After this PR merges and Flux reconciles, any PVC like:
+#   kind: PersistentVolumeClaim
+#   spec:
+#     storageClassName: nfs
+#     accessModes: ["ReadWriteMany"]
+#     resources: { requests: { storage: 10Gi } }
+# will be bound and have a subdir auto-created under
+# /nfs/data/k8s-provisioned/<namespace>-<pvc-name>-<pv-hash>/.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nfs-provisioner
+  namespace: nfs-provisioner
+spec:
+  interval: 5m0s
+  maxHistory: 2
+  chart:
+    spec:
+      chart: nfs-subdir-external-provisioner
+      version: 4.0.18
+      sourceRef:
+        kind: HelmRepository
+        name: nfs-subdir-external-provisioner
+        namespace: flux-system
+      interval: 10m0s
+  values:
+    # Provisioner identity. The leader-election lease name must be unique per
+    # provisioner if you ever run more than one (e.g. per cluster).
+    replicaCount: 1
+    leaderElection:
+      enabled: true
+    # NFS target. The IP is hardcoded (mirrors clusters/folly/storage/spore-pv.yaml)
+    # so kubelet's NFS mounter doesn't depend on DNS during kernel mount option
+    # construction. Keep in sync with the spore.lolwtf.ca Lab Net address.
+    nfs:
+      server: 10.2.0.11
+      path: /nfs/data/k8s-provisioned
+      # Match the static PV's mount options so both paths behave consistently
+      # for pods that mount either.
+      mountOptions:
+        - hard
+        - nfsvers=3
+        - timeo=600
+        - retrans=2
+        - noatime
+    # StorageClass. defaultClass=false so we do NOT displace `local-path` as
+    # the cluster default — dump, hermes-config, and many other workloads are
+    # happy on local-path and would break if the default flipped.
+    storageClass:
+      create: true
+      name: nfs
+      defaultClass: false
+      # Retain keeps the subdir around if the PVC is deleted. archiveOnDelete
+      # additionally renames it to archived-<n> so a recreate-with-same-name
+      # doesn't lose data. Set reclaimPolicy: Delete + archiveOnDelete: false
+      # to wipe on PVC delete (NOT recommended for shared/agent data).
+      reclaimPolicy: Retain
+      archiveOnDelete: true
+      allowVolumeExpansion: true
+    # RBAC. The chart creates a ServiceAccount named after the release; bind
+    # the cluster role the chart ships (nfs-provisioner-runner).
+    rbac:
+      create: true
+    serviceAccount:
+      create: true
+    # Restrict to a single namespace, not the whole cluster-wide default.
+    podSecurityContext:
+      fsGroup: 65534
+      runAsUser: 65534
+      runAsGroup: 65534
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi

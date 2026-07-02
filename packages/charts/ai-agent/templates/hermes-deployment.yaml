@@ -33,8 +33,14 @@ metadata:
   labels:
     {{- include "ai-agent.labels" . | nindent 4 }}
 spec:
-  accessModes: ["ReadWriteOnce"]
-  storageClassName: local-path
+  # storageClassName defaults to "local-path" (single-node, RWO). Override via
+  # .Values.hermes.dataVolume.storageClassName to use a different backend, e.g.
+  # "nfs" (RWX, multi-node, persistent across node loss).
+  {{- with .Values.hermes.dataVolume.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  accessModes:
+    {{- toYaml .Values.hermes.dataVolume.accessModes | nindent 4 }}
   resources:
     requests:
       storage: {{ .Values.hermes.dataVolume.storageSize | default "5Gi" }}
