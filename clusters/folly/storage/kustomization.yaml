@@ -5,4 +5,3 @@ resources:
   - ../../base/storage
   - nfs-provisioner
   - spore-pv.yaml
-

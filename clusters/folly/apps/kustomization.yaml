@@ -18,7 +18,6 @@ resources:
   - reloader
   # - satisfactory
   - hermes
-  - walter.yaml
 patches:
   - target:
       group: helm.toolkit.fluxcd.io

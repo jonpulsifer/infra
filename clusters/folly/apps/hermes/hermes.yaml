@@ -14,6 +14,9 @@
 # uses the bundled dashboard_auth/basic plugin instead. Before deploying,
 # create a "hermes dashboard basic auth" Login item in the Homelab
 # 1Password vault with "username" and "password" fields.
+#
+# Hermes is the primary agent service. The old Walter/OpenClaw hostname is kept
+# as a compatibility route in gateway.yaml while clients/bookmarks move over.
 # =============================================================================
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
