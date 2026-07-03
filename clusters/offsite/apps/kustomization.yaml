@@ -17,11 +17,19 @@ patches:
         path: /spec/interval
         value: 5m0s
       - op: replace
-        path: /spec/chart/spec/interval
-        value: 10m0s
-      - op: replace
         path: /spec/maxHistory
         value: 2
       - op: replace
         path: /spec/upgrade
         value: { cleanupOnFail: true, remediation: { retries: 5 } }
+  # chart.spec.interval only exists on HelmRepository-backed HelmReleases;
+  # OCIRepository-backed ones (chartRef) are labeled to skip it.
+  - target:
+      group: helm.toolkit.fluxcd.io
+      version: v2
+      kind: HelmRelease
+      labelSelector: "!source.toolkit.fluxcd.io/kind"
+    patch: |-
+      - op: replace
+        path: /spec/chart/spec/interval
+        value: 10m0s
