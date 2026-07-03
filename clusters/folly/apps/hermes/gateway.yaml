@@ -11,11 +11,21 @@ spec:
     - name: https-hermes
       protocol: HTTPS
       port: 443
-      hostname: &hostname "hermes.${SECRET_DOMAIN}"
+      hostname: "hermes.${SECRET_DOMAIN}"
       tls:
         certificateRefs:
           - kind: Secret
-            name: *hostname
+            name: "hermes.${SECRET_DOMAIN}"
+    # Compatibility listener for the old Walter/OpenClaw endpoint. Traffic is
+    # now served by Hermes so bookmarks and DNS can move independently.
+    - name: https-walter
+      protocol: HTTPS
+      port: 443
+      hostname: "walter.lolwtf.ca"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: "walter.lolwtf.ca"
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
@@ -27,6 +37,7 @@ spec:
     - name: hermes
   hostnames:
     - "hermes.${SECRET_DOMAIN}"
+    - "walter.lolwtf.ca"
   rules:
     - backendRefs:
         - name: hermes-ai-agent
