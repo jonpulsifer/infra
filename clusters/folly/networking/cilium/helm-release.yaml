@@ -4,6 +4,8 @@ kind: HelmRelease
 metadata:
   name: cilium
   namespace: kube-system
+  labels:
+    source.toolkit.fluxcd.io/kind: OCIRepository
 spec:
   interval: 24h
   maxHistory: 2

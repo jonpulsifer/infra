@@ -4,6 +4,8 @@ kind: HelmRelease
 metadata:
   name: reloader
   namespace: reloader
+  labels:
+    source.toolkit.fluxcd.io/kind: OCIRepository
 spec:
   interval: 24h
   chartRef:
