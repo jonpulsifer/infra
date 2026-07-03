@@ -63,7 +63,8 @@ spec:
       labels:
         {{- include "ai-agent.selectorLabels" . | nindent 8 }}
     spec:
-      hostUsers: false
+      # nfs cries about this rn
+      hostUsers: true
       automountServiceAccountToken: false
       securityContext:
         # Hermes must run as root (or its own UID 10000). s6-overlay stage2-hook.sh
