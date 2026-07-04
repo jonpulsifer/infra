@@ -40,15 +40,14 @@ spec:
             - name: tronbyt-data
               mountPath: /app/data
           # Per https://tronbyt.com/device-notes/#liveness-probe: httpGet on
-          # /health with a very high failureThreshold so a slow app-catalog
-          # sync doesn't trigger a restart.
+          # /health, port 8000.
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 30
-            failureThreshold: 10000
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
