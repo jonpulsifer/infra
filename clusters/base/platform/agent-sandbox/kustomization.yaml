@@ -2,6 +2,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - source.yaml
+  - git-repository.yaml
   - agent-sandbox.yaml
   - agents-sandbox-namespace.yaml

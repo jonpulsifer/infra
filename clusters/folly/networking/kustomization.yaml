@@ -4,7 +4,7 @@ kind: Kustomization
 resources:
   - cert-manager.yaml
   - gateway-api.yaml
-  - gateway-api-source.yaml
+  - git-repository-gateway-api.yaml
   - cilium
   - cloudflare
   - external-dns.yaml
