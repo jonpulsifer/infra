@@ -1,5 +1,7 @@
 [settings]
 experimental = true
+minimum_release_age_excludes = ["claude-code", "codex", "pi", "opencode"]
+
 
 [tools]
 bat = "latest"
@@ -27,7 +29,9 @@ btop = "latest"
 neovim = "latest"
 {{- if contains "microsoft" .chezmoi.kernel.osrelease }}
 gcloud = "latest"
+codex = "latest"
 claude-code = "latest"
+opencode = "latest"
 pi = "latest"
 {{- end }}
 {{- end }}
