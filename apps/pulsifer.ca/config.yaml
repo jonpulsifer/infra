@@ -1,0 +1,41 @@
+baseURL: "/"
+title: "pulsifer.ca"
+languageCode: "en-us"
+theme: "wip"
+
+params:
+  prompt: ❯
+  portrait:
+    link: about/
+    path: "avatar-icons.svg"
+    width: 75%
+    height: 75%
+    altText: "Avatar with floating icons"
+  social:
+    instagram: jonpulsifer.ca
+    github: jonpulsifer
+    linkedin: jonpulsifer
+    steam: jawn
+    twitter: jonpulsifer
+
+taxonomies:
+  category: categories
+  series: series
+  tag: tags
+
+menus:
+  main:
+    - identifier: about
+      name: about
+      url: /about
+    - identifier: archive
+      name: archive
+      url: /archive
+
+markup:
+  highlight:
+    style: xcode-dark
+
+enableEmoji: true
+enableGitInfo: true
+enableRobotsTXT: true
