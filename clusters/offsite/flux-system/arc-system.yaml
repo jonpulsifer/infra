@@ -11,8 +11,6 @@ spec:
   sourceRef:
     kind: GitRepository
     name: infra
-  dependsOn:
-    - name: repositories
   # CRDs exist only after this HelmRelease is ready; runners need them.
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2

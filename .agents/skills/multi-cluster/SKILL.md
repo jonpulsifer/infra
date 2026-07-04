@@ -51,16 +51,19 @@ clusters/base/
 
 ## Shared via Flux Path References
 
-Some resources are shared by pointing offsite's Flux Kustomization at folly's directory:
+Shared platform components live under `base/` and **both** clusters' `flux-system/` Kustomizations point at the same base path:
 
-| Resource                  | Flux Kustomization path              |
-|---------------------------|--------------------------------------|
-| HelmRepository sources    | `./clusters/folly/sources`       |
-| Sandbox apps              | `./clusters/folly/sandbox`       |
-| External Secrets Operator | `./clusters/folly/external-secrets-operator` |
-| External Secrets          | `./clusters/folly/external-secrets` |
+| Resource                  | Flux Kustomization path                          |
+|---------------------------|--------------------------------------------------|
+| ARC (runner controller)   | `./clusters/base/platform/arc-system`            |
+| External Secrets Operator | `./clusters/base/platform/external-secrets-operator` |
+| 1Password Connect         | `./clusters/base/platform/onepassword-connect`   |
+| Sandbox apps              | `./clusters/base/platform/agent-sandbox`         |
+| Storage (offsite)         | `./clusters/base/storage`                        |
 
 This works because Flux resolves paths relative to the git repo root, not the kustomization file.
+
+HelmRepository/GitRepository/OCIRepository **sources are not shared centrally** — each is colocated in the same directory as the HelmRelease that consumes it (`helm-repository.yaml` / `git-repository.yaml` / `oci-repository.yaml`). Sources needed by both clusters (e.g. `descheduler`, `gateway-api`) are duplicated into each cluster's directory, matching how those apps are already duplicated.
 
 ## What Stays Cluster-Specific
 

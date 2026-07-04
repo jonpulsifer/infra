@@ -307,8 +307,10 @@
     // Blocked
     // ============================================================
     {
+      // gateway-api CRD version is coupled to each cluster's cluster-gateway
+      // config; bump it manually, not via Renovate. Colocated per-cluster.
       matchManagers: ['flux'],
-      matchFileNames: ['clusters/folly/sources/git/gateway-api.yaml'],
+      matchFileNames: ['clusters/*/networking/git-repository-gateway-api.yaml'],
       enabled: false,
     },
   ],
