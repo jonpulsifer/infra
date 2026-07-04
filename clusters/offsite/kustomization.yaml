@@ -6,4 +6,4 @@ metadata:
   name: flux-bootstrap
 resources:
   - cluster.yaml
-  - flux/flux-self-managed.yaml
+  - flux-system/flux-self-managed.yaml
