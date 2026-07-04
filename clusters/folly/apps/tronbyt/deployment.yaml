@@ -39,14 +39,20 @@ spec:
           volumeMounts:
             - name: tronbyt-data
               mountPath: /app/data
+          # Per https://tronbyt.com/device-notes/#liveness-probe: httpGet on
+          # /health with a very high failureThreshold so a slow app-catalog
+          # sync doesn't trigger a restart.
           livenessProbe:
-            exec:
-              command: ["/app/tronbyt-server", "health"]
+            httpGet:
+              path: /health
+              port: 8000
             initialDelaySeconds: 10
             periodSeconds: 30
+            failureThreshold: 10000
           readinessProbe:
-            exec:
-              command: ["/app/tronbyt-server", "health"]
+            httpGet:
+              path: /health
+              port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
