@@ -6,4 +6,6 @@ resources:
   - 01-service.yaml
   - 02-pvc.yaml
   - 03-gateway.yaml
+  - 04-database.yaml
+  - 05-db-secret.sops.yaml
   - deployment.yaml
