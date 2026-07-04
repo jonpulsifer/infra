@@ -16,7 +16,7 @@ Each cluster contains: `flux-system/`, `networking/`, `monitoring/`, `nodes/`, `
 
 `base/` holds shared helm-releases (cert-manager, tailscale, external-dns, vector) used by both clusters via kustomize directory references. Cluster-specific values use Flux `postBuild` substitution with variables like `${CLUSTER_NAME}` from each cluster's `cluster-settings` ConfigMap.
 
-Both clusters share `sources/` (HelmRepository definitions) and `sandbox/` from folly's directories via Flux Kustomization path references. Offsite also shares `external-secrets-operator/` and `external-secrets/` from folly.
+Shared platform components live under `base/platform/` (`arc-system`, `external-secrets-operator`, `onepassword-connect`, `agent-sandbox`) and `base/storage/`; each cluster's `flux-system/` Kustomization points at those base paths directly. HelmRepository/GitRepository sources are **not** centralized — each source is colocated in the same directory (and same Flux Kustomization) as the HelmRelease/manifests that consume it.
 
 ## Making Changes
 
@@ -98,4 +98,4 @@ sops clusters/offsite/apps/atlantis/secret.sops.yaml
 
 ## Helm Releases
 
-Apps use `HelmRelease` resources pointing to `HelmRepository` sources in `sources/helm/`. Renovate opens automatic update PRs for chart bumps.
+Apps use `HelmRelease` resources pointing to a `HelmRepository`/`GitRepository`/`OCIRepository` source colocated in the same directory (named `helm-repository.yaml`, `git-repository.yaml`, or `oci-repository.yaml`, suffixed with the app name when a directory holds more than one). Renovate opens automatic update PRs for chart bumps.
