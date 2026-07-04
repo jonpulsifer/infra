@@ -12,7 +12,6 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: falco
-        namespace: flux-system
   values:
     driver:
       kind: modern-bpf

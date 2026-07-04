@@ -15,7 +15,6 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: onepassword
-        namespace: flux-system
       interval: 5m0s
   dependsOn:
     - name: external-secrets

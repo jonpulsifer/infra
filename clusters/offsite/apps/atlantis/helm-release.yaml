@@ -12,7 +12,6 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: atlantis
-        namespace: flux-system
   values:
     image:
       repository: jonpulsifer/atlantis

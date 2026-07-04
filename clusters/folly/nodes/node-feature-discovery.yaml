@@ -13,6 +13,5 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: node-feature-discovery
-        namespace: flux-system
   values:
     fullnameOverride: node-feature-discovery
