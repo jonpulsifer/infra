@@ -15,6 +15,12 @@ spec:
       labels: *labels
     spec:
       automountServiceAccountToken: false
+      # Kubernetes injects Docker-link-style env vars for every Service in the
+      # namespace, named `<SVCNAME>_PORT`. Our Service is named "tronbyt", so
+      # it collides with the app's own `TRONBYT_PORT` config var (the app's
+      # listen port), overriding it with a `tcp://<ip>:8000` URL instead of a
+      # bare port and crashing with "too many colons in address".
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -39,9 +45,41 @@ spec:
           volumeMounts:
             - name: tronbyt-data
               mountPath: /app/data
+          # First boot checks out ~1000 system apps onto the NFS-backed PVC,
+          # which can take over a minute; give it a generous startup budget
+          # so liveness doesn't kill it mid-checkout (subsequent boots reuse
+          # the checkout via `git fetch` and are much faster).
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 30
+          # Per https://tronbyt.com/device-notes/#liveness-probe: httpGet on
+          # /health, port 8000.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
       volumes:
