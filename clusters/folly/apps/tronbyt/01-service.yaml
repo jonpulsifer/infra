@@ -1,0 +1,18 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tronbyt
+  namespace: tronbyt
+  labels:
+    app.kubernetes.io/name: tronbyt
+    app.kubernetes.io/part-of: tronbyt
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: tronbyt
+    app.kubernetes.io/part-of: tronbyt
