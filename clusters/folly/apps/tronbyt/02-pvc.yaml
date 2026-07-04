@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tronbyt-data
+  namespace: tronbyt
+spec:
+  accessModes:
+    - ReadWriteMany
+  # Backed by the dynamic `nfs` StorageClass (provisioned by
+  # clusters/folly/storage/nfs-provisioner) on spore (10.2.0.11).
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 1Gi
