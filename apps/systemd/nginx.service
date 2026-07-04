@@ -1,0 +1,15 @@
+[Unit]
+Description=Start the nginx container
+After=cloudlab.service
+PartOf=cloudlab.service
+
+[Service]
+Type=simple
+Environment="HOME=/var/cloudlab"
+ExecStartPre=/usr/bin/docker-credential-gcr configure-docker
+ExecStartPre=/sbin/iptables -w -A INPUT -p tcp --dport 80 -j ACCEPT
+ExecStart=/usr/bin/docker run --rm --runtime=runsc --name=nginx --network=cloudlab --network-alias=nginx --ip=10.0.0.2 -p 80:8080 -v /var/cloudlab/services/nginx/nginx.conf:/etc/nginx/nginx.conf:ro nginx:alpine
+ExecStop=/usr/bin/docker stop nginx
+
+[Install]
+WantedBy=cloudlab.service
