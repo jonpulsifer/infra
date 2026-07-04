@@ -1,0 +1,19 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tronbyt
+  namespace: tronbyt
+spec:
+  instances: 1
+  bootstrap:
+    initdb:
+      database: tronbyt
+      owner: tronbyt
+      secret:
+        name: tronbyt-db
+  storage:
+    storageClass: local-path
+    size: 256Mi
+  monitoring:
+    enablePodMonitor: true
