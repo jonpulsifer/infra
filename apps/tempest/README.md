@@ -6,6 +6,10 @@ Written in [Starlark][starlark] and rendered with [Pixlet][pixlet].
 
 ![tempest](./tempest.webp)
 
+Supports 2x (128×64) displays — dimensions and fonts scale off `canvas.is2x()`:
+
+![tempest @2x](./tempest@2x.webp)
+
 ## Pages
 
 The app cycles through three pages:
@@ -35,6 +39,8 @@ python3 -m http.server 8080 &
 pixlet serve tempest.star   # then set api_url=http://127.0.0.1:8080/sample_results.json
 # or one-shot:
 pixlet render tempest.star api_url=http://127.0.0.1:8080/sample_results.json --format gif -o preview.gif
+# 2x (128x64):
+pixlet render -2 tempest.star api_url=http://127.0.0.1:8080/sample_results.json --format gif -o preview@2x.gif
 ```
 
 [tidbyt]: https://tidbyt.com/
