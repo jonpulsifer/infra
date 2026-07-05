@@ -6,6 +6,7 @@ atlantis_users := {
     "jonpulsifer",
     "rowbutt",
     "renovate[bot]",
+    "dependabot[bot]",
 }
 
 allowed if {
