@@ -41,10 +41,6 @@ locals {
       key_expiry_disabled = true
       tags                = ["tag:folly"]
     }
-    "oldboy" = {
-      key_expiry_disabled = false
-      tags                = []
-    }
     "oldschool" = {
       key_expiry_disabled = true
       tags                = ["tag:offsite"]
