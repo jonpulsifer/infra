@@ -4,6 +4,7 @@
     "ai-agents",
     "ddnsd",
     "netbench",
+    "rackstat",
     "atlantis",
     "actions-runner"
   ],

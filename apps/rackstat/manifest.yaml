@@ -1,0 +1,7 @@
+---
+id: rackstat
+name: Rackstat
+summary: Homelab rack status
+desc: Displays homelab health from the rackstat aggregator - nodes, alerts, GitOps sync, network probes, and cluster CPU.
+author: jonpulsifer
+supports2x: true

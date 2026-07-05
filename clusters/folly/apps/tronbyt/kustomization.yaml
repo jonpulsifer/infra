@@ -8,4 +8,7 @@ resources:
   - 03-gateway.yaml
   - 04-database.yaml
   - 05-db-secret.sops.yaml
+  - 06-rackstat-rbac.yaml
+  - 07-rackstat-deployment.yaml
+  - 08-rackstat-service.yaml
   - deployment.yaml
