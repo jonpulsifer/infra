@@ -1,4 +1,4 @@
-{ config, name, ... }:
+{ lib, name, ... }:
 {
   imports = [
     ../hardware/pi5
@@ -7,13 +7,6 @@
 
   networking = {
     hostName = name;
-    wireless = {
-      enable = true;
-      networks = {
-        lab = {
-          hidden = true;
-        };
-      };
-    };
+    wireless.enable = lib.mkForce false;
   };
 }

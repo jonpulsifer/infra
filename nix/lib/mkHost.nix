@@ -49,7 +49,13 @@ in
     nixosSystem {
       inherit system;
       modules = baseModules ++ modules;
-      specialArgs = { inherit inputs name tags; };
+      specialArgs = {
+        inherit inputs name tags;
+        # nixos-raspberrypi's board modules expect this as a top-level
+        # specialArg (not inputs.nixos-raspberrypi) so they can resolve their
+        # own packages/overlays.
+        nixos-raspberrypi = inputs.nixos-raspberrypi;
+      };
     };
 
   mkImage =

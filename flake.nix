@@ -1,9 +1,19 @@
 {
   description = "the homelab";
 
+  nixConfig = {
+    extra-substituters = [
+      "https://nixos-raspberrypi.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "nixos-raspberrypi.cachix.org-1:4iMO9LXa8BqhU+Rpg6LQKiGa2lsNh/j2oiYLNOQ5sPI="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
     nixos-hardware.url = "github:nixos/nixos-hardware";
+    nixos-raspberrypi.url = "github:nvmd/nixos-raspberrypi/main";
     nixos-wsl = {
       url = "github:nix-community/NixOS-WSL/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -68,6 +78,7 @@
         "cloudpi4"
         "homepi4"
         "weatherpi4"
+        "rackpi5"
         "oldboy"
       ];
 
@@ -138,6 +149,10 @@
           system = "aarch64-linux";
           modules = [ ./nix/hosts/weatherpi4.nix ];
         };
+        rackpi5 = mkHost "rackpi5" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/rackpi5.nix ];
+        };
 
         oldboy = mkHost "oldboy" {
           tags = [ "gcp" ];
@@ -172,6 +187,7 @@
           cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
+          rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
         };
       };
 
