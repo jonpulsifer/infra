@@ -16,6 +16,7 @@ CLAUDE.md
 Brewfile
 mise.toml
 skills/
+ergodox/
 
 # Local agent state; managed Claude config lives under dot_claude/.
 .claude/settings.local.json
