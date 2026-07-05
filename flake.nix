@@ -79,6 +79,7 @@
         "homepi4"
         "weatherpi4"
         "dns"
+        "rackpi5"
         "oldboy"
       ];
 
@@ -152,6 +153,10 @@
           system = "aarch64-linux";
           modules = [ ./nix/hosts/dns.nix ];
         };
+        rackpi5 = mkHost "rackpi5" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/rackpi5.nix ];
+        };
 
         oldboy = mkHost "oldboy" {
           tags = [ "gcp" ];
@@ -181,6 +186,7 @@
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
           dns = nixosConfigurations.dns.config.system.build.sdImage;
+          rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
 
           iso = nixosConfigurations.iso.config.system.build.isoImage;
           wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;

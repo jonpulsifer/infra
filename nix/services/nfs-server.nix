@@ -1,0 +1,57 @@
+# NFS server for the folly k8s cluster's shared storage, replacing spore
+# (Alpine). Exports mirror spore's /etc/exports 1:1 so the eventual cutover
+# is just an IP/DNS change in clusters/folly/storage/spore-pv.yaml and
+# clusters/folly/storage/nfs-provisioner/helm-release.yaml, not a re-layout.
+#
+# The backing disk is a 52Pi P33 NVMe HAT drive (nix/hardware/pi5/nvme-hat.nix)
+# that isn't racked yet. `nofail` keeps boot from blocking on its absence.
+# Once it's installed, bring it up once by hand:
+#   parted /dev/nvme0n1 -- mklabel gpt mkpart nfs-data ext4 0% 100%
+#   mkfs.ext4 -L nfs-data /dev/disk/by-partlabel/nfs-data
+{ ... }:
+{
+  fileSystems."/nfs/data" = {
+    device = "/dev/disk/by-partlabel/nfs-data";
+    fsType = "ext4";
+    options = [
+      "nofail"
+      "relatime"
+    ];
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /nfs/data 0755 root root -"
+    "d /nfs/data/k8s 0777 nobody nobody -"
+    "d /nfs/data/k8s-provisioned 0777 nobody nobody -"
+  ];
+
+  services.nfs.server = {
+    enable = true;
+    # Fixed ports so the auxiliary RPC services can be pinned in the firewall.
+    lockdPort = 4001;
+    mountdPort = 4002;
+    statdPort = 4000;
+    exports = ''
+      /nfs/data/                 10.13.37.0/28(rw,sync,nohide,no_subtree_check,insecure,all_squash,anonuid=1000,anongid=1000)
+      /nfs/data/k8s/              10.3.0.0/28(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) 10.100.0.0/20(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
+      /nfs/data/k8s-provisioned/  10.3.0.0/28(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) 10.100.0.0/20(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
+    '';
+  };
+
+  networking.firewall = {
+    allowedTCPPorts = [
+      111 # rpcbind
+      2049 # nfsd
+      4000 # rpc.statd
+      4001 # lockd/nlockmgr
+      4002 # rpc.mountd
+    ];
+    allowedUDPPorts = [
+      111
+      2049
+      4000
+      4001
+      4002
+    ];
+  };
+}
