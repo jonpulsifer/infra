@@ -5,12 +5,15 @@ Three pages rendered in sequence:
      feels-like, and a stats ticker (conditions, humidity, wind, pressure).
   2. Three day forecast - day, icon, high/low, precip probability bar.
   3. Next 24 hours - temperature plot from the hourly forecast.
+
+Supports 2x (128x64) displays: all dimensions scale off canvas.is2x()
+and the manifest sets supports2x.
 """
 
 load("cache.star", "cache")
 load("encoding/json.star", "json")
 load("http.star", "http")
-load("render.star", "render")
+load("render.star", "canvas", "render")
 load("schema.star", "schema")
 load("time.star", "time")
 
@@ -19,14 +22,20 @@ DEFAULT_TOKEN = ""
 WEATHERFLOW_API_URL = "https://swd.weatherflow.com/swd/rest/better_forecast?station_id=%s&token=%s"
 CACHE_TTL_SECONDS = 300
 
-FRAME_MS = 50
+FRAME_MS = 50  # divided by scale on 2x so marquees keep the same speed
 ICON_STATES = 8  # distinct animation states per icon
-ICON_HOLD = 3  # frames to hold each state
-STATIC_PAGE_FRAMES = 70  # ~3.5s per static page
+ICON_HOLD = 3  # frames to hold each state, multiplied by scale
+STATIC_PAGE_FRAMES = 70  # ~3.5s per static page at 1x, multiplied by scale
 
 UNIT_PARAMS = {
     "metric": "&units_temp=c&units_wind=kph&units_pressure=mb&units_precip=mm&units_distance=km",
     "imperial": "&units_temp=f&units_wind=mph&units_pressure=inhg&units_precip=in&units_distance=mi",
+}
+
+# fonts per scale: big temperature, small labels, ticker
+FONTS = {
+    1: {"big": "6x13", "small": "tom-thumb", "ticker": "tb-8"},
+    2: {"big": "10x20", "small": "tb-8", "ticker": "terminus-16"},
 }
 
 # palette
@@ -54,6 +63,7 @@ def main(config):
     station_id = config.str("station_id", DEFAULT_STATION_ID)
     token = config.str("token", DEFAULT_TOKEN)
     units = config.str("units", "auto")
+    scale = 2 if canvas.is2x() else 1
 
     # dev/self-hosted override; not exposed in the schema
     api_url = config.str("api_url", "")
@@ -73,14 +83,14 @@ def main(config):
     unit_labels = forecast.get("units", {})
     tz = forecast.get("timezone", "UTC")
 
-    pages = [page_current(current, unit_labels)]
+    pages = [page_current(current, unit_labels, scale)]
     if config.bool("show_forecast", True) and len(daily) > 0:
-        pages.append(hold(page_forecast(daily, tz)))
+        pages.append(hold(page_forecast(daily, tz, scale), scale))
     if config.bool("show_graph", True) and len(hourly) > 1:
-        pages.append(hold(page_graph(hourly)))
+        pages.append(hold(page_graph(hourly, scale), scale))
 
     return render.Root(
-        delay = FRAME_MS,
+        delay = FRAME_MS // scale,
         show_full_animation = True,
         child = render.Sequence(children = pages),
     )
@@ -111,38 +121,39 @@ def get_forecast(api_url, cache_suffix):
 # pages
 # ---------------------------------------------------------------------------
 
-def page_current(current, unit_labels):
+def page_current(current, unit_labels, scale):
     temp = int(current.get("air_temperature", 0))
     feels = int(current.get("feels_like", temp))
     icon_name = current.get("icon", "cloudy")
+    fonts = FONTS[scale]
 
     icon_frames = []
     for state in range(ICON_STATES):
-        for _ in range(ICON_HOLD):
-            icon_frames.append(weather_icon(icon_name, 20, state))
+        for _ in range(ICON_HOLD * scale):
+            icon_frames.append(weather_icon(icon_name, 20 * scale, state, scale))
 
     right = render.Column(
         main_align = "center",
         cross_align = "center",
         expanded = True,
         children = [
-            render.Text("%d°" % temp, font = "6x13", color = temp_color(temp)),
-            render.Text("feels %d°" % feels, font = "tom-thumb", color = COLOR_DIM),
+            render.Text("%d°" % temp, font = fonts["big"], color = temp_color(temp)),
+            render.Text("feels %d°" % feels, font = fonts["small"], color = COLOR_DIM),
         ],
     )
 
     top = render.Row(
         expanded = True,
         children = [
-            render.Box(width = 22, height = 24, child = render.Animation(children = icon_frames)),
-            render.Box(width = 42, height = 24, child = right),
+            render.Box(width = 22 * scale, height = 24 * scale, child = render.Animation(children = icon_frames)),
+            render.Box(width = canvas.width() - 22 * scale, height = 24 * scale, child = right),
         ],
     )
 
     ticker = render.Marquee(
-        width = 64,
-        offset_start = 16,
-        child = render.Text(ticker_text(current, unit_labels), font = "tb-8"),
+        width = canvas.width(),
+        offset_start = 16 * scale,
+        child = render.Text(ticker_text(current, unit_labels), font = fonts["ticker"]),
     )
 
     return render.Column(children = [top, ticker])
@@ -177,21 +188,22 @@ def ticker_text(current, unit_labels):
 
     return "  |  ".join([p for p in parts if p != ""])
 
-def page_forecast(daily, tz):
+def page_forecast(daily, tz, scale):
+    fonts = FONTS[scale]
     cols = []
     for day in daily[0:3]:
         name = time.from_timestamp(int(day.get("day_start_local", 0))).in_location(tz).format("Mon").upper()
         prob = int(day.get("precip_probability", 0))
         children = [
-            render.Text(name, font = "tom-thumb", color = COLOR_LABEL),
-            render.Box(width = 1, height = 1),
-            weather_icon(day.get("icon", "cloudy"), 10, 0),
-            render.Box(width = 1, height = 1),
-            render.Text("%d°" % int(day.get("air_temp_high", 0)), font = "tom-thumb", color = COLOR_HI),
-            render.Text("%d°" % int(day.get("air_temp_low", 0)), font = "tom-thumb", color = COLOR_LO),
+            render.Text(name, font = fonts["small"], color = COLOR_LABEL),
+            render.Box(width = 1, height = scale),
+            weather_icon(day.get("icon", "cloudy"), 10 * scale, 0, scale),
+            render.Box(width = 1, height = scale),
+            render.Text("%d°" % int(day.get("air_temp_high", 0)), font = fonts["small"], color = COLOR_HI),
+            render.Text("%d°" % int(day.get("air_temp_low", 0)), font = fonts["small"], color = COLOR_LO),
         ]
         if prob >= 20:
-            children.append(render.Box(width = max(2, prob * 12 // 100), height = 1, color = COLOR_RAIN))
+            children.append(render.Box(width = max(2, prob * 12 // 100) * scale, height = scale, color = COLOR_RAIN))
         cols.append(render.Column(cross_align = "center", children = children))
 
     return render.Row(
@@ -201,7 +213,8 @@ def page_forecast(daily, tz):
         children = cols,
     )
 
-def page_graph(hourly):
+def page_graph(hourly, scale):
+    fonts = FONTS[scale]
     hours = hourly[0:24]
     temps = [h.get("air_temperature", 0) for h in hours]
     hi = int(max(temps))
@@ -211,18 +224,18 @@ def page_graph(hourly):
         expanded = True,
         main_align = "space_between",
         children = [
-            render.Text("24H", font = "tom-thumb", color = COLOR_LABEL),
+            render.Text("24H", font = fonts["small"], color = COLOR_LABEL),
             render.Row(children = [
-                render.Text("%d°" % hi, font = "tom-thumb", color = COLOR_HI),
-                render.Text(" %d°" % lo, font = "tom-thumb", color = COLOR_LO),
+                render.Text("%d°" % hi, font = fonts["small"], color = COLOR_HI),
+                render.Text(" %d°" % lo, font = fonts["small"], color = COLOR_LO),
             ]),
         ],
     )
 
     plot = render.Plot(
         data = [(i, temps[i]) for i in range(len(temps))],
-        width = 64,
-        height = 25,
+        width = canvas.width(),
+        height = 25 * scale,
         color = COLOR_HI,
         color_inverted = COLOR_LO,
         fill = True,
@@ -232,11 +245,13 @@ def page_graph(hourly):
 
     return render.Column(children = [header, plot])
 
-def hold(page):
+def hold(page, scale):
     """Wrap a static page in an Animation so it stays up for a few seconds."""
-    return render.Animation(children = [page for _ in range(STATIC_PAGE_FRAMES)])
+    return render.Animation(children = [page for _ in range(STATIC_PAGE_FRAMES * scale)])
 
 def splash(message):
+    scale = 2 if canvas.is2x() else 1
+    fonts = FONTS[scale]
     return render.Root(
         child = render.Column(
             expanded = True,
@@ -244,11 +259,14 @@ def splash(message):
             cross_align = "center",
             children = [
                 render.Row(children = [
-                    weather_icon("partly-cloudy-day", 10, 0),
-                    render.Box(width = 2, height = 1),
-                    render.Text("TEMPEST", font = "tb-8", color = COLOR_LABEL),
+                    weather_icon("partly-cloudy-day", 10 * scale, 0, scale),
+                    render.Box(width = 2 * scale, height = 1),
+                    render.Text("TEMPEST", font = fonts["ticker"], color = COLOR_LABEL),
                 ]),
-                render.Marquee(width = 62, child = render.Text(message, font = "tom-thumb", color = COLOR_DIM)),
+                render.Marquee(
+                    width = canvas.width() - 2,
+                    child = render.Text(message, font = fonts["small"], color = COLOR_DIM),
+                ),
             ],
         ),
     )
@@ -275,13 +293,14 @@ def temp_color(t):
 def at(x, y, widget):
     return render.Padding(pad = (x, y, 0, 0), child = widget)
 
-def weather_icon(name, size, state):
+def weather_icon(name, size, state, px):
     """Draw a pixel-art icon for a WeatherFlow icon name.
 
     Args:
         name: WeatherFlow icon id, e.g. "partly-cloudy-day".
-        size: icon canvas edge in pixels (tuned for 20 and 10).
+        size: icon canvas edge in pixels (tuned for 10 and 20 per scale).
         state: animation state in [0, ICON_STATES).
+        px: stroke thickness, the display scale (1 or 2).
 
     Returns:
         A size x size widget.
@@ -290,22 +309,22 @@ def weather_icon(name, size, state):
     parts = []
 
     if name.startswith("clear"):
-        parts = moon_parts(size) if night else sun_parts(size, state)
+        parts = moon_parts(size) if night else sun_parts(size, state, px)
     elif "thunder" in name:
         parts = cloud_parts(size, COLOR_CLOUD_DARK, 0) + bolt_parts(size, state)
     elif "snow" in name:
-        parts = cloud_parts(size, COLOR_CLOUD, 0) + snow_parts(size, state)
+        parts = cloud_parts(size, COLOR_CLOUD, 0) + snow_parts(size, state, px)
     elif "sleet" in name:
-        parts = cloud_parts(size, COLOR_CLOUD, 0) + sleet_parts(size, state)
+        parts = cloud_parts(size, COLOR_CLOUD, 0) + sleet_parts(size, state, px)
     elif "rain" in name:
-        parts = cloud_parts(size, COLOR_CLOUD_DARK, 0) + rain_parts(size, state)
+        parts = cloud_parts(size, COLOR_CLOUD_DARK, 0) + rain_parts(size, state, px)
     elif name.startswith("partly"):
-        peek = moon_parts(size * 3 // 4) if night else sun_parts(size * 3 // 4, state)
+        peek = moon_parts(size * 3 // 4) if night else sun_parts(size * 3 // 4, state, px)
         parts = peek + cloud_parts(size, COLOR_CLOUD, size // 5)
     elif name.startswith("fog"):
-        parts = fog_parts(size, state)
+        parts = fog_parts(size, state, px)
     elif name.startswith("wind"):
-        parts = wind_parts(size, state)
+        parts = wind_parts(size, state, px)
     else:  # cloudy and anything unknown
         parts = cloud_parts(size, COLOR_CLOUD, size // 8)
 
@@ -315,27 +334,27 @@ def weather_icon(name, size, state):
         child = render.Stack(children = parts),
     )
 
-def sun_parts(size, state):
+def sun_parts(size, state, px):
     d = size * 3 // 5
     off = (size - d) // 2
     mid = size // 2
-    ray = max(1, size // 10)
+    ray = max(px, size // 10)
     parts = [
         at(off - 1, off - 1, render.Circle(color = COLOR_SUN_GLOW, diameter = d + 2)),
         at(off, off, render.Circle(color = COLOR_SUN, diameter = d)),
     ]
     if state % 2 == 0:
         # cardinal rays
-        parts.append(at(mid, 0, render.Box(width = 1, height = ray, color = COLOR_SUN)))
-        parts.append(at(mid, size - ray, render.Box(width = 1, height = ray, color = COLOR_SUN)))
-        parts.append(at(0, mid, render.Box(width = ray, height = 1, color = COLOR_SUN)))
-        parts.append(at(size - ray, mid, render.Box(width = ray, height = 1, color = COLOR_SUN)))
+        parts.append(at(mid, 0, render.Box(width = px, height = ray, color = COLOR_SUN)))
+        parts.append(at(mid, size - ray, render.Box(width = px, height = ray, color = COLOR_SUN)))
+        parts.append(at(0, mid, render.Box(width = ray, height = px, color = COLOR_SUN)))
+        parts.append(at(size - ray, mid, render.Box(width = ray, height = px, color = COLOR_SUN)))
     else:
         # diagonal rays
         c = off - 2 if off >= 2 else 0
-        f = size - c - 1
+        f = size - c - px
         for (x, y) in [(c, c), (f, c), (c, f), (f, f)]:
-            parts.append(at(x, y, render.Box(width = 1, height = 1, color = COLOR_SUN)))
+            parts.append(at(x, y, render.Box(width = px, height = px, color = COLOR_SUN)))
     return parts
 
 def moon_parts(size):
@@ -354,16 +373,16 @@ def cloud_parts(size, color, y_off):
         at(s // 6, y_off + s * 2 // 5, render.Box(width = s * 7 // 10, height = s // 4, color = color)),
     ]
 
-def rain_parts(size, state):
-    return precip_parts(size, state, 2, COLOR_RAIN, 1)
+def rain_parts(size, state, px):
+    return precip_parts(size, state, 2 * px, COLOR_RAIN, 1, px)
 
-def snow_parts(size, state):
-    return precip_parts(size, state // 2, 1, COLOR_SNOW, 1)
+def snow_parts(size, state, px):
+    return precip_parts(size, state // 2, px, COLOR_SNOW, 1, px)
 
-def sleet_parts(size, state):
-    return precip_parts(size, state, 2, COLOR_RAIN, 2) + precip_parts(size, state // 2, 1, COLOR_SNOW, 2)[1:2]
+def sleet_parts(size, state, px):
+    return precip_parts(size, state, 2 * px, COLOR_RAIN, 2, px) + precip_parts(size, state // 2, px, COLOR_SNOW, 2, px)[1:2]
 
-def precip_parts(size, state, drop_h, color, col_step):
+def precip_parts(size, state, drop_h, color, col_step, px):
     top = size * 7 // 10
     span = size - top - 1
     if span < 2:
@@ -371,40 +390,40 @@ def precip_parts(size, state, drop_h, color, col_step):
     parts = []
     cols = [size // 5, size // 2, size * 4 // 5]
     for i in range(0, len(cols), col_step):
-        y = top + (state + i * 2) % span
+        y = top + (state * px + i * 2) % span
         h = min(drop_h, size - y)
-        parts.append(at(cols[i], y, render.Box(width = 1, height = h, color = color)))
+        parts.append(at(cols[i], y, render.Box(width = px, height = h, color = color)))
     return parts
 
 BOLT_PIXELS = [(2, 0), (1, 1), (0, 2), (1, 2), (2, 2), (2, 3), (1, 4)]
 
 def bolt_parts(size, state):
     color = COLOR_BOLT if state % 4 < 2 else COLOR_BOLT_DIM
-    scale = 1 if size < 16 else 2
+    cell = max(1, size // 10)
     x0 = size * 2 // 5
     y0 = size // 2
     return [
-        at(x0 + x * scale, y0 + y * scale * 3 // 4, render.Box(width = scale, height = scale, color = color))
+        at(x0 + x * cell, y0 + y * cell * 3 // 4, render.Box(width = cell, height = cell, color = color))
         for (x, y) in BOLT_PIXELS
-        if y0 + y * scale * 3 // 4 + scale <= size
+        if y0 + y * cell * 3 // 4 + cell <= size
     ]
 
-def fog_parts(size, state):
+def fog_parts(size, state, px):
     parts = []
     w = size * 3 // 4
     for i in range(3):
         x = (i * 2 + state // 2) % (size - w)
         y = size * 2 // 5 + i * size // 5
-        parts.append(at(x, y, render.Box(width = w, height = 1, color = COLOR_FOG)))
+        parts.append(at(x, y, render.Box(width = w, height = px, color = COLOR_FOG)))
     return parts
 
-def wind_parts(size, state):
+def wind_parts(size, state, px):
     parts = []
     lengths = [size * 3 // 4, size // 2, size * 3 // 5]
     for i in range(3):
         y = size * 3 // 10 + i * size // 5
         x = (state + i * 2) % max(1, size - lengths[i])
-        parts.append(at(x, y, render.Box(width = lengths[i], height = 1, color = "#c8d2da")))
+        parts.append(at(x, y, render.Box(width = lengths[i], height = px, color = "#c8d2da")))
     return parts
 
 # ---------------------------------------------------------------------------

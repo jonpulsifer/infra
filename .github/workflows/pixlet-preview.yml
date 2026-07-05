@@ -56,6 +56,7 @@ jobs:
 
           apps=$(echo "$CHANGED_FILES" | awk -F/ '$1 == "apps" {print $2}' | sort -u)
           rendered=""
+          rendered2x=""
           failed=""
           for app in $apps; do
             star="apps/$app/$app.star"
@@ -71,10 +72,19 @@ jobs:
             else
               failed="$failed $app"
             fi
+            if grep -qs "^supports2x: true" "apps/$app/manifest.yaml"; then
+              pixlet render -2 "$star" "${args[@]}" \
+                --format gif --magnify 2 --max-duration 90s --silent \
+                -o "$RUNNER_TEMP/previews/$app@2x.gif" \
+                && rendered2x="$rendered2x $app" || true
+            fi
           done
 
-          echo "rendered=${rendered# }" >> "$GITHUB_OUTPUT"
-          echo "failed=${failed# }" >> "$GITHUB_OUTPUT"
+          {
+            echo "rendered=${rendered# }"
+            echo "rendered2x=${rendered2x# }"
+            echo "failed=${failed# }"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Push previews branch
         id: push
@@ -116,6 +126,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PREVIEW_SHA: ${{ steps.push.outputs.sha }}
           RENDERED: ${{ steps.render.outputs.rendered }}
+          RENDERED2X: ${{ steps.render.outputs.rendered2x }}
           FAILED: ${{ steps.render.outputs.failed }}
         run: |
           set -euo pipefail
@@ -130,6 +141,10 @@ jobs:
               echo
               echo "![$app](https://raw.githubusercontent.com/${{ github.repository }}/$PREVIEW_SHA/pr-$PR/$app.gif)"
               echo
+              if [[ " $RENDERED2X " == *" $app "* ]]; then
+                echo "![$app @2x](https://raw.githubusercontent.com/${{ github.repository }}/$PREVIEW_SHA/pr-$PR/$app@2x.gif)"
+                echo
+              fi
             done
             for app in $FAILED; do
               echo "> [!WARNING]"

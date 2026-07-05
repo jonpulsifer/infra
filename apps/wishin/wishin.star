@@ -1,10 +1,10 @@
 """ Display wishlist stats from wishin.app """
 
-load("render.star", "render")
-load("http.star", "http")
-load("encoding/base64.star", "base64")
 load("cache.star", "cache")
+load("encoding/base64.star", "base64")
 load("encoding/json.star", "json")
+load("http.star", "http")
+load("render.star", "canvas", "render")
 load("schema.star", "schema")
 
 DEFAULT_API_URL = "https://www.wishin.app/api/stats"
@@ -34,6 +34,11 @@ def main(config):
         stats = rep.json()
         cache.set(cache_key, json.encode(stats), ttl_seconds = 240)
 
+    # the embedded icons are high-res PNGs, so 2x just draws them larger
+    scale = 2 if canvas.is2x() else 1
+    icon_size = 16 * scale
+    font = "6x13" if scale == 2 else "Dina_r400-6"
+
     return render.Root(
         child = render.Column(
             expanded = True,
@@ -45,12 +50,12 @@ def main(config):
                     children = [
                         render.Image(
                             src = GIFT_ICON,
-                            width = 16,
-                            height = 16,
+                            width = icon_size,
+                            height = icon_size,
                         ),
                         render.Column(
                             children = [
-                                render.Marquee(width = 48, child = render.Text("%d gifts, %d claimed" % (stats["gifts"], stats["claimed"]), font = "Dina_r400-6")),
+                                render.Marquee(width = canvas.width() - icon_size, child = render.Text("%d gifts, %d claimed" % (stats["gifts"], stats["claimed"]), font = font)),
                             ],
                         ),
                     ],
@@ -60,12 +65,12 @@ def main(config):
                     children = [
                         render.Image(
                             src = KID_ICON,
-                            width = 16,
-                            height = 16,
+                            width = icon_size,
+                            height = icon_size,
                         ),
                         render.Column(
                             children = [
-                                render.Text("%d users" % stats["users"], font = "Dina_r400-6"),
+                                render.Text("%d users" % stats["users"], font = font),
                             ],
                         ),
                     ],

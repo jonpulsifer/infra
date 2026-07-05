@@ -1,0 +1,7 @@
+---
+id: wishin
+name: Wishin
+summary: Displays wishin.app stats
+desc: This application displays wishlist statistics from the wishin.app API.
+author: jonpulsifer
+supports2x: true
