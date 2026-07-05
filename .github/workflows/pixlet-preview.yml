@@ -1,0 +1,171 @@
+name: pixlet-preview
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - 'apps/**/*.star'
+      - 'apps/**/sample_results.json'
+      - '.github/workflows/pixlet-preview.yml'
+
+# Renders changed Pixlet apps, pushes the GIFs to the `pixlet-previews`
+# branch, and keeps a single sticky PR comment up to date with the images.
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pixlet-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PIXLET_VERSION: v0.53.1
+  PREVIEW_BRANCH: pixlet-previews
+
+jobs:
+  preview:
+    # Fork PRs get a read-only token: no branch push, no comment.
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install pixlet
+        run: |
+          curl -fsSL "https://github.com/tronbyt/pixlet/releases/download/${PIXLET_VERSION}/pixlet_${PIXLET_VERSION}_linux-amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin pixlet
+          pixlet version
+
+      - id: changed
+        uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
+        with:
+          separator: "\n"
+
+      - name: Render changed apps
+        id: render
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/previews"
+          python3 -m http.server 8642 --bind 127.0.0.1 &>/dev/null &
+          for _ in $(seq 1 40); do
+            curl -fs -o /dev/null http://127.0.0.1:8642/ && break
+            sleep 0.25
+          done
+
+          apps=$(echo "$CHANGED_FILES" | awk -F/ '$1 == "apps" {print $2}' | sort -u)
+          rendered=""
+          failed=""
+          for app in $apps; do
+            star="apps/$app/$app.star"
+            [ -f "$star" ] || continue
+            args=()
+            if [ -f "apps/$app/sample_results.json" ]; then
+              args+=("api_url=http://127.0.0.1:8642/apps/$app/sample_results.json")
+            fi
+            if pixlet render "$star" "${args[@]}" \
+                --format gif --magnify 4 --max-duration 90s --silent \
+                -o "$RUNNER_TEMP/previews/$app.gif"; then
+              rendered="$rendered $app"
+            else
+              failed="$failed $app"
+            fi
+          done
+
+          echo "rendered=${rendered# }" >> "$GITHUB_OUTPUT"
+          echo "failed=${failed# }" >> "$GITHUB_OUTPUT"
+
+      - name: Push previews branch
+        id: push
+        if: steps.render.outputs.rendered != ''
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git fetch origin "refs/heads/$PREVIEW_BRANCH" 2>/dev/null; then
+            git worktree add .previews FETCH_HEAD
+            git -C .previews checkout -B "$PREVIEW_BRANCH"
+          else
+            git worktree add --detach .previews
+            git -C .previews checkout --orphan "$PREVIEW_BRANCH"
+            git -C .previews rm -rfq . 2>/dev/null || true
+          fi
+
+          rm -rf ".previews/pr-$PR"
+          mkdir -p ".previews/pr-$PR"
+          cp "$RUNNER_TEMP"/previews/*.gif ".previews/pr-$PR/"
+          git -C .previews add "pr-$PR"
+          if git -C .previews commit -m "previews for PR #$PR @ $HEAD_SHA"; then
+            for _ in 1 2 3; do
+              git -C .previews push origin "$PREVIEW_BRANCH" && break
+              git -C .previews pull --rebase origin "$PREVIEW_BRANCH"
+            done
+          fi
+          echo "sha=$(git -C .previews rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upsert PR comment
+        if: steps.render.outputs.rendered != '' || steps.render.outputs.failed != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PREVIEW_SHA: ${{ steps.push.outputs.sha }}
+          RENDERED: ${{ steps.render.outputs.rendered }}
+          FAILED: ${{ steps.render.outputs.failed }}
+        run: |
+          set -euo pipefail
+          marker="<!-- pixlet-preview -->"
+          body=$(mktemp)
+          {
+            echo "$marker"
+            echo "## Pixlet previews"
+            echo
+            for app in $RENDERED; do
+              echo "### $app"
+              echo
+              echo "![$app](https://raw.githubusercontent.com/${{ github.repository }}/$PREVIEW_SHA/pr-$PR/$app.gif)"
+              echo
+            done
+            for app in $FAILED; do
+              echo "> [!WARNING]"
+              echo "> \`$app\` failed to render — check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+              echo
+            done
+            echo "_Rendered from ${HEAD_SHA:0:7}_"
+          } > "$body"
+
+          cid=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            --jq "first(.[] | select(.body | startswith(\"$marker\")) | .id)")
+          if [ -n "$cid" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$cid" -f body="$(cat "$body")" >/dev/null
+          else
+            gh pr comment "$PR" --repo "${{ github.repository }}" --body-file "$body"
+          fi
+
+  cleanup:
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Remove previews for closed PR
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/heads/$PREVIEW_BRANCH" 2>/dev/null || exit 0
+          git worktree add .previews FETCH_HEAD
+          git -C .previews checkout -B "$PREVIEW_BRANCH"
+          [ -d ".previews/pr-$PR" ] || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C .previews rm -rq "pr-$PR"
+          git -C .previews commit -m "remove previews for closed PR #$PR"
+          for _ in 1 2 3; do
+            git -C .previews push origin "$PREVIEW_BRANCH" && break
+            git -C .previews pull --rebase origin "$PREVIEW_BRANCH"
+          done
