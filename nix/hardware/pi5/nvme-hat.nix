@@ -30,6 +30,6 @@
   #   BOOT_ORDER=0xf416      # try NVMe, then USB, then SD, repeat
   #
   # BOOT_ORDER is what actually enables booting from NVMe -- only set it on
-  # hosts that should boot from the M.2 drive. rackpi5 has this HAT
+  # hosts that should boot from the M.2 drive. dns has this HAT
   # installed but should keep booting from its SD card for now.
 }
