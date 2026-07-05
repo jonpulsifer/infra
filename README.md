@@ -54,7 +54,8 @@ nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
 # Build installation media
 nix build .#iso         # x86_64 NixOS ISO
 nix build .#wsl         # WSL tarball
-nix build .#cloudpi4    # Raspberry Pi 4 SD image
+nix build .#cloudpi4    # Raspberry Pi 4 SD image (cross-built via qemu emulation)
+nix build .#rackpi5     # Raspberry Pi 5 SD image (cross-built via qemu emulation)
 ```
 
 See [`nix/README.md`](./nix/README.md) for detailed NixOS documentation.

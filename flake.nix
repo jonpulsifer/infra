@@ -89,8 +89,7 @@
           config.allowUnfree = true;
         }
       );
-    in
-    rec {
+
       nixosConfigurations = {
         optiplex = mkHost "optiplex" {
           role = "control-plane";
@@ -165,9 +164,24 @@
         container = mkImage ./nix/images/container.nix;
         netboot = mkImage ./nix/images/netboot.nix;
       };
+    in
+    {
+      inherit nixosConfigurations;
 
       packages = {
+        # sdImage derivations are pinned to aarch64-linux internally (each
+        # Pi's nixosSystem is called with system = "aarch64-linux" above),
+        # but they're only ever built by cross-compiling from the x86_64
+        # WSL/laptop dev box via the qemu binfmt emulation in
+        # nix/images/wsl.nix -- nobody builds these while logged into the Pi
+        # itself. So they live under x86_64-linux, matching how `nix build
+        # .#<host>` actually gets invoked, not under aarch64-linux.
         x86_64-linux = {
+          cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
+          homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
+          weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
+          rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
+
           iso = nixosConfigurations.iso.config.system.build.isoImage;
           wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
           container = nixosConfigurations.container.config.system.build.tarball;
@@ -182,12 +196,6 @@
             ];
             preferLocalBuild = true;
           };
-        };
-        aarch64-linux = {
-          cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
-          homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
-          weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
-          rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
         };
       };
 
