@@ -17,7 +17,7 @@ resource "unifi_network" "future" {
     start       = cidrhost(local.future_cidr, 2)
     stop        = cidrhost(local.future_cidr, 14)
     dns_enabled = true
-    dns_servers = ["10.2.0.20"]
+    dns_servers = ["10.2.0.10"]
     boot = {
       enabled = false
     }
