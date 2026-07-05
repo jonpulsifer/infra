@@ -14,6 +14,16 @@
 
   nixpkgs.config.allowUnfree = true;
 
+  # Emulate aarch64 via qemu-user/binfmt so we can build the Pi (pi4/pi5)
+  # sdImage outputs on this x86_64 host instead of needing a native aarch64
+  # builder or a remote builder.
+  boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
+  # NixOS's binfmt module takes over the whole binfmt_misc table on
+  # activation; without this, adding the aarch64 registration above wipes
+  # out WSL2's own .exe interop handler and breaks running Windows binaries
+  # (explorer.exe, code.exe, Docker Desktop, ...) from inside WSL.
+  wsl.interop.register = true;
+
   wsl = {
     enable = true;
     defaultUser = "jawn";
