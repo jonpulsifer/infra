@@ -1,0 +1,127 @@
+{
+ "generated_at": "2036-01-01T00:00:00Z",
+ "cluster": "folly",
+ "nodes": [
+  {
+   "name": "optiplex",
+   "up": true,
+   "k8s": true,
+   "ready": true,
+   "temp_c": 46,
+   "cpu_pct": 14.8,
+   "mem_pct": 49.6
+  },
+  {
+   "name": "riptide",
+   "up": true,
+   "k8s": true,
+   "ready": true,
+   "temp_c": 39,
+   "cpu_pct": 12.8,
+   "mem_pct": 29.5
+  },
+  {
+   "name": "shale",
+   "up": true,
+   "k8s": true,
+   "ready": true,
+   "temp_c": 40.5,
+   "cpu_pct": 10.6,
+   "mem_pct": 29.9
+  },
+  {
+   "name": "cloudpi4",
+   "up": true,
+   "k8s": false,
+   "temp_c": 41.4,
+   "cpu_pct": 0.6,
+   "mem_pct": 17.9
+  },
+  {
+   "name": "homepi4-wifi",
+   "up": false,
+   "k8s": false
+  },
+  {
+   "name": "radiopi0",
+   "up": true,
+   "k8s": false,
+   "temp_c": 31.5,
+   "cpu_pct": 1.6,
+   "mem_pct": 34.2
+  },
+  {
+   "name": "tallboy",
+   "up": false,
+   "k8s": false
+  }
+ ],
+ "alerts": [
+  {
+   "name": "TargetDown",
+   "severity": "warning",
+   "count": 1
+  },
+  {
+   "name": "CPUThrottlingHigh",
+   "severity": "info",
+   "count": 1
+  }
+ ],
+ "alert_counts": {
+  "critical": 0,
+  "warning": 1,
+  "info": 1
+ },
+ "probes": [
+  {
+   "name": "wan",
+   "ok": true,
+   "ms": 3
+  },
+  {
+   "name": "offsite",
+   "ok": true,
+   "ms": 34
+  },
+  {
+   "name": "lb",
+   "ok": true,
+   "ms": 1
+  }
+ ],
+ "cpu_history": [
+  10.4,
+  10.2,
+  10.1,
+  10,
+  10,
+  10,
+  10,
+  10,
+  10,
+  10,
+  10.2,
+  10.8,
+  11.4,
+  10.7,
+  10.2,
+  10.5,
+  10.3,
+  10.3,
+  10.3,
+  10.3,
+  10.4,
+  10.4,
+  10.6,
+  10.5,
+  10.7
+ ],
+ "gitops": {
+  "ks_ready": 27,
+  "ks_total": 27,
+  "hr_ready": 29,
+  "hr_total": 29,
+  "revision": "main@sha1:df4308d26285e47fa744d3a534afaf76d1b63568"
+ }
+}

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rackstat
+  namespace: tronbyt
+  labels: &labels
+    app.kubernetes.io/name: rackstat
+    app.kubernetes.io/part-of: tronbyt
+spec:
+  replicas: 1
+  selector:
+    matchLabels: *labels
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      serviceAccountName: rackstat
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rackstat
+          image: docker.io/jonpulsifer/rackstat:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: http
+          env:
+            - name: PROM_URL
+              value: http://prom-stack-kube-prometheus-prometheus.monitoring.svc:9090
+            - name: CLUSTER_NAME
+              value: ${CLUSTER_NAME}
+            # wan: Cloudflare DNS; offsite: offsite k8s API VIP over the Site
+            # Magic tunnel (clusters/offsite/config/cluster-topology.json —
+            # not substitutable here because Flux only loads the local
+            # cluster's topology ConfigMap); lb: the Grafana LB VIP, which
+            # exercises the Cilium BGP -> UDM route programming path.
+            - name: PROBES
+              value: wan=1.1.1.1:443,offsite=10.89.0.10:6443,lb=10.3.0.66:443
+            - name: ROOT_KUSTOMIZATION
+              value: apps
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 16Mi
+              cpu: 10m
+            limits:
+              memory: 64Mi
+              cpu: 200m
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
