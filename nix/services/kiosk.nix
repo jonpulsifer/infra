@@ -26,6 +26,12 @@ in
       default = false;
     };
 
+    public = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Bind the container port to 0.0.0.0 instead of 127.0.0.1";
+    };
+
     image = mkOption {
       type = types.str;
       default = "ghcr.io/jonpulsifer/hub:latest";
@@ -44,6 +50,8 @@ in
 
   config = mkIf cfg.enable {
     boot.kernelParams = [ "nomodeset" ];
+
+    networking.firewall.allowedTCPPorts = mkIf cfg.public [ cfg.hostPort ];
 
     hardware = {
       graphics.enable = true;
@@ -112,7 +120,11 @@ in
       containers.kiosk = {
         autoStart = true;
         image = cfg.image;
-        ports = [ "127.0.0.1:${toString cfg.hostPort}:${toString cfg.containerPort}" ];
+        ports = [
+          "${
+            if cfg.public then "0.0.0.0" else "127.0.0.1"
+          }:${toString cfg.hostPort}:${toString cfg.containerPort}"
+        ];
         environmentFiles = [ "/var/secrets/kiosk.env" ];
         environment = {
           PORT = toString cfg.containerPort;

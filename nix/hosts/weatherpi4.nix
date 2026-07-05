@@ -29,5 +29,6 @@
   services.kiosk = {
     enable = true;
     container = true;
+    public = true;
   };
 }
