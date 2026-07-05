@@ -23,7 +23,7 @@ locals {
     }
     "cloudpi4" = {
       key_expiry_disabled = true
-      tags                = []
+      tags                = ["tag:pi4"]
     }
     "craftbook-air" = {
       key_expiry_disabled = false
@@ -35,7 +35,7 @@ locals {
     }
     "homepi4" = {
       key_expiry_disabled = true
-      tags                = []
+      tags                = ["tag:pi4"]
     }
     "nuc" = {
       key_expiry_disabled = true
@@ -79,7 +79,7 @@ locals {
     }
     "weatherpi4" = {
       key_expiry_disabled = true
-      tags                = []
+      tags                = ["tag:pi4"]
     }
   }
 }

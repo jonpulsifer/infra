@@ -48,6 +48,8 @@
 		"tag:k8s-offsite":  ["tag:k8s-operator"],
 		"tag:folly":        ["tag:k8s-operator"],
 		"tag:offsite":      ["tag:k8s-operator"],
+		"tag:pi4":          ["autogroup:admin"],
+		"tag:ci":           ["autogroup:admin"],
 	},
 
 	"grants": [
@@ -85,6 +87,13 @@
 			"src": ["autogroup:owner"],
 			"dst": ["autogroup:owner"],
 			"ip":  ["*"],
+		},
+		{
+			// GitHub Actions nixos-deploy workflow: SSH-only into the
+			// standalone Pi4s so it can build+deploy them remotely.
+			"src": ["tag:ci"],
+			"dst": ["tag:pi4"],
+			"ip":  ["tcp:22"],
 		},
 	],
 
