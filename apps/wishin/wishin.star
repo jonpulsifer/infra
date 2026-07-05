@@ -1,32 +1,38 @@
+""" Display wishlist stats from wishin.app """
+
 load("render.star", "render")
 load("http.star", "http")
 load("encoding/base64.star", "base64")
 load("cache.star", "cache")
 load("encoding/json.star", "json")
+load("schema.star", "schema")
 
-WISHLIST_API_URL = "https://www.wishin.app/api/stats"
+DEFAULT_API_URL = "https://www.wishin.app/api/stats"
 
-def main():
-    """ This is a Starlark script that displays the number of gifts and people on the wishlist.
+def main(config):
+    """ This program is called by the device to render the screen.
 
-    It uses the Wishlist API to fetch the data.
+    It uses the wishin.app API to fetch the data.
     It also uses the cache module to cache the data for 4 minutes.
 
     Returns:
         A render.Root object that will be rendered by the device.
     """
 
-    stats_cached = cache.get("stats")
+    api_url = config.str("api_url", DEFAULT_API_URL)
+
+    cache_key = "stats:%s" % api_url
+    stats_cached = cache.get(cache_key)
     if stats_cached != None:
         print("Cache hit!")
         stats = json.decode(stats_cached)
     else:
         print("Cache miss! Calling wishin.app API")
-        rep = http.get(WISHLIST_API_URL)
+        rep = http.get(api_url)
         if rep.status_code != 200:
             fail("wishin.app API request failed with status %d", rep.status_code)
         stats = rep.json()
-        cache.set("stats", json.encode(stats), ttl_seconds = 240)
+        cache.set(cache_key, json.encode(stats), ttl_seconds = 240)
 
     return render.Root(
         child = render.Column(
@@ -66,6 +72,20 @@ def main():
                 ),
             ],
         ),
+    )
+
+def get_schema():
+    return schema.Schema(
+        version = "1",
+        fields = [
+            schema.Text(
+                id = "api_url",
+                name = "API URL",
+                desc = "wishin.app stats API endpoint.",
+                icon = "globe",
+                default = DEFAULT_API_URL,
+            ),
+        ],
     )
 
 GIFT_ICON = base64.decode("""
