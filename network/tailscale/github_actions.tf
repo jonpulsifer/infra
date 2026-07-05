@@ -21,6 +21,10 @@ resource "tailscale_federated_identity" "github_actions_nixos_deploy" {
   custom_claim_rules = {
     job_workflow_ref = "jonpulsifer/infra/.github/workflows/nixos-deploy.yaml@refs/heads/main"
   }
+
+  # tag:ci must exist in the ACL's tagOwners before the API will let this
+  # identity claim it (see the same note on tailscale_device_tags.devices).
+  depends_on = [tailscale_acl.this]
 }
 
 output "github_actions_nixos_deploy_client_id" {

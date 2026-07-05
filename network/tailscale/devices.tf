@@ -117,4 +117,9 @@ resource "tailscale_device_tags" "devices" {
   for_each  = { for k, v in local.devices : k => v if length(v.tags) > 0 }
   device_id = data.tailscale_device.devices[each.key].node_id
   tags      = each.value.tags
+
+  # Tags must exist in the ACL's tagOwners before the API will let a device
+  # claim them; nothing here references tailscale_acl.this, so without this
+  # Terraform is free to apply tag assignment before the ACL update lands.
+  depends_on = [tailscale_acl.this]
 }
