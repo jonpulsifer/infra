@@ -2,6 +2,7 @@
 {
   imports = [
     ../hardware/pi5
+    ../hardware/pi5/nvme-hat.nix
     ../services/common.nix
   ];
 
