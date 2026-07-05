@@ -67,7 +67,7 @@ jobs:
           # on first contact instead of prompting.
           NIX_SSHOPTS: -o StrictHostKeyChecking=accept-new
         run: |
-          nix shell nixpkgs#nixos-rebuild-ng -c \
+          nix shell --inputs-from . nixpkgs#nixos-rebuild-ng -c \
             nixos-rebuild ${{ inputs.mode }} --sudo \
             --flake .#${{ inputs.host }} \
             --target-host "jawn@${{ inputs.host }}.pirate-musical.ts.net"
