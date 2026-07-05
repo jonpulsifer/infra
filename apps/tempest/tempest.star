@@ -5,28 +5,35 @@ load("http.star", "http")
 load("encoding/base64.star", "base64")
 load("cache.star", "cache")
 load("encoding/json.star", "json")
+load("schema.star", "schema")
 
-TOKEN = ""
-WEATHERFLOW_API_URL = "https://swd.weatherflow.com/swd/rest/better_forecast?station_id=85191&token=" + TOKEN
+DEFAULT_STATION_ID = "85191"
+DEFAULT_TOKEN = ""
+WEATHERFLOW_API_URL = "https://swd.weatherflow.com/swd/rest/better_forecast?station_id=%s&token=%s"
 
-def main():
+def main(config):
     """ This program is called by the device to render the screen.
 
     Returns:
         A render.Root object that will be rendered by the device.
     """
 
-    forecast_cached = cache.get("forecast")
+    station_id = config.str("station_id", DEFAULT_STATION_ID)
+    token = config.str("token", DEFAULT_TOKEN)
+    api_url = WEATHERFLOW_API_URL % (station_id, token)
+
+    cache_key = "forecast:%s" % station_id
+    forecast_cached = cache.get(cache_key)
     if forecast_cached != None:
         print("Cache hit!")
         forecast = json.decode(forecast_cached)
     else:
         print("Cache miss! Calling WeatherFlow API")
-        rep = http.get(WEATHERFLOW_API_URL)
+        rep = http.get(api_url)
         if rep.status_code != 200:
             fail("WeatherFlow API request failed with status %d", rep.status_code)
         forecast = rep.json()
-        cache.set("forecast", json.encode(forecast), ttl_seconds = 300)
+        cache.set(cache_key, json.encode(forecast), ttl_seconds = 300)
 
     # Get the current location name
     location = forecast["location_name"]
@@ -58,4 +65,25 @@ def main():
                 ],
             ),
         ),
+    )
+
+def get_schema():
+    return schema.Schema(
+        version = "1",
+        fields = [
+            schema.Text(
+                id = "station_id",
+                name = "Station ID",
+                desc = "WeatherFlow Tempest station ID.",
+                icon = "towerBroadcast",
+                default = DEFAULT_STATION_ID,
+            ),
+            schema.Text(
+                id = "token",
+                name = "Token",
+                desc = "WeatherFlow API personal access token.",
+                icon = "key",
+                default = DEFAULT_TOKEN,
+            ),
+        ],
     )
