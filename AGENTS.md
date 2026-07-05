@@ -55,7 +55,7 @@ limited to `init -backend=false && validate`, lint, build, and unit tests.
 
 This repo is GitOps-first: author desired state in git and let the operators apply it. Do not mutate live infra directly.
 
-- **Terraform** (network roots under `network/`: `unifi/folly`, `unifi/offsite`, `cloudflare/`, `tailscale/`; the rest under `terraform/`: `gcp/`, `argo/`, `google-workspace/`, `vault/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
+- **Terraform** (all root modules live under `terraform/`: network fabric in `terraform/network/` — `unifi/folly`, `unifi/offsite`, `cloudflare/`, `tailscale/` — and cloud/identity in `terraform/gcp/`, `terraform/argo/`, `terraform/google-workspace/`, `terraform/vault/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
 - **Kubernetes** (`clusters/**`): changes deploy via **Flux** (and **ArgoCD** for apps sourced from external repos) on merge to `main`. Commit manifests; **never `kubectl apply`** to author state. `kubectl`, `flux get`, and `flux reconcile` are for inspection or forcing a sync. Use explicit contexts (`--context folly` / `--context offsite`) and namespaces.
 - **NixOS** (`nix/**`): `nixos-rebuild` is the apply path (see Key Commands). State changes that may mutate live hosts should be called out before running.
 
@@ -89,7 +89,7 @@ sudo nixos-rebuild switch --rollback
 ### Terraform
 
 ```bash
-cd terraform/<module-dir>   # e.g. terraform/gcp/projects/homelab-ng (network roots live under network/, e.g. network/cloudflare, network/unifi/folly)
+cd terraform/<module-dir>   # e.g. terraform/gcp/projects/homelab-ng, terraform/network/cloudflare, terraform/network/unifi/folly
 terraform init
 terraform plan    # local inspection only — applies go through Atlantis on the PR (see "How Changes Ship")
 
@@ -155,21 +155,21 @@ Cilium provides CNI + BGP load balancer (pools defined in `networking/cilium/ip-
 
 The Flux **bootstrap** (the `flux-operator`/`flux-instance` install and node labels) is Terraform, and lives per-cluster in `clusters/<site>/bootstrap/` (e.g. `clusters/folly/bootstrap/bootstrap.tf`).
 
-**Network facts have a single source of truth: the per-cluster `cluster-topology` ConfigMaps at `clusters/<site>/config/cluster-topology.json`** (cluster IPs/CIDRs, API-server endpoints, BGP ASNs/addresses). Each JSON file **is** the Flux ConfigMap (applied as-is — JSON is valid YAML) and doubles as the structured facts every layer reads, so there is no generator. `data` is flat `string→string` (a Flux `substituteFrom` requirement), so lists/numbers are encoded as strings (e.g. `CLUSTER_DNS` is comma-separated, `API_SERVER_PORT` is a string). Do not hardcode these — reference the SSOT: Flux substitutes `${VAR}` from it via `postBuild.substituteFrom`; Nix reads it with `builtins.fromJSON` in `nix/services/k8s/networks.nix` (parsing the port to an int and splitting the DNS list); Terraform roots read it with `jsondecode(file(".../cluster-topology.json")).data` (a `topology.tf` per root). (Not yet migrated: the FRR `*.conf` BGP files and `network/tailscale/policy.hujson` still hold literals.)
+**Network facts have a single source of truth: the per-cluster `cluster-topology` ConfigMaps at `clusters/<site>/config/cluster-topology.json`** (cluster IPs/CIDRs, API-server endpoints, BGP ASNs/addresses). Each JSON file **is** the Flux ConfigMap (applied as-is — JSON is valid YAML) and doubles as the structured facts every layer reads, so there is no generator. `data` is flat `string→string` (a Flux `substituteFrom` requirement), so lists/numbers are encoded as strings (e.g. `CLUSTER_DNS` is comma-separated, `API_SERVER_PORT` is a string). Do not hardcode these — reference the SSOT: Flux substitutes `${VAR}` from it via `postBuild.substituteFrom`; Nix reads it with `builtins.fromJSON` in `nix/services/k8s/networks.nix` (parsing the port to an int and splitting the DNS list); Terraform roots read it with `jsondecode(file(".../cluster-topology.json")).data` (a `topology.tf` per root). (Not yet migrated: the FRR `*.conf` BGP files and `terraform/network/tailscale/policy.hujson` still hold literals.)
 
-### Layer 3 – Cloud & Network: `terraform/` and `network/`
+### Layer 3 – Cloud & Network: `terraform/`
 
-Terraform root modules live under `terraform/` (cloud/identity) and `network/` (the network fabric, brought out front). Each is a standalone module. CI validates and auto-formats on push to `main`.
+All Terraform root modules live under `terraform/`. Each is a standalone module. CI validates and auto-formats on push to `main`.
 
-Network fabric — `network/`:
+Network fabric — `terraform/network/`:
 
-- `network/unifi/folly/` – primary-site UniFi: VLANs, BGP config, client management (state prefix `terraform/unifi`, kept for continuity)
-- `network/unifi/offsite/` – offsite UniFi: networks, WANs, WLANs, BGP (state prefix `terraform/unifi/offsite`)
-  - **Cross-site k8s reachability** (folly ⇄ offsite over the single Site Magic tunnel) is gated by the **gateway firewall**, not the routing protocol: iBGP between the gateways carries the pod CIDRs + LB VIP pools, but a gateway only forwards them if its firewall allows the **full k8s address space** (pod CIDRs + VIP pools, not just node subnets). folly enforces this in `firewall.tf` (custom `Lab` zone); offsite uses the permissive default `Internal` zone. See `network/unifi/folly/README.md`.
-- `network/cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
-- `network/tailscale/` – devices, routes, ACL policy
+- `terraform/network/unifi/folly/` – primary-site UniFi: VLANs, BGP config, client management (state prefix `terraform/unifi`, kept for continuity)
+- `terraform/network/unifi/offsite/` – offsite UniFi: networks, WANs, WLANs, BGP (state prefix `terraform/unifi/offsite`)
+  - **Cross-site k8s reachability** (folly ⇄ offsite over the single Site Magic tunnel) is gated by the **gateway firewall**, not the routing protocol: iBGP between the gateways carries the pod CIDRs + LB VIP pools, but a gateway only forwards them if its firewall allows the **full k8s address space** (pod CIDRs + VIP pools, not just node subnets). folly enforces this in `firewall.tf` (custom `Lab` zone); offsite uses the permissive default `Internal` zone. See `terraform/network/unifi/folly/README.md`.
+- `terraform/network/cloudflare/` – DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), Cloudflare Tunnels, security rules
+- `terraform/network/tailscale/` – devices, routes, ACL policy
 
-Cloud & identity — `terraform/`:
+Cloud & identity:
 
 - `terraform/gcp/organization/` – org-level IAM, folders, projects, billing
 - `terraform/gcp/projects/<name>/` – per-project resources (homelab-ng, firebees, lolcorp, etc.)

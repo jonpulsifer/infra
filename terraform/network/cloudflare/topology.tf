@@ -5,7 +5,7 @@
 # local.topology.folly.API_SERVER_IP.
 locals {
   topology = {
-    folly   = jsondecode(file("${path.module}/../../clusters/folly/config/cluster-topology.json")).data
-    offsite = jsondecode(file("${path.module}/../../clusters/offsite/config/cluster-topology.json")).data
+    folly   = jsondecode(file("${path.module}/../../../clusters/folly/config/cluster-topology.json")).data
+    offsite = jsondecode(file("${path.module}/../../../clusters/offsite/config/cluster-topology.json")).data
   }
 }

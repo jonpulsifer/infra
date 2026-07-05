@@ -1,22 +1,22 @@
 ---
 name: unifi-network
-description: Discover, query, inspect, and reason about the live homelab UniFi network — controller, networks/VLANs, WLANs, adopted devices, and connected clients. Use when asked to look at, audit, debug, or reason about the UniFi network, find a client/device by name/IP/MAC, check what VLANs/subnets/DHCP exist, or reconcile live state against network/unifi/. Authenticates against the UDM Pro using creds from 1Password (op).
+description: Discover, query, inspect, and reason about the live homelab UniFi network — controller, networks/VLANs, WLANs, adopted devices, and connected clients. Use when asked to look at, audit, debug, or reason about the UniFi network, find a client/device by name/IP/MAC, check what VLANs/subnets/DHCP exist, or reconcile live state against terraform/network/unifi/. Authenticates against the UDM Pro using creds from 1Password (op).
 ---
 
 # unifi-network
 
 Read-only discovery for the homelab UniFi controller (a **UDM Pro**, Network
 app `10.4.57`, at `https://unifi.fml.pulsifer.ca` / `https://10.13.37.1`).
-This is the live counterpart to the desired state in `network/unifi/folly/` (the
-primary site; the offsite gateway is `network/unifi/offsite/`) — use it to see what
-the controller *actually* has before editing the Terraform.
+This is the live counterpart to the desired state in `terraform/network/unifi/folly/`
+(the primary site; the offsite gateway is `terraform/network/unifi/offsite/`) — use
+it to see what the controller *actually* has before editing the Terraform.
 
 The driver is **`.agents/skills/unifi-network/unifi.sh`** (paths below are
 relative to the repo root). It pulls the `terraform` Super Admin creds from
 the **homelab 1Password vault** via `op`, opens a UniFi-OS cookie session, and
 wraps the legacy Network API (`/proxy/network/api/...`) behind named subcommands.
 It is **read-only** — every subcommand is a GET. Authoring network state still
-goes through `network/unifi/folly/` + Atlantis (see CLAUDE.md "How Changes Ship").
+goes through `terraform/network/unifi/folly/` + Atlantis (see CLAUDE.md "How Changes Ship").
 
 ## Prerequisites
 
@@ -156,7 +156,7 @@ Prefer the API driver for anything it already covers; SSH is for FRR/BGP, raw
   `/s/default/rest/...`. Non-site paths like `/self/sites` also work.
 - **The `terraform` user is Super Admin** — the session can read everything
   (Protect, Access, etc.), but this driver deliberately only GETs Network data.
-  Don't add write verbs here; state changes belong in `network/unifi/folly/`.
+  Don't add write verbs here; state changes belong in `terraform/network/unifi/folly/`.
 
 ## Troubleshooting
 

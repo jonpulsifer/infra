@@ -30,8 +30,8 @@ spec:
       # previous "network/unifi/**/*.conf" globstar failed to match the .conf
       # files and they never autoplanned. This stays safe because Atlantis only
       # creates a project for a dir that contains .tf — and the only .conf files
-      # in tf roots are network/unifi/{folly,offsite}; other .conf files live in
-      # non-tf dirs (apps/, dotfiles/) so they never trigger a plan.
+      # in tf roots are terraform/network/unifi/{folly,offsite}; other .conf files
+      # live in non-tf dirs (apps/, dotfiles/) so they never trigger a plan.
       ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,**/*.conf"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
