@@ -18,7 +18,7 @@ locals {
       tags                = []
     }
     "chromebook-a288" = {
-      key_expiry_disabled = false
+      key_expiry_disabled = true
       tags                = []
     }
     "cloudpi4" = {
@@ -58,7 +58,7 @@ locals {
       tags                = ["tag:folly"]
     }
     "shale" = {
-      key_expiry_disabled = false
+      key_expiry_disabled = true
       tags                = []
     }
     "spore" = {
