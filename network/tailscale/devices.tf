@@ -18,12 +18,12 @@ locals {
       tags                = []
     }
     "chromebook-a288" = {
-      key_expiry_disabled = false
+      key_expiry_disabled = true
       tags                = []
     }
     "cloudpi4" = {
       key_expiry_disabled = true
-      tags                = []
+      tags                = ["tag:pi4"]
     }
     "craftbook-air" = {
       key_expiry_disabled = false
@@ -35,15 +35,11 @@ locals {
     }
     "homepi4" = {
       key_expiry_disabled = true
-      tags                = []
+      tags                = ["tag:pi4"]
     }
     "nuc" = {
       key_expiry_disabled = true
       tags                = ["tag:folly"]
-    }
-    "oldboy" = {
-      key_expiry_disabled = false
-      tags                = []
     }
     "oldschool" = {
       key_expiry_disabled = true
@@ -62,7 +58,7 @@ locals {
       tags                = ["tag:folly"]
     }
     "shale" = {
-      key_expiry_disabled = false
+      key_expiry_disabled = true
       tags                = []
     }
     "spore" = {
@@ -79,7 +75,7 @@ locals {
     }
     "weatherpi4" = {
       key_expiry_disabled = true
-      tags                = []
+      tags                = ["tag:pi4"]
     }
   }
 }
@@ -121,4 +117,9 @@ resource "tailscale_device_tags" "devices" {
   for_each  = { for k, v in local.devices : k => v if length(v.tags) > 0 }
   device_id = data.tailscale_device.devices[each.key].node_id
   tags      = each.value.tags
+
+  # Tags must exist in the ACL's tagOwners before the API will let a device
+  # claim them; nothing here references tailscale_acl.this, so without this
+  # Terraform is free to apply tag assignment before the ACL update lands.
+  depends_on = [tailscale_acl.this]
 }
