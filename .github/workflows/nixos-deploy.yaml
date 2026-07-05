@@ -46,7 +46,7 @@ jobs:
       - name: Build ${{ inputs.host }}
         run: nix build .#nixosConfigurations.${{ inputs.host }}.config.system.build.toplevel
 
-      # OIDC workload identity federation (network/tailscale/github_actions.tf) —
+      # OIDC workload identity federation (terraform/network/tailscale/github_actions.tf) —
       # exchanges this job's GitHub-issued OIDC token for a short-lived,
       # tag:ci-scoped auth key. No long-lived Tailscale secret in GitHub.
       - name: Join tailnet
