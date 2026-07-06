@@ -26,7 +26,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: NixOS/nix-installer-action@main
+      - uses: NixOS/nix-installer-action@00b25e1d0d56f56e90ee9814fb4385c721348f74 # main
         with:
           extra-conf: |
             experimental-features = nix-command flakes

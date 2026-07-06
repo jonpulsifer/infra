@@ -19,6 +19,7 @@ resources:
   # - satisfactory
   - hermes
   - tronbyt
+  - vault
 patches:
   - target:
       group: helm.toolkit.fluxcd.io

@@ -83,8 +83,8 @@
       fi
 
       rootPart=$(findmnt -n -o SOURCE /)
-      diskDev=$(lsblk -npo PKNAME "$rootPart")
-      partNum=$(lsblk -npo MAJ:MIN "$rootPart" | awk -F: '{print $2}')
+      diskDev=$(lsblk -rnpo PKNAME "$rootPart")
+      partNum=$(lsblk -rno PARTN "$rootPart")
 
       echo "root=$rootPart disk=$diskDev partNum=$partNum"
 
@@ -95,10 +95,18 @@
       resize2fs "$rootPart"
 
       # Give everything after that to a new partition for /nfs/data.
-      echo ",+,L" | sfdisk --append --no-reread "$diskDev"
+      # NOT "echo ,+,L | sfdisk --append" -- with an unspecified start,
+      # sfdisk fills the first free gap it finds in disk order, which on
+      # this layout is a few reserved sectors *before* partition 1, not
+      # the real free space after root. Compute the real start explicitly
+      # from partition 2's own current geometry instead.
+      rootStart=$(cat "/sys/class/block/$(basename "$rootPart")/start")
+      rootSize=$(cat "/sys/class/block/$(basename "$rootPart")/size")
+      dataStart=$(( rootStart + rootSize ))
+      echo "start=$dataStart,type=L" | sfdisk --append --no-reread "$diskDev"
       partprobe "$diskDev"
 
-      dataPart=$(lsblk -npo NAME "$diskDev" | tail -n1)
+      dataPart=$(lsblk -rnpo NAME "$diskDev" | tail -n1)
       echo "data partition: $dataPart"
       mkfs.ext4 -F -L nfs-data "$dataPart"
 
