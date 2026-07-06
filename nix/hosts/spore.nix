@@ -36,9 +36,9 @@
     wireless.enable = lib.mkForce false;
   };
 
-  # Alpine already runs this HAT's NVMe stable at Gen 3 (dtparam=pciex1_gen=3
-  # in spore's current /boot/config.txt); carry that over instead of
-  # nvme-hat.nix's conservative Gen 2 default.
+  # Alpine already ran this HAT's NVMe stable at Gen 3
+  # (dtparam=pciex1_gen=3 in spore's old /boot/config.txt); carry that over
+  # instead of nvme-hat.nix's conservative Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
     enable = true;
     value = 3;
