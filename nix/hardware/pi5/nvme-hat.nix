@@ -27,9 +27,18 @@
   # setting:
   #   PSU_MAX_CURRENT=5000   # PoE+ HAT can supply up to 5A
   #   PCIE_PROBE=1           # auto-detect the NVMe drive
-  #   BOOT_ORDER=0xf416      # try NVMe, then USB, then SD, repeat
+  #   BOOT_ORDER=0xf461      # confirmed working on rackpi5/dns/spore: boots
+  #                          # SD first every time, regardless of what else
+  #                          # is attached. Digits are read right-to-left
+  #                          # (least-significant/rightmost tried first), so
+  #                          # the rightmost "1" (SD) always wins the race
+  #                          # before the other digits are ever reached --
+  #                          # this previously documented 0xf416 as "NVMe
+  #                          # first", which was wrong.
   #
-  # BOOT_ORDER is what actually enables booting from NVMe -- only set it on
-  # hosts that should boot from the M.2 drive. dns has this HAT
-  # installed but should keep booting from its SD card for now.
+  # BOOT_ORDER only matters for which device wins when more than one is
+  # bootable -- it doesn't gate whether the kernel brings up the PCIe/NVMe
+  # link at all (that's PCIE_PROBE plus this file's dtparam=pciex1, which
+  # apply regardless of BOOT_ORDER). dns has this HAT installed but should
+  # keep booting from its SD card for now.
 }
