@@ -34,7 +34,7 @@ spec:
         - op: replace
           path: /spec/template/spec/containers/0/image
           # renovate: datasource=docker
-          value: registry.k8s.io/agent-sandbox/agent-sandbox-controller:v0.4.6
+          value: registry.k8s.io/agent-sandbox/agent-sandbox-controller:v0.5.0
         - op: add
           path: /spec/template/spec/containers/0/args/-
           value: "--extensions"
