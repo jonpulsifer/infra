@@ -1,12 +1,11 @@
-# NFS server for the folly k8s cluster's shared storage, replacing spore
-# (Alpine). Exports mirror spore's /etc/exports 1:1 so the eventual cutover
-# is just an IP/DNS change in clusters/folly/storage/spore-pv.yaml and
-# clusters/folly/storage/nfs-provisioner/helm-release.yaml, not a re-layout.
+# NFS server for the folly k8s cluster's shared storage. Currently only
+# spore (nix/hosts/spore.nix) uses this -- exports mirror what it served as
+# Alpine 1:1 so clusters/folly/storage/spore-pv.yaml and the nfs-provisioner
+# HelmRelease didn't need to change, only the OS underneath.
 #
-# The default backing disk is a 52Pi P33 NVMe HAT drive
-# (nix/hardware/pi5/nvme-hat.nix) on its own GPT table, referenced by
-# partlabel. `nofail` keeps boot from blocking on its absence. Once it's
-# installed, bring it up once by hand:
+# The default backing disk is a dedicated GPT disk referenced by partlabel
+# (e.g. a second drive with no OS on it). `nofail` keeps boot from blocking
+# on its absence. Bring it up once by hand:
 #   parted /dev/nvme0n1 -- mklabel gpt mkpart nfs-data ext4 0% 100%
 #   mkfs.ext4 -L nfs-data /dev/disk/by-partlabel/nfs-data
 #
