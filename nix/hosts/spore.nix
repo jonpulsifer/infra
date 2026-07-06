@@ -1,7 +1,8 @@
 # spore, reinstalled from Alpine to NixOS in place, keeping its identity
 # (MAC/IP/DNS in terraform/network/unifi/folly/clients.yaml) so
-# clusters/folly/storage/spore-pv.yaml and the nfs-provisioner HelmRelease
-# don't need to change -- only the OS underneath changes.
+# clusters/folly/storage/spore-pv.yaml, the nfs-provisioner HelmRelease, and
+# terraform/network/unifi/folly/k8s.tf's PXE tftp_server/boot.server all keep
+# working unchanged -- only the OS underneath changes.
 #
 # spore has no SD card: it boots directly off its single NVMe drive, which
 # is what the sd-image gets flashed onto. That's also the only place to put
@@ -27,6 +28,7 @@
     ../hardware/pi5/nvme-hat.nix
     ../services/common.nix
     ../services/nfs-server.nix
+    ../services/pxe-netboot.nix
   ];
 
   networking = {
