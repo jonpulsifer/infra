@@ -157,6 +157,10 @@
           system = "aarch64-linux";
           modules = [ ./nix/hosts/rackpi5.nix ];
         };
+        spore = mkHost "spore" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/spore.nix ];
+        };
 
         oldboy = mkHost "oldboy" {
           tags = [ "gcp" ];
@@ -187,6 +191,7 @@
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
           dns = nixosConfigurations.dns.config.system.build.sdImage;
           rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
+          spore = nixosConfigurations.spore.config.system.build.sdImage;
 
           iso = nixosConfigurations.iso.config.system.build.isoImage;
           wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
