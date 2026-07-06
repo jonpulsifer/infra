@@ -27,6 +27,7 @@
           "1.1.1.2"
           "1.0.0.2"
         ];
+        listeningMode = "ALL";
         # Every query otherwise gets a line appended to pihole.log; skip that
         # write stream entirely since Grafana (via the exporter below) is the
         # source of truth for stats, not the on-box query log.
@@ -46,6 +47,7 @@
 
   services.pihole-web = {
     enable = true;
+    hostName = "dns.lolwtf.ca";
     ports = [ 80 ];
   };
 
@@ -54,6 +56,6 @@
   services.prometheus.exporters.pihole = {
     enable = true;
     openFirewall = true;
-    piholeHostname = "127.0.0.1";
+    piholeHostname = "dns.lolwtf.ca";
   };
 }
