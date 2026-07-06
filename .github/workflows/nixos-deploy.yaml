@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: NixOS/nix-installer-action@main
+      - uses: NixOS/nix-installer-action@00b25e1d0d56f56e90ee9814fb4385c721348f74 # main
         with:
           extra-conf: |
             experimental-features = nix-command flakes
