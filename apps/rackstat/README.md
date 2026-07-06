@@ -27,7 +27,7 @@ Serves `/api/rackstat` and `/healthz` on `:8080`, caching snapshots for 15s.
 Sources, each degrading independently:
 
 - **Prometheus** — node up/temp/CPU/mem from the `node-exporter` job (k8s
-  nodes and the bare Pis), firing alerts (excluding the always-firing
+  nodes and bare hosts), firing alerts (excluding the always-firing
   Watchdog/InfoInhibitor), k8s readiness from kube-state-metrics, and a 24h
   cluster CPU history. Fleet membership comes from Prometheus targets, so
   hosts never need to be hardcoded.

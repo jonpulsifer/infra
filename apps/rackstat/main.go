@@ -2,7 +2,7 @@
 // rack-top Tidbyt/Tronbyt display (apps/rackstat/rackstat.star). It fans out
 // to three sources and degrades gracefully when any of them is unavailable:
 //
-//   - Prometheus: node up/temp/cpu/mem (node-exporter, incl. the bare Pis),
+//   - Prometheus: node up/temp/cpu/mem (node-exporter, incl. bare hosts),
 //     firing alerts (minus the always-firing Watchdog/InfoInhibitor), k8s
 //     node readiness, and a 24h cluster CPU history for the sparkline page.
 //   - Kubernetes API: Flux Kustomization/HelmRelease readiness and the last
@@ -54,7 +54,7 @@ type Snapshot struct {
 }
 
 // Node is one machine known to Prometheus' node-exporter job. K8s nodes also
-// carry cluster readiness; the bare Pis just have exporter reachability.
+// carry cluster readiness; bare hosts just have exporter reachability.
 type Node struct {
 	Name   string   `json:"name"`
 	Up     bool     `json:"up"`
@@ -385,8 +385,8 @@ func severityRank(s string) int {
 }
 
 // nodeName normalizes a node-exporter series to a short host name: prefer
-// the k8s node label, else the host part of instance ("homepi4.lolwtf.ca:9100"
-// -> "homepi4").
+// the k8s node label, else the host part of instance ("dns.lolwtf.ca:9100"
+// -> "dns").
 func nodeName(metric map[string]string) string {
 	if n := metric["node"]; n != "" {
 		return n

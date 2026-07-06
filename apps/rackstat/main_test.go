@@ -36,7 +36,7 @@ func TestNodeName(t *testing.T) {
 		want   string
 	}{
 		{map[string]string{"node": "optiplex"}, "optiplex"},
-		{map[string]string{"instance": "homepi4-wifi.lolwtf.ca:9100"}, "homepi4-wifi"},
+		{map[string]string{"instance": "dns.lolwtf.ca:9100"}, "dns"},
 		{map[string]string{"instance": "cloudpi4:9100"}, "cloudpi4"},
 		{map[string]string{"instance": "radiopi0"}, "radiopi0"},
 		{map[string]string{}, ""},
@@ -79,7 +79,8 @@ func fakeProm(t *testing.T) *httptest.Server {
 			w.Write([]byte(promVec(
 				map[string]any{"node": "optiplex", "_value": "1"},
 				map[string]any{"node": "riptide", "_value": "1"},
-				map[string]any{"instance": "tallboy.lolwtf.ca:9100", "_value": "0"},
+				map[string]any{"instance": "dns.lolwtf.ca:9100", "_value": "1"},
+				map[string]any{"instance": "spore.lolwtf.ca:9100", "_value": "0"},
 				map[string]any{"instance": "cloudpi4:9100", "_value": "1"},
 			)))
 		case strings.HasPrefix(q, `max by (node, instance) (node_hwmon_temp_celsius)`):
@@ -113,8 +114,8 @@ func TestCollectProm(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(snap.Nodes) != 4 {
-		t.Fatalf("want 4 nodes, got %+v", snap.Nodes)
+	if len(snap.Nodes) != 5 {
+		t.Fatalf("want 5 nodes, got %+v", snap.Nodes)
 	}
 	// k8s nodes sort first
 	if !snap.Nodes[0].K8s || snap.Nodes[0].Name != "optiplex" {
@@ -124,8 +125,8 @@ func TestCollectProm(t *testing.T) {
 		t.Errorf("riptide should be k8s and not ready, got %+v", snap.Nodes[1])
 	}
 	for _, n := range snap.Nodes {
-		if n.Name == "tallboy" && n.Up {
-			t.Errorf("tallboy should be down")
+		if n.Name == "spore" && n.Up {
+			t.Errorf("spore should be down")
 		}
 	}
 	if snap.Nodes[0].TempC == nil || *snap.Nodes[0].TempC != 54.3 {
@@ -168,7 +169,7 @@ func TestSnapshotCachesAndServes(t *testing.T) {
 	if decoded.Cluster != "" && decoded.Cluster != "folly" {
 		t.Errorf("unexpected cluster: %q", decoded.Cluster)
 	}
-	if len(decoded.Nodes) != 4 {
-		t.Errorf("want 4 nodes over HTTP, got %d", len(decoded.Nodes))
+	if len(decoded.Nodes) != 5 {
+		t.Errorf("want 5 nodes over HTTP, got %d", len(decoded.Nodes))
 	}
 }
