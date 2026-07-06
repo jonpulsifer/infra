@@ -61,7 +61,6 @@ resource "unifi_firewall_policy" "allow_established_related_internal" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10000
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -84,7 +83,6 @@ resource "unifi_firewall_policy" "allow_established_related_hotspot" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10000
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -107,7 +105,6 @@ resource "unifi_firewall_policy" "allow_established_related_external" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10000
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -130,7 +127,6 @@ resource "unifi_firewall_policy" "allow_established_related_vpn" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10000
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -153,7 +149,6 @@ resource "unifi_firewall_policy" "drop_invalid_internal" {
   action               = "BLOCK"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10001
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -176,7 +171,6 @@ resource "unifi_firewall_policy" "drop_invalid_hotspot" {
   action               = "BLOCK"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10001
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -199,7 +193,6 @@ resource "unifi_firewall_policy" "drop_invalid_external" {
   action               = "BLOCK"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10001
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -222,7 +215,6 @@ resource "unifi_firewall_policy" "drop_invalid_vpn" {
   action               = "BLOCK"
   protocol             = "all"
   ip_version           = "IPV4"
-  index                = 10001
   create_allow_respond = false
   enabled              = true
   logging              = false
@@ -245,7 +237,6 @@ resource "unifi_firewall_policy" "internal_to_lab" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "BOTH"
-  index                = 10000
   create_allow_respond = true
   enabled              = true
   logging              = false
@@ -268,7 +259,6 @@ resource "unifi_firewall_policy" "lab_to_lab" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "BOTH"
-  index                = 10000
   create_allow_respond = true
   enabled              = true
   logging              = false
@@ -291,7 +281,6 @@ resource "unifi_firewall_policy" "prometheus_windows_exporters" {
   action               = "ALLOW"
   protocol             = "tcp"
   ip_version           = "BOTH"
-  index                = 10000
   create_allow_respond = true
   enabled              = true
   logging              = false
@@ -315,7 +304,6 @@ resource "unifi_firewall_policy" "nest_k8s_to_folly_k8s" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "BOTH"
-  index                = 10000
   create_allow_respond = true
   enabled              = true
   logging              = false
@@ -340,7 +328,6 @@ resource "unifi_firewall_policy" "folly_k8s_to_nest_k8s" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "BOTH"
-  index                = 10000
   create_allow_respond = true
   enabled              = true
   logging              = false
@@ -365,7 +352,6 @@ resource "unifi_firewall_policy" "internal_to_nest_k8s" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "BOTH"
-  index                = 10002
   create_allow_respond = true
   enabled              = true
   logging              = false
@@ -389,7 +375,6 @@ resource "unifi_firewall_policy" "teleport_cidr_to_lab" {
   action               = "ALLOW"
   protocol             = "all"
   ip_version           = "BOTH"
-  index                = 10001
   create_allow_respond = true
   enabled              = true
   logging              = false
