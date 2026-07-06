@@ -2,14 +2,14 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
 | <a name="requirement_vault"></a> [vault](#requirement\_vault) | ~> 5.0 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.3.1 |
 | <a name="provider_vault"></a> [vault](#provider\_vault) | 5.9.0 |
 
@@ -20,7 +20,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [vault_approle_auth_backend_role.cert_manager](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/approle_auth_backend_role) | resource |
 | [vault_approle_auth_backend_role.home](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/approle_auth_backend_role) | resource |
 | [vault_approle_auth_backend_role.terraform](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/approle_auth_backend_role) | resource |
@@ -38,6 +38,7 @@ No modules.
 | [vault_jwt_auth_backend_role.google_default](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/jwt_auth_backend_role) | resource |
 | [vault_mount.home](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/mount) | resource |
 | [vault_mount.pki](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/mount) | resource |
+| [vault_pki_secret_backend_config_ca.offline_intermediate](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/pki_secret_backend_config_ca) | resource |
 | [vault_pki_secret_backend_config_urls.config_urls](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/pki_secret_backend_config_urls) | resource |
 | [vault_pki_secret_backend_role.fml](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/pki_secret_backend_role) | resource |
 | [vault_pki_secret_backend_role.lolwtf](https://registry.terraform.io/providers/hashicorp/vault/latest/docs/resources/pki_secret_backend_role) | resource |
@@ -51,12 +52,14 @@ No modules.
 
 ## Inputs
 
-No inputs.
+| Name | Description | Type | Default | Required |
+| ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_pki_intermediate_pem_bundle"></a> [pki\_intermediate\_pem\_bundle](#input\_pki\_intermediate\_pem\_bundle) | PEM bundle (private key followed by certificate) of the offline-generated<br/>intermediate CA. When set, terraform/vault imports it as the active CA on<br/>the `pki` mount via vault\_pki\_secret\_backend\_config\_ca — letting Vault<br/>issue leaf certs signed by the offline-rooted intermediate.<br/><br/>Leave null to apply the Vault PKI mount + roles without any CA configured<br/>(matches the previous behaviour, e.g. before the first offline ceremony<br/>has been run). Pass via TF\_VAR so the bundle never lands in git:<br/><br/>  TF\_VAR\_pki\_intermediate\_pem\_bundle="$(cat pki/export/intermediate.pem)" \<br/>    terraform -chdir=terraform/vault apply | `string` | `null` | no |
 
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_home_approle"></a> [home\_approle](#output\_home\_approle) | n/a |
 | <a name="output_home_approle_secret"></a> [home\_approle\_secret](#output\_home\_approle\_secret) | n/a |
 <!-- END_TF_DOCS -->
