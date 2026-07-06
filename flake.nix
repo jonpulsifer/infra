@@ -81,6 +81,7 @@
         "dns"
         "rackpi5"
         "oldboy"
+        "spore"
       ];
 
       legacyPackages = forAllSystems (
