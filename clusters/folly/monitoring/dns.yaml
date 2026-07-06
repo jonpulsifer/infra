@@ -1,0 +1,76 @@
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: dns
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: dns
+    lolwtf.ca/service: pihole
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 9617
+    protocol: TCP
+endpoints:
+  - addresses: ["10.2.0.10"]
+    nodeName: dns
+--- # trivy:ignore:avd-ksv-0108
+apiVersion: v1
+kind: Service
+metadata:
+  name: dns
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: pihole
+    jobLabel: pihole
+spec:
+  ports:
+    - name: http-metrics
+      port: 9617
+      protocol: TCP
+      targetPort: 9617
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dns
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: pihole
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpoint_node_name]
+          targetLabel: instance
+  selector:
+    matchLabels:
+      lolwtf.ca/service: pihole
+  namespaceSelector:
+    matchNames:
+      - monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dns
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: pihole
+    release: prom-stack
+spec:
+  groups:
+    - name: dns
+      rules:
+        - alert: PrometheusTargetMissing
+          expr: up {endpoint="http-metrics",  namespace="monitoring", service="dns"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            message: Prometheus target missing (instance {{ $labels.instance }})
+            description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

@@ -6,6 +6,7 @@ configMapGenerator:
   - name: dashboards
     files:
       - dht22.json
+      - pihole.json
 generatorOptions:
   disableNameSuffixHash: true
   annotations:
