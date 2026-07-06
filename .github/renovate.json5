@@ -17,12 +17,17 @@
   dependencyDashboard: true,
   lockFileMaintenance: {
     enabled: true,
+    automerge: true,
   },
   suppressNotifications: [
     'prEditedNotification',
     'prIgnoreNotification',
   ],
-  rebaseWhen: 'conflicted',
+  // 'auto' rebases automerging PRs (most of this repo) whenever they fall
+  // behind main — Atlantis plans stay fresh and GitHub native auto-merge can
+  // satisfy require-up-to-date rules — while manual-review PRs only rebase on
+  // conflict. Terraform PRs are forced to behind-base-branch below.
+  rebaseWhen: 'auto',
   // Use GitHub's native auto-merge so PRs merge as soon as required checks
   // pass, instead of waiting for the next Renovate run.
   platformAutomerge: true,
@@ -92,14 +97,21 @@
       rangeStrategy:      'update-lockfile',
       separateMajorMinor: false,
       automerge:          true,
+      // Atlantis applies the PR's plan: keep every provider PR rebased on main
+      // so the plan that gets applied always matches the merge result.
+      rebaseWhen: 'behind-base-branch',
     },
+    // Provider groups match on depName (the required_providers key, e.g.
+    // "google"). packageName is the full registry source ("hashicorp/google"),
+    // so matchPackageNames regexes like /^google$/ silently stopped grouping
+    // when Renovate dropped the depName fallback — hence matchDepNames.
     // Google GA + Beta must travel together; group across all stacks so
     // Atlantis sees a single combined constraint change per bump.
     {
       description:      'Terraform Google providers (GA + Beta) — single PR',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^google$/', '/^google-beta$/'],
+      matchDepNames:    ['google', 'google-beta'],
       groupName:       'terraform google providers',
       groupSlug:       'terraform-google-providers',
     },
@@ -108,7 +120,7 @@
       description:      'Terraform Cloudflare provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^cloudflare$/'],
+      matchDepNames:    ['cloudflare'],
       groupName: 'terraform cloudflare provider',
       groupSlug: 'terraform-cloudflare-provider',
     },
@@ -116,7 +128,7 @@
       description:      'Terraform Tailscale provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^tailscale$/'],
+      matchDepNames:    ['tailscale'],
       groupName: 'terraform tailscale provider',
       groupSlug: 'terraform-tailscale-provider',
     },
@@ -124,7 +136,7 @@
       description:      'Terraform Unifi provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^unifi$/'],
+      matchDepNames:    ['unifi'],
       groupName: 'terraform unifi provider',
       groupSlug: 'terraform-unifi-provider',
     },
@@ -132,7 +144,7 @@
       description:      'Terraform Vault provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^vault$/'],
+      matchDepNames:    ['vault'],
       groupName: 'terraform vault provider',
       groupSlug: 'terraform-vault-provider',
     },
@@ -140,7 +152,7 @@
       description:      'Terraform Kubernetes + Helm providers',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^kubernetes$/', '/^helm$/'],
+      matchDepNames:    ['kubernetes', 'helm'],
       groupName: 'terraform k8s providers',
       groupSlug: 'terraform-k8s-providers',
     },
@@ -148,7 +160,7 @@
       description:      'Terraform GitHub providers',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^github$/', '/^googleworkspace$/'],
+      matchDepNames:    ['github', 'googleworkspace'],
       groupName: 'terraform github providers',
       groupSlug: 'terraform-github-providers',
     },
@@ -156,7 +168,7 @@
       description:      'Terraform 1Password provider',
       matchManagers:    ['terraform'],
       matchDatasources: ['terraform-provider'],
-      matchPackageNames: ['/^onepassword$/'],
+      matchDepNames:    ['onepassword'],
       groupName: 'terraform 1password provider',
       groupSlug: 'terraform-1password-provider',
     },
@@ -252,6 +264,24 @@
       matchDatasources: ['docker', 'helm'],
       matchPackageNames: ['/gha-runner-scale-set-controller/', '/gha-runner-scale-set/'],
     },
+    {
+      description: 'Flux: manifests OCI artifact + flux2 kustomize ref move in lockstep',
+      matchPackageNames: ['ghcr.io/fluxcd/flux-manifests', 'fluxcd/flux2'],
+      groupName: 'flux',
+      groupSlug: 'flux',
+    },
+    {
+      description: 'Auto-merge flux minor/patch as one unit',
+      matchPackageNames: ['ghcr.io/fluxcd/flux-manifests', 'fluxcd/flux2'],
+      matchUpdateTypes: ['minor', 'patch'],
+      automerge: true,
+    },
+    {
+      description: 'agent-sandbox: GitRepository tag + controller image override move together',
+      matchPackageNames: ['/agent-sandbox/'],
+      groupName: 'agent-sandbox',
+      groupSlug: 'agent-sandbox',
+    },
     // ============================================================
     // Flux helm charts
     // ============================================================
@@ -277,21 +307,34 @@
       matchUpdateTypes: ['digest', 'pinDigest'],
       automerge: true,
     },
+    {
+      // Digest lookups carry no release timestamp, so the global 3-day age
+      // gate would hold them as pending forever (timestamp-required). Digests
+      // track moving tags we already chose (first-party :latest pins), so no
+      // age gate applies.
+      description: 'Digest pins are exempt from the release-age gate',
+      matchUpdateTypes: ['digest', 'pin', 'pinDigest'],
+      minimumReleaseAge: null,
+    },
     // ============================================================
-    // GitHub Actions
+    // GitHub Actions — fully automated CI updates
     // ============================================================
     {
-      description: 'Auto-merge GitHub Actions',
+      description: 'Group all non-major GitHub Actions updates into one PR',
       matchManagers: ['github-actions'],
-      automerge: true,
-      matchUpdateTypes: ['minor', 'patch', 'digest'],
-      minimumReleaseAge: '3 days',
+      matchUpdateTypes: ['minor', 'patch', 'digest', 'pin', 'pinDigest'],
+      groupName: 'github actions',
+      groupSlug: 'github-actions',
     },
     {
-      description: 'Auto-merge trusted GitHub Actions',
+      description: 'Auto-merge all GitHub Actions (majors sit out the 3-day age gate first)',
       matchManagers: ['github-actions'],
-      matchPackageNames: ['/^actions\\//', '/^renovatebot\\//'],
       automerge: true,
+    },
+    {
+      description: 'Fast-lane trusted GitHub Actions orgs',
+      matchManagers: ['github-actions'],
+      matchPackageNames: ['/^actions\\//', '/^docker\\//', '/^renovatebot\\//'],
       matchUpdateTypes: ['minor', 'patch', 'digest'],
       minimumReleaseAge: '1 minute',
     },
