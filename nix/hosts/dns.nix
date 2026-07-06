@@ -49,6 +49,8 @@
     ports = [ 80 ];
   };
 
+  services.resolved.enable = lib.mkForce false;
+
   services.prometheus.exporters.pihole = {
     enable = true;
     openFirewall = true;
