@@ -38,6 +38,13 @@
     '';
   };
 
+  # /nfs/data is nofail, so on boot without the NVMe attached it would
+  # otherwise silently stay an empty directory on the SD card while nfsd
+  # exports it anyway. Require the real mount so a missing disk is a hard
+  # failure to start, not a silent wrong-export.
+  systemd.services.nfs-server.unitConfig.RequiresMountsFor = [ "/nfs/data" ];
+  systemd.services.nfs-mountd.unitConfig.RequiresMountsFor = [ "/nfs/data" ];
+
   networking.firewall = {
     allowedTCPPorts = [
       111 # rpcbind
