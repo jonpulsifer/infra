@@ -38,8 +38,8 @@
    "mem_pct": 17.9
   },
   {
-   "name": "homepi4-wifi",
-   "up": false,
+   "name": "dns",
+   "up": true,
    "k8s": false
   },
   {
@@ -51,7 +51,7 @@
    "mem_pct": 34.2
   },
   {
-   "name": "tallboy",
+   "name": "spore",
    "up": false,
    "k8s": false
   }
