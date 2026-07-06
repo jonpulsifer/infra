@@ -20,18 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: NixOS/nix-installer-action@main
+      - uses: NixOS/nix-installer-action@00b25e1d0d56f56e90ee9814fb4385c721348f74 # main
         with:
           extra-conf: |
             experimental-features = nix-command flakes
-      - uses: DeterminateSystems/flake-checker-action@89c01715e5d0dfdc0a1bfe9d59891ee4945c1483 # main
+      - uses: DeterminateSystems/flake-checker-action@a0f068d37b542f3150564fbf1164fec2d958ee11 # main
       - run: nix flake check
   nixos:
     runs-on: ubuntu-latest
     needs: check
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: NixOS/nix-installer-action@main
+      - uses: NixOS/nix-installer-action@00b25e1d0d56f56e90ee9814fb4385c721348f74 # main
         with:
           extra-conf: |
             experimental-features = nix-command flakes
@@ -50,7 +50,7 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: NixOS/nix-installer-action@main
+      - uses: NixOS/nix-installer-action@00b25e1d0d56f56e90ee9814fb4385c721348f74 # main
         with:
           extra-conf: |
             experimental-features = nix-command flakes
