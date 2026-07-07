@@ -1,0 +1,123 @@
+# Service-level monitoring for spore, the NFS + PXE (TFTP/HTTP) server
+# (nix/hosts/spore.nix). Node-level metrics (node_nfsd_*, /nfs/data
+# filesystem, systemd unit states) arrive via local-node-exporters.yaml;
+# this file scrapes the nginx exporter for the PXE HTTP endpoint and
+# carries the NFS/PXE alert rules.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: spore
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: spore
+    lolwtf.ca/service: spore-pxe
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 9113
+    protocol: TCP
+endpoints:
+  - addresses: ["10.2.0.11"]
+    nodeName: spore
+--- # trivy:ignore:avd-ksv-0108
+apiVersion: v1
+kind: Service
+metadata:
+  name: spore
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: spore-pxe
+    jobLabel: spore-pxe
+spec:
+  ports:
+    - name: http-metrics
+      port: 9113
+      protocol: TCP
+      targetPort: 9113
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: spore
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: spore-pxe
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpoint_node_name]
+          targetLabel: instance
+  selector:
+    matchLabels:
+      lolwtf.ca/service: spore-pxe
+  namespaceSelector:
+    matchNames:
+      - monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: spore
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: spore-pxe
+    release: prom-stack
+spec:
+  groups:
+    - name: spore
+      rules:
+        - alert: PrometheusTargetMissing
+          expr: up {endpoint="http-metrics",  namespace="monitoring", service="spore"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            message: Prometheus target missing (instance {{ $labels.instance }})
+            description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+        # The `or absent(...)` arms also catch the unit dropping out of the
+        # node exporter's --collector.systemd.unit-include regex.
+        - alert: SporeNfsServerDown
+          expr: (node_systemd_unit_state{instance="spore", name="nfs-server.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="nfs-server.service", state="active"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: NFS server on spore is down
+            description: "nfs-server.service is not active on spore. k8s PVs (spore-pv, nfs-provisioner) are unavailable."
+        - alert: SporeTftpDown
+          expr: (node_systemd_unit_state{instance="spore", name="dnsmasq.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="dnsmasq.service", state="active"})
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: PXE TFTP (dnsmasq) on spore is down
+            description: "dnsmasq.service is not active on spore. Bare-metal k8s nodes cannot netboot (ipxe.efi via terraform/network/unifi/folly/k8s.tf)."
+        - alert: SporePxeHttpDown
+          expr: nginx_up{instance="spore"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: PXE HTTP (nginx) on spore is down
+            description: "nginx on spore is not serving. Netboot menus chain to bzImage/initrd over HTTP, so PXE boots will hang after ipxe.efi."
+        - alert: SporeNfsDataNotMounted
+          expr: absent(node_filesystem_size_bytes{instance="spore", mountpoint="/nfs/data"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: /nfs/data is not mounted on spore
+            description: "The nfs-data partition is not mounted (it is nofail, so boot continues without it). nfs-server refuses to start via RequiresMountsFor."
+        - alert: SporeNfsDataLowSpace
+          expr: 100 * (1 - node_filesystem_avail_bytes{instance="spore", mountpoint="/nfs/data"} / node_filesystem_size_bytes{instance="spore", mountpoint="/nfs/data"}) > 85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: /nfs/data on spore is over 85% full
+            description: "VALUE = {{ $value }}% used. k8s PVCs provision from this filesystem; expand or prune before it fills."

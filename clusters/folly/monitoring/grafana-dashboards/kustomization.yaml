@@ -7,6 +7,7 @@ configMapGenerator:
     files:
       - dht22.json
       - pihole.json
+      - spore.json
 generatorOptions:
   disableNameSuffixHash: true
   annotations:
