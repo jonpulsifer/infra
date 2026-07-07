@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/cloudflare/cloudflare-go/v5 v5.1.0
+	github.com/cloudflare/cloudflare-go/v7 v7.6.0
 	github.com/miekg/dns v1.1.72
 )
 
