@@ -6,8 +6,9 @@ resources:
   - helm-repository-prometheus.yaml
   - kube-prometheus.yaml
   - grafana-dashboards
- # - local-node-exporters.yaml
+  - local-node-exporters.yaml
   - dns.yaml
+  - spore.yaml
   - git-repository-loki.yaml
   - loki.yaml
  # - picow.yaml

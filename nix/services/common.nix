@@ -49,6 +49,14 @@
   services.prometheus.exporters.node = {
     enable = lib.mkDefault true;
     openFirewall = true;
+    # Unit-state metrics so Prometheus can alert on the services these hosts
+    # exist to run (nfsd/dnsmasq/nginx on spore, pihole-ftl on dns, ...).
+    # Scoped with an include regex: the full systemd collector emits ~5
+    # series per unit and these are small Pis.
+    enabledCollectors = [ "systemd" ];
+    extraFlags = [
+      "--collector.systemd.unit-include=(nfs-server|nfs-mountd|rpc-statd|dnsmasq|nginx|pihole-ftl|tailscaled|ddnsd|sshd)\\.service"
+    ];
   };
 
   programs.zsh.enable = lib.mkDefault true;
