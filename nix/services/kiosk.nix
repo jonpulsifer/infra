@@ -49,8 +49,6 @@ in
   };
 
   config = mkIf cfg.enable {
-    boot.kernelParams = [ "nomodeset" ];
-
     networking.firewall.allowedTCPPorts = mkIf cfg.public [ cfg.hostPort ];
 
     hardware = {
@@ -71,48 +69,24 @@ in
       shell = pkgs.zsh;
     };
 
-    services.displayManager = {
-      autoLogin = {
-        enable = true;
-        user = cfg.user;
-      };
-      defaultSession = "none+openbox";
-    };
+    programs.xwayland.enable = mkForce false;
 
-    services.xserver = {
-      enable = true;
-      monitorSection = ''
-        Option   "NODPMS"
-      '';
-      serverLayoutSection = ''
-        Option   "BlankTime" "0"
-        Option   "DPMS" "false"
-      '';
-      config = ''
-        Section "ServerFlags"
-          Option  "DontVTSwitch"  "True"
-        EndSection
-      '';
-      desktopManager = {
-        xterm.enable = false;
-      };
-      displayManager = {
-        lightdm = {
-          enable = true;
-          greeter.enable = false;
+    services = {
+      cage = {
+        enable = true;
+        package = pkgs.cage.override {
+          wlroots_0_20 = pkgs.wlroots_0_20.override {
+            enableXWayland = false;
+          };
         };
+        user = cfg.user;
+        environment = {
+          MOZ_ENABLE_WAYLAND = "1";
+        };
+        program = "${pkgs.firefox}/bin/firefox --kiosk --private-window ${escapeShellArg cfg.url}";
       };
-      windowManager.openbox.enable = true;
+      xserver.enable = mkForce false;
     };
-    environment.etc."openbox/autostart".source = pkgs.writeScript "autostart" ''
-      #!${pkgs.bash}/bin/bash
-      xset dpms force on
-      xset -dpms &
-      xset s noblank &
-      xset s off &
-      # https://developer.mozilla.org/en-US/docs/Mozilla/Command_Line_Options
-      ${pkgs.firefox}/bin/firefox --kiosk ${cfg.url} &
-    '';
 
     virtualisation.docker.enable = mkIf cfg.container true;
     virtualisation.oci-containers = mkIf cfg.container {
@@ -133,15 +107,6 @@ in
       };
     };
 
-    nixpkgs.overlays = with pkgs; [
-      (final: prev: {
-        openbox = prev.openbox.overrideAttrs (oldAttrs: rec {
-          postFixup = ''
-            ln -sf /etc/openbox/autostart $out/etc/xdg/openbox/autostart
-          '';
-        });
-      })
-    ];
     services.dbus.enable = true;
   };
 }
