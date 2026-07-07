@@ -46,6 +46,27 @@
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
+  # rackpi5 netboots from this host (see nix/hosts/rackpi5.nix): its / is the
+  # NFS export below and its /boot/firmware is a directory inside the TFTP
+  # root, exported rw so nixos-rebuilds on rackpi5 drop kernels straight into
+  # the netboot tree dnsmasq already serves. no_root_squash because rackpi5's
+  # root writes both as uid 0.
+  systemd.tmpfiles.rules = [
+    "d /nfs/data/rackpi5 0755 root root -"
+    "d /var/lib/tftpboot/rackpi5 0755 root root -"
+  ];
+  services.nfs.server.exports = ''
+    /nfs/data/rackpi5           10.2.0.12(rw,sync,no_subtree_check,insecure,no_root_squash)
+    /var/lib/tftpboot/rackpi5   10.2.0.12(rw,sync,no_subtree_check,insecure,no_root_squash)
+  '';
+  # No file leases means nfsd grants no delegations. Nix hard-links files
+  # inside rackpi5's NFS root, and a LINK against a file whose write
+  # delegation the *same* client holds deadlocks in the server's recall
+  # (observed: nix-env stuck in nfs4_proc_link indefinitely while populating
+  # the netboot root). Delegations are a read-caching nicety; the k8s NFS
+  # workloads don't miss them.
+  boot.kernel.sysctl."fs.leases-enable" = 0;
+
   sdImage.expandOnBoot = false;
 
   systemd.services.grow-root-and-partition-storage = {
