@@ -158,6 +158,13 @@
           system = "aarch64-linux";
           modules = [ ./nix/hosts/rackpi5.nix ];
         };
+        # rackpi5's default boot: stateless RAM image served over HTTP from
+        # spore (nix/images/pi5-ram.nix); the rackpi5 config above is its
+        # NFS-root fallback tier.
+        rackpi5-ram = mkHost "rackpi5-ram" {
+          system = "aarch64-linux";
+          modules = [ ./nix/images/pi5-ram.nix ];
+        };
         spore = mkHost "spore" {
           system = "aarch64-linux";
           modules = [ ./nix/hosts/spore.nix ];
@@ -192,6 +199,7 @@
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
           dns = nixosConfigurations.dns.config.system.build.sdImage;
           rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
+          rackpi5-ram = nixosConfigurations.rackpi5-ram.config.system.build.piBootImg;
           spore = nixosConfigurations.spore.config.system.build.sdImage;
 
           iso = nixosConfigurations.iso.config.system.build.isoImage;

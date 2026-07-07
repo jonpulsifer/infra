@@ -54,6 +54,14 @@
   systemd.tmpfiles.rules = [
     "d /nfs/data/rackpi5 0755 root root -"
     "d /var/lib/tftpboot/rackpi5 0755 root root -"
+    # rackpi5's default boot is the stateless RAM image, HTTP-booted from
+    # nginx's tftpboot root: `nix build .#nixosConfigurations.rackpi5-ram
+    # .config.system.build.piBootImg`, copy boot.img + nix-store.squashfs
+    # here, then sign (the bootloader rejects unsigned HTTP downloads;
+    # rackpi5's EEPROM holds the matching public key):
+    #   rpi-eeprom-digest -i boot.img -o boot.sig \
+    #     -k /var/lib/pi-boot-sign/private.pem
+    "d /var/lib/tftpboot/rackpi5-ram 0755 root root -"
   ];
   services.nfs.server.exports = ''
     /nfs/data/rackpi5           10.2.0.12(rw,sync,no_subtree_check,insecure,no_root_squash)
