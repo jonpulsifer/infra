@@ -176,7 +176,7 @@ Cloud & identity:
 - `terraform/argo/` – ArgoCD application definitions (Terraform-managed)
 - `terraform/google-workspace/` – Google Workspace users, groups, domains
 - `terraform/vault/` – HashiCorp Vault auth, mounts, policies
-- `terraform/modules/` – reusable modules (gce-vpc, gke-cluster, gke-nodepool, …) consumed by the roots via relative paths
+- `terraform/modules/` – reusable modules (currently just gce-vpc) consumed by the roots via relative paths
 
 ### Layer 4 – Applications, Packages & Images
 
