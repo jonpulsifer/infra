@@ -22,5 +22,6 @@
   services.kiosk = {
     enable = true;
     container = true;
+    url = "https://tronbyt.lolwtf.ca/tv/next";
   };
 }
