@@ -121,7 +121,7 @@ Custom service modules in `services/`:
 - **`common.nix`** - Base server configuration with SSH, Tailscale, monitoring
 - **`jellyfin.nix`** - Media server
 - **`github-runner.nix`** - Self-hosted GitHub Actions runners
-- **`kiosk.nix`** - Kiosk mode display
+- **`kiosk.nix`** - Kiosk mode display. See the [kiosk runbook](../docs/kiosk-runbook.md).
 - **`nas.nix`** - Network attached storage
 - **`nix-serve.nix`** - Binary cache server
 - **`yarr.nix`** - RSS reader
@@ -292,4 +292,3 @@ When making changes:
 2. Format code with `nix fmt`
 3. Build affected systems to verify
 4. Document any new options or services
-
