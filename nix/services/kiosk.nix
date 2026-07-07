@@ -7,6 +7,15 @@
 with lib;
 let
   cfg = config.services.kiosk;
+  kioskProgram = pkgs.writeShellScript "kiosk-firefox" ''
+    ${optionalString cfg.container ''
+      until ${pkgs.curl}/bin/curl --fail --silent --show-error --max-time 2 --output /dev/null ${escapeShellArg cfg.url}; do
+        ${pkgs.coreutils}/bin/sleep 2
+      done
+    ''}
+
+    exec ${pkgs.firefox}/bin/firefox --kiosk --private-window ${escapeShellArg cfg.url}
+  '';
 in
 {
   options.services.kiosk = {
@@ -83,9 +92,14 @@ in
         environment = {
           MOZ_ENABLE_WAYLAND = "1";
         };
-        program = "${pkgs.firefox}/bin/firefox --kiosk --private-window ${escapeShellArg cfg.url}";
+        program = "${kioskProgram}";
       };
       xserver.enable = mkForce false;
+    };
+
+    systemd.services.cage-tty1 = mkIf cfg.container {
+      after = [ "docker-kiosk.service" ];
+      wants = [ "docker-kiosk.service" ];
     };
 
     virtualisation.docker.enable = mkIf cfg.container true;
