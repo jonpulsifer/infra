@@ -14,7 +14,7 @@ resource "tailscale_federated_identity" "github_actions_nixos_deploy" {
   # Locked to main: a workflow_dispatch run against any other ref won't match
   # this subject, so the tailnet join fails (Tailscale-side auth error, not a
   # GitHub-side one) rather than deploying from an unmerged branch.
-  subject = "repo:jonpulsifer/infra:ref:refs/heads/main"
+  subject = "repo:jonpulsifer@5461940/infra@952814997:ref:refs/heads/main"
   scopes  = ["auth_keys"]
   tags    = ["tag:ci"]
 
