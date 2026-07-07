@@ -43,6 +43,15 @@
     };
   };
 
+  # Metrics for the PXE HTTP endpoint: the stub_status page stays
+  # localhost-only, the exporter republishes it on :9113 for Prometheus
+  # (scraped via clusters/folly/monitoring/spore.yaml).
+  services.nginx.statusPage = true;
+  services.prometheus.exporters.nginx = {
+    enable = true;
+    openFirewall = true;
+  };
+
   networking.firewall = {
     allowedTCPPorts = [ 80 ];
     allowedUDPPorts = [ 69 ]; # tftp
