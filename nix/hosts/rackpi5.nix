@@ -1,18 +1,32 @@
-# rackpi5 is diskless: the Pi 5 bootloader netboots from spore (10.2.0.11,
-# nix/hosts/spore.nix). The EEPROM TFTP-loads firmware/kernel/initrd from
-# spore's dnsmasq (/var/lib/tftpboot/rackpi5/, which is this host's
-# /boot/firmware mounted over NFS -- so every nixos-rebuild here lands
-# kernels straight in the netboot tree), and stage-1 mounts / over NFS from
-# spore:/nfs/data/rackpi5. The SD card keeps the last standalone image as a
-# rescue system; the EEPROM only falls back to it when netboot fails.
+# rackpi5 is diskless, with a three-tier boot ladder off spore (10.2.0.11,
+# nix/hosts/spore.nix):
+#
+#   1. HTTP (default): the stateless RAM image (nix/images/pi5-ram.nix,
+#      the rackpi5-ram flake config) -- boot.img pulled from spore's nginx
+#      at wire speed, runs entirely from RAM.
+#   2. NET (fallback): THIS config. The EEPROM TFTP-loads firmware/kernel/
+#      initrd from spore's dnsmasq (/var/lib/tftpboot/rackpi5/, which is
+#      this host's /boot/firmware mounted over NFS -- so every
+#      nixos-rebuild here lands kernels straight in the netboot tree), and
+#      stage-1 mounts / over NFS from spore:/nfs/data/rackpi5.
+#   3. SD (last resort): the pre-netboot standalone image, if a card is
+#      inserted.
 #
 # Like nvme-hat.nix's settings, the netboot side of the EEPROM lives outside
 # the closure and is applied by hand with `sudo rpi-eeprom-config --edit`:
-#   BOOT_ORDER=0xf12          # right-to-left: NET first, SD rescue, retry
+#   BOOT_ORDER=0xf127         # right-to-left: HTTP, NET, SD, retry
+#   HTTP_HOST=10.2.0.11       # spore's nginx (plain http is allowed only
+#   HTTP_PATH=rackpi5-ram     #   because HTTP_HOST is explicitly set)
 #   TFTP_IP=10.2.0.11         # spore; Lab Net DHCP has no boot options
 #   TFTP_PREFIX=1             # prefix TFTP paths with TFTP_PREFIX_STR
 #                             # (0=serial dir, 1=TFTP_PREFIX_STR, 2=MAC dir)
 #   TFTP_PREFIX_STR=rackpi5/
+#
+# The EEPROM additionally embeds the public half of spore's
+# /var/lib/pi-boot-sign/private.pem (rpi-eeprom-config -p): the bootloader
+# refuses any HTTP-downloaded boot.img whose boot.sig isn't RSA-signed.
+# Reflashing a stock EEPROM image wipes the key, which silently demotes
+# rackpi5 to the NFS tier until the key is re-added.
 {
   lib,
   name,
