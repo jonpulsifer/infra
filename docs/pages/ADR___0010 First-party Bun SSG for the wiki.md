@@ -5,7 +5,7 @@ supersedes:: the renderer choice in [[ADR/0009 Logseq wiki on Cloudflare Pages]]
 tags:: adr
 
 - # Context
-	- [[ADR/0009 Logseq wiki on Cloudflare Pages]] chose the official `logseq/publish-spa` action as the renderer. In practice it clones and compiles the entire Logseq frontend (yarn + ClojureScript) in CI — ~20 minutes on a cold cache — and the pinned 2024-era release (`v0.3.1`) sets up **Node 18** and leaves it on `PATH`, which broke the very first production deploy: wrangler 4 requires Node ≥ 20. The published site was also a multi-megabyte SPA for what is fundamentally a documentation site.
+	- [[ADR/0009 Logseq wiki on Cloudflare Pages]] chose the official `logseq/publish-spa` action as the renderer. In practice it clones and compiles the entire Logseq frontend (yarn + ClojureScript) in CI — ~20 minutes on a cold cache — and the pinned 2024-era release (`v0.3.1`) sets up **Node 18** and leaves it on `PATH`; wrangler 4 requires Node ≥ 20. The published site was also a multi-megabyte SPA for what is fundamentally a documentation site.
 - # Decision
 	- Replace the renderer with a **first-party static site generator**: `apps/wiki` — ~400 lines of TypeScript run by **Bun**, with shiki as the only dependency.
 	- It renders the Logseq subset this wiki actually uses: outline blocks, `[[wikilinks]]` with a linked-references panel, namespaces with sub-page listings, `key:: value` properties (ADR `status::` gets colored chips), `#tags` with tag pages, tables, and dual-theme highlighted code — plus a ⌘K search index and a canvas force-directed **graph view**.
