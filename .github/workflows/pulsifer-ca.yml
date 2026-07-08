@@ -31,6 +31,19 @@ jobs:
           hugo-version: 'latest'
           extended: true
 
+      - name: Setup Tailwind CSS CLI
+        env:
+          TAILWIND_VERSION: 4.3.2
+          TAILWIND_SHA256: 5036c4fb4328e0bcdbb6065c70d8ac9452e0d4c947113a788a8f94fd390425c1
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/tailwindcss" "https://github.com/tailwindlabs/tailwindcss/releases/download/v${TAILWIND_VERSION}/tailwindcss-linux-x64"
+          echo "${TAILWIND_SHA256}  ${RUNNER_TEMP}/tailwindcss" | sha256sum --check -
+          chmod +x "$RUNNER_TEMP/tailwindcss"
+
+      - name: Build CSS
+        working-directory: apps/pulsifer.ca
+        run: '"$RUNNER_TEMP/tailwindcss" --input css/main.css --output assets/css/built.css --minify'
+
       - name: Build
         working-directory: apps/pulsifer.ca
         run: hugo --minify
