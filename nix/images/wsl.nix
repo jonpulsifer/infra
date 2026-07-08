@@ -46,6 +46,7 @@
   environment.systemPackages = [
     pkgs.wget
     pkgs.python3
+    pkgs.bubblewrap
     # pkgs.pipx
   ];
 
