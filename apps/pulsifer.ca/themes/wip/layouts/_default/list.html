@@ -5,7 +5,7 @@
     {{ range .Pages }}
     <article class="border-b border-dashed border-zinc-800/70 pb-8 last:border-b-0">
       <h2 class="text-xl font-semibold tracking-tight">
-        <a href="{{ .Permalink }}" class="text-zinc-100 transition-colors hover:text-ember">{{ .Title }}</a>
+        <a href="{{ .Permalink }}" class="text-zinc-100 transition-colors hover:text-accent">{{ .Title }}</a>
       </h2>
       <div class="mt-2">{{ partial "post-meta" . }}</div>
       {{ with .Summary }}

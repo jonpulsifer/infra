@@ -6,12 +6,12 @@
   --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "JetBrains Mono",
     Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* near-black canvas with a sogamed ember accent */
-  --color-ink: #050505;
-  --color-surface: #0e0e10;
-  --color-ember: #ff6d1f;
-  --color-ember-bright: #ffa05c;
-  --color-rust: #c2410c;
+  /* near-black canvas with a violet bias; electric purple/blue accent */
+  --color-ink: #07060b;
+  --color-surface: #100f16;
+  --color-accent: #8b5cf6;
+  --color-accent-bright: #a78bfa;
+  --color-glow: #60a5fa;
 }
 
 @layer base {
@@ -21,7 +21,7 @@
   }
 
   ::selection {
-    background-color: --alpha(var(--color-ember) / 30%);
+    background-color: --alpha(var(--color-accent) / 30%);
     color: var(--color-zinc-50);
   }
 }
@@ -29,6 +29,14 @@
 @layer components {
   .cursor-blink {
     animation: blink 1.2s steps(2, start) infinite;
+  }
+
+  /* violet → blue gradient text, a nod to the hand-woven hover gradients */
+  .text-gradient {
+    background: linear-gradient(90deg, var(--color-accent-bright), var(--color-glow));
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
   }
 
   @keyframes blink {
@@ -49,7 +57,7 @@
 
   .prose sup {
     font-family: var(--font-mono);
-    color: var(--color-ember);
+    color: var(--color-accent);
     padding-left: --spacing(1);
     font-weight: 400;
   }
@@ -88,7 +96,7 @@
 
   .prose summary::before {
     content: "▸ ";
-    color: var(--color-ember);
+    color: var(--color-accent);
   }
 
   .prose details[open] summary::before {
@@ -108,7 +116,7 @@
 
   #TableOfContents li::before {
     content: "· ";
-    color: var(--color-ember);
+    color: var(--color-accent);
   }
 
   #TableOfContents a {
@@ -117,6 +125,6 @@
   }
 
   #TableOfContents a:hover {
-    color: var(--color-ember);
+    color: var(--color-accent);
   }
 }

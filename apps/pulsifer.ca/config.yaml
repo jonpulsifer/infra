@@ -6,7 +6,7 @@ theme: "wip"
 params:
   prompt: ❯
   author: "Jonathan Pulsifer"
-  tagline: "principal infrastructure & cloud security engineer"
+  tagline: "securing the cloud since it was just someone else's computer"
   portrait:
     link: about/
     path: "avatar-icons.svg"
