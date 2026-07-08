@@ -16,3 +16,4 @@ icon:: 📜
 	- [[ADR/0007 Offline root CA with YubiKey and SLIP-0039]] — root stays offline; Vault runs the intermediate
 	- [[ADR/0008 Diskless netboot for rackpi5]] — stateless RAM image served from spore
 	- [[ADR/0009 Logseq wiki on Cloudflare Pages]] — this wiki
+	- [[ADR/0010 First-party Bun SSG for the wiki]] — the renderer that actually builds it

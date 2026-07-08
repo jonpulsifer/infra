@@ -193,19 +193,23 @@ First-party code and container/image builds, separate from the infra layers:
 - **`terraform.yml`**: validates changed `.tf` files (discovered dynamically), then auto-formats and regenerates terraform-docs on merge to `main`
 - **`trivy.yml`**: scans `.tf` and `clusters/**` for CRITICAL/HIGH IaC vulnerabilities
 - **`containers.yml`**: builds container images from `apps/`, `packages/`, `images/`
-- **`wiki.yml`**: builds the `docs/` Logseq graph with `logseq/publish-spa` and deploys it to Cloudflare Pages on merge (see Documentation Wiki)
+- **`wiki.yml`**: builds the `docs/` Logseq graph with the first-party Bun SSG (`apps/wiki`) and deploys it to Cloudflare Pages on merge (see Documentation Wiki)
 - **Renovate**: opens PRs for Helm chart, container image, and Terraform provider updates automatically
 
 ## Documentation Wiki
 
 `docs/` is a **Logseq graph** (pages in `docs/pages/`, journals in `docs/journals/`, config in
-`docs/logseq/`) published publicly at **wiki.lolwtf.ca**. `.github/workflows/wiki.yml` builds it
-with the official `logseq/publish-spa` action and deploys via `wrangler pages deploy` to the
+`docs/logseq/`) published publicly at **wiki.lolwtf.ca**. `.github/workflows/wiki.yml` renders it
+with the first-party Bun SSG in **`apps/wiki`** (~400-line `build.ts`, shiki-only dep; `bun run
+build` → `dist/`, `bun run dev` to preview) and deploys via `bun x wrangler pages deploy` to the
 Cloudflare Pages project `infra-wiki` (project/domain/DNS are Terraform-managed in
 `terraform/network/cloudflare/wiki.tf`; deploys need the `CLOUDFLARE_API_TOKEN` Actions secret).
 
 - Pages are Logseq outline markdown: blocks start with `- `, nesting is tabs, page properties are
   `key:: value` lines at the top of the file, and a `/` in a page name is `___` in the filename.
+- The renderer supports outline text, `[[wikilinks]]`/backlinks, properties, `#tags`, tables, and
+  code fences — **not** block refs `((…))`, embeds, or `{{query}}`; extend `apps/wiki/build.ts`
+  before using those in `docs/`.
 - ADRs live in the `ADR/` namespace (`docs/pages/ADR___NNNN <title>.md`) with `status::`/`date::`
   properties; copy `ADR/Template` for new ones. Architecture docs are under `Architecture/`,
   runbooks under `Runbooks/`.

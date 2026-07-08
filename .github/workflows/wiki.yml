@@ -6,10 +6,12 @@ on:
       - main
     paths:
       - 'docs/**'
+      - 'apps/wiki/**'
       - '.github/workflows/wiki.yml'
   pull_request:
     paths:
       - 'docs/**'
+      - 'apps/wiki/**'
       - '.github/workflows/wiki.yml'
 
 concurrency:
@@ -25,19 +27,20 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      - name: Build Logseq SPA
-        uses: logseq/publish-spa@3fa40f2288e96b5927037610e2445f892a438d79 # v0.3.1
-        with:
-          graph-directory: docs
-          output-directory: www
-          theme-mode: dark
-          accent-color: purple
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        working-directory: apps/wiki
+        run: bun run build
 
       - name: Deploy to Cloudflare Pages
         if: github.ref == 'refs/heads/main'
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        working-directory: apps/wiki
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           # fml account (terraform/network/cloudflare/account.tf)
-          accountId: d7f641bb9f4b9de593f721ad06989dbe
-          command: pages deploy www --project-name=infra-wiki --branch=main
+          CLOUDFLARE_ACCOUNT_ID: d7f641bb9f4b9de593f721ad06989dbe
+        run: bun x wrangler pages deploy dist --project-name=infra-wiki --branch=main

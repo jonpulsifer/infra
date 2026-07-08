@@ -1,6 +1,7 @@
 icon:: ✍️
 
-- This wiki is the `docs/` directory of [jonpulsifer/infra](https://github.com/jonpulsifer/infra) — a Logseq graph. Editing it is a normal PR; merging to `main` publishes it to [wiki.lolwtf.ca](https://wiki.lolwtf.ca) via `.github/workflows/wiki.yml` ([[ADR/0009 Logseq wiki on Cloudflare Pages]]).
+- This wiki is the `docs/` directory of [jonpulsifer/infra](https://github.com/jonpulsifer/infra) — a Logseq graph. Editing it is a normal PR; merging to `main` publishes it to [wiki.lolwtf.ca](https://wiki.lolwtf.ca) via `.github/workflows/wiki.yml` ([[ADR/0009 Logseq wiki on Cloudflare Pages]]), rendered by the first-party Bun SSG in `apps/wiki` ([[ADR/0010 First-party Bun SSG for the wiki]]).
+- One renderer caveat: block refs `((…))`, embeds, and `{{query}}` are not supported — stick to outline text, wikilinks, properties, tables, and code fences, or extend `apps/wiki/build.ts` first.
 - ## Editing with Logseq (recommended)
 	- Open the Logseq desktop app → *Add new graph* → choose the repo's `docs/` directory.
 	- Logseq's working files (`logseq/bak/`, `logseq/.recycle/`, metadata) are gitignored; `logseq/config.edn` and `logseq/custom.css` are tracked — changes to them are deliberate.
