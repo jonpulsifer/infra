@@ -6,8 +6,9 @@ year:: ~2019
 serial:: 100000009c1080f8
 revision:: c03111
 cpu:: BCM2711, Cortex-A72 (4c)
-ram:: 4 GB
-storage:: 64 GB microSD
+ram:: 4 GB LPDDR4-3200
+gpu:: Broadcom VideoCore VI
+storage:: 64 GB microSD (root 59 GB, 41% used)
 os:: Ubuntu 22.04.5 LTS
 
 - Utility Pi. The odd one out: still runs **Ubuntu**, not NixOS (config exists as `nix/hosts/cloudpi4.nix` but the deployed OS is Ubuntu 22.04, kernel 5.15-raspi).

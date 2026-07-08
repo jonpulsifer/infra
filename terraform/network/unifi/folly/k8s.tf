@@ -7,8 +7,8 @@ locals {
     "erx"      = cidrhost(local.lab_cidr, 5)
     "k8s"      = cidrhost(local.node_cidr, 10)
     "nuc"      = cidrhost(local.node_cidr, 13)
-    "800g2"    = cidrhost(local.node_cidr, 11)
     "riptide"  = cidrhost(local.node_cidr, 12)
+    "shale"    = cidrhost(local.node_cidr, 11)
     "optiplex" = cidrhost(local.node_cidr, 10)
   }
 }

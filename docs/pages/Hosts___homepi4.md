@@ -6,8 +6,9 @@ year:: ~2020
 serial:: 100000001e657842
 revision:: d03114
 cpu:: BCM2711, Cortex-A72 (4c)
-ram:: 8 GB
-storage:: 32 GB microSD
+ram:: 8 GB LPDDR4-3200
+gpu:: Broadcom VideoCore VI
+storage:: 32 GB microSD (root 29 GB, 72% used)
 os:: NixOS 26.05 (Yarara)
 
 - Kiosk Pi ([[Runbooks/Kiosk]]). Config: `nix/hosts/homepi4.nix`.

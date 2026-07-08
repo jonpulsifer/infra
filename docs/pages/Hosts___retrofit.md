@@ -7,8 +7,9 @@ year:: ~2016
 serial:: MXL7211HNN
 sku:: W3X40UC#ABA
 cpu:: Intel Core i7-6700T @ 2.80GHz (4c/8t)
-ram:: 16 GB
-storage:: 512 GB Timetec SD08 SATA SSD
+ram:: 16 GB DDR4 SODIMM
+gpu:: Intel HD Graphics 530
+storage:: 512 GB Timetec SD08 SATA SSD (root 91 GB, 50% used)
 os:: NixOS 26.05 (Yarara)
 firmware:: N21 Ver. 02.21 (2016-11-01)
 
