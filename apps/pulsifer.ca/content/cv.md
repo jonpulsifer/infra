@@ -9,15 +9,19 @@ toc: true
 
 ## Summary
 
-:wave: Hi, I'm Jonathan Pulsifer, an **engineering manager** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with [Open Source][github], **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **security engineer** or **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
+:wave: Hi, I'm Jonathan Pulsifer, a **principal engineer** who fits into the [Staff Engineer Tech Lead & Architect](https://staffeng.com/guides/staff-archetypes) archetypes. I enjoy working with [Open Source][github], **Google Cloud Platform**, **Kubernetes**, and **Containers**. Some might call me a **security engineer** or **sysadmin**, some might call me a **DevOps** engineer, but I just like computers :technologist:
 
 ## Employment History
 
 ### [MoonPay][moonpay], 2021-current
 
+#### Principal Infrastructure & Cloud Security Engineer, 2026-current
+
+I'm currently the Principal Infrastructure & Cloud Security Engineer at MoonPay, leading the technical implementation of MoonPay's infrastructure and cloud security.
+
 #### Engineering Manager
 
-I'm currently the Engineering Manager for MoonPay's **Site Reliability Engineering** and **Cloud Security** teams. I'm responsible for the hiring, onboarding, and development of the teams, as well as the day-to-day operations of the teams. I'm also responsible for the technical direction of the teams, and the overall security posture of MoonPay's infrastructure.
+I was the Engineering Manager for MoonPay's **Site Reliability Engineering** and **Cloud Security** teams. I was responsible for the hiring, onboarding, and development of the teams, as well as their day-to-day operations, technical direction, and the overall security posture of MoonPay's infrastructure.
 
 ### [Shopify][shop], 2016-2021
 
