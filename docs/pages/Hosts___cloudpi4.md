@@ -1,0 +1,15 @@
+type:: host
+role:: utility Pi
+vendor:: Raspberry Pi
+model:: Raspberry Pi 4 Model B Rev 1.1 (4 GB)
+year:: ~2019
+serial:: 100000009c1080f8
+revision:: c03111
+cpu:: BCM2711, Cortex-A72 (4c)
+ram:: 4 GB
+storage:: 64 GB microSD
+os:: Ubuntu 22.04.5 LTS
+
+- Utility Pi. The odd one out: still runs **Ubuntu**, not NixOS (config exists as `nix/hosts/cloudpi4.nix` but the deployed OS is Ubuntu 22.04, kernel 5.15-raspi).
+- Reached as `cloudpi4.lolwtf.ca`.
+- See [[Fleet]] for the full inventory.
