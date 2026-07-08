@@ -1,15 +1,21 @@
-<header class="page-header">
-  <div class="page-header-inner">
-    <div class="logo">
-      <span class="prompt">{{ string .Site.Params.prompt }}</span>
-      <a href="{{ .Site.BaseURL }}">{{ .Site.Title }}</a>
+<header class="border-b border-dashed border-zinc-800">
+  <div class="max-w-3xl mx-auto px-5 sm:px-6 h-14 flex items-center justify-between gap-4">
+    <div class="font-mono text-[15px] font-semibold">
+      <a href="{{ .Site.BaseURL }}" class="text-zinc-100 transition-colors hover:text-accent">
+        <span class="text-accent">{{ .Site.Params.prompt }}</span>
+        {{ .Site.Title }}<span class="cursor-blink text-accent" aria-hidden="true">▌</span>
+      </a>
     </div>
     {{- with .Site.Menus.main }}
-    <nav class="site-nav">
-      <ul>
+    <nav class="font-mono text-sm" aria-label="main navigation">
+      <ul class="flex items-center">
         {{- range . }}
-        <li><a href="{{ .URL | relURL }}">{{ .Name }}</a></li>
+        <li class="flex items-center">
+          <span class="text-zinc-700 select-none" aria-hidden="true">|</span>
+          <a href="{{ .URL | relURL }}" class="px-2.5 sm:px-3 text-zinc-400 transition-colors hover:text-accent">{{ .Name }}</a>
+        </li>
         {{- end }}
+        <li><span class="text-zinc-700 select-none" aria-hidden="true">|</span></li>
       </ul>
     </nav>
     {{- end }}

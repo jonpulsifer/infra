@@ -1,0 +1,130 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "JetBrains Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* near-black canvas with a violet bias; electric purple/blue accent */
+  --color-ink: #07060b;
+  --color-surface: #100f16;
+  --color-accent: #8b5cf6;
+  --color-accent-bright: #a78bfa;
+  --color-glow: #60a5fa;
+}
+
+@layer base {
+  html {
+    font-feature-settings: "liga", "calt";
+    scrollbar-color: var(--color-zinc-700) var(--color-ink);
+  }
+
+  ::selection {
+    background-color: --alpha(var(--color-accent) / 30%);
+    color: var(--color-zinc-50);
+  }
+}
+
+@layer components {
+  .cursor-blink {
+    animation: blink 1.2s steps(2, start) infinite;
+  }
+
+  /* violet → blue gradient text, a nod to the hand-woven hover gradients */
+  .text-gradient {
+    background: linear-gradient(90deg, var(--color-accent-bright), var(--color-glow));
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+
+  @keyframes blink {
+    to {
+      visibility: hidden;
+    }
+  }
+
+  /* prose refinements the element modifiers can't reach */
+  .prose hr {
+    border-style: dashed;
+    border-color: var(--color-zinc-800);
+  }
+
+  .prose :where(h2, h3):not(:where([class~="not-prose"] *)) {
+    scroll-margin-top: --spacing(20);
+  }
+
+  .prose sup {
+    font-family: var(--font-mono);
+    color: var(--color-accent);
+    padding-left: --spacing(1);
+    font-weight: 400;
+  }
+
+  .prose .highlight {
+    border: 1px dashed var(--color-zinc-800);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .prose .highlight > div,
+  .prose .highlight pre {
+    overflow-x: auto;
+    margin: 0;
+  }
+
+  /* ▸ marker for the detail shortcode, gradient days are over */
+  .prose details {
+    border: 1px dashed var(--color-zinc-800);
+    border-radius: var(--radius-sm);
+    padding: --spacing(3) --spacing(4);
+    margin-block: --spacing(6);
+  }
+
+  .prose summary {
+    cursor: pointer;
+    list-style: none;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--color-zinc-300);
+  }
+
+  .prose summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .prose summary::before {
+    content: "▸ ";
+    color: var(--color-accent);
+  }
+
+  .prose details[open] summary::before {
+    content: "▾ ";
+  }
+
+  /* table of contents: sogamed-style · bullets */
+  #TableOfContents ul {
+    list-style: none;
+    margin: 0;
+    padding-left: --spacing(4);
+  }
+
+  #TableOfContents > ul {
+    padding-left: 0;
+  }
+
+  #TableOfContents li::before {
+    content: "· ";
+    color: var(--color-accent);
+  }
+
+  #TableOfContents a {
+    color: var(--color-zinc-400);
+    text-decoration: none;
+  }
+
+  #TableOfContents a:hover {
+    color: var(--color-accent);
+  }
+}

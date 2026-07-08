@@ -1,0 +1,16 @@
+{{ define "main" }}
+<main class="flex flex-col items-center justify-center py-24 text-center">
+  <pre class="inline-block text-left font-mono text-xs leading-tight text-accent sm:text-sm" aria-hidden="true">
+ _  _    ___  _  _
+| || |  / _ \| || |
+| || |_| | | | || |_
+|__   _| |_| |__   _|
+   |_|  \___/   |_|</pre>
+  <p class="mt-8 font-mono text-sm text-zinc-400">&gt;&gt; page not found <span class="cursor-blink text-accent" aria-hidden="true">▌</span></p>
+  <p class="mt-6 font-mono text-sm">
+    <span class="text-zinc-700 select-none" aria-hidden="true">|</span>
+    <a href="{{ .Site.BaseURL }}" class="px-3 text-zinc-400 transition-colors hover:text-accent">return to main</a>
+    <span class="text-zinc-700 select-none" aria-hidden="true">|</span>
+  </p>
+</main>
+{{ end }}

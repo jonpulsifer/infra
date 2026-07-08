@@ -1,0 +1,21 @@
+[tools]
+hugo = "0.164.0"
+"aqua:tailwindlabs/tailwindcss" = "4.3.2"
+
+[tasks.css]
+description = "Compile Tailwind CSS into the Hugo assets dir"
+run = "tailwindcss --input css/main.css --output assets/css/built.css --minify"
+
+[tasks.css-watch]
+description = "Recompile Tailwind CSS on change (run beside 'hugo serve')"
+run = "tailwindcss --input css/main.css --output assets/css/built.css --watch"
+
+[tasks.build]
+description = "Build the production site"
+depends = ["css"]
+run = "hugo --minify"
+
+[tasks.serve]
+description = "Run the Hugo dev server (pair with css-watch when editing styles)"
+depends = ["css"]
+run = "hugo serve"

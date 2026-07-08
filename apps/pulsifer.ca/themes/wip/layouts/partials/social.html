@@ -1,22 +1,19 @@
 {{ with .Site.Params.social }}
-<div class="social">
-      <p class="social-header">Find me on the internet</p>
-      <ul class="icons">
-            {{ with .github }}
-            <li><a href="https://github.com/{{ . }}" target="_blank"><i class="lab la-github"></i></a></li>
-            {{ end }}
-            {{ with .instagram }}
-            <li><a href="https://instagr.am/{{ . }}" target="_blank"><i class="lab la-instagram"></i></a></li>
-            {{ end }}
-            {{ with .linkedin }}
-            <li><a href="https://linkedin.com/in/{{ . }}" target="_blank"><i class="lab la-linkedin"></i></a></li>
-            {{ end }}
-            {{ with .steam }}
-            <li><a href="https://steamcommunity.com/id/{{ . }}" target="_blank"><i class="lab la-steam"></i></a></li>
-            {{ end }}
-            {{ with .twitter }}
-            <li><a href="https://twitter.com/{{ . }}" target="_blank"><i class="lab la-twitter"></i></a></li>
-            {{ end }}
-      </ul>
-</div>
+<nav class="mt-10 font-mono text-sm" aria-label="social links">
+  <ul class="flex flex-wrap items-center justify-center gap-y-2">
+    {{- $links := slice }}
+    {{- with .github }}{{ $links = $links | append (dict "name" "github" "url" (printf "https://github.com/%s" .)) }}{{ end }}
+    {{- with .linkedin }}{{ $links = $links | append (dict "name" "linkedin" "url" (printf "https://linkedin.com/in/%s" .)) }}{{ end }}
+    {{- with .instagram }}{{ $links = $links | append (dict "name" "instagram" "url" (printf "https://instagr.am/%s" .)) }}{{ end }}
+    {{- with .steam }}{{ $links = $links | append (dict "name" "steam" "url" (printf "https://steamcommunity.com/id/%s" .)) }}{{ end }}
+    {{- with .twitter }}{{ $links = $links | append (dict "name" "twitter" "url" (printf "https://twitter.com/%s" .)) }}{{ end }}
+    {{- range $links }}
+    <li class="flex items-center">
+      <span class="text-zinc-700 select-none" aria-hidden="true">|</span>
+      <a href="{{ .url }}" target="_blank" rel="noopener" class="px-3 text-zinc-400 transition-colors hover:text-accent">{{ .name }}</a>
+    </li>
+    {{- end }}
+    <li><span class="text-zinc-700 select-none" aria-hidden="true">|</span></li>
+  </ul>
+</nav>
 {{ end }}
