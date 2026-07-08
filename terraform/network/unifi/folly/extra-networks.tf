@@ -36,10 +36,12 @@ resource "unifi_network" "iot" {
   multicast_dns      = true
 
   dhcp_server = {
-    enabled   = true
-    leasetime = local.one_day
-    start     = cidrhost(local.iot_cidr, 2)
-    stop      = cidrhost(local.iot_cidr, 62)
+    enabled     = true
+    leasetime   = local.one_day
+    start       = cidrhost(local.iot_cidr, 2)
+    stop        = cidrhost(local.iot_cidr, 62)
+    dns_enabled = true
+    dns_servers = ["10.2.0.10"]
     boot = {
       enabled = false
     }
