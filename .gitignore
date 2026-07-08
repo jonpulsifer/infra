@@ -22,6 +22,15 @@ dist/
 out/
 *.tgz
 
+# ─── Logseq (docs/ wiki graph) ───────────────────────────────────────────────
+# Track pages/journals + logseq/{config.edn,custom.css}; ignore app state.
+docs/logseq/bak/
+docs/logseq/.recycle/
+docs/logseq/graphs-txid.edn
+docs/logseq/broken-config.edn
+docs/logseq/metadata.edn
+docs/.trash/
+
 # ─── Agent / AI Tooling ──────────────────────────────────────────────────────
 # Ignore local/personal Claude config, but track the shared session-start hook
 # + settings so Claude Code on the web bootstraps the toolchain.

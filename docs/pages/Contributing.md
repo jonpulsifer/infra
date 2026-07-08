@@ -1,0 +1,18 @@
+icon:: ✍️
+
+- This wiki is the `docs/` directory of [jonpulsifer/infra](https://github.com/jonpulsifer/infra) — a Logseq graph. Editing it is a normal PR; merging to `main` publishes it to [wiki.lolwtf.ca](https://wiki.lolwtf.ca) via `.github/workflows/wiki.yml` ([[ADR/0009 Logseq wiki on Cloudflare Pages]]).
+- ## Editing with Logseq (recommended)
+	- Open the Logseq desktop app → *Add new graph* → choose the repo's `docs/` directory.
+	- Logseq's working files (`logseq/bak/`, `logseq/.recycle/`, metadata) are gitignored; `logseq/config.edn` and `logseq/custom.css` are tracked — changes to them are deliberate.
+	- Commit and open a PR as usual. The `wiki` workflow builds the site on the PR as a check.
+- ## Editing as plain markdown
+	- Pages are files in `docs/pages/`; a `/` in a page name is `___` in the filename (`ADR/0001 …` → `ADR___0001 ….md`).
+	- Logseq markdown is an **outline**: every block starts with `- `, nesting uses tabs, and continuation lines (code fences, tables) are indented to align with the block's content.
+	- Page properties are `key:: value` lines at the very top of the file, no bullet.
+	- Link generously: `[[Page Name]]`. A link to a page that doesn't exist yet is fine — it marks something worth writing.
+- ## Writing an ADR
+	- Copy [[ADR/Template]] to `ADR/NNNN <short title>` (next free number), fill in Context / Decision / Consequences, set `status:: proposed`, PR it. Process details on [[ADR]].
+- ## House rules
+	- **This site is public.** Never paste decrypted SOPS content, tokens, or private keys — if `sops -d` touched it, it doesn't go here.
+	- Facts that have a single source of truth (network topology, versions) should be referenced, not copied — link to the file instead of restating values that will drift.
+	- Journals are for dated notes (incidents, ceremonies, migrations); pages are for living documentation.
