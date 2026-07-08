@@ -9,7 +9,7 @@ tags:: adr
 	- Use **disko** for declarative partitioning on the x86 hosts, with mounts keyed on **GPT partlabels** (`disk-main-*`). Each host declares only its target device (`homelab.disko.device` in `flake.nix`).
 - # Consequences
 	- Installs and reinstalls are reproducible from the flake; device naming no longer matters.
-	- **Migration hazard**: hosts installed before the disko change (PR #799) have differently-labeled GPT partitions and **fail to boot** on a new generation unless relabeled to `disk-main-*` first. Relabel scripts live in `nix/scripts/`.
-	- Rollback on an unmigrated host means booting the previous generation from the bootloader menu.
+	- Hosts labeled before the disko change fail to boot on a new generation unless relabeled to `disk-main-*`; relabel scripts live in `nix/scripts/`.
+	- Rollback on an unmigrated host is the bootloader's previous-generation menu.
 - # Links
 	- [[Architecture/NixOS]], [[Fleet]]

@@ -15,5 +15,5 @@ tags:: adr
 	- One-time setup: the `CLOUDFLARE_API_TOKEN` Actions secret (Pages:Edit scope) and an Atlantis apply of the Pages project must precede the first deploy.
 	- Alternatives considered: in-cluster hosting (rejected — circular dependency with the infra it documents), GitHub Pages subpath under pulsifer.ca (rejected — two workflows sharing one `gh-pages` branch clobber each other), plain static renderers like Hugo/Quartz (rejected — Logseq outline syntax renders poorly outside Logseq).
 - # Links
-	- **Renderer superseded** the same day by [[ADR/0010 First-party Bun SSG for the wiki]] — `publish-spa` broke its first deploy (Node 18 leak) and cost ~20 min per cold build. Hosting, domain, and graph layout here still stand.
+	- Renderer superseded by [[ADR/0010 First-party Bun SSG for the wiki]] — `publish-spa` pins Node 18 on `PATH` (incompatible with wrangler 4) and takes ~20 min per cold build. Hosting, domain, and graph layout here still stand.
 	- [[Contributing]], [[Architecture/GitOps]]

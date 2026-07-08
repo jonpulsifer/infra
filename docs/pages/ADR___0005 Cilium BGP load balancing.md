@@ -10,7 +10,7 @@ tags:: adr
 	- Cross-site reachability is **gated by the gateway firewall, not the routing protocol**: each gateway must allow the full k8s address space (pod CIDRs + VIP pools, not just node subnets) to forward the routes it learns. folly enforces this with the custom `Lab` zone in `terraform/network/unifi/folly/firewall.tf`; offsite relies on the permissive default `Internal` zone.
 - # Consequences
 	- LB VIPs are plain routed IPs — no MetalLB, no ARP tricks, and the gateway's routing table shows exactly what's advertised.
-	- Debugging lesson learned the hard way: when VIPs are unreachable, check **whether the UDM actually programmed the BGP routes** and for Tailscale hairpin interference **before** suspecting Cilium — a past outage was misdiagnosed as a Cilium/kernel regression and it wasn't. Don't downgrade Cilium for this symptom.
+	- Unreachable VIPs most often point to the gateway not programming the advertised BGP routes, or Tailscale hairpin interference — not the Cilium/kernel. Check those first; do not downgrade Cilium for this symptom.
 	- Firewall changes are part of any address-space change; forgetting them breaks cross-site silently.
 - # Links
 	- [[Architecture/Networking]], [[ADR/0003 Cluster topology single source of truth]], `terraform/network/unifi/folly/README.md`

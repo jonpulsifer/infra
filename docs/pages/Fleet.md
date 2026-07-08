@@ -21,7 +21,12 @@ icon:: 🖥️
 	  | [[Hosts/dns]] | DNS | Pi 5 8 GB | |
 	  | [[Hosts/rackpi5]] | rack status | Pi 5 8 GB | **diskless** — RAM image from spore ([[ADR/0008 Diskless netboot for rackpi5]]) |
 	  | [[Hosts/spore]] | NFS/PXE boot server | Pi 5 8 GB, NVMe | boot-critical for rackpi5; monitored by folly |
-	  | [[Hosts/radiopi0]] | radio | Pi Zero W | **unmanaged** — Raspbian buster, not in the flake |
+	  | [[Hosts/radiopi0]] | radio | Pi Zero W | **unmanaged** — Raspbian buster, Pirate Radio case + pHAT BEAT DAC |
+- ## Offline / unplugged Pis
+	- | Host | Purpose | Hardware | Notes |
+	  | ---- | ------- | -------- | ----- |
+	  | [[Hosts/blinkypi0]] | blinky + CloudEvents | Pi Zero W | offline — Blinkt! in a Flirc case; not in the flake |
+	  | [[Hosts/eviropico]] | enviro sensor | Pico W / Pico 2 W | unplugged but working — Enviro+ MicroPython, not in the flake |
 - ## Cloud
 	- | Host | Where | Notes |
 	  | ---- | ----- | ----- |
