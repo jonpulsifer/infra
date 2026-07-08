@@ -1,0 +1,12 @@
+{
+  "name": "wiki",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run build.ts",
+    "dev": "bun run build.ts && bun run serve.ts"
+  },
+  "dependencies": {
+    "shiki": "^3.13.0"
+  }
+}

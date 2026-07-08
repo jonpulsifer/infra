@@ -41,10 +41,8 @@ docs/.trash/
 .agents/
 
 # ─── Node / Bun ──────────────────────────────────────────────────────────────
-# Only tracked in sub-packages that need them; root is not a node project
-# node_modules/
-# package-lock.json
-# bun.lockb
+# Root is a Bun workspace (apps/*, packages/*); bun.lock is tracked.
+node_modules/
 
 # ─── IDE / Editor ────────────────────────────────────────────────────────────
 .vscode/
