@@ -1,74 +1,25 @@
 ---
 name: multi-cluster
 description: Add or modify shared resources across folly and offsite k8s clusters using the base/ pattern.
+metadata:
+  runbook: docs/pages/Runbooks___Add Shared Kubernetes Resource.md
+  wiki: https://wiki.lolwtf.ca/runbooks/add-shared-kubernetes-resource/
 ---
 
-## Shared Base Pattern
+# Multi-Cluster
 
-`clusters/base/` holds resources shared by both clusters. Each shared component is a directory with its own `kustomization.yaml`.
+Canonical human runbook: `docs/pages/Runbooks___Add Shared Kubernetes Resource.md`.
+Reference bridge: `references/runbook.md`.
 
-```
-clusters/base/
-├── kustomization.yaml              # cluster-runtimeclass
-├── monitoring/
-│   ├── kustomization.yaml
-│   └── vector.yaml                 # ${CLUSTER_NAME} templated
-└── networking/
-    ├── cert-manager/
-    │   ├── kustomization.yaml
-    │   └── helm-release.yaml
-    ├── external-dns/
-    │   ├── kustomization.yaml
-    │   └── helm-release.yaml       # ${CLUSTER_NAME}, ${SECRET_DOMAIN} templated
-    └── tailscale/
-        ├── kustomization.yaml
-        └── helm-release.yaml
-```
+## Agent Notes
 
-## Adding a New Shared Resource
-
-1. Create `clusters/base/<category>/<component>/kustomization.yaml` listing the resource files
-2. Templatize cluster-specific values with `${CLUSTER_NAME}`, `${SECRET_DOMAIN}`, or other vars from `cluster-settings`/`cluster-secrets`
-3. In each cluster's kustomization, reference the base directory:
-   ```yaml
-   resources:
-     - ../../../base/networking/<component>
-   ```
-4. Add cluster-specific patches in the overlay kustomization if needed
-5. Validate both clusters:
-   ```bash
-   kubectl kustomize clusters/folly/<category>/
-   kubectl kustomize clusters/offsite/<category>/
-   ```
-
-## Key Constraints
-
-- **Never reference individual files** outside the kustomization root — kustomize blocks this. Always reference directories.
-- **Flux postBuild substitution** handles variable replacement at deploy time. Variables come from:
-  - `cluster-settings` ConfigMap (CLUSTER_NAME, TIMEZONE, network CIDRs, etc.)
-  - `cluster-secrets` Secret (SECRET_DOMAIN, CLOUDFLARE_ZONE, GATEWAY_ZONE, etc.)
-- The Flux Kustomization must have `postBuild.substituteFrom` configured to use templated vars.
-
-## Shared via Flux Path References
-
-Shared platform components live under `base/` and **both** clusters' `flux-system/` Kustomizations point at the same base path:
-
-| Resource                  | Flux Kustomization path                          |
-|---------------------------|--------------------------------------------------|
-| ARC (runner controller)   | `./clusters/base/platform/arc-system`            |
-| External Secrets Operator | `./clusters/base/platform/external-secrets-operator` |
-| 1Password Connect         | `./clusters/base/platform/onepassword-connect`   |
-| Sandbox apps              | `./clusters/base/platform/agent-sandbox`         |
-| Storage (offsite)         | `./clusters/base/storage`                        |
-
-This works because Flux resolves paths relative to the git repo root, not the kustomization file.
-
-HelmRepository/GitRepository/OCIRepository **sources are not shared centrally** — each is colocated in the same directory as the HelmRelease that consumes it (`helm-repository.yaml` / `git-repository.yaml` / `oci-repository.yaml`). Sources needed by both clusters (e.g. `descheduler`, `gateway-api`) are duplicated into each cluster's directory, matching how those apps are already duplicated.
-
-## What Stays Cluster-Specific
-
-- `cilium/` — different BGP peers, IP pools, hubble config
-- `gateway-api/` — different listeners and routes
-- `tailscale/connector.yaml` — different names, routes, tags
-- `cloudflare/` SOPS secrets — different tunnel credentials
-- `cert-manager/issuers/` and `certificates/` — may have domain-specific diffs
+- Shared resources live under `clusters/base/`.
+- Each shared component should be a directory with its own `kustomization.yaml`.
+- Cluster overlays reference shared directories, not individual files outside the kustomization root.
+- Templatize cluster-specific values with Flux substitutions such as `${CLUSTER_NAME}` and `${SECRET_DOMAIN}` when the parent Flux Kustomization provides them.
+- Validate every consuming cluster:
+  ```bash
+  kubectl kustomize clusters/folly/<category>
+  kubectl kustomize clusters/offsite/<category>
+  ```
+- Keep genuinely cluster-specific resources in cluster overlays.

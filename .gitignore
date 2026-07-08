@@ -38,7 +38,9 @@ docs/.trash/
 !.claude/settings.json
 !.claude/hooks/
 .claude/settings.local.json
-.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 
 # ─── Node / Bun ──────────────────────────────────────────────────────────────
 # Root is a Bun workspace (apps/*, packages/*); bun.lock is tracked.

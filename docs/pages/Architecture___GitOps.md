@@ -19,4 +19,4 @@ tags:: architecture
 	- `nixos-deploy.yaml`, `nix-ci.yaml`, `nix-image-builder.yaml` — NixOS build/deploy pipelines
 	- **Renovate** opens PRs for Helm charts, container images, Terraform providers, and GitHub Actions
 - ## The bootstrap exceptions
-	- Two places where a layer reaches into another: the Flux bootstrap (`clusters/<site>/bootstrap/` Terraform installs `flux-operator`/`flux-instance`), and the Atlantis ↔ ArgoCD auth wiring (see the `kubernetes-gitops` skill for token rotation).
+	- Two places where a layer reaches into another: the Flux bootstrap (`clusters/<site>/bootstrap/` Terraform installs `flux-operator`/`flux-instance`), and the Atlantis ↔ ArgoCD auth wiring (see [[Runbooks/Kubernetes GitOps Change]] for token rotation).

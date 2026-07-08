@@ -13,6 +13,8 @@ icon:: ✍️
 	- Link generously: `[[Page Name]]`. A link to a page that doesn't exist yet is fine — it marks something worth writing.
 - ## Writing an ADR
 	- Copy [[ADR/Template]] to `ADR/NNNN <short title>` (next free number), fill in Context / Decision / Consequences, set `status:: proposed`, PR it. Process details on [[ADR]].
+- ## Repository changes
+	- [[Contributing/Onboard Repo]] — vendor an external `jonpulsifer` repo into this monorepo while preserving history.
 - ## House rules
 	- **This site is public.** Never paste decrypted SOPS content, tokens, or private keys — if `sops -d` touched it, it doesn't go here.
 	- Facts that have a single source of truth (network topology, versions) should be referenced, not copied — link to the file instead of restating values that will drift.
