@@ -1,0 +1,222 @@
+/* ── infra wiki theme ─────────────────────────────────────────────────────
+   Violet/blue palette shared with pulsifer.ca. Loaded by Logseq (desktop)
+   and baked into the published SPA at wiki.lolwtf.ca. */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+:root {
+  --wiki-violet: #8b5cf6;
+  --wiki-violet-soft: #a78bfa;
+  --wiki-blue: #60a5fa;
+  --wiki-gradient: linear-gradient(120deg, #a78bfa 0%, #818cf8 45%, #60a5fa 100%);
+  --ls-font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* ── dark theme (default for the published site) ── */
+html[data-theme="dark"],
+.dark-theme {
+  --ls-primary-background-color: #0b0d16;
+  --ls-secondary-background-color: #10131f;
+  --ls-tertiary-background-color: #171b2c;
+  --ls-quaternary-background-color: #1e2338;
+  --ls-primary-text-color: #d9dbe8;
+  --ls-secondary-text-color: #9aa1bc;
+  --ls-title-text-color: #f4f5fb;
+  --ls-header-button-background: #171b2c;
+  --ls-link-text-color: var(--wiki-violet-soft);
+  --ls-link-text-hover-color: #c4b5fd;
+  --ls-link-ref-text-color: var(--wiki-violet-soft);
+  --ls-link-ref-text-hover-color: #c4b5fd;
+  --ls-block-ref-link-text-color: var(--wiki-blue);
+  --ls-block-bullet-color: #4d5378;
+  --ls-block-bullet-border-color: #2a2f4c;
+  --ls-block-highlight-color: rgba(139, 92, 246, 0.14);
+  --ls-page-properties-background-color: #131729;
+  --ls-page-inline-code-bg-color: #1a1e33;
+  --ls-page-inline-code-color: #c4b5fd;
+  --ls-border-color: #232842;
+  --ls-secondary-border-color: #232842;
+  --ls-guideline-color: #232842;
+  --ls-table-tr-even-background-color: rgba(139, 92, 246, 0.05);
+  --ls-selection-background-color: rgba(96, 165, 250, 0.28);
+  --ls-page-checkbox-color: var(--wiki-violet);
+  --ls-active-primary-color: var(--wiki-violet);
+  --ls-active-secondary-color: var(--wiki-blue);
+  --ls-scrollbar-foreground-color: #2a2f4c;
+}
+
+/* ── light theme ── */
+html[data-theme="light"],
+.white-theme,
+.light-theme {
+  --ls-primary-background-color: #fbfbfe;
+  --ls-secondary-background-color: #f4f4fb;
+  --ls-tertiary-background-color: #ecedf8;
+  --ls-quaternary-background-color: #e3e5f4;
+  --ls-primary-text-color: #2a2d3d;
+  --ls-secondary-text-color: #5b5f79;
+  --ls-title-text-color: #191b28;
+  --ls-link-text-color: #7c3aed;
+  --ls-link-text-hover-color: #6d28d9;
+  --ls-link-ref-text-color: #7c3aed;
+  --ls-link-ref-text-hover-color: #6d28d9;
+  --ls-block-ref-link-text-color: #2563eb;
+  --ls-block-highlight-color: rgba(139, 92, 246, 0.1);
+  --ls-page-properties-background-color: #f1f1fa;
+  --ls-page-inline-code-bg-color: #eeeefa;
+  --ls-page-inline-code-color: #6d28d9;
+  --ls-border-color: #e2e3f0;
+  --ls-guideline-color: #e2e3f0;
+  --ls-table-tr-even-background-color: rgba(139, 92, 246, 0.04);
+  --ls-active-primary-color: #7c3aed;
+  --ls-active-secondary-color: #2563eb;
+}
+
+/* ── ambient glow behind the page ── */
+.dark-theme #main-content-container,
+html[data-theme="dark"] #main-content-container {
+  background:
+    radial-gradient(1100px 500px at 85% -5%, rgba(139, 92, 246, 0.09), transparent 60%),
+    radial-gradient(900px 450px at -10% 20%, rgba(96, 165, 250, 0.06), transparent 55%);
+}
+
+/* ── typography ── */
+body,
+html {
+  font-family: var(--ls-font-family);
+  -webkit-font-smoothing: antialiased;
+}
+
+.page-title,
+h1.title,
+.journal-title h1,
+.ls-page-title {
+  background: var(--wiki-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.ls-block h1,
+.ls-block h2,
+.ls-block h3 {
+  color: var(--ls-title-text-color);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.ls-block h2 {
+  border-bottom: 1px solid var(--ls-border-color);
+  padding-bottom: 0.3rem;
+}
+
+/* ── code ── */
+code,
+pre,
+.CodeMirror,
+.code-block {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace !important;
+  font-size: 0.86em;
+}
+
+.ls-block pre,
+.ls-block .code-block {
+  border: 1px solid var(--ls-border-color);
+  border-radius: 10px;
+  background: var(--ls-secondary-background-color) !important;
+}
+
+:not(pre) > code {
+  background: var(--ls-page-inline-code-bg-color);
+  color: var(--ls-page-inline-code-color);
+  border-radius: 5px;
+  padding: 0.1em 0.35em;
+}
+
+/* ── tags as chips ── */
+a.tag {
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 999px;
+  color: var(--wiki-violet-soft) !important;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 10px;
+  text-transform: uppercase;
+  opacity: 1;
+}
+
+a.tag:hover {
+  background: rgba(139, 92, 246, 0.22);
+}
+
+a.tag[data-ref="runbook"] {
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.35);
+  color: var(--wiki-blue) !important;
+}
+
+/* ── page properties card ── */
+.page-properties,
+.pre-block {
+  border: 1px solid var(--ls-border-color);
+  border-radius: 10px;
+  padding: 0.5rem 0.85rem;
+}
+
+.page-property-key {
+  color: var(--wiki-blue);
+  font-weight: 600;
+}
+
+/* ── tables ── */
+.ls-block table {
+  border: 1px solid var(--ls-border-color);
+  border-radius: 10px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+
+.ls-block table th {
+  background: var(--ls-tertiary-background-color);
+  border-bottom: 2px solid var(--wiki-violet);
+  font-weight: 700;
+}
+
+.ls-block table th,
+.ls-block table td {
+  padding: 0.4rem 0.75rem;
+}
+
+/* ── linked references / embeds ── */
+.references,
+.block-embed {
+  border: 1px solid var(--ls-border-color);
+  border-radius: 10px;
+}
+
+.block-highlight,
+.ls-block:focus-within > .block-content-wrapper {
+  border-radius: 6px;
+}
+
+/* ── left sidebar ── */
+.left-sidebar-inner {
+  background: var(--ls-secondary-background-color) !important;
+  border-right: 1px solid var(--ls-border-color);
+}
+
+.left-sidebar-inner .favorite-item a:hover,
+.left-sidebar-inner .recent-item a:hover {
+  color: var(--wiki-violet-soft);
+}
+
+/* ── bullets get a faint violet ring on hover ── */
+.bullet-container:hover .bullet {
+  background: var(--wiki-violet);
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.18);
+}

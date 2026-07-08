@@ -1,0 +1,20 @@
+{:meta/version 1
+
+ ;; This graph is the source for https://wiki.lolwtf.ca — published by
+ ;; .github/workflows/wiki.yml (logseq/publish-spa → Cloudflare Pages).
+ ;; Everything in the graph is public; never paste decrypted secrets here.
+ :publishing/all-pages-public? true
+
+ :preferred-format :markdown
+ :preferred-workflow :now
+ :export/bullet-indentation :tab
+
+ :default-home {:page "Home" :sidebar "Contents"}
+ :favorites ["Home" "Architecture" "ADR" "Runbooks" "Fleet"]
+
+ :feature/enable-journals? true
+ :feature/enable-whiteboards? false
+ :start-of-week 0
+
+ :ui/enable-tooltip? true
+ :ui/show-brackets? false}
