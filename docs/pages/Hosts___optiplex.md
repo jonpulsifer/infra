@@ -7,8 +7,9 @@ year:: ~2017
 serial:: 66BT7M2
 sku:: 07A3
 cpu:: Intel Core i7-7700T @ 2.90GHz (4c/8t)
-ram:: 16 GB
-storage:: 256 GB SK hynix SC311 SATA SSD
+ram:: 16 GB DDR4 SODIMM
+gpu:: Intel HD Graphics 630 (8086:5912)
+storage:: 256 GB SK hynix SC311 SATA SSD (root 91 GB, 79% used)
 os:: NixOS 26.05 (Yarara)
 firmware:: BIOS 1.27.0 (2023-09-19)
 

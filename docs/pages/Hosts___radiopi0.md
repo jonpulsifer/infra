@@ -6,8 +6,9 @@ year:: ~2017
 serial:: 0000000056f8a6ff
 revision:: 9000c1
 cpu:: BCM2835, ARM1176 (1c, armv6l)
-ram:: 512 MB
-storage:: 32 GB microSD
+ram:: 512 MB LPDDR2 (package-on-package)
+gpu:: Broadcom VideoCore IV
+storage:: 32 GB microSD (root 30 GB, 8% used)
 os:: Raspbian 10 (buster)
 
 - Pi Zero W radio box. **Unmanaged**: not in `flake.nix`, runs EOL Raspbian buster, login is `pi@radiopi0.lolwtf.ca`.

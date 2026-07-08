@@ -6,7 +6,7 @@ icon:: 🖥️
 	  | ---- | ---- | -------- | ----- |
 	  | [[Hosts/optiplex]] | control-plane | Dell OptiPlex 3050, i7-7700T | disko on `/dev/sda` |
 	  | [[Hosts/riptide]] | worker | HP EliteDesk 800 G5 Mini, i5-9500T | NVMe, working TPM 2.0 |
-	  | [[Hosts/shale]] | worker | HP EliteDesk 800 G2 DM 35W, i7-6700T | no `shale.lolwtf.ca` record — jump via optiplex |
+	  | [[Hosts/shale]] | worker | HP EliteDesk 800 G2 DM 35W, i7-6700T | ex-`800g2`/`rosie` — same box, third name |
 - ## offsite — backup k8s cluster
 	- | Host | Role | Hardware | Notes |
 	  | ---- | ---- | -------- | ----- |
@@ -29,4 +29,4 @@ icon:: 🖥️
 - ## Images (not hosts)
 	- `wsl`, `iso`, `gce`, `container`, `netboot`, and `rackpi5-ram` (the pi5 RAM image) are buildable images defined alongside the hosts in `flake.nix`.
 - ## Reaching things
-	- LAN hosts resolve as `<host>.lolwtf.ca`; offsite and weatherpi4 require the tailnet. k8s nodes have Tailscale disabled — go through the LAN or the cluster (shale currently needs `ssh -J optiplex.lolwtf.ca jawn@10.3.0.11`).
+	- LAN hosts resolve as `<host>.lolwtf.ca`; offsite and weatherpi4 require the tailnet. k8s nodes have Tailscale disabled — go through the LAN or the cluster.

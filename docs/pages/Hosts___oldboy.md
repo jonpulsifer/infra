@@ -5,6 +5,7 @@ model:: GCE e2-micro (free tier)
 serial:: n/a (virtual)
 cpu:: 2 shared vCPU
 ram:: 1 GB
+gpu:: none
 storage:: 16 GB pd-standard
 os:: NixOS
 
