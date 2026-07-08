@@ -1,101 +1,30 @@
 ---
 name: kubernetes-gitops
 description: Work with Kubernetes manifests and GitOps workflows for the folly and offsite clusters. Covers FluxCD reconciliation, networking architecture, and SOPS secrets.
+metadata:
+  runbook: docs/pages/Runbooks___Kubernetes GitOps Change.md
+  wiki: https://wiki.lolwtf.ca/runbooks/kubernetes-gitops-change/
 ---
 
-## Cluster Structure
+# Kubernetes GitOps
 
-```
-clusters/
-  base/      # Shared resources referenced by both clusters
-  folly/     # Primary on-site (nuc, optiplex, riptide, 800g2)
-  offsite/   # Backup cluster (oldschool, retrofit)
-```
+Canonical human runbook: `docs/pages/Runbooks___Kubernetes GitOps Change.md`.
+Reference bridge: `references/runbook.md`.
 
-Each cluster contains: `flux-system/`, `networking/`, `monitoring/`, `nodes/`, `storage/`.
+## Agent Notes
 
-`base/` holds shared helm-releases (cert-manager, tailscale, external-dns, vector) used by both clusters via kustomize directory references. Cluster-specific values use Flux `postBuild` substitution with variables like `${CLUSTER_NAME}` from each cluster's `cluster-settings` ConfigMap.
-
-Shared platform components live under `base/platform/` (`arc-system`, `external-secrets-operator`, `onepassword-connect`, `agent-sandbox`) and `base/storage/`; each cluster's `flux-system/` Kustomization points at those base paths directly. HelmRepository/GitRepository sources are **not** centralized — each source is colocated in the same directory (and same Flux Kustomization) as the HelmRelease/manifests that consume it.
-
-## Making Changes
-
-Changes to `clusters/` deploy automatically via FluxCD when merged to `main`.
-
-```bash
-# Check reconciliation status
-flux get kustomizations -A
-flux get helmreleases -A
-
-# Force reconcile
-flux reconcile kustomization <name> -n flux-system --with-source
-```
-
-## Networking Architecture
-
-| Component     | Resource                                       | Purpose                          |
-|---------------|------------------------------------------------|----------------------------------|
-| CNI           | `networking/cilium/`                           | Pod networking + BGP LB          |
-| Ingress       | `networking/gateway-api/cluster-gateway.yaml`  | Kubernetes Gateway API           |
-| External      | `networking/cloudflare/cloudflared.yaml`        | Cloudflare Tunnel (no open ports)|
-| Internal VPN  | `networking/tailscale/`                        | Tailscale operator               |
-| TLS           | `networking/cert-manager/`                     | Let's Encrypt via Cloudflare DNS |
-| DNS           | `networking/external-dns/`                     | Cloudflare records from Gateway  |
-
-BGP IP pools are in `networking/cilium/ip-pools.yaml`.
-
-## SOPS Secrets
-
-Files matching `*.sops.yaml` are encrypted at rest. FluxCD decrypts via the cluster's age key.
-
-```bash
-# View/edit
-sops clusters/folly/networking/tailscale/secret.sops.yaml
-
-# Encrypt new file (must match path regex in .sops.yaml)
-sops -e -i clusters/<cluster>/<path>.sops.yaml
-```
-
-Encrypted fields: `data` and `stringData` only (per `.sops.yaml`).
-
-## Atlantis / ArgoCD Cross-Cluster Auth
-
-Atlantis (offsite) connects to ArgoCD (folly) to verify Terraform plans against live application state.
-
-| Component | Location | Account |
-|-----------|----------|---------|
-| Atlantis HelmRelease | `clusters/offsite/apps/atlantis/helm-release.yaml` | Connects via `ARGOCD_AUTH_TOKEN` |
-| Atlantis secret | `clusters/offsite/apps/atlantis/secret.sops.yaml` | Stores `argocd_token` |
-| ArgoCD config | `clusters/folly/apps/argo/helm-release.yaml` | Defines `accounts.atlantis: apiKey` + RBAC |
-
-**When the ArgoCD token expires**, `atlantis/plan` checks fail with signature errors (JWT signed with a rotated key). Symptoms:
-- GitHub PR status: `atlantis/plan: terraform/argo/default` → FAILURE
-- Atlantis logs show gRPC/auth errors against `argo.${SECRET_DOMAIN}:443`
-
-### Rotating the Token
-
-```bash
-# 1. Port-forward to ArgoCD server
-kubectl port-forward -n argo svc/argo-argocd-server 9090:80
-
-# 2. Get admin password and login
-ARGOCD_PASS=$(kubectl get secrets -n argo argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-TOKEN=$(curl -s -X POST "http://localhost:9090/api/v1/session" \
-  -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"$ARGOCD_PASS\"}" | jq -r '.token')
-
-# 3. Generate new token for the atlantis account
-RESULT=$(curl -s -X POST "http://localhost:9090/api/v1/account/atlantis/token" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{}")
-NEW_TOKEN=$(echo "$RESULT" | jq -r '.token')
-
-# 4. Update SOPS secret (decrypt → edit → re-encrypt)
-sops clusters/offsite/apps/atlantis/secret.sops.yaml
-# Replace the argocd_token value with base64-encoded NEW_TOKEN
-```
-
-## Helm Releases
-
-Apps use `HelmRelease` resources pointing to a `HelmRepository`/`GitRepository`/`OCIRepository` source colocated in the same directory (named `helm-repository.yaml`, `git-repository.yaml`, or `oci-repository.yaml`, suffixed with the app name when a directory holds more than one). Renovate opens automatic update PRs for chart bumps.
+- Changes under `clusters/` deploy automatically via Flux after merge to `main`.
+- Do not use `kubectl apply` to author desired state.
+- Use explicit contexts: `--context folly` and `--context offsite`.
+- Inspect reconciliation:
+  ```bash
+  flux --context <cluster> get kustomizations -A
+  flux --context <cluster> get helmreleases -A
+  ```
+- Force reconcile only for inspection or merged changes:
+  ```bash
+  flux --context <cluster> reconcile kustomization <name> -n flux-system --with-source
+  ```
+- SOPS files are encrypted at rest; never expose decrypted values in docs, PR comments, or logs.
+- HelmRepository/GitRepository/OCIRepository sources are colocated with the resources that consume them unless the local pattern says otherwise.
+- For shared `clusters/base/` changes, also use the `multi-cluster` skill.
