@@ -24,7 +24,10 @@
   ...
 }:
 let
-  spore = "10.2.0.11";
+  # spore's Lab-net IP comes from the Lab SSOT, terraform/network/unifi/folly/lab.tf.json.
+  spore =
+    (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json))
+    .locals.lab.hosts.spore;
   storeUrl = "http://${spore}/rackpi5-ram/nix-store.squashfs";
   # systemd-escape -p /sysroot/nix/.ro-store
   roStoreMount = "sysroot-nix-.ro\\x2dstore.mount";

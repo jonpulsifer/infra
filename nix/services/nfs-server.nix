@@ -13,6 +13,10 @@
 # spore's sd-image-flashed NVMe, which has no partlabel support) override
 # `homelab.nfsServer.dataDevice` to a by-label path instead.
 { config, lib, ... }:
+let
+  # folly cluster CIDRs come from the network SSOT (see nix/services/k8s/networks.nix).
+  folly = (builtins.fromJSON (builtins.readFile ../../clusters/folly/config/cluster-topology.json)).data;
+in
 {
   options.homelab.nfsServer.dataDevice = lib.mkOption {
     type = lib.types.str;
@@ -42,10 +46,13 @@
       lockdPort = 4001;
       mountdPort = 4002;
       statdPort = 4000;
+      # K8S_NODE_CIDR is the single Kubernetes network (VLAN 8, 10.3.0.0/26);
+      # CILIUM_POD_CIDR covers the pods. 10.13.37.0/28 is the "future" network
+      # (terraform/network/unifi/folly/extra-networks.tf).
       exports = ''
         /nfs/data/                 10.13.37.0/28(rw,sync,nohide,no_subtree_check,insecure,all_squash,anonuid=1000,anongid=1000)
-        /nfs/data/k8s/              10.3.0.0/28(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) 10.100.0.0/20(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
-        /nfs/data/k8s-provisioned/  10.3.0.0/28(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) 10.100.0.0/20(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
+        /nfs/data/k8s/              ${folly.K8S_NODE_CIDR}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) ${folly.CILIUM_POD_CIDR}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
+        /nfs/data/k8s-provisioned/  ${folly.K8S_NODE_CIDR}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) ${folly.CILIUM_POD_CIDR}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
       '';
     };
 

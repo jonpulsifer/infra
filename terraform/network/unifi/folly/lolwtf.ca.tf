@@ -1,5 +1,6 @@
 locals {
-  lab_cidr    = "10.2.0.1/24"
+  # gateway-host (.1) form of lab.tf.json's cidr, same as k8s.tf's node_cidr
+  lab_cidr    = "${cidrhost(local.lab.cidr, 1)}/${split("/", local.lab.cidr)[1]}"
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
   lab_clients = merge(local.clients.lab, local.clients.rpis)
@@ -48,6 +49,19 @@ resource "unifi_network" "lab" {
     }
   }
 
+  # lab.tf.json carries full Lab-net host IPs for the consumers that can't do
+  # CIDR math on clients.yaml's host octets (the spore/rackpi5 Nix configs).
+  # Fail the plan if the two ever disagree.
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        local.lab.hosts.dns == cidrhost(local.lab_cidr, local.clients.rpis.dns.ip),
+        local.lab.hosts.spore == cidrhost(local.lab_cidr, local.clients.rpis.spore.ip),
+        local.lab.hosts.rackpi5 == cidrhost(local.lab_cidr, local.clients.rpis.rackpi5.ip),
+      ])
+      error_message = "Host IPs in lab.tf.json disagree with the clients.yaml octets."
+    }
+  }
 }
 
 resource "unifi_wlan" "lab" {
