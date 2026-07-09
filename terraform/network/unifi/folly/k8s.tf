@@ -30,11 +30,11 @@ resource "unifi_network" "k8s" {
     start       = cidrhost(local.node_cidr, 2)
     stop        = cidrhost(local.node_cidr, 62)
     dns_enabled = true
-    dns_servers = [local.topology.LAB_DNS_IP]
-    tftp_server = local.topology.SPORE_IP
+    dns_servers = [local.lab.hosts.dns]
+    tftp_server = local.lab.hosts.spore
     boot = {
       enabled  = true
-      server   = local.topology.SPORE_IP
+      server   = local.lab.hosts.spore
       filename = "boot/ipxe.efi"
     }
   }

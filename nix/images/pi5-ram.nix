@@ -24,10 +24,10 @@
   ...
 }:
 let
-  # spore's Lab-net IP comes from the network SSOT (see nix/services/k8s/networks.nix).
+  # spore's Lab-net IP comes from the Lab SSOT, terraform/network/unifi/folly/lab.tf.json.
   spore =
-    (builtins.fromJSON (builtins.readFile ../../clusters/folly/config/cluster-topology.json))
-    .data.SPORE_IP;
+    (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json))
+    .locals.lab.hosts.spore;
   storeUrl = "http://${spore}/rackpi5-ram/nix-store.squashfs";
   # systemd-escape -p /sysroot/nix/.ro-store
   roStoreMount = "sysroot-nix-.ro\\x2dstore.mount";

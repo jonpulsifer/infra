@@ -1,6 +1,6 @@
 # spore, reinstalled from Alpine to NixOS in place, keeping its identity
 # (MAC/DNS octet in terraform/network/unifi/folly/clients.yaml, full IP in
-# clusters/folly/config/cluster-topology.json as SPORE_IP) so
+# terraform/network/unifi/folly/lab.tf.json) so
 # clusters/folly/storage/spore-pv.yaml, the nfs-provisioner HelmRelease, and
 # terraform/network/unifi/folly/k8s.tf's PXE tftp_server/boot.server all keep
 # working unchanged -- only the OS underneath changes.
@@ -24,8 +24,10 @@
   ...
 }:
 let
-  # Lab-net host IPs come from the network SSOT (see nix/services/k8s/networks.nix).
-  folly = (builtins.fromJSON (builtins.readFile ../../clusters/folly/config/cluster-topology.json)).data;
+  # Lab-net host IPs come from the Lab SSOT, terraform/network/unifi/folly/lab.tf.json.
+  lab =
+    (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json))
+    .locals.lab;
 in
 {
   imports = [
@@ -69,8 +71,8 @@ in
     "d /var/lib/tftpboot/rackpi5-ram 0755 root root -"
   ];
   services.nfs.server.exports = ''
-    /nfs/data/rackpi5           ${folly.RACKPI5_IP}(rw,sync,no_subtree_check,insecure,no_root_squash)
-    /var/lib/tftpboot/rackpi5   ${folly.RACKPI5_IP}(rw,sync,no_subtree_check,insecure,no_root_squash)
+    /nfs/data/rackpi5           ${lab.hosts.rackpi5}(rw,sync,no_subtree_check,insecure,no_root_squash)
+    /var/lib/tftpboot/rackpi5   ${lab.hosts.rackpi5}(rw,sync,no_subtree_check,insecure,no_root_squash)
   '';
   # No file leases means nfsd grants no delegations. Nix hard-links files
   # inside rackpi5's NFS root, and a LINK against a file whose write

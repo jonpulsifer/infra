@@ -17,7 +17,7 @@ resource "unifi_network" "future" {
     start       = cidrhost(local.future_cidr, 2)
     stop        = cidrhost(local.future_cidr, 14)
     dns_enabled = true
-    dns_servers = [local.topology.LAB_DNS_IP]
+    dns_servers = [local.lab.hosts.dns]
     boot = {
       enabled = false
     }
@@ -41,7 +41,7 @@ resource "unifi_network" "iot" {
     start       = cidrhost(local.iot_cidr, 2)
     stop        = cidrhost(local.iot_cidr, 62)
     dns_enabled = true
-    dns_servers = [local.topology.LAB_DNS_IP]
+    dns_servers = [local.lab.hosts.dns]
     boot = {
       enabled = false
     }

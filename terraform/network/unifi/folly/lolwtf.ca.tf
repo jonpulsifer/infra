@@ -1,6 +1,6 @@
 locals {
-  # gateway-host (.1) form of the SSOT's LAB_CIDR, same as k8s.tf's node_cidr
-  lab_cidr    = "${cidrhost(local.topology.LAB_CIDR, 1)}/${split("/", local.topology.LAB_CIDR)[1]}"
+  # gateway-host (.1) form of lab.tf.json's cidr, same as k8s.tf's node_cidr
+  lab_cidr    = "${cidrhost(local.lab.cidr, 1)}/${split("/", local.lab.cidr)[1]}"
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
   lab_clients = merge(local.clients.lab, local.clients.rpis)
@@ -49,18 +49,17 @@ resource "unifi_network" "lab" {
     }
   }
 
-  # The cluster-topology SSOT carries full Lab-net IPs (LAB_DNS_IP, SPORE_IP,
-  # RACKPI5_IP) for the consumers that can't do CIDR math on clients.yaml's
-  # host octets (Nix host configs, Flux substitutions). Fail the plan if the
-  # two ever disagree.
+  # lab.tf.json carries full Lab-net host IPs for the consumers that can't do
+  # CIDR math on clients.yaml's host octets (the spore/rackpi5 Nix configs).
+  # Fail the plan if the two ever disagree.
   lifecycle {
     precondition {
       condition = alltrue([
-        local.topology.LAB_DNS_IP == cidrhost(local.lab_cidr, local.clients.rpis.dns.ip),
-        local.topology.SPORE_IP == cidrhost(local.lab_cidr, local.clients.rpis.spore.ip),
-        local.topology.RACKPI5_IP == cidrhost(local.lab_cidr, local.clients.rpis.rackpi5.ip),
+        local.lab.hosts.dns == cidrhost(local.lab_cidr, local.clients.rpis.dns.ip),
+        local.lab.hosts.spore == cidrhost(local.lab_cidr, local.clients.rpis.spore.ip),
+        local.lab.hosts.rackpi5 == cidrhost(local.lab_cidr, local.clients.rpis.rackpi5.ip),
       ])
-      error_message = "Lab host IPs in clusters/folly/config/cluster-topology.json disagree with the clients.yaml octets."
+      error_message = "Host IPs in lab.tf.json disagree with the clients.yaml octets."
     }
   }
 }
