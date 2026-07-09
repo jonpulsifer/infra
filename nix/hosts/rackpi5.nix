@@ -34,7 +34,10 @@
   ...
 }:
 let
-  spore = "10.2.0.11";
+  # spore's Lab-net IP comes from the network SSOT (see nix/services/k8s/networks.nix).
+  spore =
+    (builtins.fromJSON (builtins.readFile ../../clusters/folly/config/cluster-topology.json))
+    .data.SPORE_IP;
 in
 {
   imports = [

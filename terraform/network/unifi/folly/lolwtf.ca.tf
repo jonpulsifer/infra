@@ -1,5 +1,6 @@
 locals {
-  lab_cidr    = "10.2.0.1/24"
+  # gateway-host (.1) form of the SSOT's LAB_CIDR, same as k8s.tf's node_cidr
+  lab_cidr    = "${cidrhost(local.topology.LAB_CIDR, 1)}/${split("/", local.topology.LAB_CIDR)[1]}"
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
   lab_clients = merge(local.clients.lab, local.clients.rpis)
@@ -48,6 +49,20 @@ resource "unifi_network" "lab" {
     }
   }
 
+  # The cluster-topology SSOT carries full Lab-net IPs (LAB_DNS_IP, SPORE_IP,
+  # RACKPI5_IP) for the consumers that can't do CIDR math on clients.yaml's
+  # host octets (Nix host configs, Flux substitutions). Fail the plan if the
+  # two ever disagree.
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        local.topology.LAB_DNS_IP == cidrhost(local.lab_cidr, local.clients.rpis.dns.ip),
+        local.topology.SPORE_IP == cidrhost(local.lab_cidr, local.clients.rpis.spore.ip),
+        local.topology.RACKPI5_IP == cidrhost(local.lab_cidr, local.clients.rpis.rackpi5.ip),
+      ])
+      error_message = "Lab host IPs in clusters/folly/config/cluster-topology.json disagree with the clients.yaml octets."
+    }
+  }
 }
 
 resource "unifi_wlan" "lab" {
