@@ -40,6 +40,7 @@ jobs:
         with:
           extra-conf: |
             experimental-features = nix-command flakes
+            accept-flake-config = true
 
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
