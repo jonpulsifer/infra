@@ -66,8 +66,16 @@ nix build .#wsl         # WSL tarball
 nix build .#gce         # Google Compute Engine image
 
 # Build Raspberry Pi images
-nix build .#cloudpi4    # SD card image
+nix build .#cloudpi4    # SD card image from an x86_64 build host
+
+# Build natively on an ARM host
+nix build .#nixosConfigurations.cloudpi4.config.system.build.sdImage
 ```
+
+The `nix-image-builder` GitHub Actions workflow builds Raspberry Pi images on
+native `ubuntu-24.04-arm` runners. Run it manually from the Actions tab, choose
+an image, and download the resulting `<image>-sd-image` artifact. GitHub keeps
+these image artifacts for one day.
 
 ### Deploying Updates
 

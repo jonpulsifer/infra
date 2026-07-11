@@ -21,9 +21,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    # radiopi0 (armv6l) cross-compiles from aarch64-linux (nix/hardware/pi0.nix
-    # sets nixpkgs.buildPlatform/hostPlatform) same as the native aarch64 pi4
-    # builds -- both want the arm64 runner, just for different reasons.
+    # Build Raspberry Pi images on the native ARM runner. The other image
+    # targets are x86_64 NixOS configurations and use the standard runner.
     runs-on: ${{ (contains(inputs.image, 'pi4') || inputs.image == 'radiopi0') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -40,7 +39,13 @@ jobs:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
-      - run: nix build .#${{ inputs.image }}
+      - name: Build image
+        run: |
+          if [[ "${{ contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' }}" == "true" ]]; then
+            nix build ".#nixosConfigurations.${{ inputs.image }}.config.system.build.sdImage"
+          else
+            nix build ".#packages.x86_64-linux.${{ inputs.image }}"
+          fi
 
       - name: Build WSL tarball
         if: ${{ inputs.image == 'wsl' }}
