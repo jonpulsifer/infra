@@ -3,13 +3,14 @@ on:
   workflow_dispatch:
     inputs:
       host:
-        description: "Pi4 host to build + deploy"
+        description: "Host to build + deploy"
         required: true
         type: choice
         options:
           - cloudpi4
           - homepi4
           - weatherpi4
+          - radiopi0
       mode:
         description: "nixos-rebuild action (boot activates on next reboot; switch activates immediately)"
         required: true
@@ -23,8 +24,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    # Native aarch64 runner: cloudpi4/homepi4/weatherpi4 are aarch64-linux,
-    # same as nixos-aarch64 in nix-ci.yaml — avoids slow qemu cross-compilation.
+    # Native aarch64 runner: cloudpi4/homepi4/weatherpi4 build natively as
+    # aarch64-linux (same as nixos-aarch64 in nix-ci.yaml); radiopi0 (armv6l)
+    # cross-compiles from aarch64-linux (nix/hardware/pi0.nix sets
+    # nixpkgs.buildPlatform/hostPlatform). Both want this runner, avoiding
+    # slow qemu emulation either way.
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -63,8 +67,8 @@ jobs:
 
       - name: Deploy ${{ inputs.host }}
         env:
-          # Pi4s are only ever reached over the tailnet; accept the host key
-          # on first contact instead of prompting.
+          # These hosts are only ever reached over the tailnet; accept the
+          # host key on first contact instead of prompting.
           NIX_SSHOPTS: -o StrictHostKeyChecking=accept-new
         run: |
           nix shell --inputs-from . nixpkgs#nixos-rebuild-ng -c \

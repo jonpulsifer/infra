@@ -82,6 +82,7 @@
         "rackpi5"
         "oldboy"
         "spore"
+        "radiopi0"
       ];
 
       legacyPackages = forAllSystems (
@@ -170,6 +171,15 @@
           modules = [ ./nix/hosts/spore.nix ];
         };
 
+        # armv6l Pi Zero W: no native builder/cache exists for this arch, so
+        # this is cross-compiled (nix/hardware/pi0.nix sets nixpkgs.crossSystem)
+        # from whatever machine builds it -- in practice spore, hence the
+        # aarch64-linux system below matching spore's native arch.
+        radiopi0 = mkHost "radiopi0" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/radiopi0.nix ];
+        };
+
         oldboy = mkHost "oldboy" {
           tags = [ "gcp" ];
           modules = [ ./nix/hosts/oldboy.nix ];
@@ -216,6 +226,14 @@
             ];
             preferLocalBuild = true;
           };
+        };
+
+        # radiopi0's armv6l target is cross-compiled, not natively built, so
+        # its build platform (aarch64-linux, matching spore) actually needs to
+        # be the system running `nix build`, unlike the x86_64-linux aliases
+        # above.
+        aarch64-linux = {
+          radiopi0 = nixosConfigurations.radiopi0.config.system.build.sdImage;
         };
       };
 
