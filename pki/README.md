@@ -1,21 +1,24 @@
 # pki/ — Offline Root CA Ceremony
 
-An air-gap-friendly ceremony that mints a hardware-anchored Ed25519 root CA
-+ signed intermediate, designed to feed HashiCorp Vault's PKI mount so Vault
-becomes the active issuer of leaf certs for the homelab (k8s cert-manager,
-NixOS host identity, etc.).
+An air-gap-friendly ceremony that mints an Ed25519 root CA + signed
+intermediate, designed to feed HashiCorp Vault's PKI mount so Vault becomes
+the active issuer of leaf certs for the homelab (k8s cert-manager, NixOS host
+identity, etc.). The root can be anchored either to a YubiKey (default) or to
+an age-encrypted file on disk — see [Storage mode](#storage-mode-yubikey-vs-disk).
 
 ## Hybrid architecture (offline root → Vault intermediate → Terraform plumbs)
 
 This is deliberately split across the trust boundary:
 
-1. **Offline (this script, air-gapped host + YubiKey):**
+1. **Offline (this script, air-gapped host):**
    - mints the Ed25519 **root** keypair
    - shards the root seed via SLIP-0039 (2-of-3) for offline recovery
-   - imports the root private key onto a YubiKey PIV slot — the hardware anchor
+   - anchors the root private key — onto a YubiKey PIV slot (hardware anchor,
+     default) or as an age-encrypted file on disk (`STORAGE_MODE=disk`)
    - issues the **intermediate** signed by the root
-   - scrubs the root key from disk; the root private key lives **only** on the
-     YubiKey + in the shards
+   - scrubs the plaintext root key from disk; the root private key lives
+     **only** on the YubiKey + in the shards (or, in disk mode, only in the
+     age-encrypted `root.key.age` + shards file)
 
    The intermediate leaves with you in `pki/export/intermediate.pem`
    (key+cert concatenated). Its private key is *the* trust you carry into
@@ -54,8 +57,9 @@ This is deliberately split across the trust boundary:
 ## Why a script + Terraform, not one or the other?
 
 - **Terraform alone can't** drive the offline ceremony: USB passthrough to a
-  YubiKey, human transcription of SLIP-0039 shards, and Sigstore provenance
-  verification of `step` are all out-of-band operations no provider supports.
+  YubiKey (or age encryption to disk), human transcription of SLIP-0039
+  shards, and Sigstore provenance verification of `step` are all out-of-band
+  operations no provider supports.
 - **The offline script alone can't** own the *plumbing* — Vault mount + roles +
   URL config + AppRole issuance policies are exactly what Terraform is for.
   The script handshake-rolls the certs; Terraform owns everything that's
@@ -75,37 +79,81 @@ pki/
     root.crt                  # public root cert (kept)
     intermediate.crt          # signed intermediate (→ Vault)
     intermediate.key          # intermediate private key (→ Vault, secret)
+    root.key.age              # disk mode only — age-encrypted root key
+    root_seed_shards.txt.age  # disk mode only — age-encrypted SLIP-0039 shards
 ```
 
 ## What the ceremony does
 
 1. Builds a one-shot Ubuntu container with `step`, `cosign`, `ykman`,
-   `shamir-mnemonic[cli]`, `cryptography`, and `srm`.
+   `shamir-mnemonic[cli]`, `cryptography`, `secure-delete`, and `age`.
 2. Downloads Smallstep CLI from `dl.smallstep.com` and verifies its
    Sigstore bundle with cosign.
 3. Generates an Ed25519 root CA (`step certificate create --profile root-ca`).
 4. Extracts the 32-byte root seed from the PKCS8 PEM and shards it via
    SLIP-0039 **using `--master-secret=HEX`** — otherwise `shamir create`
    generates its own random secret and the shards would not recover the root.
-   The human is prompted to transcribe the shards before continuing.
-5. Imports the root private key and cert into PIV slot `9c` on a YubiKey.
+   In `STORAGE_MODE=yubikey` (default) the human transcribes the shards
+   before continuing; in `STORAGE_MODE=disk` they're encrypted straight to
+   `root_seed_shards.txt.age`.
+5. Anchors the root private key + cert: imports into PIV slot `9c` on a
+   YubiKey (`yubikey` mode), or encrypts `root.key` to `root.key.age` with
+   `age` (`disk` mode).
 6. Issues an Ed25519 intermediate CA signed by the root.
-7. Scrubs `root.key` and the raw seed from disk. The root private key now
-   exists **only** on the YubiKey + in the shards.
+7. Scrubs plaintext `root.key` and the raw seed from disk. The root private
+   key now exists **only** on the YubiKey + in the shards (or, in disk mode,
+   only in `root.key.age` + `root_seed_shards.txt.age`).
+
+## Storage mode: YubiKey vs. disk
+
+`STORAGE_MODE` picks how the root private key and SLIP-0039 shards are
+anchored after generation. Default is `yubikey`.
+
+| | `yubikey` (default) | `disk` |
+|---|---|---|
+| Root key | Imported to YubiKey PIV slot `9c` | Encrypted to `root.key.age` with `age` |
+| Shards | Printed for hand transcription, distributed to trusted parties | Encrypted to `root_seed_shards.txt.age`, kept together |
+| Hardware needed | YubiKey 5.7+, USB passthrough | None |
+| Recovery needs | 2-of-3 shards, or the YubiKey | The age identity file |
+
+Disk mode trades the hardware anchor and human-distributed shards for a
+single age identity file under your own custody — simpler to run, but a
+single point of compromise if that identity file and `export/` end up in the
+same place. Prefer `yubikey` for the real production root; `disk` is useful
+for lab/test roots or when a YubiKey isn't available.
+
+To use it, generate an age keypair **ahead of time**, on the air-gapped host,
+and keep `identity.txt` offline (a password manager, an encrypted USB stick —
+anywhere other than `pki/export/`, which this script treats as disposable):
+
+```bash
+age-keygen -o identity.txt
+# Public key: age1...   <- this is DISK_ENCRYPTION_RECIPIENT
+```
+
+```bash
+STORAGE_MODE=disk \
+DISK_ENCRYPTION_RECIPIENT="age1..." \
+./pki/offline-root-ceremony.sh
+```
 
 ## Requirements
 
-- Air-gapped host with Docker and a USB-attached YubiKey.
-- **YubiKey 5.7 or later** for PIV Ed25519 support. Verify with
-  `ykman info` (look for "Form factor" + firmware ≥ 5.7).
-- `sudo` to start/stop host `pcscd` (so the container can grab the card reader).
-- No host smart card daemon running (`pcscd` is stopped on the host, started
-  inside the container).
+- Air-gapped host with Docker.
+- `STORAGE_MODE=yubikey` (default) additionally needs:
+  - A USB-attached **YubiKey 5.7 or later** for PIV Ed25519 support. Verify
+    with `ykman info` (look for "Form factor" + firmware ≥ 5.7).
+  - `sudo` to start/stop host `pcscd` (so the container can grab the card
+    reader). No host smart card daemon running (`pcscd` is stopped on the
+    host, started inside the container).
+- `STORAGE_MODE=disk` additionally needs an age recipient key generated ahead
+  of time (see [Storage mode](#storage-mode-yubikey-vs-disk)) — no YubiKey,
+  USB passthrough, or `sudo` required.
 
 ## Running
 
 ```bash
-# from the repo root — defaults baked in; override env vars to taste
+# from the repo root — defaults baked in (STORAGE_MODE=yubikey); override env vars to taste
 ./pki/offline-root-ceremony.sh
 
 # overrides
@@ -113,11 +161,16 @@ STEP_VERSION=0.30.6 \
 ROOT_CA_NAME="My Homelab Root CA" \
 SHAMIR_THRESHOLD=2 SHAMIR_SHARES=3 \
 ./pki/offline-root-ceremony.sh
+
+# disk storage mode instead of a YubiKey
+STORAGE_MODE=disk DISK_ENCRYPTION_RECIPIENT="age1..." \
+./pki/offline-root-ceremony.sh
 ```
 
-You will be prompted to transcribe the SLIP-0039 shards before the YubiKey
-import step. Do not press Enter until every shard is recorded somewhere
-offline.
+In `yubikey` mode you will be prompted to transcribe the SLIP-0039 shards
+before the YubiKey import step. Do not press Enter until every shard is
+recorded somewhere offline. In `disk` mode the shards are encrypted
+automatically — nothing to transcribe.
 
 ## After the ceremony
 
@@ -144,10 +197,13 @@ offline.
    it where relying parties will pick it up (k8s ConfigMap, a NixOS module
    writing to `/etc/ssl/certs/`, etc.).
 
-4. **Shards**: store each of the three shards with a different trusted party.
-   Any two re-derive the root seed (`shamir recover`), which can be re-imported
-   to a replacement YubiKey if the original is lost. One shard alone leaks
-   nothing about the root.
+4. **Shards**: in `yubikey` mode, store each of the three shards with a
+   different trusted party. Any two re-derive the root seed (`shamir
+   recover`), which can be re-imported to a replacement YubiKey if the
+   original is lost. One shard alone leaks nothing about the root. In `disk`
+   mode the shards live together, encrypted, in `export/root_seed_shards.txt.age`
+   — back that file (and `root.key.age`) up somewhere durable, e.g. alongside
+   the age identity in a password manager.
 
 5. **Scrub the bundle from the laptop** once Vault owns the CA:
    ```bash
@@ -156,7 +212,9 @@ offline.
    ```
    (Keep `intermediate.crt` + `root.crt` for chain bundling.)
 
-## Recovery (re-key a YubiKey from shards)
+## Recovery
+
+### From shards, re-key a YubiKey (`yubikey` mode)
 
 ```bash
 shamir recover        # enter 2 of the 3 shards → master secret hex
@@ -177,6 +235,25 @@ ykman piv keys import 9c root.key
 ykman piv certificates import 9c root.crt
 ```
 
+### From the age-encrypted files (`disk` mode)
+
+The root key doesn't need reconstructing from shards in this mode — it's
+already on disk, just encrypted:
+
+```bash
+age -d -i identity.txt -o root.key pki/export/root.key.age
+age -d -i identity.txt -o root_seed_shards.txt pki/export/root_seed_shards.txt.age
+```
+
+`root.key` is ready to use directly (e.g. as `--ca-key` for a follow-up
+intermediate ceremony). The decrypted shards are a redundant recovery path if
+`root.key.age` itself is ever lost or corrupted while the age identity
+survives — feed 2 of the 3 into `shamir recover` as above. Note both files
+are encrypted to the *same* age identity, so losing the identity itself takes
+out both paths at once; back it up as carefully as you would a root key.
+Shred the plaintext `root.key` / `root_seed_shards.txt` again once you're
+done with them.
+
 ## Operational notes
 
 - The script deliberately **does not** rotate the PIV management key. The
@@ -189,4 +266,10 @@ ykman piv certificates import 9c root.crt
   configure touch policy via `ykman piv keys set-touch` (YubiKey 5.7+).
 - Intermediate expiry is 2 years; root expiry is ~15 years. Re-issuance of
   an intermediate can be done in a follow-up ceremony using the root on the
-  YubiKey.
+  YubiKey (or `root.key.age` in disk mode).
+- `STORAGE_MODE=disk` is a deliberately weaker trust model than `yubikey`:
+  the root key and shards both collapse to "whoever holds the age identity
+  file," rather than requiring physical possession of a hardware token or
+  collusion between separate shard holders. Fine for a lab/test root; think
+  twice before using it for the root that Vault's production PKI mount
+  ultimately chains to.
