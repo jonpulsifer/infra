@@ -75,7 +75,7 @@ jobs:
         with:
           name: ${{ inputs.image }}-sd-image
           path: result/sd-image/nixos-image-sd-card-*
-          retention-days: 30
+          retention-days: 1
           compression-level: 0
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
