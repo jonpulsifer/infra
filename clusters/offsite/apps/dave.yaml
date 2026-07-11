@@ -15,7 +15,7 @@ spec:
         name: infra
         namespace: flux-system
   values:
-    image: docker.io/jonpulsifer/ai-agents:latest@sha256:4d3d5b10b68b9b81b68bae24ab70982ba5853bd858893f676ead8b2ed5685756
+    image: docker.io/jonpulsifer/ai-agents:latest@sha256:dbb6a306b6085d918ce162a87f0a639822c11187b67924e56a4b5c0beea2705c
     port: 18789
     hostname: dave.lolwtf.ca
     storageSize: 2Gi
