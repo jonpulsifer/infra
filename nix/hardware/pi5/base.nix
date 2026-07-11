@@ -5,6 +5,7 @@
 # the sd-image module and per-host volume labels on top.
 {
   lib,
+  pkgs,
   nixos-raspberrypi,
   ...
 }:
@@ -17,6 +18,8 @@
 
   # save some space
   documentation.enable = false;
+
+  environment.systemPackages = [ pkgs.wiringpi ];
 
   nixpkgs.hostPlatform = "aarch64-linux";
 

@@ -1,5 +1,6 @@
 {
   lib,
+  pkgs,
   modulesPath,
   ...
 }:
@@ -10,6 +11,10 @@
 
   # save some space
   documentation.enable = false;
+
+  # GPIO tooling for the LED HATs on this board family (pHAT BEAT on
+  # radiopi0, Blinkt! on blinkypi0).
+  environment.systemPackages = [ pkgs.wiringpi ];
 
   # Original Pi Zero W: BCM2835, single-core ARM1176JZF-S (armv6l). No
   # nixos-hardware/nixos-raspberrypi board module targets this chip (those
