@@ -15,6 +15,7 @@ on:
           - homepi4
           - weatherpi4
           - radiopi0
+          - blinkypi0
           - wsl
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,7 +24,7 @@ jobs:
   build:
     # Build Raspberry Pi images on the native ARM runner. The other image
     # targets are x86_64 NixOS configurations and use the standard runner.
-    runs-on: ${{ (contains(inputs.image, 'pi4') || inputs.image == 'radiopi0') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ (contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' || inputs.image == 'blinkypi0') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
       id-token: write
@@ -41,7 +42,7 @@ jobs:
           skipPush: ${{ github.ref != 'refs/heads/main' }}
       - name: Build image
         run: |
-          if [[ "${{ contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' }}" == "true" ]]; then
+          if [[ "${{ contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' || inputs.image == 'blinkypi0' }}" == "true" ]]; then
             nix build ".#nixosConfigurations.${{ inputs.image }}.config.system.build.sdImage"
           else
             nix build ".#packages.x86_64-linux.${{ inputs.image }}"
@@ -71,7 +72,7 @@ jobs:
           process_gcloudignore: false
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: ${{ contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' }}
+        if: ${{ contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' || inputs.image == 'blinkypi0' }}
         with:
           name: ${{ inputs.image }}-sd-image
           path: result/sd-image/nixos-image-sd-card-*

@@ -11,6 +11,7 @@ on:
           - homepi4
           - weatherpi4
           - radiopi0
+          - blinkypi0
       mode:
         description: "nixos-rebuild action (boot activates on next reboot; switch activates immediately)"
         required: true

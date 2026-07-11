@@ -86,6 +86,7 @@
         "oldboy"
         "spore"
         "radiopi0"
+        "blinkypi0"
       ];
 
       legacyPackages = forAllSystems (
@@ -182,6 +183,14 @@
           system = "aarch64-linux";
           modules = [ ./nix/hosts/radiopi0.nix ];
         };
+        # Same board family as radiopi0 (Pi Zero W, armv6l), same cross-build
+        # story -- but the physical device is currently unplugged, so this
+        # config is derived from docs/pages/Hosts___blinkypi0.md and mirrors
+        # radiopi0.nix rather than being verified against live hardware.
+        blinkypi0 = mkHost "blinkypi0" {
+          system = "aarch64-linux";
+          modules = [ ./nix/hosts/blinkypi0.nix ];
+        };
 
         oldboy = mkHost "oldboy" {
           tags = [ "gcp" ];
@@ -237,6 +246,7 @@
         # above.
         aarch64-linux = {
           radiopi0 = nixosConfigurations.radiopi0.config.system.build.sdImage;
+          blinkypi0 = nixosConfigurations.blinkypi0.config.system.build.sdImage;
         };
       };
 
