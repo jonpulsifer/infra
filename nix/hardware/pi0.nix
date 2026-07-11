@@ -35,18 +35,68 @@
   # letting the real (likely genuinely broken, not just meta-flagged) cross
   # build run.
   nixpkgs.overlays = [
-    (
-      final: prev: {
-        efivar = prev.runCommand "empty-efivar" { } "mkdir $out";
-        efibootmgr = prev.runCommand "empty-efibootmgr" { } "mkdir $out";
-      }
-    )
+    (final: prev: {
+      efivar = prev.runCommand "empty-efivar" { } "mkdir $out";
+      efibootmgr = prev.runCommand "empty-efibootmgr" { } "mkdir $out";
+    })
   ];
 
-  # Required for the Pi Zero W's wifi/bt firmware (bcm43438).
+  # Required for the Pi Zero W's wifi firmware (bcm43438).
   hardware.enableRedistributableFirmware = true;
 
   boot = {
+    # linux_rpi1 starts from Raspberry Pi's broad bcmrpi_defconfig, which
+    # enables drivers for every Pi generation and a large collection of
+    # unrelated expansion hardware. Some of the Pi 5 / DesignWare modules
+    # also emit 64-bit division calls that cannot be linked as ARMv6 kernel
+    # modules (__aeabi_{u,}ldivmod is not exported by the kernel).
+    #
+    # Keep the interfaces these appliances use (MMC, USB, wifi, GPIO,
+    # SPI, BCM2835 I2C, and ASoC audio), and trim hardware that cannot exist
+    # on an original Pi Zero W or is unused by either attached LED/audio HAT.
+    kernelPatches = [
+      {
+        name = "pi-zero-minimal-kernel-config";
+        patch = null;
+        structuredExtraConfig =
+          let
+            disabled = lib.mkForce lib.kernel.no;
+          in
+          {
+            # Pi 4/5 and RP1 peripherals.
+            BCM2711_THERMAL = disabled;
+            CLK_BCM2711_DVP = disabled;
+            PWM_RP1 = disabled;
+            SND_RP1_AUDIO_OUT = disabled;
+            VIDEO_RP1_CFE = disabled;
+
+            # The Zero uses the BCM2835 I2C controller, not DesignWare.
+            I2C_DESIGNWARE_CORE = disabled;
+            I2C_DESIGNWARE_PCI = disabled;
+            I2C_DESIGNWARE_PLATFORM = disabled;
+            I2C_DESIGNWARE_SLAVE = disabled;
+
+            # Neither host has camera, tuner, sensor/ADC, or specialist radio
+            # hardware attached.
+            MEDIA_SUPPORT = disabled;
+            IIO = disabled;
+            BT = disabled;
+            CAN = disabled;
+            NFC = disabled;
+            WWAN = disabled;
+            HAMRADIO = disabled;
+
+            # An original Pi Zero has no PCMCIA, SATA, RAID, or device mapper.
+            # Keep the SCSI core selected by USB mass storage so its USB port
+            # remains generally useful.
+            PCCARD = disabled;
+            ATA = disabled;
+            MD = disabled;
+            BLK_DEV_DM = disabled;
+          };
+      }
+    ];
+
     # sd-image-raspberrypi pulls in the generic installer's filesystem set
     # (zfs, btrfs, cifs, f2fs, ntfs, xfs) via profiles/base.nix -- all
     # irrelevant here, and zfs in particular is a large, slow, from-source
