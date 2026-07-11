@@ -23,6 +23,9 @@ let
     serviceCidr = d.SERVICE_CIDR;
     dns = lib.splitString "," d.CLUSTER_DNS;
     upstreamDns = d.ROUTER_IP;
+    # NFS export and firewall require the node CIDR and the LB VIP pool.
+    nodeCidr = d.K8S_NODE_CIDR;
+    lbRange = d.LB_RANGE;
   };
 in
 {

@@ -1,6 +1,9 @@
+# k8s_cidr is the /28 network, not the full CIDR prefix. The cluster-topology
+# holds the /28 (K8S_NODE_CIDR = "10.89.0.0/28"), but unifi_network.subnet
+# requires the full CIDR notation with mask (e.g. "10.89.0.0/28"), so we take the
+# node CIDR as-is. The DHCP range is derived from it.
 locals {
   lan_cidr = "192.168.1.1/24"
-  k8s_cidr = "10.89.0.1/28"
 }
 
 resource "unifi_network" "default" {
@@ -25,7 +28,7 @@ resource "unifi_network" "default" {
 
 resource "unifi_network" "k8s" {
   name               = "Kubernetes"
-  subnet             = local.k8s_cidr
+  subnet             = local.topology.K8S_NODE_CIDR
   vlan               = 2
   setting_preference = "auto"
   auto_scale         = false
@@ -35,8 +38,8 @@ resource "unifi_network" "k8s" {
   dhcp_server = {
     enabled   = true
     leasetime = local.one_day
-    start     = cidrhost(local.k8s_cidr, 2)
-    stop      = cidrhost(local.k8s_cidr, 14)
+    start     = cidrhost(local.topology.K8S_NODE_CIDR, 2)
+    stop      = cidrhost(local.topology.K8S_NODE_CIDR, 14)
     boot = {
       enabled = false
     }
