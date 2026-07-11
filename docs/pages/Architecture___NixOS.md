@@ -19,6 +19,10 @@ tags:: architecture
 	- ```bash
 	  nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
 	  ```
+	- Build a Raspberry Pi SD image natively on ARM:
+	- ```bash
+	  nix build .#nixosConfigurations.<hostname>.config.system.build.sdImage
+	  ```
 	- Deploy immediately:
 	- ```bash
 	  nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
@@ -31,6 +35,10 @@ tags:: architecture
 	- ```bash
 	  sudo nixos-rebuild switch --rollback
 	  ```
+- ## Downloadable Pi images
+	- Run the manual `nix-image-builder` workflow from GitHub Actions and select a Raspberry Pi image.
+	- Pi images build on a native `ubuntu-24.04-arm` runner and are uploaded as `<image>-sd-image` artifacts.
+	- Artifacts are retained for one day, so download them from the workflow run promptly.
 - ## Auto-upgrades keep git honest
 	- Hosts auto-rebuild from GitHub `main`. A config deployed from a branch **silently reverts** on the next upgrade cycle unless the branch merges promptly. Treat `nixos-rebuild` from a branch as a test, not a deploy.
 - ## Disk layout

@@ -16,7 +16,7 @@ tags:: architecture
 	- `trivy.yml` — scans `.tf` and `clusters/**` for CRITICAL/HIGH IaC vulnerabilities
 	- `wiki.yml` — builds this wiki from `docs/` and deploys it to Cloudflare Pages
 	- `pulsifer-ca.yml` — builds and deploys the Hugo site to GitHub Pages
-	- `nixos-deploy.yaml`, `nix-ci.yaml`, `nix-image-builder.yaml` — NixOS build/deploy pipelines
+	- `nixos-deploy.yaml`, `nix-ci.yaml`, `nix-image-builder.yaml` — NixOS build/deploy pipelines; the manual image builder produces downloadable Pi SD-image artifacts from native ARM runners, retained for one day
 	- **Renovate** opens PRs for Helm charts, container images, Terraform providers, and GitHub Actions
 - ## The bootstrap exceptions
 	- Two places where a layer reaches into another: the Flux bootstrap (`clusters/<site>/bootstrap/` Terraform installs `flux-operator`/`flux-instance`), and the Atlantis ↔ ArgoCD auth wiring (see [[Runbooks/Kubernetes GitOps Change]] for token rotation).

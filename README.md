@@ -53,9 +53,21 @@ nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
 # Build installation media
 nix build .#iso         # x86_64 NixOS ISO
 nix build .#wsl         # WSL tarball
-nix build .#cloudpi4    # Raspberry Pi 4 SD image (cross-built via qemu emulation)
-nix build .#dns         # Raspberry Pi 5 SD image (cross-built via qemu emulation)
+nix build .#cloudpi4    # Raspberry Pi 4 SD image (local x86_64 build)
+nix build .#dns         # Raspberry Pi 5 SD image (local x86_64 build)
 ```
+
+For native Raspberry Pi image builds, run the host configuration on an
+`aarch64-linux` machine:
+
+```bash
+nix build .#nixosConfigurations.cloudpi4.config.system.build.sdImage
+```
+
+The manual `nix-image-builder` GitHub Actions workflow builds Pi images on a
+native ARM runner. Select an image from the workflow dispatch menu, then
+download the image from the run's artifact named `<image>-sd-image`; artifacts
+are retained for one day.
 
 See [`nix/README.md`](./nix/README.md) for detailed NixOS documentation.
 
