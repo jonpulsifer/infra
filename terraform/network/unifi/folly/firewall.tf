@@ -44,10 +44,13 @@ resource "unifi_firewall_group" "teleport_cidr" {
 # inline (matching_target = "IP") so the pod CIDRs and Cilium LB VIP pools are
 # permitted too.
 locals {
+  # Cross-site k8s CIDRs derived from the network SSOT (topology.tf).
+  # folly_k8s_cidrs covers the folly cluster's node subnet, Cilium LB VIP pool,
+  # and pod CIDR.  nest_k8s_cidrs covers the offsite cluster's equivalent.
   folly_k8s_cidrs = [
-    "10.3.0.0/26",   # nodes (Kubernetes network, VLAN 8)
-    "10.3.0.64/26",  # Cilium LB VIP pool
-    "10.100.0.0/20", # pod CIDR
+    local.topology.K8S_NODE_CIDR,    # nodes (Kubernetes network, VLAN 8)
+    local.lb_range,                    # Cilium LB VIP pool
+    local.topology.CILIUM_POD_CIDR,   # pod CIDR
   ]
   nest_k8s_cidrs = [
     "10.89.0.0/28",  # offsite nodes

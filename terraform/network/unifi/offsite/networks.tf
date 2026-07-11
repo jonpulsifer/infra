@@ -1,6 +1,8 @@
 locals {
   lan_cidr = "192.168.1.1/24"
-  k8s_cidr = "10.89.0.1/28"
+  # node_cidr keeps the gateway-host (.1) form the UniFi network subnet expects;
+  # cidrhost() masks host bits so the static_records/dhcp ranges below are unchanged.
+  node_cidr = "${cidrhost(local.topology.K8S_NODE_CIDR, 1)}/${split("/", local.topology.K8S_NODE_CIDR)[1]}"
 }
 
 resource "unifi_network" "default" {
@@ -25,7 +27,7 @@ resource "unifi_network" "default" {
 
 resource "unifi_network" "k8s" {
   name               = "Kubernetes"
-  subnet             = local.k8s_cidr
+  subnet             = local.node_cidr
   vlan               = 2
   setting_preference = "auto"
   auto_scale         = false
@@ -35,8 +37,8 @@ resource "unifi_network" "k8s" {
   dhcp_server = {
     enabled   = true
     leasetime = local.one_day
-    start     = cidrhost(local.k8s_cidr, 2)
-    stop      = cidrhost(local.k8s_cidr, 14)
+    start     = cidrhost(local.topology.K8S_NODE_CIDR, 2)
+    stop      = cidrhost(local.topology.K8S_NODE_CIDR, 14)
     boot = {
       enabled = false
     }
