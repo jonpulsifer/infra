@@ -46,7 +46,26 @@
   # Required for the Pi Zero W's wifi/bt firmware (bcm43438).
   hardware.enableRedistributableFirmware = true;
 
-  boot.zfs.forceImportRoot = false;
+  boot = {
+    # sd-image-raspberrypi pulls in the generic installer's filesystem set
+    # (zfs, btrfs, cifs, f2fs, ntfs, xfs) via profiles/base.nix -- all
+    # irrelevant here, and zfs in particular is a large, slow, from-source
+    # cross build with no armv6l cache. Only ext4 (root) and vfat (firmware
+    # partition) are actually used.
+    supportedFilesystems = lib.mkForce [
+      "ext4"
+      "vfat"
+    ];
+
+    # Same installer default pulls in drivers for SATA, NVMe, RAID, virtio,
+    # and USB HID devices that don't exist on this board. The Pi Zero W's SD
+    # host controller is built into the kernel; only the modular MMC block
+    # driver is needed to mount an ext4 root from the SD card.
+    initrd = {
+      availableKernelModules = lib.mkForce [ "mmc_block" ];
+      kernelModules = lib.mkForce [ ];
+    };
+  };
 
   sdImage.compressImage = true;
 }
