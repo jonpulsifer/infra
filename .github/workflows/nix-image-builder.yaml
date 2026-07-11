@@ -14,13 +14,17 @@ on:
           - cloudpi4
           - homepi4
           - weatherpi4
+          - radiopi0
           - wsl
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
-    runs-on: ${{ contains(inputs.image, 'pi4') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    # radiopi0 (armv6l) cross-compiles from aarch64-linux (nix/hardware/pi0.nix
+    # sets nixpkgs.buildPlatform/hostPlatform) same as the native aarch64 pi4
+    # builds -- both want the arm64 runner, just for different reasons.
+    runs-on: ${{ (contains(inputs.image, 'pi4') || inputs.image == 'radiopi0') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
       id-token: write
@@ -61,7 +65,7 @@ jobs:
           process_gcloudignore: false
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: ${{ contains(inputs.image, 'pi4') }}
+        if: ${{ contains(inputs.image, 'pi4') || inputs.image == 'radiopi0' }}
         with:
           name: ${{ inputs.image }}-sd-image
           path: result/sd-image/nixos-image-sd-card-*
