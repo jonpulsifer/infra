@@ -1,7 +1,7 @@
 {
-  "lastChangelogVersion": "0.78.0",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "lastChangelogVersion": "0.80.3",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "minimax-m2.7",
   "defaultThinkingLevel": "high",
   "hideThinkingBlock": false,
   "theme": "hipster-night",
