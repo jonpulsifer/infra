@@ -27,6 +27,7 @@ krew = "latest"
 {{- if eq .chezmoi.os "linux" }}
 btop = "latest"
 neovim = "latest"
+node = "latest" # runtime for npm-based LSP servers (yamlls, bashls, jsonls) installed by mason
 {{- if contains "microsoft" .chezmoi.kernel.osrelease }}
 gcloud = "latest"
 codex = "latest"
