@@ -29,13 +29,26 @@
 
   boot = {
     zfs.forceImportRoot = false;
+
+    # The generic aarch64 installer image pulls in all-hardware.nix, which
+    # otherwise adds drivers for SATA, NVMe, RAID, virtio, displays, and other
+    # boards to the initrd.  The Pi 4 kernel has its SD host controller and
+    # ext4 support built in; only the modular MMC block driver is needed to
+    # mount an ext4 root from the SD card.
+    initrd = {
+      availableKernelModules = lib.mkForce [ "mmc_block" ];
+      kernelModules = lib.mkForce [ ];
+    };
+
     kernelParams = [
       "console=tty0"
       "cma=256M"
       "cgroup_enable=cpuset"
       "cgroup_enable=memory"
     ];
-    supportedFilesystems = [
+    # sd-image-aarch64 enables the installer filesystem set by default.  These
+    # hosts only need ext4 for root and vfat for the firmware partition.
+    supportedFilesystems = lib.mkForce [
       "ext4"
       "vfat"
     ];
