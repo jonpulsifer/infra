@@ -5,13 +5,23 @@ on:
       - main
     paths:
       - .github/workflows/nix-ci.yaml
+      - apps/ddnsd/**
+      - dotfiles/**
       - flake.lock
-      - "**/*.nix"
+      - flake.nix
+      - nix/**
+      - clusters/folly/config/cluster-topology.json
+      - terraform/network/unifi/folly/lab.tf.json
   pull_request:
     paths:
       - .github/workflows/nix-ci.yaml
+      - apps/ddnsd/**
+      - dotfiles/**
       - flake.lock
-      - "**/*.nix"
+      - flake.nix
+      - nix/**
+      - clusters/folly/config/cluster-topology.json
+      - terraform/network/unifi/folly/lab.tf.json
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,6 +34,7 @@ jobs:
         with:
           extra-conf: |
             experimental-features = nix-command flakes
+            accept-flake-config = true
       - uses: DeterminateSystems/flake-checker-action@a0f068d37b542f3150564fbf1164fec2d958ee11 # main
       - run: nix flake check
   nixos:
@@ -35,28 +46,78 @@ jobs:
         with:
           extra-conf: |
             experimental-features = nix-command flakes
+            accept-flake-config = true
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
       - run: nix build .#nixosConfigurations.optiplex.config.system.build.toplevel
-  nixos-aarch64:
-    # Build one Pi (weatherpi4) on a native ARM runner so aarch64 packages
-    # get cached in Cachix — cross-compiling or building these on the Pis
-    # themselves is painfully slow. Runs on push to main and on PRs (cache
-    # push is gated on main, see skipPush below).
-    runs-on: ubuntu-24.04-arm
+  images:
     needs: check
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      # Build the complete image set rather than maintaining a second copy of
+      # the Nix import graph to guess which outputs a change affects.
+      matrix:
+        include:
+          - image: container
+            runner: ubuntu-latest
+            attribute: packages.x86_64-linux.container
+          - image: gce
+            runner: ubuntu-latest
+            attribute: packages.x86_64-linux.gce
+          - image: iso
+            runner: ubuntu-latest
+            attribute: packages.x86_64-linux.iso
+          - image: oldboy
+            runner: ubuntu-latest
+            attribute: packages.x86_64-linux.oldboy
+          - image: wsl
+            runner: ubuntu-latest
+            attribute: packages.x86_64-linux.wsl
+          - image: netboot
+            runner: ubuntu-latest
+            attribute: packages.x86_64-linux.netboot
+          - image: cloudpi4
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.cloudpi4.config.system.build.sdImage
+          - image: homepi4
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.homepi4.config.system.build.sdImage
+          - image: weatherpi4
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.weatherpi4.config.system.build.sdImage
+          - image: radiopi0
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.radiopi0.config.system.build.sdImage
+          - image: dns
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.dns.config.system.build.sdImage
+          - image: rackpi5
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.rackpi5.config.system.build.sdImage
+          - image: rackpi5-ram
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.rackpi5-ram.config.system.build.piBootImg
+          - image: spore
+            runner: ubuntu-24.04-arm
+            attribute: nixosConfigurations.spore.config.system.build.sdImage
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: NixOS/nix-installer-action@00b25e1d0d56f56e90ee9814fb4385c721348f74 # main
         with:
           extra-conf: |
             experimental-features = nix-command flakes
+            accept-flake-config = true
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
           name: jonpulsifer
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: ${{ github.ref != 'refs/heads/main' }}
-      - run: nix build .#nixosConfigurations.weatherpi4.config.system.build.toplevel
+      - name: Build ${{ matrix.image }} image
+        run: nix build ".#${{ matrix.attribute }}"
+      - name: Build WSL tarball
+        if: matrix.image == 'wsl'
+        run: sudo ./result/bin/nixos-wsl-tarball-builder ./nixos.wsl
