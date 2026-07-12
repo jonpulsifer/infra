@@ -1,4 +1,4 @@
-status:: accepted
+status:: superseded by [[ADR/0011 Migrate dotfiles from chezmoi to mise]]
 date:: 2025 (backfilled 2026-07-08)
 deciders:: [[jawn]]
 tags:: adr

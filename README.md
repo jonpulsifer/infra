@@ -14,7 +14,7 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 ├── apps/          # Deployable first-party services (agent-web, hermes, tidbyt, …)
 ├── packages/      # Shared building blocks (agent-web-ui, charts/)
 ├── images/        # Base & tool OCI images + cloudlab-linux VM build tooling
-└── dotfiles/      # chezmoi-managed dotfiles
+└── dotfiles/      # mise-managed dotfiles
 ```
 
 ## 🚀 Quick Start

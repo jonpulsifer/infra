@@ -19,4 +19,4 @@ Reference bridge: `references/runbook.md`.
 - Prefer `nixos-rebuild boot --sudo --target-host <hostname> --flake .#<hostname>` for remote/headless hosts.
 - Use `switch` only when immediate activation is intended.
 - Roll back with `nix run .#<hostname> -- sudo nixos-rebuild switch --rollback` when the host is reachable.
-- Dotfiles are chezmoi-managed from in-repo `dotfiles/` via `nix/system/chezmoi.nix`; there is no dotfiles flake input or home-manager integration.
+- Dotfiles are mise-managed from in-repo `dotfiles/` via `nix/system/mise-dotfiles.nix`; there is no dotfiles flake input or home-manager integration.

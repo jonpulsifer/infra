@@ -53,7 +53,7 @@ tags:: runbook, nixos
 	  nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel --no-link
 	  ```
 - # Dotfiles
-	- Dotfiles are chezmoi-managed from the in-repo `dotfiles/` tree. `nix/system/chezmoi.nix` carries that subtree into the system closure and runs `chezmoi apply --source <store-path>` during activation. See [[ADR/0006 Dotfiles vendored in-repo with chezmoi]].
+	- Dotfiles are mise-managed from the in-repo `dotfiles/` tree. `nix/system/mise-dotfiles.nix` carries that subtree into the system closure and runs `mise bootstrap --only dotfiles` during activation. See [[ADR/0011 Migrate dotfiles from chezmoi to mise]].
 	- There is no dotfiles flake input and no home-manager integration.
 - # Auto-upgrade caveat
 	- Hosts auto-rebuild from GitHub `main`. A config deployed from a branch can be reverted by the next auto-upgrade unless the branch merges promptly. Treat a branch deploy as a test unless it has merged.
