@@ -38,11 +38,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    mise = {
-      url = "github:jdx/mise";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     keys = {
       url = "https://github.com/jonpulsifer.keys";
       flake = false;
@@ -99,6 +94,9 @@
         import nixpkgs {
           inherit system;
           config.allowUnfree = true;
+          overlays = [
+            (import ./nix/overlays/mise.nix)
+          ];
         }
       );
 
