@@ -132,7 +132,6 @@
             ./nix/system/quiker.nix
             ./nix/system/tailscale-disable.nix
             ./nix/system/sops.nix
-            ./nix/services/github-runner.nix
             ./nix/services/yarr.nix
           ];
           extraConfig = {
