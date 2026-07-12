@@ -28,6 +28,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     hosts = {
       url = "github:StevenBlack/hosts";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -126,12 +131,18 @@
           imports = [
             ./nix/system/quiker.nix
             ./nix/system/tailscale-disable.nix
+            ./nix/system/sops.nix
             ./nix/services/github-runner.nix
             ./nix/services/yarr.nix
           ];
           extraConfig = {
             virtualisation.docker.enable = true;
             homelab.disko.device = "/dev/sda";
+            sops.defaultSopsFile = ./nix/secrets/oldschool.sops.yaml;
+            # harmonia's binary-cache signing key (public half committed at
+            # nix/secrets/oldschool-harmonia-cache.pub); wired into
+            # services.harmonia in the deploy-harmonia ticket.
+            sops.secrets."harmonia-cache-key" = { };
           };
         };
         retrofit = mkHost "retrofit" {

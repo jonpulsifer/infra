@@ -5,3 +5,13 @@ creation_rules:
     key_groups:
       - age:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+  # Bare NixOS host secrets (nix/secrets/<host>.sops.yaml), decrypted by
+  # sops-nix on the host itself. Each host's own SSH-host-key-derived age
+  # recipient is added alongside the fleet admin key as new hosts onboard --
+  # see nix/system/sops.nix.
+  - path_regex: nix/secrets/.*\.sops\.ya?ml
+    key_groups:
+      - age:
+          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+          # oldschool (ssh-to-age of its ed25519 host key)
+          - age1apj76svz7gq7uk9w702fv589s2vcu2vfrayx0uucrkrjwl7xcqaqv6g50c
