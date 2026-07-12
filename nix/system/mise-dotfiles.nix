@@ -14,9 +14,7 @@ let
     path = "${inputs.self}/dotfiles";
     name = "mise-dotfiles";
   };
-  mise = inputs.mise.packages.${pkgs.stdenv.hostPlatform.system}.mise.overrideAttrs (_: {
-    doCheck = false;
-  });
+  mise = import ../lib/mise-package.nix { inherit pkgs inputs; };
 in
 lib.mkIf (user.isNormalUser or false) {
   system.activationScripts.miseDotfiles = {

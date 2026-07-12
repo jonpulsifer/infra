@@ -13,6 +13,7 @@ let
   sshKeys = lib.splitString "\n" (builtins.readFile inputs.keys);
   rowbuttKeys = lib.splitString "\n" (builtins.readFile inputs.rowbuttkeys);
   consolePasswordHash = "$6$MyfHzd0UhaiNWR2.$e3CjotacfdkRzNBs/AyIGLkneJCeIZcIVd2zLm5cEoJbSCpKB2ilEAIBtqZQl6xiNgngoFH6dyqyabhwjYVQU/";
+  mise = import ../lib/mise-package.nix { inherit pkgs inputs; };
 in
 {
   programs.zsh.enable = true;

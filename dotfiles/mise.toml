@@ -19,6 +19,7 @@ dotfiles.root = "."
 "~/.config/nvim" = { mode = "copy" }
 "~/.local/bin" = { mode = "copy" }
 "~/.pi/agent" = { mode = "copy" }
+"~/.claude/settings.json" = { mode = "copy" }
 
 # Agent skills: source lives in `skills/` (this repo's canonical copy); all three agent
 # tools read from their own location, so each gets its own direct entry rather than
@@ -39,7 +40,6 @@ dotfiles.root = "."
 # otherwise make mise try to parse this Tera template as its own config and fail.
 "~/.config/mise/config.toml" = { mode = "template", source = "mise-global-config.toml" }
 "~/.config/zsh/.zshrc" = { mode = "template" }
-"~/.claude/settings.json" = { mode = "template" }
 "~/.claude/statusline.sh" = { mode = "template" }
 
 [vars]
@@ -61,7 +61,7 @@ moonpay_instead_of = ""
 # 600/700 in any mode) — rework via a bootstrap hook instead of a platform-specific shim.
 # Fires on `mise bootstrap --only dotfiles` too (verified: hooks run around the dotfiles
 # step regardless of --only/--skip scoping), so this covers NixOS, macOS, and WSL alike.
-post-dotfiles = "chmod 700 ~/.gnupg && chmod 600 ~/.ssh/config"
+post-dotfiles = "chmod 700 ~/.gnupg ~/.ssh && chmod 600 ~/.ssh/config"
 
 [tasks.bootstrap]
 # Runs automatically as the "custom task" step of `mise bootstrap` on macOS (step 10:

@@ -28,9 +28,11 @@ shellcheck .local/bin/* 2>/dev/null
 
 - **Templating**: real per-machine/OS/work-personal conditionals (Tera) live in
   `.config/git/config`, `.ssh/config`, `.gnupg/gpg.conf`, `.config/ghostty/config`,
-  `.config/zsh/.zshrc`, `mise-global-config.toml`, `.claude/settings.json`,
-  `.claude/statusline.sh`. WSL detection has no native mise function — done via `exec()`
-  against `/proc/sys/kernel/osrelease`.
+  `.config/zsh/.zshrc`, `mise-global-config.toml`, `.claude/statusline.sh`. WSL detection
+  has no native mise function — done via `exec()` against `/proc/sys/kernel/osrelease`.
+  `.claude/settings.json` has no per-machine variance and is plain `mode = "copy"`
+  (folds in what was a separately-named, never-actually-applied `settings.chezmoi.json`
+  under chezmoi).
 - **Skills**: source under `skills/`; `mise.toml` deploys the whole directory directly to
   `~/.agents/skills`, `~/.claude/skills`, and `~/.gemini/config/skills` (no per-file
   wrapper indirection).
