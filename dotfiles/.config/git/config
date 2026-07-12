@@ -1,5 +1,5 @@
 {%- set is_work = get_env(name="MISE_ENV", default="personal") == "work" -%}
-{%- set is_wsl = exec(command="grep -qi -e microsoft -e wsl /proc/sys/kernel/osrelease 2>/dev/null && echo true || echo false") == "true" -%}
+{%- set is_wsl = get_env(name="WSL_DISTRO_NAME", default="") != "" -%}
 {%- set signingkey = vars.git_signingkey -%}
 {%- if not is_work and is_wsl -%}
 {%-   set signingkey = vars.git_signingkey_wsl -%}

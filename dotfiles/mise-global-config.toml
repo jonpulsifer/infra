@@ -1,4 +1,4 @@
-{%- set is_wsl = exec(command="grep -qi -e microsoft -e wsl /proc/sys/kernel/osrelease 2>/dev/null && echo true || echo false") == "true" -%}
+{%- set is_wsl = get_env(name="WSL_DISTRO_NAME", default="") != "" -%}
 [settings]
 experimental = true
 minimum_release_age_excludes = ["claude-code", "codex", "pi", "opencode"]
