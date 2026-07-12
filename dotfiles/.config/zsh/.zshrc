@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Zsh — chezmoi external plugins (~/.local/share/zsh/plugins) + mise
+# Zsh — mise-managed plugins (http backend, see ~/.config/mise/config.toml) + mise
 export ZDOTDIR="${ZDOTDIR:-$HOME/.config/zsh}"
 
 # --- PATH: user scripts first, then mise shims ---
@@ -9,7 +9,7 @@ if command -v mise >/dev/null 2>&1; then
   export MISE_NODE_COMPILE=false
 fi
 
-{{ if eq .chezmoi.os "darwin" -}}
+{% if os() == "macos" -%}
 # Homebrew — all macOS hosts
 if [[ -x /opt/homebrew/bin/brew ]]; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -34,7 +34,7 @@ fi
 [[ -s "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc" ]] && \
   source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc"
 
-{{ end -}}
+{% endif -%}
 
 # --- Early zstyles (before prompt/plugins) ---
 setopt TRANSIENT_RPROMPT
@@ -65,27 +65,34 @@ ZSH_HIGHLIGHT_STYLES[dollar-double-quoted-argument]=fg=009
 ZSH_HIGHLIGHT_STYLES[back-double-quoted-argument]=fg=009
 ZSH_HIGHLIGHT_STYLES[assign]=none
 
-# --- Zsh plugins (chezmoi .chezmoiexternal.yaml → ~/.local/share/zsh/plugins) ---
-ZPLUG_DIR="${ZPLUG_DIR:-$HOME/.local/share/zsh/plugins}"
-fpath+=("$ZPLUG_DIR/kube-ps1")
-fpath+=("$ZPLUG_DIR/pure")
+# --- Zsh plugins (mise http-backend tools, see ~/.config/mise/config.toml) ---
+# Resolved at shell-start rather than a fixed directory, since each plugin's install path
+# is versioned (~/.local/share/mise/installs/http-<name>/<version>/).
+ZPLUG_PURE="$(mise where http:zsh-plugin-pure 2>/dev/null)"
+ZPLUG_FZF_TAB="$(mise where http:zsh-plugin-fzf-tab 2>/dev/null)"
+ZPLUG_AUTOSUGGESTIONS="$(mise where http:zsh-plugin-autosuggestions 2>/dev/null)"
+ZPLUG_SYNTAX_HIGHLIGHTING="$(mise where http:zsh-plugin-syntax-highlighting 2>/dev/null)"
+ZPLUG_KUBE_PS1="$(mise where http:zsh-plugin-kube-ps1 2>/dev/null)"
+
+[[ -n "$ZPLUG_KUBE_PS1" ]] && fpath+=("$ZPLUG_KUBE_PS1")
+[[ -n "$ZPLUG_PURE" ]] && fpath+=("$ZPLUG_PURE")
 [[ -d /opt/homebrew/share/zsh/site-functions ]] && fpath[1,0]="/opt/homebrew/share/zsh/site-functions"
 
 autoload -Uz compinit && compinit -C
 
 # Order: autosuggestions → fzf-tab → pure prompt → syntax-highlighting (must be last)
-[[ -r "$ZPLUG_DIR/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] && \
-  source "$ZPLUG_DIR/zsh-autosuggestions/zsh-autosuggestions.zsh"
-[[ -r "$ZPLUG_DIR/fzf-tab/fzf-tab.zsh" ]] && \
-  source "$ZPLUG_DIR/fzf-tab/fzf-tab.zsh"
+[[ -n "$ZPLUG_AUTOSUGGESTIONS" && -r "$ZPLUG_AUTOSUGGESTIONS/zsh-autosuggestions.zsh" ]] && \
+  source "$ZPLUG_AUTOSUGGESTIONS/zsh-autosuggestions.zsh"
+[[ -n "$ZPLUG_FZF_TAB" && -r "$ZPLUG_FZF_TAB/fzf-tab.zsh" ]] && \
+  source "$ZPLUG_FZF_TAB/fzf-tab.zsh"
 
-if [[ -r "$ZPLUG_DIR/pure/pure.zsh" ]]; then
+if [[ -n "$ZPLUG_PURE" && -r "$ZPLUG_PURE/pure.zsh" ]]; then
   autoload -Uz promptinit && promptinit
   prompt pure
 fi
 
-[[ -r "$ZPLUG_DIR/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && \
-  source "$ZPLUG_DIR/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+[[ -n "$ZPLUG_SYNTAX_HIGHLIGHTING" && -r "$ZPLUG_SYNTAX_HIGHLIGHTING/zsh-syntax-highlighting.zsh" ]] && \
+  source "$ZPLUG_SYNTAX_HIGHLIGHTING/zsh-syntax-highlighting.zsh"
 
 # --- fzf (Dracula-ish) ---
 export FZF_DEFAULT_OPTS="\
@@ -139,8 +146,8 @@ bindkey "^[[1;5D" backward-word
 [[ -n "${key[Shift-Tab]}" ]] && bindkey -- "${key[Shift-Tab]}"  reverse-menu-complete
 
 # --- Kubernetes prompt + kubecolor (optional) ---
-if command -v kubectl >/dev/null 2>&1 && [[ -r "$HOME/.local/share/zsh/plugins/kube-ps1/kube-ps1.sh" ]]; then
-  source "$HOME/.local/share/zsh/plugins/kube-ps1/kube-ps1.sh"
+if command -v kubectl >/dev/null 2>&1 && [[ -n "$ZPLUG_KUBE_PS1" && -r "$ZPLUG_KUBE_PS1/kube-ps1.sh" ]]; then
+  source "$ZPLUG_KUBE_PS1/kube-ps1.sh"
 
   # Load kubectl completions before aliasing to kubecolor
   source <(kubectl completion zsh)

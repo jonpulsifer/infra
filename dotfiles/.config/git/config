@@ -1,26 +1,22 @@
-{{- $isWSL := and (eq .chezmoi.os "linux") (or (contains "microsoft" .chezmoi.kernel.osrelease) (contains "WSL" .chezmoi.kernel.osrelease)) -}}
-{{- $isWork := eq .chezmoi.username .git.work_username -}}
-{{- $identity := .git.identity.personal -}}
-{{- if $isWork -}}
-{{-   $identity = .git.identity.work -}}
-{{- end -}}
-{{- $signingKey := $identity.signingkey -}}
-{{- if and (not $isWork) $isWSL -}}
-{{-   $signingKey = $identity.signingkey_wsl -}}
-{{- end -}}
-{{- $gpgProgram := "" -}}
-{{- if and $isWork (eq .chezmoi.os "darwin") -}}
-{{-   $gpgProgram = .git.gpg.darwin_program -}}
-{{- else if $isWSL -}}
-{{-   $gpgProgram = .git.gpg.wsl_program -}}
-{{- end -}}
+{%- set is_work = get_env(name="MISE_ENV", default="personal") == "work" -%}
+{%- set is_wsl = exec(command="grep -qi -e microsoft -e wsl /proc/sys/kernel/osrelease 2>/dev/null && echo true || echo false") == "true" -%}
+{%- set signingkey = vars.git_signingkey -%}
+{%- if not is_work and is_wsl -%}
+{%-   set signingkey = vars.git_signingkey_wsl -%}
+{%- endif -%}
+{%- set gpg_program = "" -%}
+{%- if is_work and os() == "macos" -%}
+{%-   set gpg_program = vars.gpg_darwin_program -%}
+{%- elif is_wsl -%}
+{%-   set gpg_program = vars.gpg_wsl_program -%}
+{%- endif -%}
 [user]
-	name = {{ .git.name }}
-	email = {{ $identity.email }}
-	signingkey = {{ $signingKey }}
+	name = {{ vars.git_name }}
+	email = {{ vars.git_email }}
+	signingkey = {{ signingkey }}
 
 [github]
-	user = {{ .git.github_user }}
+	user = {{ vars.git_github_user }}
 
 [color]
 	ui = true
@@ -29,10 +25,10 @@
 	whitespace = trailing-space,space-before-tab
 	excludesfile = ~/.config/git/ignore
 
-{{- if not $isWSL }}
+{%- if not is_wsl %}
 [gpg]
 	format = ssh
-{{- end }}
+{%- endif %}
 
 [help]
 	autocorrect = 1
@@ -53,16 +49,16 @@
 [push]
 	default = current
 
-{{- if $isWork }}
+{%- if is_work %}
 
-[url "{{ .git.moonpay.ssh_prefix }}"]
-{{- range .git.moonpay.instead_of }}
-	insteadOf = {{ . }}
-{{- end }}
-{{- end }}
+[url "{{ vars.moonpay_ssh_prefix }}"]
+{%- for x in vars.moonpay_instead_of | split(pat=",") %}
+	insteadOf = {{ x }}
+{%- endfor %}
+{%- endif %}
 
-[url "git@github.com:{{ .git.github_user }}/"]
-	insteadOf = https://github.com/{{ .git.github_user }}/
+[url "git@github.com:{{ vars.git_github_user }}/"]
+	insteadOf = https://github.com/{{ vars.git_github_user }}/
 
 [alias]
 	ad = add
@@ -102,17 +98,17 @@
 	files-by-author = "!git log --author=\"$1\" --name-only --pretty=format: | sort | uniq"
 	check-perms = "!git ls-files -s | awk '{ if (substr($1,1,3) ~ /75[0-7]/) print $2 \" \" $4 }'"
 
-{{- if or $isWSL $gpgProgram }}
-{{- if $isWSL }}
+{%- if is_wsl or gpg_program %}
+{%- if is_wsl %}
 [gpg]
 	format = ssh
 
-{{- end }}
-{{- if $gpgProgram }}
+{%- endif %}
+{%- if gpg_program %}
 [gpg "ssh"]
-	program = {{ $gpgProgram | quote }}
-{{- end }}
-{{- end }}
+	program = "{{ gpg_program }}"
+{%- endif %}
+{%- endif %}
 
 [commit]
 	gpgSign = true

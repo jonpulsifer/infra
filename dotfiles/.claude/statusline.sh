@@ -58,9 +58,10 @@ G_PLUS=$'\xEF\x91\x97'         # U+F457 nf-oct-diff_added
 G_MINUS=$'\xEF\x91\x98'        # U+F458 nf-oct-diff_removed
 G_AGENT=$'\xEF\x91\xAA'        # U+F46A nf-oct-hubot
 G_FILE=$'\xEF\x80\x96'         # U+F016 nf-fa-file_o
-{{ if eq .chezmoi.username "jpulsifer" -}}
+{%- set is_work = get_env(name="MISE_ENV", default="personal") == "work" %}
+{% if is_work -%}
 G_WALLET='🌕'                 # Full moon for MoonPay
-{{ end -}}
+{% endif -%}
 
 # -- Helper: human-readable token counts --------------------------------------
 fmt_tok() {
@@ -75,7 +76,7 @@ fmt_tok() {
   fi
 }
 
-{{ if eq .chezmoi.username "jpulsifer" -}}
+{% if is_work -%}
 # -- MoonPay wallet balance (cached, non-blocking) ----------------------------
 MP_CACHE="${TMPDIR:-/tmp}/claude-statusline-mp-balance"
 MP_CACHE_LOCK="${MP_CACHE}.lock"
@@ -160,7 +161,7 @@ get_wallet_balance() {
   return 1
 }
 
-{{ end -}}
+{% endif -%}
 # -- Git info ------------------------------------------------------------------
 GIT="git --no-optional-locks -C $cwd"
 GIT_BRANCH="" GIT_REMOTE_URL="" GIT_CHANGED=0
@@ -221,7 +222,7 @@ if [ -n "$lines_add" ] && [ "$lines_add" != "null" ] && [ -n "$lines_rm" ] && [ 
   fi
 fi
 
-{{ if eq .chezmoi.username "jpulsifer" -}}
+{% if is_work -%}
 # Wallet balance (MoonPay MPC — Solana)
 wallet_seg=""
 if wallet_data=$(get_wallet_balance 2>/dev/null); then
@@ -239,7 +240,7 @@ if wallet_data=$(get_wallet_balance 2>/dev/null); then
     wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${C_GOLD}\$0.00${RST} ${C_GRAY}— fund me! 💸💰${RST}"
   fi
 fi
-{{ end -}}
+{% endif -%}
 
 # -- Line 2 segments ----------------------------------------------------------
 
@@ -356,9 +357,9 @@ l1+=("$repo_seg")
 [ -n "$branch_seg" ] && l1+=("$branch_seg")
 [ -n "$changed_seg" ] && l1+=("$changed_seg")
 [ -n "$lines_seg" ] && l1+=("$lines_seg")
-{{ if eq .chezmoi.username "jpulsifer" -}}
+{% if is_work -%}
 [ -n "$wallet_seg" ] && l1+=("$wallet_seg")
-{{- end }}
+{% endif -%}
 
 line1=""
 for i in "${!l1[@]}"; do

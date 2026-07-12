@@ -1,0 +1,76 @@
+{%- set is_wsl = exec(command="grep -qi -e microsoft -e wsl /proc/sys/kernel/osrelease 2>/dev/null && echo true || echo false") == "true" -%}
+[settings]
+experimental = true
+minimum_release_age_excludes = ["claude-code", "codex", "pi", "opencode"]
+
+
+[tools]
+bat = "latest"
+delta = "latest"
+eza = "latest"
+fd = "latest"
+fzf = "latest"
+gh = "latest"
+jq = "latest"
+ripgrep = "latest"
+sd = "latest"
+1password-cli = "latest"
+
+# cloud stuff
+kubectl = "latest"
+helm = "latest"
+k9s = "latest"
+kubecolor = "latest"
+kubectx = "latest"
+kubens = "latest"
+krew = "latest"
+
+{%- if os() == "linux" %}
+btop = "latest"
+neovim = "latest"
+node = "latest" # runtime for npm-based LSP servers (yamlls, bashls, jsonls) installed by mason
+{%- if is_wsl %}
+gcloud = "latest"
+codex = "latest"
+claude-code = "latest"
+opencode = "latest"
+pi = "latest"
+{%- endif %}
+{%- endif %}
+
+# zsh plugins (replaces chezmoi's .chezmoiexternal.yaml) — pinned via the http backend
+# since these are GitHub tag-archive tarballs, not uploaded Release assets. `.config/zsh/.zshrc`
+# resolves each install path at shell-start via `mise where`, so these must live in this
+# global config (not a project-local mise.toml) to be resolvable from any cwd. One table
+# per plugin (not an inline table) so each has an unambiguous single `=` line for Renovate's
+# regex manager to match the version against.
+
+[tools."http:zsh-plugin-pure"]
+# renovate: datasource=github-tags depName=sindresorhus/pure
+version = "1.27.1"
+url = "https://github.com/sindresorhus/pure/archive/refs/tags/v{% raw %}{{ version }}{% endraw %}.tar.gz"
+strip_components = 1
+
+[tools."http:zsh-plugin-fzf-tab"]
+# renovate: datasource=github-tags depName=Aloxaf/fzf-tab
+version = "1.2.0"
+url = "https://github.com/Aloxaf/fzf-tab/archive/refs/tags/v{% raw %}{{ version }}{% endraw %}.tar.gz"
+strip_components = 1
+
+[tools."http:zsh-plugin-autosuggestions"]
+# renovate: datasource=github-tags depName=zsh-users/zsh-autosuggestions
+version = "0.7.0"
+url = "https://github.com/zsh-users/zsh-autosuggestions/archive/refs/tags/v{% raw %}{{ version }}{% endraw %}.tar.gz"
+strip_components = 1
+
+[tools."http:zsh-plugin-syntax-highlighting"]
+# renovate: datasource=github-tags depName=zsh-users/zsh-syntax-highlighting
+version = "0.8.0"
+url = "https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/{% raw %}{{ version }}{% endraw %}.tar.gz"
+strip_components = 1
+
+[tools."http:zsh-plugin-kube-ps1"]
+# renovate: datasource=github-tags depName=jonmosco/kube-ps1
+version = "0.9.0"
+url = "https://github.com/jonmosco/kube-ps1/archive/refs/tags/v{% raw %}{{ version }}{% endraw %}.tar.gz"
+strip_components = 1
