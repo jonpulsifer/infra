@@ -14,7 +14,10 @@ let
     path = "${inputs.self}/dotfiles";
     name = "mise-dotfiles";
   };
-  mise = import ../lib/mise-package.nix { inherit pkgs inputs; };
+  # Prebuilt binary via the overlay nix/system/user.nix applies system-wide (both modules
+  # are imported together on every host that has either) — not the from-source jdx/mise
+  # flake input.
+  mise = pkgs.mise;
 in
 lib.mkIf (user.isNormalUser or false) {
   system.activationScripts.miseDotfiles = {
