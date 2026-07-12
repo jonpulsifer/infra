@@ -45,7 +45,7 @@ Restate what the user wants in 1–3 sentences.
 Small, load-bearing snippets — types, signatures, configs, failing tests. Inline code blocks with paths.
 
 ## Existing Patterns
-Patterns already in the codebase the next agent should follow (e.g. "errors are returned, not panicked"; "config goes through `chezmoidata.yaml`").
+Patterns already in the codebase the next agent should follow (e.g. "errors are returned, not panicked"; "config goes through `settings.toml`").
 
 ## Likely Implementation Area
 Files/functions that will probably change, and why.

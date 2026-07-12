@@ -1,5 +1,4 @@
 # bootstrap
-brew "chezmoi"
 brew "mise"
 brew "git"
 

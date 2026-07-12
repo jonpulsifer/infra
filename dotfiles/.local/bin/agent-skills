@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Chezmoi manages outbound skill distribution to ~/.agents/skills/, ~/.claude/skills/,
-# and ~/.config/opencode/skills/. Pi also reads ~/.agents/skills directly.
-# This script discovers skills from external sources and backfills them into
-# the canonical directory.
+# mise's [dotfiles] table handles outbound skill distribution to ~/.agents/skills/,
+# ~/.claude/skills/, and ~/.gemini/config/skills/. Pi also reads ~/.agents/skills
+# directly. This script discovers skills from external sources and backfills them
+# into the canonical directory.
 
 CANONICAL_DIR="$HOME/.agents/skills"
 SCAN_DIRS=(

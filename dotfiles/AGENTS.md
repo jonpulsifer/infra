@@ -14,8 +14,7 @@ GPG (Linux), Ghostty, and Claude Code / Gemini agent skill deployment.
   to `~/.config/mise/config.toml`); project tools via per-repo `mise.toml`; this
   directory's own `mise.toml` holds the `[dotfiles]` table, not a tool list.
 - **Identity**: personal git identity is `[vars]` in `mise.toml`; work overrides
-  (the replacement for `eq .chezmoi.username "jpulsifer"`) live in `mise.work.toml`,
-  loaded via `MISE_ENV=work`.
+  live in `mise.work.toml`, loaded via `MISE_ENV=work`.
 
 ## Build & validation
 
@@ -29,10 +28,11 @@ shellcheck .local/bin/* 2>/dev/null
 - **Templating**: real per-machine/OS/work-personal conditionals (Tera) live in
   `.config/git/config`, `.ssh/config`, `.gnupg/gpg.conf`, `.config/ghostty/config`,
   `.config/zsh/.zshrc`, `mise-global-config.toml`, `.claude/statusline.sh`. WSL detection
-  has no native mise function — done via `exec()` against `/proc/sys/kernel/osrelease`.
-  `.claude/settings.json` has no per-machine variance and is plain `mode = "copy"`
-  (folds in what was a separately-named, never-actually-applied `settings.chezmoi.json`
-  under chezmoi).
+  is env-var based: `get_env(name="WSL_DISTRO_NAME", default="") != ""` (WSL sets it for
+  every session; the NixOS WSL image sets it programmatically for the activation-script
+  bootstrap in `nix/system/mise-dotfiles.nix`, keyed off `wsl.enable`). Running
+  `mise bootstrap` under plain `sudo` strips it — bootstrap as the target user instead.
+  `.claude/settings.json` has no per-machine variance and is plain `mode = "copy"`.
 - **Skills**: source under `skills/`; `mise.toml` deploys the whole directory directly to
   `~/.agents/skills`, `~/.claude/skills`, and `~/.gemini/config/skills` (no per-file
   wrapper indirection).

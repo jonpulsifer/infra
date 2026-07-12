@@ -1,4 +1,4 @@
-{%- set is_wsl = exec(command="grep -qi -e microsoft -e wsl /proc/sys/kernel/osrelease 2>/dev/null && echo true || echo false") == "true" -%}
+{%- set is_wsl = get_env(name="WSL_DISTRO_NAME", default="") != "" -%}
 [settings]
 experimental = true
 minimum_release_age_excludes = ["claude-code", "codex", "pi", "opencode"]
@@ -38,7 +38,7 @@ pi = "latest"
 {%- endif %}
 {%- endif %}
 
-# zsh plugins (replaces chezmoi's .chezmoiexternal.yaml) — pinned via the http backend
+# zsh plugins — pinned via the http backend
 # since these are GitHub tag-archive tarballs, not uploaded Release assets. `.config/zsh/.zshrc`
 # resolves each install path at shell-start via `mise where`, so these must live in this
 # global config (not a project-local mise.toml) to be resolvable from any cwd. One table

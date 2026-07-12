@@ -37,8 +37,8 @@ install the app via Homebrew Cask if you use it.
 
 ## Layout
 
-Plain, `$HOME`-mirrored paths (`.config/git/config`, not chezmoi's `dot_config/...`
-encoding) — mise's `[dotfiles]` defaults to mirroring the home-relative target path under
+Plain, `$HOME`-mirrored paths (`.config/git/config` deploys to `~/.config/git/config`) —
+mise's `[dotfiles]` defaults to mirroring the home-relative target path under
 this directory. Everything actually deployed is declared explicitly in `mise.toml`'s
 `[dotfiles]` table (an allow-list); anything not listed there (this README, `Brewfile`,
 `skills/`, `ergodox/`, `AGENTS.md`) simply never leaves the repo.
