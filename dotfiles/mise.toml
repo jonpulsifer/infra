@@ -29,7 +29,8 @@ dotfiles.root = "."
 "~/.gemini/config/skills" = { mode = "copy", source = "skills" }
 
 # Templated: real per-machine/OS/work-personal conditionals live in these files (Tera,
-# using [vars] below + MISE_ENV for work/personal + exec()/os() for platform detection).
+# using [vars] below + env vars (MISE_ENV for work/personal, WSL_DISTRO_NAME for WSL)
+# + os() for platform detection).
 "~/.config/git/config" = { mode = "template" }
 "~/.ssh/config" = { mode = "template" }
 "~/.gnupg/gpg.conf" = { mode = "template" }
