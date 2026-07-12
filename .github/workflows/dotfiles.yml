@@ -18,15 +18,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - name: Install chezmoi
-        run: mkdir -p ~/.local/bin && curl -fsSL https://get.chezmoi.io | sh -s -- -b ~/.local/bin
-      - name: Chezmoi dry-run
+      - name: Install mise
+        run: curl -fsSL https://mise.run | sh
+      - name: mise dotfiles dry-run
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          mkdir -p ~/.local/share && ln -sfn "${{ github.workspace }}/dotfiles" ~/.local/share/chezmoi
-          chezmoi apply --dry-run
+          export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+          cd dotfiles
+          mise trust -y .
+          mise dotfiles apply --dry-run
       - name: Shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           cd dotfiles
-          shellcheck install dot_local/bin/executable_yeet dot_local/bin/executable_sssh .chezmoiscripts/run_once_install-mise.sh
+          shellcheck .local/bin/*

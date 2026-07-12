@@ -26,13 +26,17 @@ spec:
       ATLANTIS_WRITE_GIT_CREDS: "true"
       ATLANTIS_AUTOPLAN_MODULES: "true"
       # Default is "**/*.tf*"; also autoplan when the unifi_bgp sidecar configs
-      # pulled in via file() change. Use an unanchored "**/*.conf" glob: the
-      # previous "network/unifi/**/*.conf" globstar failed to match the .conf
-      # files and they never autoplanned. This stays safe because Atlantis only
-      # creates a project for a dir that contains .tf — and the only .conf files
-      # in tf roots are terraform/network/unifi/{folly,offsite}; other .conf files
-      # live in non-tf dirs (apps/, dotfiles/) so they never trigger a plan.
-      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,**/*.conf"
+      # pulled in via file() change. Scoped to "terraform/**/*.conf" (not an
+      # unanchored "**/*.conf") — Atlantis attempts a plan in every directory
+      # containing a file matching this list, .tf or not, and fails loudly
+      # ("No configuration files") if there's no actual Terraform there. An
+      # unscoped glob previously matched dotfiles/.tmux.conf and
+      # dotfiles/.gnupg/gpg.conf, breaking PR checks for unrelated dotfiles
+      # changes. The narrower "network/unifi/**/*.conf" was tried first and
+      # failed to match (this globstar implementation needs 2+ path segments
+      # for "**"; unifi/folly/bgp-folly.conf only has one) — "terraform/**/*.conf"
+      # has enough segments before the target file to avoid that.
+      ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,terraform/**/*.conf"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
       GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
