@@ -53,5 +53,15 @@ tags:: adr
 	  old flow if needed (nothing auto-reapplies there, unlike NixOS).
 	- Future direction (not yet decided, out of scope here): mise eventually managing all
 	  AI-agent tooling fleet-wide, with Nix/Brew shrinking to system-only packages.
+	- Collateral CI fixes, not part of the design decision itself but required to land it:
+	  Atlantis's `ATLANTIS_AUTOPLAN_FILE_LIST` had an unanchored `**/*.conf` glob (meant only
+	  for the unifi BGP sidecar configs) that started matching the new flat
+	  `dotfiles/.tmux.conf`/`dotfiles/.gnupg/gpg.conf` paths, and Atlantis attempts (and
+	  fails) a plan in any directory with a matching file — scoped to `terraform/**/*.conf`
+	  instead. A pre-existing, unrelated Trivy finding on `ergodox/Dockerfile` (missing
+	  `USER`) was also swept up by a directory-wide IaC scan triggered by this being the
+	  first PR to touch other top-level files under `dotfiles/`; suppressed via
+	  `.trivyignore.yaml` rather than fixed, since it's a local firmware-build container,
+	  not a deployed service.
 - # Links
 	- [[ADR/0006 Dotfiles vendored in-repo with chezmoi]] (superseded), [[Architecture/NixOS]]
