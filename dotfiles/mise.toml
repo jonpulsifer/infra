@@ -6,9 +6,8 @@
 dotfiles.root = "."
 
 [dotfiles]
-# Convenience pointer, mirrors chezmoi's old `symlink_dot_dotfiles.tmpl`. Points at the
-# live source tree (a Nix store path on NixOS) — dangles across store-path GC between
-# activations, same pre-existing risk chezmoi's version already had.
+# Convenience pointer at the live source tree (a Nix store path on NixOS) — dangles
+# across store-path GC between activations; self-heals on the next one.
 "~/.dotfiles" = { mode = "symlink", source = "." }
 
 "~/.tmux.conf" = { mode = "copy" }
@@ -22,8 +21,7 @@ dotfiles.root = "."
 "~/.claude/settings.json" = { mode = "copy" }
 
 # Agent skills: source lives in `skills/` (this repo's canonical copy); all three agent
-# tools read from their own location, so each gets its own direct entry rather than
-# chezmoi's old include-wrapper-per-location indirection.
+# tools read from their own location, so each gets its own direct entry.
 "~/.agents/skills" = { mode = "copy", source = "skills" }
 "~/.claude/skills" = { mode = "copy", source = "skills" }
 "~/.gemini/config/skills" = { mode = "copy", source = "skills" }
@@ -69,9 +67,7 @@ post-dotfiles = "chmod 700 ~/.gnupg ~/.ssh && chmod 600 ~/.ssh/config"
 # "mise run bootstrap — if a task named 'bootstrap' is defined"). `[bootstrap.packages]`'s
 # brew backend doesn't read a Brewfile and doesn't support casks/taps (which this one
 # needs), so this stays a plain, idempotent `brew bundle` invocation rather than a
-# declarative packages table — replaces chezmoi's checksum-gated run_onchange script;
-# `mise bootstrap` isn't triggered on every shell start the way `chezmoi apply` was, so
-# there's no equivalent forcing function to optimize away with a checksum guard.
+# declarative packages table.
 description = "macOS: brew bundle install from Brewfile"
 run = '''
 if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then

@@ -51,8 +51,8 @@ jobs:
       - name: Build WSL tarball
         if: ${{ inputs.image == 'wsl' }}
         # Dotfiles ship in-repo (dotfiles/) and are applied by
-        # nix/system/chezmoi.nix from the system closure on first boot, so the
-        # tarball needs no build-time dotfiles seeding.
+        # nix/system/mise-dotfiles.nix from the system closure on first boot, so
+        # the tarball needs no build-time dotfiles seeding.
         run: sudo ./result/bin/nixos-wsl-tarball-builder ./nixos.wsl
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3

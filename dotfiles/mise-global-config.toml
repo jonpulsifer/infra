@@ -38,7 +38,7 @@ pi = "latest"
 {%- endif %}
 {%- endif %}
 
-# zsh plugins (replaces chezmoi's .chezmoiexternal.yaml) — pinned via the http backend
+# zsh plugins — pinned via the http backend
 # since these are GitHub tag-archive tarballs, not uploaded Release assets. `.config/zsh/.zshrc`
 # resolves each install path at shell-start via `mise where`, so these must live in this
 # global config (not a project-local mise.toml) to be resolvable from any cwd. One table
