@@ -217,13 +217,14 @@ Cloudflare Pages project `infra-wiki` (project/domain/DNS are Terraform-managed 
 
 ## Dotfiles Integration
 
-Dotfiles live in-repo under `dotfiles/` (formerly the standalone `jonpulsifer/dotfiles` repo, merged in via `git filter-repo`). They are **chezmoi-managed**, not a flake input — there is no `dotfiles` flake input and no home-manager.
+Dotfiles live in-repo under `dotfiles/` (formerly the standalone `jonpulsifer/dotfiles` repo, merged in via `git filter-repo`; chezmoi-managed until the mise migration — see wiki `ADR/0011`). They are **mise-managed** (`[dotfiles]` + `mise bootstrap`), not a flake input — there is no `dotfiles` flake input and no home-manager.
 
-- The repo-root `.chezmoiroot` contains `dotfiles`, so chezmoi treats the `dotfiles/` subdirectory as its source root.
-- On NixOS hosts, `nix/system/chezmoi.nix` carries the `dotfiles/` tree into the system closure (via the flake source) and runs `chezmoi apply --source <store-path>` in an activation script (for the `jawn` user) — no network clone, and it self-heals on every rebuild/boot. The module is imported on cluster/Pi hosts through `nix/services/common.nix`, and directly by the WSL image (`nix/images/wsl.nix`).
-- The WSL image (`.github/workflows/nix-image-builder.yaml`) builds a plain tarball; dotfiles are applied by that same activation script on first boot, so the workflow does no build-time chezmoi seeding.
+- `dotfiles/mise.toml` holds the `[dotfiles]` table (plain, `$HOME`-mirrored paths — not chezmoi's `dot_config/...` encoding), `[vars]` for personal git identity, and a `[tasks.bootstrap]` task for the macOS Brewfile. `dotfiles/mise.work.toml` overrides identity `[vars]` when `MISE_ENV=work` is set.
+- On NixOS hosts, `nix/system/mise-dotfiles.nix` carries the `dotfiles/` tree into the system closure (via the flake source, same as before) and runs `mise bootstrap --only dotfiles` in an activation script (for the `jawn` user) — no network clone, and it self-heals on every rebuild/boot. Scoped to just the dotfiles step so it doesn't touch Nix-managed packages/users. The module is imported on cluster/Pi hosts through `nix/services/common.nix`, and directly by the WSL image (`nix/images/wsl.nix`). Uses the flake's own `inputs.mise` package (also provisioned per-user in `nix/system/user.nix`), not nixpkgs.
+- The WSL image (`.github/workflows/nix-image-builder.yaml`) builds a plain tarball; dotfiles are applied by that same activation script on first boot, so the workflow does no build-time seeding.
+- Non-NixOS machines (macOS, generic Linux): `curl https://mise.run | sh && mise trust -y dotfiles/mise.toml && mise bootstrap` from within `dotfiles/`. There is no `install` script.
 
-Editing dotfiles (e.g. zsh config in `dotfiles/dot_config/zsh/`) ships to hosts on the next `chezmoi apply` / rebuild — no separate repo to update.
+Editing dotfiles (e.g. zsh config in `dotfiles/.config/zsh/`) ships to hosts on the next `mise bootstrap --only dotfiles` / rebuild — no separate repo to update.
 
 ## Skills
 

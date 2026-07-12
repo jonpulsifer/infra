@@ -1,0 +1,9 @@
+# Work-machine identity overrides. Loaded automatically over mise.toml's [vars] when
+# MISE_ENV=work is set (e.g. `export MISE_ENV=work` in the work laptop's shell profile,
+# or `mise dotfiles apply -E work`) — replaces chezmoi's `.chezmoi.username ==
+# .git.work_username` inference with an explicit, auditable per-machine opt-in.
+[vars]
+git_email = "jonathan@moonpay.com"
+git_signingkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay"
+moonpay_ssh_prefix = "git@github.com:moonpay/"
+moonpay_instead_of = "git@github.com:MoonPay/,https://github.com/moonpay/"

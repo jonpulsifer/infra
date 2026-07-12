@@ -6,7 +6,7 @@ tags:: architecture
 	- `nix/hosts/<hostname>.nix` — per-host entry points (the Pis, `spore`, `oldboy`); k8s nodes are defined directly in `flake.nix` with `role`/`tags` and pull in the k8s service modules
 	- `nix/hardware/` — hardware profiles (pi4, pi5, x86)
 	- `nix/services/` — optional service modules (`k8s/`, `common.nix`, `kiosk.nix`, `iperf3.nix`, …)
-	- `nix/system/` — core modules: SSH hardening, Tailscale, auto-upgrades, users, disko, chezmoi
+	- `nix/system/` — core modules: SSH hardening, Tailscale, auto-upgrades, users, disko, mise-dotfiles
 	- `nix/overlays/` — package patches and overrides
 	- `nix/images/` — buildable images: WSL tarball, ISO, GCE, container, netboot, and the pi5 RAM image
 - ## Host groups
@@ -44,4 +44,4 @@ tags:: architecture
 - ## Disk layout
 	- Partitioning is declarative via disko with GPT partlabels (`disk-main-*`). Hosts installed before the migration need their partitions relabeled or they fail to boot — see [[ADR/0004 Disko with GPT partlabels]] and the scripts in `nix/scripts/`.
 - ## Dotfiles
-	- chezmoi-managed from the in-repo `dotfiles/` tree; an activation script applies them from the store path on every rebuild/boot, no network clone. See [[ADR/0006 Dotfiles vendored in-repo with chezmoi]].
+	- mise-managed (`[dotfiles]` + `mise bootstrap --only dotfiles`) from the in-repo `dotfiles/` tree; an activation script applies them from the store path on every rebuild/boot, no network clone. See [[ADR/0011 Migrate dotfiles from chezmoi to mise]].

@@ -1,10 +1,10 @@
 # Skills
 
-Source-of-truth Agent Skills for this dotfiles repo. Each skill lives in `skills/<name>/SKILL.md` and is deployed via chezmoi `include` to:
+Source-of-truth Agent Skills for this dotfiles repo. Each skill lives in `skills/<name>/SKILL.md`; `mise.toml` deploys the whole `skills/` directory directly (no per-skill wrapper files) to:
 
 - `~/.agents/skills/` — read by pi
 - `~/.claude/skills/`
-- `~/.config/opencode/skills/`
+- `~/.gemini/config/skills/`
 
 Global "how I work" preferences live in `skills/how-i-work.md` and are deployed to `~/.pi/agent/AGENTS.md` and `~/.claude/CLAUDE.md` — always in context, not loaded on demand.
 
@@ -58,21 +58,18 @@ The ceremony is there when you need it; skip it when you don't.
 
 ## Storage Convention
 
-Skills write artifacts to `.agent/context/` in the working repo. This dir is globally gitignored via `dot_config/git/ignore`. We use git worktrees per task, so two parallel tasks never share an `.agent/` directory and don't clobber each other.
+Skills write artifacts to `.agent/context/` in the working repo. This dir is globally gitignored via `.config/git/ignore`. We use git worktrees per task, so two parallel tasks never share an `.agent/` directory and don't clobber each other.
 
 ## Adding a Skill
 
 1. Create `skills/<name>/SKILL.md` with `name:` and `description:` frontmatter. Description should start with "Use when…" and name concrete triggers (under 1024 chars).
-2. Add wrappers in `dot_agents/skills/<name>/SKILL.md.tmpl`, `dot_claude/skills/<name>/SKILL.md.tmpl`, `dot_config/opencode/skills/<name>/SKILL.md.tmpl`, each containing:
-   ```gotmpl
-   {{ include "skills/<name>/SKILL.md" }}
-   ```
-3. If pi-specific, put it in `dot_pi/agent/skills/<name>/SKILL.md` instead (not shared with claude/opencode).
-4. `chezmoi apply --dry-run` to validate, then `chezmoi apply`.
+2. No wrapper files needed — `mise.toml` deploys the whole `skills/` directory to all three locations, so the new file is picked up automatically.
+3. If pi-specific, put it in `.pi/agent/skills/<name>/SKILL.md` instead (not shared with claude/gemini).
+4. `mise dotfiles apply --dry-run` to validate, then `mise dotfiles apply`.
 
 ## Prompt Templates (pi)
 
-Lightweight aliases over skills, in `dot_pi/agent/prompts/`:
+Lightweight aliases over skills, in `.pi/agent/prompts/`:
 
 - `/ctx <task>` — context-builder with thoroughness hint
 - `/plan [task]` — planner, auto-reads context.md

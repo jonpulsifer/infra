@@ -1,0 +1,79 @@
+[settings]
+# Relative to this file's directory (config_root), so this works unmodified from any
+# checkout location: a plain git clone, the Nix store copy NixOS activation applies from,
+# or a WSL image. Source resolution for entries below (when `source` is omitted) mirrors
+# the home-relative target path under this root, e.g. target "~/.zshenv" -> "./.zshenv".
+dotfiles.root = "."
+
+[dotfiles]
+# Convenience pointer, mirrors chezmoi's old `symlink_dot_dotfiles.tmpl`. Points at the
+# live source tree (a Nix store path on NixOS) — dangles across store-path GC between
+# activations, same pre-existing risk chezmoi's version already had.
+"~/.dotfiles" = { mode = "symlink", source = "." }
+
+"~/.tmux.conf" = { mode = "copy" }
+"~/.vimrc" = { mode = "copy" }
+"~/.zshenv" = { mode = "copy" }
+"~/.config/.bunfig.toml" = { mode = "copy" }
+"~/.config/git/ignore" = { mode = "copy" }
+"~/.config/nvim" = { mode = "copy" }
+"~/.local/bin" = { mode = "copy" }
+"~/.pi/agent" = { mode = "copy" }
+
+# Agent skills: source lives in `skills/` (this repo's canonical copy); all three agent
+# tools read from their own location, so each gets its own direct entry rather than
+# chezmoi's old include-wrapper-per-location indirection.
+"~/.agents/skills" = { mode = "copy", source = "skills" }
+"~/.claude/skills" = { mode = "copy", source = "skills" }
+"~/.gemini/config/skills" = { mode = "copy", source = "skills" }
+
+# Templated: real per-machine/OS/work-personal conditionals live in these files (Tera,
+# using [vars] below + MISE_ENV for work/personal + exec()/os() for platform detection).
+"~/.config/git/config" = { mode = "template" }
+"~/.ssh/config" = { mode = "template" }
+"~/.gnupg/gpg.conf" = { mode = "template" }
+"~/.config/ghostty/config" = { mode = "template" }
+# Source deliberately NOT at the mirrored path ".config/mise/config.toml": mise's own
+# project-config auto-discovery treats "<cwd>/.config/mise/config.toml" as a candidate
+# settings file, so running any mise command with cwd inside this dotfiles tree would
+# otherwise make mise try to parse this Tera template as its own config and fail.
+"~/.config/mise/config.toml" = { mode = "template", source = "mise-global-config.toml" }
+"~/.config/zsh/.zshrc" = { mode = "template" }
+"~/.claude/settings.json" = { mode = "template" }
+"~/.claude/statusline.sh" = { mode = "template" }
+
+[vars]
+# Personal identity (default). Work overrides live in mise.work.toml, loaded when
+# MISE_ENV=work. Flat keys only — mise's [vars] doesn't support nested tables.
+git_name = "Jonathan Pulsifer"
+git_github_user = "jonpulsifer"
+git_email = "jonathan@pulsifer.ca"
+git_signingkey = "~/.ssh/id_ed25519"
+git_signingkey_wsl = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v"
+gpg_darwin_program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
+gpg_wsl_program = "/mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe"
+# Only meaningful when MISE_ENV=work overrides moonpay_ssh_prefix; harmless default.
+moonpay_ssh_prefix = ""
+moonpay_instead_of = ""
+
+[bootstrap.hooks]
+# ~/.ssh and ~/.gnupg have no [dotfiles]-native permission mechanism (mise doesn't set
+# 600/700 in any mode) — rework via a bootstrap hook instead of a platform-specific shim.
+# Fires on `mise bootstrap --only dotfiles` too (verified: hooks run around the dotfiles
+# step regardless of --only/--skip scoping), so this covers NixOS, macOS, and WSL alike.
+post-dotfiles = "chmod 700 ~/.gnupg && chmod 600 ~/.ssh/config"
+
+[tasks.bootstrap]
+# Runs automatically as the "custom task" step of `mise bootstrap` on macOS (step 10:
+# "mise run bootstrap — if a task named 'bootstrap' is defined"). `[bootstrap.packages]`'s
+# brew backend doesn't read a Brewfile and doesn't support casks/taps (which this one
+# needs), so this stays a plain, idempotent `brew bundle` invocation rather than a
+# declarative packages table — replaces chezmoi's checksum-gated run_onchange script;
+# `mise bootstrap` isn't triggered on every shell start the way `chezmoi apply` was, so
+# there's no equivalent forcing function to optimize away with a checksum guard.
+description = "macOS: brew bundle install from Brewfile"
+run = '''
+if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+  brew bundle install --no-upgrade --file "{{config_root}}/Brewfile"
+fi
+'''

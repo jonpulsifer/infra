@@ -53,7 +53,7 @@ Full-repo run only when:
 ## Ran
 - `pnpm run format` — ok
 - `pnpm run lint` — ok
-- `shellcheck dot_local/bin/executable_agent-skills` — 0 findings
+- `shellcheck .local/bin/agent-skills` — 0 findings
 
 ## Auto-fixed
 - `path/to/file` — formatter applied
