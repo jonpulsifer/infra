@@ -25,3 +25,10 @@ misconfigurations:
   - id: AVD-KSV-0009
     paths: ["**/iperf3/iperf3-daemonset.yaml", "iperf3-daemonset.yaml"]
     statement: "netbench iperf3 server needs hostNetwork to benchmark per-node VLAN paths."
+  # ergodox/Dockerfile builds QMK keyboard firmware interactively/locally, run by
+  # hand to compile a .hex file — not a deployed service. Pre-existing, unrelated
+  # to the dotfiles/mise migration; only surfaced because that PR was the first to
+  # touch other top-level files under dotfiles/, triggering a directory-wide scan.
+  - id: DS-0002
+    paths: ["**/ergodox/Dockerfile", "ergodox/Dockerfile"]
+    statement: "Local QMK firmware build container, not a deployed service; root is fine."

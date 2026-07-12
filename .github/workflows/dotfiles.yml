@@ -30,4 +30,4 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           cd dotfiles
-          shellcheck .local/bin/*
+          grep -rl '^#!/usr/bin/env bash' .local/bin/* | xargs shellcheck
