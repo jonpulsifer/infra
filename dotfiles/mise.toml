@@ -62,3 +62,18 @@ moonpay_instead_of = ""
 # Fires on `mise bootstrap --only dotfiles` too (verified: hooks run around the dotfiles
 # step regardless of --only/--skip scoping), so this covers NixOS, macOS, and WSL alike.
 post-dotfiles = "chmod 700 ~/.gnupg && chmod 600 ~/.ssh/config"
+
+[tasks.bootstrap]
+# Runs automatically as the "custom task" step of `mise bootstrap` on macOS (step 10:
+# "mise run bootstrap — if a task named 'bootstrap' is defined"). `[bootstrap.packages]`'s
+# brew backend doesn't read a Brewfile and doesn't support casks/taps (which this one
+# needs), so this stays a plain, idempotent `brew bundle` invocation rather than a
+# declarative packages table — replaces chezmoi's checksum-gated run_onchange script;
+# `mise bootstrap` isn't triggered on every shell start the way `chezmoi apply` was, so
+# there's no equivalent forcing function to optimize away with a checksum guard.
+description = "macOS: brew bundle install from Brewfile"
+run = '''
+if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+  brew bundle install --no-upgrade --file "{{config_root}}/Brewfile"
+fi
+'''
