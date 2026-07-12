@@ -5,7 +5,6 @@ _.file = '.env'
 1password-cli = "latest"
 age = "latest"
 bat = "latest"
-chezmoi = "latest"
 cilium-cli = "latest"
 delta = "latest"
 eza = "latest"
@@ -75,7 +74,7 @@ description = "List shell scripts in this repo"
 hide = true
 dir = "dotfiles"
 run = """
-grep -rl '^#!/usr/bin/env bash' dot_local/bin/executable_* .chezmoiscripts/*.sh 2>/dev/null
+grep -rl '^#!/usr/bin/env bash' .local/bin/* 2>/dev/null
 """
 
 [tasks.format]
@@ -105,11 +104,11 @@ dir = "dotfiles"
 depends = ["format:check", "lint"]
 
 [tasks.diff]
-description = "Show chezmoi diff"
+description = "Show mise dotfiles status"
 dir = "dotfiles"
-run = "chezmoi diff"
+run = "mise dotfiles status"
 
 [tasks.dry-run]
-description = "Dry-run chezmoi apply"
+description = "Dry-run mise dotfiles apply"
 dir = "dotfiles"
-run = "chezmoi apply --dry-run"
+run = "mise dotfiles apply --dry-run"

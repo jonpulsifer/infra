@@ -9,7 +9,7 @@
     inputs.nixos-wsl.nixosModules.default
     ../system/user.nix
     ../system/nixos.nix
-    ../system/chezmoi.nix
+    ../system/mise-dotfiles.nix
   ];
 
   nixpkgs.config.allowUnfree = true;
