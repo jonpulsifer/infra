@@ -35,7 +35,7 @@ jobs:
           extra-conf: |
             experimental-features = nix-command flakes
             accept-flake-config = true
-      - uses: DeterminateSystems/flake-checker-action@a0f068d37b542f3150564fbf1164fec2d958ee11 # main
+      - uses: DeterminateSystems/flake-checker-action@de924abd783455e8429c858962b9e43062d19da1 # main
       - run: nix flake check
   nixos:
     runs-on: ubuntu-latest
