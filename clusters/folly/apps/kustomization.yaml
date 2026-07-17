@@ -15,7 +15,7 @@ resources:
   - open-webui
   - postgres
   - redis
-  - reloader
+  - ../../base/apps/reloader
   # - satisfactory
   - hermes
   - tronbyt

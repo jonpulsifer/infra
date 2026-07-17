@@ -22,14 +22,13 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    runnerScaleSetName: infra-folly
+    runnerScaleSetName: infra-${CLUSTER_NAME}
     scaleSetLabels:
-      - "folly"
+      - "${CLUSTER_NAME}"
       - "self-hosted"
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
     minRunners: 1
-    maxRunners: 5
     template:
       spec:
         containers:
