@@ -108,9 +108,17 @@ for topology_file in "$@"; do
   done
   ((${#fact[@]} == ${#required_keys[@]})) || continue
 
-  for key in API_SERVER_IP ROUTER_IP CLUSTER_DNS; do
+  for key in API_SERVER_IP ROUTER_IP; do
     if ! ipv4_to_int "${fact[$key]}" >/dev/null; then
       diagnose "$topology_file" "$key must be an IPv4 address"
+    fi
+  done
+  IFS=, read -r -a cluster_dns_addresses <<<"${fact[CLUSTER_DNS]}"
+  for cluster_dns in "${cluster_dns_addresses[@]}"; do
+    if ! ipv4_to_int "$cluster_dns" >/dev/null; then
+      diagnose "$topology_file" "each CLUSTER_DNS entry must be an IPv4 address"
+    elif ! ip_in_cidr "$cluster_dns" "${fact[SERVICE_CIDR]}"; then
+      diagnose "$topology_file" "each CLUSTER_DNS entry must be in SERVICE_CIDR"
     fi
   done
   for key in K8S_NODE_CIDR CILIUM_POD_CIDR SERVICE_CIDR CILIUM_NATIVE_ROUTING_CIDR LB_RANGE; do
@@ -135,9 +143,6 @@ for topology_file in "$@"; do
   if ! ip_in_cidr "${fact[ROUTER_IP]}" "${fact[K8S_NODE_CIDR]}"; then
     diagnose "$topology_file" "ROUTER_IP must be in K8S_NODE_CIDR"
   fi
-  if ! ip_in_cidr "${fact[CLUSTER_DNS]}" "${fact[SERVICE_CIDR]}"; then
-    diagnose "$topology_file" "CLUSTER_DNS must be in SERVICE_CIDR"
-  fi
   if cidrs_overlap "${fact[LB_RANGE]}" "${fact[K8S_NODE_CIDR]}"; then
     diagnose "$topology_file" "LB_RANGE must not overlap K8S_NODE_CIDR"
   fi
@@ -159,11 +164,14 @@ for ((i = 0; i < ${#cluster_names[@]}; i++)); do
     if [[ ${cluster_names[i]} == "${cluster_names[j]}" ]]; then
       diagnose "topology contract" "CLUSTER_NAME values must be unique"
     fi
-    for kind in node_cidrs pod_cidrs service_cidrs lb_ranges; do
-      declare -n ranges="$kind"
-      if cidrs_overlap "${ranges[i]}" "${ranges[j]}"; then
-        diagnose "topology contract" "${kind} must not overlap between ${cluster_names[i]} and ${cluster_names[j]}"
-      fi
+    for first_kind in node_cidrs pod_cidrs service_cidrs lb_ranges; do
+      declare -n first_ranges="$first_kind"
+      for second_kind in node_cidrs pod_cidrs service_cidrs lb_ranges; do
+        declare -n second_ranges="$second_kind"
+        if cidrs_overlap "${first_ranges[i]}" "${second_ranges[j]}"; then
+          diagnose "topology contract" "${first_kind} must not overlap ${second_kind} between ${cluster_names[i]} and ${cluster_names[j]}"
+        fi
+      done
     done
   done
 done

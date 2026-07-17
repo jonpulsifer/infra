@@ -25,6 +25,13 @@ else
 fi
 
 cp "$repo_root/clusters/folly/config/cluster-topology.json" "$fixture_dir/folly.json"
+jq '.data.CLUSTER_DNS = "10.10.0.254,10.10.0.253"' "$fixture_dir/folly.json" >"$fixture_dir/multiple-dns.json"
+if "$validator" "$fixture_dir/multiple-dns.json"; then
+  pass "each comma-separated cluster DNS address may satisfy the contract"
+else
+  fail "a comma-separated cluster DNS list should satisfy the contract"
+fi
+
 jq 'del(.data.LB_RANGE)' "$fixture_dir/folly.json" >"$fixture_dir/missing-lb.json"
 if "$validator" "$fixture_dir/missing-lb.json" 2>"$fixture_dir/missing-lb.err"; then
   fail "a topology without LB_RANGE should fail"
@@ -41,4 +48,14 @@ elif grep -q 'LB_RANGE must not overlap K8S_NODE_CIDR' "$fixture_dir/overlapping
   pass "overlapping address spaces produce a local diagnostic"
 else
   fail "overlapping address spaces should name the invariant"
+fi
+
+cp "$repo_root/clusters/offsite/config/cluster-topology.json" "$fixture_dir/offsite.json"
+jq '.data.LB_RANGE = "10.100.0.0/20"' "$fixture_dir/offsite.json" >"$fixture_dir/offsite-lb-overlaps-folly-pods.json"
+if "$validator" "$repo_root/clusters/folly/config/cluster-topology.json" "$fixture_dir/offsite-lb-overlaps-folly-pods.json" 2>"$fixture_dir/cross-cluster-overlap.err"; then
+  fail "an offsite LB range overlapping folly pods should fail"
+elif grep -q 'pod_cidrs must not overlap lb_ranges between folly and offsite' "$fixture_dir/cross-cluster-overlap.err"; then
+  pass "cross-cluster address-space collisions produce a local diagnostic"
+else
+  fail "cross-cluster collisions should name both CIDR kinds"
 fi
