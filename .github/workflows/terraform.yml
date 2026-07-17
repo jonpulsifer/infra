@@ -5,9 +5,15 @@ on:
       - main
     paths:
       - '**/*.tf'
+      - '**/.terraform.lock.hcl'
+      - terraform/network/unifi/folly/lab.tf.json
+      - .github/scripts/validation-impact.sh
   pull_request:
     paths:
       - '**/*.tf'
+      - '**/.terraform.lock.hcl'
+      - terraform/network/unifi/folly/lab.tf.json
+      - .github/scripts/validation-impact.sh
 
 # Cancel superseded runs on the same ref instead of letting them pile up.
 concurrency:
@@ -19,7 +25,7 @@ jobs:
     name: Get Changed Files
     runs-on: ubuntu-latest
     outputs:
-      # Output a JSON string list of unique directories containing changed files matching the patterns
+      # Output a JSON string list of Terraform roots affected by changed paths.
       directories: ${{ steps.expand-directories.outputs.directories }}
       # Output 'true' or 'false' as a string
       any_changed: ${{ steps.changed-directories.outputs.any_changed }}
@@ -28,38 +34,31 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 2
-      - name: Directories with Changes
-        id: changed-directories
+      - name: Changed validation inputs
+        id: changed-paths
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
-          dir_names: true
-          matrix: true
+          separator: "\n"
           files: |
             **/*.tf
             **/.terraform.lock.hcl
-      - name: Expand Terraform root directories
+            terraform/network/unifi/folly/lab.tf.json
+            .github/scripts/validation-impact.sh
+      - name: Resolve affected Terraform roots
         id: expand-directories
-        if: steps.changed-directories.outputs.any_changed == 'true'
+        if: steps.changed-paths.outputs.any_changed == 'true'
         env:
-          CHANGED_DIRECTORIES: ${{ steps.changed-directories.outputs.all_changed_files }}
+          CHANGED_PATHS: ${{ steps.changed-paths.outputs.all_changed_files }}
         run: |
           set -euo pipefail
-
-          declare -A directories=()
-          while IFS= read -r dir; do
-            while [[ -n "$dir" && "$dir" != "." ]]; do
-              if compgen -G "$dir/*.tf" > /dev/null; then
-                directories["$dir"]=1
-              fi
-              if [[ "$dir" != */* ]]; then
-                break
-              fi
-              dir="${dir%/*}"
-            done
-          done < <(jq -r '.[]' <<< "$CHANGED_DIRECTORIES")
-
-          matrix="$(printf '%s\n' "${!directories[@]}" | sort | jq -R -s -c 'split("\n")[:-1]')"
+          matrix="$(printf '%s\n' "$CHANGED_PATHS" \
+            | .github/scripts/validation-impact.sh targets \
+            | sed -n 's/^terraform://p' \
+            | jq -R -s -c 'split("\n")[:-1]')"
           echo "directories=$matrix" >> "$GITHUB_OUTPUT"
+      - name: Record whether validation inputs changed
+        id: changed-directories
+        run: echo "any_changed=${{ steps.changed-paths.outputs.any_changed }}" >> "$GITHUB_OUTPUT"
 
   validate:
     needs: [changed-directories]
