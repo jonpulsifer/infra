@@ -17,6 +17,10 @@ assert_targets 'both topology ConfigMaps validate Nix' \
   $'clusters/folly/config/cluster-topology.json\nclusters/offsite/config/cluster-topology.json' \
   'nix:flake-check'
 
+assert_targets 'the Nix workflow validates its routing target' \
+  '.github/workflows/nix-ci.yaml' \
+  'nix:flake-check'
+
 assert_targets 'the lab contract validates its Terraform root and Nix' \
   'terraform/network/unifi/folly/lab.tf.json' \
   $'nix:flake-check\nterraform:terraform/network/unifi/folly'

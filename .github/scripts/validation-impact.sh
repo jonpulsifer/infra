@@ -30,13 +30,13 @@ targets() {
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
     case "$path" in
-      flake.nix|flake.lock|nix/*|apps/ddnsd/*|dotfiles/*|clusters/folly/config/cluster-topology.json|clusters/offsite/config/cluster-topology.json|terraform/network/unifi/folly/lab.tf.json)
+      flake.nix|flake.lock|nix/*|apps/ddnsd/*|dotfiles/*|clusters/folly/config/cluster-topology.json|clusters/offsite/config/cluster-topology.json|terraform/network/unifi/folly/lab.tf.json|.github/workflows/nix-ci.yaml)
         target_set[nix:flake-check]=1
         ;;
     esac
 
     case "$path" in
-      .github/scripts/validation-impact.sh)
+      .github/scripts/validation-impact.sh|.github/workflows/terraform.yml)
         while IFS= read -r root; do
           target_set["terraform:$root"]=1
         done < <(terraform_roots)

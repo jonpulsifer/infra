@@ -43,6 +43,10 @@ run = "nix develop -c nix fmt"
 description = "Format Terraform files"
 run = "terraform fmt -recursive"
 
+[tasks."validation-impact:test"]
+description = "Test validation-impact routing"
+run = "bash .github/scripts/validation-impact_test.sh"
+
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
