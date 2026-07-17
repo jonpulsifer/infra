@@ -1,0 +1,23 @@
+name: topology contract
+
+on:
+  pull_request:
+    paths:
+      - clusters/**/config/cluster-topology.json
+      - .github/scripts/validate-cluster-topology.sh
+      - .github/scripts/test-validate-cluster-topology.sh
+      - .github/workflows/topology-contract.yml
+  push:
+    branches: [main]
+    paths:
+      - clusters/**/config/cluster-topology.json
+      - .github/scripts/validate-cluster-topology.sh
+      - .github/scripts/test-validate-cluster-topology.sh
+      - .github/workflows/topology-contract.yml
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - run: bash .github/scripts/test-validate-cluster-topology.sh
