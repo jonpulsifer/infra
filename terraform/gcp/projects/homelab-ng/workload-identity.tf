@@ -1,5 +1,11 @@
 locals {
-  github_actions_subject_prefix = "repo:jonpulsifer@5461940/infra@952814997"
+  # Repos allowed to mint tokens from the shared "homelab" GitHub OIDC provider.
+  # This only gates who can authenticate at all; what each repo can then do is
+  # scoped separately by per-resource IAM bindings (see iam.tf, datastore.tf).
+  github_actions_allowed_repository_ids = [
+    "952814997", # jonpulsifer/infra
+    "554977933", # jonpulsifer/ts
+  ]
 }
 
 resource "google_iam_workload_identity_pool" "homelab" {
@@ -23,7 +29,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
-  attribute_condition = "assertion.sub.startsWith('${local.github_actions_subject_prefix}') && assertion.repository_owner_id == '5461940' && assertion.repository_id == '952814997'"
+  attribute_condition = "assertion.repository_owner_id == '5461940' && assertion.repository_id in ${jsonencode(local.github_actions_allowed_repository_ids)}"
   depends_on          = [google_org_policy_policy.allowed_workload_identity_providers]
 }
 
