@@ -6,7 +6,7 @@ resources:
   - atlantis
   - descheduler
   - dave.yaml
-  - reloader
+  - ../../base/apps/reloader
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
