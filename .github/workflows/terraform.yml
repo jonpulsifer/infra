@@ -5,6 +5,7 @@ on:
       - main
     paths:
       - '**/*.tf'
+      - '**/*.tftest.hcl'
       - '**/.terraform.lock.hcl'
       - terraform/network/unifi/folly/lab.tf.json
       - .github/scripts/validation-impact.sh
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - '**/*.tf'
+      - '**/*.tftest.hcl'
       - '**/.terraform.lock.hcl'
       - terraform/network/unifi/folly/lab.tf.json
       - .github/scripts/validation-impact.sh
@@ -45,6 +47,7 @@ jobs:
           separator: "\n"
           files: |
             **/*.tf
+            **/*.tftest.hcl
             **/.terraform.lock.hcl
             terraform/network/unifi/folly/lab.tf.json
             .github/scripts/validation-impact.sh
@@ -94,6 +97,8 @@ jobs:
       - name: Terraform Validate
         id: validate
         run: terraform validate
+      - name: Terraform Test
+        run: terraform test
 
   # Formatting is enforced on the PR (a check), not auto-committed to main —
   # branch protection rejects bot pushes, and a PR check also avoids the
