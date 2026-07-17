@@ -1,9 +1,29 @@
 locals {
-  github_actions_subject_prefix = "repo:jonpulsifer@5461940/infra@952814997"
+  # Repos allowed to mint tokens from the shared "homelab" GitHub OIDC provider.
+  # This only gates who can authenticate at all; what each repo can then do is
+  # scoped separately by per-resource IAM bindings (see iam.tf, datastore.tf).
+  github_actions_allowed_repository_ids = [
+    "952814997", # jonpulsifer/infra
+    "554977933", # jonpulsifer/ts
+  ]
 }
 
 resource "google_iam_workload_identity_pool" "homelab" {
   workload_identity_pool_id = "homelab"
+}
+
+# Org policy changes to iam.workloadIdentityPoolProviders are eventually
+# consistent — GCP can reject a provider create/update against the *old*
+# allowed_values for a minute or two even after the policy update has been
+# applied. Force a delay here, and re-trigger it whenever allowed_values
+# changes, so provider resources don't race the policy's propagation.
+resource "time_sleep" "workload_identity_org_policy_propagation" {
+  depends_on      = [google_org_policy_policy.allowed_workload_identity_providers]
+  create_duration = "120s"
+
+  triggers = {
+    allowed_values = jsonencode(google_org_policy_policy.allowed_workload_identity_providers.spec[0].rules[0].values[0].allowed_values)
+  }
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {
@@ -23,8 +43,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
-  attribute_condition = "assertion.sub.startsWith('${local.github_actions_subject_prefix}') && assertion.repository_owner_id == '5461940' && assertion.repository_id == '952814997'"
-  depends_on          = [google_org_policy_policy.allowed_workload_identity_providers]
+  attribute_condition = "assertion.repository_owner_id == '5461940' && assertion.repository_id in ${jsonencode(local.github_actions_allowed_repository_ids)}"
+  depends_on          = [time_sleep.workload_identity_org_policy_propagation]
 }
 
 resource "google_iam_workload_identity_pool_provider" "vercel" {
@@ -36,11 +56,11 @@ resource "google_iam_workload_identity_pool_provider" "vercel" {
     "attribute.environment" = "assertion.environment"
   }
 
-  attribute_condition = "assertion.sub.startsWith('owner:jonpulsifers-projects:project:')"
+  attribute_condition = "assertion.sub.startsWith('owner:jonpulsifer:project:')"
   oidc {
-    allowed_audiences = ["https://vercel.com/jonpulsifers-projects"]
-    issuer_uri        = "https://oidc.vercel.com/jonpulsifers-projects"
+    allowed_audiences = ["https://vercel.com/jonpulsifer"]
+    issuer_uri        = "https://oidc.vercel.com/jonpulsifer"
   }
 
-  depends_on = [google_org_policy_policy.allowed_workload_identity_providers]
+  depends_on = [time_sleep.workload_identity_org_policy_propagation]
 }
