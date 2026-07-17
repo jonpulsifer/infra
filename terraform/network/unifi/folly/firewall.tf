@@ -48,9 +48,9 @@ locals {
   # folly_k8s_cidrs covers the folly cluster's node subnet, Cilium LB VIP pool,
   # and pod CIDR.  nest_k8s_cidrs covers the offsite cluster's equivalent.
   folly_k8s_cidrs = [
-    local.topology.K8S_NODE_CIDR,    # nodes (Kubernetes network, VLAN 8)
-    local.lb_range,                    # Cilium LB VIP pool
-    local.topology.CILIUM_POD_CIDR,   # pod CIDR
+    local.topology.K8S_NODE_CIDR,   # nodes (Kubernetes network, VLAN 8)
+    local.lb_range,                 # Cilium LB VIP pool
+    local.topology.CILIUM_POD_CIDR, # pod CIDR
   ]
   nest_k8s_cidrs = [
     "10.89.0.0/28",  # offsite nodes
