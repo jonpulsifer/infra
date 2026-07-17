@@ -17,17 +17,6 @@ export type WeatherData = {
   device_id?: number;
   stationLabel?: string;
   rainTotal?: number; // mm
-  rainDuration?: number; // minutes
-  minMax24h?: {
-    tempMin?: number;
-    tempMax?: number;
-    humidityMin?: number;
-    humidityMax?: number;
-    windSpeedMax?: number;
-    pressureMin?: number;
-    pressureMax?: number;
-    uvIndexMax?: number;
-  };
 };
 
 export type WeatherEvent = {
@@ -57,6 +46,34 @@ export type WebSocketState =
   | 'connected'
   | 'reconnecting'
   | 'error';
+
+// Typed status contract emitted by WeatherService (server) over the 'status'
+// event / SSE 'status' event, and consumed by useWeatherSocket (client).
+// Replaces classifying errors by substring-matching server free text: the
+// server now says explicitly whether an error is a configuration problem
+// (bad/missing token - user-actionable, should surface in the UI) or a
+// transient connection problem (network blip - server will retry, UI should
+// not flap into an error state for it).
+export type WeatherServiceErrorKind = 'config' | 'connection';
+
+export type WeatherServiceStatus =
+  | {
+      status: 'connected';
+      device_id?: number;
+      stationLabel?: string;
+    }
+  | {
+      status: 'disconnected';
+      device_id?: number;
+      stationLabel?: string;
+    }
+  | {
+      status: 'error';
+      errorKind: WeatherServiceErrorKind;
+      error: string;
+      device_id?: number;
+      stationLabel?: string;
+    };
 
 // WebSocket message types from WeatherFlow API
 export type WebSocketMessage = {

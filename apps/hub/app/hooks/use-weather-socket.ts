@@ -11,7 +11,11 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { log } from '~/lib/logger';
-import type { StationData, WeatherEvent } from '~/lib/weatherflow/types';
+import type {
+  StationData,
+  WeatherEvent,
+  WeatherServiceStatus,
+} from '~/lib/weatherflow/types';
 
 export function useWeatherSocket() {
   const [stations, setStations] = useState<Map<number, StationData>>(new Map());
@@ -54,8 +58,28 @@ export function useWeatherSocket() {
       // Handle status updates
       eventSource.addEventListener('status', (event) => {
         try {
-          const data = JSON.parse(event.data);
+          const data: WeatherServiceStatus & {
+            device_id?: number;
+            stationLabel?: string;
+          } = JSON.parse(event.data);
           log.debug('Status update:', data);
+
+          // Errors that aren't tied to a specific device are connection/
+          // config-level (e.g. a bad token, or a network blip while
+          // fetching a token's station list). Only 'config' errors are
+          // user-actionable, so only those surface in the UI - 'connection'
+          // errors are transient and the server is already retrying.
+          if (data.status === 'error' && data.device_id == null) {
+            if (data.errorKind === 'config') {
+              setConnectionError((prev) => {
+                if (prev && !prev.includes(data.error)) {
+                  return `${prev}\n\n${data.error}`;
+                }
+                return data.error;
+              });
+            }
+            return;
+          }
 
           const deviceId = data.device_id;
           if (!deviceId) return;
@@ -71,25 +95,10 @@ export function useWeatherSocket() {
                 weatherData: {},
                 connectionStatus: 'disconnected',
                 lastUpdate: null,
-                websocketStatus: data.websocketStatus, // Keep for debugging only
-                websocketError: data.websocketError, // Keep for debugging only
-                lastDataReceived: data.lastDataReceived || null,
               };
               log.info(
                 `Creating entry for device ${deviceId} (status: ${data.status})`,
               );
-            }
-
-            // Update websocket status and related fields (for debugging only, not UI display)
-            if (data.websocketStatus !== undefined) {
-              existing.websocketStatus = data.websocketStatus;
-            }
-            if (data.websocketError !== undefined) {
-              existing.websocketError =
-                data.websocketError === null ? undefined : data.websocketError;
-            }
-            if (data.lastDataReceived !== undefined) {
-              existing.lastDataReceived = data.lastDataReceived;
             }
 
             // Update station label if provided in status event
@@ -102,17 +111,12 @@ export function useWeatherSocket() {
 
             // Simplified connection status: based on data availability, not WebSocket technical state
             // 'connected' = has data available, 'disconnected' = no data, 'error' = configuration error only
-            if (data.status === 'error' && data.error) {
+            if (data.status === 'error') {
               const errorMsg = data.stationLabel
                 ? `${data.stationLabel}: ${data.error}`
                 : data.error;
-              const isConfigError =
-                data.error.includes('environment variables') ||
-                data.error.includes('not configured') ||
-                data.error.includes('Missing') ||
-                data.error.includes('Failed to create WebSocket connection');
 
-              if (isConfigError) {
+              if (data.errorKind === 'config') {
                 existing.connectionStatus = 'error';
                 setConnectionError((prev) => {
                   if (prev && !prev.includes(errorMsg)) {
@@ -121,7 +125,8 @@ export function useWeatherSocket() {
                   return errorMsg;
                 });
               }
-              // Don't update status for transient WebSocket errors - keep existing status
+              // errorKind 'connection' is transient - keep existing status,
+              // the server is already retrying.
             } else if (data.status === 'connected') {
               // Only mark as connected if we have actual data, otherwise keep current status
               // Status will be updated to 'connected' when weather data arrives

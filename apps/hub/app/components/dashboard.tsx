@@ -1,6 +1,7 @@
 import { AlertCircle, Clock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useWeatherSocket } from '~/hooks/use-weather-socket';
+import { diffStations } from '~/lib/weatherflow/diff';
 import { RefreshMenu } from './RefreshMenu';
 import { StationDisplay } from './StationDisplay';
 
@@ -124,117 +125,23 @@ export default function Dashboard() {
             )}
 
             {/* Comparison Station - Only show if we have 2 stations */}
-            {stationArray.length === 2 &&
-              (() => {
-                const left = stationArray[0].weatherData;
-                const right = stationArray[1].weatherData;
-
-                // Calculate differences (left - right)
-                const diffData = {
-                  temperature:
-                    left.temperature != null && right.temperature != null
-                      ? left.temperature - right.temperature
-                      : undefined,
-                  humidity:
-                    left.humidity != null && right.humidity != null
-                      ? left.humidity - right.humidity
-                      : undefined,
-                  windSpeed:
-                    left.windSpeed != null && right.windSpeed != null
-                      ? left.windSpeed - right.windSpeed // Keep in m/s, StationDisplay will convert
-                      : undefined,
-                  windLull:
-                    left.windLull != null && right.windLull != null
-                      ? left.windLull - right.windLull // Keep in m/s, StationDisplay will convert
-                      : undefined,
-                  windGust:
-                    left.windGust != null && right.windGust != null
-                      ? left.windGust - right.windGust // Keep in m/s, StationDisplay will convert
-                      : undefined,
-                  pressure:
-                    left.pressure != null && right.pressure != null
-                      ? left.pressure - right.pressure
-                      : undefined,
-                  uvIndex:
-                    left.uvIndex != null && right.uvIndex != null
-                      ? left.uvIndex - right.uvIndex
-                      : undefined,
-                  solarRadiation:
-                    left.solarRadiation != null && right.solarRadiation != null
-                      ? left.solarRadiation - right.solarRadiation
-                      : undefined,
-                  illuminance:
-                    left.illuminance != null && right.illuminance != null
-                      ? left.illuminance - right.illuminance
-                      : undefined,
-                  rainTotal:
-                    left.rainTotal != null && right.rainTotal != null
-                      ? left.rainTotal - right.rainTotal
-                      : undefined,
-                  minMax24h: {
-                    tempMin:
-                      left.minMax24h?.tempMin != null &&
-                      right.minMax24h?.tempMin != null
-                        ? left.minMax24h.tempMin - right.minMax24h.tempMin
-                        : undefined,
-                    tempMax:
-                      left.minMax24h?.tempMax != null &&
-                      right.minMax24h?.tempMax != null
-                        ? left.minMax24h.tempMax - right.minMax24h.tempMax
-                        : undefined,
-                    humidityMin:
-                      left.minMax24h?.humidityMin != null &&
-                      right.minMax24h?.humidityMin != null
-                        ? left.minMax24h.humidityMin -
-                          right.minMax24h.humidityMin
-                        : undefined,
-                    humidityMax:
-                      left.minMax24h?.humidityMax != null &&
-                      right.minMax24h?.humidityMax != null
-                        ? left.minMax24h.humidityMax -
-                          right.minMax24h.humidityMax
-                        : undefined,
-                    windSpeedMax:
-                      left.minMax24h?.windSpeedMax != null &&
-                      right.minMax24h?.windSpeedMax != null
-                        ? left.minMax24h.windSpeedMax -
-                          right.minMax24h.windSpeedMax // Keep in m/s, StationDisplay will convert
-                        : undefined,
-                    pressureMin:
-                      left.minMax24h?.pressureMin != null &&
-                      right.minMax24h?.pressureMin != null
-                        ? left.minMax24h.pressureMin -
-                          right.minMax24h.pressureMin
-                        : undefined,
-                    pressureMax:
-                      left.minMax24h?.pressureMax != null &&
-                      right.minMax24h?.pressureMax != null
-                        ? left.minMax24h.pressureMax -
-                          right.minMax24h.pressureMax
-                        : undefined,
-                    uvIndexMax:
-                      left.minMax24h?.uvIndexMax != null &&
-                      right.minMax24h?.uvIndexMax != null
-                        ? left.minMax24h.uvIndexMax - right.minMax24h.uvIndexMax
-                        : undefined,
-                  },
-                };
-
-                return (
-                  <StationDisplay
-                    key="diff"
-                    stationLabel="Difference"
-                    weatherData={diffData}
-                    connectionStatus="connected"
-                    lastUpdate={Math.max(
-                      stationArray[0].lastUpdate || 0,
-                      stationArray[1].lastUpdate || 0,
-                    )}
-                    isSingleStation={false}
-                    isDiff={true}
-                  />
-                );
-              })()}
+            {stationArray.length === 2 && (
+              <StationDisplay
+                key="diff"
+                stationLabel="Difference"
+                weatherData={diffStations(
+                  stationArray[0].weatherData,
+                  stationArray[1].weatherData,
+                )}
+                connectionStatus="connected"
+                lastUpdate={Math.max(
+                  stationArray[0].lastUpdate || 0,
+                  stationArray[1].lastUpdate || 0,
+                )}
+                isSingleStation={false}
+                isDiff={true}
+              />
+            )}
 
             {/* Right Station */}
             {stationArray[1] && (
