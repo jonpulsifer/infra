@@ -1,17 +1,9 @@
 import { eq } from 'drizzle-orm';
 import type { NextRequest } from 'next/server';
-import { db, scripts, settings } from '@/lib/db';
+import { getSetting } from '@/lib/actions';
+import { resolveServerOrigin } from '@/lib/boot-resolver';
+import { db, scripts } from '@/lib/db';
 import { buildTemplateContext, processTemplate } from '@/lib/ipxe';
-
-
-async function getSetting(key: string): Promise<string | null> {
-  const result = await db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, key))
-    .get();
-  return result?.value ?? null;
-}
 
 export async function GET(
   request: NextRequest,
@@ -39,19 +31,13 @@ export async function GET(
 
   // Get server origin for template variables
   const configuredOrigin = await getSetting('serverOrigin');
-  const serverOrigin =
-    configuredOrigin ||
-    request.headers.get('x-forwarded-host') ||
-    request.headers.get('host') ||
-    'localhost:3000';
-  const protocol = request.headers.get('x-forwarded-proto') || 'http';
-  const baseUrl = configuredOrigin || `${protocol}://${serverOrigin}`;
+  const serverOrigin = resolveServerOrigin(request, configuredOrigin);
 
   // Try to get MAC from query params (optional, for template context)
   const mac = request.nextUrl.searchParams.get('mac') || '00:00:00:00:00:00';
 
   // Build a minimal template context (host-specific vars will be generic)
-  const context = buildTemplateContext(mac, null, null, baseUrl);
+  const context = buildTemplateContext(mac, null, null, serverOrigin);
   const content = processTemplate(script.content, context);
 
   return new Response(content, {

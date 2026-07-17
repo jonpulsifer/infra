@@ -2,6 +2,7 @@
 
 import { desc, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
+import { makeCrudActions } from './crud';
 import { db, hosts, profiles, scripts, settings } from './db';
 import type { NewHost, NewProfile, NewScript } from './db/schema';
 import { normalizeMac } from './ipxe';
@@ -9,6 +10,19 @@ import { normalizeMac } from './ipxe';
 // ============================================================================
 // Hosts
 // ============================================================================
+
+const hostCrud = makeCrudActions<
+  Pick<NewHost, 'macAddress' | 'hostname' | 'profileId'>,
+  Partial<Pick<NewHost, 'hostname' | 'profileId'>>,
+  string
+>({
+  table: hosts,
+  idColumn: hosts.macAddress,
+  paths: (mac) =>
+    mac
+      ? ['/hosts', `/hosts/${encodeURIComponent(mac)}`, '/']
+      : ['/hosts', '/'],
+});
 
 export async function getHosts() {
   return db.select().from(hosts).orderBy(desc(hosts.lastSeen));
@@ -24,19 +38,13 @@ export async function createHost(data: {
   hostname?: string;
   profileId?: number;
 }) {
-  const now = new Date().toISOString();
   const normalized = normalizeMac(data.macAddress);
 
-  await db.insert(hosts).values({
+  await hostCrud.create({
     macAddress: normalized,
     hostname: data.hostname || null,
     profileId: data.profileId || null,
-    createdAt: now,
-    updatedAt: now,
   });
-
-  revalidatePath('/hosts');
-  revalidatePath('/');
 }
 
 export async function updateHost(
@@ -44,29 +52,28 @@ export async function updateHost(
   data: Partial<Pick<NewHost, 'hostname' | 'profileId'>>,
 ) {
   const normalized = normalizeMac(macAddress);
-  const now = new Date().toISOString();
-
-  await db
-    .update(hosts)
-    .set({ ...data, updatedAt: now })
-    .where(eq(hosts.macAddress, normalized));
-
-  revalidatePath('/hosts');
-  revalidatePath(`/hosts/${encodeURIComponent(macAddress)}`);
-  revalidatePath('/');
+  await hostCrud.update(normalized, data);
 }
 
 export async function deleteHost(macAddress: string) {
   const normalized = normalizeMac(macAddress);
-  await db.delete(hosts).where(eq(hosts.macAddress, normalized));
-
-  revalidatePath('/hosts');
-  revalidatePath('/');
+  await hostCrud.remove(normalized);
 }
 
 // ============================================================================
 // Profiles
 // ============================================================================
+
+// Profiles have an extra invariant (at most one default profile) that
+// doesn't fit the generic create/update shape, so they don't use
+// `makeCrudActions` directly for writes. The factory is still used here
+// purely to keep the revalidation paths declared in one place.
+const profileCrud = makeCrudActions<never, never, number>({
+  table: profiles,
+  idColumn: profiles.id,
+  paths: (id) =>
+    id ? ['/profiles', `/profiles/${id}`, '/'] : ['/profiles', '/'],
+});
 
 export async function getProfiles() {
   return db.select().from(profiles).orderBy(desc(profiles.updatedAt));
@@ -81,27 +88,31 @@ export async function createProfile(
 ) {
   const now = new Date().toISOString();
 
-  // If this profile is set as default, unset any existing default
-  if (data.isDefault) {
-    await db.update(profiles).set({ isDefault: false });
-  }
+  // Unset any existing default and insert the new profile atomically, so two
+  // concurrent create/update(isDefault: true) calls can't both leave a
+  // default set (or race and leave zero/two defaults).
+  const inserted = db.transaction((tx) => {
+    if (data.isDefault) {
+      tx.update(profiles).set({ isDefault: false }).run();
+    }
 
-  const result = await db
-    .insert(profiles)
-    .values({
-      name: data.name,
-      description: data.description || null,
-      content: data.content,
-      isDefault: data.isDefault || false,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning({ id: profiles.id });
+    return tx
+      .insert(profiles)
+      .values({
+        name: data.name,
+        description: data.description || null,
+        content: data.content,
+        isDefault: data.isDefault || false,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: profiles.id })
+      .get();
+  });
 
-  revalidatePath('/profiles');
-  revalidatePath('/');
+  profileCrud.revalidate();
 
-  return result[0];
+  return inserted;
 }
 
 export async function updateProfile(
@@ -112,38 +123,50 @@ export async function updateProfile(
 ) {
   const now = new Date().toISOString();
 
-  // If this profile is being set as default, unset any existing default
-  if (data.isDefault) {
-    await db.update(profiles).set({ isDefault: false });
-  }
+  // Same atomicity concern as createProfile: unset-then-set must happen in
+  // one transaction so it can't race with a concurrent default change.
+  db.transaction((tx) => {
+    if (data.isDefault) {
+      tx.update(profiles).set({ isDefault: false }).run();
+    }
 
-  await db
-    .update(profiles)
-    .set({ ...data, updatedAt: now })
-    .where(eq(profiles.id, id));
+    tx.update(profiles)
+      .set({ ...data, updatedAt: now })
+      .where(eq(profiles.id, id))
+      .run();
+  });
 
-  revalidatePath('/profiles');
-  revalidatePath(`/profiles/${id}`);
-  revalidatePath('/');
+  profileCrud.revalidate(id);
 }
 
 export async function deleteProfile(id: number) {
-  // Clear profile assignments from hosts
-  await db
-    .update(hosts)
-    .set({ profileId: null })
-    .where(eq(hosts.profileId, id));
+  // Clear profile assignments from hosts and delete the profile atomically.
+  db.transaction((tx) => {
+    tx.update(hosts)
+      .set({ profileId: null })
+      .where(eq(hosts.profileId, id))
+      .run();
 
-  await db.delete(profiles).where(eq(profiles.id, id));
+    tx.delete(profiles).where(eq(profiles.id, id)).run();
+  });
 
-  revalidatePath('/profiles');
+  profileCrud.revalidate(id);
   revalidatePath('/hosts');
-  revalidatePath('/');
 }
 
 // ============================================================================
 // Scripts
 // ============================================================================
+
+const scriptCrud = makeCrudActions<
+  Pick<NewScript, 'path' | 'description' | 'content'>,
+  Partial<Pick<NewScript, 'path' | 'description' | 'content'>>,
+  number
+>({
+  table: scripts,
+  idColumn: scripts.id,
+  paths: () => ['/scripts', '/'],
+});
 
 export async function getScripts() {
   return db.select().from(scripts).orderBy(scripts.path);
@@ -160,50 +183,37 @@ export async function getScriptByPath(path: string) {
 export async function createScript(
   data: Pick<NewScript, 'path' | 'description' | 'content'>,
 ) {
-  const now = new Date().toISOString();
-
-  const result = await db
-    .insert(scripts)
-    .values({
-      path: data.path,
-      description: data.description || null,
-      content: data.content,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning({ id: scripts.id });
-
-  revalidatePath('/scripts');
-  revalidatePath('/');
-
-  return result[0];
+  return scriptCrud.create(data);
 }
 
 export async function updateScript(
   id: number,
   data: Partial<Pick<NewScript, 'path' | 'description' | 'content'>>,
 ) {
-  const now = new Date().toISOString();
-
-  await db
-    .update(scripts)
-    .set({ ...data, updatedAt: now })
-    .where(eq(scripts.id, id));
-
-  revalidatePath('/scripts');
-  revalidatePath('/');
+  await scriptCrud.update(id, data);
 }
 
 export async function deleteScript(id: number) {
-  await db.delete(scripts).where(eq(scripts.id, id));
-
-  revalidatePath('/scripts');
-  revalidatePath('/');
+  await scriptCrud.remove(id);
 }
 
 // ============================================================================
 // Settings
 // ============================================================================
+
+// Settings are a key/value upsert (no separate create/update, no
+// timestamps), so they don't fit makeCrudActions' insert/update shape.
+// `remove`/`revalidate` still apply cleanly, so we reuse those.
+const settingCrud = makeCrudActions<
+  Record<string, unknown>,
+  Record<string, unknown>,
+  string
+>({
+  table: settings,
+  idColumn: settings.key,
+  paths: () => ['/settings'],
+  timestamps: false,
+});
 
 export async function getSettings() {
   const rows = await db.select().from(settings);
@@ -225,11 +235,10 @@ export async function setSetting(key: string, value: string) {
     .values({ key, value })
     .onConflictDoUpdate({ target: settings.key, set: { value } });
 
-  revalidatePath('/settings');
+  settingCrud.revalidate();
   revalidatePath('/');
 }
 
 export async function deleteSetting(key: string) {
-  await db.delete(settings).where(eq(settings.key, key));
-  revalidatePath('/settings');
+  await settingCrud.remove(key);
 }
