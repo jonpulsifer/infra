@@ -13,7 +13,7 @@ const MAX_BODY_SIZE = 5 * 1024 * 1024; // 5MB
  * Webhook ingestion endpoint for /api/[slug]
  * Handles incoming webhooks with:
  * - Rate limiting (5 RPS)
- * - Optimistic locking for blob writes
+ * - Etag-based freshness tracking for polling (see lib/webhook-feed.ts)
  * - Automatic webhook storage
  *
  * Reserved slugs: "health" (handled by /api/health)

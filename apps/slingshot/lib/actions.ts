@@ -57,8 +57,11 @@ export async function getAllProjectsAction() {
 }
 
 /**
- * Send a test webhook to self (for example/demo purposes)
- * Note: This sends to the project's own endpoint, so domain validation is not needed
+ * Send a test webhook (for example/demo purposes).
+ *
+ * This is a Server Action, i.e. a callable POST endpoint - the caller can
+ * pass any URL, so it goes through the same SSRF-safe sender as
+ * sendOutgoingWebhookAction rather than assuming the URL is always safe.
  */
 export async function sendTestWebhookAction(
   webhookUrl: string,
@@ -68,26 +71,22 @@ export async function sendTestWebhookAction(
   'use server';
 
   try {
-    const options: RequestInit = {
+    const { sendOutgoingWebhook } = await import('./outgoing-webhook-sender');
+
+    const result = await sendOutgoingWebhook(webhookUrl, {
       method,
       headers: {
         'Content-Type': 'application/json',
         'X-Test-Webhook': 'true',
       },
-    };
-
-    if (body && ['POST', 'PUT', 'PATCH'].includes(method)) {
-      options.body = body;
-    }
-
-    const response = await fetch(webhookUrl, options);
-    const responseText = await response.text();
+      body: body && ['POST', 'PUT', 'PATCH'].includes(method) ? body : null,
+    });
 
     return {
       success: true,
-      status: response.status,
-      statusText: response.statusText,
-      body: responseText.slice(0, 200), // Limit response body size
+      status: result.status,
+      statusText: result.statusText,
+      body: result.body.slice(0, 200), // Limit response body size
     };
   } catch (error) {
     throw new Error(
@@ -102,21 +101,22 @@ export async function sendTestWebhookAction(
 export async function pollStatsAction(currentEtag?: string | null) {
   try {
     const { checkStatsChanged, getStats } = await import('./stats-storage');
+    const { resolveFeedUpdate } = await import('./webhook-feed');
 
-    // Check metadata first
-    const { changed, etag: newEtag } = await checkStatsChanged();
+    const result = await resolveFeedUpdate(
+      currentEtag,
+      checkStatsChanged,
+      (etag) => getStats(etag),
+    );
 
-    // If not changed or ETag matches, return no change
-    if (!changed || (currentEtag && newEtag === currentEtag)) {
+    if (!result.changed) {
       return { changed: false };
     }
 
-    // If changed, fetch full data
-    const { data, etag } = await getStats(newEtag);
     return {
       changed: true,
-      stats: data,
-      etag: etag || undefined,
+      stats: result.data,
+      etag: result.etag,
     };
   } catch (error) {
     console.error('Failed to poll stats:', error);
@@ -154,21 +154,22 @@ export async function pollWebhooksAction(
 ) {
   try {
     const { checkWebhooksChanged, getWebhooks } = await import('./storage');
+    const { resolveFeedUpdate } = await import('./webhook-feed');
 
-    // Check metadata first
-    const { changed, etag: newEtag } = await checkWebhooksChanged(slug);
+    const result = await resolveFeedUpdate(
+      currentEtag,
+      () => checkWebhooksChanged(slug),
+      (etag) => getWebhooks(slug, etag),
+    );
 
-    // If not changed or ETag matches, return no change
-    if (!changed || (currentEtag && newEtag === currentEtag)) {
+    if (!result.changed) {
       return { changed: false };
     }
 
-    // If changed, fetch full data
-    const { data: history, etag } = await getWebhooks(slug, newEtag);
     return {
       changed: true,
-      webhooks: history?.webhooks || [],
-      etag: etag || undefined,
+      webhooks: result.data?.webhooks || [],
+      etag: result.etag,
     };
   } catch (error) {
     console.error('Failed to poll webhooks:', error);
@@ -298,68 +299,20 @@ export async function sendOutgoingWebhookAction(
       encodedUrl = encodeURI(parsed.url);
     }
 
-    // Validate domain before sending
-    const { validateOutgoingDomain } = await import(
-      './validate-outgoing-domain'
+    // Send the webhook through the SSRF-safe sender: it validates the
+    // domain allowlist and resolved IP before the initial request AND on
+    // every redirect hop, and ASCII/secret-sanitizes headers before anything
+    // goes out over the wire.
+    const { sendOutgoingWebhook } = await import('./outgoing-webhook-sender');
+    const result = await sendOutgoingWebhook(
+      encodedUrl,
+      {
+        method: parsed.method,
+        headers: parsed.headers,
+        body: parsed.body,
+      },
+      { rateLimitKey: slug },
     );
-    const validation = validateOutgoingDomain(encodedUrl);
-
-    if (!validation.allowed) {
-      throw new Error(validation.error || 'Domain not allowed');
-    }
-
-    // Sanitize headers to ensure they're ASCII-only (HTTP headers must be ASCII)
-    // Headers cannot contain Unicode characters - they must be ASCII (0-255)
-    const sanitizedHeaders: Record<string, string> = {};
-    for (const [key, value] of Object.entries(parsed.headers)) {
-      // Header keys must be ASCII-only - replace non-ASCII with '?'
-      const sanitizedKey = Array.from(key)
-        .map((char) => {
-          const code = char.charCodeAt(0);
-          // Check for surrogate pairs (UTF-16) and single code points > 255
-          if (code >= 0xd800 && code <= 0xdfff) {
-            // Surrogate pair - skip or replace
-            return '';
-          }
-          return code > 255 ? '?' : char;
-        })
-        .join('')
-        .trim();
-
-      // Header values must be ASCII-only - replace non-ASCII with '?'
-      const sanitizedValue = Array.from(value)
-        .map((char) => {
-          const code = char.charCodeAt(0);
-          // Check for surrogate pairs (UTF-16) and single code points > 255
-          if (code >= 0xd800 && code <= 0xdfff) {
-            // Surrogate pair - skip or replace
-            return '';
-          }
-          return code > 255 ? '?' : char;
-        })
-        .join('');
-
-      if (sanitizedKey) {
-        sanitizedHeaders[sanitizedKey] = sanitizedValue;
-      }
-    }
-
-    // Send the webhook
-    const options: RequestInit = {
-      method: parsed.method,
-      headers: sanitizedHeaders,
-    };
-
-    if (parsed.body && ['POST', 'PUT', 'PATCH'].includes(parsed.method)) {
-      options.body = parsed.body;
-    }
-
-    const startTime = Date.now();
-    const response = await fetch(encodedUrl, options);
-    const endTime = Date.now();
-    const duration = endTime - startTime;
-
-    const responseText = await response.text();
 
     // Save the outgoing webhook
     const { appendWebhook } = await import('./storage');
@@ -377,9 +330,9 @@ export async function sendOutgoingWebhookAction(
       body: parsed.body || null,
       timestamp: Date.now(),
       direction: 'outgoing',
-      responseStatus: response.status,
-      responseBody: responseText.slice(0, 10000), // Limit response body size
-      duration,
+      responseStatus: result.status,
+      responseBody: result.body.slice(0, 10000), // Limit response body size
+      duration: result.duration,
     };
 
     // Append webhook
@@ -389,9 +342,9 @@ export async function sendOutgoingWebhookAction(
     return {
       success: true,
       webhookId: webhook.id,
-      status: response.status,
-      statusText: response.statusText,
-      responseBody: responseText.slice(0, 200), // Limit response body for return
+      status: result.status,
+      statusText: result.statusText,
+      responseBody: result.body.slice(0, 200), // Limit response body for return
     };
   } catch (error) {
     console.error('Failed to send outgoing webhook:', error);

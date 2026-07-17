@@ -8,9 +8,9 @@ A modern, serverless webhook testing platform built with Next.js 16, Google Clou
 - ⚡ **Live stream** — Real-time webhook ingestion with SSE + local cache hydration
 - 🔍 **Rich inspection** — Headers, body, response, and raw payload views with syntax highlighting
 - 🟥🟩 **Color-coded diffs** — Inline and side-by-side diffs to compare any two events
-- 🎯 **Replay safely** — Client-side webhook resend to avoid SSRF risk
+- 🎯 **Replay safely** — Server-side SSRF protection: domain allowlist plus resolved-IP validation on the initial request and every redirect hop (`lib/outgoing-webhook-sender.ts`)
 - 🔒 **Rate limiting** — 5 req/sec per project to prevent congestion
-- 📦 **Single-file storage** — Circular buffer per project with optimistic locking
+- 📦 **Single-file storage** — Circular buffer per project with etag-based freshness polling
 - 🧭 **Quick copy** — One-click cURL/HTTPie/Burp export for fast debugging
 - 📱 **Responsive UI** — Resizable panels and keyboard-friendly interactions
 
@@ -28,8 +28,8 @@ A modern, serverless webhook testing platform built with Next.js 16, Google Clou
 ### Key Design Decisions
 
 1. **Single-File Storage**: All webhooks for a project are stored in one JSON file (`projects/{id}/webhooks.json`) with a circular buffer limit of 100 webhooks
-2. **Optimistic Locking**: Uses ETag-based retry logic instead of distributed locks (no Redis required)
-3. **Client-Side Resend**: Webhook replay happens in the browser to prevent SSRF attacks
+2. **Freshness Polling**: Uses ETag-based change detection (`lib/webhook-feed.ts`) so clients can poll without re-downloading unchanged data (no Redis required)
+3. **Server-Side SSRF Protection**: Webhook replay/test-send goes through `lib/outgoing-webhook-sender.ts`, which validates the domain allowlist and resolved IP before the initial request and on every redirect hop
 4. **Google Cloud Firestore**: Uses Firestore with Workload Identity Federation for authentication
 
 ## Getting Started
