@@ -32,6 +32,15 @@ else
   fail "a comma-separated cluster DNS list should satisfy the contract"
 fi
 
+jq '.data.CLUSTER_DNS = "10.10.0.254,"' "$fixture_dir/folly.json" >"$fixture_dir/trailing-comma-dns.json"
+if "$validator" "$fixture_dir/trailing-comma-dns.json" 2>"$fixture_dir/trailing-comma-dns.err"; then
+  fail "a trailing DNS comma should fail"
+elif grep -q 'CLUSTER_DNS entries must not be empty' "$fixture_dir/trailing-comma-dns.err"; then
+  pass "empty cluster DNS entries produce a local diagnostic"
+else
+  fail "an empty cluster DNS entry should name the invariant"
+fi
+
 jq 'del(.data.LB_RANGE)' "$fixture_dir/folly.json" >"$fixture_dir/missing-lb.json"
 if "$validator" "$fixture_dir/missing-lb.json" 2>"$fixture_dir/missing-lb.err"; then
   fail "a topology without LB_RANGE should fail"

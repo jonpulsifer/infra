@@ -113,6 +113,9 @@ for topology_file in "$@"; do
       diagnose "$topology_file" "$key must be an IPv4 address"
     fi
   done
+  if [[ ${fact[CLUSTER_DNS]} == ,* || ${fact[CLUSTER_DNS]} == *, || ${fact[CLUSTER_DNS]} == *,,* ]]; then
+    diagnose "$topology_file" "CLUSTER_DNS entries must not be empty"
+  fi
   IFS=, read -r -a cluster_dns_addresses <<<"${fact[CLUSTER_DNS]}"
   for cluster_dns in "${cluster_dns_addresses[@]}"; do
     if ! ipv4_to_int "$cluster_dns" >/dev/null; then
