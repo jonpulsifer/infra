@@ -9,7 +9,7 @@ ENV PATH="/root/.bun/bin:${PATH}" \
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN bunx turbo@2.10.3 prune hub --docker
+RUN bun x turbo@2.10.3 prune hub --docker
 
 FROM base AS builder
 WORKDIR /app
