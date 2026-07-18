@@ -1,0 +1,14 @@
+[
+  {
+    "image": "spore",
+    "context": ".",
+    "file": "apps/spore/Dockerfile",
+    "watch": [
+      "apps/spore",
+      "packages/typescript-config",
+      "package.json",
+      "bun.lock",
+      "turbo.json"
+    ]
+  }
+]

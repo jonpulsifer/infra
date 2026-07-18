@@ -4,6 +4,9 @@
 *
 !apps
 !packages
+!package.json
+!bun.lock
+!turbo.json
 
 # Even within the whitelisted trees, never send dependency/build artifacts.
 **/node_modules
