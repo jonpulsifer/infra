@@ -4,8 +4,8 @@ kind: Namespace
 metadata:
   name: vault
   labels:
-    app.kubernetes.io/name: vault
-    app.kubernetes.io/part-of: vault
+    app.kubernetes.io/name: openbao
+    app.kubernetes.io/part-of: openbao
     kustomize.toolkit.fluxcd.io/prune: enabled
     pod-security.kubernetes.io/audit: baseline
     pod-security.kubernetes.io/audit-version: latest

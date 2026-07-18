@@ -55,7 +55,7 @@ limited to `init -backend=false && validate`, lint, build, and unit tests.
 
 This repo is GitOps-first: author desired state in git and let the operators apply it. Do not mutate live infra directly.
 
-- **Terraform** (all root modules live under `terraform/`: network fabric in `terraform/network/` — `unifi/folly`, `unifi/offsite`, `cloudflare/`, `tailscale/` — and cloud/identity in `terraform/gcp/`, `terraform/argo/`, `terraform/google-workspace/`, `terraform/vault/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
+- **Terraform** (all root modules live under `terraform/`: network fabric in `terraform/network/` — `unifi/folly`, `unifi/offsite`, `cloudflare/`, `tailscale/` — and cloud/identity in `terraform/gcp/`, `terraform/argo/`, `terraform/google-workspace/`; reusable modules in `terraform/modules/`): applies run through **Atlantis** on the PR. Open a PR — Atlantis autoplans the changed module(s); comment `atlantis apply` to apply (a successful apply automerges). Locally, `terraform init`/`plan` and `init -backend=false && validate` are for inspection only. **Never run `terraform apply` against remote state** — it races Atlantis and causes lock contention / drift. CI (`terraform.yml`) only validates. See the `kubernetes-gitops` skill for the Atlantis ↔ ArgoCD auth + token-rotation details.
 - **Kubernetes** (`clusters/**`): changes deploy via **Flux** (and **ArgoCD** for apps sourced from external repos) on merge to `main`. Commit manifests; **never `kubectl apply`** to author state. `kubectl`, `flux get`, and `flux reconcile` are for inspection or forcing a sync. Use explicit contexts (`--context folly` / `--context offsite`) and namespaces.
 - **NixOS** (`nix/**`): `nixos-rebuild` is the apply path (see Key Commands). State changes that may mutate live hosts should be called out before running.
 
@@ -175,7 +175,7 @@ Cloud & identity:
 - `terraform/gcp/projects/<name>/` – per-project resources (homelab-ng, firebees, lolcorp, etc.)
 - `terraform/argo/` – ArgoCD application definitions (Terraform-managed)
 - `terraform/google-workspace/` – Google Workspace users, groups, domains
-- `terraform/vault/` – HashiCorp Vault auth, mounts, policies
+- OpenBao is deployed through `clusters/folly/apps/vault/`, uses integrated Raft storage, and uses an isolated GCP KMS key from `terraform/gcp/projects/homelab-ng/`.
 - `terraform/modules/` – reusable modules (currently just gce-vpc) consumed by the roots via relative paths
 
 ### Layer 4 – Applications, Packages & Images
