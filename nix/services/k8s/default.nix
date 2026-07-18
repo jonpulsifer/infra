@@ -8,6 +8,10 @@ let
   networks = import ./networks.nix { inherit lib; };
   networkConfig = networks.${config.services.k8s.network};
   cfg = config.services.k8s;
+  fmlIssuer = "https://oidc.lolwtf.ca/${cfg.network}";
+  fmlSignerCert = ../../../terraform/pki/certs/${cfg.network}-sa-signer.pem;
+  legacyIssuer = "https://kubernetes.default.svc";
+  legacySignerCert = "/var/lib/kubernetes/secrets/service-account.pem";
 in
 {
 
@@ -27,6 +31,19 @@ in
       ];
       description = "K8s node role";
       default = "worker";
+    };
+    serviceAccountIssuerMigrationStage = lib.mkOption {
+      type = lib.types.enum [
+        "legacy"
+        "dual-accept"
+        "cutover"
+      ];
+      default = "legacy";
+      description = ''
+        FML ServiceAccount issuer rollout stage. Control planes must pass through
+        dual-accept before cutover so existing tokens remain valid while the new
+        verification key and issuer are introduced.
+      '';
     };
   };
 
@@ -164,15 +181,38 @@ in
             "${config.networking.hostName}.pirate-musical.ts.net"
             config.services.kubernetes.apiserver.advertiseAddress
           ];
-          extraOpts = ''
+          serviceAccountIssuer = lib.mkIf (
+            cfg.serviceAccountIssuerMigrationStage == "cutover"
+          ) fmlIssuer;
+          serviceAccountKeyFile = lib.mkIf (
+            cfg.serviceAccountIssuerMigrationStage == "cutover"
+          ) fmlSignerCert;
+          serviceAccountSigningKeyFile = lib.mkIf (
+            cfg.serviceAccountIssuerMigrationStage == "cutover"
+          ) config.sops.secrets."k8s-sa-signing-key".path;
+          extraOpts =
+            ''
             --enable-aggregator-routing=true \
             --requestheader-allowed-names=front-proxy-client \
             --requestheader-extra-headers-prefix=X-Remote-Extra- \
             --requestheader-group-headers=X-Remote-Group \
             --requestheader-username-headers=X-Remote-User
-          '';
+            ''
+            + lib.optionalString (cfg.serviceAccountIssuerMigrationStage == "dual-accept") ''
+              --service-account-issuer=${fmlIssuer} \
+              --service-account-key-file=${fmlSignerCert}
+            ''
+            + lib.optionalString (cfg.serviceAccountIssuerMigrationStage == "cutover") ''
+              --service-account-issuer=${legacyIssuer} \
+              --service-account-key-file=${legacySignerCert}
+            '';
         };
-        controllerManager.enable = true;
+        controllerManager = {
+          enable = true;
+          serviceAccountKeyFile = lib.mkIf (
+            cfg.serviceAccountIssuerMigrationStage == "cutover"
+          ) config.sops.secrets."k8s-sa-signing-key".path;
+        };
         scheduler.enable = true;
         addonManager.enable = true;
       })

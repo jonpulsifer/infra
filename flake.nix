@@ -106,8 +106,22 @@
           tags = [ "folly" ];
           imports = [
             ./nix/system/tailscale-disable.nix
+            ./nix/system/sops.nix
+            { services.k8s.serviceAccountIssuerMigrationStage = "dual-accept"; }
           ];
-          extraConfig.homelab.disko.device = "/dev/sda";
+          extraConfig = {
+            homelab.disko.device = "/dev/sda";
+            sops.defaultSopsFile = ./nix/secrets/optiplex.sops.yaml;
+            sops.secrets."k8s-sa-signing-key" = {
+              owner = "kubernetes";
+              group = "kubernetes";
+              mode = "0400";
+              restartUnits = [
+                "kube-apiserver.service"
+                "kube-controller-manager.service"
+              ];
+            };
+          };
         };
         riptide = mkHost "riptide" {
           tags = [ "folly" ];
@@ -150,8 +164,22 @@
           role = "control-plane";
           imports = [
             ./nix/system/tailscale-disable.nix
+            ./nix/system/sops.nix
+            { services.k8s.serviceAccountIssuerMigrationStage = "dual-accept"; }
           ];
-          extraConfig.homelab.disko.device = "/dev/sda";
+          extraConfig = {
+            homelab.disko.device = "/dev/sda";
+            sops.defaultSopsFile = ./nix/secrets/retrofit.sops.yaml;
+            sops.secrets."k8s-sa-signing-key" = {
+              owner = "kubernetes";
+              group = "kubernetes";
+              mode = "0400";
+              restartUnits = [
+                "kube-apiserver.service"
+                "kube-controller-manager.service"
+              ];
+            };
+          };
         };
 
         cloudpi4 = mkHost "cloudpi4" {
