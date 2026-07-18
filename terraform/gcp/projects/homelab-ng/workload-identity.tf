@@ -4,7 +4,6 @@ locals {
   # scoped separately by per-resource IAM bindings (see iam.tf, datastore.tf).
   github_actions_allowed_repository_ids = [
     "952814997", # jonpulsifer/infra
-    "554977933", # jonpulsifer/ts
   ]
 }
 

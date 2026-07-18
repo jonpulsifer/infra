@@ -12,9 +12,3 @@ resource "google_project_iam_binding" "firestore_database_user" {
     local.slingshot_principals
   )
 }
-
-resource "google_project_iam_binding" "firestore_database_reader" {
-  project = local.project
-  role    = "roles/datastore.viewer"
-  members = ["principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.repository/jonpulsifer/ts"]
-}
