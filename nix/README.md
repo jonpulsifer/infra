@@ -25,7 +25,7 @@ nix/
 - `riptide` - worker
 
 **Offsite Cluster**:
-- `oldschool` - worker (github-runner, yarr, docker)
+- `oldschool` - worker (infra GitHub runner, yarr, docker)
 - `retrofit` - control-plane
 
 ### Raspberry Pi Systems
@@ -128,7 +128,7 @@ Custom service modules in `services/`:
 - **`k8s/`** - NixOS service helpers for Kubernetes (Cilium CNI, Longhorn storage, gVisor runtime) — not the cluster manifests, which live in `clusters/`
 - **`common.nix`** - Base server configuration with SSH, Tailscale, monitoring
 - **`jellyfin.nix`** - Media server
-- **`github-runner.nix`** - Self-hosted GitHub Actions runners
+- **`github-runner.nix`** - Self-hosted GitHub Actions runner for this infra repository
 - **`kiosk.nix`** - Kiosk mode display. See the [kiosk runbook](../docs/kiosk-runbook.md).
 - **`nas.nix`** - Network attached storage
 - **`nix-serve.nix`** - Binary cache server
