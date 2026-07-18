@@ -181,31 +181,28 @@ in
             "${config.networking.hostName}.pirate-musical.ts.net"
             config.services.kubernetes.apiserver.advertiseAddress
           ];
-          serviceAccountIssuer = lib.mkIf (
-            cfg.serviceAccountIssuerMigrationStage == "cutover"
-          ) fmlIssuer;
+          serviceAccountIssuer = lib.mkIf (cfg.serviceAccountIssuerMigrationStage == "cutover") fmlIssuer;
           serviceAccountKeyFile = lib.mkIf (
             cfg.serviceAccountIssuerMigrationStage == "cutover"
           ) fmlSignerCert;
           serviceAccountSigningKeyFile = lib.mkIf (
             cfg.serviceAccountIssuerMigrationStage == "cutover"
           ) config.sops.secrets."k8s-sa-signing-key".path;
-          extraOpts =
-            ''
+          extraOpts = ''
             --enable-aggregator-routing=true \
             --requestheader-allowed-names=front-proxy-client \
             --requestheader-extra-headers-prefix=X-Remote-Extra- \
             --requestheader-group-headers=X-Remote-Group \
             --requestheader-username-headers=X-Remote-User
-            ''
-            + lib.optionalString (cfg.serviceAccountIssuerMigrationStage == "dual-accept") ''
-              --service-account-issuer=${fmlIssuer} \
-              --service-account-key-file=${fmlSignerCert}
-            ''
-            + lib.optionalString (cfg.serviceAccountIssuerMigrationStage == "cutover") ''
-              --service-account-issuer=${legacyIssuer} \
-              --service-account-key-file=${legacySignerCert}
-            '';
+          ''
+          + lib.optionalString (cfg.serviceAccountIssuerMigrationStage == "dual-accept") ''
+            --service-account-issuer=${fmlIssuer} \
+            --service-account-key-file=${fmlSignerCert}
+          ''
+          + lib.optionalString (cfg.serviceAccountIssuerMigrationStage == "cutover") ''
+            --service-account-issuer=${legacyIssuer} \
+            --service-account-key-file=${legacySignerCert}
+          '';
         };
         controllerManager = {
           enable = true;
