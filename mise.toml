@@ -44,6 +44,10 @@ run = "nix develop -c nix fmt"
 description = "Format Terraform files"
 run = "terraform fmt -recursive"
 
+[tasks."k8s:render-apps"]
+description = "Render shared folly and offsite app overlays"
+run = "bash .github/scripts/render-cluster-apps.sh"
+
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
