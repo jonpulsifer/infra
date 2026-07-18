@@ -22,6 +22,7 @@ tags:: architecture
 	  ```
 	- Use explicit contexts and namespaces: `--context folly` / `--context offsite`.
 	- First-party apps deploy as Flux HelmReleases using the `app` / `ai-agent` charts from `packages/charts/`, referenced as `packages/charts/<name>` against the `infra` GitRepository.
+	- Actions Runner Controller provides a shared `infra-<cluster>` scale set in each cluster. First-party repositories use that infra runner pool; they do not get repository-specific scale sets.
 	- ArgoCD application definitions are Terraform-managed in `terraform/argo/`.
 - ## Networking inside the clusters
 	- Cilium is the CNI and the BGP load balancer; VIP pools live in `networking/cilium/ip-pools.yaml` — see [[Architecture/Networking]] and [[ADR/0005 Cilium BGP load balancing]].
