@@ -6,6 +6,7 @@ _.file = '.env'
 age = "latest"
 bat = "latest"
 cilium-cli = "latest"
+conftest = "latest"
 delta = "latest"
 eza = "latest"
 flux2 = "latest"
