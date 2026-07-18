@@ -8,12 +8,12 @@ tags:: architecture
 	- ### Layer 2 — Kubernetes ([[Architecture/Kubernetes]])
 		- Two clusters under `clusters/`: `folly` (primary, on-site) and `offsite` (backup), plus `clusters/base/` for shared resources. FluxCD reconciles manifests on merge; ArgoCD handles apps sourced from external repos.
 	- ### Layer 3 — Cloud & network ([[Architecture/Terraform]])
-		- Terraform root modules under `terraform/`: UniFi network fabric, Cloudflare DNS/tunnels, Tailscale, GCP organization and projects, Google Workspace, and Vault. Applies run through Atlantis on the PR — see [[ADR/0001 GitOps apply model]].
+		- Terraform root modules under `terraform/`: UniFi network fabric, Cloudflare DNS/tunnels, Tailscale, GCP organization and projects, and Google Workspace. OpenBao is deployed through Flux. Applies run through Atlantis on the PR — see [[ADR/0001 GitOps apply model]].
 	- ### Layer 4 — Applications ([[Architecture/Applications]])
 		- First-party code: deployable services in `apps/`, reusable packages and Helm charts in `packages/`, base/tool OCI images in `images/`. Built by CI on change.
 - ## Cross-cutting concerns
 	- [[Architecture/Networking]] — VLANs, BGP, Cilium load balancing, tunnels, and the cross-site fabric
-	- [[Architecture/Secrets and PKI]] — SOPS/age, Vault, and the offline root CA
+	- [[Architecture/Secrets and PKI]] — SOPS/age and OpenBao
 	- [[Architecture/GitOps]] — how a change actually ships, layer by layer
 	- [[Fleet]] — the concrete hosts all of this runs on
 - ## Design principles

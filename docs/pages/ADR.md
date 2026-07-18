@@ -13,7 +13,8 @@ icon:: 📜
 	- [[ADR/0004 Disko with GPT partlabels]] — declarative partitioning keyed on `disk-main-*` labels
 	- [[ADR/0005 Cilium BGP load balancing]] — Cilium advertises VIPs; the gateway firewall gates cross-site
 	- [[ADR/0006 Dotfiles vendored in-repo with chezmoi]] — no home-manager, no separate repo (superseded by 0011)
-	- [[ADR/0007 Offline root CA with YubiKey and SLIP-0039]] — root stays offline; Vault runs the intermediate
+	- [[ADR/0007 Offline root CA with YubiKey and SLIP-0039]] — superseded by [[ADR/0012 Migrate Vault to OpenBao]]
+	- [[ADR/0012 Migrate Vault to OpenBao]] — fresh OpenBao storage; Vault data and PKI are not migrated
 	- [[ADR/0008 Diskless netboot for rackpi5]] — stateless RAM image served from spore
 	- [[ADR/0009 Logseq wiki on Cloudflare Pages]] — this wiki
 	- [[ADR/0010 First-party Bun SSG for the wiki]] — the renderer that actually builds it
