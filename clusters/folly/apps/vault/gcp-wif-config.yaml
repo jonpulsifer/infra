@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-gcp-wif
+data:
+  credentials.json: |
+    {
+      "universe_domain": "googleapis.com",
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/folly",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "credential_source": {
+        "file": "/var/run/secrets/google/token",
+        "format": {
+          "type": "text"
+        }
+      },
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/vault-id@homelab-ng.iam.gserviceaccount.com:generateAccessToken"
+    }

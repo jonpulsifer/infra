@@ -5,5 +5,5 @@ resources:
   - namespace.yaml
   - helm-repository.yaml
   - helm-release.yaml
-  - secret.sops.yaml
+  - gcp-wif-config.yaml
 namespace: vault
