@@ -10,7 +10,7 @@ ENV PATH="/root/.bun/bin:${PATH}" \
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN bunx turbo@2.10.3 prune slingshot --docker
+RUN bun x turbo@2.10.3 prune slingshot --docker
 
 FROM base AS builder
 ENV STANDALONE=1
