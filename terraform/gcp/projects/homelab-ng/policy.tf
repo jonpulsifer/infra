@@ -140,7 +140,10 @@ resource "google_org_policy_policy" "allowed_workload_identity_providers" {
       values {
         allowed_values = [
           "is:https://token.actions.githubusercontent.com",
-          "is:https://oidc.vercel.com/jonpulsifer"
+          "is:https://oidc.vercel.com/jonpulsifer",
+          # Cluster SA issuers (terraform/pki; served via Cloudflare Pages)
+          "is:https://oidc.lolwtf.ca/folly",
+          "is:https://oidc.lolwtf.ca/offsite"
         ]
       }
     }
