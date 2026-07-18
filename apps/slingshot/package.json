@@ -48,7 +48,7 @@
     "date-fns": "4.4.0",
     "embla-carousel-react": "8.6.0",
     "framer-motion": "12.42.2",
-    "google-auth-library": "10.7.0",
+    "google-auth-library": "10.9.0",
     "input-otp": "1.4.2",
     "lucide-react": "1.21.0",
     "nanoid": "5.1.15",
