@@ -1,0 +1,32 @@
+name: topology contract
+
+on:
+  pull_request:
+    paths:
+      - clusters/**/config/cluster-topology.json
+      - .github/policy/cluster-topology.rego
+      - .github/policy/cluster-topology_test.rego
+      - .github/workflows/topology-contract.yml
+  push:
+    branches: [main]
+    paths:
+      - clusters/**/config/cluster-topology.json
+      - .github/policy/cluster-topology.rego
+      - .github/policy/cluster-topology_test.rego
+      - .github/workflows/topology-contract.yml
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
+        with:
+          install_args: conftest
+      - name: Run policy unit tests
+        run: conftest verify -p .github/policy
+      - name: Validate accepted topology ConfigMaps against the contract
+        run: |
+          conftest test --combine -p .github/policy \
+            clusters/folly/config/cluster-topology.json \
+            clusters/offsite/config/cluster-topology.json
