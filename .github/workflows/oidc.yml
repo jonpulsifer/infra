@@ -29,22 +29,28 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-24.04
+    container: oven/bun:1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Assemble site
+        id: assemble
         run: |
           set -euo pipefail
           for cluster in folly offsite; do
             src="terraform/pki/oidc/$cluster"
             [ -d "$src" ] || continue
-            jq -e .issuer "$src/openid-configuration.json"
-            jq -e '.keys | length > 0' "$src/jwks.json"
+            bun -e "const d = await Bun.file('$src/openid-configuration.json').json(); if (!d.issuer) throw new Error('no issuer')"
+            bun -e "const d = await Bun.file('$src/jwks.json').json(); if (!(d.keys?.length > 0)) throw new Error('empty jwks')"
             mkdir -p "dist/$cluster/.well-known" "dist/$cluster/openid/v1"
             cp "$src/openid-configuration.json" "dist/$cluster/.well-known/openid-configuration"
             cp "$src/jwks.json" "dist/$cluster/openid/v1/jwks"
           done
-          [ -d dist ] || { echo "no issuer documents committed yet"; exit 1; }
+          if [ ! -d dist ]; then
+            echo "no issuer documents committed yet; skipping deploy"
+            echo "have_docs=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Extensionless JSON needs explicit headers; keep max-age short so
           # signer rotation propagates to verifiers quickly.
           cat > dist/_headers <<'EOF'
@@ -53,12 +59,10 @@ jobs:
             Cache-Control: public, max-age=300
           EOF
           find dist -type f | sort
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: github.ref == 'refs/heads/main'
+          echo "have_docs=true" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Cloudflare Pages
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.assemble.outputs.have_docs == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           # fml account (terraform/network/cloudflare/account.tf)
