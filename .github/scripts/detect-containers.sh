@@ -12,7 +12,8 @@
 #
 # build.json format (array of build objects):
 #   [{ "image": "name", "context": ".", "file": "path/Dockerfile",
-#      "build-args": "KEY=val", "watch": ["extra/path"] }]
+#      "build-args": "KEY=val", "platforms": "linux/amd64,linux/arm64",
+#      "watch": ["extra/path"] }]
 # All fields except "image" are optional.
 #
 # Input:  CHANGED_FILES env var — newline-separated list of changed file paths
@@ -22,7 +23,7 @@ set -euo pipefail
 
 manifest=".github/containers.json"
 
-mapfile -t changed_files <<< "${CHANGED_FILES:-}"
+mapfile -t changed_files <<<"${CHANGED_FILES:-}"
 
 # A change to the workflow, this script, or the allowlist rebuilds every image.
 rebuild_all=false
@@ -36,7 +37,10 @@ fi
 # Membership sets from the allowlist: is_build (publish) and is_classified
 # (build ∪ ignore — anything an unclassified-image check should accept).
 declare -A is_build is_classified
-while IFS= read -r img; do is_build[$img]=1; is_classified[$img]=1; done \
+while IFS= read -r img; do
+  is_build[$img]=1
+  is_classified[$img]=1
+done \
   < <(jq -r '.build[]' "$manifest")
 while IFS= read -r img; do is_classified[$img]=1; done \
   < <(jq -r '.ignore[]' "$manifest")
@@ -68,19 +72,20 @@ for dockerfile in "${dockerfiles[@]}"; do
   fi
 
   for entry in "${entries[@]}"; do
-    image=$(jq -r --arg b "$base" '.image // $b' <<< "$entry")
+    image=$(jq -r --arg b "$base" '.image // $b' <<<"$entry")
 
     [[ -n "${is_classified[$image]:-}" ]] || unclassified[$image]=1
     # Only allowlisted images are eligible for the build matrix.
     [[ -n "${is_build[$image]:-}" ]] || continue
 
-    context=$(jq -r --arg d "$dir" '.context    // $d' <<< "$entry")
-    file=$(jq -r '.file        // ""' <<< "$entry")
-    build_args=$(jq -r '."build-args" // ""' <<< "$entry")
+    context=$(jq -r --arg d "$dir" '.context    // $d' <<<"$entry")
+    file=$(jq -r '.file        // ""' <<<"$entry")
+    build_args=$(jq -r '."build-args" // ""' <<<"$entry")
+    platforms=$(jq -r '.platforms   // ""' <<<"$entry")
 
     should_build="$rebuild_all"
     if [[ "$should_build" != "true" ]]; then
-      mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<< "$entry")
+      mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<<"$entry")
       for watch in "${watches[@]}"; do
         if path_changed "$watch"; then
           should_build=true
@@ -92,7 +97,8 @@ for dockerfile in "${dockerfiles[@]}"; do
     if [[ "$should_build" == "true" ]]; then
       includes=$(jq -cn --argjson a "$includes" \
         --arg img "$image" --arg ctx "$context" --arg f "$file" --arg ba "$build_args" \
-        '$a + [{"image":$img,"context":$ctx,"file":$f,"build-args":$ba}]')
+        --arg p "$platforms" \
+        '$a + [{"image":$img,"context":$ctx,"file":$f,"build-args":$ba,"platforms":$p}]')
     fi
   done
 done
@@ -104,14 +110,14 @@ if [[ -n "${unclassified[*]:-}" ]]; then
 fi
 
 out="${GITHUB_OUTPUT:-/dev/stderr}"
-if [[ $(jq 'length' <<< "$includes") -gt 0 ]]; then
+if [[ $(jq 'length' <<<"$includes") -gt 0 ]]; then
   {
     echo "has_changes=true"
-    echo "matrix=$(jq -c '{"include":.}' <<< "$includes")"
-  } >> "$out"
+    echo "matrix=$(jq -c '{"include":.}' <<<"$includes")"
+  } >>"$out"
 else
   {
     echo "has_changes=false"
     echo 'matrix={"include":[]}'
-  } >> "$out"
+  } >>"$out"
 fi
