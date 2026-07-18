@@ -24,7 +24,7 @@
     "react-router": "8.0.1",
     "react-router-dom": "7.18.0",
     "tailwind-merge": "3.6.0",
-    "ws": "8.21.0"
+    "ws": "8.21.1"
   },
   "devDependencies": {
     "@react-router/dev": "8.0.1",
