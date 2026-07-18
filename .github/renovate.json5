@@ -9,6 +9,7 @@
     ':semanticCommits',
     ':automergePr',
     ':automergeRequireAllStatusChecks',
+    ':enableVulnerabilityAlerts',
     'customManagers:dockerfileVersions',
     'customManagers:githubActionsVersions',
     'customManagers:helmChartYamlAppVersions',
@@ -235,6 +236,11 @@
       semanticCommitScope: 'terraform-provider',
       commitMessageTopic: 'provider {{depName}}',
     },
+    {
+      matchDatasources: ['npm'],
+      semanticCommitScope: 'typescript',
+      commitMessageTopic: 'package {{depName}}',
+    },
     // ============================================================
     // Labels
     // ============================================================
@@ -270,6 +276,31 @@
       matchManagers: ['terraform'],
       matchDatasources: ['terraform-provider'],
       addLabels: ['renovate/terraform-provider'],
+    },
+    {
+      matchDatasources: ['npm'],
+      addLabels: ['renovate/typescript'],
+    },
+    // ============================================================
+    // TypeScript / Bun — conservative intake, automated upkeep
+    // ============================================================
+    {
+      // Bun uses its own Renovate manager, but registry dependencies still
+      // come from the npm datasource. Give npm releases extra time for
+      // malware reports and unpublishes to surface before opening a PR.
+      description: 'npm packages: seven-day cooldown and stale-package signal',
+      matchDatasources: ['npm'],
+      minimumReleaseAge: '7 days',
+      abandonmentThreshold: '2 years',
+    },
+    {
+      // Pre-1.0 releases may contain breaking changes. Keep those and every
+      // major update for manual review.
+      description: 'Auto-merge stable npm non-major updates after cooldown and CI',
+      matchDatasources: ['npm'],
+      matchCurrentVersion: '!/^0/',
+      matchUpdateTypes: ['minor', 'patch'],
+      automerge: true,
     },
     // ============================================================
     // Grouping
@@ -330,6 +361,13 @@
       // age gate applies.
       description: 'Digest pins are exempt from the release-age gate',
       matchUpdateTypes: ['digest', 'pin', 'pinDigest'],
+      minimumReleaseAge: null,
+    },
+    {
+      // Lockfile maintenance is a package-manager operation, not a release,
+      // so there is no individual release timestamp for Renovate to check.
+      description: 'Lockfile maintenance is exempt from the release-age gate',
+      matchUpdateTypes: ['lockFileMaintenance'],
       minimumReleaseAge: null,
     },
     // ============================================================
