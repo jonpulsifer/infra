@@ -29,9 +29,10 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    container: oven/bun:1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Assemble site
         run: |
@@ -65,4 +66,30 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           # fml account (terraform/network/cloudflare/account.tf)
           CLOUDFLARE_ACCOUNT_ID: d7f641bb9f4b9de593f721ad06989dbe
-        run: bun x wrangler pages deploy dist --project-name=fml-oidc --branch=main
+        run: |
+          set -euo pipefail
+          bun x wrangler pages deploy dist --project-name=fml-oidc --branch=main | tee wrangler-output.log
+          grep --fixed-strings --quiet 'Deployment complete!' wrangler-output.log
+
+      - name: Verify public issuer endpoints
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            failed=false
+            for cluster in folly offsite; do
+              [ -d "terraform/pki/oidc/$cluster" ] || continue
+              for path in .well-known/openid-configuration openid/v1/jwks; do
+                url="https://oidc.lolwtf.ca/$cluster/$path"
+                if ! curl --fail --silent --show-error --max-time 10 "$url" >/dev/null; then
+                  failed=true
+                fi
+              done
+            done
+            if [ "$failed" = false ]; then
+              exit 0
+            fi
+            echo "issuer endpoints not ready (attempt $attempt/12)"
+            sleep 5
+          done
+          exit 1
