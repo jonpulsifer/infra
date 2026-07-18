@@ -23,3 +23,30 @@ resource "google_kms_crypto_key_iam_member" "vault_viewer" {
   role          = "roles/cloudkms.viewer"
   member        = google_service_account.vault.member
 }
+
+# OpenBao gets a distinct KMS key so its fresh storage cannot read Vault data.
+resource "google_kms_key_ring" "openbao" {
+  name     = "openbao"
+  location = local.region
+}
+
+resource "google_kms_crypto_key" "openbao" {
+  name     = "openbao"
+  key_ring = google_kms_key_ring.openbao.id
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_kms_crypto_key_iam_member" "openbao_encrypt_decrypt" {
+  crypto_key_id = google_kms_crypto_key.openbao.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = google_service_account.vault.member
+}
+
+resource "google_kms_crypto_key_iam_member" "openbao_viewer" {
+  crypto_key_id = google_kms_crypto_key.openbao.id
+  role          = "roles/cloudkms.viewer"
+  member        = google_service_account.vault.member
+}

@@ -13,7 +13,6 @@ tags:: runbook, terraform
 		- `terraform/gcp/projects/<name>`
 		- `terraform/argo`
 		- `terraform/google-workspace`
-		- `terraform/vault`
 		- `clusters/folly/bootstrap`
 		- `clusters/offsite/bootstrap`
 - # Local validation

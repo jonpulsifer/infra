@@ -1,4 +1,4 @@
-status:: accepted
+status:: superseded
 date:: 2026-07-06 (backfilled 2026-07-08)
 deciders:: [[jawn]]
 tags:: adr
@@ -15,3 +15,4 @@ tags:: adr
 	- Recovery depends on physical custody of the YubiKey and enough SLIP-0039 shares; losing both is unrecoverable by design.
 - # Links
 	- [[Architecture/Secrets and PKI]]
+	- Superseded by [[ADR/0012 Migrate Vault to OpenBao]]

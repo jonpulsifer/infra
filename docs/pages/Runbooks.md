@@ -5,6 +5,7 @@ icon:: 🚒
 	- [[Runbooks/Deploy a NixOS Host]] — build, deploy, verify, and roll back NixOS hosts
 	- [[Runbooks/Terraform Change]] — Atlantis-first Terraform workflow and local validation
 	- [[Runbooks/Kubernetes GitOps Change]] — inspect Flux, reconcile resources, and handle SOPS safely
+	- [[Runbooks/OpenBao Bootstrap]] — initialize and verify the fresh folly OpenBao instance
 	- [[Runbooks/Add Shared Kubernetes Resource]] — use the `clusters/base/` pattern for both clusters
 	- [[Runbooks/Validate Infra Changes]] — validation commands by change area
 	- [[Runbooks/Inspect UniFi Network]] — read-only UniFi discovery before Terraform changes

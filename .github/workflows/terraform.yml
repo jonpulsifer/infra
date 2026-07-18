@@ -5,9 +5,21 @@ on:
       - main
     paths:
       - '**/*.tf'
+      - '**/*.tftest.hcl'
+      - '**/.terraform.lock.hcl'
+      - terraform/network/unifi/folly/lab.tf.json
+      - .github/scripts/validation-impact.sh
+      - .github/scripts/validation-impact_test.sh
+      - .github/workflows/terraform.yml
   pull_request:
     paths:
       - '**/*.tf'
+      - '**/*.tftest.hcl'
+      - '**/.terraform.lock.hcl'
+      - terraform/network/unifi/folly/lab.tf.json
+      - .github/scripts/validation-impact.sh
+      - .github/scripts/validation-impact_test.sh
+      - .github/workflows/terraform.yml
 
 # Cancel superseded runs on the same ref instead of letting them pile up.
 concurrency:
@@ -19,47 +31,50 @@ jobs:
     name: Get Changed Files
     runs-on: ubuntu-latest
     outputs:
-      # Output a JSON string list of unique directories containing changed files matching the patterns
-      directories: ${{ steps.expand-directories.outputs.directories }}
+      # Output a JSON string list of Terraform roots affected by changed paths.
+      directories: ${{ steps.routing.outputs.directories }}
       # Output 'true' or 'false' as a string
-      any_changed: ${{ steps.changed-directories.outputs.any_changed }}
+      any_changed: ${{ steps.routing.outputs.any_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 2
-      - name: Directories with Changes
-        id: changed-directories
+      - name: Changed validation inputs
+        id: changed-paths
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
-          dir_names: true
-          matrix: true
+          separator: "\n"
           files: |
             **/*.tf
+            **/*.tftest.hcl
             **/.terraform.lock.hcl
-      - name: Expand Terraform root directories
-        id: expand-directories
-        if: steps.changed-directories.outputs.any_changed == 'true'
+            terraform/network/unifi/folly/lab.tf.json
+            .github/scripts/validation-impact.sh
+            .github/scripts/validation-impact_test.sh
+            .github/workflows/terraform.yml
+      - name: Resolve affected Terraform roots
+        id: routing
         env:
-          CHANGED_DIRECTORIES: ${{ steps.changed-directories.outputs.all_changed_files }}
+          CHANGED_PATHS: ${{ steps.changed-paths.outputs.all_changed_files }}
         run: |
           set -euo pipefail
-
-          declare -A directories=()
-          while IFS= read -r dir; do
-            while [[ -n "$dir" && "$dir" != "." ]]; do
-              if compgen -G "$dir/*.tf" > /dev/null; then
-                directories["$dir"]=1
-              fi
-              if [[ "$dir" != */* ]]; then
-                break
-              fi
-              dir="${dir%/*}"
-            done
-          done < <(jq -r '.[]' <<< "$CHANGED_DIRECTORIES")
-
-          matrix="$(printf '%s\n' "${!directories[@]}" | sort | jq -R -s -c 'split("\n")[:-1]')"
+          matrix="$(printf '%s\n' "$CHANGED_PATHS" \
+            | .github/scripts/validation-impact.sh targets \
+            | sed -n 's/^terraform://p' \
+            | jq -R -s -c 'split("\n")[:-1]')"
           echo "directories=$matrix" >> "$GITHUB_OUTPUT"
+          if [[ "$matrix" == '[]' ]]; then
+            echo 'any_changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'any_changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  routing-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - run: bash .github/scripts/validation-impact_test.sh
 
   validate:
     needs: [changed-directories]
@@ -82,6 +97,8 @@ jobs:
       - name: Terraform Validate
         id: validate
         run: terraform validate
+      - name: Terraform Test
+        run: terraform test
 
   # Formatting is enforced on the PR (a check), not auto-committed to main —
   # branch protection rejects bot pushes, and a PR check also avoids the
