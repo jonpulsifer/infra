@@ -44,6 +44,10 @@ run = "nix develop -c nix fmt"
 description = "Format Terraform files"
 run = "terraform fmt -recursive"
 
+[tasks."validation-impact:test"]
+description = "Test validation-impact routing"
+run = "bash .github/scripts/validation-impact_test.sh"
+
 [tasks."k8s:render-apps"]
 description = "Render shared folly and offsite app overlays"
 run = "bash .github/scripts/render-cluster-apps.sh"
@@ -51,14 +55,14 @@ run = "bash .github/scripts/render-cluster-apps.sh"
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
-  "bash -lc 'for d in terraform/argo terraform/network/cloudflare terraform/network/tailscale terraform/network/unifi/folly terraform/network/unifi/offsite terraform/vault terraform/google-workspace terraform/gcp/organization terraform/gcp/projects/* clusters/folly/bootstrap; do [ -d \"$d\" ] || continue; echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done'",
+  "bash -lc 'while IFS= read -r d; do echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done < <(.github/scripts/validation-impact.sh terraform-roots)'",
 ]
 
 [tasks."tf:validate"]
 description = "Validate Terraform modules"
 depends = ["tf:init"]
 run = [
-  "bash -lc 'for d in terraform/argo terraform/network/cloudflare terraform/network/tailscale terraform/network/unifi/folly terraform/network/unifi/offsite terraform/vault terraform/google-workspace terraform/gcp/organization terraform/gcp/projects/* clusters/folly/bootstrap; do [ -d \"$d\" ] || continue; echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done'",
+  "bash -lc 'while IFS= read -r d; do echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done < <(.github/scripts/validation-impact.sh terraform-roots)'",
 ]
 
 [tasks."tf:docs"]
