@@ -40,6 +40,14 @@ resource "google_service_account" "vault" {
   account_id = "vault-id"
 }
 
+# OpenBao uses the folly provider and its chart-created vault/vault-openbao KSA
+# to obtain short-lived credentials for this GSA's existing KMS grants.
+resource "google_service_account_iam_member" "vault_folly_workload_identity" {
+  service_account_id = google_service_account.vault.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.fml.name}/subject/folly:system:serviceaccount:vault:vault-openbao"
+}
+
 data "google_iam_policy" "github_actions" {
   binding {
     role = "roles/iam.workloadIdentityUser"
