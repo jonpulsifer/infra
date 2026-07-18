@@ -42,50 +42,46 @@ locals {
   }
 }
 
-resource "tls_private_key" "flux" {
-  algorithm   = "ECDSA"
-  ecdsa_curve = "P256"
-}
+module "flux_bootstrap" {
+  source = "../../../terraform/modules/flux-bootstrap"
 
-resource "github_repository_deploy_key" "this" {
-  title      = "Flux (offsite)"
-  repository = local.github.repo
-  key        = tls_private_key.flux.public_key_openssh
-  read_only  = "true"
-}
+  cluster_name = "offsite"
+  github_repo  = local.github.repo
+  flux_values  = file("${path.module}/flux-values.yaml")
 
-resource "helm_release" "flux_operator" {
-  name             = "flux-operator"
-  namespace        = "flux-system"
-  repository       = "oci://ghcr.io/controlplaneio-fluxcd/charts"
-  chart            = "flux-operator"
-  create_namespace = true
-}
-
-resource "helm_release" "flux" {
-  depends_on = [helm_release.flux_operator]
-
-  name       = "flux"
-  namespace  = "flux-system"
-  repository = "oci://ghcr.io/controlplaneio-fluxcd/charts"
-  chart      = "flux-instance"
-
-  values = [
-    file("${path.module}/flux-values.yaml")
-  ]
-}
-
-resource "kubernetes_secret" "main" {
-  metadata {
-    name      = "flux-github-app-credentials"
-    namespace = "flux-system"
+  providers = {
+    github     = github
+    helm       = helm
+    kubernetes = kubernetes
   }
+}
 
-  data = {
-    identity       = tls_private_key.flux.private_key_pem
-    "identity.pub" = tls_private_key.flux.public_key_pem
-    known_hosts    = "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg="
-  }
+moved {
+  from = tls_private_key.flux
+  to   = module.flux_bootstrap.tls_private_key.flux
+}
 
-  depends_on = [helm_release.flux]
+moved {
+  from = github_repository_deploy_key.this
+  to   = module.flux_bootstrap.github_repository_deploy_key.this
+}
+
+moved {
+  from = helm_release.flux_operator
+  to   = module.flux_bootstrap.helm_release.flux_operator
+}
+
+moved {
+  from = helm_release.flux
+  to   = module.flux_bootstrap.helm_release.flux
+}
+
+moved {
+  from = kubernetes_secret.main
+  to   = module.flux_bootstrap.kubernetes_secret.main
+}
+
+output "bootstrap_resources" {
+  description = "Stable identities of resources created for Flux bootstrap."
+  value       = module.flux_bootstrap.bootstrap_resources
 }

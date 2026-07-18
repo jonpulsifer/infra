@@ -10,7 +10,7 @@ Infrastructure-as-code for a multi-cloud homelab environment. This repository ma
 ├── clusters/      # Kubernetes GitOps manifests (folly, offsite, base) — FluxCD
 ├── terraform/     # All Terraform root modules: network/ (unifi/{folly,offsite},
 │                  #   cloudflare, tailscale), gcp, argo, google-workspace,
-│                  #   vault, modules/
+│                  #   modules/
 ├── apps/          # Deployable first-party services (agent-web, hermes, tidbyt, …)
 ├── packages/      # Shared building blocks (agent-web-ui, charts/)
 ├── images/        # Base & tool OCI images + cloudlab-linux VM build tooling
@@ -137,7 +137,7 @@ Flake-based NixOS configurations for all physical and virtual machines. Modular 
 FluxCD GitOps manifests for the `folly` and `offsite` clusters, with shared resources in `clusters/base/`. The Flux bootstrap itself is Terraform (`clusters/<site>/bootstrap/`).
 
 ### `terraform/` - Cloud, Identity & Network
-All Terraform root modules. Network fabric under `terraform/network/`: `unifi/folly` and `unifi/offsite` (UniFi controllers — VLANs, BGP, clients), `cloudflare/` (DNS & security), and `tailscale/` (tailnet policy & devices). Cloud & identity: `gcp/` (resources by project), `argo/` (ArgoCD apps), `google-workspace/`, and `vault/`. Reusable modules live in `terraform/modules/`.
+All Terraform root modules. Network fabric under `terraform/network/`: `unifi/folly` and `unifi/offsite` (UniFi controllers — VLANs, BGP, clients), `cloudflare/` (DNS & security), and `tailscale/` (tailnet policy & devices). Cloud & identity: `gcp/` (resources by project), `argo/` (ArgoCD apps), and `google-workspace/`. OpenBao is deployed by Flux with integrated Raft storage and a GCP KMS key managed in `terraform/gcp/projects/homelab-ng/`. Reusable modules live in `terraform/modules/`.
 
 ### `apps/`, `packages/`, `images/` - Code & Builds
 First-party services (`apps/`), shared libraries and Helm charts (`packages/`), and base/tool container + VM images (`images/`).

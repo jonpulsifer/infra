@@ -10,10 +10,7 @@ tags:: architecture
 	  sops -e -i clusters/<cluster>/<path>.sops.yaml   # encrypt new file
 	  ```
 	- Flux decrypts at reconcile time in-cluster.
-- ## Vault
-	- HashiCorp Vault runs in the folly cluster; auth methods, mounts, and policies are Terraform-managed in `terraform/vault/`. external-secrets syncs selected material into cluster secrets.
-- ## PKI: offline root, online intermediate
-	- The root CA was generated in an offline ceremony (`pki/offline-root-ceremony.sh`) anchored to a YubiKey with the key material sharded via SLIP-0039. Vault holds and operates the intermediate as the active issuing CA. See [[ADR/0007 Offline root CA with YubiKey and SLIP-0039]].
-	- Ceremony artifacts under `pki/export/` are gitignored — CA keys and certs never get committed.
+- ## OpenBao
+	- OpenBao runs in the folly cluster with isolated Raft storage and GCP KMS auto-unseal. It starts with no migrated Vault data or PKI material; configure any future auth methods, mounts, policies, and PKI explicitly.
 - ## 1Password
 	- Operator credentials (UniFi, etc.) live in 1Password; the `op` CLI fetches them for tooling (e.g. the `unifi-network` skill). CI uses scoped service-account tokens where needed.

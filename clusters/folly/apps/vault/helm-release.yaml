@@ -7,12 +7,15 @@ metadata:
 spec:
   chart:
     spec:
-      chart: vault
-      version: 0.32.0
+      chart: openbao
+      version: 0.28.5
       sourceRef:
         kind: HelmRepository
-        name: hashicorp
+        name: openbao
   values:
+    # No workloads use agent injection; avoid deploying the Vault-compatible injector.
+    injector:
+      enabled: false
     server:
       enabled: true
       ingress:
@@ -27,10 +30,10 @@ spec:
               - *host
             secretName: *host
       extraEnvironmentVars:
-        GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/vault/credentials.json
-        VAULT_LOG_LEVEL: debug
+        GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/openbao/credentials.json
+      logLevel: debug
       dataStorage:
-        enabled: false
+        enabled: true
       standalone:
         enabled: true
         config: |
@@ -41,13 +44,13 @@ spec:
           seal "gcpckms" {
             project     = "homelab-ng"
             region      = "northamerica-northeast1"
-            key_ring    = "vault"
-            crypto_key  = "vault"
+            key_ring    = "openbao"
+            crypto_key  = "openbao"
           }
 
-          storage "gcs" {
-            bucket     = "homelab-ng-vault"
-            ha_enabled = "false"
+          storage "raft" {
+            path    = "/openbao/data"
+            node_id = "vault-openbao-0"
           }
 
           listener "tcp" {
@@ -57,7 +60,7 @@ spec:
           }
       volumeMounts:
         - name: secrets
-          mountPath: /var/run/secrets/vault
+          mountPath: /var/run/secrets/openbao
           readOnly: true
       volumes:
         - name: secrets

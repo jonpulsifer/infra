@@ -12,7 +12,7 @@ tags:: architecture
 	- `gcp/projects/<name>/` — per-project resources (homelab-ng, firebees, lolcorp, …)
 	- `argo/` — ArgoCD application definitions
 	- `google-workspace/` — users, groups, domains
-	- `vault/` — Vault auth, mounts, policies
+	- OpenBao backing resources — GCP KMS in `gcp/projects/homelab-ng/`; the server's integrated Raft storage is Flux-managed
 	- `modules/` — reusable modules consumed by relative path
 - ## Workflow
 	- Open a PR → Atlantis autoplans the changed module(s) → review the plan → comment `atlantis apply` → successful apply automerges.
