@@ -19,7 +19,9 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
-RUN bun run build --filter=slingshot
+RUN --mount=type=secret,id=gcp_credentials,required=true \
+  GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcp_credentials \
+  bun run build --filter=slingshot
 
 FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runner
 ENV HOSTNAME=0.0.0.0 \

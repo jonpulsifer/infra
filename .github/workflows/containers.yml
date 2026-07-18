@@ -51,12 +51,24 @@ jobs:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Authenticate Slingshot build to Google Cloud
+        if: matrix.image == 'slingshot'
+        id: gcp_auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
+          project_id: homelab-ng
+          create_credentials_file: true
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - name: Set up Docker Buildx
@@ -91,5 +103,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          secret-files: ${{ matrix.image == 'slingshot' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
           sbom: true
           provenance: true

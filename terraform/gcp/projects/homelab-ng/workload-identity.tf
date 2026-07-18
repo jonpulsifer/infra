@@ -91,7 +91,9 @@ resource "google_iam_workload_identity_pool_provider" "fml_k8s" {
   workload_identity_pool_provider_id = each.key
 
   attribute_mapping = {
-    "google.subject"           = "assertion.sub"
+    # Provider IDs are not part of a pool principal URI. Prefix the mapped
+    # subject so identically named KSAs in different clusters stay distinct.
+    "google.subject"           = "'${each.key}:' + assertion.sub"
     "attribute.namespace"      = "assertion['kubernetes.io']['namespace']"
     "attribute.serviceaccount" = "assertion['kubernetes.io']['serviceaccount']['name']"
   }
