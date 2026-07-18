@@ -67,3 +67,42 @@ resource "google_iam_workload_identity_pool_provider" "vercel" {
 
   depends_on = [time_sleep.workload_identity_org_policy_propagation]
 }
+
+# Cluster workload identities: each cluster's kube-apiserver is an OIDC issuer
+# (SA token signer issued by terraform/pki; discovery docs + JWKS served at
+# oidc.lolwtf.ca via Cloudflare Pages). Separate pool from "homelab" so cluster
+# workloads and CI identities never share a principalSet namespace. One provider
+# per cluster — the clusters have distinct issuers/keys because their SA
+# subjects (system:serviceaccount:ns:name) would otherwise be indistinguishable.
+# ("fml-pool" because GCP requires pool IDs of 4+ chars — bare "fml" is too short.)
+locals {
+  fml_clusters    = toset(["folly", "offsite"])
+  fml_issuer_base = "https://oidc.lolwtf.ca"
+}
+
+resource "google_iam_workload_identity_pool" "fml" {
+  workload_identity_pool_id = "fml-pool"
+}
+
+resource "google_iam_workload_identity_pool_provider" "fml_k8s" {
+  for_each = local.fml_clusters
+
+  workload_identity_pool_id          = google_iam_workload_identity_pool.fml.workload_identity_pool_id
+  workload_identity_pool_provider_id = each.key
+
+  attribute_mapping = {
+    "google.subject"           = "assertion.sub"
+    "attribute.namespace"      = "assertion['kubernetes.io']['namespace']"
+    "attribute.serviceaccount" = "assertion['kubernetes.io']['serviceaccount']['name']"
+  }
+
+  # Only bound (projected) ServiceAccount tokens federate; IAM grants must add
+  # their own namespace/serviceaccount conditions — never grant pool-wide.
+  attribute_condition = "assertion.sub.startsWith('system:serviceaccount:')"
+
+  oidc {
+    issuer_uri = "${local.fml_issuer_base}/${each.key}"
+  }
+
+  depends_on = [time_sleep.workload_identity_org_policy_propagation]
+}

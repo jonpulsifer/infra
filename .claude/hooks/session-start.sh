@@ -28,6 +28,7 @@ export PATH="$HOME/.local/bin:$PATH"
 #    ship in the container; nix and the heavier CLIs are intentionally skipped.)
 echo "==> installing curated tools via mise"
 mise install \
+  opentofu \
   terraform \
   terraform-docs \
   shellcheck \
