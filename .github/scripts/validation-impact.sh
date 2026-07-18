@@ -57,7 +57,7 @@ targets() {
 terraform_roots() {
   # A backend declaration distinguishes independently validated roots from
   # reusable modules beneath terraform/modules.
-  rg -l --glob '*.tf' 'backend "' terraform clusters/*/bootstrap | xargs -r -n1 dirname | sort -u
+  grep -rl --include='*.tf' 'backend "' terraform clusters/*/bootstrap | xargs -r -n1 dirname | sort -u
 }
 
 case "${1:-}" in
