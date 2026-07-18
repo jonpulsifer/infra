@@ -21,6 +21,9 @@ kustomize = "latest"
 shellcheck = "latest"
 shfmt = "latest"
 sops = "latest"
+# tofu is the apply-path binary (Atlantis runs ATLANTIS_DEFAULT_TF_DISTRIBUTION=opentofu);
+# terraform stays installed for anything not yet migrated.
+opentofu = "latest"
 terraform = "latest"
 terraform-docs = "latest"
 vim = "latest"
@@ -33,7 +36,7 @@ run = "nix develop"
 description = "Format Nix + Terraform"
 run = [
   "nix develop -c nix fmt",
-  "terraform fmt -recursive",
+  "tofu fmt -recursive",
 ]
 
 [tasks."nix:fmt"]
@@ -42,7 +45,7 @@ run = "nix develop -c nix fmt"
 
 [tasks."tf:fmt"]
 description = "Format Terraform files"
-run = "terraform fmt -recursive"
+run = "tofu fmt -recursive"
 
 [tasks."validation-impact:test"]
 description = "Test validation-impact routing"
@@ -55,14 +58,14 @@ run = "bash .github/scripts/render-cluster-apps.sh"
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
-  "bash -lc 'while IFS= read -r d; do echo \"==> terraform init -backend=false $d\"; terraform -chdir=\"$d\" init -backend=false -input=false; done < <(.github/scripts/validation-impact.sh terraform-roots)'",
+  "bash -lc 'while IFS= read -r d; do echo \"==> tofu init -backend=false $d\"; tofu -chdir=\"$d\" init -backend=false -input=false; done < <(.github/scripts/validation-impact.sh terraform-roots)'",
 ]
 
 [tasks."tf:validate"]
 description = "Validate Terraform modules"
 depends = ["tf:init"]
 run = [
-  "bash -lc 'while IFS= read -r d; do echo \"==> terraform validate $d\"; terraform -chdir=\"$d\" validate; done < <(.github/scripts/validation-impact.sh terraform-roots)'",
+  "bash -lc 'while IFS= read -r d; do echo \"==> tofu validate $d\"; tofu -chdir=\"$d\" validate; done < <(.github/scripts/validation-impact.sh terraform-roots)'",
 ]
 
 [tasks."tf:docs"]
@@ -74,7 +77,7 @@ run = [
 [tasks."tf:plan"]
 description = "Run Terraform plan for one module (set TF_DIR)"
 run = [
-  "bash -lc 'if [ -z \"$TF_DIR\" ]; then echo \"Set TF_DIR, e.g. TF_DIR=unifi mise run tf:plan\"; exit 1; fi; terraform -chdir=\"$TF_DIR\" init -input=false && terraform -chdir=\"$TF_DIR\" plan'",
+  "bash -lc 'if [ -z \"$TF_DIR\" ]; then echo \"Set TF_DIR, e.g. TF_DIR=unifi mise run tf:plan\"; exit 1; fi; tofu -chdir=\"$TF_DIR\" init -input=false && tofu -chdir=\"$TF_DIR\" plan'",
 ]
 
 # helper: find bash/sh scripts (excludes python, etc.)
