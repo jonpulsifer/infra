@@ -35,7 +35,6 @@ in
       repo = "infra";
       extraPackages = [ pkgs.cachix ];
     };
-    ts = mkRunner { repo = "ts"; };
   };
   nix.settings.trusted-users = [
     "github-runner-infra"

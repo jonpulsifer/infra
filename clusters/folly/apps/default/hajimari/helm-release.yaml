@@ -35,7 +35,6 @@ spec:
           - dump
           - falco
           - flux-system
-          - request-headers
           - kube-system
           - monitoring
       name: "overlord"
