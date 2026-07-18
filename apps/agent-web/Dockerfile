@@ -2,8 +2,8 @@
 #
 # Build context is the REPO ROOT (the frontend lives in packages/agent-web-ui).
 # Two images are produced from this one Dockerfile via --build-arg AGENT_SET:
-#   AGENT_SET=full  -> docker.io/jonpulsifer/ai-agents (claude-code, opencode, pi, openclaw)
-#   AGENT_SET=pi    -> docker.io/jonpulsifer/pi         (openclaw only)
+#   AGENT_SET=full  -> ghcr.io/jonpulsifer/ai-agents (claude-code, opencode, pi, openclaw)
+#   AGENT_SET=pi    -> local validation only (openclaw only)
 #
 #   docker build -f apps/agent-web/Dockerfile --build-arg AGENT_SET=full .
 
