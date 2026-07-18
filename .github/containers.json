@@ -6,7 +6,10 @@
     "netbench",
     "rackstat",
     "atlantis",
-    "actions-runner"
+    "actions-runner",
+    "hub",
+    "slingshot",
+    "spore"
   ],
   "ignore": [
     "bashcurljq",
