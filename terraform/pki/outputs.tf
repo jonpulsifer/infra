@@ -36,9 +36,11 @@ output "sa_signer_private_keys" {
 output "fml_root_cert" {
   description = "FML Root CA certificate (PEM)."
   value       = local.fml_root_cert
+  sensitive   = true
 }
 
 output "fml_intermediate_cert" {
   description = "FML Intermediate CA certificate (PEM)."
   value       = local.fml_intermediate_cert
+  sensitive   = true
 }
