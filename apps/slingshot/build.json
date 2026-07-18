@@ -3,6 +3,7 @@
     "image": "slingshot",
     "context": ".",
     "file": "apps/slingshot/Dockerfile",
+    "platforms": "linux/amd64",
     "watch": [
       "apps/slingshot",
       "packages/typescript-config",

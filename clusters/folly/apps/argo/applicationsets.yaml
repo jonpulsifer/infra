@@ -14,7 +14,7 @@ spec:
     spec:
       project: default
       sources:
-        - repoURL: https://github.com/jonpulsifer/ts.git
+        - repoURL: https://github.com/jonpulsifer/infra.git
           targetRevision: HEAD
           path: apps/{{app}}/k8s
       destination:

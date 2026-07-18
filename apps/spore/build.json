@@ -3,6 +3,7 @@
     "image": "spore",
     "context": ".",
     "file": "apps/spore/Dockerfile",
+    "platforms": "linux/amd64,linux/arm64",
     "watch": [
       "apps/spore",
       "packages/typescript-config",
