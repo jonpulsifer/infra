@@ -30,7 +30,7 @@ spec:
               - *host
             secretName: *host
       extraEnvironmentVars:
-        GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/openbao/credentials.json
+        GOOGLE_APPLICATION_CREDENTIALS: /var/run/secrets/google/credentials.json
       logLevel: debug
       dataStorage:
         enabled: true
@@ -59,12 +59,22 @@ spec:
             tls_disable_client_certs = true
           }
       volumeMounts:
-        - name: secrets
-          mountPath: /var/run/secrets/openbao
+        - name: google-wif
+          mountPath: /var/run/secrets/google
           readOnly: true
       volumes:
-        - name: secrets
-          secret:
-            secretName: vault
+        - name: google-wif
+          projected:
+            defaultMode: 288 # 0440
+            sources:
+              - serviceAccountToken:
+                  audience: https://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/folly
+                  expirationSeconds: 3600
+                  path: token
+              - configMap:
+                  name: vault-gcp-wif
+                  items:
+                    - key: credentials.json
+                      path: credentials.json
     ui:
       enabled: true
