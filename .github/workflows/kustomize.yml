@@ -1,0 +1,23 @@
+name: kustomize
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'clusters/base/**'
+      - 'clusters/folly/apps/**'
+      - 'clusters/offsite/apps/**'
+      - '.github/scripts/render-cluster-apps.sh'
+      - '.github/workflows/kustomize.yml'
+  pull_request:
+    paths:
+      - 'clusters/base/**'
+      - 'clusters/folly/apps/**'
+      - 'clusters/offsite/apps/**'
+      - '.github/scripts/render-cluster-apps.sh'
+      - '.github/workflows/kustomize.yml'
+jobs:
+  render-apps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - run: bash .github/scripts/render-cluster-apps.sh

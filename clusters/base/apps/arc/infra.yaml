@@ -1,0 +1,40 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: infra
+  namespace: arc
+spec:
+  interval: 24h
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    force: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    runnerScaleSetName: infra-${CLUSTER_NAME}
+    scaleSetLabels:
+      - "${CLUSTER_NAME}"
+      - "self-hosted"
+    githubConfigUrl: https://github.com/jonpulsifer/infra
+    githubConfigSecret: arc
+    minRunners: 1
+    template:
+      spec:
+        containers:
+          - name: runner
+            image: jonpulsifer/actions-runner:latest@sha256:1d998da13bb6d6dcce7f1869920d6a7049696d6e6ff049c4472939c185660298
+            command: ["/home/runner/run.sh"]
+            env:
+              - name: ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT
+                value: "false"

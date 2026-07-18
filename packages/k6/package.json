@@ -1,0 +1,20 @@
+{
+  "name": "k6-scripts",
+  "version": "0.0.1",
+  "description": "my k6 scripts",
+  "repository": "https://github.com/jonpulsifer/infra/tree/main/packages/k6",
+  "private": true,
+  "devDependencies": {
+    "@types/k6": "2.0.0",
+    "@types/node": "26.0.0",
+    "ts-node": "10.9.2",
+    "@repo/typescript-config": "workspace:*",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "prebuild": "rm -rf dist",
+    "build": "tsc",
+    "dev": "tsc --watch"
+  }
+}

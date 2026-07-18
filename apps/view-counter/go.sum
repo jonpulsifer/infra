@@ -12,12 +12,16 @@ cloud.google.com/go/firestore v1.22.0 h1:avooeboIq37vKXobrbPUFhFBxS/c3FqmWoX0xs8
 cloud.google.com/go/firestore v1.22.0/go.mod h1:PaM4i7i7ruALSKmlpHXXZaPObcZw0W7ie5UOPr72iTU=
 cloud.google.com/go/firestore v1.23.0 h1:lFkdUEqdb1FxJNeZ17ZCrpok/+5yZdWapEzDCwLuwp8=
 cloud.google.com/go/firestore v1.23.0/go.mod h1:2EWfSUj+iqHckyH7uSjLI+lDgSAWJs9jL/uP45PnuQQ=
+cloud.google.com/go/firestore v1.24.0 h1:x0Z3hrgjYgo2wI9whuBRQcNc2hYwzZDQy/7pkUXbXcs=
+cloud.google.com/go/firestore v1.24.0/go.mod h1:5aojyjN4olKUnBZDCRWwM+NsdrrCX3t1qfyERZGOonM=
 cloud.google.com/go/functions v1.19.7 h1:7LcOD18euIVGRUPaeCmgO6vfWSLNIsi6STWRQcdANG8=
 cloud.google.com/go/functions v1.19.7/go.mod h1:xbcKfS7GoIcaXr2FSwmtn9NXal1JR4TV6iYZlgXffwA=
 cloud.google.com/go/longrunning v0.9.0 h1:0EzbDEGsAvOZNbqXopgniY0w0a1phvu5IdUFq8grmqY=
 cloud.google.com/go/longrunning v0.9.0/go.mod h1:pkTz846W7bF4o2SzdWJ40Hu0Re+UoNT6Q5t+igIcb8E=
 cloud.google.com/go/longrunning v1.0.0 h1:lwzWEYD8+NkYV7dhexOz6kmlvajZA70+bW/xMhRVVdY=
 cloud.google.com/go/longrunning v1.0.0/go.mod h1:8nqFBPOO1U/XkhWl0I19AMZEphrHi73VNABIpKYaTwM=
+cloud.google.com/go/longrunning v1.2.0 h1:WjYH3YHBGCxGJP9M4dWGHBfXr/cFIjMkNgWcJj7/iMM=
+cloud.google.com/go/longrunning v1.2.0/go.mod h1:5KMQALFGOCtFoi2xSOA1u3H7WKlhmckgiyFw7+LGQp0=
 github.com/GoogleCloudPlatform/functions-framework-go v1.9.2 h1:Cev/PdoxY86bJjGwHJcpiWMhrZMVEoKp9wuEp9gCUvw=
 github.com/GoogleCloudPlatform/functions-framework-go v1.9.2/go.mod h1:wLEV4uSJztSBI+QyUy2fkHBuGFjRIAEDOqcEQ2hwmgE=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=

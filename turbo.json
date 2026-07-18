@@ -1,0 +1,64 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV",
+    "STANDALONE",
+    "npm_package_version",
+    "npm_package_name"
+  ],
+  "globalDependencies": ["**/.env.*local"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "build/**"]
+    },
+    "lint": {},
+    "lint:fix": {
+      "cache": false
+    },
+    "slingshot#build": {
+      "dependsOn": ["^build"],
+      "env": [
+        "NEXT_PUBLIC_BASE_URL",
+        "NODE_IP",
+        "NODE_NAME",
+        "POD_IP",
+        "POD_NAME",
+        "POD_LABEL_APP_INSTANCE",
+        "POD_CHANGE_ME",
+        "NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA",
+        "NEXT_PUBLIC_VERCEL_ENV",
+        "NEXT_PUBLIC_SOME_VARIABLE",
+        "NEXT_PUBLIC_ENVIRONMENT_VARIABLE",
+        "WEBHOOK_ALLOWED_OUTGOING_DOMAINS",
+        "GOOGLE_APPLICATION_CREDENTIALS"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "build/**"]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "inputs": [
+        "src/**/*.tsx",
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "test/**/*.tsx"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "emulators": {
+      "cache": false,
+      "persistent": true
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

@@ -3,7 +3,7 @@ module github.com/jonpulsifer/infra/apps/view-counter
 go 1.26.4
 
 require (
-	cloud.google.com/go/firestore v1.23.0
+	cloud.google.com/go/firestore v1.24.0
 	github.com/GoogleCloudPlatform/functions-framework-go v1.9.2
 	google.golang.org/grpc v1.82.0
 )
@@ -14,7 +14,7 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/functions v1.19.7 // indirect
-	cloud.google.com/go/longrunning v1.0.0 // indirect
+	cloud.google.com/go/longrunning v1.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudevents/sdk-go/v2 v2.15.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

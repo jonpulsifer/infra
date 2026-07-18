@@ -1,12 +1,15 @@
 {
-  "_comment": "Allowlist for the containers workflow. Every image produced by a Dockerfile under apps/ or images/ must appear in exactly one of these lists. detect-containers.sh fails CI if a Dockerfile is left unclassified, so a new app can't be silently published or silently dropped. 'build' = published to DockerHub; 'ignore' = has a Dockerfile but is intentionally not published here.",
+  "_comment": "Allowlist for the containers workflow. Every image produced by a Dockerfile under apps/ or images/ must appear in exactly one of these lists. detect-containers.sh fails CI if a Dockerfile is left unclassified, so a new app can't be silently published or silently dropped. 'build' = published to GHCR; 'ignore' = has a Dockerfile but is intentionally not published here.",
   "build": [
     "ai-agents",
     "ddnsd",
     "netbench",
     "rackstat",
     "atlantis",
-    "actions-runner"
+    "actions-runner",
+    "hub",
+    "slingshot",
+    "spore"
   ],
   "ignore": [
     "bashcurljq",
@@ -15,7 +18,10 @@
     "workstation",
     "cortex",
     "hermes",
+    "hub",
     "minecraft",
+    "slingshot",
+    "spore",
     "thehive"
   ]
 }

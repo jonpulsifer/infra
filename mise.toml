@@ -6,6 +6,7 @@ _.file = '.env'
 age = "latest"
 bat = "latest"
 cilium-cli = "latest"
+conftest = "latest"
 delta = "latest"
 eza = "latest"
 flux2 = "latest"
@@ -46,6 +47,10 @@ run = "terraform fmt -recursive"
 [tasks."validation-impact:test"]
 description = "Test validation-impact routing"
 run = "bash .github/scripts/validation-impact_test.sh"
+
+[tasks."k8s:render-apps"]
+description = "Render shared folly and offsite app overlays"
+run = "bash .github/scripts/render-cluster-apps.sh"
 
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"

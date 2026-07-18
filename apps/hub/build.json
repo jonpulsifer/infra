@@ -1,0 +1,15 @@
+[
+  {
+    "image": "hub",
+    "context": ".",
+    "file": "apps/hub/Dockerfile",
+    "platforms": "linux/amd64,linux/arm64",
+    "watch": [
+      "apps/hub",
+      "packages/typescript-config",
+      "package.json",
+      "bun.lock",
+      "turbo.json"
+    ]
+  }
+]

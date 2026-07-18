@@ -4,8 +4,11 @@ locals {
   # scoped separately by per-resource IAM bindings (see iam.tf, datastore.tf).
   github_actions_allowed_repository_ids = [
     "952814997", # jonpulsifer/infra
-    "554977933", # jonpulsifer/ts
   ]
+
+  # IAM grants use the immutable repository ID mapping so a repository rename
+  # does not interrupt direct GitHub Actions federation.
+  infra_github_actions_principal = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.repository_id/952814997"
 }
 
 resource "google_iam_workload_identity_pool" "homelab" {
