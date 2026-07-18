@@ -1,0 +1,14 @@
+[
+  {
+    "image": "slingshot",
+    "context": ".",
+    "file": "apps/slingshot/Dockerfile",
+    "watch": [
+      "apps/slingshot",
+      "packages/typescript-config",
+      "package.json",
+      "bun.lock",
+      "turbo.json"
+    ]
+  }
+]
