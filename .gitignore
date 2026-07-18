@@ -45,6 +45,7 @@ docs/.trash/
 # ─── Node / Bun ──────────────────────────────────────────────────────────────
 # Root is a Bun workspace (apps/*, packages/*); bun.lock is tracked.
 node_modules/
+.turbo/
 
 # ─── IDE / Editor ────────────────────────────────────────────────────────────
 .vscode/
