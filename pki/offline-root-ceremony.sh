@@ -41,7 +41,8 @@ set -euo pipefail
 : "${SHAMIR_SHARES:=3}"
 : "${STORAGE_MODE:=yubikey}"       # yubikey | disk
 : "${DISK_ENCRYPTION_RECIPIENT:=}" # age1... — required when STORAGE_MODE=disk
-: "${DOCKER_IMAGE:=pki-offline-ceremony:latest}"
+: "${CONTAINER_IMAGE:=pki-offline-ceremony:latest}"
+: "${CONTAINER_RUNTIME:=wslc.exe}" # Set to docker when running with Docker.
 
 export STEP_VERSION ROOT_CA_NAME INTERMEDIATE_CA_NAME KEY_TYPE CURVE
 export ROOT_EXPIRY_HOURS INTERMEDIATE_EXPIRY_HOURS PIV_SLOT
@@ -86,7 +87,7 @@ sanitize_host_environment() {
 # ==============================================================================
 # CONTAINER IMAGE
 # ==============================================================================
-generate_docker_image() {
+generate_container_image() {
   echo "[*] Building ephemeral ceremony container..."
   local ctx
   ctx="$(mktemp -d)"
@@ -112,10 +113,10 @@ RUN python3 -m venv /opt/pki-env \
 # step CLI is downloaded at runtime so its provenance can be verified with cosign
 ENV PATH="/opt/pki-env/bin:${PATH}"
 WORKDIR /pki
-# Empty entrypoint so docker run <script> execs the script directly.
+# Empty entrypoint so the container runtime executes the script directly.
 ENTRYPOINT []
 EOF
-  docker build -t "${DOCKER_IMAGE}" "${ctx}"
+  "${CONTAINER_RUNTIME}" build -t "${CONTAINER_IMAGE}" "${ctx}"
   rm -rf "${ctx}"
 }
 
@@ -331,22 +332,28 @@ INNER
 # RUN THE CEREMONY IN THE CONTAINER
 # ==============================================================================
 run_ceremony() {
-  local -a docker_args=(-it --rm)
+  local -a container_args=(-it --rm)
   if [[ "${STORAGE_MODE}" == yubikey ]]; then
     echo "[*] Launching container with USB passthrough..."
-    docker_args+=(--device /dev/bus/usb --privileged)
+    container_args+=(--device /dev/bus/usb --privileged)
   else
     echo "[*] Launching container (STORAGE_MODE=disk, no USB passthrough needed)..."
   fi
-  docker run "${docker_args[@]}" \
+  "${CONTAINER_RUNTIME}" run "${container_args[@]}" \
     -v "${EXPORT_DIR}:/pki/export" \
-    -e STEP_VERSION -e ROOT_CA_NAME -e INTERMEDIATE_CA_NAME \
-    -e KEY_TYPE -e CURVE \
-    -e ROOT_EXPIRY_HOURS -e INTERMEDIATE_EXPIRY_HOURS \
-    -e PIV_SLOT -e SHAMIR_THRESHOLD -e SHAMIR_SHARES \
-    -e STORAGE_MODE -e DISK_ENCRYPTION_RECIPIENT \
+    -e "STEP_VERSION=${STEP_VERSION}" \
+    -e "ROOT_CA_NAME=${ROOT_CA_NAME}" \
+    -e "INTERMEDIATE_CA_NAME=${INTERMEDIATE_CA_NAME}" \
+    -e "KEY_TYPE=${KEY_TYPE}" -e "CURVE=${CURVE}" \
+    -e "ROOT_EXPIRY_HOURS=${ROOT_EXPIRY_HOURS}" \
+    -e "INTERMEDIATE_EXPIRY_HOURS=${INTERMEDIATE_EXPIRY_HOURS}" \
+    -e "PIV_SLOT=${PIV_SLOT}" \
+    -e "SHAMIR_THRESHOLD=${SHAMIR_THRESHOLD}" \
+    -e "SHAMIR_SHARES=${SHAMIR_SHARES}" \
+    -e "STORAGE_MODE=${STORAGE_MODE}" \
+    -e "DISK_ENCRYPTION_RECIPIENT=${DISK_ENCRYPTION_RECIPIENT}" \
     --name pki-ceremony \
-    "${DOCKER_IMAGE}" \
+    "${CONTAINER_IMAGE}" \
     /pki/export/inner_ceremony.sh
 }
 
@@ -377,7 +384,7 @@ cleanup_host() {
 # MAIN
 # ==============================================================================
 sanitize_host_environment
-generate_docker_image
+generate_container_image
 write_inner_script
 run_ceremony
 cleanup_host
