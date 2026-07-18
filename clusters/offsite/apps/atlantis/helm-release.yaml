@@ -37,6 +37,11 @@ spec:
       # for "**"; unifi/folly/bgp-folly.conf only has one) — "terraform/**/*.conf"
       # has enough segments before the target file to avoid that.
       ATLANTIS_AUTOPLAN_FILE_LIST: "**/*.tf*,terraform/**/*.conf"
+      # OpenTofu for every root: state-format compatible with Terraform, and
+      # terraform/pki needs the opentofu/tls provider fork (max_path_length),
+      # which only exists on the OpenTofu registry. Server-wide because the
+      # server-side repos[] config has no per-project terraform_distribution.
+      ATLANTIS_DEFAULT_TF_DISTRIBUTION: "opentofu"
       # ATLANTIS_SILENCE_FORK_PR_ERRORS: "true"
       GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/terraform.json"
       GOOGLEWORKSPACE_CREDENTIALS: "/run/secrets/terraform.json"
