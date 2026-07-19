@@ -1,0 +1,36 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: hub
+  namespace: hub
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: packages/charts/app
+      reconcileStrategy: Revision
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
+  values:
+    fullnameOverride: hub
+    image: ghcr.io/jonpulsifer/hub:latest@sha256:1f062388cbbe0280b3a8a0d5c1d411b8c215fa688b294aae593497875bdb6ff2
+    command: "bun run start"
+    port: 3000
+    hostname: hub.lolwtf.ca
+    sandbox: false
+    envFromSecret: hub-env
+    env:
+      - name: HOME
+        value: /tmp
+    ingress:
+      enabled: true
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m

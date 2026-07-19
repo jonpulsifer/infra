@@ -5,6 +5,7 @@ resources:
   - ../../base/apps/iperf3
   - atlantis
   - descheduler
+  - hub
   - dave.yaml
   - ../../base/apps/reloader
 patches:
