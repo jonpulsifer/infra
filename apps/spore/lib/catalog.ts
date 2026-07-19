@@ -61,6 +61,19 @@ export interface NativeBootTarget {
   readonly artifactBaseUrl: string;
 }
 
+export const nativeBootArtifacts = [
+  'boot.img',
+  'boot.sig',
+  'nix-store.squashfs',
+] as const;
+export type NativeBootArtifact = (typeof nativeBootArtifacts)[number];
+
+export function isNativeBootArtifact(
+  value: string,
+): value is NativeBootArtifact {
+  return nativeBootArtifacts.some((artifact) => artifact === value);
+}
+
 export interface BootCatalog {
   readonly serverOrigin: string;
   readonly allowUnknownHosts: boolean;

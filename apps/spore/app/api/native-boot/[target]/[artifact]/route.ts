@@ -2,7 +2,11 @@ import type { NativeBootDecision } from '@/lib/boot-decision';
 import { getSpore } from '@/lib/spore';
 
 export interface NativeBootRouteService {
-  resolveNativeBoot(target: string, artifact: string): NativeBootDecision;
+  resolveNativeBoot(
+    target: string,
+    artifact: string,
+    squashfsDigest?: string | null,
+  ): NativeBootDecision;
 }
 
 type NativeBootRouteContext = {
@@ -12,9 +16,10 @@ type NativeBootRouteContext = {
 export function createNativeBootGet(
   getBoot: () => NativeBootRouteService = () => getSpore().boot,
 ) {
-  return async (_request: Request, { params }: NativeBootRouteContext) => {
+  return async (request: Request, { params }: NativeBootRouteContext) => {
     const { target, artifact } = await params;
-    const decision = getBoot().resolveNativeBoot(target, artifact);
+    const digest = new URL(request.url).searchParams.get('sha256');
+    const decision = getBoot().resolveNativeBoot(target, artifact, digest);
     const headers = new Headers({
       'Cache-Control': 'no-store',
       'Content-Type': 'application/octet-stream',

@@ -210,6 +210,20 @@ describe('native boot assets', () => {
 
     expect(boot.resolveNativeBoot('rackpi5', '../boot.img').status).toBe(404);
     expect(boot.resolveNativeBoot('missing', 'boot.sig').status).toBe(404);
+    const digest = 'a'.repeat(64);
+    expect(
+      boot.resolveNativeBoot('rackpi5', 'nix-store.squashfs', digest),
+    ).toEqual({
+      status: 200,
+      outcome: 'native-boot',
+      internalPath: `/_spore-native-boot/stores/${digest}.squashfs`,
+    });
+    expect(
+      boot.resolveNativeBoot('rackpi5', 'nix-store.squashfs'),
+    ).toMatchObject({ status: 404, internalPath: null });
+    expect(
+      boot.resolveNativeBoot('rackpi5', 'nix-store.squashfs', '../current'),
+    ).toMatchObject({ status: 404, internalPath: null });
     expect(attempts).toHaveLength(1);
   });
 });

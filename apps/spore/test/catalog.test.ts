@@ -105,19 +105,49 @@ describe('boot catalog', () => {
     expect(() => parseBootCatalog(collision)).toThrow(/duplicate MAC/);
   });
 
-  test('rejects malformed native boot targets', () => {
+  test('rejects a malformed native boot target id', () => {
     expect(() =>
       parseBootCatalog({
         ...validCatalog(),
         nativeBootTargets: {
           'rack pi': {
             hostname: 'rackpi5',
+            macAddress: '2c:cf:67:dc:7e:9b',
+            protocol: 'raspberry-pi-http',
+          },
+        },
+      }),
+    ).toThrow(/profile id/);
+  });
+
+  test('rejects a malformed native boot target MAC', () => {
+    expect(() =>
+      parseBootCatalog({
+        ...validCatalog(),
+        nativeBootTargets: {
+          rackpi5: {
+            hostname: 'rackpi5',
             macAddress: 'not-a-mac',
+            protocol: 'raspberry-pi-http',
+          },
+        },
+      }),
+    ).toThrow(/native boot target MAC/);
+  });
+
+  test('rejects an unsupported native boot protocol', () => {
+    expect(() =>
+      parseBootCatalog({
+        ...validCatalog(),
+        nativeBootTargets: {
+          rackpi5: {
+            hostname: 'rackpi5',
+            macAddress: '2c:cf:67:dc:7e:9b',
             protocol: 'tftp' as 'raspberry-pi-http',
           },
         },
       }),
-    ).toThrow(/native boot target|profile id|MAC|protocol/);
+    ).toThrow(/protocol/);
   });
 
   test.each([

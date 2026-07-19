@@ -7,9 +7,9 @@
 #
 # spore has no SD card: it boots directly off its single NVMe drive, which
 # is what the sd-image gets flashed onto. That's also the only place to put
-# NFS data, so unlike rackpi5 (a second, dedicated GPT disk with a
-# partlabel) this needs a THIRD partition carved out of the same MBR disk
-# the sd-image module already partitions into firmware + root.
+# NFS data, so this needs a THIRD partition carved out of the same MBR disk
+# the sd-image module already partitions into firmware + root. rackpi5 is
+# stateless and consumes none of this storage.
 #
 # The sd-image module's default `expandOnBoot` would grow root to consume
 # the *entire* disk on first boot -- exactly the OS/data commingling this

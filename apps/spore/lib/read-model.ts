@@ -1,5 +1,5 @@
 import { type EffectiveBootOutcome, resolveBootPolicy } from './boot-decision';
-import type { BootCatalog } from './catalog';
+import type { BootCatalog, NativeBootTarget } from './catalog';
 import type { BootOutcome, Observation } from './observations';
 import { getSpore } from './spore';
 
@@ -31,12 +31,8 @@ export interface ScriptReadModel {
   readonly content: string;
 }
 
-export interface NativeBootTargetReadModel {
+export interface NativeBootTargetReadModel extends NativeBootTarget {
   readonly id: string;
-  readonly hostname: string;
-  readonly macAddress: string;
-  readonly protocol: 'raspberry-pi-http';
-  readonly artifactBaseUrl: string;
 }
 
 export interface SporeReadModel {

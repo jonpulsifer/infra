@@ -2,6 +2,7 @@ import {
   type BootCatalog,
   type BootHost,
   type BootProfile,
+  isNativeBootArtifact,
   isSafeScriptPath,
 } from './catalog';
 import {
@@ -43,7 +44,11 @@ export interface NativeBootDecision {
 export interface BootDecisionService {
   decideBoot(macAddress: string): BootDecision;
   renderScript(path: string, macAddress?: string | null): ScriptDecision;
-  resolveNativeBoot(targetId: string, artifact: string): NativeBootDecision;
+  resolveNativeBoot(
+    targetId: string,
+    artifact: string,
+    squashfsDigest?: string | null,
+  ): NativeBootDecision;
 }
 
 export interface BootDecisionOptions {
@@ -118,11 +123,6 @@ export function createBootDecisionService({
   onObservationError = (error) =>
     console.error('Unable to record Spore boot observation', error),
 }: BootDecisionOptions): BootDecisionService {
-  const nativeArtifacts = new Set([
-    'boot.img',
-    'boot.sig',
-    'nix-store.squashfs',
-  ]);
   const record = (attempt: BootAttempt): void => {
     try {
       observations.recordBootAttempt(attempt);
@@ -222,11 +222,29 @@ export function createBootDecisionService({
       };
     },
 
-    resolveNativeBoot(targetId: string, artifact: string): NativeBootDecision {
+    resolveNativeBoot(
+      targetId: string,
+      artifact: string,
+      squashfsDigest?: string | null,
+    ): NativeBootDecision {
       const target = Object.hasOwn(catalog.nativeBootTargets, targetId)
         ? catalog.nativeBootTargets[targetId]
         : undefined;
-      if (!target || !nativeArtifacts.has(artifact)) {
+      if (!target || !isNativeBootArtifact(artifact)) {
+        return {
+          status: 404,
+          outcome: 'native-boot-not-found',
+          internalPath: null,
+        };
+      }
+
+      const internalPath =
+        artifact === 'nix-store.squashfs'
+          ? squashfsDigest?.match(/^[0-9a-f]{64}$/)
+            ? `/_spore-native-boot/stores/${squashfsDigest}.squashfs`
+            : null
+          : `/_spore-native-boot/${targetId}/${artifact}`;
+      if (internalPath === null) {
         return {
           status: 404,
           outcome: 'native-boot-not-found',
@@ -244,7 +262,7 @@ export function createBootDecisionService({
       return {
         status: 200,
         outcome: 'native-boot',
-        internalPath: `/_spore-native-boot/${targetId}/${artifact}`,
+        internalPath,
       };
     },
   });

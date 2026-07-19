@@ -58,7 +58,7 @@ Spore is built as a standalone Next.js package and runs directly as `spore.servi
 
 The service listens on `127.0.0.1:3000`, uses `/var/lib/spore/observations.db`, and attempts the packaged migration before startup. A migration failure degrades observations and health without blocking catalog-backed boot decisions. Nginx adds the public iPXE and native-boot API paths to the existing PXE vhost. Native assets use `X-Accel-Redirect` into an internal nginx-only location, so Node makes the policy decision without streaming the image or squashfs. The management UI at `spore.pirate-musical.ts.net/spore` (also named `spore.lolwtf.ca`) is protected by Tailscale authentication, and port 3000 is not opened in the firewall.
 
-Dnsmasq/TFTP, nginx's static `/var/lib/tftpboot` root, and NFS retain independent systemd lifecycles for their existing consumers. Rackpi5 deliberately uses only Spore's native route: a root-only publisher injects the squashfs digest into `boot.img`, signs the exact image with `/var/lib/pi-boot-sign/private.pem`, and atomically activates the artifact set before Spore and nginx start.
+Dnsmasq/TFTP, nginx's static `/var/lib/tftpboot` root, and NFS retain independent systemd lifecycles for their existing consumers. Rackpi5 deliberately uses only Spore's native route: the Nix image build embeds the squashfs digest, stage 1 requests that content-addressed root, and a root-only publisher signs the exact `boot.img` with `/var/lib/pi-boot-sign/private.pem` before atomically activating the artifact set before Spore and nginx start.
 
 Build without activating the host:
 

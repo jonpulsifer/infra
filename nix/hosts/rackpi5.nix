@@ -50,7 +50,6 @@ in
     nixos.initialHashedPassword = lib.mkForce null;
   };
   services.openssh.settings.PermitRootLogin = lib.mkForce "no";
-  services.getty.autologinUser = lib.mkForce config.users.users.jawn.name;
 
   boot.loader.raspberry-pi.bootloader = "kernel";
   fileSystems."/nix/.ro-store".device = lib.mkForce "/nix-store.squashfs";
@@ -96,7 +95,7 @@ in
         fi
 
         curl --fail --retry 10 --retry-connrefused --retry-delay 2 \
-          -o /nix-store.squashfs.partial ${storeUrl}
+          -o /nix-store.squashfs.partial "${storeUrl}?sha256=$expected"
         verify_store /nix-store.squashfs.partial
         mv /nix-store.squashfs.partial /nix-store.squashfs
       '';
@@ -111,7 +110,9 @@ in
       script = "install -m 600 /etc/ssh/initrd_host_key_ro /etc/ssh/initrd_host_key";
     };
     contents."/etc/ssh/initrd_host_key_ro".source = "${initrdSshHostKey}/key";
-    emergencyAccess = true;
+    # Recovery remains key-authenticated over initrd SSH; do not expose an
+    # unauthenticated emergency shell on the physical console.
+    emergencyAccess = false;
   };
   boot.initrd.network.ssh = {
     enable = true;
@@ -142,6 +143,15 @@ in
         mv staging/nixos/default/* staging/
         rm -rf staging/nixos
         sed -i "/^os_prefix=/d" staging/config.txt
+
+        # The signed image pins its content-addressed root. Spore serves old
+        # roots by digest, so activation cannot mix boot and root generations.
+        checksum=$(sha256sum ${config.system.build.squashfsStore} | cut -d ' ' -f 1)
+        sed -i 's/ spore\.squashfs-sha256=[0-9a-f]\{64\}//g' staging/cmdline.txt
+        printf '%s spore.squashfs-sha256=%s\n' \
+          "$(tr -d '\r\n' < staging/cmdline.txt)" "$checksum" \
+          > staging/cmdline.pinned.txt
+        mv staging/cmdline.pinned.txt staging/cmdline.txt
 
         size_kib=$(du -s --apparent-size --block-size=1024 staging | cut -f1)
         size_kib=$(( size_kib + size_kib / 10 + 8192 ))

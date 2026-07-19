@@ -63,6 +63,7 @@ pkgs.runCommand "spore-deployment-check"
         and (.nativeBootTargets.rackpi5.protocol) == "raspberry-pi-http"' \
       '${service.environment.SPORE_CATALOG_FILE}' >/dev/null
     grep -q 'spore.squashfs-sha256' '${publisherExec}'
+    grep -q 'stores/\$checksum.squashfs' '${publisherExec}'
     grep -q 'rpi-eeprom-digest' '${publisherExec}'
     touch "$out"
   ''

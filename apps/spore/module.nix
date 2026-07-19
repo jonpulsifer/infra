@@ -433,7 +433,7 @@ in
               restartTriggers = [ artifact.package ];
               path = with pkgs; [
                 coreutils
-                gnused
+                gnugrep
                 mtools
                 raspberrypi-eeprom
               ];
@@ -474,22 +474,21 @@ in
                 test -s "$source_store"
                 test -s "$signing_key"
                 install -d -m 0755 "$state/releases"
+                install -d -m 0755 "$state/stores"
                 stage=$(mktemp -d "$state/releases/.${id}.XXXXXX")
                 trap 'rm -rf "$stage"' EXIT
 
                 install -m 0644 "$source_image" "$stage/boot.img"
-                mcopy -i "$stage/boot.img@@512" ::/cmdline.txt "$stage/cmdline.txt"
                 checksum=$(sha256sum "$source_store" | cut -d ' ' -f 1)
-                sed -i 's/ spore\.squashfs-sha256=[0-9a-f]\{64\}//g' "$stage/cmdline.txt"
-                printf '%s spore.squashfs-sha256=%s\n' \
-                  "$(tr -d '\r\n' < "$stage/cmdline.txt")" "$checksum" \
-                  > "$stage/cmdline.signed.txt"
-                mcopy -o -i "$stage/boot.img@@512" "$stage/cmdline.signed.txt" ::/cmdline.txt
-                rm "$stage/cmdline.txt" "$stage/cmdline.signed.txt"
+                mtype -i "$stage/boot.img@@512" ::/cmdline.txt \
+                  | tr -d '\r' \
+                  | grep -q "spore.squashfs-sha256=$checksum"
 
                 rpi-eeprom-digest -i "$stage/boot.img" -o "$stage/boot.sig" -k "$signing_key"
                 test -s "$stage/boot.sig"
                 ln -s "$source_store" "$stage/nix-store.squashfs"
+                ln -sfn "$source_store" "$state/stores/.${id}-$checksum.new"
+                mv -Tf "$state/stores/.${id}-$checksum.new" "$state/stores/$checksum.squashfs"
 
                 release_id=$(
                   {

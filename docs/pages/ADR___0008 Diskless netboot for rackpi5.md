@@ -8,7 +8,7 @@ tags:: adr
 	- An ARM64 UEFI/iPXE chain was evaluated, but the archived Pi 5 EDK2 firmware does not support the built-in RP1 Ethernet controller, and current U-Boot likewise has no RP1 Ethernet driver. Requiring a USB NIC and abandoned firmware would make the boot path less safe, not more modern.
 - # Decision
 	- `rackpi5` runs **diskless** with one boot path. Its Pi EEPROM HTTP-loads `boot.sig` and `boot.img` from Spore's native-boot API; there is no NFS-root, TFTP, SD, or UEFI fallback tier.
-	- `nix/hosts/rackpi5.nix` is the sole host and image configuration. Spore atomically publishes its `piBootImg`, injects the matching squashfs SHA-256 into `cmdline.txt`, then signs that exact first-stage image with a private key that never enters the Nix store.
+	- `nix/hosts/rackpi5.nix` is the sole host and image configuration. Its image build embeds the matching squashfs SHA-256 in `cmdline.txt`; Spore atomically publishes and signs that exact first-stage image with a private key that never enters the Nix store.
 	- The EEPROM verifies `boot.img`; the signed command line anchors the squashfs digest; stage 1 refuses to mount a downloaded store that does not match it.
 - # Consequences
 	- No local storage or alternate boot state can drift. A reboot either runs the Git/Nix-reviewed generation published by Spore or fails closed.
