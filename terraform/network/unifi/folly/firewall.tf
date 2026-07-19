@@ -350,6 +350,30 @@ resource "unifi_firewall_policy" "folly_k8s_to_nest_k8s" {
   }
 }
 
+resource "unifi_firewall_policy" "lab_clients_to_nest_k8s" {
+  name                 = "Allow Lab clients to Nest k8s"
+  action               = "ALLOW"
+  protocol             = "all"
+  ip_version           = "BOTH"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "IP"
+    ips                = [local.lab.cidr]
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = local.nest_k8s_cidrs
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.vpn.id
+  }
+}
+
 resource "unifi_firewall_policy" "internal_to_nest_k8s" {
   name                 = "Allow Internal to Nest k8s"
   action               = "ALLOW"
