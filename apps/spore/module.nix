@@ -347,7 +347,11 @@ in
       locations."/" = {
         proxyPass = upstream;
         proxyWebsockets = false;
-        extraConfig = lib.concatMapStringsSep "\n" (cidr: "allow ${cidr};") cfg.managementCidrs + ''
+        extraConfig = ''
+          satisfy any;
+        ''
+        + lib.concatMapStringsSep "\n" (cidr: "allow ${cidr};") cfg.managementCidrs
+        + ''
 
           deny all;
           proxy_set_header Host $host;
