@@ -16,6 +16,11 @@
   ],
   dependencyDashboardTitle: 'Renovate Dashboard',
   dependencyDashboard: true,
+  // Keep the repository-wide dependency queue small. This also limits
+  // concurrent branches, so workspace updates do not pile up against shared
+  // lockfiles. Vulnerability alerts bypass these limits by design.
+  prConcurrentLimit: 3,
+  branchConcurrentLimit: 3,
   lockFileMaintenance: {
     enabled: true,
     automerge: true,
