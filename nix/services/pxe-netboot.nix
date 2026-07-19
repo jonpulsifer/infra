@@ -5,8 +5,8 @@
 # far too slow for ~900MB initrds).
 #
 # This module remains the sole owner of dnsmasq, TFTP, and the static nginx
-# root used by x86 PXE. apps/spore/module.nix adds its API routes and an
-# internal native-artifact location without taking ownership of this tree.
+# root used by x86 PXE. nix/services/spore-native-boot.nix adds the signed Pi
+# native-boot locations to this vhost without taking ownership of this tree.
 # The actual content under
 # /var/lib/tftpboot (ipxe.efi, menu.ipxe, per-target netboot images) is
 # build/backup artifacts, not something Nix generates -- restore it from

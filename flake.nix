@@ -100,10 +100,6 @@
         }
       );
 
-      sporePackages = forAllSystems (
-        system: legacyPackages.${system}.callPackage ./apps/spore/package.nix { }
-      );
-
       nixosConfigurations =
         let
           rackpi5Configuration = mkHost "rackpi5" {
@@ -215,9 +211,10 @@
             modules = [
               ./nix/hosts/spore.nix
               {
-                services.spore.nativeBootArtifacts.rackpi5 = {
+                services.spore.nativeBootTargets.rackpi5 = {
                   package = rackpi5Configuration.config.system.build.piBootImg;
                   signingKey = "/var/lib/pi-boot-sign/private.pem";
+                  httpPath = "/rackpi5-ram/";
                 };
               }
             ];
@@ -270,7 +267,6 @@
           dns = nixosConfigurations.dns.config.system.build.sdImage;
           rackpi5 = nixosConfigurations.rackpi5.config.system.build.piBootImg;
           spore = nixosConfigurations.spore.config.system.build.sdImage;
-          spore-app = sporePackages.x86_64-linux;
 
           iso = nixosConfigurations.iso.config.system.build.isoImage;
           wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
@@ -295,14 +291,7 @@
         aarch64-linux = {
           radiopi0 = nixosConfigurations.radiopi0.config.system.build.sdImage;
           blinkypi0 = nixosConfigurations.blinkypi0.config.system.build.sdImage;
-          spore-app = sporePackages.aarch64-linux;
         };
-      };
-
-      checks.aarch64-linux.spore-deployment = import ./apps/spore/test/module.nix {
-        inherit (nixosConfigurations.spore) config;
-        inherit (nixosConfigurations.spore) pkgs;
-        inherit lib;
       };
 
       inherit legacyPackages;

@@ -5,7 +5,6 @@ tags:: architecture
 - ## `apps/` — deployable services
 	- `agent-web` — AI agent web environment; one Dockerfile with `--build-arg AGENT_SET={full,pi}`, publishes the `ai-agents` image
 	- `ddnsd` — Go Cloudflare DDNS daemon, consumed by NixOS hosts via `nix/system/ddnsd.nix`
-	- `spore` — read-only iPXE/native-boot catalog and status service, packaged and run directly by NixOS on [[Hosts/spore]]. Git/Nix owns boot policy; SQLite contains observations only. See [[ADR/0013 Git and Nix own the Spore boot catalog]].
 	- `netbench` — Go web UI running `iperf3` benchmarks across nodes/LANs/clusters; servers are the `clusters/base/apps/iperf3` hostNetwork DaemonSet plus `services.iperf3` on the bare Pis
 	- `view-counter` — Go GCP Cloud Function (deployed by `view-counter.yml`)
 	- `orgpolicyauditor` — Google Cloud Function auditing the GCP organization IAM policy
@@ -14,8 +13,8 @@ tags:: architecture
 	- `wishin`, `tempest` — Starlark/Pixlet Tidbyt apps; each app directory doubles as the `apps/<name>/<name>.star` layout that `tronbyt-server`'s git-repo app discovery expects
 	- `hermes`, `systemd` — supporting services and images
 - ## Deployment ownership
-	- An `apps/` path does not imply an OCI image. Container-backed apps are classified in `.github/containers.json`; host-native services such as `spore` and `ddnsd` carry an app-local Nix package/module and are built through Nix CI.
-	- Spore keeps the existing x86 dnsmasq/TFTP/static tree separately owned. Its public adapters are two iPXE text routes and a fail-closed native artifact route; nginx performs the internal file transfer after the application authorizes a catalog target. The read-only management surface is separately restricted.
+	- An `apps/` path does not imply an OCI image. Container-backed apps are classified in `.github/containers.json`; host-native services such as `ddnsd` carry an app-local Nix package/module and are built through Nix CI.
+	- [[Hosts/spore]] runs no first-party app: it is the NFS + netboot server. dnsmasq/TFTP + a static nginx tree serve x86 PXE, and a root-only publisher (`nix/services/spore-native-boot.nix`) serves rackpi5's signed `boot.img`/`boot.sig`/`nix-store.squashfs` as static files at `/rackpi5-ram/`. See [[ADR/0014 Collapse Spore to a static netboot server]].
 - ## `packages/` — reusable building blocks
 	- `agent-web-ui` — shared TS/Bun frontend + PTY server (root Bun workspace member)
 	- `charts/` — the `app` and `ai-agent` Helm charts; Flux HelmReleases reference them as `packages/charts/<name>` against the `infra` GitRepository

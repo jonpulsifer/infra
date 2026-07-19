@@ -8,7 +8,10 @@
 #
 #   BOOT_ORDER=0xf7
 #   HTTP_HOST=10.2.0.11
-#   HTTP_PATH=spore/api/native-boot/rackpi5
+#   HTTP_PATH=rackpi5-ram
+#
+# Spore serves the signed artifacts as plain static files under /rackpi5-ram/
+# (nix/services/spore-native-boot.nix), matching HTTP_PATH above.
 #
 # HTTP boot downloads boot.sig and boot.img. The EEPROM must contain the public
 # half of Spore's /var/lib/pi-boot-sign/private.pem; stock EEPROM updates erase
@@ -24,7 +27,7 @@
 let
   lab =
     (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json)).locals.lab;
-  storeUrl = "http://${lab.hosts.spore}/spore/api/native-boot/rackpi5/nix-store.squashfs";
+  storeUrl = "http://${lab.hosts.spore}/rackpi5-ram/nix-store.squashfs";
   roStoreMount = "sysroot-nix-.ro\\x2dstore.mount";
   # This key authenticates only the stage-1 debug sshd of a stateless image on
   # the lab VLAN. It is intentionally ephemeral and embedded in boot.img.

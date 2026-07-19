@@ -1,8 +1,9 @@
-status:: accepted
+status:: superseded
 date:: 2026-07-19
 deciders:: [[jawn]]
 tags:: adr
 
+- > Superseded by [[ADR/0014 Collapse Spore to a static netboot server]]. The Next.js application, catalog/boot-decision engine, and SQLite observations described below were removed; only the signed Pi native-boot publisher and static nginx/TFTP serving remain.
 - # Context
 	- Spore decides what bare-metal hosts boot and is therefore desired infrastructure state, but its profiles, scripts, assignments, and server origin were editable through an unauthenticated web UI and stored beside runtime observations in one SQLite database.
 	- Three seed formats had already diverged, including a dated Nix store path. The container also duplicated the dnsmasq and nginx services that NixOS already owns on the `spore` host.

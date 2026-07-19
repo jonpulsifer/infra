@@ -9,12 +9,12 @@ tags:: architecture
 	- `nix/system/` — core modules: SSH hardening, Tailscale, auto-upgrades, users, disko, mise-dotfiles
 	- `nix/overlays/` — package patches and overrides
 	- `nix/images/` — buildable images: WSL tarball, ISO, GCE, container, netboot, and the pi5 RAM image
-	- App-local `package.nix` / `module.nix` pairs may be imported by a host when an application belongs directly on NixOS. `apps/spore` uses this pattern for its pinned Node package, migrations, generated boot catalog, systemd lifecycle, and nginx routes.
+	- App-local `package.nix` / `module.nix` pairs may be imported by a host when an application belongs directly on NixOS. `apps/ddnsd` uses this pattern (`nix/system/ddnsd.nix`).
 - ## Host groups
 	- **folly k8s nodes**: `optiplex` (control-plane), `riptide`, `shale`
 	- **offsite k8s nodes**: `retrofit` (control-plane), `oldschool`
 	- **Raspberry Pis**: `cloudpi4`, `homepi4`, `weatherpi4`, `dns`, `rackpi5` (diskless — see [[ADR/0008 Diskless netboot for rackpi5]]), `spore` (NFS/PXE server)
-		- `spore` also runs the loopback-only Spore application and a root-only signed native-artifact publisher. The x86 static PXE tree remains isolated, while diskless `rackpi5` intentionally uses the Spore native route as its sole boot path; see [[ADR/0013 Git and Nix own the Spore boot catalog]].
+		- `spore` runs no application — only nginx/dnsmasq and a root-only signed native-boot publisher (`nix/services/spore-native-boot.nix`). The x86 static PXE tree remains isolated, while diskless `rackpi5` intentionally uses the static `/rackpi5-ram/` artifacts as its sole boot path; see [[ADR/0014 Collapse Spore to a static netboot server]].
 	- **Cloud**: `oldboy` (GCE)
 - ## Deploying
 	- Build without deploying:
