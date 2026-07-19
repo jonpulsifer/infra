@@ -29,11 +29,37 @@ export class WeatherService extends EventEmitter {
   private connections = new Map<string, StationConnection>(); // token -> connection state
   private messageHandler = new WeatherMessageHandler();
   private deviceToStation = new Map<number, string>();
+  private ignoreStationIds: Set<number>;
+  // Derived set: device IDs belonging to ignored stations, populated
+  // in fetchAndListen and consulted in the message handler for defense
+  // in depth (drops messages that arrive before/during fetchAndListen).
+  private blockedDeviceIds = new Set<number>();
 
   private constructor() {
     super();
     // Increase max listeners for many SSE clients
     this.setMaxListeners(100);
+    this.ignoreStationIds = this.parseIgnoreStations();
+  }
+
+  /**
+   * Parse TEMPESTWX_IGNORE_STATIONS env var into a Set of station IDs to ignore.
+   * Comma-separated list, e.g. "85191,12345". All devices belonging to an
+   * ignored station are dropped.
+   */
+  private parseIgnoreStations(): Set<number> {
+    const raw = process.env[WEATHERFLOW_CONFIG.IGNORE_STATIONS_ENV];
+    if (!raw) return new Set();
+    const ids = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter((n) => !isNaN(n));
+    if (ids.length > 0) {
+      log.info(`Ignoring station IDs: ${ids.join(', ')}`);
+    }
+    return new Set(ids);
   }
 
   public static getInstance(): WeatherService {
@@ -111,6 +137,10 @@ export class WeatherService extends EventEmitter {
 
         // Process with handler to get clean WeatherData
         const deviceId = message.device_id || 0;
+
+        // Drop messages from devices belonging to ignored stations
+        if (this.blockedDeviceIds.has(deviceId)) return;
+
         const stationLabel = this.deviceToStation.get(deviceId) || '';
 
         const weatherData = this.messageHandler.processObservation(
@@ -257,12 +287,28 @@ export class WeatherService extends EventEmitter {
       if (!data.stations) return;
 
       for (const station of data.stations) {
+        // Skip entire station if its ID is in the ignore list
+        if (this.ignoreStationIds.has(station.station_id)) {
+          log.info(
+            `Ignoring station ${station.station_id} (${station.name}) — in TEMPESTWX_IGNORE_STATIONS`,
+          );
+          // Populate blockedDeviceIds so the message handler also drops
+          // any messages from these devices (defense in depth).
+          if (station.devices) {
+            for (const device of station.devices) {
+              this.blockedDeviceIds.add(device.device_id);
+            }
+          }
+          continue;
+        }
+
         if (!station.devices) continue;
         for (const device of station.devices) {
           // Only listen to Tempest (ST) or Air/Sky devices, not Hubs (HB)
           if (device.device_type === 'HB') continue;
 
           const deviceId = device.device_id;
+
           this.deviceToStation.set(deviceId, station.name);
 
           // Emit status update so client knows about this station immediately

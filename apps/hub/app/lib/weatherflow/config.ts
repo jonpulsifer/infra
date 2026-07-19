@@ -20,6 +20,11 @@ export const WEATHERFLOW_CONFIG = {
   REST_API_URL: 'https://swd.weatherflow.com/swd/rest',
   API_TIMEOUT: 10000, // 10 seconds
 
+  // Station filtering
+  // Comma-separated list of station IDs to ignore (set via TEMPESTWX_IGNORE_STATIONS env var).
+  // All devices belonging to an ignored station are dropped.
+  IGNORE_STATIONS_ENV: 'TEMPESTWX_IGNORE_STATIONS',
+
   // Data processing thresholds
   PRESSURE_TREND_THRESHOLD: 1.0, // mb threshold for significant change
   PRESSURE_HISTORY_SIZE: 20, // Keep last 20 readings for trend calculation
