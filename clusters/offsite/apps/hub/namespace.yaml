@@ -1,9 +1,9 @@
+---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ include "app.fullname" . }}
+  name: hub
   labels:
-    {{- include "app.labels" . | nindent 4 }}
     kustomize.toolkit.fluxcd.io/prune: enabled
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/enforce-version: latest

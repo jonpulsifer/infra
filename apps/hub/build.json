@@ -3,7 +3,7 @@
     "image": "hub",
     "context": ".",
     "file": "apps/hub/Dockerfile",
-    "platforms": "linux/amd64,linux/arm64",
+    "platforms": "linux/amd64",
     "watch": [
       "apps/hub",
       "packages/typescript-config",
