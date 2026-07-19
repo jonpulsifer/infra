@@ -22,10 +22,11 @@ RUN bun run build --filter=hub
 FROM base AS runner
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/hub/node_modules ./apps/hub/node_modules
-COPY --from=builder /app/apps/hub/package.json ./apps/hub/package.json
-COPY --from=builder /app/apps/hub/build ./apps/hub/build
+USER 1000:1000
+COPY --from=builder --chown=1000:1000 /app/node_modules ./node_modules
+COPY --from=builder --chown=1000:1000 /app/apps/hub/node_modules ./apps/hub/node_modules
+COPY --from=builder --chown=1000:1000 /app/apps/hub/package.json ./apps/hub/package.json
+COPY --from=builder --chown=1000:1000 /app/apps/hub/build ./apps/hub/build
 WORKDIR /app/apps/hub
 EXPOSE 3000
 CMD ["bun", "run", "start"]
