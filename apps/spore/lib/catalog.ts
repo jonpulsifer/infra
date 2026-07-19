@@ -30,6 +30,14 @@ const hostSchema = z
   })
   .strict();
 
+const nativeBootTargetSchema = z
+  .object({
+    hostname: z.string().trim().min(1),
+    macAddress: z.string(),
+    protocol: z.literal('raspberry-pi-http'),
+  })
+  .strict();
+
 const catalogInputSchema = z
   .object({
     serverOrigin: z.string(),
@@ -38,6 +46,7 @@ const catalogInputSchema = z
     profiles: z.record(z.string(), profileSchema),
     scripts: z.record(z.string(), scriptSchema),
     hosts: z.record(z.string(), hostSchema),
+    nativeBootTargets: z.record(z.string(), nativeBootTargetSchema).default({}),
   })
   .strict();
 
@@ -45,6 +54,25 @@ export type BootCatalogInput = z.input<typeof catalogInputSchema>;
 export type BootProfile = Readonly<z.output<typeof profileSchema>>;
 export type BootScript = Readonly<z.output<typeof scriptSchema>>;
 export type BootHost = Readonly<z.output<typeof hostSchema>>;
+export interface NativeBootTarget {
+  readonly hostname: string;
+  readonly macAddress: string;
+  readonly protocol: 'raspberry-pi-http';
+  readonly artifactBaseUrl: string;
+}
+
+export const nativeBootArtifacts = [
+  'boot.img',
+  'boot.sig',
+  'nix-store.squashfs',
+] as const;
+export type NativeBootArtifact = (typeof nativeBootArtifacts)[number];
+
+export function isNativeBootArtifact(
+  value: string,
+): value is NativeBootArtifact {
+  return nativeBootArtifacts.some((artifact) => artifact === value);
+}
 
 export interface BootCatalog {
   readonly serverOrigin: string;
@@ -53,6 +81,7 @@ export interface BootCatalog {
   readonly profiles: Readonly<Record<string, BootProfile>>;
   readonly scripts: Readonly<Record<string, BootScript>>;
   readonly hosts: Readonly<Record<string, BootHost>>;
+  readonly nativeBootTargets: Readonly<Record<string, NativeBootTarget>>;
 }
 
 const stableIdPattern = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
@@ -171,6 +200,24 @@ export function parseBootCatalog(input: unknown): BootCatalog {
       normalizedHosts[normalizedMac] = host;
     }
 
+    const nativeBootTargets: Record<string, NativeBootTarget> = {};
+    for (const [id, target] of Object.entries(parsed.nativeBootTargets)) {
+      assertStableProfileId(id);
+      let macAddress: string;
+      try {
+        macAddress = normalizeMac(target.macAddress);
+      } catch {
+        throw new Error(
+          `invalid native boot target MAC address: ${target.macAddress}`,
+        );
+      }
+      nativeBootTargets[id] = {
+        ...target,
+        macAddress,
+        artifactBaseUrl: `${parsed.serverOrigin}/api/native-boot/${id}`,
+      };
+    }
+
     return Object.freeze({
       serverOrigin: parsed.serverOrigin,
       allowUnknownHosts: parsed.allowUnknownHosts,
@@ -178,6 +225,7 @@ export function parseBootCatalog(input: unknown): BootCatalog {
       profiles: frozenRecord(parsed.profiles),
       scripts: frozenRecord(parsed.scripts),
       hosts: frozenRecord(normalizedHosts),
+      nativeBootTargets: frozenRecord(nativeBootTargets),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

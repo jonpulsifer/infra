@@ -11,7 +11,7 @@ import {
 import { getReadModel } from '@/lib/read-model';
 
 export default async function SettingsPage() {
-  const { catalog } = await getReadModel();
+  const { catalog, nativeBootTargets } = await getReadModel();
   const exampleMac = '52:54:00:00:00:01';
 
   return (
@@ -62,10 +62,10 @@ export default async function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Network className="h-5 w-5 text-spore" />
-              public iPXE routes
+              public boot routes
             </CardTitle>
             <CardDescription>
-              only boot and script adapters are exposed on the lab network
+              immutable iPXE and signed native-boot adapters
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 font-mono text-xs">
@@ -75,6 +75,14 @@ export default async function SettingsPage() {
             <code className="block overflow-x-auto rounded-sm bg-muted p-3">
               {catalog.serverOrigin}/api/scripts/&lt;path&gt;
             </code>
+            {nativeBootTargets.map((target) => (
+              <code
+                key={target.id}
+                className="block overflow-x-auto rounded-sm bg-muted p-3"
+              >
+                {target.artifactBaseUrl}/&lt;artifact&gt;
+              </code>
+            ))}
             <p className="flex gap-2 text-sm text-muted-foreground">
               <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
               The management UI, health route, and static assets are limited by

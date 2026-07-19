@@ -7,9 +7,9 @@
 #
 # spore has no SD card: it boots directly off its single NVMe drive, which
 # is what the sd-image gets flashed onto. That's also the only place to put
-# NFS data, so unlike rackpi5 (a second, dedicated GPT disk with a
-# partlabel) this needs a THIRD partition carved out of the same MBR disk
-# the sd-image module already partitions into firmware + root.
+# NFS data, so this needs a THIRD partition carved out of the same MBR disk
+# the sd-image module already partitions into firmware + root. rackpi5 is
+# stateless and consumes none of this storage.
 #
 # The sd-image module's default `expandOnBoot` would grow root to consume
 # the *entire* disk on first boot -- exactly the OS/data commingling this
@@ -138,37 +138,12 @@ in
           '';
         };
       };
+      nativeBootTargets.rackpi5 = {
+        hostname = "rackpi5";
+        protocol = "raspberry-pi-http";
+      };
     };
   };
-
-  # rackpi5 netboots from this host (see nix/hosts/rackpi5.nix): its / is the
-  # NFS export below and its /boot/firmware is a directory inside the TFTP
-  # root, exported rw so nixos-rebuilds on rackpi5 drop kernels straight into
-  # the netboot tree dnsmasq already serves. no_root_squash because rackpi5's
-  # root writes both as uid 0.
-  systemd.tmpfiles.rules = [
-    "d /nfs/data/rackpi5 0755 root root -"
-    "d /var/lib/tftpboot/rackpi5 0755 root root -"
-    # rackpi5's default boot is the stateless RAM image, HTTP-booted from
-    # nginx's tftpboot root: `nix build .#nixosConfigurations.rackpi5-ram
-    # .config.system.build.piBootImg`, copy boot.img + nix-store.squashfs
-    # here, then sign (the bootloader rejects unsigned HTTP downloads;
-    # rackpi5's EEPROM holds the matching public key):
-    #   rpi-eeprom-digest -i boot.img -o boot.sig \
-    #     -k /var/lib/pi-boot-sign/private.pem
-    "d /var/lib/tftpboot/rackpi5-ram 0755 root root -"
-  ];
-  services.nfs.server.exports = ''
-    /nfs/data/rackpi5           ${lab.hosts.rackpi5}(rw,sync,no_subtree_check,insecure,no_root_squash)
-    /var/lib/tftpboot/rackpi5   ${lab.hosts.rackpi5}(rw,sync,no_subtree_check,insecure,no_root_squash)
-  '';
-  # No file leases means nfsd grants no delegations. Nix hard-links files
-  # inside rackpi5's NFS root, and a LINK against a file whose write
-  # delegation the *same* client holds deadlocks in the server's recall
-  # (observed: nix-env stuck in nfs4_proc_link indefinitely while populating
-  # the netboot root). Delegations are a read-caching nicety; the k8s NFS
-  # workloads don't miss them.
-  boot.kernel.sysctl."fs.leases-enable" = 0;
 
   sdImage.expandOnBoot = false;
 

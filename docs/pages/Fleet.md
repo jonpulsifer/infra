@@ -32,6 +32,6 @@ icon:: 🖥️
 	  | ---- | ----- | ----- |
 	  | [[Hosts/oldboy]] | GCE e2-micro (free tier) | tagged `gcp` |
 - ## Images (not hosts)
-	- `wsl`, `iso`, `gce`, `container`, `netboot`, and `rackpi5-ram` (the pi5 RAM image) are buildable images defined alongside the hosts in `flake.nix`.
+	- `wsl`, `iso`, `gce`, `container`, and `netboot` are standalone buildable images. `rackpi5` directly exposes its signed-boot input as `config.system.build.piBootImg`.
 - ## Reaching things
 	- LAN hosts resolve as `<host>.lolwtf.ca`; offsite and weatherpi4 require the tailnet. k8s nodes have Tailscale disabled — go through the LAN or the cluster.

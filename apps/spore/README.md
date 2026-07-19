@@ -1,6 +1,6 @@
 # Spore
 
-Spore is the homelab's read-only iPXE catalog, boot-decision service, and observation dashboard. Git and Nix own every value that can change what a machine boots. SQLite stores only runtime observations.
+Spore is the homelab's read-only network-boot catalog, decision service, and observation dashboard. It serves iPXE policy and rackpi5's signed native Raspberry Pi HTTP boot target. Git and Nix own every value that can change what a machine boots. SQLite stores only runtime observations.
 
 Next.js remains the UI and HTTP shell because its standalone server is small enough for the Pi 5 and a framework rewrite would not remove the Node, native SQLite, or Nix packaging work. Boot policy itself is framework-independent and tested through `lib/boot-decision.ts`.
 
@@ -46,6 +46,7 @@ Production clients use:
 
 - `GET http://10.2.0.11/spore/api/boot/<mac>` for a host decision.
 - `GET http://10.2.0.11/spore/api/scripts/<path>?mac=<mac>` for a chainable script with the same host context.
+- `GET http://10.2.0.11/spore/api/native-boot/<target>/<artifact>` for a declared native target's whitelisted signed boot assets.
 
 Responses are `text/plain`, never cached, and contain iPXE content. Valid but denied/unconfigured hosts receive a successful HTTP response containing a safe local-boot script; malformed requests still receive an HTTP error.
 
@@ -55,9 +56,9 @@ Templates may use `{{mac}}`, `{{mac_hyphen}}`, `{{hostname}}`, `{{profile_name}}
 
 Spore is built as a standalone Next.js package and runs directly as `spore.service`; it is not an OCI image. The package compiles `better-sqlite3` against pinned Node 24 on the target platform and smoke-tests a real migration during the Nix build.
 
-The service listens on `127.0.0.1:3000`, uses `/var/lib/spore/observations.db`, and attempts the packaged migration before startup. A migration failure degrades observations and health without blocking catalog-backed boot decisions. Nginx adds the two public iPXE paths to the existing PXE vhost. The management UI at `spore.pirate-musical.ts.net/spore` (also named `spore.lolwtf.ca`) is protected by Tailscale authentication, and port 3000 is not opened in the firewall.
+The service listens on `127.0.0.1:3000`, uses `/var/lib/spore/observations.db`, and attempts the packaged migration before startup. A migration failure degrades observations and health without blocking catalog-backed boot decisions. Nginx adds the public iPXE and native-boot API paths to the existing PXE vhost. Native assets use `X-Accel-Redirect` into an internal nginx-only location, so Node makes the policy decision without streaming the image or squashfs. The management UI at `spore.pirate-musical.ts.net/spore` (also named `spore.lolwtf.ca`) is protected by Tailscale authentication, and port 3000 is not opened in the firewall.
 
-Dnsmasq/TFTP, nginx's static `/var/lib/tftpboot` root, NFS, and Spore have independent systemd lifecycles. A Spore process failure does not stop the static boot path used by `rackpi5`.
+Dnsmasq/TFTP, nginx's static `/var/lib/tftpboot` root, and NFS retain independent systemd lifecycles for their existing consumers. Rackpi5 deliberately uses only Spore's native route: the Nix image build embeds the squashfs digest, stage 1 requests that content-addressed root, and a root-only publisher signs the exact `boot.img` with `/var/lib/pi-boot-sign/private.pem` before atomically activating the artifact set before Spore and nginx start.
 
 Build without activating the host:
 

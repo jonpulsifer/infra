@@ -37,6 +37,13 @@ function catalogInput(): BootCatalogInput {
       'aa:bb:cc:dd:ee:01': { hostname: 'nuc', profile: 'k8s' },
       'aa:bb:cc:dd:ee:02': { hostname: 'optiplex' },
     },
+    nativeBootTargets: {
+      rackpi5: {
+        hostname: 'rackpi5',
+        macAddress: '2c:cf:67:dc:7e:9b',
+        protocol: 'raspberry-pi-http',
+      },
+    },
   };
 }
 
@@ -181,5 +188,42 @@ describe('chainable scripts', () => {
     expect(boot.renderScript('../secret.ipxe').status).toBe(404);
     expect(boot.renderScript('k8s/net boot.ipxe').status).toBe(404);
     expect(boot.renderScript('constructor').status).toBe(404);
+  });
+});
+
+describe('native boot assets', () => {
+  test('resolves only declared target artifacts and observes the target MAC', () => {
+    const { service: boot, attempts } = service();
+
+    expect(boot.resolveNativeBoot('rackpi5', 'boot.img')).toEqual({
+      status: 200,
+      outcome: 'native-boot',
+      internalPath: '/_spore-native-boot/rackpi5/boot.img',
+    });
+    expect(attempts).toEqual([
+      {
+        macAddress: '2c:cf:67:dc:7e:9b',
+        outcome: 'native-boot',
+        profileId: 'rackpi5',
+      },
+    ]);
+
+    expect(boot.resolveNativeBoot('rackpi5', '../boot.img').status).toBe(404);
+    expect(boot.resolveNativeBoot('missing', 'boot.sig').status).toBe(404);
+    const digest = 'a'.repeat(64);
+    expect(
+      boot.resolveNativeBoot('rackpi5', 'nix-store.squashfs', digest),
+    ).toEqual({
+      status: 200,
+      outcome: 'native-boot',
+      internalPath: `/_spore-native-boot/stores/${digest}.squashfs`,
+    });
+    expect(
+      boot.resolveNativeBoot('rackpi5', 'nix-store.squashfs'),
+    ).toMatchObject({ status: 404, internalPath: null });
+    expect(
+      boot.resolveNativeBoot('rackpi5', 'nix-store.squashfs', '../current'),
+    ).toMatchObject({ status: 404, internalPath: null });
+    expect(attempts).toHaveLength(1);
   });
 });

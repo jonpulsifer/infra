@@ -8,6 +8,7 @@ export type BootOutcome =
   | 'unknown-allowed'
   | 'unknown-denied'
   | 'missing-profile'
+  | 'native-boot'
   | 'legacy-import';
 
 export interface Observation {

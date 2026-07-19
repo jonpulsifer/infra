@@ -1,5 +1,5 @@
 import { type EffectiveBootOutcome, resolveBootPolicy } from './boot-decision';
-import type { BootCatalog } from './catalog';
+import type { BootCatalog, NativeBootTarget } from './catalog';
 import type { BootOutcome, Observation } from './observations';
 import { getSpore } from './spore';
 
@@ -31,6 +31,10 @@ export interface ScriptReadModel {
   readonly content: string;
 }
 
+export interface NativeBootTargetReadModel extends NativeBootTarget {
+  readonly id: string;
+}
+
 export interface SporeReadModel {
   readonly catalog: Readonly<
     Pick<BootCatalog, 'serverOrigin' | 'allowUnknownHosts' | 'defaultProfile'>
@@ -38,6 +42,7 @@ export interface SporeReadModel {
   readonly hosts: readonly HostReadModel[];
   readonly profiles: readonly ProfileReadModel[];
   readonly scripts: readonly ScriptReadModel[];
+  readonly nativeBootTargets: readonly NativeBootTargetReadModel[];
 }
 
 const emptyObservation = {
@@ -114,6 +119,13 @@ export function buildReadModel(
     )
     .sort((left, right) => left.path.localeCompare(right.path));
 
+  const nativeBootTargets = Object.entries(catalog.nativeBootTargets)
+    .map(
+      ([id, target]): NativeBootTargetReadModel =>
+        Object.freeze({ id, ...target }),
+    )
+    .sort((left, right) => left.id.localeCompare(right.id));
+
   return Object.freeze({
     catalog: Object.freeze({
       serverOrigin: catalog.serverOrigin,
@@ -123,6 +135,7 @@ export function buildReadModel(
     hosts: Object.freeze(hosts),
     profiles: Object.freeze(profiles),
     scripts: Object.freeze(scripts),
+    nativeBootTargets: Object.freeze(nativeBootTargets),
   });
 }
 

@@ -31,6 +31,13 @@ const validCatalog = (): BootCatalogInput => ({
   hosts: {
     'AA-BB-CC-DD-EE-FF': { hostname: 'nuc', profile: 'k8s' },
   },
+  nativeBootTargets: {
+    rackpi5: {
+      hostname: 'rackpi5',
+      macAddress: '2C-CF-67-DC-7E-9B',
+      protocol: 'raspberry-pi-http',
+    },
+  },
 });
 
 describe('boot catalog', () => {
@@ -40,6 +47,12 @@ describe('boot catalog', () => {
     expect(catalog.hosts['aa:bb:cc:dd:ee:ff']).toEqual({
       hostname: 'nuc',
       profile: 'k8s',
+    });
+    expect(catalog.nativeBootTargets.rackpi5).toEqual({
+      hostname: 'rackpi5',
+      macAddress: '2c:cf:67:dc:7e:9b',
+      protocol: 'raspberry-pi-http',
+      artifactBaseUrl: 'http://10.2.0.11/spore/api/native-boot/rackpi5',
     });
     expect(catalog.serverOrigin).toBe('http://10.2.0.11/spore');
     expect(Object.isFrozen(catalog)).toBe(true);
@@ -90,6 +103,51 @@ describe('boot catalog', () => {
     const collision = validCatalog();
     collision.hosts['aa:bb:cc:dd:ee:ff'] = { hostname: 'duplicate' };
     expect(() => parseBootCatalog(collision)).toThrow(/duplicate MAC/);
+  });
+
+  test('rejects a malformed native boot target id', () => {
+    expect(() =>
+      parseBootCatalog({
+        ...validCatalog(),
+        nativeBootTargets: {
+          'rack pi': {
+            hostname: 'rackpi5',
+            macAddress: '2c:cf:67:dc:7e:9b',
+            protocol: 'raspberry-pi-http',
+          },
+        },
+      }),
+    ).toThrow(/profile id/);
+  });
+
+  test('rejects a malformed native boot target MAC', () => {
+    expect(() =>
+      parseBootCatalog({
+        ...validCatalog(),
+        nativeBootTargets: {
+          rackpi5: {
+            hostname: 'rackpi5',
+            macAddress: 'not-a-mac',
+            protocol: 'raspberry-pi-http',
+          },
+        },
+      }),
+    ).toThrow(/native boot target MAC/);
+  });
+
+  test('rejects an unsupported native boot protocol', () => {
+    expect(() =>
+      parseBootCatalog({
+        ...validCatalog(),
+        nativeBootTargets: {
+          rackpi5: {
+            hostname: 'rackpi5',
+            macAddress: '2c:cf:67:dc:7e:9b',
+            protocol: 'tftp' as 'raspberry-pi-http',
+          },
+        },
+      }),
+    ).toThrow(/protocol/);
   });
 
   test.each([

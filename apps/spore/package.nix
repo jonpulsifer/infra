@@ -96,7 +96,7 @@ buildNpmPackage {
   '';
 
   meta = {
-    description = "Read-only iPXE catalog and observation UI";
+    description = "Read-only network-boot catalog and observation UI";
     license = lib.licenses.mit;
     mainProgram = "spore";
     platforms = lib.platforms.linux;

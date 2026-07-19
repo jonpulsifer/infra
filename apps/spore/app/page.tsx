@@ -29,7 +29,7 @@ export default async function DashboardPage() {
           dashboard
         </h1>
         <p className="font-mono text-muted-foreground">
-          read-only iPXE catalog and runtime observations
+          read-only network-boot catalog and runtime observations
         </p>
       </div>
 

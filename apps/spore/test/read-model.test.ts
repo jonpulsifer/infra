@@ -25,6 +25,13 @@ const catalog = parseBootCatalog({
     '00:00:00:00:00:02': { hostname: 'zeta', profile: 'k8s' },
     '00:00:00:00:00:01': { hostname: 'alpha' },
   },
+  nativeBootTargets: {
+    rackpi5: {
+      hostname: 'rackpi5',
+      macAddress: '2c:cf:67:dc:7e:9b',
+      protocol: 'raspberry-pi-http',
+    },
+  },
 });
 
 describe('Spore read model', () => {
@@ -66,6 +73,15 @@ describe('Spore read model', () => {
         expect.objectContaining({ id: 'k8s', hostCount: 1 }),
       ]),
     );
+    expect(model.nativeBootTargets).toEqual([
+      {
+        id: 'rackpi5',
+        hostname: 'rackpi5',
+        macAddress: '2c:cf:67:dc:7e:9b',
+        protocol: 'raspberry-pi-http',
+        artifactBaseUrl: 'http://10.2.0.11/spore/api/native-boot/rackpi5',
+      },
+    ]);
   });
 
   test('keeps unknown observations after configured hosts in stable order', () => {
