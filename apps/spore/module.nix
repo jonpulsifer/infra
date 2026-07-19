@@ -433,9 +433,12 @@ in
               restartTriggers = [ artifact.package ];
               path = with pkgs; [
                 coreutils
+                gawk
                 gnugrep
                 mtools
                 raspberrypi-eeprom
+                openssl
+                xxd
               ];
               serviceConfig = {
                 Type = "oneshot";

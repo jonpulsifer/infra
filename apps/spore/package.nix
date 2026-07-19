@@ -34,7 +34,7 @@ buildNpmPackage {
       ./tsconfig.json
     ];
   };
-  npmDepsHash = "sha256-QEmYVYUE5NDMHVNIuQCaiByO8uvInMgNXUqs144sMeE=";
+  npmDepsHash = "sha256-FYu2iEL02C5/qs3tz9YyfVvYf+xSV+51I1b3OunKn6I=";
 
   nativeBuildInputs = [
     autoPatchelfHook
