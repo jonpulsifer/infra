@@ -50,7 +50,7 @@
     "framer-motion": "12.42.2",
     "google-auth-library": "10.9.0",
     "input-otp": "1.4.2",
-    "lucide-react": "1.21.0",
+    "lucide-react": "1.24.0",
     "nanoid": "5.1.16",
     "next": "16.2.10",
     "next-themes": "0.4.6",
