@@ -28,7 +28,8 @@
 
   services.kiosk = {
     enable = true;
-    container = true;
+    container = false;
     public = true;
+    url = "https://hub.lolwtf.ca";
   };
 }
