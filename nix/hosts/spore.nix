@@ -23,11 +23,6 @@
   pkgs,
   ...
 }:
-let
-  # Lab-net host IPs come from the Lab SSOT, terraform/network/unifi/folly/lab.tf.json.
-  lab =
-    (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json)).locals.lab;
-in
 {
   imports = [
     ../hardware/pi5
@@ -35,7 +30,7 @@ in
     ../services/common.nix
     ../services/nfs-server.nix
     ../services/pxe-netboot.nix
-    ../system/spore.nix
+    ../services/spore-native-boot.nix
   ];
 
   networking = {
@@ -53,97 +48,9 @@ in
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
-  services.spore.managementCidrs = [
-    "127.0.0.0/8"
-    "::1/128"
-    "100.64.0.0/10"
-    "10.1.0.0/24" # fml / management LAN
-    lab.cidr # 10.2.0.0/24 — lab LAN
-    "10.3.0.0/26" # k8s node subnet
-    "10.13.37.0/28" # future VLAN
-  ];
-  services.spore.managementAliases = [
-    "spore.pirate-musical.ts.net"
-    lab.hosts.spore # 10.2.0.11 — reachable by LAN IP
-  ];
-
-  # Desired boot state is built into an immutable catalog. MAC addresses are
-  # derived from clients.yaml in the package closure, keeping UniFi's client
-  # inventory as the single source of truth instead of transcribing it here.
-  services.spore = {
-    enable = true;
-    catalog = {
-      serverOrigin = "http://${lab.hosts.spore}/spore";
-      allowUnknownHosts = true;
-      defaultProfile = "default-menu";
-      hostsSource = ../../terraform/network/unifi/folly/clients.yaml;
-      hostsSourceGroup = "k8s";
-      hostsSourceProfile = "k8s-node";
-      profiles = {
-        default-menu = {
-          name = "Default Boot Menu";
-          description = "Fallback menu for unassigned and newly observed hosts";
-          content = ''
-            #!ipxe
-            dhcp
-            set base-url {{base_url}}
-
-            :start
-            menu iPXE Boot Menu - {{hostname}} ({{mac}})
-            item --gap -- -------------------------
-            item k8s-node Boot the NixOS K8s node path
-            item netbootxyz Open netboot.xyz
-            item shell Open an iPXE shell
-            item local Boot from local disk
-            choose --default k8s-node --timeout 5000 target && goto ''${target}
-
-            :k8s-node
-            chain ''${base-url}/api/scripts/k8s-node/netboot.ipxe?mac={{mac}}
-
-            :netbootxyz
-            chain --replace https://boot.netboot.xyz/menu.ipxe
-
-            :shell
-            shell
-
-            :local
-            exit
-          '';
-        };
-        k8s-node = {
-          name = "K8s Node";
-          description = "Direct chain to the Nix-owned static PXE menu";
-          content = ''
-            #!ipxe
-            dhcp
-            chain {{base_url}}/api/scripts/k8s-node/netboot.ipxe?mac={{mac}}
-          '';
-        };
-      };
-      scripts = {
-        "k8s-node/netboot.ipxe" = {
-          description = "Hand off to the independently served static PXE tree";
-          content = ''
-            #!ipxe
-            echo Loading the NixOS PXE menu for {{hostname}} ({{mac}})...
-            chain http://{{server_ip}}/menu.ipxe
-          '';
-        };
-        "nuc/netboot.ipxe" = {
-          description = "Open the upstream netboot.xyz management menu";
-          content = ''
-            #!ipxe
-            echo Loading the management menu for {{hostname}} ({{mac}})...
-            chain --replace https://boot.netboot.xyz/menu.ipxe
-          '';
-        };
-      };
-      nativeBootTargets.rackpi5 = {
-        hostname = "rackpi5";
-        protocol = "raspberry-pi-http";
-      };
-    };
-  };
+  # Signed native-boot publishing for rackpi5. The target's boot.img package and
+  # signing key are wired in flake.nix, where rackpi5's config is in scope.
+  services.spore.enable = true;
 
   sdImage.expandOnBoot = false;
 

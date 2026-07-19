@@ -82,8 +82,6 @@ jobs:
           skipPush: ${{ github.ref != 'refs/heads/main' }}
       - run: >-
           nix build
-          .#packages.aarch64-linux.spore-app
-          .#checks.aarch64-linux.spore-deployment
           .#nixosConfigurations.spore.config.system.build.toplevel
   images:
     needs: [changed-paths, check]

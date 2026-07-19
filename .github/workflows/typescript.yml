@@ -6,7 +6,6 @@ on:
     paths:
       - "apps/hub/**"
       - "apps/slingshot/**"
-      - "apps/spore/**"
       - "packages/k6/**"
       - "packages/typescript-config/**"
       - "package.json"
@@ -19,7 +18,6 @@ on:
     paths:
       - "apps/hub/**"
       - "apps/slingshot/**"
-      - "apps/spore/**"
       - "packages/k6/**"
       - "packages/typescript-config/**"
       - "package.json"
