@@ -1,7 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { connection } from 'next/server';
+import { ManagedNotice } from '@/components/managed-notice';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,109 +11,95 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { getHosts, getProfile } from '@/lib/actions';
-import { formatDate } from '@/lib/utils';
-import { ProfileEditForm } from './_components/profile-edit-form';
+import { getReadModel } from '@/lib/read-model';
 
 interface ProfilePageProps {
   params: Promise<{ id: string }>;
 }
 
 export default async function ProfilePage({ params }: ProfilePageProps) {
-  await connection();
   const { id } = await params;
-  const profileId = Number.parseInt(id, 10);
+  const model = await getReadModel();
+  const profile = model.profiles.find(
+    (candidate) => candidate.id === decodeURIComponent(id),
+  );
 
-  if (Number.isNaN(profileId)) {
-    notFound();
-  }
+  if (!profile) notFound();
 
-  const [profile, hosts] = await Promise.all([
-    getProfile(profileId),
-    getHosts(),
-  ]);
-
-  if (!profile) {
-    notFound();
-  }
-
-  const assignedHosts = hosts.filter((h) => h.profileId === profile.id);
+  const effectiveHosts = model.hosts.filter(
+    (host) => host.configured && host.profileId === profile.id,
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link href="/profiles">
-          <Button variant="ghost" size="icon">
+        <Button asChild variant="ghost" size="icon">
+          <Link href="/profiles" aria-label="Back to profiles">
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <div className="flex items-center gap-3">
-          <h1 className="text-3xl font-bold">{profile.name}</h1>
-          {profile.isDefault && <Badge variant="default">Default</Badge>}
+          </Link>
+        </Button>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="font-mono text-3xl font-bold lowercase">
+              {profile.name}
+            </h1>
+            {profile.isDefault && <Badge variant="spore">default</Badge>}
+          </div>
+          <p className="font-mono text-muted-foreground">{profile.id}</p>
         </div>
       </div>
 
+      <ManagedNotice />
+
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <ProfileEditForm profile={profile} />
-        </div>
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>iPXE content</CardTitle>
+            <CardDescription>
+              {profile.description ?? 'catalog-managed boot profile'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-x-auto rounded-sm bg-muted p-4 text-sm leading-relaxed">
+              {profile.content}
+            </pre>
+          </CardContent>
+        </Card>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile Info</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <p className="text-sm font-medium">Created</p>
-                <p className="text-sm text-muted-foreground">
-                  {formatDate(profile.createdAt)}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm font-medium">Last Updated</p>
-                <p className="text-sm text-muted-foreground">
-                  {formatDate(profile.updatedAt)}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Assigned Hosts</CardTitle>
-              <CardDescription>
-                {assignedHosts.length} host
-                {assignedHosts.length !== 1 ? 's' : ''} using this profile
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {assignedHosts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No hosts assigned to this profile
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {assignedHosts.map((host) => (
-                    <li key={host.macAddress}>
-                      <Link
-                        href={`/hosts/${encodeURIComponent(host.macAddress)}`}
-                        className="text-sm hover:underline"
-                      >
-                        {host.hostname || host.macAddress}
-                      </Link>
-                      {host.hostname && (
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {host.macAddress}
-                        </p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>effective hosts</CardTitle>
+            <CardDescription>
+              {effectiveHosts.length} catalog assignment or default
+              {effectiveHosts.length === 1 ? '' : 's'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {effectiveHosts.length === 0 ? (
+              <p className="font-mono text-sm text-muted-foreground">
+                no host resolves to this profile
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {effectiveHosts.map((host) => (
+                  <li key={host.macAddress}>
+                    <Link
+                      href={`/hosts/${encodeURIComponent(host.macAddress)}`}
+                      className="font-mono text-sm text-spore hover:underline"
+                    >
+                      {host.hostname ?? host.macAddress}
+                    </Link>
+                    {host.hostname && (
+                      <p className="font-mono text-xs text-muted-foreground">
+                        {host.macAddress}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

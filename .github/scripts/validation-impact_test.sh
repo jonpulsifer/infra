@@ -21,6 +21,14 @@ assert_targets 'the Nix workflow validates its routing target' \
   '.github/workflows/nix-ci.yaml' \
   'nix:flake-check'
 
+assert_targets 'Spore application changes validate the direct Nix package' \
+  'apps/spore/lib/catalog.ts' \
+  'nix:flake-check'
+
+assert_targets 'the Spore MAC source validates the generated Nix catalog' \
+  'terraform/network/unifi/folly/clients.yaml' \
+  $'nix:flake-check\nterraform:terraform/network/unifi/folly'
+
 assert_targets 'the lab contract validates its Terraform root and Nix' \
   'terraform/network/unifi/folly/lab.tf.json' \
   $'nix:flake-check\nterraform:terraform/network/unifi/folly'

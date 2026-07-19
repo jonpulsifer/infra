@@ -9,10 +9,12 @@ tags:: architecture
 	- `nix/system/` — core modules: SSH hardening, Tailscale, auto-upgrades, users, disko, mise-dotfiles
 	- `nix/overlays/` — package patches and overrides
 	- `nix/images/` — buildable images: WSL tarball, ISO, GCE, container, netboot, and the pi5 RAM image
+	- App-local `package.nix` / `module.nix` pairs may be imported by a host when an application belongs directly on NixOS. `apps/spore` uses this pattern for its pinned Node package, migrations, generated boot catalog, systemd lifecycle, and nginx routes.
 - ## Host groups
 	- **folly k8s nodes**: `optiplex` (control-plane), `riptide`, `shale`
 	- **offsite k8s nodes**: `retrofit` (control-plane), `oldschool`
 	- **Raspberry Pis**: `cloudpi4`, `homepi4`, `weatherpi4`, `dns`, `rackpi5` (diskless — see [[ADR/0008 Diskless netboot for rackpi5]]), `spore` (NFS/PXE server)
+		- `spore` also runs the loopback-only Spore application directly. Its failure is isolated from dnsmasq, nginx's static PXE root, NFS, and the diskless `rackpi5` boot artifacts; see [[ADR/0013 Git and Nix own the Spore boot catalog]].
 	- **Cloud**: `oldboy` (GCE)
 - ## Deploying
 	- Build without deploying:

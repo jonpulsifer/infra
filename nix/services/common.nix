@@ -55,7 +55,7 @@
     # series per unit and these are small Pis.
     enabledCollectors = [ "systemd" ];
     extraFlags = [
-      "--collector.systemd.unit-include=(nfs-server|nfs-mountd|rpc-statd|dnsmasq|nginx|pihole-ftl|tailscaled|ddnsd|sshd)\\.service"
+      "--collector.systemd.unit-include=(nfs-server|nfs-mountd|rpc-statd|dnsmasq|nginx|spore|pihole-ftl|tailscaled|ddnsd|sshd)\\.service"
     ];
   };
 

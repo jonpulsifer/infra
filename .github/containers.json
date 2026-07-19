@@ -8,8 +8,7 @@
     "atlantis",
     "actions-runner",
     "hub",
-    "slingshot",
-    "spore"
+    "slingshot"
   ],
   "ignore": [
     "bashcurljq",
@@ -17,7 +16,6 @@
     "openclaw",
     "workstation",
     "hermes",
-    "slingshot",
-    "spore"
+    "slingshot"
   ]
 }

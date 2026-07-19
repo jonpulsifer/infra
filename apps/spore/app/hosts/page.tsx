@@ -1,8 +1,6 @@
-import { Plus } from 'lucide-react';
 import Link from 'next/link';
-import { connection } from 'next/server';
+import { ManagedNotice } from '@/components/managed-notice';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -10,102 +8,79 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { getHosts, getProfiles } from '@/lib/actions';
-import { timeAgo } from '@/lib/utils';
-import { HostActions } from './_components/host-actions';
-import { NewHostDialog } from './_components/new-host-dialog';
+import { getReadModel } from '@/lib/read-model';
+import { formatBootPolicy, timeAgo } from '@/lib/utils';
 
 export default async function HostsPage() {
-  await connection();
-  const [hosts, profiles] = await Promise.all([getHosts(), getProfiles()]);
-
-  const profileMap = new Map(profiles.map((p) => [p.id, p]));
+  const model = await getReadModel();
+  const profileById = new Map(
+    model.profiles.map((profile) => [profile.id, profile]),
+  );
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-mono font-bold tracking-tight lowercase">
-            hosts
-          </h1>
-          <p className="text-muted-foreground font-mono">
-            manage network boot hosts by mac address
-          </p>
-        </div>
-        <NewHostDialog profiles={profiles}>
-          <Button variant="spore">
-            <Plus className="mr-2 h-4 w-4" />
-            add host
-          </Button>
-        </NewHostDialog>
+      <div>
+        <h1 className="font-mono text-3xl font-bold tracking-tight lowercase">
+          hosts
+        </h1>
+        <p className="font-mono text-muted-foreground">
+          configured hosts joined with runtime boot observations
+        </p>
       </div>
+
+      <ManagedNotice>
+        Hostnames and profile assignments come from the Nix catalog. First seen,
+        last seen, and attempt counts come from SQLite.
+      </ManagedNotice>
 
       <Card>
         <CardHeader>
-          <CardTitle>registered hosts</CardTitle>
+          <CardTitle>host projection</CardTitle>
           <CardDescription>
-            {hosts.length} host{hosts.length !== 1 ? 's' : ''} registered
+            {model.hosts.length} configured or observed host
+            {model.hosts.length === 1 ? '' : 's'}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {hosts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No hosts registered yet. Hosts will auto-register when they boot
-              via iPXE, or you can add them manually.
+          {model.hosts.length === 0 ? (
+            <p className="font-mono text-sm text-muted-foreground">
+              no hosts are configured or observed
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full font-mono">
+              <table className="w-full min-w-[760px] font-mono">
                 <thead>
-                  <tr className="border-b border-border text-left text-sm text-muted-foreground">
-                    <th className="pb-3 font-medium uppercase tracking-wider text-xs">
-                      Hostname
-                    </th>
-                    <th className="pb-3 font-medium uppercase tracking-wider text-xs">
-                      MAC Address
-                    </th>
-                    <th className="pb-3 font-medium uppercase tracking-wider text-xs">
-                      Profile
-                    </th>
-                    <th className="pb-3 font-medium uppercase tracking-wider text-xs">
-                      Last Seen
-                    </th>
-                    <th className="pb-3 font-medium uppercase tracking-wider text-xs">
-                      Actions
-                    </th>
+                  <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="pb-3 font-medium">host</th>
+                    <th className="pb-3 font-medium">mac address</th>
+                    <th className="pb-3 font-medium">profile</th>
+                    <th className="pb-3 font-medium">attempts</th>
+                    <th className="pb-3 font-medium">last seen</th>
+                    <th className="pb-3 font-medium">source</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {hosts.map((host) => {
+                  {model.hosts.map((host) => {
                     const profile = host.profileId
-                      ? profileMap.get(host.profileId)
-                      : null;
-
+                      ? profileById.get(host.profileId)
+                      : undefined;
                     return (
-                      <tr
-                        key={host.macAddress}
-                        className="text-sm hover:bg-secondary/50 transition-colors"
-                      >
+                      <tr key={host.macAddress} className="text-sm">
                         <td className="py-4">
                           <Link
                             href={`/hosts/${encodeURIComponent(host.macAddress)}`}
-                            className="font-medium text-spore hover:text-spore/80 hover:underline"
+                            className="text-spore hover:underline"
                           >
-                            {host.hostname || (
-                              <span className="text-muted-foreground italic">
-                                unnamed
-                              </span>
-                            )}
+                            {host.hostname ?? 'unknown host'}
                           </Link>
                         </td>
-                        <td className="py-4 text-sm tracking-wide">
+                        <td className="py-4 tracking-wide">
                           {host.macAddress}
                         </td>
                         <td className="py-4">
                           {profile ? (
                             <Link
-                              href={`/profiles/${profile.id}`}
-                              className="hover:underline"
+                              href={`/profiles/${encodeURIComponent(profile.id)}`}
                             >
                               <Badge
                                 variant={
@@ -116,14 +91,21 @@ export default async function HostsPage() {
                               </Badge>
                             </Link>
                           ) : (
-                            <Badge variant="outline">default</Badge>
+                            <Badge variant="outline">
+                              {formatBootPolicy(host.effectiveOutcome)}
+                            </Badge>
                           )}
                         </td>
+                        <td className="py-4">{host.bootCount}</td>
                         <td className="py-4 text-muted-foreground">
                           {timeAgo(host.lastSeen)}
                         </td>
                         <td className="py-4">
-                          <HostActions host={host} profiles={profiles} />
+                          <Badge
+                            variant={host.configured ? 'secondary' : 'outline'}
+                          >
+                            {host.configured ? 'Git / Nix' : 'observed only'}
+                          </Badge>
                         </td>
                       </tr>
                     );

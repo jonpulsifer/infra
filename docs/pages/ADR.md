@@ -19,3 +19,4 @@ icon:: 📜
 	- [[ADR/0009 Logseq wiki on Cloudflare Pages]] — this wiki
 	- [[ADR/0010 First-party Bun SSG for the wiki]] — the renderer that actually builds it
 	- [[ADR/0011 Migrate dotfiles from chezmoi to mise]] — one templating tool instead of two
+	- [[ADR/0013 Git and Nix own the Spore boot catalog]] — reviewed boot policy, observation-only SQLite, and a direct NixOS service
