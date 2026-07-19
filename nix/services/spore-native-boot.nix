@@ -70,9 +70,15 @@ in
           wantedBy = [ "multi-user.target" ];
           before = [ "nginx.service" ];
           restartTriggers = [ target.package ];
+          # rpi-eeprom-digest is a shell script that shells out to openssl and
+          # xxd (and greps/awks its output); coreutils covers sha256sum/mktemp.
           path = with pkgs; [
             coreutils
+            gawk
+            gnugrep
+            openssl
             raspberrypi-eeprom
+            xxd
           ];
           serviceConfig = {
             Type = "oneshot";
