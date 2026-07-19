@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	cloud.google.com/go/firestore v1.24.0
 	github.com/GoogleCloudPlatform/functions-framework-go v1.9.2
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 )
 
 require (
