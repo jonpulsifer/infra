@@ -53,6 +53,20 @@ in
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
+  services.spore.managementCidrs = [
+    "127.0.0.0/8"
+    "::1/128"
+    "100.64.0.0/10"
+    "10.1.0.0/24" # fml / management LAN
+    lab.cidr # 10.2.0.0/24 — lab LAN
+    "10.3.0.0/26" # k8s node subnet
+    "10.13.37.0/28" # future VLAN
+  ];
+  services.spore.managementAliases = [
+    "spore.pirate-musical.ts.net"
+    lab.hosts.spore # 10.2.0.11 — reachable by LAN IP
+  ];
+
   # Desired boot state is built into an immutable catalog. MAC addresses are
   # derived from clients.yaml in the package closure, keeping UniFi's client
   # inventory as the single source of truth instead of transcribing it here.
