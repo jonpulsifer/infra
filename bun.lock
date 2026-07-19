@@ -176,7 +176,7 @@
       "version": "0.0.1",
       "devDependencies": {
         "@repo/typescript-config": "workspace:*",
-        "@types/k6": "2.0.0",
+        "@types/k6": "2.0.1",
         "@types/node": "26.1.1",
         "ts-node": "10.9.2",
         "typescript": "5.9.3",
@@ -742,7 +742,7 @@
 
     "@types/hast": ["@types/hast@3.0.5", "", { "dependencies": { "@types/unist": "*" } }, "sha512-rp/ezSWaD1m44dPKICGhiskI13nVr7qTloFwDa/IYkhhf5nzwP+zIQcIJh3WIFSBOy/H1PzB40jPjMDksN4F+g=="],
 
-    "@types/k6": ["@types/k6@2.0.0", "", {}, "sha512-ztO2fVOAQxtCpF6VWTn8O6FW6Z4DpjhY+XvD2GpCe/+fAfekD45bQ+vrM0B0C0c5ajLpVgWTMlLu9dKZ1nI+wg=="],
+    "@types/k6": ["@types/k6@2.0.1", "", {}, "sha512-3lAXtNx1qMwnn+fbE65yP1h9ADJyG6xQaIfGrhasZI2uck8S+gLuCbQl38YkbR5lGeE/NyCiF0FznmElpUgBsA=="],
 
     "@types/mdast": ["@types/mdast@4.0.4", "", { "dependencies": { "@types/unist": "*" } }, "sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA=="],
 
