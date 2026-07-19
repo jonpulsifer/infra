@@ -6,3 +6,11 @@ instance:
     - source-controller
     - kustomize-controller
     - helm-controller
+  sync:
+    kind: GitRepository
+    name: infra
+    url: "ssh://git@github.com/jonpulsifer/infra"
+    ref: "refs/heads/main"
+    path: "clusters/offsite/flux-system"
+    pullSecret: "flux-github-app-credentials"
+    interval: "1h"
