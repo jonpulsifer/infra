@@ -22,9 +22,6 @@ spec:
     hostname: hub.lolwtf.ca
     sandbox: false
     envFromSecret: hub-env
-    env:
-      - name: HOME
-        value: /tmp
     ingress:
       enabled: true
     resources:
