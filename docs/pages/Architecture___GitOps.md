@@ -19,4 +19,4 @@ tags:: architecture
 	- `nixos-deploy.yaml`, `nix-ci.yaml`, `nix-image-builder.yaml` — NixOS build/deploy pipelines; the manual image builder produces downloadable Pi SD-image artifacts from native ARM runners, retained for one day
 	- **Renovate** opens PRs for Helm charts, container images, Terraform providers, and GitHub Actions
 - ## The bootstrap exceptions
-	- Two places where a layer reaches into another: the Flux bootstrap (`clusters/<site>/bootstrap/` Terraform installs `flux-operator`/`flux-instance`), and the Atlantis ↔ ArgoCD auth wiring (see [[Runbooks/Kubernetes GitOps Change]] for token rotation).
+	- Two places where a layer reaches into another: the Flux bootstrap (`clusters/<site>/bootstrap/` Terraform installs `flux-operator`/`flux-instance`; the `FluxInstance`'s `instance.sync` in `flux-values.yaml` then owns the root `GitRepository`/`Kustomization` — no hand-applied `cluster.yaml`), and the Atlantis ↔ ArgoCD auth wiring (see [[Runbooks/Kubernetes GitOps Change]] for token rotation).
