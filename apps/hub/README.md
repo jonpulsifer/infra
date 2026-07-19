@@ -34,6 +34,9 @@ A weather station dashboard designed for the Raspberry Pi 4 display, powered by 
 3. Create a `.env` file with your TempestWx token:
    ```env
    TEMPESTWX_TOKENS=your_token_here
+   # Optional: comma-separated station IDs to ignore (all devices belonging to
+   # an ignored station are dropped)
+   TEMPESTWX_IGNORE_STATIONS=85191
    ```
 
 ### Development
