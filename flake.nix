@@ -104,148 +104,153 @@
         system: legacyPackages.${system}.callPackage ./apps/spore/package.nix { }
       );
 
-      nixosConfigurations = {
-        optiplex = mkHost "optiplex" {
-          role = "control-plane";
-          tags = [ "folly" ];
-          imports = [
-            ./nix/system/tailscale-disable.nix
-            ./nix/system/sops.nix
-            { services.k8s.serviceAccountIssuerMigrationStage = "cutover"; }
-          ];
-          extraConfig = {
-            homelab.disko.device = "/dev/sda";
-            sops.defaultSopsFile = ./nix/secrets/optiplex.sops.yaml;
-            sops.secrets."k8s-sa-signing-key" = {
-              owner = "kubernetes";
-              group = "kubernetes";
-              mode = "0400";
-              restartUnits = [
-                "kube-apiserver.service"
-                "kube-controller-manager.service"
-              ];
+      nixosConfigurations =
+        let
+          rackpi5Configuration = mkHost "rackpi5" {
+            system = "aarch64-linux";
+            modules = [ ./nix/hosts/rackpi5.nix ];
+          };
+        in
+        {
+          optiplex = mkHost "optiplex" {
+            role = "control-plane";
+            tags = [ "folly" ];
+            imports = [
+              ./nix/system/tailscale-disable.nix
+              ./nix/system/sops.nix
+              { services.k8s.serviceAccountIssuerMigrationStage = "cutover"; }
+            ];
+            extraConfig = {
+              homelab.disko.device = "/dev/sda";
+              sops.defaultSopsFile = ./nix/secrets/optiplex.sops.yaml;
+              sops.secrets."k8s-sa-signing-key" = {
+                owner = "kubernetes";
+                group = "kubernetes";
+                mode = "0400";
+                restartUnits = [
+                  "kube-apiserver.service"
+                  "kube-controller-manager.service"
+                ];
+              };
             };
           };
-        };
-        riptide = mkHost "riptide" {
-          tags = [ "folly" ];
-          imports = [
-            ./nix/system/tailscale-disable.nix
-          ];
-          extraConfig.homelab.disko.device = "/dev/nvme0n1";
-        };
-        shale = mkHost "shale" {
-          tags = [ "folly" ];
-          imports = [
-            ./nix/system/tailscale-disable.nix
-          ];
-          extraConfig.homelab.disko.device = "/dev/sda";
-        };
-
-        oldschool = mkHost "oldschool" {
-          tags = [ "offsite" ];
-          imports = [
-            ./nix/system/quiker.nix
-            ./nix/system/tailscale-disable.nix
-            ./nix/system/sops.nix
-            ./nix/services/yarr.nix
-          ];
-          extraConfig = {
-            virtualisation.docker.enable = true;
-            homelab.disko.device = "/dev/sda";
-            # 200G root (default is 100G) — leaves headroom for the harmonia
-            # binary cache + remote-builder role on top of docker/runner/yarr.
-            homelab.disko.rootSize = "200G";
-            sops.defaultSopsFile = ./nix/secrets/oldschool.sops.yaml;
-            # harmonia's binary-cache signing key (public half committed at
-            # nix/secrets/oldschool-harmonia-cache.pub); wired into
-            # services.harmonia in the deploy-harmonia ticket.
-            sops.secrets."harmonia-cache-key" = { };
+          riptide = mkHost "riptide" {
+            tags = [ "folly" ];
+            imports = [
+              ./nix/system/tailscale-disable.nix
+            ];
+            extraConfig.homelab.disko.device = "/dev/nvme0n1";
           };
-        };
-        retrofit = mkHost "retrofit" {
-          tags = [ "offsite" ];
-          role = "control-plane";
-          imports = [
-            ./nix/system/tailscale-disable.nix
-            ./nix/system/sops.nix
-            { services.k8s.serviceAccountIssuerMigrationStage = "cutover"; }
-          ];
-          extraConfig = {
-            homelab.disko.device = "/dev/sda";
-            sops.defaultSopsFile = ./nix/secrets/retrofit.sops.yaml;
-            sops.secrets."k8s-sa-signing-key" = {
-              owner = "kubernetes";
-              group = "kubernetes";
-              mode = "0400";
-              restartUnits = [
-                "kube-apiserver.service"
-                "kube-controller-manager.service"
-              ];
+          shale = mkHost "shale" {
+            tags = [ "folly" ];
+            imports = [
+              ./nix/system/tailscale-disable.nix
+            ];
+            extraConfig.homelab.disko.device = "/dev/sda";
+          };
+
+          oldschool = mkHost "oldschool" {
+            tags = [ "offsite" ];
+            imports = [
+              ./nix/system/quiker.nix
+              ./nix/system/tailscale-disable.nix
+              ./nix/system/sops.nix
+              ./nix/services/yarr.nix
+            ];
+            extraConfig = {
+              virtualisation.docker.enable = true;
+              homelab.disko.device = "/dev/sda";
+              # 200G root (default is 100G) — leaves headroom for the harmonia
+              # binary cache + remote-builder role on top of docker/runner/yarr.
+              homelab.disko.rootSize = "200G";
+              sops.defaultSopsFile = ./nix/secrets/oldschool.sops.yaml;
+              # harmonia's binary-cache signing key (public half committed at
+              # nix/secrets/oldschool-harmonia-cache.pub); wired into
+              # services.harmonia in the deploy-harmonia ticket.
+              sops.secrets."harmonia-cache-key" = { };
             };
           };
-        };
+          retrofit = mkHost "retrofit" {
+            tags = [ "offsite" ];
+            role = "control-plane";
+            imports = [
+              ./nix/system/tailscale-disable.nix
+              ./nix/system/sops.nix
+              { services.k8s.serviceAccountIssuerMigrationStage = "cutover"; }
+            ];
+            extraConfig = {
+              homelab.disko.device = "/dev/sda";
+              sops.defaultSopsFile = ./nix/secrets/retrofit.sops.yaml;
+              sops.secrets."k8s-sa-signing-key" = {
+                owner = "kubernetes";
+                group = "kubernetes";
+                mode = "0400";
+                restartUnits = [
+                  "kube-apiserver.service"
+                  "kube-controller-manager.service"
+                ];
+              };
+            };
+          };
 
-        cloudpi4 = mkHost "cloudpi4" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/cloudpi4.nix ];
-        };
-        homepi4 = mkHost "homepi4" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/homepi4.nix ];
-        };
-        weatherpi4 = mkHost "weatherpi4" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/weatherpi4.nix ];
-        };
-        dns = mkHost "dns" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/dns.nix ];
-        };
-        rackpi5 = mkHost "rackpi5" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/rackpi5.nix ];
-        };
-        # rackpi5's default boot: stateless RAM image served over HTTP from
-        # spore (nix/images/pi5-ram.nix); the rackpi5 config above is its
-        # NFS-root fallback tier.
-        rackpi5-ram = mkHost "rackpi5-ram" {
-          system = "aarch64-linux";
-          modules = [ ./nix/images/pi5-ram.nix ];
-        };
-        spore = mkHost "spore" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/spore.nix ];
-        };
+          cloudpi4 = mkHost "cloudpi4" {
+            system = "aarch64-linux";
+            modules = [ ./nix/hosts/cloudpi4.nix ];
+          };
+          homepi4 = mkHost "homepi4" {
+            system = "aarch64-linux";
+            modules = [ ./nix/hosts/homepi4.nix ];
+          };
+          weatherpi4 = mkHost "weatherpi4" {
+            system = "aarch64-linux";
+            modules = [ ./nix/hosts/weatherpi4.nix ];
+          };
+          dns = mkHost "dns" {
+            system = "aarch64-linux";
+            modules = [ ./nix/hosts/dns.nix ];
+          };
+          rackpi5 = rackpi5Configuration;
+          spore = mkHost "spore" {
+            system = "aarch64-linux";
+            modules = [
+              ./nix/hosts/spore.nix
+              {
+                services.spore.nativeBootArtifacts.rackpi5 = {
+                  package = rackpi5Configuration.config.system.build.piBootImg;
+                  signingKey = "/var/lib/pi-boot-sign/private.pem";
+                };
+              }
+            ];
+          };
 
-        # armv6l Pi Zero W: no native builder/cache exists for this arch, so
-        # this is cross-compiled (nix/hardware/pi0.nix sets nixpkgs.crossSystem)
-        # from whatever machine builds it -- in practice spore, hence the
-        # aarch64-linux system below matching spore's native arch.
-        radiopi0 = mkHost "radiopi0" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/radiopi0.nix ];
-        };
-        # Same board family as radiopi0 (Pi Zero W, armv6l), same cross-build
-        # story -- but the physical device is currently unplugged, so this
-        # config is derived from docs/pages/Hosts___blinkypi0.md and mirrors
-        # radiopi0.nix rather than being verified against live hardware.
-        blinkypi0 = mkHost "blinkypi0" {
-          system = "aarch64-linux";
-          modules = [ ./nix/hosts/blinkypi0.nix ];
-        };
+          # armv6l Pi Zero W: no native builder/cache exists for this arch, so
+          # this is cross-compiled (nix/hardware/pi0.nix sets nixpkgs.crossSystem)
+          # from whatever machine builds it -- in practice spore, hence the
+          # aarch64-linux system below matching spore's native arch.
+          radiopi0 = mkHost "radiopi0" {
+            system = "aarch64-linux";
+            modules = [ ./nix/hosts/radiopi0.nix ];
+          };
+          # Same board family as radiopi0 (Pi Zero W, armv6l), same cross-build
+          # story -- but the physical device is currently unplugged, so this
+          # config is derived from docs/pages/Hosts___blinkypi0.md and mirrors
+          # radiopi0.nix rather than being verified against live hardware.
+          blinkypi0 = mkHost "blinkypi0" {
+            system = "aarch64-linux";
+            modules = [ ./nix/hosts/blinkypi0.nix ];
+          };
 
-        oldboy = mkHost "oldboy" {
-          tags = [ "gcp" ];
-          modules = [ ./nix/hosts/oldboy.nix ];
-        };
+          oldboy = mkHost "oldboy" {
+            tags = [ "gcp" ];
+            modules = [ ./nix/hosts/oldboy.nix ];
+          };
 
-        wsl = mkImage ./nix/images/wsl.nix;
-        iso = mkImage ./nix/images/iso.nix;
-        gce = mkImage ./nix/images/gce.nix;
-        container = mkImage ./nix/images/container.nix;
-        netboot = mkImage ./nix/images/netboot.nix;
-      };
+          wsl = mkImage ./nix/images/wsl.nix;
+          iso = mkImage ./nix/images/iso.nix;
+          gce = mkImage ./nix/images/gce.nix;
+          container = mkImage ./nix/images/container.nix;
+          netboot = mkImage ./nix/images/netboot.nix;
+        };
     in
     {
       inherit nixosConfigurations;
@@ -263,8 +268,7 @@
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
           dns = nixosConfigurations.dns.config.system.build.sdImage;
-          rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
-          rackpi5-ram = nixosConfigurations.rackpi5-ram.config.system.build.piBootImg;
+          rackpi5 = nixosConfigurations.rackpi5.config.system.build.piBootImg;
           spore = nixosConfigurations.spore.config.system.build.sdImage;
           spore-app = sporePackages.x86_64-linux;
 

@@ -5,8 +5,8 @@
 # far too slow for ~900MB initrds).
 #
 # This module remains the sole owner of dnsmasq, TFTP, and the static nginx
-# root. apps/spore/module.nix only merges two reverse-proxy locations into
-# the vhost; an application failure cannot stop or restart these adapters.
+# root used by x86 PXE. apps/spore/module.nix adds its API routes and an
+# internal native-artifact location without taking ownership of this tree.
 # The actual content under
 # /var/lib/tftpboot (ipxe.efi, menu.ipxe, per-target netboot images) is
 # build/backup artifacts, not something Nix generates -- restore it from

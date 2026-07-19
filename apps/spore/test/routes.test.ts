@@ -4,6 +4,7 @@ import {
   createBootGet,
 } from '../app/api/boot/[mac]/route';
 import { createHealthGet } from '../app/api/health/route';
+import { createNativeBootGet } from '../app/api/native-boot/[target]/[artifact]/route';
 import { createScriptGet } from '../app/api/scripts/[...path]/route';
 
 describe('boot HTTP adapter', () => {
@@ -108,5 +109,50 @@ describe('health HTTP adapter', () => {
     const response = await GET();
     expect(response.status).toBe(503);
     expect(await response.text()).toBe('failure\n');
+  });
+});
+
+describe('native boot HTTP adapter', () => {
+  test('hands an allowed artifact to the internal nginx location', async () => {
+    const received: Array<[string, string]> = [];
+    const GET = createNativeBootGet(() => ({
+      resolveNativeBoot(target: string, artifact: string) {
+        received.push([target, artifact]);
+        return {
+          status: 200 as const,
+          outcome: 'native-boot' as const,
+          internalPath: '/_spore-native-boot/rackpi5/boot.img',
+        };
+      },
+    }));
+
+    const response = await GET(
+      new Request('http://untrusted.example/native-boot'),
+      {
+        params: Promise.resolve({ target: 'rackpi5', artifact: 'boot.img' }),
+      },
+    );
+
+    expect(received).toEqual([['rackpi5', 'boot.img']]);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-accel-redirect')).toBe(
+      '/_spore-native-boot/rackpi5/boot.img',
+    );
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  test('does not emit an internal path for a denied artifact', async () => {
+    const GET = createNativeBootGet(() => ({
+      resolveNativeBoot: () => ({
+        status: 404 as const,
+        outcome: 'native-boot-not-found' as const,
+        internalPath: null,
+      }),
+    }));
+    const response = await GET(new Request('http://localhost/native-boot'), {
+      params: Promise.resolve({ target: 'rackpi5', artifact: '../boot.img' }),
+    });
+    expect(response.status).toBe(404);
+    expect(response.headers.has('x-accel-redirect')).toBe(false);
   });
 });

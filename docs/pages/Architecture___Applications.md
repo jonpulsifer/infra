@@ -5,7 +5,7 @@ tags:: architecture
 - ## `apps/` — deployable services
 	- `agent-web` — AI agent web environment; one Dockerfile with `--build-arg AGENT_SET={full,pi}`, publishes the `ai-agents` image
 	- `ddnsd` — Go Cloudflare DDNS daemon, consumed by NixOS hosts via `nix/system/ddnsd.nix`
-	- `spore` — read-only iPXE catalog/status service, packaged and run directly by NixOS on [[Hosts/spore]]. Git/Nix owns boot policy; SQLite contains observations only. See [[ADR/0013 Git and Nix own the Spore boot catalog]].
+	- `spore` — read-only iPXE/native-boot catalog and status service, packaged and run directly by NixOS on [[Hosts/spore]]. Git/Nix owns boot policy; SQLite contains observations only. See [[ADR/0013 Git and Nix own the Spore boot catalog]].
 	- `netbench` — Go web UI running `iperf3` benchmarks across nodes/LANs/clusters; servers are the `clusters/base/apps/iperf3` hostNetwork DaemonSet plus `services.iperf3` on the bare Pis
 	- `view-counter` — Go GCP Cloud Function (deployed by `view-counter.yml`)
 	- `orgpolicyauditor` — Google Cloud Function auditing the GCP organization IAM policy
@@ -15,7 +15,7 @@ tags:: architecture
 	- `hermes`, `systemd` — supporting services and images
 - ## Deployment ownership
 	- An `apps/` path does not imply an OCI image. Container-backed apps are classified in `.github/containers.json`; host-native services such as `spore` and `ddnsd` carry an app-local Nix package/module and are built through Nix CI.
-	- Spore deliberately keeps its web process separate from NixOS-owned dnsmasq, TFTP assets, static nginx, and NFS. Only its two iPXE HTTP adapters are exposed to the PXE network; its read-only management surface is Tailscale-authenticated.
+	- Spore keeps the existing x86 dnsmasq/TFTP/static tree separately owned. Its public adapters are two iPXE text routes and a fail-closed native artifact route; nginx performs the internal file transfer after the application authorizes a catalog target. The read-only management surface is separately restricted.
 - ## `packages/` — reusable building blocks
 	- `agent-web-ui` — shared TS/Bun frontend + PTY server (root Bun workspace member)
 	- `charts/` — the `app` and `ai-agent` Helm charts; Flux HelmReleases reference them as `packages/charts/<name>` against the `infra` GitRepository

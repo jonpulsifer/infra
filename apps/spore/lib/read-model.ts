@@ -31,6 +31,14 @@ export interface ScriptReadModel {
   readonly content: string;
 }
 
+export interface NativeBootTargetReadModel {
+  readonly id: string;
+  readonly hostname: string;
+  readonly macAddress: string;
+  readonly protocol: 'raspberry-pi-http';
+  readonly artifactBaseUrl: string;
+}
+
 export interface SporeReadModel {
   readonly catalog: Readonly<
     Pick<BootCatalog, 'serverOrigin' | 'allowUnknownHosts' | 'defaultProfile'>
@@ -38,6 +46,7 @@ export interface SporeReadModel {
   readonly hosts: readonly HostReadModel[];
   readonly profiles: readonly ProfileReadModel[];
   readonly scripts: readonly ScriptReadModel[];
+  readonly nativeBootTargets: readonly NativeBootTargetReadModel[];
 }
 
 const emptyObservation = {
@@ -114,6 +123,13 @@ export function buildReadModel(
     )
     .sort((left, right) => left.path.localeCompare(right.path));
 
+  const nativeBootTargets = Object.entries(catalog.nativeBootTargets)
+    .map(
+      ([id, target]): NativeBootTargetReadModel =>
+        Object.freeze({ id, ...target }),
+    )
+    .sort((left, right) => left.id.localeCompare(right.id));
+
   return Object.freeze({
     catalog: Object.freeze({
       serverOrigin: catalog.serverOrigin,
@@ -123,6 +139,7 @@ export function buildReadModel(
     hosts: Object.freeze(hosts),
     profiles: Object.freeze(profiles),
     scripts: Object.freeze(scripts),
+    nativeBootTargets: Object.freeze(nativeBootTargets),
   });
 }
 

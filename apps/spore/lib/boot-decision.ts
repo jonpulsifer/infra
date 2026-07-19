@@ -34,9 +34,16 @@ export interface ScriptDecision {
   readonly content: string;
 }
 
+export interface NativeBootDecision {
+  readonly status: 200 | 404;
+  readonly outcome: 'native-boot' | 'native-boot-not-found';
+  readonly internalPath: string | null;
+}
+
 export interface BootDecisionService {
   decideBoot(macAddress: string): BootDecision;
   renderScript(path: string, macAddress?: string | null): ScriptDecision;
+  resolveNativeBoot(targetId: string, artifact: string): NativeBootDecision;
 }
 
 export interface BootDecisionOptions {
@@ -111,6 +118,11 @@ export function createBootDecisionService({
   onObservationError = (error) =>
     console.error('Unable to record Spore boot observation', error),
 }: BootDecisionOptions): BootDecisionService {
+  const nativeArtifacts = new Set([
+    'boot.img',
+    'boot.sig',
+    'nix-store.squashfs',
+  ]);
   const record = (attempt: BootAttempt): void => {
     try {
       observations.recordBootAttempt(attempt);
@@ -207,6 +219,32 @@ export function createBootDecisionService({
           script.content,
           buildTemplateContext(macAddress, host, profile, catalog.serverOrigin),
         ),
+      };
+    },
+
+    resolveNativeBoot(targetId: string, artifact: string): NativeBootDecision {
+      const target = Object.hasOwn(catalog.nativeBootTargets, targetId)
+        ? catalog.nativeBootTargets[targetId]
+        : undefined;
+      if (!target || !nativeArtifacts.has(artifact)) {
+        return {
+          status: 404,
+          outcome: 'native-boot-not-found',
+          internalPath: null,
+        };
+      }
+
+      if (artifact === 'boot.img') {
+        record({
+          macAddress: target.macAddress,
+          outcome: 'native-boot',
+          profileId: targetId,
+        });
+      }
+      return {
+        status: 200,
+        outcome: 'native-boot',
+        internalPath: `/_spore-native-boot/${targetId}/${artifact}`,
       };
     },
   });

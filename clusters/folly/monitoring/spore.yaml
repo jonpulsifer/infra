@@ -1,5 +1,5 @@
 # Service-level monitoring for spore, the NFS + PXE (TFTP/HTTP) server and
-# the independently supervised Spore catalog application
+# the Spore catalog application and signed rackpi5 publisher
 # (nix/hosts/spore.nix). Node-level metrics (node_nfsd_*, /nfs/data
 # filesystem, systemd unit states) arrive via local-node-exporters.yaml;
 # this file scrapes the nginx exporter for the PXE HTTP endpoint and
@@ -102,18 +102,26 @@ spec:
           expr: nginx_up{instance="spore"} == 0
           for: 5m
           labels:
-            severity: warning
+            severity: critical
           annotations:
             message: PXE HTTP (nginx) on spore is down
-            description: "nginx on spore is not serving. Netboot menus chain to bzImage/initrd over HTTP, so PXE boots will hang after ipxe.efi."
+            description: "nginx on spore is not serving. x86 netboot payloads and rackpi5's sole signed native-boot path are unavailable."
         - alert: SporeAppDown
           expr: (node_systemd_unit_state{instance="spore", name="spore.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="spore.service", state="active"})
           for: 5m
           labels:
-            severity: warning
+            severity: critical
           annotations:
-            message: Spore catalog UI and dynamic iPXE routes are down
-            description: "spore.service is not active. The read-only UI and dynamic boot decisions are unavailable, but static HTTP, TFTP, and NFS remain independent."
+            message: Spore boot-decision service is down
+            description: "spore.service is not active. Dynamic iPXE decisions and rackpi5's sole native-boot route are unavailable; the separate static x86 PXE tree remains independent."
+        - alert: SporeRackpi5PublisherDown
+          expr: (node_systemd_unit_state{instance="spore", name="spore-native-boot-rackpi5.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="spore-native-boot-rackpi5.service", state="active"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: rackpi5 signed boot publisher is down
+            description: "spore-native-boot-rackpi5.service is not active. Spore cannot expose a complete signed artifact set for rackpi5's sole boot path."
         - alert: SporeNfsDataNotMounted
           expr: absent(node_filesystem_size_bytes{instance="spore", mountpoint="/nfs/data"})
           for: 5m

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Spore - iPXE Boot Manager',
-  description: 'Observe the Git-managed iPXE boot catalog and boot activity',
+  description: 'Observe Git-managed network-boot policy and activity',
 };
 
 export default function RootLayout({

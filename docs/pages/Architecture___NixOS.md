@@ -14,7 +14,7 @@ tags:: architecture
 	- **folly k8s nodes**: `optiplex` (control-plane), `riptide`, `shale`
 	- **offsite k8s nodes**: `retrofit` (control-plane), `oldschool`
 	- **Raspberry Pis**: `cloudpi4`, `homepi4`, `weatherpi4`, `dns`, `rackpi5` (diskless — see [[ADR/0008 Diskless netboot for rackpi5]]), `spore` (NFS/PXE server)
-		- `spore` also runs the loopback-only Spore application directly. Its failure is isolated from dnsmasq, nginx's static PXE root, NFS, and the diskless `rackpi5` boot artifacts; see [[ADR/0013 Git and Nix own the Spore boot catalog]].
+		- `spore` also runs the loopback-only Spore application and a root-only signed native-artifact publisher. The x86 static PXE tree remains isolated, while diskless `rackpi5` intentionally uses the Spore native route as its sole boot path; see [[ADR/0013 Git and Nix own the Spore boot catalog]].
 	- **Cloud**: `oldboy` (GCE)
 - ## Deploying
 	- Build without deploying:
