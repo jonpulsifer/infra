@@ -42,7 +42,10 @@ spec:
             - containerPort: {{ .Values.port }}
               protocol: TCP
           env:
+            # readOnlyRootFilesystem: /tmp (below) is the only writable path
             - name: TMPDIR
+              value: /tmp
+            - name: HOME
               value: /tmp
             {{- if .Values.database.enabled }}
             - name: DATABASE_URL
