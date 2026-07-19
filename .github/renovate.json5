@@ -29,11 +29,11 @@
     'prEditedNotification',
     'prIgnoreNotification',
   ],
-  // Recreate dependency branches only when they conflict with main. This
-  // avoids regenerating shared lockfiles and rerunning CI after every merge.
-  // Terraform provider PRs opt into behind-base-branch below so Atlantis
-  // always applies a current plan.
-  rebaseWhen: 'conflicted',
+  // 'auto' rebases automerging PRs (most of this repo) whenever they fall
+  // behind main — Atlantis plans stay fresh and GitHub native auto-merge can
+  // satisfy require-up-to-date rules — while manual-review PRs only rebase on
+  // conflict. Terraform PRs are forced to behind-base-branch below.
+  rebaseWhen: 'auto',
   // Use GitHub's native auto-merge so PRs merge as soon as required checks
   // pass, instead of waiting for the next Renovate run.
   platformAutomerge: true,
