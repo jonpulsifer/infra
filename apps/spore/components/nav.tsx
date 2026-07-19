@@ -39,7 +39,7 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex w-64 flex-col border-r border-border bg-card">
+    <nav className="flex border-b border-border bg-card md:min-h-screen md:w-64 md:flex-col md:border-r md:border-b-0">
       <div className="p-4">
         <Link href="/" className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-md bg-spore text-spore-foreground glow-spore-sm">
@@ -56,8 +56,8 @@ export function Nav() {
         </Link>
       </div>
 
-      <div className="flex-1 px-2 py-2">
-        <ul className="space-y-0.5">
+      <div className="flex-1 overflow-x-auto px-2 py-2">
+        <ul className="flex min-w-max gap-0.5 md:block md:min-w-0 md:space-y-0.5">
           {navItems.map((item) => {
             const isActive =
               pathname === item.href ||
@@ -83,10 +83,10 @@ export function Nav() {
         </ul>
       </div>
 
-      <div className="border-t border-border p-4">
+      <div className="hidden border-t border-border p-4 md:block">
         <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          <span className="inline-block h-2 w-2 rounded-full bg-spore mr-2 animate-pulse" />
-          10.2.0.11:3000
+          <span className="mr-2 inline-block h-2 w-2 rounded-full bg-spore" />
+          git / nix managed
         </div>
       </div>
     </nav>

@@ -1,10 +1,13 @@
-# TFTP + HTTP PXE netboot serving, replicating spore's current Alpine
+# Boot-critical TFTP + static HTTP PXE serving, migrated from Alpine.
 # dnsmasq (TFTP-only, port=0) + nginx setup. terraform/network/unifi/folly/k8s.tf
 # points bare-metal k8s node netboot at this host's TFTP (boot/ipxe.efi) and
 # the ipxe menu chains to per-target bzImage/initrd served over HTTP (TFTP is
 # far too slow for ~900MB initrds).
 #
-# This only recreates the *serving* mechanism. The actual content under
+# This module remains the sole owner of dnsmasq, TFTP, and the static nginx
+# root. apps/spore/module.nix only merges two reverse-proxy locations into
+# the vhost; an application failure cannot stop or restart these adapters.
+# The actual content under
 # /var/lib/tftpboot (ipxe.efi, menu.ipxe, per-target netboot images) is
 # build/backup artifacts, not something Nix generates -- restore it from
 # backup or `nix build .#netboot` after this is deployed.

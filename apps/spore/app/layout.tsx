@@ -1,20 +1,14 @@
 import { GeistMono } from 'geist/font/mono';
+import { GeistSans } from 'geist/font/sans';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import { lazy, Suspense } from 'react';
 import './globals.css';
 import { Nav } from '@/components/nav';
 
-const Loading = lazy(() => import('./loading'));
-
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-});
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Spore - iPXE Boot Manager',
-  description: 'Manage iPXE network boot profiles and hosts',
+  description: 'Observe the Git-managed iPXE boot catalog and boot activity',
 };
 
 export default function RootLayout({
@@ -25,13 +19,13 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${inter.variable} ${GeistMono.variable} min-h-screen antialiased font-sans`}
+        className={`${GeistSans.variable} ${GeistMono.variable} min-h-screen antialiased font-sans`}
       >
-        <div className="flex min-h-screen">
-          <Suspense fallback={<Loading />}>
-            <Nav />
-          </Suspense>
-          <main className="flex-1 overflow-auto p-8">{children}</main>
+        <div className="flex min-h-screen flex-col md:flex-row">
+          <Nav />
+          <main className="min-w-0 flex-1 overflow-auto p-5 md:p-8">
+            {children}
+          </main>
         </div>
       </body>
     </html>

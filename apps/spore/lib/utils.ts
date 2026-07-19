@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import type { EffectiveBootOutcome } from './boot-decision';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -23,4 +24,19 @@ export function timeAgo(date: string | null | undefined): string {
   if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
 
   return then.toLocaleDateString();
+}
+
+export function formatBootPolicy(outcome: EffectiveBootOutcome): string {
+  switch (outcome) {
+    case 'profile':
+      return 'assigned profile';
+    case 'default-profile':
+      return 'default profile';
+    case 'unknown-allowed':
+      return 'default profile (unknown allowed)';
+    case 'unknown-denied':
+      return 'denied by policy';
+    case 'missing-profile':
+      return 'local boot (no profile applies)';
+  }
 }

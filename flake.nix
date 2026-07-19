@@ -100,6 +100,10 @@
         }
       );
 
+      sporePackages = forAllSystems (
+        system: legacyPackages.${system}.callPackage ./apps/spore/package.nix { }
+      );
+
       nixosConfigurations = {
         optiplex = mkHost "optiplex" {
           role = "control-plane";
@@ -262,6 +266,7 @@
           rackpi5 = nixosConfigurations.rackpi5.config.system.build.sdImage;
           rackpi5-ram = nixosConfigurations.rackpi5-ram.config.system.build.piBootImg;
           spore = nixosConfigurations.spore.config.system.build.sdImage;
+          spore-app = sporePackages.x86_64-linux;
 
           iso = nixosConfigurations.iso.config.system.build.isoImage;
           wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
@@ -286,7 +291,14 @@
         aarch64-linux = {
           radiopi0 = nixosConfigurations.radiopi0.config.system.build.sdImage;
           blinkypi0 = nixosConfigurations.blinkypi0.config.system.build.sdImage;
+          spore-app = sporePackages.aarch64-linux;
         };
+      };
+
+      checks.aarch64-linux.spore-deployment = import ./apps/spore/test/module.nix {
+        inherit (nixosConfigurations.spore) config;
+        inherit (nixosConfigurations.spore) pkgs;
+        inherit lib;
       };
 
       inherit legacyPackages;

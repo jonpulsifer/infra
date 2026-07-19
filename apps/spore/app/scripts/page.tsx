@@ -1,7 +1,6 @@
-import { FileCode, Plus } from 'lucide-react';
+import { FileCode } from 'lucide-react';
 import Link from 'next/link';
-import { connection } from 'next/server';
-import { Button } from '@/components/ui/button';
+import { ManagedNotice } from '@/components/managed-notice';
 import {
   Card,
   CardContent,
@@ -9,83 +8,62 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { getScripts } from '@/lib/actions';
-import { timeAgo } from '@/lib/utils';
-import { NewScriptDialog } from './_components/new-script-dialog';
+import { getReadModel } from '@/lib/read-model';
 
 export default async function ScriptsPage() {
-  await connection();
-  const scripts = await getScripts();
-
-  // Group scripts by top-level directory
-  const groupedScripts = scripts.reduce(
-    (acc, script) => {
-      const parts = script.path.split('/');
-      const group = parts.length > 1 ? parts[0] : '(root)';
-      if (!acc[group]) acc[group] = [];
-      acc[group].push(script);
-      return acc;
-    },
-    {} as Record<string, typeof scripts>,
+  const { scripts } = await getReadModel();
+  const groups = Map.groupBy(
+    scripts,
+    (script) => script.path.split('/')[0] ?? '(root)',
   );
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Scripts</h1>
-          <p className="text-muted-foreground">
-            Chainable iPXE sub-scripts served at /api/scripts/[path]
-          </p>
-        </div>
-        <NewScriptDialog>
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            New Script
-          </Button>
-        </NewScriptDialog>
+      <div>
+        <h1 className="font-mono text-3xl font-bold lowercase">scripts</h1>
+        <p className="font-mono text-muted-foreground">
+          chainable iPXE fragments served from the immutable catalog
+        </p>
       </div>
+
+      <ManagedNotice />
 
       {scripts.length === 0 ? (
         <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-muted-foreground">No scripts created yet</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Scripts are chainable sub-scripts that can be referenced from
-              profiles.
-            </p>
-            <NewScriptDialog>
-              <Button className="mt-4">Create your first script</Button>
-            </NewScriptDialog>
+          <CardContent className="py-8 text-center font-mono text-muted-foreground">
+            no scripts are present in the generated catalog
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-6">
-          {Object.entries(groupedScripts)
-            .sort(([a], [b]) => a.localeCompare(b))
+          {[...groups.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
             .map(([group, groupScripts]) => (
               <Card key={group}>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <FileCode className="h-5 w-5" />
-                    {group === '(root)' ? 'Root Scripts' : group}
+                    <FileCode className="h-5 w-5 text-spore" />
+                    {group}
                   </CardTitle>
                   <CardDescription>
-                    {groupScripts.length} script
-                    {groupScripts.length !== 1 ? 's' : ''}
+                    {groupScripts.length} catalog script
+                    {groupScripts.length === 1 ? '' : 's'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="divide-y">
+                  <div className="divide-y divide-border">
                     {groupScripts.map((script) => (
                       <div
-                        key={script.id}
-                        className="flex items-center justify-between py-3"
+                        key={script.path}
+                        className="flex flex-col justify-between gap-2 py-3 first:pt-0 sm:flex-row sm:items-center"
                       >
                         <div>
                           <Link
-                            href={`/scripts/${script.path}`}
-                            className="font-mono text-sm hover:underline"
+                            href={`/scripts/${script.path
+                              .split('/')
+                              .map(encodeURIComponent)
+                              .join('/')}`}
+                            className="font-mono text-sm text-spore hover:underline"
                           >
                             {script.path}
                           </Link>
@@ -95,14 +73,9 @@ export default async function ScriptsPage() {
                             </p>
                           )}
                         </div>
-                        <div className="flex items-center gap-4">
-                          <code className="rounded bg-muted px-2 py-1 text-xs">
-                            /api/scripts/{script.path}
-                          </code>
-                          <span className="text-xs text-muted-foreground">
-                            {timeAgo(script.updatedAt)}
-                          </span>
-                        </div>
+                        <code className="w-fit rounded-sm bg-muted px-2 py-1 text-xs">
+                          /api/scripts/{script.path}
+                        </code>
                       </div>
                     ))}
                   </div>
