@@ -1,6 +1,6 @@
 [tools]
 hugo = "0.164.0"
-"aqua:tailwindlabs/tailwindcss" = "4.3.2"
+"aqua:tailwindlabs/tailwindcss" = "4.3.3"
 
 [tasks.css]
 description = "Compile Tailwind CSS into the Hugo assets dir"
