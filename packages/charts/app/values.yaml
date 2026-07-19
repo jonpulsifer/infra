@@ -5,6 +5,9 @@ replicas: 1
 hostname: ""
 sandbox: true
 
+env: []
+envFromSecret: ""
+
 resources:
   requests:
     memory: 256Mi

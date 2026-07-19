@@ -41,14 +41,28 @@ spec:
           ports:
             - containerPort: {{ .Values.port }}
               protocol: TCP
-          {{- if .Values.database.enabled }}
           env:
+            - name: TMPDIR
+              value: /tmp
+            {{- if .Values.database.enabled }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ include "app.databaseName" . }}-app
                   key: uri
+            {{- end }}
+            {{- range .Values.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          {{- with .Values.envFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
           {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               memory: {{ .Values.resources.requests.memory }}
@@ -66,3 +80,6 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        - name: tmp
+          emptyDir: {}
