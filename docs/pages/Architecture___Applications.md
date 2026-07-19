@@ -11,7 +11,7 @@ tags:: architecture
 	- `pulsifer.ca` — the personal site: Hugo + Tailwind CSS v4, deployed to GitHub Pages by `pulsifer-ca.yml`
 	- `rackstat` — Go aggregator condensing rack-top homelab status for Tronbyt
 	- `wishin`, `tempest` — Starlark/Pixlet Tidbyt apps; each app directory doubles as the `apps/<name>/<name>.star` layout that `tronbyt-server`'s git-repo app discovery expects
-	- `hermes`, `minecraft`, `thehive`, `cortex`, `systemd` — supporting services and images
+	- `hermes`, `systemd` — supporting services and images
 - ## `packages/` — reusable building blocks
 	- `agent-web-ui` — shared TS/Bun frontend + PTY server (root Bun workspace member)
 	- `charts/` — the `app` and `ai-agent` Helm charts; Flux HelmReleases reference them as `packages/charts/<name>` against the `infra` GitRepository

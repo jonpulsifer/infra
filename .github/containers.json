@@ -16,12 +16,9 @@
     "kernel-builder",
     "openclaw",
     "workstation",
-    "cortex",
     "hermes",
     "hub",
-    "minecraft",
     "slingshot",
-    "spore",
-    "thehive"
+    "spore"
   ]
 }
