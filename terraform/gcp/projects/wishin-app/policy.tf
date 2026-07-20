@@ -1,33 +1,19 @@
-# firebase needs a service account
-resource "google_org_policy_policy" "allow_service_accounts" {
-  name   = "projects/${local.project}/policies/iam.disableServiceAccountCreation"
-  parent = "projects/${local.project}"
-  spec {
-    rules {
-      enforce = "FALSE"
-    }
-  }
+module "firebase_project_policies" {
+  source  = "../../../modules/firebase-project-policies"
+  project = local.project
 }
 
-# firebase needs keys
-resource "google_org_policy_policy" "allow_service_account_keys" {
-  name   = "projects/${local.project}/policies/iam.disableServiceAccountKeyCreation"
-  parent = "projects/${local.project}"
-  spec {
-    rules {
-      enforce = "FALSE"
-    }
-  }
+moved {
+  from = google_org_policy_policy.allow_service_accounts
+  to   = module.firebase_project_policies.google_org_policy_policy.allow_service_accounts
 }
 
-# firebase needs a bucket
-resource "google_org_policy_policy" "allowed_storage_retention_policy_seconds" {
-  name   = "projects/${local.project}/policies/storage.retentionPolicySeconds"
-  parent = "projects/${local.project}"
-  spec {
-    inherit_from_parent = false
-    rules {
-      allow_all = "TRUE"
-    }
-  }
+moved {
+  from = google_org_policy_policy.allow_service_account_keys
+  to   = module.firebase_project_policies.google_org_policy_policy.allow_service_account_keys
+}
+
+moved {
+  from = google_org_policy_policy.allowed_storage_retention_policy_seconds
+  to   = module.firebase_project_policies.google_org_policy_policy.allowed_storage_retention_policy_seconds
 }
