@@ -135,11 +135,11 @@ NixOS configurations for all physical hosts, declared in `flake.nix`. Host confi
 
 - `nix/hosts/<hostname>.nix` – per-host entry point
 - `nix/hardware/` – hardware-specific settings (pi4, pi5, x86)
-- `nix/services/` – optional service modules (`k8s/`, `common.nix`, `jellyfin.nix`, etc.)
+- `nix/services/` – optional service modules (`k8s/`, `common.nix`, `kiosk.nix`, etc.)
 - `nix/system/` – core modules: SSH hardening, Tailscale, auto-upgrades, users
 - `nix/overlays/` – package patches and overrides
 
-Hosts fall into two groups: Kubernetes nodes (folly cluster: nuc/optiplex/riptide/800g2; offsite cluster: oldschool/retrofit) and standalone Pis (cloudpi4, homepi4, screenpi4).
+Hosts fall into two groups: Kubernetes nodes (folly cluster: optiplex/riptide/shale; offsite cluster: oldschool/retrofit) and standalone hosts (the Pis cloudpi4/homepi4/weatherpi4/dns/spore/rackpi5/radiopi0/blinkypi0, plus the oldboy GCE VM).
 
 ### Layer 2 – Kubernetes: `clusters/`
 
