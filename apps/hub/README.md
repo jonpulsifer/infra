@@ -2,11 +2,19 @@
 
 A weather station dashboard designed for the Raspberry Pi 4 display, powered by TempestWx.
 
+## How it works
+
+The server polls the WeatherFlow REST API for the latest observation of every
+station reachable with the configured tokens (one request per station every
+30s, regardless of how many displays are watching) and caches an in-memory
+snapshot. Clients fetch the snapshot from `/api/weather` on the same cadence.
+Stations report new observations roughly once a minute, so the display is at
+most ~30s behind the station.
+
 ## Features
 
-- **Real-time Weather Data**: Connects to TempestWx API to display current weather conditions.
-- **Station Display**: Detailed view of weather station metrics.
-- **Dashboard**: Overview of key weather information.
+- **Weather Data**: Latest conditions per station, with a per-station freshness indicator.
+- **Station Comparison**: With exactly two stations, a center column shows the field-by-field difference.
 - **Kiosk Mode**: Optimized for running as a dedicated display on Raspberry Pi 4.
 - **Container Friendly**: Includes endpoints for process management (e.g., restart via `api.exit`).
 
@@ -21,7 +29,7 @@ A weather station dashboard designed for the Raspberry Pi 4 display, powered by 
 
 ### Prerequisites
 
-- Node.js
+- Node.js or Bun
 - TempestWx API Token
 
 ### Installation
@@ -34,8 +42,7 @@ A weather station dashboard designed for the Raspberry Pi 4 display, powered by 
 3. Create a `.env` file with your TempestWx token:
    ```env
    TEMPESTWX_TOKENS=your_token_here
-   # Optional: comma-separated station IDs to ignore (all devices belonging to
-   # an ignored station are dropped)
+   # Optional: comma-separated station IDs to ignore
    TEMPESTWX_IGNORE_STATIONS=85191
    ```
 

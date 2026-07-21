@@ -1,236 +1,64 @@
-// Shared types for WeatherFlow Tempest API
+// Shared types for the WeatherFlow Tempest REST API and the /api/weather snapshot.
 
-export type WeatherData = {
-  temperature?: number;
-  humidity?: number;
+export type BarometricTrend = 'rising' | 'falling' | 'steady';
+
+export type StationObservation = {
+  timestamp?: number; // epoch seconds of the observation
+  temperature?: number; // C
+  feelsLike?: number; // C
+  humidity?: number; // %
+  pressure?: number; // mb
+  barometricTrend?: BarometricTrend;
   windSpeed?: number; // Wind Avg (m/s)
-  windLull?: number; // Wind Lull (m/s)
-  windGust?: number; // Wind Gust (m/s)
-  windDirection?: number; // Wind Direction (degrees)
-  pressure?: number;
+  windLull?: number; // m/s
+  windGust?: number; // m/s
+  windDirection?: number; // degrees
   uvIndex?: number;
-  illuminance?: number; // Lux
   solarRadiation?: number; // W/m^2
-  timestamp?: number;
-  barometricTrend?: 'rising' | 'falling' | 'steady';
-  feelsLike?: number;
-  device_id?: number;
-  stationLabel?: string;
-  rainTotal?: number; // mm
+  illuminance?: number; // Lux
+  rainTotal?: number; // Local daily rain accumulation (mm)
 };
 
-export type WeatherEvent = {
-  type: string;
-  timestamp: number;
-  data?: any;
+export type StationSnapshot = {
+  stationId: number;
+  name: string;
+  observation: StationObservation | null;
+  updatedAt: number | null; // ms epoch of the last successful poll
+  error?: string; // set when the most recent poll for this station failed
 };
 
-export type ConnectionStatus =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'error';
-
-export type StationData = {
-  weatherData: WeatherData;
-  connectionStatus: ConnectionStatus; // Simplified: based on data availability, not WebSocket technical state
-  lastUpdate: number | null;
-  websocketStatus?: WebSocketState; // Internal/debugging only - not exposed to UI
-  websocketError?: string; // Internal/debugging only - not exposed to UI
-  lastDataReceived?: number | null;
+export type WeatherSnapshot = {
+  stations: StationSnapshot[];
+  // User-actionable configuration problem (missing/rejected token). Transient
+  // poll failures are per-station errors instead - the poller retries those.
+  configError?: string;
+  generatedAt: number; // ms epoch
 };
 
-export type WebSocketState =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'error';
-
-// Typed status contract emitted by WeatherService (server) over the 'status'
-// event / SSE 'status' event, and consumed by useWeatherSocket (client).
-// Replaces classifying errors by substring-matching server free text: the
-// server now says explicitly whether an error is a configuration problem
-// (bad/missing token - user-actionable, should surface in the UI) or a
-// transient connection problem (network blip - server will retry, UI should
-// not flap into an error state for it).
-export type WeatherServiceErrorKind = 'config' | 'connection';
-
-export type WeatherServiceStatus =
-  | {
-      status: 'connected';
-      device_id?: number;
-      stationLabel?: string;
-    }
-  | {
-      status: 'disconnected';
-      device_id?: number;
-      stationLabel?: string;
-    }
-  | {
-      status: 'error';
-      errorKind: WeatherServiceErrorKind;
-      error: string;
-      device_id?: number;
-      stationLabel?: string;
-    };
-
-// WebSocket message types from WeatherFlow API
-export type WebSocketMessage = {
-  type: string;
-  device_id?: number;
-  id?: string;
-};
-
-export type AckMessage = WebSocketMessage & {
-  type: 'ack';
-};
-
-export type ObsAirMessage = WebSocketMessage & {
-  type: 'obs_air';
-  obs: Array<
-    [
-      number, // Time Epoch (seconds)
-      number, // Station Pressure (MB)
-      number, // Air Temperature (C)
-      number, // Relative Humidity (%)
-      number, // Lightning Strike Count
-      number, // Lightning Strike Avg Distance (km)
-      number, // Battery (Volts)
-      number, // Report Interval (Minutes)
-    ]
-  >;
-};
-
-export type ObsSkyMessage = WebSocketMessage & {
-  type: 'obs_sky';
-  obs: Array<
-    [
-      number, // Time Epoch (seconds)
-      number, // Illuminance (Lux)
-      number, // UV Index
-      number, // Rain Accumulated (mm)
-      number, // Wind Lull (m/s)
-      number, // Wind Avg (m/s)
-      number, // Wind Gust (m/s)
-      number, // Wind Direction (degrees)
-      number, // Battery (Volts)
-      number, // Report Interval (Minutes)
-      number, // Solar Radiation (W/m^2)
-      number, // Local Daily Rain Accumulation (mm)
-      number, // Precipitation Type (0=none, 1=rain, 2=hail)
-      number, // Wind Sample Interval (seconds)
-      number, // Rain Accumulated Final (Rain Check) (mm)
-      number, // Local Daily Rain Accumulation Final (Rain Check) (mm)
-      number, // Precipitation Analysis Type
-    ]
-  >;
-};
-
-export type ObsStMessage = WebSocketMessage & {
-  type: 'obs_st';
-  obs: Array<
-    [
-      number, // Time Epoch (seconds)
-      number, // Wind Lull (m/s)
-      number, // Wind Avg (m/s)
-      number, // Wind Gust (m/s)
-      number, // Wind Direction (degrees)
-      number, // Wind Sample Interval (seconds)
-      number, // Station Pressure (MB)
-      number, // Air Temperature (C)
-      number, // Relative Humidity (%)
-      number, // Illuminance (Lux)
-      number, // UV Index
-      number, // Solar Radiation (W/m^2)
-      number, // Rain Accumulated (mm)
-      number, // Precipitation Type (0=none, 1=rain, 2=hail)
-      number, // Lightning Strike Avg Distance (km)
-      number, // Lightning Strike Count
-      number, // Battery (Volts)
-      number, // Report Interval (Minutes)
-      number, // Local Daily Rain Accumulation (mm)
-      number | null, // Rain Accumulated Final (Rain Check) (mm)
-      number | null, // Local Daily Rain Accumulation Final (Rain Check) (mm)
-      number, // Precipitation Analysis Type
-    ]
-  >;
-};
-
-export type RapidWindMessage = WebSocketMessage & {
-  type: 'rapid_wind';
-  ob: [
-    number, // Time Epoch (seconds)
-    number, // Wind Speed (m/s)
-    number, // Wind Direction (degrees)
-  ];
-};
-
-export type EvtStrikeMessage = WebSocketMessage & {
-  type: 'evt_strike';
-  evt: [
-    number, // Time Epoch (seconds)
-    number, // Distance (km)
-    number, // Energy
-  ];
-};
-
-export type EvtPrecipMessage = WebSocketMessage & {
-  type: 'evt_precip';
-};
-
-export type ListenStartMessage = {
-  type: 'listen_start';
-  device_id: number;
-  id: string;
-};
-
-export type ListenStopMessage = {
-  type: 'listen_stop';
-  device_id: number;
-  id: string;
-};
-
-export type AnyWebSocketMessage =
-  | AckMessage
-  | ObsAirMessage
-  | ObsSkyMessage
-  | ObsStMessage
-  | RapidWindMessage
-  | EvtStrikeMessage
-  | EvtPrecipMessage;
-
-// API response types
-export type StationApiResponse = {
-  stations: Array<{
+// Minimal shapes of the two REST responses the poller consumes.
+export type StationsResponse = {
+  stations?: Array<{
     station_id: number;
-    station_name?: string;
     name?: string;
     public_name?: string;
-    device_id?: number;
-    device_type?: string;
-    device_type_name?: string;
-    serial_number?: string;
-    devices?: Array<{
-      device_id: number;
-      device_type?: string;
-      device_type_name?: string;
-      serial_number?: string;
-    }>;
   }>;
 };
 
-export type ObservationsApiResponse = {
-  obs: Array<number[]>;
-};
-
-// Station mapping types
-export type StationMapping = {
-  deviceToStation: Map<number, string>; // device_id -> station name
-  deviceToToken: Map<number, string>; // device_id -> token
-  tokenToStations: Map<string, number[]>; // token -> station_ids[]
-  stationIdToStation: Map<
-    number,
-    { name: string; deviceIds: number[]; token: string }
-  >;
+export type StationObsResponse = {
+  obs?: Array<{
+    timestamp?: number;
+    air_temperature?: number;
+    feels_like?: number;
+    relative_humidity?: number;
+    station_pressure?: number;
+    barometric_pressure?: number;
+    wind_avg?: number;
+    wind_lull?: number;
+    wind_gust?: number;
+    wind_direction?: number;
+    uv?: number;
+    solar_radiation?: number;
+    brightness?: number;
+    precip_accum_local_day?: number;
+  }>;
 };

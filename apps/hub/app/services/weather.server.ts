@@ -1,351 +1,230 @@
-import { EventEmitter } from 'node:events';
-import { WebSocket } from 'ws';
-import { log } from '~/lib/logger';
 import { WEATHERFLOW_CONFIG } from '~/lib/weatherflow/config';
-import { WeatherMessageHandler } from '~/lib/weatherflow/message-handler';
 import type {
-  ListenStartMessage,
-  WeatherServiceStatus,
+  BarometricTrend,
+  StationObservation,
+  StationObsResponse,
+  StationSnapshot,
+  StationsResponse,
+  WeatherSnapshot,
 } from '~/lib/weatherflow/types';
 
+type Station = { id: number; name: string; token: string };
+type PressureSample = { t: number; p: number };
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(WEATHERFLOW_CONFIG.API_TIMEOUT),
+  });
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return res.json() as Promise<T>;
+}
+
+function computeTrend(history: PressureSample[]): BarometricTrend {
+  const cutoff = Date.now() / 1000 - WEATHERFLOW_CONFIG.PRESSURE_TREND_WINDOW;
+  const recent = history.filter((s) => s.t >= cutoff);
+  if (recent.length < 2) return 'steady';
+  const diff = recent[recent.length - 1].p - recent[0].p;
+  if (diff > WEATHERFLOW_CONFIG.PRESSURE_TREND_THRESHOLD) return 'rising';
+  if (diff < -WEATHERFLOW_CONFIG.PRESSURE_TREND_THRESHOLD) return 'falling';
+  return 'steady';
+}
+
 /**
- * Per-token connection state. WeatherFlow authenticates per-connection, so
- * each configured token gets its own WebSocket, reconnect backoff, and
- * keepalive timer - one token's connection trouble never affects another's.
+ * Polls the WeatherFlow REST API for the latest observation of every station
+ * reachable with the configured tokens, keeping an in-memory snapshot that
+ * /api/weather serves to any number of clients. Upstream traffic is fixed at
+ * one request per station per POLL_INTERVAL regardless of client count.
  */
-type StationConnection = {
-  token: string;
-  ws: WebSocket | null;
-  isConnecting: boolean;
-  reconnectAttempts: number;
-  reconnectTimeout: NodeJS.Timeout | null;
-  keepaliveInterval: NodeJS.Timeout | null;
-  lastMessageAt: number;
-};
-
-export class WeatherService extends EventEmitter {
-  private static instance: WeatherService;
-  private tokens: string[] = [];
-  private connections = new Map<string, StationConnection>(); // token -> connection state
-  private messageHandler = new WeatherMessageHandler();
-  private deviceToStation = new Map<number, string>();
+class WeatherPoller {
+  private tokens: string[];
+  // Tokens whose station list we haven't successfully fetched yet; retried
+  // every tick until discovery succeeds or the token is rejected as invalid.
+  private undiscovered: Set<string>;
   private ignoreStationIds: Set<number>;
-  // Derived set: device IDs belonging to ignored stations, populated
-  // in fetchAndListen and consulted in the message handler for defense
-  // in depth (drops messages that arrive before/during fetchAndListen).
-  private blockedDeviceIds = new Set<number>();
+  private stations: Station[] = [];
+  private snapshots = new Map<number, StationSnapshot>();
+  private pressureHistories = new Map<number, PressureSample[]>();
+  private tokenErrors = new Map<string, string>();
+  private firstTick: Promise<void> | null = null;
 
-  private constructor() {
-    super();
-    // Increase max listeners for many SSE clients
-    this.setMaxListeners(100);
-    this.ignoreStationIds = this.parseIgnoreStations();
-  }
-
-  /**
-   * Parse TEMPESTWX_IGNORE_STATIONS env var into a Set of station IDs to ignore.
-   * Comma-separated list, e.g. "85191,12345". All devices belonging to an
-   * ignored station are dropped.
-   */
-  private parseIgnoreStations(): Set<number> {
-    const raw = process.env[WEATHERFLOW_CONFIG.IGNORE_STATIONS_ENV];
-    if (!raw) return new Set();
-    const ids = raw
+  constructor() {
+    this.tokens = (process.env.TEMPESTWX_TOKENS ?? '')
       .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map(Number)
-      .filter((n) => !isNaN(n));
-    if (ids.length > 0) {
-      log.info(`Ignoring station IDs: ${ids.join(', ')}`);
-    }
-    return new Set(ids);
-  }
-
-  public static getInstance(): WeatherService {
-    if (!WeatherService.instance) {
-      WeatherService.instance = new WeatherService();
-    }
-    return WeatherService.instance;
-  }
-
-  public setTokens(tokens: string[]) {
-    const newTokens = tokens.filter((t) => !this.tokens.includes(t));
-    if (newTokens.length > 0) {
-      this.tokens = [...this.tokens, ...newTokens];
-      // Connect every newly configured token - each gets its own WebSocket
-      // since WeatherFlow auth is per-connection, not per-device.
-      for (const token of newTokens) {
-        this.connect(token);
-      }
-    }
-  }
-
-  private emitStatus(status: WeatherServiceStatus) {
-    this.emit('status', status);
-  }
-
-  private getConnection(token: string): StationConnection {
-    let conn = this.connections.get(token);
-    if (!conn) {
-      conn = {
-        token,
-        ws: null,
-        isConnecting: false,
-        reconnectAttempts: 0,
-        reconnectTimeout: null,
-        keepaliveInterval: null,
-        lastMessageAt: 0,
-      };
-      this.connections.set(token, conn);
-    }
-    return conn;
-  }
-
-  private connect(token: string) {
-    const conn = this.getConnection(token);
-
-    if (conn.ws?.readyState === WebSocket.OPEN || conn.isConnecting) {
-      return;
-    }
-
-    conn.isConnecting = true;
-    const url = `${WEATHERFLOW_CONFIG.WS_URL}?token=${token}`;
-
-    log.info('Connecting to WeatherFlow WebSocket...');
-
-    const ws = new WebSocket(url);
-    conn.ws = ws;
-
-    ws.on('open', () => {
-      log.info('WeatherFlow WebSocket connected');
-      conn.isConnecting = false;
-      conn.reconnectAttempts = 0;
-      conn.lastMessageAt = Date.now();
-      this.emitStatus({ status: 'connected' });
-      this.startKeepalive(conn);
-
-      // We don't pre-fetch devices, so we don't know which device IDs to
-      // send 'listen_start' for until we've fetched this token's stations.
-      this.fetchAndListen(token);
-    });
-
-    ws.on('message', (data: Buffer) => {
-      conn.lastMessageAt = Date.now();
-      try {
-        const message = JSON.parse(data.toString());
-
-        // Process with handler to get clean WeatherData
-        const deviceId = message.device_id || 0;
-
-        // Drop messages from devices belonging to ignored stations
-        if (this.blockedDeviceIds.has(deviceId)) return;
-
-        const stationLabel = this.deviceToStation.get(deviceId) || '';
-
-        const weatherData = this.messageHandler.processObservation(
-          message,
-          deviceId,
-          stationLabel,
-        );
-
-        if (weatherData) {
-          this.emit('data', weatherData);
-        }
-
-        const weatherEvent = this.messageHandler.processEvent(
-          message,
-          deviceId,
-          stationLabel,
-        );
-        if (weatherEvent) {
-          this.emit('event', weatherEvent);
-        }
-      } catch (error) {
-        log.error('Error processing message:', error);
-      }
-    });
-
-    ws.on('close', () => {
-      log.warn('WeatherFlow WebSocket closed');
-      conn.isConnecting = false;
-      conn.ws = null;
-      this.stopKeepalive(conn);
-      this.emitStatus({ status: 'disconnected' });
-      this.scheduleReconnect(conn);
-    });
-
-    ws.on('error', (error: Error) => {
-      log.error('WeatherFlow WebSocket error:', error);
-      conn.isConnecting = false;
-      // Transient connection error - the 'close' handler (which always
-      // follows) schedules the reconnect. Emitted as errorKind: 'connection'
-      // so the client can log/track it without flipping into the
-      // user-facing error banner reserved for config problems.
-      this.emitStatus({
-        status: 'error',
-        errorKind: 'connection',
-        error: error.message,
-      });
-    });
-  }
-
-  /**
-   * Send a WebSocket ping periodically to keep the connection alive.
-   * WeatherFlow's server-side idle timeout (IDLE_TIMEOUT) closes
-   * connections that go quiet; KEEPALIVE_INTERVAL is comfortably shorter
-   * so we never hit it. Also acts as a watchdog: if no message (data or
-   * pong) has arrived within IDLE_TIMEOUT, the socket is presumed dead and
-   * force-closed so scheduleReconnect can re-establish it.
-   */
-  private startKeepalive(conn: StationConnection) {
-    this.stopKeepalive(conn);
-    conn.keepaliveInterval = setInterval(() => {
-      if (!conn.ws || conn.ws.readyState !== WebSocket.OPEN) return;
-
-      const idleFor = Date.now() - conn.lastMessageAt;
-      if (idleFor > WEATHERFLOW_CONFIG.IDLE_TIMEOUT) {
-        log.warn(
-          `WeatherFlow connection idle for ${idleFor}ms, forcing reconnect`,
-        );
-        conn.ws.terminate();
-        return;
-      }
-
-      conn.ws.ping();
-    }, WEATHERFLOW_CONFIG.KEEPALIVE_INTERVAL);
-  }
-
-  private stopKeepalive(conn: StationConnection) {
-    if (conn.keepaliveInterval) {
-      clearInterval(conn.keepaliveInterval);
-      conn.keepaliveInterval = null;
-    }
-  }
-
-  private scheduleReconnect(conn: StationConnection) {
-    if (conn.reconnectTimeout) return;
-
-    const { INITIAL_DELAY, MAX_DELAY, BACKOFF_MULTIPLIER, MAX_RETRIES } =
-      WEATHERFLOW_CONFIG.WS_RECONNECT;
-
-    // Cap the exponent, not the retries: an unattended kiosk should keep
-    // trying forever, just without the delay growing past MAX_DELAY.
-    const exponent = Math.min(conn.reconnectAttempts, MAX_RETRIES);
-    const delay = Math.min(
-      INITIAL_DELAY * BACKOFF_MULTIPLIER ** exponent,
-      MAX_DELAY,
+      .map((t) => t.trim())
+      .filter(Boolean);
+    this.undiscovered = new Set(this.tokens);
+    this.ignoreStationIds = new Set(
+      (process.env[WEATHERFLOW_CONFIG.IGNORE_STATIONS_ENV] ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map(Number)
+        .filter(Number.isFinite),
     );
-    conn.reconnectAttempts += 1;
-
-    conn.reconnectTimeout = setTimeout(() => {
-      conn.reconnectTimeout = null;
-      this.connect(conn.token);
-    }, delay);
   }
 
-  private async fetchAndListen(token: string) {
-    // We need to fetch this token's stations to learn its device IDs -
-    // this is the one "prefetch" we can't avoid if we want to listen.
+  async getSnapshot(): Promise<WeatherSnapshot> {
+    if (!this.firstTick) {
+      this.firstTick = this.tick();
+      setInterval(() => {
+        this.tick();
+      }, WEATHERFLOW_CONFIG.POLL_INTERVAL);
+    }
+    await this.firstTick;
+    return {
+      stations: this.stations.map(
+        (s) =>
+          this.snapshots.get(s.id) ?? {
+            stationId: s.id,
+            name: s.name,
+            observation: null,
+            updatedAt: null,
+          },
+      ),
+      configError: this.configError(),
+      generatedAt: Date.now(),
+    };
+  }
+
+  private configError(): string | undefined {
+    if (this.tokens.length === 0) {
+      return 'Missing TEMPESTWX_TOKENS environment variable (comma-separated list of WeatherFlow access tokens).';
+    }
+    if (this.tokenErrors.size > 0) {
+      return [...this.tokenErrors.values()].join('\n\n');
+    }
+    return undefined;
+  }
+
+  // Never rejects: discovery and per-station polls each catch their own
+  // errors, so a failed tick just leaves the previous snapshot in place.
+  private async tick(): Promise<void> {
+    for (const token of [...this.undiscovered]) {
+      await this.discover(token);
+    }
+    await Promise.all(this.stations.map((s) => this.poll(s)));
+  }
+
+  private async discover(token: string): Promise<void> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        WEATHERFLOW_CONFIG.API_TIMEOUT,
+      const data = await fetchJson<StationsResponse>(
+        `${WEATHERFLOW_CONFIG.REST_API_URL}/stations?token=${token}`,
       );
-
-      let response: Response;
-      try {
-        response = await fetch(
-          `${WEATHERFLOW_CONFIG.REST_API_URL}/stations?token=${token}`,
-          { signal: controller.signal },
-        );
-      } finally {
-        clearTimeout(timeout);
-      }
-
-      if (!response.ok) {
-        const isAuthError = response.status === 401 || response.status === 403;
-        log.error(
-          `Failed to fetch WeatherFlow stations (HTTP ${response.status})`,
-        );
-        this.emitStatus({
-          status: 'error',
-          errorKind: isAuthError ? 'config' : 'connection',
-          error: `Failed to fetch stations (HTTP ${response.status})`,
-        });
-        if (!isAuthError) {
-          setTimeout(
-            () => this.fetchAndListen(token),
-            WEATHERFLOW_CONFIG.WS_RECONNECT.MAX_DELAY,
-          );
-        }
-        return;
-      }
-
-      const data = await response.json();
-      if (!data.stations) return;
-
-      for (const station of data.stations) {
-        // Skip entire station if its ID is in the ignore list
+      for (const station of data.stations ?? []) {
         if (this.ignoreStationIds.has(station.station_id)) {
-          log.info(
-            `Ignoring station ${station.station_id} (${station.name}) — in TEMPESTWX_IGNORE_STATIONS`,
+          console.info(
+            `Ignoring station ${station.station_id} — in ${WEATHERFLOW_CONFIG.IGNORE_STATIONS_ENV}`,
           );
-          // Populate blockedDeviceIds so the message handler also drops
-          // any messages from these devices (defense in depth).
-          if (station.devices) {
-            for (const device of station.devices) {
-              this.blockedDeviceIds.add(device.device_id);
-            }
-          }
           continue;
         }
-
-        if (!station.devices) continue;
-        for (const device of station.devices) {
-          // Only listen to Tempest (ST) or Air/Sky devices, not Hubs (HB)
-          if (device.device_type === 'HB') continue;
-
-          const deviceId = device.device_id;
-
-          this.deviceToStation.set(deviceId, station.name);
-
-          // Emit status update so client knows about this station immediately
-          this.emitStatus({
-            status: 'connected',
-            device_id: deviceId,
-            stationLabel: station.name,
-          });
-
-          const conn = this.connections.get(token);
-          if (conn?.ws?.readyState === WebSocket.OPEN) {
-            const msg: ListenStartMessage = {
-              type: 'listen_start',
-              device_id: deviceId,
-              id: Math.random().toString(),
-            };
-            conn.ws.send(JSON.stringify(msg));
-            log.info(`Listening to device ${deviceId} (${station.name})`);
-          }
-        }
+        if (this.stations.some((s) => s.id === station.station_id)) continue;
+        this.stations.push({
+          id: station.station_id,
+          name:
+            station.name ??
+            station.public_name ??
+            `Station ${station.station_id}`,
+          token,
+        });
+        console.info(
+          `Discovered station ${station.station_id} (${station.name ?? 'unnamed'})`,
+        );
       }
+      this.undiscovered.delete(token);
+      this.tokenErrors.delete(token);
     } catch (error) {
-      log.error('Error fetching stations:', error);
-      // Retry the fetch - the socket is open but we don't yet know which
-      // devices to listen to, so keep trying rather than leaving it silent.
-      setTimeout(
-        () => this.fetchAndListen(token),
-        WEATHERFLOW_CONFIG.WS_RECONNECT.MAX_DELAY,
-      );
+      const status = (error as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        // Rejected token: user-actionable, no point retrying.
+        this.undiscovered.delete(token);
+        this.tokenErrors.set(
+          token,
+          `WeatherFlow rejected a configured token (HTTP ${status}). Check TEMPESTWX_TOKENS.`,
+        );
+      }
+      console.error('Failed to fetch WeatherFlow stations:', error);
     }
   }
 
-  public getKnownStations(): Array<{ deviceId: number; stationLabel: string }> {
-    const stations: Array<{ deviceId: number; stationLabel: string }> = [];
-    for (const [deviceId, stationLabel] of this.deviceToStation.entries()) {
-      stations.push({ deviceId, stationLabel });
+  private async poll(station: Station): Promise<void> {
+    const prev = this.snapshots.get(station.id);
+    try {
+      const data = await fetchJson<StationObsResponse>(
+        `${WEATHERFLOW_CONFIG.REST_API_URL}/observations/station/${station.id}?token=${station.token}`,
+      );
+      const obs = data.obs?.[0];
+      if (!obs) return;
+      const observation: StationObservation = {
+        timestamp: obs.timestamp,
+        temperature: obs.air_temperature,
+        feelsLike: obs.feels_like,
+        humidity: obs.relative_humidity,
+        pressure: obs.station_pressure ?? obs.barometric_pressure,
+        windSpeed: obs.wind_avg,
+        windLull: obs.wind_lull,
+        windGust: obs.wind_gust,
+        windDirection: obs.wind_direction,
+        uvIndex: obs.uv,
+        solarRadiation: obs.solar_radiation,
+        illuminance: obs.brightness,
+        rainTotal: obs.precip_accum_local_day,
+      };
+      observation.barometricTrend = this.trackPressure(station.id, observation);
+      this.snapshots.set(station.id, {
+        stationId: station.id,
+        name: station.name,
+        observation,
+        updatedAt: Date.now(),
+      });
+    } catch (error) {
+      console.error(
+        `Failed to poll station ${station.id} (${station.name}):`,
+        error,
+      );
+      // Keep the last good observation; the UI shows staleness from its age.
+      this.snapshots.set(station.id, {
+        stationId: station.id,
+        name: station.name,
+        observation: prev?.observation ?? null,
+        updatedAt: prev?.updatedAt ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-    return stations;
   }
+
+  private trackPressure(
+    stationId: number,
+    observation: StationObservation,
+  ): BarometricTrend | undefined {
+    if (observation.pressure == null || observation.timestamp == null) {
+      return undefined;
+    }
+    const history = this.pressureHistories.get(stationId) ?? [];
+    // Polls outpace the station's ~1/min reports; only record new observations.
+    if (history[history.length - 1]?.t !== observation.timestamp) {
+      history.push({ t: observation.timestamp, p: observation.pressure });
+      const cutoff =
+        Date.now() / 1000 - 2 * WEATHERFLOW_CONFIG.PRESSURE_TREND_WINDOW;
+      while (history.length > 0 && history[0].t < cutoff) {
+        history.shift();
+      }
+      this.pressureHistories.set(stationId, history);
+    }
+    return computeTrend(history);
+  }
+}
+
+// One poller (and one poll interval) per process, surviving dev-server module
+// reloads.
+declare global {
+  var __weatherPoller: WeatherPoller | undefined;
+}
+
+export function getWeatherSnapshot(): Promise<WeatherSnapshot> {
+  globalThis.__weatherPoller ??= new WeatherPoller();
+  return globalThis.__weatherPoller.getSnapshot();
 }
