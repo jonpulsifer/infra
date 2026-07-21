@@ -1,287 +1,210 @@
 # NixOS Configuration
 
-This directory contains NixOS configurations for a homelab infrastructure using Nix flakes. The setup manages multiple physical hosts, Kubernetes clusters, Raspberry Pis, and various installation images.
+NixOS configurations for the homelab, managed as a Nix flake (`flake.nix` at the repo
+root). The setup covers the Kubernetes node fleet, a collection of Raspberry Pis, a GCE
+VM, and several installation images.
 
 ## 🏗️ Architecture
 
-The configuration is organized into modular components:
-
 ```
 nix/
-├── hardware/          # Hardware-specific configurations
-├── hosts/             # Per-host configurations
-├── profiles/          # Reusable system profiles
-├── services/          # Service modules (k8s, jellyfin, etc.)
-├── system/            # Core system configurations
-└── overlays/          # Package overlays
+├── disko/             # Declarative disk layouts
+├── hardware/          # Hardware-specific configurations (pi0, pi4, pi5, x86)
+├── hosts/             # Per-host entry points (Pis, VMs)
+├── images/            # Installer / image builders (iso, wsl, gce, container, netboot)
+├── lib/               # mkHost / mkImage / apps helpers
+├── overlays/          # Package overlays (mise, certmgr, runc, ddnsd, patches)
+├── profiles/          # Reusable system profiles (k8s-node)
+├── secrets/           # SOPS-encrypted per-host secrets
+├── services/          # Optional service modules (k8s/, kiosk, nfs, netboot, …)
+└── system/            # Core modules (users, ssh, tailscale, sops, dotfiles, …)
 ```
+
+Hosts are declared in `flake.nix` as explicit `mkHost` calls (`nix/lib/mkHost.nix`), in
+two styles:
+
+- **Kubernetes nodes** are declared inline in the flake with `tags`/`role`/`imports`;
+  `mkHost` wires in `profiles/k8s-node.nix` for them. There is no `nix/hosts/<name>.nix`
+  for these.
+- **Everything else** (Pis, oldboy) passes `modules = [ ./nix/hosts/<name>.nix ]`.
 
 ## 🖥️ Managed Systems
 
-### Kubernetes Clusters
+### Kubernetes clusters
 
-**Folly Cluster** (on-site):
-- `optiplex` - control-plane
-- `riptide` - worker
+**folly** (on-site): `optiplex` (control-plane), `riptide`, `shale`
 
-**Offsite Cluster**:
-- `oldschool` - worker (infra GitHub runner, yarr, docker)
-- `retrofit` - control-plane
+**offsite**: `retrofit` (control-plane), `oldschool` (worker; docker + yarr)
 
-### Raspberry Pi Systems
+### Raspberry Pis
 
-- `cloudpi4` - Cloud services Pi
-- `homepi4` - Home automation Pi
-- `weatherpi4` - Display/kiosk Pi
+- `cloudpi4`, `homepi4` – general service Pis
+- `weatherpi4` – kiosk/display Pi (see the wiki runbook `Runbooks/Kiosk`)
+- `dns` – lab DNS Pi
+- `spore` – Pi 5: NFS server, PXE/netboot server, rackpi5 native-boot publisher
+- `rackpi5` – Pi 5, netbooted; config in `nix/hosts/rackpi5.nix`
+- `radiopi0`, `blinkypi0` – Pi Zero W (armv6l, cross-compiled; blinkypi0 mirrors radiopi0)
 
-### Installation Images
+### Other
 
-- `iso` - x86_64 NixOS installation ISO
-- `wsl` - Windows Subsystem for Linux tarball
-- `gce` - Google Compute Engine image
+- `oldboy` – GCE VM
+
+### Installation images
+
+- `iso` – x86_64 NixOS installation ISO
+- `wsl` – Windows Subsystem for Linux tarball
+- `gce` – Google Compute Engine image
+- `container` – system tarball
+- `netboot` – PXE ramdisk/kernel/iPXE script bundle (served by spore)
 
 ## 🚀 Quick Start
 
-### Development Environment
-
-Enter the development shell with all required tools:
+### Development environment
 
 ```bash
 nix develop
 ```
 
-This provides: `kubectl`, `helm`, `terraform`, `sops`, `fluxcd`, `cilium-cli`, and more.
-
-### Building Systems
-
-Build a specific system configuration:
+### Building systems
 
 ```bash
-# Build a host system
-nix build .#nixosConfigurations.nuc.config.system.build.toplevel
+# Build a host system (does not deploy)
+nix build .#nixosConfigurations.optiplex.config.system.build.toplevel
 
 # Build installation media
 nix build .#iso         # x86_64 NixOS ISO
-nix build .#wsl         # WSL tarball
+nix build .#wsl         # WSL tarball builder
 nix build .#gce         # Google Compute Engine image
 
-# Build Raspberry Pi images
-nix build .#cloudpi4    # SD card image from an x86_64 build host
+# Build Raspberry Pi SD images (cross-compiled from an x86_64 build host)
+nix build .#cloudpi4
 
 # Build natively on an ARM host
 nix build .#nixosConfigurations.cloudpi4.config.system.build.sdImage
 ```
 
-The `nix-image-builder` GitHub Actions workflow builds Raspberry Pi images on
-native `ubuntu-24.04-arm` runners. Run it manually from the Actions tab, choose
-an image, and download the resulting `<image>-sd-image` artifact. GitHub keeps
-these image artifacts for one day.
+The `nix-image-builder` GitHub Actions workflow builds Raspberry Pi images on native
+`ubuntu-24.04-arm` runners. Run it manually from the Actions tab, choose an image, and
+download the resulting `<image>-sd-image` artifact (kept for one day).
 
-### Deploying Updates
-
-After making changes, rebuild and deploy:
+### Deploying updates
 
 ```bash
 # On the target system (immediate activation)
 sudo nixos-rebuild switch --flake .#<hostname>
 
-# Or build remotely and copy (immediate activation)
+# Build remotely and copy (immediate activation)
 nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
-```
 
-#### Remote Rebuilding with Boot
-
-For safer deployments, especially on remote systems, use `boot` instead of `switch`. This prepares the configuration for the next reboot rather than immediately activating it:
-
-```bash
-# Build remotely and prepare for next boot (safer)
+# Safer: prepare for next reboot instead of activating now
 nixos-rebuild boot --sudo --target-host <hostname> --flake .#<hostname>
-
-# Example: Deploy to oldboy VM via Tailscale
-nixos-rebuild boot --sudo --target-host nixos.pirate-musical.ts.net --flake .#oldboy
 ```
 
-**Why use remote rebuilding?**
-
-- **Safety**: `boot` action lets you test the configuration on reboot rather than immediately applying changes
-- **Remote systems**: Deploy to systems you can't physically access (cloud VMs, remote servers)
-- **Testing**: Verify configurations work before committing to them
-- **Rollback**: Easier to rollback if something goes wrong on next boot
-- **Network efficiency**: Build locally and transfer only the closure, rather than building on resource-constrained remote systems
-
-**Common systems to rebuild remotely:**
-
-- **Cloud VMs** (e.g., `oldboy` on GCE) - Access via Tailscale or public IP
-- **Offsite hosts** (e.g., `oldschool`, `retrofit`) - Remote Kubernetes nodes
-- **Headless systems** - Systems without direct console access
-
-## 📦 Profiles
-
-Reusable configuration profiles in `profiles/`:
-
-- **`k8s-node.nix`** - Shared x86 Kubernetes node base (hardware, k8s, ethtool offload)
+Prefer `boot` for remote or hard-to-reach systems — the new configuration is only
+activated on the next reboot, so a bad change can't take the host down mid-deploy and
+rollback is a reboot away.
 
 ## 🔧 Services
 
 Custom service modules in `services/`:
 
-- **`k8s/`** - NixOS service helpers for Kubernetes (Cilium CNI, Longhorn storage, gVisor runtime) — not the cluster manifests, which live in `clusters/`
-- **`common.nix`** - Base server configuration with SSH, Tailscale, monitoring
-- **`jellyfin.nix`** - Media server
-- **`github-runner.nix`** - Self-hosted GitHub Actions runner for this infra repository
-- **`kiosk.nix`** - Kiosk mode display. See the [kiosk runbook](../docs/kiosk-runbook.md).
-- **`nas.nix`** - Network attached storage
-- **`nix-serve.nix`** - Binary cache server
-- **`yarr.nix`** - RSS reader
+- **`k8s/`** – NixOS service helpers for Kubernetes (Cilium CNI, Longhorn storage,
+  gVisor runtime) — not the cluster manifests, which live in `clusters/`. Reads cluster
+  network facts from the `clusters/<site>/config/cluster-topology.json` SSOT.
+- **`common.nix`** – base server configuration (SSH, Tailscale, monitoring); imported by
+  most hosts
+- **`iperf3.nix`** – iperf3 server for netbench
+- **`kiosk.nix`** – kiosk-mode display (see wiki `Runbooks/Kiosk`)
+- **`nfs-server.nix`** – NFS exports (spore)
+- **`pxe-netboot.nix`** – dnsmasq/nginx PXE netboot server (spore)
+- **`spore-native-boot.nix`** – signed Pi native-boot publisher (spore → rackpi5)
+- **`yarr.nix`** – RSS reader (oldschool)
 
 ## 🌐 System Modules
 
-Core system configurations in `system/`:
+Core modules in `system/`:
 
-- **`nixos.nix`** - Base NixOS settings (flakes, caching, auto-upgrade)
-- **`user.nix`** - User account management
-- **`ssh.nix`** - SSH server configuration
-- **`tailscale.nix`** - Tailscale VPN setup
-- **`ddnsd.nix`** - Dynamic DNS daemon
-- **`fpc.nix`** - Custom FPC configuration
+- **`nixos.nix`** – base NixOS settings (flakes, caching, auto-upgrade)
+- **`user.nix`** – user account management
+- **`ssh.nix`** – SSH server hardening
+- **`tailscale.nix`** / **`tailscale-disable.nix`** – Tailscale VPN on/off
+- **`sops.nix`** – sops-nix secrets wiring
+- **`ddnsd.nix`** – dynamic DNS daemon (first-party, from `apps/ddnsd`)
+- **`mise-dotfiles.nix`** – applies the in-repo `dotfiles/` via mise on activation
+- **`quiker.nix`** – quicker boot/less quirky kernel settings
 
 ## 🔑 Inputs & Dependencies
 
-The flake uses several external inputs:
+Flake inputs (see `flake.nix`):
 
-- **`nixpkgs`** - NixOS 25.05 package set
-- **`nixos-hardware`** - Hardware-specific configurations
-- **`nixos-wsl`** - WSL integration
-- **`home-manager`** - User environment management
-- **`dotfiles`** - Personal dotfiles repository
-- **`ddnsd`** - Custom dynamic DNS daemon
-- **`hosts`** - StevenBlack's unified hosts file
+- **`nixpkgs`** – NixOS 26.05 package set (plus **`unstable`** for cherry-picks)
+- **`nixos-hardware`**, **`nixos-raspberrypi`** – hardware support
+- **`nixos-wsl`** – WSL integration
+- **`disko`** – declarative disk partitioning
+- **`sops-nix`** – SOPS secrets in NixOS
+- **`hosts`** – StevenBlack's unified hosts file
+- **`keys`** / **`rowbuttkeys`** / **`wannabekeys`** – SSH public keys fetched from GitHub
 
-SSH keys are automatically imported from GitHub:
-- `jonpulsifer.keys` - Main user keys
-- `wannabehero.keys` - Additional authorized keys
+There is no home-manager and no dotfiles flake input — dotfiles ship via
+`nix/system/mise-dotfiles.nix` from the in-repo `dotfiles/` tree.
 
 ## 🛠️ Common Tasks
 
-### Adding a New Host
+### Adding a new host
 
-1. Create a new file in `hosts/<hostname>.nix`:
+For a Pi/VM-style host:
 
-```nix
-{ name, ... }:
-{
-  imports = [
-    ../profiles/k8s-node.nix # for k8s nodes; otherwise ../hardware/x86 ../services/common.nix
-  ];
+1. Create `hosts/<hostname>.nix` importing the right hardware module and
+   `../services/common.nix`.
+2. Add an `mkHost` call in `flake.nix`'s `nixosConfigurations`
+   (`modules = [ ./nix/hosts/<hostname>.nix ];`) and, if it should be deployable via the
+   flake apps, add it to `deployHosts`.
 
-  networking.hostName = name;
-  # Add host-specific configuration
-}
-```
+For a Kubernetes node: add an inline `mkHost` call with `tags` (`folly`/`offsite`),
+optional `role = "control-plane"`, and `extraConfig.homelab.disko.device` — mirror an
+existing node like `riptide`.
 
-2. Add to `flake.nix` `baseHostsSpec` with metadata only (tags, system, or profile):
+### Creating a new service
 
-```nix
-baseHostsSpec = {
-  # ... existing hosts
-  newhostname = { tags = [ "folly" ]; };
-};
-```
+1. Create `services/<service>.nix` with an `options.services.<service>.enable` toggle.
+2. Import it from the host config and set `services.<service>.enable = true;`.
 
-### Creating a New Service
-
-1. Create `services/<service>.nix`:
-
-```nix
-{ config, lib, pkgs, ... }:
-{
-  options.services.<service> = {
-    enable = lib.mkEnableOption "<service>";
-  };
-
-  config = lib.mkIf config.services.<service>.enable {
-    # Service configuration
-  };
-}
-```
-
-2. Import in host configuration:
-
-```nix
-imports = [ ../services/<service>.nix ];
-services.<service>.enable = true;
-```
-
-### Updating Dependencies
-
-Update flake inputs:
+### Updating dependencies
 
 ```bash
-# Update all inputs
-nix flake update
-
-# Update specific input
-nix flake lock --update-input nixpkgs
+nix flake update                          # all inputs
+nix flake lock --update-input nixpkgs     # one input
 ```
-
-## 🎯 Design Principles
-
-1. **Declarative** - All system state defined in configuration
-2. **Modular** - Reusable components shared across hosts
-3. **Reproducible** - Flake lock ensures consistent builds
-4. **Secure** - Immutable users, automatic security updates
-5. **Observable** - Prometheus exporters on all nodes
-
-## 📝 Configuration Features
-
-- **Automatic garbage collection** - Weekly cleanup of old generations
-- **Binary caching** - Custom cachix cache for faster builds
-- **Tailscale integration** - Secure mesh networking
-- **SSH hardening** - Key-based auth, fail2ban protection
-- **Monitoring** - Node exporters for Prometheus
-- **Dynamic DNS** - Automatic DNS updates via ddnsd
 
 ## 🔍 Troubleshooting
 
 ### Build failures
 
 ```bash
-# Check flake evaluation
 nix flake check
-
-# Build with verbose output
 nix build --verbose .#nixosConfigurations.<host>.config.system.build.toplevel
 ```
 
-### Disk space issues
+### Disk space
 
 ```bash
-# Manual garbage collection
 nix-collect-garbage -d
-
-# Remove old boot entries
-sudo nix-collect-garbage -d
-sudo /run/current-system/bin/switch-to-configuration boot
+sudo nix-collect-garbage -d && sudo /run/current-system/bin/switch-to-configuration boot
 ```
 
 ### WSL VHD optimization
 
-The WSL virtual hard disk can grow large over time. After cleaning up space in WSL, compact the VHD from Windows PowerShell (run as Administrator):
+After cleaning up space inside WSL, compact the VHD from Windows PowerShell (as
+Administrator):
 
 ```powershell
-# Optimize/compact the NixOS WSL VHD
 Optimize-VHD ((Get-ChildItem -Path HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss | Where-Object { $_.GetValue("DistributionName") -eq 'nixos' }).GetValue("BasePath") + "\ext4.vhdx")
 ```
-
-This recovers disk space after running garbage collection inside WSL.
 
 ### Rolling back
 
 ```bash
-# List generations
 sudo nix-env --list-generations --profile /nix/var/nix/profiles/system
-
-# Rollback to previous generation
 sudo nixos-rebuild switch --rollback
 ```
 
@@ -290,13 +213,10 @@ sudo nixos-rebuild switch --rollback
 - [NixOS Manual](https://nixos.org/manual/nixos/stable/)
 - [Nix Flakes](https://nixos.wiki/wiki/Flakes)
 - [NixOS Search](https://search.nixos.org/)
-- [Home Manager Manual](https://nix-community.github.io/home-manager/)
 
 ## 🤝 Contributing
 
-When making changes:
-
-1. Test locally with `nix flake check`
-2. Format code with `nix fmt`
+1. Test with `nix flake check`
+2. Format with `nix fmt`
 3. Build affected systems to verify
-4. Document any new options or services
+4. Document new options or services
