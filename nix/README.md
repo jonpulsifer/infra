@@ -116,6 +116,7 @@ Custom service modules in `services/`:
 - **`iperf3.nix`** – iperf3 server for netbench
 - **`kiosk.nix`** – kiosk-mode display (see wiki `Runbooks/Kiosk`)
 - **`nfs-server.nix`** – NFS exports (spore)
+- **`ntp-server.nix`** – redundant Chrony LAN time servers (dns + spore)
 - **`pxe-netboot.nix`** – dnsmasq/nginx PXE netboot server (spore)
 - **`spore-native-boot.nix`** – signed Pi native-boot publisher (spore → rackpi5)
 - **`yarr.nix`** – RSS reader (oldschool)

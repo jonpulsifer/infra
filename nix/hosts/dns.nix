@@ -4,6 +4,7 @@
     ../hardware/pi5
     ../hardware/pi5/nvme-hat.nix
     ../services/common.nix
+    ../services/ntp-server.nix
   ];
 
   networking = {

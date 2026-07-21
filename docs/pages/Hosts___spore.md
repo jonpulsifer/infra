@@ -14,6 +14,8 @@ os:: NixOS 26.05 (Yarara)
 - NFS/PXE and signed native-boot server — **boot-critical for [[Hosts/rackpi5]]** ([[ADR/0008 Diskless netboot for rackpi5]]); monitored by folly.
 - Only Pi with NVMe storage (128 GB Patriot P300). Config: `nix/hosts/spore.nix`.
 - Reached as `spore.lolwtf.ca`.
+- Redundant LAN NTP server paired with [[Hosts/dns]] (`nix/services/ntp-server.nix`). Chrony uses authenticated Cloudflare and Netnod NTS upstreams, polls DNS, and serves UDP/123 to routed `10.0.0.0/8` clients. Orphan fallback reports stratum 10; neither Pi is stratum 1 without a hardware reference clock.
+- Verify with `chronyc tracking`, `chronyc sources -v`, and `chronyc authdata`.
 - ## Netboot serving
 	- There is **no application, database, or dynamic boot decision** — the Nix-built image is the policy. Spore just serves files over HTTP (nginx) plus TFTP (dnsmasq). The old Next.js catalog/observation app was removed; boot integrity is enforced by the EEPROM signature and the initrd's cmdline-pinned squashfs digest, not by a server.
 	- **x86 k8s nodes** netboot off the static iPXE tree in `/var/lib/tftpboot` (`nix/services/pxe-netboot.nix`): DHCP → TFTP `boot/ipxe.efi` → `menu.ipxe` → per-target kernel/initrd over HTTP.
