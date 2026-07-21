@@ -74,3 +74,11 @@ spec:
           annotations:
             message: Prometheus target missing (instance {{ $labels.instance }})
             description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+        - alert: DnsChronyDown
+          expr: (node_systemd_unit_state{instance="dns", name="chronyd.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="dns", name="chronyd.service", state="active"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: NTP server on dns is down
+            description: "chronyd.service is not active on dns. Clients configured to use dns as a time source have lost one half of the redundant NTP pair."
