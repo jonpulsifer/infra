@@ -87,6 +87,7 @@ class WeatherPoller {
       ),
       configError: this.configError(),
       generatedAt: Date.now(),
+      buildId: __BUILD_ID__,
     };
   }
 

@@ -33,6 +33,9 @@ export type WeatherSnapshot = {
   // poll failures are per-station errors instead - the poller retries those.
   configError?: string;
   generatedAt: number; // ms epoch
+  // Server bundle's build ID. Kiosk clients reload when it no longer matches
+  // their own, so long-running displays pick up new deployments.
+  buildId: string;
 };
 
 // Minimal shapes of the two REST responses the poller consumes.

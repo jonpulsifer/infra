@@ -11,6 +11,11 @@ snapshot. Clients fetch the snapshot from `/api/weather` on the same cadence.
 Stations report new observations roughly once a minute, so the display is at
 most ~30s behind the station.
 
+Each build bakes a build ID into both the server and client bundles, and the
+snapshot includes the server's ID. Kiosk browsers (which never navigate on
+their own) reload themselves when the IDs stop matching, so long-running
+displays pick up new deployments within one poll interval.
+
 ## Features
 
 - **Weather Data**: Latest conditions per station, with a per-station freshness indicator.
