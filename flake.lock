@@ -281,11 +281,11 @@
     },
     "unstable": {
       "locked": {
-        "lastModified": 1784356753,
-        "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
+        "lastModified": 1784497964,
+        "narHash": "sha256-vlHUuqAcbcH2RKmHbPiuQzbv1pnzzavXnI62RD0bqCU=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
+        "rev": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
         "type": "github"
       },
       "original": {
@@ -298,7 +298,7 @@
     "wannabekeys": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-u/gIivX3q5XWeffdJnegMjoe5WEX07oE33WHUxSTyUk=",
+        "narHash": "sha256-851D0BWN5/IN030Wcx3aKhpeC1pnWP3EZEcz5+0g4hQ=",
         "type": "file",
         "url": "https://github.com/wannabehero.keys"
       },
