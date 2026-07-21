@@ -32,11 +32,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
           name="viewport"
           content="width=device-width, initial-scale=1, user-scalable=no"
         />
-        <meta name="theme-color" content="#111827" />
+        <meta name="theme-color" content="#0b0f15" />
         <Meta />
         <Links />
       </head>
-      <body className="bg-gray-900 text-white">
+      <body className="bg-[#0b0f15] text-white">
         <div className="flex flex-col h-screen">
           <div className="flex-grow overflow-hidden">{children}</div>
         </div>
