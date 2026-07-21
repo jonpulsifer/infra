@@ -1,34 +1,18 @@
-// Configuration constants for WeatherFlow API
+// Configuration constants for the WeatherFlow REST API poller.
 
 export const WEATHERFLOW_CONFIG = {
-  // WebSocket configuration
-  WS_URL: 'wss://ws.weatherflow.com/swd/data',
-  WS_RECONNECT: {
-    INITIAL_DELAY: 1000, // 1 second
-    MAX_DELAY: 30000, // 30 seconds
-    BACKOFF_MULTIPLIER: 2,
-    // Caps how many times the backoff delay is allowed to grow before it
-    // holds steady at MAX_DELAY. This is a kiosk display meant to run
-    // unattended, so we never stop retrying entirely - we just stop
-    // growing the delay after this many attempts.
-    MAX_RETRIES: 10,
-  },
-  KEEPALIVE_INTERVAL: 5 * 60 * 1000, // 5 minutes
-  IDLE_TIMEOUT: 10 * 60 * 1000, // 10 minutes (server-side timeout)
-
-  // REST API configuration
   REST_API_URL: 'https://swd.weatherflow.com/swd/rest',
-  API_TIMEOUT: 10000, // 10 seconds
+  API_TIMEOUT: 10_000, // ms
 
-  // Station filtering
-  // Comma-separated list of station IDs to ignore (set via TEMPESTWX_IGNORE_STATIONS env var).
-  // All devices belonging to an ignored station are dropped.
+  // Stations report a new observation roughly once a minute; polling twice as
+  // often keeps the display at most ~30s behind without hammering the API.
+  POLL_INTERVAL: 30_000, // ms
+
+  // Comma-separated list of station IDs to ignore (TEMPESTWX_IGNORE_STATIONS).
   IGNORE_STATIONS_ENV: 'TEMPESTWX_IGNORE_STATIONS',
 
-  // Data processing thresholds
-  PRESSURE_TREND_THRESHOLD: 1.0, // mb threshold for significant change
-  PRESSURE_HISTORY_SIZE: 20, // Keep last 20 readings for trend calculation
-  HUMIDEX_MIN_TEMP: 20, // C - humidex not applicable below this
-  HUMIDEX_MIN_HUMIDITY: 40, // % - humidex not applicable below this
-  FEELS_LIKE_MIN_DIFF: 2, // C - only show feels like if difference > 2
+  // Barometric trend: change needed over the trend window to count as
+  // rising/falling rather than steady.
+  PRESSURE_TREND_THRESHOLD: 1.0, // mb
+  PRESSURE_TREND_WINDOW: 30 * 60, // seconds
 } as const;

@@ -1,22 +1,5 @@
 // Pure diff computation for comparing two weather stations.
-//
-// Deepens what used to be a large inline object literal in dashboard.tsx:
-// callers pass two WeatherData readings and get back a StationDiff with one
-// nullish-safe subtraction per field, computed the same way every time.
-import type { WeatherData } from './types';
-
-export type StationDiff = {
-  temperature?: number;
-  humidity?: number;
-  windSpeed?: number; // m/s - StationDisplay/MetricRow convert to km/h for display
-  windLull?: number; // m/s
-  windGust?: number; // m/s
-  pressure?: number;
-  uvIndex?: number;
-  solarRadiation?: number;
-  illuminance?: number;
-  rainTotal?: number;
-};
+import type { StationObservation } from './types';
 
 /**
  * Subtract two optional numbers, returning undefined unless both sides are present.
@@ -30,14 +13,14 @@ function diffField(
 
 /**
  * Compute the field-by-field difference (left - right) between two stations'
- * weather data. A field is only populated in the result when both stations
+ * observations. A field is only populated in the result when both stations
  * report a value for it; otherwise it's left undefined so callers render a
  * placeholder instead of a misleading zero.
  */
 export function diffStations(
-  left: WeatherData,
-  right: WeatherData,
-): StationDiff {
+  left: StationObservation,
+  right: StationObservation,
+): StationObservation {
   return {
     temperature: diffField(left.temperature, right.temperature),
     humidity: diffField(left.humidity, right.humidity),
