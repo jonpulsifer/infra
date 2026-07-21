@@ -3,22 +3,28 @@ import {
   ArrowRight,
   ArrowUp,
   CloudRain,
-  Compass,
   Droplets,
-  Eye,
+  Gauge,
+  Lightbulb,
   Sun,
-  Thermometer,
   Wind,
+  X,
   Zap,
 } from 'lucide-react';
+import type { LeaderMap } from '~/lib/weatherflow/leader';
 import type { StationObservation } from '~/lib/weatherflow/types';
-import { formatMetricNumber, getDiffColorClass, MetricRow } from './metric-row';
+import { MetricRow } from './metric-row';
 
 interface StationDisplayProps {
   label: string;
   observation: StationObservation | null;
-  isDiff?: boolean;
   now: number; // ms epoch, ticks from the dashboard clock
+  index: number; // this station's position in the compared group
+  leaders: LeaderMap; // per-metric leading station index
+  isWarmest?: boolean; // this station holds the highest temperature
+  tempDelta?: number | null; // signed °C vs the other station (2-station mode)
+  solo?: boolean; // single-station "big display" mode
+  onRemove?: () => void; // dev-only per-panel remove affordance
 }
 
 const WIND_DIRECTIONS = [
@@ -40,25 +46,15 @@ const WIND_DIRECTIONS = [
   'NNW',
 ];
 
-const SKELETON_ROWS = [
-  'humidity',
-  'wind',
-  'pressure',
-  'rain',
-  'uv',
-  'lull',
-  'gust',
-  'solar',
-];
+const SKELETON_ROWS = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
 
-function getWindDirectionLabel(degrees?: number): string {
-  if (degrees == null) return '--';
-  const index = Math.round(degrees / 22.5) % 16;
-  return `${WIND_DIRECTIONS[index]} ${degrees.toFixed(0)}°`;
+function windDirection(degrees?: number): string | undefined {
+  if (degrees == null) return undefined;
+  return WIND_DIRECTIONS[Math.round(degrees / 22.5) % 16];
 }
 
 /**
- * Plain-language freshness for the station header: a colored dot plus the
+ * Plain-language freshness for the panel header: a colored dot plus the
  * observation time. Green under 3 minutes old, amber under 10, "Stale" beyond.
  */
 function getFreshness(
@@ -66,7 +62,7 @@ function getFreshness(
   now: number,
 ): { dotClass: string; text: string } {
   if (obsTimestamp == null) {
-    return { dotClass: 'bg-gray-500', text: 'No data' };
+    return { dotClass: 'bg-slate-500', text: 'No data' };
   }
   const ageMinutes = (now / 1000 - obsTimestamp) / 60;
   const updated = new Date(obsTimestamp * 1000).toLocaleTimeString([], {
@@ -74,249 +70,208 @@ function getFreshness(
     minute: '2-digit',
   });
   if (ageMinutes < 3) {
-    return { dotClass: 'bg-green-400', text: `Updated ${updated}` };
+    return { dotClass: 'bg-emerald-400', text: `Updated ${updated}` };
   }
   if (ageMinutes < 10) {
-    return { dotClass: 'bg-yellow-400', text: `Updated ${updated}` };
+    return { dotClass: 'bg-amber-400', text: `Updated ${updated}` };
   }
-  return { dotClass: 'bg-red-400', text: `Stale — last update ${updated}` };
+  return { dotClass: 'bg-red-400', text: `Stale ${updated}` };
 }
 
-function getBarometricTrendIcon(trend?: string) {
+function trendIcon(trend?: string) {
+  const cls = 'w-3.5 h-3.5';
   switch (trend) {
     case 'rising':
-      return <ArrowUp className="w-4 h-4 text-green-400" />;
+      return <ArrowUp className={`${cls} text-emerald-400`} />;
     case 'falling':
-      return <ArrowDown className="w-4 h-4 text-red-400" />;
+      return <ArrowDown className={`${cls} text-red-400`} />;
     default:
-      return <ArrowRight className="w-4 h-4 text-gray-400" />;
+      return <ArrowRight className={`${cls} text-slate-500`} />;
   }
 }
+
+const ICON = 'w-4 h-4 text-slate-500 shrink-0';
 
 export function StationDisplay({
   label,
   observation,
-  isDiff = false,
   now,
+  index,
+  leaders,
+  isWarmest = false,
+  tempDelta = null,
+  solo = false,
+  onRemove,
 }: StationDisplayProps) {
   const obs = observation ?? {};
-  const tempC = obs.temperature;
-  const feelsLike = obs.feelsLike;
-  const windAvgKmh = obs.windSpeed != null ? obs.windSpeed * 3.6 : undefined;
-  const windLullKmh = obs.windLull != null ? obs.windLull * 3.6 : undefined;
-  const windGustKmh = obs.windGust != null ? obs.windGust * 3.6 : undefined;
+  const windKmh = obs.windSpeed != null ? obs.windSpeed * 3.6 : undefined;
+  const gustKmh = obs.windGust != null ? obs.windGust * 3.6 : undefined;
   const freshness = getFreshness(obs.timestamp, now);
+  const leads = (field: keyof LeaderMap) => leaders[field] === index;
+
+  const dir = windDirection(obs.windDirection);
+  const windSub = [dir, gustKmh != null ? `gust ${gustKmh.toFixed(1)}` : null]
+    .filter(Boolean)
+    .join(' · ');
+
+  const removeButton = onRemove ? (
+    <button
+      type="button"
+      onClick={onRemove}
+      aria-label={`Remove ${label}`}
+      className="p-0.5 -mr-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+    >
+      <X className="w-4 h-4" />
+    </button>
+  ) : null;
+
+  const header = (
+    <div className="flex items-center justify-between gap-2 py-2.5 shrink-0">
+      <span className="text-[0.95rem] font-bold truncate">{label}</span>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${freshness.dotClass}`}
+          aria-hidden="true"
+        />
+        <span className="text-[0.6rem] uppercase tracking-wide text-slate-500 font-semibold whitespace-nowrap">
+          {freshness.text}
+        </span>
+        {removeButton}
+      </div>
+    </div>
+  );
 
   // Skeleton while a discovered station has no observation yet
-  if (!isDiff && observation == null) {
+  if (observation == null) {
     return (
-      <div className="flex flex-col h-full border-r border-gray-700 last:border-r-0 overflow-hidden flex-1">
-        <div className="flex items-center justify-between px-2 py-1 border-b border-gray-700 flex-shrink-0 h-[2.25rem]">
-          <span className="text-gray-300 font-bold text-base whitespace-nowrap">
-            {label}
-          </span>
-          <div className="h-3 w-16 bg-gray-800 rounded animate-pulse" />
+      <div className="flex-1 min-w-0 flex flex-col bg-[#10151d] px-4">
+        {header}
+        <div className="flex items-end gap-2.5 pb-2.5 border-b border-white/[0.07]">
+          <div className="h-14 w-28 bg-white/5 rounded animate-pulse" />
         </div>
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <div className="flex flex-col items-center justify-center py-1 border-b border-gray-800 flex-shrink-0 h-24">
-            <div className="h-10 w-32 bg-gray-800 rounded animate-pulse mb-2" />
-            <div className="h-3 w-20 bg-gray-800 rounded animate-pulse" />
-          </div>
-          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            {SKELETON_ROWS.map((row) => (
-              <div
-                key={row}
-                className="flex items-center justify-between px-2 py-0.5 border-b border-gray-800 flex-shrink-0 min-h-[1.75rem]"
-              >
-                <div className="h-3 w-16 bg-gray-800 rounded animate-pulse" />
-                <div className="h-4 w-12 bg-gray-800 rounded animate-pulse" />
-              </div>
-            ))}
-          </div>
+        <div className="flex-1 flex flex-col min-h-0">
+          {SKELETON_ROWS.map((row) => (
+            <div
+              key={row}
+              className="flex-1 min-h-[2.1rem] flex items-center justify-between border-b border-white/[0.07] last:border-b-0"
+            >
+              <div className="h-3 w-20 bg-white/5 rounded animate-pulse" />
+              <div className="h-4 w-12 bg-white/5 rounded animate-pulse" />
+            </div>
+          ))}
         </div>
       </div>
     );
   }
 
+  const metrics = (
+    <>
+      <MetricRow
+        icon={<Droplets className={ICON} />}
+        label="Humidity"
+        isLeader={leads('humidity')}
+        value={obs.humidity}
+        unit="%"
+        decimals={0}
+        showUnitWhenEmpty
+      />
+      <MetricRow
+        icon={<Wind className={ICON} />}
+        label="Wind"
+        sub={windSub || undefined}
+        isLeader={leads('windSpeed')}
+        value={windKmh}
+        unit={windKmh === 0 ? '' : 'km/h'}
+        decimals={1}
+        displayText={windKmh === 0 ? 'Calm' : undefined}
+      />
+      <MetricRow
+        icon={<Gauge className={ICON} />}
+        label="Pressure"
+        isLeader={leads('pressure')}
+        value={obs.pressure}
+        unit="mb"
+        decimals={0}
+        trailing={trendIcon(obs.barometricTrend)}
+      />
+      <MetricRow
+        icon={<CloudRain className={ICON} />}
+        label="Rain"
+        isLeader={leads('rainTotal')}
+        value={obs.rainTotal}
+        unit="mm"
+        decimals={1}
+      />
+      <MetricRow
+        icon={<Sun className={ICON} />}
+        label="UV index"
+        isLeader={leads('uvIndex')}
+        value={obs.uvIndex}
+        decimals={1}
+      />
+      <MetricRow
+        icon={<Zap className={ICON} />}
+        label="Solar"
+        isLeader={leads('solarRadiation')}
+        value={obs.solarRadiation}
+        unit="W/m²"
+        decimals={0}
+      />
+      <MetricRow
+        icon={<Lightbulb className={ICON} />}
+        label="Light"
+        isLeader={leads('illuminance')}
+        value={obs.illuminance}
+        unit="lux"
+        decimals={0}
+        locale
+      />
+    </>
+  );
+
   return (
-    <div
-      className={`flex flex-col h-full border-r border-gray-700 last:border-r-0 overflow-hidden ${isDiff ? 'flex-[0.5]' : 'flex-1'}`}
-    >
-      {/* Station Header */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-gray-700 flex-shrink-0 h-[2.25rem]">
-        {isDiff ? (
-          <div className="flex items-center justify-center gap-2 text-xs w-full">
-            <span className="text-gray-300 font-bold text-base whitespace-nowrap">
-              {label}
+    <div className="flex-1 min-w-0 flex flex-col bg-[#10151d] px-4">
+      {header}
+
+      {/* Temperature */}
+      <div className="flex items-end gap-2.5 pb-2.5 border-b border-white/[0.07] shrink-0">
+        <span
+          className={`${
+            solo ? 'text-[6.5rem]' : 'text-[3.4rem]'
+          } font-extrabold leading-[0.82] tracking-tight tabular-nums ${
+            isWarmest ? 'text-sky-400' : 'text-white'
+          }`}
+        >
+          {obs.temperature != null ? obs.temperature.toFixed(1) : '--'}°
+        </span>
+        <div className="flex flex-col gap-0.5 pb-1">
+          {tempDelta != null && (
+            <span
+              className={`text-[0.72rem] font-semibold tabular-nums ${
+                tempDelta < 0 ? 'text-slate-500' : 'text-sky-400'
+              }`}
+            >
+              {tempDelta > 0 ? '+' : ''}
+              {tempDelta.toFixed(1)}° vs other
             </span>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-2 text-xs w-full">
-            <span className="text-gray-300 font-bold text-base whitespace-nowrap">
-              {label}
+          )}
+          {obs.feelsLike != null && (
+            <span className="text-[0.7rem] text-slate-400 font-semibold">
+              Feels {obs.feelsLike.toFixed(1)}°
             </span>
-            <div className="flex items-center gap-1.5">
-              <span
-                className={`w-2 h-2 rounded-full ${freshness.dotClass}`}
-                aria-hidden="true"
-              />
-              <span className="text-gray-500 text-[10px]">
-                {freshness.text}
-              </span>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Weather Content */}
-      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-        {/* Temperature - Large */}
-        <div className="flex flex-col items-center justify-center py-1 border-b border-gray-800 flex-shrink-0">
-          <div className="flex items-center">
-            <Thermometer className="w-4 h-4 text-orange-400 mr-2" />
-            <div
-              className={`text-4xl font-bold ${getDiffColorClass(tempC, isDiff)}`}
-            >
-              {formatMetricNumber(tempC, {
-                decimals: 1,
-                unit: '°',
-                isDiff,
-                showUnitWhenEmpty: true,
-              })}
-            </div>
-          </div>
-          <div className="h-3 flex items-center justify-center">
-            {feelsLike != null &&
-            Math.abs(feelsLike - (tempC ?? 0)) > 2 &&
-            !isDiff ? (
-              <div className="text-xs text-gray-400">
-                Feels like {feelsLike.toFixed(1)}°
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Weather Details Grid */}
-        <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
-          <MetricRow
-            icon={<Droplets className="w-4 h-4 text-blue-400" />}
-            label="Humidity"
-            isDiff={isDiff}
-            value={obs.humidity}
-            unit="%"
-            decimals={0}
-            showUnitWhenEmpty
-          />
-
-          <MetricRow
-            icon={<Wind className="w-4 h-4 text-gray-400" />}
-            label="Wind Avg"
-            isDiff={isDiff}
-            value={windAvgKmh}
-            displayText={
-              windAvgKmh != null && windAvgKmh !== 0
-                ? formatMetricNumber(windAvgKmh, {
-                    decimals: 1,
-                    unit: ' km/h',
-                    isDiff,
-                  })
-                : windAvgKmh === 0 && isDiff
-                  ? '0 km/h'
-                  : 'Windless'
-            }
-          />
-
-          <MetricRow
-            icon={<Eye className="w-4 h-4 text-purple-400" />}
-            label="Pressure"
-            isDiff={isDiff}
-            value={obs.pressure}
-            decimals={0}
-            trailing={
-              <>
-                <span className="text-xs text-gray-500">mb</span>
-                {!isDiff && getBarometricTrendIcon(obs.barometricTrend)}
-              </>
-            }
-          />
-
-          <MetricRow
-            icon={<CloudRain className="w-4 h-4 text-blue-400" />}
-            label="Rain"
-            isDiff={isDiff}
-            value={obs.rainTotal}
-            unit=" mm"
-            decimals={1}
-            undefinedClassName="text-gray-500"
-          />
-
-          <MetricRow
-            icon={<Sun className="w-4 h-4 text-yellow-400" />}
-            label="UV"
-            isDiff={isDiff}
-            value={obs.uvIndex}
-            decimals={1}
-          />
-
-          <MetricRow
-            icon={<Wind className="w-4 h-4 text-gray-500" />}
-            label="Wind Lull"
-            isDiff={isDiff}
-            weight="semibold"
-            labelClassName="text-gray-500"
-            neutralClassName="text-gray-300"
-            undefinedClassName="text-gray-500"
-            value={windLullKmh}
-            unit=" km/h"
-            decimals={1}
-          />
-
-          <MetricRow
-            icon={<Wind className="w-4 h-4 text-gray-500" />}
-            label="Wind Gust"
-            isDiff={isDiff}
-            weight="semibold"
-            labelClassName="text-gray-500"
-            neutralClassName="text-gray-300"
-            undefinedClassName="text-gray-500"
-            value={windGustKmh}
-            unit=" km/h"
-            decimals={1}
-          />
-
-          <MetricRow
-            icon={<Compass className="w-4 h-4 text-gray-400" />}
-            label="Direction"
-            isDiff={isDiff}
-            weight="semibold"
-            displayText={getWindDirectionLabel(obs.windDirection)}
-          />
-
-          <MetricRow
-            icon={<Zap className="w-4 h-4 text-yellow-300" />}
-            label="Solar"
-            isDiff={isDiff}
-            weight="semibold"
-            neutralClassName="text-white"
-            undefinedClassName="text-gray-500"
-            value={obs.solarRadiation}
-            unit=" W/m²"
-            decimals={0}
-          />
-
-          <MetricRow
-            icon={<Sun className="w-4 h-4 text-gray-500" />}
-            label="Light"
-            isDiff={isDiff}
-            weight="semibold"
-            labelClassName="text-gray-500"
-            neutralClassName="text-gray-300"
-            undefinedClassName="text-gray-500"
-            value={obs.illuminance}
-            unit=" lux"
-            decimals={0}
-          />
-        </div>
+      {/* Metrics fill the remaining height */}
+      <div
+        className={
+          solo
+            ? 'flex-1 grid grid-cols-2 gap-x-6 content-center'
+            : 'flex-1 flex flex-col min-h-0'
+        }
+      >
+        {metrics}
       </div>
     </div>
   );
