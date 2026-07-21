@@ -14,7 +14,7 @@ jobs:
     outputs:
       nix_changed: ${{ steps.targets.outputs.nix_changed }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 2
       - id: changed-paths
@@ -38,7 +38,7 @@ jobs:
     if: needs.changed-paths.outputs.nix_changed == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
         with:
           extra-conf: |
@@ -51,7 +51,7 @@ jobs:
     needs: [changed-paths, check]
     if: needs.changed-paths.outputs.nix_changed == 'true'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
         with:
           extra-conf: |
@@ -69,7 +69,7 @@ jobs:
     needs: [changed-paths, check]
     if: needs.changed-paths.outputs.nix_changed == 'true'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
         with:
           extra-conf: |
@@ -103,7 +103,7 @@ jobs:
             runner: ubuntu-24.04-arm
             attribute: nixosConfigurations.rackpi5.config.system.build.piBootImg
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
         with:
           extra-conf: |
