@@ -20,8 +20,8 @@ in
     enable = true;
     enableNTS = true;
     servers = [
-      "time.cloudflare.com"
-      "nts.netnod.se"
+      "time.nrc.ca"
+      "time.chu.nrc.ca"
     ];
     extraConfig = ''
       # The two LAN servers poll one another so orphan mode can elect a leader
