@@ -1,6 +1,4 @@
 type:: host
-cluster:: [[Architecture/Kubernetes]] offsite
-role:: control-plane
 vendor:: HP
 model:: EliteDesk 800 G2 DM 65W
 year:: ~2016
@@ -15,4 +13,3 @@ firmware:: N21 Ver. 02.21 (2016-11-01)
 
 - offsite control-plane. Chassis asset tag matches the serial (MXL7211HNN).
 - Offsite — reach over the tailnet.
-- See [[Fleet]] for the full inventory.

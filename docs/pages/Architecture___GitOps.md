@@ -1,22 +1,42 @@
 icon:: 🔁
 tags:: architecture
 
-- How a change actually ships, by layer. The common thread: author desired state in git, let an operator apply it. Rationale in [[ADR/0001 GitOps apply model]].
+- How a change actually ships. Desired state lives in git; an operator applies it after a PR check or a merge to `main`. Nobody applies by hand.
+- ## Apply paths at a glance
+	- | Layer | Trigger | Applies via | Never |
+	  |---|---|---|---|
+	  | Terraform (`terraform/`, `clusters/*/bootstrap/`) | PR opened/updated → autoplan; `atlantis apply` comment | Atlantis — successful apply automerges the PR | `tofu`/`terraform apply` against remote state, locally |
+	  | Kubernetes (`clusters/**`) | Merge to `main` | Flux reconciliation | `kubectl apply` to author state |
+	  | NixOS (`nix/**`) | Merge to `main` (daily auto-upgrade) or manual dispatch | `nixos-rebuild switch`/`boot` | out-of-band edits outside git |
 - ## Terraform → Atlantis
-	- Open a PR touching a root module → Atlantis autoplans it → review → comment `atlantis apply` → a successful apply automerges the PR.
-	- Local `terraform plan` is inspection-only; applying locally races Atlantis and corrupts locks.
-- ## Kubernetes → Flux (+ ArgoCD)
-	- Merge to `main` → Flux reconciles `clusters/**`. ArgoCD deploys apps sourced from external repos (definitions in `terraform/argo/`).
-	- `flux reconcile kustomization <name> -n flux-system` forces a sync; `kubectl` is for inspection.
-- ## NixOS → nixos-rebuild + auto-upgrade
-	- `nixos-rebuild switch/boot --flake .#<host> --target-host <host>` is the apply path, and hosts also auto-rebuild from GitHub `main` — so out-of-band or branch deploys silently revert unless merged promptly.
-- ## CI workflows
-	- `terraform.yml` — validates changed `.tf` files; auto-formats + regenerates terraform-docs on merge
-	- `containers.yml` — builds container images from `apps/`, `packages/`, `images/`
-	- `trivy.yml` — scans `.tf` and `clusters/**` for CRITICAL/HIGH IaC vulnerabilities
-	- `wiki.yml` — builds this wiki from `docs/` and deploys it to Cloudflare Pages
-	- `pulsifer-ca.yml` — builds and deploys the Hugo site to GitHub Pages
-	- `nixos-deploy.yaml`, `nix-ci.yaml`, `nix-image-builder.yaml` — NixOS build/deploy pipelines; the manual image builder produces downloadable Pi SD-image artifacts from native ARM runners, retained for one day
-	- **Renovate** opens PRs for Helm charts, container images, Terraform providers, and GitHub Actions
-- ## The bootstrap exceptions
-	- Two places where a layer reaches into another: the Flux bootstrap (`clusters/<site>/bootstrap/` Terraform installs `flux-operator`/`flux-instance`; the `FluxInstance`'s `instance.sync` in `flux-values.yaml` then owns the root `GitRepository`/`Kustomization` — no hand-applied `cluster.yaml`), and the Atlantis ↔ ArgoCD auth wiring (see [[Runbooks/Kubernetes GitOps Change]] for token rotation).
+	- Every root under `terraform/` and each `clusters/<site>/bootstrap/` is a standalone Terraform root, applied through **Atlantis** (`clusters/offsite/apps/atlantis`, itself a Flux `HelmRelease`) on the PR — never locally against remote state.
+	- The binary is **OpenTofu** (`tofu`), not Terraform: Atlantis's chart value `defaultTFDistribution: opentofu` sets `ATLANTIS_DEFAULT_TF_DISTRIBUTION=opentofu`, and CI (`terraform.yml`) installs via `opentofu/setup-opentofu` and runs `tofu init -backend=false`, `tofu validate`, and `tofu test` per affected root, plus a separate `tofu fmt -check -recursive` job. `mise.toml` installs both `tofu` and `terraform`, but `mise run tf:*` (`tf:init`, `tf:validate`, `tf:fmt`, `tf:docs`, `tf:plan`) is the local command source of truth.
+	- Flow: open a PR touching a root → Atlantis autoplans it (`ATLANTIS_AUTOPLAN_MODULES: "true"`, file list `**/*.tf*,terraform/**/*.conf`) and runs a `policy_check` (conftest-style policy set, owners `jonpulsifer`/`rowbutt`) → review the plan comment → comment `atlantis apply` → `ATLANTIS_AUTOMERGE: "true"` merges the PR once the apply succeeds.
+	- `trivy.yml` additionally scans every changed `.tf` directory (and `clusters/**`) for CRITICAL/HIGH IaC findings on the PR.
+	- Step-by-step: [[Runbooks/Terraform Change]]. Root/module layout: [[Architecture/Terraform]].
+- ## Kubernetes → Flux, and where ArgoCD fits
+	- Merge to `main` → Flux reconciles `clusters/**`. Each cluster's root sync comes from its `FluxInstance` — `clusters/<site>/bootstrap/bootstrap.tf` installs `flux-operator`/`flux-instance`, and `flux-values.yaml`'s `instance.sync` points it at the `infra` `GitRepository` (`pullSecret: flux-github-app-credentials`, `ref: refs/heads/main`, `path: clusters/<site>/flux-system`). There's no hand-applied root `Kustomization`.
+	- `kustomize.yml` renders `clusters/base/**` and `clusters/{folly,offsite}/apps/**` (plus their `arc` overlays) with `kubectl kustomize` on push/PR — a render check, not an apply.
+	- `topology-contract.yml` runs `conftest` against `.github/policy/cluster-topology.rego` on both clusters' `cluster-topology.json` before Flux ever substitutes those values into a manifest.
+	- ArgoCD ships the same way as everything else: it's a Flux `HelmRelease` (`clusters/folly/apps/argo`). Its RBAC grants an `atlantis` API-key account full access to `applications`/`applicationsets`, and the Atlantis `HelmRelease` carries `ARGOCD_SERVER`/`ARGOCD_AUTH_TOKEN` — wiring for Atlantis to manage ArgoCD `Application` resources through `terraform/argo`, an `argocd`-provider Terraform root (state prefix `terraform/argo`). As of today that root declares only the provider — its generated `README.md` reads "No resources" — so ArgoCD is installed but owns no applications yet; Flux is the only thing writing live cluster state right now. `argocd-diff-preview.yaml` already posts a diff-preview PR comment for changes under `clusters/**/argo/**` or `terraform/argo/**`, ready for when that path is used.
+	- Never `kubectl apply` to author state; `kubectl`, `flux get`, `flux reconcile` are for inspection or forcing a sync.
+	- Step-by-step: [[Runbooks/Kubernetes GitOps Change]]. Cluster internals: [[Architecture/Kubernetes]].
+- ## NixOS → nixos-rebuild + daily auto-upgrade
+	- Apply command: `nixos-rebuild switch|boot --flake .#<host> --target-host <host> --sudo`. `boot` installs the generation and activates on the next reboot; `switch` activates immediately.
+	- Every NixOS host — including the k8s nodes (`optiplex`, `riptide`, `shale`, `oldschool`, `retrofit`, declared inline in `flake.nix`, not under `nix/hosts/`) — carries `system.autoUpgrade` enabled by default (`nix/system/nixos.nix`: flake `github:jonpulsifer/infra`, daily at `03:37` plus up to a 1h random delay). Hosts self-pull and rebuild from `main` daily with no workflow run involved.
+	- `radiopi0` and `blinkypi0` disable `system.autoUpgrade` — both cross-build elsewhere and only ever get pushed to via `nixos-rebuild --target-host`, never on-device. They (plus `cloudpi4`, `homepi4`, `weatherpi4`) update through `nixos-deploy.yaml`, a manual `workflow_dispatch` that builds on an aarch64 GitHub runner, joins the tailnet with a short-lived Tailscale OIDC key (`tag:ci`), and runs `nixos-rebuild` over SSH to `<host>.pirate-musical.ts.net`.
+	- Implication: a host deployed straight from a branch stays live only until the next auto-upgrade cycle pulls `main` and reverts it. Merge promptly, or treat a branch deploy as a test.
+	- `nix-ci.yaml` gates all of this: `nix flake check`, a build of `optiplex`'s closure, a native-ARM build of `spore`, and the `container`/`wsl`/`rackpi5` image outputs — scoped to changed paths through the same routing mechanism as Terraform (below).
+	- Step-by-step: [[Runbooks/Deploy a NixOS Host]]. Host inventory: [[Fleet]]. Layer background: [[Architecture/NixOS]].
+- ## How CI decides what to validate
+	- `.github/scripts/validation-impact.sh` is the shared routing seam behind both `terraform.yml` and `nix-ci.yaml`: given changed paths on stdin, its `targets` command prints one stable target per line — `terraform:<root>` (walking up from each changed `*.tf`/`*.tftest.hcl`/`.terraform.lock.hcl` to the nearest directory holding a `.tf` file) or `nix:flake-check` (a fixed path list: `flake.nix`/`flake.lock`, `nix/*`, `apps/ddnsd/*`, `apps/spore/*`, `dotfiles/*`, both clusters' `cluster-topology.json`, `terraform/network/unifi/folly/lab.tf.json`/`clients.yaml`, `.github/workflows/nix-ci.yaml`).
+	- A Terraform root is any directory (under `terraform/` or `clusters/*/bootstrap`) whose `.tf` file has a `backend "` block — that's what separates an independently-applied root from a reusable module under `terraform/modules/`. A change to `validation-impact.sh` or `terraform.yml` itself fans out to every root.
+	- `terraform.yml`'s `changed-directories` job feeds the routed roots into a matrix so `validate`/`fmt` only run against what changed; `nix-ci.yaml`'s `changed-paths` job checks for the literal `nix:flake-check` line to gate its `check`/`nixos`/`spore`/`images` jobs. A `routing-tests` job runs `validation-impact_test.sh` to unit-test the routing script itself.
+	- `containers.yml` and `kustomize.yml` route independently, by path prefix rather than through `validation-impact.sh`: `containers.yml`'s `detect-containers.sh` matches `apps/**`/`packages/**`/`images/**` against `.github/containers.json`'s `build`/`ignore` classification — an image with a `Dockerfile` that isn't classified fails CI. `kustomize.yml`, `trivy.yml`, and `topology-contract.yml` key off their own workflow-level `paths:` filters.
+- ## Renovate
+	- `.github/renovate.json5` opens PRs for Terraform providers, Helm charts, container images, GitHub Actions, Nix packages (including the in-repo `dotfiles` input), and npm packages, grouped and labeled by kind.
+	- Automerge (GitHub-native, `platformAutomerge: true`) is broad but tiered: Terraform provider bumps use `update-lockfile` and automerge once CI passes — lockfile-only, so no `atlantis apply` is needed; container/Helm patch+digest and Flux minor/patch bumps automerge; GitHub Actions automerge (majors sit out a 3-day age gate first); non-major npm updates automerge after a 7-day cooldown. The `mise` prebuilt-binary bump in `nix/overlays/mise.nix` never automerges — its two `fetchurl` hashes need a manual refresh.
+	- Anything touching `clusters/**` still only takes effect once its PR merges and Flux reconciles; anything touching a Terraform root with real resource changes still needs a reviewed `atlantis apply`.
+- ## Docs publish
+	- `wiki.yml` builds `docs/` — this Logseq graph — with the Bun SSG in `apps/wiki` (`bun run build` → `dist/`) on every push and PR touching `docs/**`, `apps/wiki/**`, or the workflow itself. On `main` it additionally runs `bun x wrangler pages deploy dist --project-name=infra-wiki` to Cloudflare Pages (project and DNS Terraform-managed in `terraform/network/cloudflare/`). A docs page goes live at wiki.lolwtf.ca the moment its PR merges to `main` — there's no separate publish step.
+	- Validate before opening a docs PR: [[Runbooks/Validate Infra Changes]].

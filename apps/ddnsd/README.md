@@ -1,11 +1,12 @@
 # Cloudflare DDNS Client (`ddnsd`)
 
-![CI](https://img.shields.io/github/actions/workflow/status/jonpulsifer/ddnsd/ci.yaml?branch=main)
-![License](https://img.shields.io/github/license/jonpulsifer/ddnsd)
-![Go Report Card](https://goreportcard.com/badge/github.com/jonpulsifer/ddnsd)
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/jonpulsifer/ddnsd)
+A dynamic DNS updater for Cloudflare-managed domains: it keeps a DNS record
+pointed at the current IP address. Useful for home servers, IoT devices, or any
+setup on a dynamic IP.
 
-Cloudflare DDNS Client (`ddnsd`) is a dynamic DNS updater for Cloudflare-managed domains, enabling you to automatically update DNS records as your IP address changes. This tool is especially useful for home servers, IoT devices, or any other setup with a dynamic IP address.
+`ddnsd` ships two ways from this repo — as the `ghcr.io/jonpulsifer/ddnsd`
+container image, and as a Nix package that NixOS hosts run as a systemd service
+via `nix/system/ddnsd.nix`.
 
 ## 🚀 Features
 
@@ -21,15 +22,14 @@ Before you begin, ensure you have met the following requirements:
 
 - A Cloudflare account and API token with permissions to edit DNS records
 - The zone (domain) name for which you want to update the DNS record
-- Go 1.22 or later installed on your machine
+- Go 1.25 or later, to build from source
 
 ## 🛠 Installation
 
-To install `ddnsd`, clone the repository and build the binary using Go:
+Build the binary from this directory:
 
 ```bash
-git clone https://github.com/jonpulsifer/ddnsd.git
-cd ddnsd
+cd apps/ddnsd
 go build
 ```
 

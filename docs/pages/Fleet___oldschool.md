@@ -1,6 +1,4 @@
 type:: host
-cluster:: [[Architecture/Kubernetes]] offsite
-role:: worker
 vendor:: HP
 model:: EliteDesk 800 G3 DM 35W
 year:: ~2017
@@ -13,6 +11,5 @@ storage:: 512 GB KingFast SATA SSD (root 63 GB, 70% used)
 os:: NixOS 26.05 (Yarara)
 firmware:: P21 Ver. 02.15 (2018-01-31)
 
-- offsite worker; also runs docker, a GitHub Actions runner, and yarr.
+- offsite worker. Also runs docker, a GitHub Actions runner, and yarr.
 - Offsite — reach over the tailnet.
-- See [[Fleet]] for the full inventory.

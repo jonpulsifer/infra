@@ -1,7 +1,7 @@
 tags:: runbook
 hosts:: homepi4, weatherpi4
 
-- This runbook covers the Raspberry Pi kiosk hosts `homepi4` and `weatherpi4`. Both use `nix/services/kiosk.nix`. The display stack is **Cage on Wayland**; Firefox runs in kiosk/private-window mode against the configured kiosk URL. For container-backed kiosks, the default URL is `http://localhost:8080`.
+- This runbook covers the Raspberry Pi kiosk hosts `homepi4` and `weatherpi4`. Both use `nix/services/kiosk.nix` with `container = false` and point Firefox directly at `https://hub.lolwtf.ca` — there is no local container on either host today. The display stack is **Cage on Wayland**; Firefox runs in kiosk/private-window mode against that URL.
 - # Quick checks
 	- Check Cage and Firefox:
 	- ```bash
@@ -11,32 +11,25 @@ hosts:: homepi4, weatherpi4
 	- Expected:
 		- `cage-tty1.service` is `active (running)`
 		- Cage runs `/nix/store/...-kiosk-firefox`
-		- Firefox runs with `--kiosk --private-window http://localhost:8080`
-	- Check the container-backed app:
+		- Firefox runs with `--kiosk --private-window https://hub.lolwtf.ca`
+	- Check that the remote hub is reachable from the host:
 	- ```bash
-	  nix run .#<host> -- systemctl --no-pager --full status docker-kiosk.service
-	  nix run .#<host> -- docker ps
-	  nix run .#<host> -- journalctl -u docker-kiosk.service -n 50 --no-pager
+	  nix run .#<host> -- curl -sk -o /dev/null -w '%{http_code}\n' https://hub.lolwtf.ca
 	  ```
-	- Expected:
-		- `docker-kiosk.service` is active
-		- Container `kiosk` is running `ghcr.io/jonpulsifer/hub:latest`
-		- Port mapping includes `0.0.0.0:8080->8080/tcp`
-		- Recent logs include `GET / 200` and, for the weather app, `GET /api/weather 200`
+	- Expected HTTP status is `200`.
 - # If the screen shows Firefox "Oops"
-	- This is usually Firefox loading before the local container is ready. The module uses a wrapper that waits for the kiosk URL before launching Firefox, but after manual switches or service restarts it is still worth checking the order of events.
-	- Check whether the app is serving:
+	- Both hosts point straight at the remote `https://hub.lolwtf.ca` — there is no local container and no readiness wait before Firefox launches, so "Oops" here almost always means the host couldn't reach that URL (Wi-Fi, DNS, or the hub itself) when Cage started.
+	- Confirm reachability:
 	- ```bash
-	  nix run .#<host> -- journalctl -u docker-kiosk.service -n 80 --no-pager
+	  nix run .#<host> -- curl -sk -o /dev/null -w '%{http_code}\n' https://hub.lolwtf.ca
 	  ```
-	- If the app is healthy and logging `GET / 200`, refresh the display by restarting Cage:
+	- If it now answers `200`, restart Cage so Firefox reloads:
 	- ```bash
 	  nix run .#<host> -- sudo systemctl restart cage-tty1.service
 	  ```
 	- Verify Firefox relaunched:
 	- ```bash
 	  nix run .#<host> -- pgrep -a firefox
-	  nix run .#<host> -- journalctl -u docker-kiosk.service -n 20 --no-pager
 	  ```
 - # If Cage is inactive
 	- Check whether it is enabled and part of the graphical target:
@@ -54,16 +47,6 @@ hosts:: homepi4, weatherpi4
 	  NOT restarting the following changed units: cage-tty1.service
 	  ```
 	- In that case, restart Cage once:
-	- ```bash
-	  nix run .#<host> -- sudo systemctl restart cage-tty1.service
-	  ```
-- # If the container is down
-	- Restart the container service:
-	- ```bash
-	  nix run .#<host> -- sudo systemctl restart docker-kiosk.service
-	  nix run .#<host> -- systemctl --no-pager --full status docker-kiosk.service
-	  ```
-	- Then restart Cage so Firefox reconnects to the now-running app:
 	- ```bash
 	  nix run .#<host> -- sudo systemctl restart cage-tty1.service
 	  ```

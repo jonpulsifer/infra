@@ -197,7 +197,7 @@ async function blockSnippet(b: Block, page: Page): Promise<string> {
 
 // ── chrome ───────────────────────────────────────────────────────────────────
 
-const NAV_ORDER = ["Home", "Architecture", "ADR", "Runbooks", "Fleet", "Contributing"];
+const NAV_ORDER = ["Home", "Architecture", "Runbooks", "Fleet"];
 
 function nav(current: Page | null): string {
   const item = (name: string) => {

@@ -29,14 +29,14 @@ tags:: runbook, validation
 	  ```
 	- See [[Runbooks/Kubernetes GitOps Change]] and [[Runbooks/Add Shared Kubernetes Resource]].
 - # Terraform
-	- From the changed root:
+	- The binary is **OpenTofu** (`tofu`), not `terraform`. Validate every root the same way CI does:
 	- ```bash
-	  terraform init -backend=false
-	  terraform validate
+	  mise run tf:init
+	  mise run tf:validate
 	  ```
 	- Format:
 	- ```bash
-	  terraform fmt -recursive
+	  mise run tf:fmt
 	  ```
 	- See [[Runbooks/Terraform Change]].
 - # Secrets safety

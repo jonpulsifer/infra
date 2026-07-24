@@ -1,27 +1,32 @@
 icon:: 🌍
 tags:: architecture
 
-- **Layer 3.** All Terraform root modules live under `terraform/`; each is standalone. Applies run through **Atlantis** on the PR — never locally ([[ADR/0001 GitOps apply model]]).
-- ## Network fabric — `terraform/network/`
-	- `unifi/folly/` — primary-site UniFi: VLANs, BGP config, client management (state prefix `terraform/unifi`)
-	- `unifi/offsite/` — offsite UniFi: networks, WANs, WLANs, BGP (state prefix `terraform/unifi/offsite`)
-	- `cloudflare/` — DNS zones (pulsifer.ca, wishin.app, lolwtf.ca), tunnels, security rules, the Pages project behind this wiki
-	- `tailscale/` — devices, routes, ACL policy
-- ## Cloud & identity
-	- `gcp/organization/` — org-level IAM, folders, projects, billing
-	- `gcp/projects/<name>/` — per-project resources (homelab-ng, firebees, lolcorp, …)
-	- `argo/` — ArgoCD application definitions
-	- `google-workspace/` — users, groups, domains
-	- OpenBao backing resources — GCP KMS in `gcp/projects/homelab-ng/`; the server's integrated Raft storage is Flux-managed
-	- `modules/` — reusable modules consumed by relative path
-- ## Workflow
-	- Open a PR → Atlantis autoplans the changed module(s) → review the plan → comment `atlantis apply` → successful apply automerges.
-	- Locally, only inspection:
-	- ```bash
-	  terraform init -backend=false && terraform validate
-	  terraform fmt -recursive
-	  ```
-	- **Never `terraform apply` against remote state** — it races Atlantis and causes lock contention and drift.
-	- Roots that need network facts read the SSOT: `jsondecode(file(".../cluster-topology.json")).data` via a `topology.tf` per root ([[ADR/0003 Cluster topology single source of truth]]).
-- ## CI
-	- `terraform.yml` validates changed `.tf` files on PRs, then auto-formats and regenerates terraform-docs on merge to `main`. `trivy.yml` scans for IaC vulnerabilities. Renovate bumps providers.
+- Layer 3: cloud and identity resources managed as code under `terraform/`, applied by **Atlantis**. Every root module is standalone — its own state, its own backend.
+- ## The binary is OpenTofu
+	- The apply-path binary is **`tofu`** (OpenTofu), not `terraform`. Atlantis runs with `ATLANTIS_DEFAULT_TF_DISTRIBUTION=opentofu`; `mise.toml` installs both `opentofu` and `terraform`, with `terraform` kept for anything not on the OpenTofu path. CI's `validate` job uses `opentofu/setup-opentofu` and runs `tofu init` / `tofu validate` / `tofu test`.
+	- `terraform/pki` requires OpenTofu specifically: it uses the `opentofu/tls` provider fork for `max_path_length`, published only on the OpenTofu registry.
+	- The directory is still named `terraform/` — only the binary changed.
+- ## Layout
+	- **Network fabric** — `terraform/network/`: UniFi at the two sites (`unifi/folly/`, `unifi/offsite/`), `cloudflare/`, `tailscale/`. Covered in [[Architecture/Networking]] — this page doesn't duplicate VLANs, BGP, or tunnel detail.
+	- **Cloud & identity** — `terraform/gcp/organization/` (org-level IAM, folders, projects, billing), `terraform/gcp/projects/<name>/` (one directory per GCP project), `terraform/argo/` (the `argocd` provider wiring; it declares no resources today), `terraform/google-workspace/` (users, groups, domains), and `terraform/pki/` (the FML per-cluster K8s CAs and ServiceAccount token-signer certs, issued off a 1Password-held intermediate; each cluster's OIDC discovery document lives under `terraform/pki/oidc/<cluster>/` and is served at `oidc.lolwtf.ca` — see [[Architecture/Secrets and PKI]]).
+	- **Cluster bootstrap** — `clusters/<site>/bootstrap/` (e.g. `clusters/folly/bootstrap/bootstrap.tf`) is also a standalone root: it installs `flux-operator`/`flux-instance` via the `flux-bootstrap` module.
+	- **Reusable modules** — `terraform/modules/`: building blocks roots consume by relative `source` path, e.g. `source = "../../../modules/cluster-topology"` or `source = "../../../modules/gce-vpc"`. A module directory has no backend of its own — see the state-backend discovery rule below.
+- ## State backends
+	- Every root backs onto the same GCS bucket, `homelab-ng`, with a per-root `prefix`. Most prefixes mirror the directory path; the `terraform/network/` roots use shorter ones (`terraform/unifi`, `terraform/cloudflare`, `terraform/tailscale`) that do not match their directory name. A state prefix is a stable address, not a mirror of the tree — read the `backend` block rather than inferring the prefix from the path.
+- ## How CI finds the roots
+	- `.github/scripts/validation-impact.sh` is the single mechanism CI uses to turn a set of changed paths into a set of Terraform roots to validate — no hardcoded root list.
+	- `terraform_roots()` greps every `*.tf` file under `terraform/` and `clusters/*/bootstrap` for a `backend "` block and takes the unique parent directories. A backend declaration is what makes something a root instead of a module — `terraform/modules/*` has none, so it's never selected.
+	- `targets()` maps each changed path to root(s): a changed `*.tf` or `.terraform.lock.hcl` walks up from its directory to the nearest ancestor containing `*.tf` files (`terraform_root_for_path`); a changed `lab.tf.json` or `clients.yaml` maps straight to `terraform/network/unifi/folly`; a changed `validation-impact.sh` or `terraform.yml` invalidates every root.
+	- `.github/workflows/terraform.yml` calls this script to build the `changed-directories` job's matrix, then runs `validate` (`tofu init -backend=false`, `tofu validate`, `tofu test`) and a separate `fmt` job (`tofu fmt -check -recursive`) per matched root. `mise run tf:init` / `tf:validate` run the same discovery locally.
+- ## `tofu test`
+	- CI's `validate` job runs `tofu test` in every matched root, not just `tofu validate`. Most roots have no `*.tftest.hcl` files, so this is a no-op assertion of "still green"; `clusters/folly/bootstrap` and `clusters/offsite/bootstrap` carry real test suites (`bootstrap.tftest.hcl`) that exercise the Flux bootstrap module's outputs.
+	- `fmt` is a PR check (`tofu fmt -check -recursive`), not an auto-commit to `main` — branch protection rejects bot pushes. Fix drift locally with `mise run tf:fmt`.
+- ## Network facts: the `topology.tf` pattern
+	- Roots that need cluster network facts (`K8S_NODE_CIDR`, `API_SERVER_IP`, `LB_RANGE`, …) don't `jsondecode` the SSOT directly — they instantiate the `terraform/modules/cluster-topology` module in a `topology.tf`, passing `site = "folly"` (or `"offsite"`, or `for_each` over both for `terraform/network/cloudflare`). The module itself does the read: `jsondecode(file("${path.module}/../../../clusters/${var.site}/config/cluster-topology.json")).data`, exposed as its `data` output.
+	- Callers use it as `local.topology.<KEY>`, e.g. `local.topology.LB_RANGE` in `terraform/network/unifi/folly/topology.tf`. Edit the JSON ConfigMap, never the values that reference it.
+- ## terraform-docs
+	- Root READMEs with a `BEGIN_TF_DOCS` / `END_TF_DOCS` marker pair get their Requirements/Providers/Modules/Resources/Inputs/Outputs tables generated from the `.tf` source. `mise run tf:docs` finds every README with the markers and re-injects them with `terraform-docs markdown table --output-mode inject`.
+	- This is a local task only — no CI workflow regenerates or checks these tables, so a stale README next to current `.tf` files is a real possibility until someone runs the task.
+- ## Applying
+	- Open a PR touching a root → Atlantis autoplans it → comment `atlantis apply` after reviewing the plan → a successful apply automerges. Full flow, including the Atlantis ↔ ArgoCD auth wiring, is on [[Architecture/GitOps]].
+	- **Never run `tofu apply` (or `terraform apply`) against remote state locally.** It races Atlantis for the state lock and produces drift. Local `tofu init` / `tofu plan` (or `mise run tf:plan` with `TF_DIR` set) are for inspection only.
