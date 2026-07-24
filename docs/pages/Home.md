@@ -1,20 +1,23 @@
 icon:: 🏡
 
 - # jonpulsifer/infra
-- The living documentation for a multi-layer homelab managed entirely as code: NixOS bare metal, two Kubernetes clusters, Terraform-managed cloud and network fabric, and GitOps-driven deployments. The source of truth is the [infra repository](https://github.com/jonpulsifer/infra); this wiki is the `docs/` Logseq graph inside it, published on every merge to `main`.
+- Living documentation for a homelab managed entirely as code: NixOS bare metal, two Kubernetes clusters, an OpenTofu-managed cloud and network fabric, and GitOps-driven deployments. The source of truth is the [infra repository](https://github.com/jonpulsifer/infra); this wiki is its `docs/` Logseq graph, published on every merge to `main`.
 - ## Start here
 	- [[Architecture]] — the four layers and how they fit together
-	- [[ADR]] — architecture decision records: why things are the way they are
 	- [[Runbooks]] — operational procedures for when things misbehave
-	- [[Fleet]] — every host, its role, and its hardware
-	- [[Contributing]] — how to edit this wiki
+	- [[Fleet]] — every host, its hardware, and its quirks
 - ## The stack in one breath
-	- **Layer 1 — Bare metal**: [[Architecture/NixOS]] configurations for every physical host, deployed with `nixos-rebuild` and kept honest by auto-upgrades from `main`.
-	- **Layer 2 — Kubernetes**: two clusters (`folly` on-site, `offsite` backup) reconciled by FluxCD, described in [[Architecture/Kubernetes]].
-	- **Layer 3 — Cloud & network**: UniFi, Cloudflare, Tailscale, GCP, and Google Workspace, all under [[Architecture/Terraform]] with applies gated through Atlantis. OpenBao runs through Flux in the folly cluster.
-	- **Layer 4 — Applications**: first-party services, packages, and OCI images, catalogued in [[Architecture/Applications]].
-	- Everything ships the same way: open a PR, let the operators apply it. See [[Architecture/GitOps]].
+	- **Bare metal** — [[Architecture/NixOS]] configuration for every host, deployed with `nixos-rebuild` and kept honest by auto-upgrades from `main`.
+	- **Kubernetes** — two clusters, `folly` on-site and `offsite` for backup, reconciled by FluxCD. See [[Architecture/Kubernetes]].
+	- **Cloud and network** — UniFi, Cloudflare, Tailscale, GCP and Google Workspace under [[Architecture/Terraform]], with applies gated through Atlantis. The network fabric itself is [[Architecture/Networking]].
+	- **Applications** — first-party services, packages and OCI images, described in [[Architecture/Applications]].
+	- Everything ships the same way: open a PR and let the operators apply it. See [[Architecture/GitOps]].
 - ## House rules
-	- Author desired state in git; never mutate live infra directly.
-	- Network facts come from the `cluster-topology` single source of truth — see [[ADR/0003 Cluster topology single source of truth]].
-	- Secrets are SOPS-encrypted in-repo; this wiki is public, so nothing decrypted ever lands here. See [[Architecture/Secrets and PKI]].
+	- Author desired state in git. Never mutate live infrastructure by hand.
+	- Network facts come from the `cluster-topology` single source of truth. Reference it; never copy values out of it.
+	- Secrets are SOPS-encrypted in the repository. **This site is public** — nothing decrypted ever lands here. See [[Architecture/Secrets and PKI]].
+- ## Editing
+	- These pages are the `docs/` directory of the repo. Editing is a normal PR; merging to `main` publishes to [wiki.lolwtf.ca](https://wiki.lolwtf.ca).
+	- Pages are Logseq outline markdown: `key:: value` properties at the top, every block starts with `- `, nesting is tabs, and a `/` in a page name is `___` in the filename.
+	- The renderer supports outline text, wiki-style page links, properties, `#tags`, tables and code fences — not block refs, embeds or queries. Extend `apps/wiki/build.ts` before reaching for those.
+	- Write in the present tense about what is true today. Git history is the record of what changed; these pages are not.

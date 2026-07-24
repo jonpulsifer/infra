@@ -1,6 +1,6 @@
 tags:: runbook, kubernetes, gitops
 
-- Use this when changing manifests under `clusters/` or inspecting Flux deployment state. Architecture lives in [[Architecture/Kubernetes]] and the apply model is [[ADR/0001 GitOps apply model]].
+- Use this when changing manifests under `clusters/` or inspecting Flux deployment state. Architecture lives in [[Architecture/Kubernetes]]; the apply model is on [[Architecture/GitOps]].
 - # Rule
 	- Author desired state in git and let Flux reconcile it after merge. Do not use `kubectl apply` to author state.
 	- Use explicit contexts:

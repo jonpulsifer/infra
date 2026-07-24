@@ -1,49 +1,52 @@
 icon:: ❄️
 tags:: architecture
 
-- **Layer 1.** Every physical host runs NixOS, configured under `nix/` and declared in `flake.nix` via a `mkHost` helper (`nix/lib/mkHost.nix`). See [[Fleet]] for the concrete machines.
-- ## Layout
-	- `nix/hosts/<hostname>.nix` — per-host entry points (the Pis, `spore`, `oldboy`); k8s nodes are defined directly in `flake.nix` with `role`/`tags` and pull in the k8s service modules
-	- `nix/hardware/` — hardware profiles (pi4, pi5, x86)
-	- `nix/services/` — optional service modules (`k8s/`, `common.nix`, `kiosk.nix`, `iperf3.nix`, …)
-	- `nix/system/` — core modules: SSH hardening, Tailscale, auto-upgrades, users, disko, mise-dotfiles
-	- `nix/overlays/` — package patches and overrides
-	- `nix/images/` — buildable images: WSL tarball, ISO, GCE, container, netboot, and the pi5 RAM image
-	- App-local `package.nix` / `module.nix` pairs may be imported by a host when an application belongs directly on NixOS. `apps/ddnsd` uses this pattern (`nix/system/ddnsd.nix`).
-- ## Host groups
-	- **folly k8s nodes**: `optiplex` (control-plane), `riptide`, `shale`
-	- **offsite k8s nodes**: `retrofit` (control-plane), `oldschool`
-	- **Raspberry Pis**: `cloudpi4`, `homepi4`, `weatherpi4`, `dns`, `rackpi5` (diskless — see [[ADR/0008 Diskless netboot for rackpi5]]), `spore` (NFS/PXE server)
-		- `spore` runs no application — only nginx/dnsmasq and a root-only signed native-boot publisher (`nix/services/spore-native-boot.nix`). The x86 static PXE tree remains isolated, while diskless `rackpi5` intentionally uses the static `/rackpi5-ram/` artifacts as its sole boot path; see [[ADR/0014 Collapse Spore to a static netboot server]].
-	- **Cloud**: `oldboy` (GCE)
-- ## Deploying
-	- Build without deploying:
-	- ```bash
-	  nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
-	  ```
-	- Build a Raspberry Pi SD image natively on ARM:
-	- ```bash
-	  nix build .#nixosConfigurations.<hostname>.config.system.build.sdImage
-	  ```
-	- Deploy immediately:
-	- ```bash
-	  nixos-rebuild switch --flake .#<hostname> --target-host <hostname> --sudo
-	  ```
-	- Deploy safely (activates on next reboot):
-	- ```bash
-	  nixos-rebuild boot --sudo --target-host <hostname> --flake .#<hostname>
-	  ```
-	- Roll back on the host:
-	- ```bash
-	  sudo nixos-rebuild switch --rollback
-	  ```
-- ## Downloadable Pi images
-	- Run the manual `nix-image-builder` workflow from GitHub Actions and select a Raspberry Pi image.
-	- Pi images build on a native `ubuntu-24.04-arm` runner and are uploaded as `<image>-sd-image` artifacts.
-	- Artifacts are retained for one day, so download them from the workflow run promptly.
-- ## Auto-upgrades keep git honest
-	- Hosts auto-rebuild from GitHub `main`. A config deployed from a branch **silently reverts** on the next upgrade cycle unless the branch merges promptly. Treat `nixos-rebuild` from a branch as a test, not a deploy.
-- ## Disk layout
-	- Partitioning is declarative via disko with GPT partlabels (`disk-main-*`). Hosts installed before the migration need their partitions relabeled or they fail to boot — see [[ADR/0004 Disko with GPT partlabels]] and the scripts in `nix/scripts/`.
-- ## Dotfiles
-	- mise-managed (`[dotfiles]` + `mise bootstrap --only dotfiles`) from the in-repo `dotfiles/` tree; an activation script applies them from the store path on every rebuild/boot, no network clone. See [[ADR/0011 Migrate dotfiles from chezmoi to mise]].
+- **Layer 1: bare metal.** Every host in the fleet is declared as NixOS in one flake at the repo root (`flake.nix`), configured under `nix/`. A few hosts run something else and are being brought across — [[Fleet]] lists the machine inventory and the known divergence. [[Runbooks/Deploy a NixOS Host]] has the build/deploy/rollback commands; this page is architecture only.
+- ## How a host is built: `mkHost`
+	- `flake.nix` never calls `nixosSystem` directly. Every host goes through `mkHost` (`nix/lib/mkHost.nix`), which always prepends two modules before anything host-specific: `nix/system/ssh.nix` and `nix/system/user.nix`. `specialArgs` passed to every host include `inputs`, `name` (the flake attribute name, used as `networking.hostName`), `tags`, and `nixos-raspberrypi` (the board-support flake input, needed as a top-level specialArg by its own modules).
+	- From there `mkHost` branches on whether the call passed an explicit `modules` list:
+		- **`modules` given** → those modules are used as-is. This is every Pi, `oldboy`, and `rackpi5`.
+		- **`modules` omitted** → `mkHost` synthesizes one module from `tags`/`role`/`imports`/`extraConfig`, importing `nix/profiles/k8s-node.nix` and setting `networking.hostName`, `services.k8s.network` (derived from the `folly`/`offsite` tag), and `services.k8s.role` (`worker` unless `role = "control-plane"`). This is every Kubernetes node.
+	- `nix/profiles/k8s-node.nix` itself imports `nix/hardware/x86`, `nix/disko`, `nix/services/common.nix`, and `nix/services/k8s` — so a k8s node's full module stack is: `ssh.nix` + `user.nix` (from `mkHost`) → x86 hardware → disko → common services → the k8s service → whatever the flake entry added via `imports`/`extraConfig`.
+	- A non-k8s host's stack is whatever its `nix/hosts/<name>.nix` imports — in practice always some `nix/hardware/*` board module plus `nix/services/common.nix` (which itself pulls in `mise-dotfiles.nix`, `ddnsd.nix`, `nixos.nix`, `ssh.nix`, `tailscale.nix`, `user.nix`), plus whatever optional `nix/services/*` modules that host needs.
+- ## Inline in `flake.nix` vs `nix/hosts/*.nix`
+	- Kubernetes nodes are declared **inline** in `flake.nix`'s `nixosConfigurations` — `tags`, optional `role`, `imports` (e.g. `system/tailscale-disable.nix`, `system/sops.nix`), and `extraConfig` (disko device/size, sops secrets) sit directly in the flake, mirroring a call like `riptide` or `shale`. There is no `nix/hosts/riptide.nix`.
+	- Everything else — every Pi, `oldboy`, and the four image outputs — passes `modules = [ ./nix/hosts/<name>.nix ]` (or, for the images, a module under `nix/images/`). The flake entry is a one-liner; all host-specific configuration lives in that file.
+	- `rackpi5` is a partial exception: its `nixosSystem` is built once (`rackpi5Configuration`, `system = "aarch64-linux"`, `modules = [ ./nix/hosts/rackpi5.nix ]`) and then referenced twice — as `nixosConfigurations.rackpi5` and as the source of `spore`'s `services.spore.nativeBootTargets.rackpi5.package`, since `spore` is what publishes rackpi5's signed boot image.
+- ## Disk layout: disko
+	- `nix/disko/default.nix` declares a GPT, EFI-only, single-disk layout via `homelab.disko.device` (default `/dev/sda`) and `homelab.disko.rootSize` (default `100G`). Three partitions, all mounted by **GPT partlabel** rather than filesystem label: `disk-main-ESP` (512M vfat → `/boot`), `disk-main-nixos` (root, ext4 → `/`), `disk-main-storage` (remainder, ext4 → `/mnt/disks`, `nofail`). Only k8s nodes use disko (it's pulled in by `profiles/k8s-node.nix`); Pi/image hosts partition via their `sd-image`/`netboot` installer modules instead.
+	- `oldschool` raises `rootSize` to `200G` — headroom for the harmonia binary-cache/remote-builder role stacked on top of Docker, the Actions runner, and `yarr`.
+	- Hosts installed before partlabel-based disko mount by filesystem label instead and fail to find root at boot until relabeled. `nix/scripts/disko-partlabel-check.sh` (read-only audit) and `disko-partlabel-migrate.sh` (`sgdisk` GPT-name rewrite only — never touches filesystem data) handle that in place, no reinstall needed.
+	- The install ISO (below) drives disko through a `homelab-install <host>` wrapper that reads the target host's `homelab.disko.device` straight out of the flake before partitioning.
+- ## Secrets: sops-nix
+	- `nix/system/sops.nix` wires in `sops-nix`, but decrypts with the **host's own SSH ed25519 host key** (`age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ]`) rather than a shared fleet-wide age key — a compromised host only exposes secrets scoped to that host.
+	- It's imported by `imports` on three hosts today: `optiplex` and `retrofit` (each with `sops.defaultSopsFile = nix/secrets/<host>.sops.yaml` and a `k8s-sa-signing-key` secret owned by `kubernetes:kubernetes`, feeding the FML ServiceAccount-issuer cutover in `services.k8s`), and `oldschool` (`harmonia-cache-key`; the cache's public signing half is committed in the clear at `nix/secrets/oldschool-harmonia-cache.pub`). `nix/secrets/` holds one `.sops.yaml` per host that uses it.
+- ## Auto-upgrade
+	- `nix/system/nixos.nix` sets `system.autoUpgrade.enable = lib.mkDefault true`, pulling `github.com:jonpulsifer/infra` (`main`) daily at `03:37` with up to an hour of random delay and `-L` logging. This is on by default for every host built through `mkHost` unless a host overrides it.
+	- Because it's a default, not a hard-coded `true`, individual hosts turn it off where it would be wrong: `radiopi0` and `blinkypi0` both set `system.autoUpgrade.enable = false` — there's no armv6l builder or binary cache anywhere, so their generations are always cross-built elsewhere (in practice on `spore`) and pushed with `nixos-rebuild ... --target-host`, never attempted on-device. `nix/images/container.nix` also forces it off (`lib.mkForce false`) — an ephemeral container image has no business rebuilding itself.
+	- The practical consequence: a config deployed from a branch to a host that still auto-upgrades gets silently reverted on the next `03:37` cycle unless the branch merges to `main` first.
+- ## Image outputs
+	- `flake.nix` builds five extra `nixosConfigurations` through the same `mkHost`/`mkImage` machinery, each backed by a module under `nix/images/`, always `system = "x86_64-linux"`:
+		- `wsl` — `nixos-wsl` module, Docker Desktop interop, and `boot.binfmt.emulatedSystems = [ "aarch64-linux" ]` so a WSL/laptop dev box can cross-build the Pi `sdImage` outputs via qemu-user binfmt without a native aarch64 builder.
+		- `iso` — `installation-cd-minimal` + `hardware/x86` + `services/common.nix`; ships `disko` and a `homelab-install <host>` wrapper (`nix/images/homelab-install.sh`, MOTD points at `nix/images/INSTALL.md`) that reads the target's `homelab.disko.device` out of the flake, then runs `disko --mode destroy,format,mount` and `nixos-install`, both against `github:jonpulsifer/infra#<host>` by default (a branch or local checkout can be substituted).
+		- `gce` — `virtualisation/google-compute-image.nix`; also the base `oldboy` (the GCE VM host) imports directly, layering `services/common.nix` on top — so `gce` doubles as both a buildable generic image and `oldboy`'s actual hardware profile.
+		- `container` — `virtualisation/docker-image.nix`, hostname `pulse`, auto-upgrade and sshguard forced off; ships `curl`/`wget`/`jq`/`htop` for AI-agent dev use.
+		- `netboot` — `installer/netboot/netboot-minimal.nix` + `hardware/x86` + `services/common.nix`: a generic x86 PXE rescue/install image. Distinct from `spore`'s always-on PXE server (`nix/services/pxe-netboot.nix`) and from `rackpi5`'s own netboot boot chain below — this one is a buildable artifact, not a host.
+	- `packages.x86_64-linux` re-exports the buildable artifacts flatly: the five images above, plus `sdImage`/`piBootImg` outputs for `cloudpi4`, `homepi4`, `weatherpi4`, `dns`, `spore`, and `rackpi5` — grouped under `x86_64-linux` because in practice they're all built by cross-compiling from an x86_64 WSL/laptop box, never natively on the Pi. `radiopi0` and `blinkypi0`'s `sdImage` packages instead live under `packages.aarch64-linux`, since their armv6l cross-build actually needs an aarch64 build platform (matching `spore`'s native arch).
+	- The `nix-image-builder` GitHub Actions workflow (manual `workflow_dispatch`) builds a subset on demand: `container`, `gce`, `iso`, `oldboy`, `cloudpi4`, `homepi4`, `weatherpi4`, `radiopi0`, `blinkypi0`, `wsl`. Pi targets run on native `ubuntu-24.04-arm` runners; the rest on standard runners. `gce`/`oldboy`/`wsl` upload straight to GCS; the others upload as workflow artifacts retained for one day. `dns`, `spore`, and `rackpi5` are not in this workflow's choices.
+- ## Cross-compiling the armv6l Pi Zeros
+	- `radiopi0` and `blinkypi0` are the original Pi Zero W (BCM2835, single-core armv6l). No `nixos-hardware`/`nixos-raspberrypi` board module goes back that far, and there's no armv6l binary cache, so `nix/hardware/pi0.nix` sets `nixpkgs.buildPlatform.system = "aarch64-linux"` with `nixpkgs.hostPlatform = lib.systems.examples.raspberryPi` — a real cross-compile (build machine stays its own native arch), not QEMU emulation. Because `nixpkgs.buildPlatform` is pinned to `aarch64-linux`, both hosts' `nixosConfigurations` entries in `flake.nix` are also declared with `system = "aarch64-linux"` to match — the actual target is still armv6l.
+	- The stock Pi kernel config doesn't cross-build cleanly for this chip (some Pi 4/5 and DesignWare-I2C drivers it pulls in emit 64-bit division calls the armv6l kernel linker can't resolve), so `pi0.nix` carries a `structuredExtraConfig` kernel patch that strips those plus camera/media/Bluetooth/CAN/NFC/PCMCIA/SATA/RAID support neither board needs, keeping MMC, USB, wifi, GPIO, SPI, BCM2835 I2C, and ASoC audio.
+	- Both hosts build on `spore` (whose native arch is aarch64-linux, matching the cross build platform above) and are pushed with `nixos-rebuild ... --target-host`, never built on-device; `system.autoUpgrade.enable = false` on both, verified in `nix/hosts/radiopi0.nix` and `nix/hosts/blinkypi0.nix`.
+	- `blinkypi0` is unplugged. Its config mirrors `radiopi0.nix` and is unverified against live hardware — check the wifi and board specifics against the real Pi before deploying to it.
+- ## `rackpi5`: diskless netboot
+	- `rackpi5` has no local storage and one boot path: the Pi 5 EEPROM HTTP-loads a signed `boot.img` from `spore`, and stage 1 downloads and SHA-256-verifies the matching squashfs Nix store before mounting it read-only — no SD/NFS/TFTP fallback. `nix/hosts/rackpi5.nix` builds that `boot.img` (`system.build.piBootImg`) and wires up an initrd fetch service plus a key-authenticated initrd SSH recovery shell (port 2222; the physical console has no emergency shell).
+	- `services.spore.nativeBootTargets.rackpi5` (set on the `spore` host in `flake.nix`, since that's where `rackpi5Configuration.config.system.build.piBootImg` is in scope) publishes the signed artifacts; `nix/services/spore-native-boot.nix` serves them as static files under `/rackpi5-ram/`.
+	- The EEPROM's own boot-order/HTTP-host configuration lives outside the Nix closure entirely and is applied by hand with `rpi-eeprom-config --edit` — a stock EEPROM firmware update erases the enrolled signing key, so it needs re-enrolling before the next reboot after any such update.
+- ## Cluster-topology SSOT feeding into Nix
+	- `nix/services/k8s/networks.nix` reads `clusters/folly/config/cluster-topology.json` and `clusters/offsite/config/cluster-topology.json` with `builtins.fromJSON`, parsing the API-server port to an int and splitting the comma-separated DNS list — the same ConfigMap JSON Flux applies. `nix/services/k8s/default.nix` consumes that for `masterAddress`, `clusterCidr`, `serviceCidr`, `kubelet.clusterDns`, and the static `apiServerIP`/`apiServerHostname` host entry.
+	- `nix/services/nfs-server.nix` (spore) reads the same `folly` topology for `nodeCidr` and `lbRange` to scope its NFS export ACLs to the real node subnet and Cilium LB VIP pool.
+	- `nix/hosts/rackpi5.nix` reads a second SSOT, `terraform/network/unifi/folly/lab.tf.json` (`.locals.lab`), to resolve `spore`'s lab-net IP for its signed-store fetch URL.
+	- None of these files hardcode an address — change the JSON, and Nix, Terraform, and Flux all pick it up.
+- ## Not here
+	- Actual `nixos-rebuild`/`nix build` invocations, adding a new host, rollback, and the auto-upgrade branch-revert caveat in command form: [[Runbooks/Deploy a NixOS Host]].

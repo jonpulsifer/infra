@@ -1,31 +1,37 @@
 icon:: ☸️
 tags:: architecture
 
-- **Layer 2.** Two clusters reconciled by FluxCD from `clusters/`, with ArgoCD layered on for apps sourced from external repositories.
+- **Layer 2** of [[Architecture]]: two Kubernetes clusters under `clusters/`, reconciled by FluxCD on every merge to `main`. Flux owns every piece of live cluster state. ArgoCD is installed as a Flux HelmRelease and owns no applications; `terraform/argo/` wires the provider and declares no resources. Reconciliation mechanics and the apply model live on [[Architecture/GitOps]].
 - ## Clusters
-	- `clusters/folly/` — primary on-site cluster (`optiplex`, `riptide`, `shale`)
-	- `clusters/offsite/` — backup cluster (`retrofit`, `oldschool`)
-	- `clusters/base/` — resources shared by both, referenced by path from each cluster (the multi-cluster pattern)
-- ## Per-cluster structure
-	- `flux-system/` — FluxCD source-of-truth kustomizations
-	- `networking/` — Cilium, cert-manager, Cloudflare tunnel, Gateway API, external-dns
-	- `monitoring/` — kube-prometheus-stack, Loki, Grafana, promtail (folly only; offsite has no Prometheus)
-	- `nodes/` — Intel device plugins, node-feature-discovery
-	- `storage/` — storage classes and provisioners
-	- `config/` — cluster secrets and the `cluster-topology` ConfigMap ([[ADR/0003 Cluster topology single source of truth]])
-	- `bootstrap/` — the Terraform that installs `flux-operator`/`flux-instance` and labels nodes
-- ## How things deploy
-	- Merge to `main` → Flux reconciles. **Never `kubectl apply`** to author state; `kubectl` and `flux` are for inspection or forcing a sync ([[ADR/0001 GitOps apply model]]).
-	- ```bash
-	  flux get kustomizations -A
-	  flux reconcile kustomization <name> -n flux-system
-	  ```
-	- Use explicit contexts and namespaces: `--context folly` / `--context offsite`.
-	- First-party apps deploy as Flux HelmReleases using the `app` / `ai-agent` charts from `packages/charts/`, referenced as `packages/charts/<name>` against the `infra` GitRepository.
-	- Actions Runner Controller provides a shared `infra-<cluster>` scale set in each cluster. First-party repositories use that infra runner pool; they do not get repository-specific scale sets.
-	- ArgoCD application definitions are Terraform-managed in `terraform/argo/`.
-- ## Networking inside the clusters
-	- Cilium is the CNI and the BGP load balancer; VIP pools live in `networking/cilium/ip-pools.yaml` — see [[Architecture/Networking]] and [[ADR/0005 Cilium BGP load balancing]].
-	- Ingress is Gateway API: a `cluster-gateway` fronted by a Cloudflare Tunnel as the external entry point.
+	- `clusters/folly/` — primary, on-site. Nodes: `optiplex` (control-plane), `riptide`, `shale` (workers).
+	- `clusters/offsite/` — backup. Nodes: `retrofit` (control-plane), `oldschool` (worker).
+	- `clusters/base/` — resources shared by both clusters, referenced by relative path from each cluster's manifests.
+	- Hardware, serials, and per-host quirks for all five nodes: [[Fleet]].
+- ## The base/ sharing pattern
+	- A cluster's `flux-system/kustomization.yaml` lists `../../base/flux-system` as a resource alongside its own per-domain Kustomizations. That pulls in the shared platform layer — `arc-system`, `external-secrets-operator`, `onepassword-connect`, `sandbox` (agent-sandbox), `valkey-operator` — from `clusters/base/flux-system/`.
+	- Individual per-cluster manifests also reference specific `base/` subtrees directly wherever an app or component is identical across sites: `clusters/folly/apps/kustomization.yaml` lists `../../base/apps/iperf3` and `../../base/apps/reloader` next to its cluster-only app directories; `clusters/folly/storage/kustomization.yaml` lists `../../base/storage` next to `nfs-provisioner`; `clusters/folly/networking/cloudflare/kustomization.yaml` lists `../../../base/networking/cloudflare` next to its own tunnel credentials.
+	- Where a cluster has no local override at all, its Flux `Kustomization` custom resource points `spec.path` straight at the base directory — `clusters/offsite/flux-system/storage.yaml`'s `path` is `./clusters/base/storage`, since offsite carries no cluster-specific storage overlay.
+	- `clusters/base/kustomization.yaml` itself holds just `cluster-runtimeclass.yaml` and `cluster-settings.yaml` — the `cluster-settings` ConfigMap that, alongside `cluster-topology`, every Flux Kustomization's `postBuild.substituteFrom` reads.
+- ## Bootstrap
+	- `clusters/<site>/bootstrap/` is a standalone OpenTofu root (state `gs://homelab-ng/clusters/<site>/bootstrap`) that calls the shared `terraform/modules/flux-bootstrap` module. The module cuts an ECDSA deploy key, registers it read-only against the `infra` GitHub repository, installs the `flux-operator` and `flux-instance` Helm releases (`oci://ghcr.io/controlplaneio-fluxcd/charts`) into the `flux-system` namespace, and writes the key into the `flux-github-app-credentials` Secret that Flux uses to pull.
+	- `node-labels.tf` in the same root labels each node: `node-role.kubernetes.io/control-plane` or `/worker`, plus `bgp-enabled: "true"` on every node in both clusters.
+	- `flux-values.yaml` supplies the Helm values for `flux-instance`. Its `instance.sync` block is what makes the `FluxInstance` own the root git sync: `GitRepository` name `infra`, ref `refs/heads/main`, path `clusters/<site>/flux-system`, `pullSecret: flux-github-app-credentials`. The operator generates the root `GitRepository`/`Kustomization` from that block — there is no hand-applied root manifest.
+	- This root applies through Atlantis like any other Terraform module — see [[Architecture/GitOps]].
+- ## Nodes
+	- `clusters/folly/nodes/` adds the Intel device-plugin operator, the GPU device plugin, and node-feature-discovery (`intel-uhd-630.yaml`) for the folly nodes' integrated GPUs. offsite has no `nodes/` directory — no device-plugin layer runs there.
+- ## Storage
+	- `clusters/base/storage/` provides `local-path-provisioner`, shared by both clusters.
+	- `clusters/folly/storage/` layers an NFS provisioner (`nfs-provisioner/`, backed by spore) and a static PV (`spore-pv.yaml`) on top. offsite uses `base/storage` unmodified.
+- ## Monitoring
+	- `clusters/base/monitoring/` provides `metrics-server` and `vector` (log shipping), shared by both clusters.
+	- `clusters/folly/monitoring/` layers kube-prometheus-stack and Loki on top, plus Grafana dashboards and hand-written `ServiceMonitor`/`EndpointSlice` pairs that scrape node-exporter and pihole metrics off hosts Prometheus can't discover via the Kubernetes API (`dns`, `spore`, `cloudpi4`, `radiopi0`, `rackpi5`). offsite's `monitoring/kustomization.yaml` carries no resources of its own — no Prometheus stack runs there.
+- ## Networking
+	- Cilium (CNI + BGP load balancing) and the Gateway API live under each cluster's `networking/`, built from shared Helm releases in `clusters/base/networking/{cert-manager,cloudflare,external-dns,tailscale}` plus per-cluster secrets and config. Full detail, including the cross-site firewall gating, is on [[Architecture/Networking]].
+- ## Network facts: the cluster-topology SSOT
+	- `clusters/<site>/config/cluster-topology.json` **is** the Flux `cluster-topology` ConfigMap (`namespace: flux-system`) — applied as-is, because JSON is valid YAML, with no generator step. It's a plain resource in `clusters/<site>/config/kustomization.yaml`.
+	- `data` is a flat `string → string` map: `CLUSTER_NAME`, `API_SERVER_IP`, `API_SERVER_HOSTNAME`, `API_SERVER_PORT`, `ROUTER_IP`, `K8S_NODE_CIDR`, `CILIUM_POD_CIDR`, `SERVICE_CIDR`, `CLUSTER_DNS`, `CILIUM_NATIVE_ROUTING_CIDR`, `LB_RANGE`, `BGP_GATEWAY_ASN`, `BGP_CILIUM_ASN`. It stays flat because Flux's `postBuild.substituteFrom` only accepts string values, so a list (`CLUSTER_DNS`) is comma-separated and numbers (`API_SERVER_PORT`, both ASNs) are stringified.
+	- Every other per-domain Flux `Kustomization` (`apps`, `networking`, `storage`, `monitoring`, `arc-runners`) `dependsOn: config` and substitutes `${VAR}` from this ConfigMap — plus `cluster-settings` and the `cluster-secrets` Secret — via `postBuild.substituteFrom`.
+	- `.github/workflows/topology-contract.yml` runs `conftest` against both clusters' `cluster-topology.json` on every touching PR, enforcing the schema in `.github/policy/cluster-topology.rego`: every required key present and non-empty, IPs/CIDRs/ports/ASNs well-formed, `API_SERVER_IP` and `ROUTER_IP` inside `K8S_NODE_CIDR`, `LB_RANGE` disjoint from `K8S_NODE_CIDR`, and no CIDR overlap between the two clusters' files.
+	- Consumers beyond Flux: `nix/services/k8s/networks.nix` reads it with `builtins.fromJSON`; OpenTofu roots declare a `topology.tf` that instantiates the shared `terraform/modules/cluster-topology` module, which does the `jsondecode`. Full picture on [[Architecture/Networking]].
 - ## Secrets
-	- SOPS-encrypted in-repo (`clusters/**/*.sops.yaml`) — see [[Architecture/Secrets and PKI]].
+	- SOPS-encrypted in-repo (`clusters/**/*.sops.yaml`), decrypted per-Kustomization via `decryption.provider: sops` — see [[Architecture/Secrets and PKI]].

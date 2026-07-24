@@ -45,7 +45,7 @@ tags:: runbook, nixos
 	  ```
 	- If remote access is risky, use the bootloader console or local access and select the previous generation.
 - # Adding a host
-	- Kubernetes nodes normally belong in `baseHostsSpec` in `flake.nix`; the hostname is the attr name and cluster membership comes from tags.
+	- Kubernetes nodes are declared inline in `nixosConfigurations` in `flake.nix` via `mkHost`; the hostname is the attr name and cluster membership comes from `tags = [ "folly" ]` or `[ "offsite" ]`.
 	- Standalone hosts with unique config get a file under `nix/hosts/<hostname>.nix` and a `flake.nix` host entry pointing at it.
 	- Validate after adding a host:
 	- ```bash
@@ -53,7 +53,7 @@ tags:: runbook, nixos
 	  nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel --no-link
 	  ```
 - # Dotfiles
-	- Dotfiles are mise-managed from the in-repo `dotfiles/` tree. `nix/system/mise-dotfiles.nix` carries that subtree into the system closure and runs `mise bootstrap --only dotfiles` during activation. See [[ADR/0011 Migrate dotfiles from chezmoi to mise]].
+	- Dotfiles are mise-managed from the in-repo `dotfiles/` tree. `nix/system/mise-dotfiles.nix` carries that subtree into the system closure and runs `mise bootstrap --only dotfiles` during activation.
 	- There is no dotfiles flake input and no home-manager integration.
 - # Auto-upgrade caveat
 	- Hosts auto-rebuild from GitHub `main`. A config deployed from a branch can be reverted by the next auto-upgrade unless the branch merges promptly. Treat a branch deploy as a test unless it has merged.
