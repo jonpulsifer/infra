@@ -76,9 +76,3 @@ Secrets are SOPS-encrypted in-repo with age, sourced from 1Password, and
 decrypted on NixOS hosts by sops-nix using each host's own SSH host key.
 OpenBao runs in the folly cluster with Raft storage and GCP KMS auto-unseal.
 Network segmentation is enforced by UniFi; Tailscale provides the overlay.
-
-The wiki is public — nothing decrypted ever lands in `docs/`.
-
-## License
-
-[MIT](./LICENSE)
