@@ -74,6 +74,31 @@ run = [
   "bash -lc 'grep -rl BEGIN_TF_DOCS . --include=README.md | xargs -r -n1 dirname | sort -u | while read -r d; do echo \"==> $d\"; terraform-docs markdown table --output-file README.md --output-mode inject \"$d\" >/dev/null; done'",
 ]
 
+[tasks."nix:check"]
+description = "Evaluate the whole flake (every host); slow"
+run = "nix flake check"
+
+[tasks."nix:build"]
+description = "Build one host's system closure without deploying (set HOST)"
+run = [
+  "bash -lc 'if [ -z \"${HOST:-}\" ]; then echo \"Set HOST, e.g. HOST=optiplex mise run nix:build\"; exit 1; fi; nix build \".#nixosConfigurations.$HOST.config.system.build.toplevel\" --no-link --print-out-paths'",
+]
+
+[tasks."ts:check"]
+description = "Typecheck and lint the Bun/Turborepo workspace"
+run = [
+  "bun run typecheck",
+  "bun run lint",
+]
+
+[tasks."docs:build"]
+description = "Build the Logseq wiki with the first-party Bun SSG"
+run = "bun run --cwd apps/wiki build"
+
+[tasks."docs:check"]
+description = "Docs contract: wikilinks resolve, referenced paths exist, no archaeology"
+run = "bash .github/scripts/docs-contract.sh"
+
 [tasks."tf:plan"]
 description = "Run Terraform plan for one module (set TF_DIR)"
 run = [

@@ -37,6 +37,9 @@ docs/.trash/
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
+# Claude Code only discovers skills in .claude/skills; .agents/skills is the
+# tool-agnostic source. This symlink is how the repo's skills actually load.
+!.claude/skills
 .claude/settings.local.json
 .agents/*
 !.agents/skills/

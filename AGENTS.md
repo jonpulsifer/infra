@@ -71,7 +71,7 @@ file does not list contents.
 | `images/` | Base and tool OCI images. |
 | `dotfiles/` | mise-managed dotfiles, carried onto NixOS hosts by the system closure. |
 | `docs/` | The Logseq graph published as the wiki. |
-| `.agents/skills/` | Repo-local agent skills. |
+| `.agents/skills/` | Repo-local agent skills. Tool-agnostic source; `.claude/skills` is a symlink to it. |
 
 ## Single sources of truth
 
@@ -99,7 +99,9 @@ read by `nix/hosts/rackpi5.nix`.
 - [Runbooks](docs/pages/Runbooks.md) — step-by-step operational procedures.
   Skills point here rather than restating them.
 - [Fleet](docs/pages/Fleet.md) — every host, its hardware, and its quirks.
-- `.agents/skills/` — task-scoped agent guidance.
+- `.agents/skills/` — task-scoped agent guidance. A skill carries a `runbook:`
+  pointer in its frontmatter and holds only agent-specific notes; the runbook
+  stays the canonical procedure.
 
 Inside `docs/`, pages link each other with Logseq `[[wikilinks]]`. This file is
 not part of the graph, so it uses paths.
@@ -119,6 +121,11 @@ you edit documentation:
    reality diverges, say so in present tense with the blocker.
 4. **Verify before you write.** Every path must exist, every command must match
    what the repo runs.
+
+Run `mise run docs:check` before pushing docs. It enforces what a script can:
+every wikilink resolves, every referenced repo path exists, and no past-tense
+archaeology. It runs in CI and gates the wiki deploy. Rules 2 and 3 are on you —
+no script catches "this list was right when it was written".
 
 `docs/` is a Logseq graph: page properties are `key:: value` at the top of the
 file, every block starts with `- `, nesting is tabs, and a `/` in a page name is

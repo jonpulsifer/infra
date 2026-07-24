@@ -15,14 +15,13 @@ This is the live counterpart to the desired state in `terraform/network/unifi/fo
 it to see what the controller *actually* has before editing the Terraform.
 
 Canonical public runbook: `docs/pages/Runbooks___Inspect UniFi Network.md`.
-Reference bridge: `references/runbook.md`.
 
 The driver is **`.agents/skills/unifi-network/unifi.sh`** (paths below are
 relative to the repo root). It pulls the `terraform` Super Admin creds from
 the **homelab 1Password vault** via `op`, opens a UniFi-OS cookie session, and
 wraps the legacy Network API (`/proxy/network/api/...`) behind named subcommands.
 It is **read-only** — every subcommand is a GET. Authoring network state still
-goes through `terraform/network/unifi/folly/` + Atlantis (see CLAUDE.md "How Changes Ship").
+goes through `terraform/network/unifi/folly/` + Atlantis (see AGENTS.md "How changes ship").
 
 ## Prerequisites
 

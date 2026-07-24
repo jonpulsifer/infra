@@ -1,6 +1,10 @@
 ---
 name: kubernetes-gitops
-description: Work with Kubernetes manifests and GitOps workflows for the folly and offsite clusters. Covers FluxCD reconciliation, networking architecture, and SOPS secrets.
+description: >-
+  Work with Kubernetes manifests and GitOps workflows for the folly and offsite
+  clusters. Covers FluxCD reconciliation, inspecting cluster state, and SOPS
+  secrets. Use when changing anything under clusters/ or diagnosing why a
+  manifest has not taken effect.
 metadata:
   runbook: docs/pages/Runbooks___Kubernetes GitOps Change.md
   wiki: https://wiki.lolwtf.ca/runbooks/kubernetes-gitops-change/
@@ -9,22 +13,34 @@ metadata:
 # Kubernetes GitOps
 
 Canonical human runbook: `docs/pages/Runbooks___Kubernetes GitOps Change.md`.
-Reference bridge: `references/runbook.md`.
+Layer background: `docs/pages/Architecture___Kubernetes.md`. This file holds
+only the agent-specific guidance.
 
-## Agent Notes
+## Agent notes
 
-- Changes under `clusters/` deploy automatically via Flux after merge to `main`.
-- Do not use `kubectl apply` to author desired state.
-- Use explicit contexts: `--context folly` and `--context offsite`.
-- Inspect reconciliation:
+- Changes under `clusters/` deploy via Flux after merge to `main`. **Never
+  `kubectl apply` to author desired state** — `kubectl`, `flux get`, and
+  `flux reconcile` are for inspection or forcing a sync.
+- Flux owns all live cluster state. ArgoCD is installed as a HelmRelease but
+  owns no applications; `terraform/argo` declares no resources.
+- Always use explicit contexts — there are two clusters and the wrong one is a
+  silent mistake:
   ```bash
-  flux --context <cluster> get kustomizations -A
-  flux --context <cluster> get helmreleases -A
+  flux --context <folly|offsite> get kustomizations -A
+  flux --context <folly|offsite> get helmreleases -A
+  flux --context <folly|offsite> reconcile kustomization <name> -n flux-system --with-source
   ```
-- Force reconcile only for inspection or merged changes:
+- Render locally before pushing:
   ```bash
-  flux --context <cluster> reconcile kustomization <name> -n flux-system --with-source
+  kubectl kustomize clusters/<site>/<category>
   ```
-- SOPS files are encrypted at rest; never expose decrypted values in docs, PR comments, or logs.
-- HelmRepository/GitRepository/OCIRepository sources are colocated with the resources that consume them unless the local pattern says otherwise.
-- For shared `clusters/base/` changes, also use the `multi-cluster` skill.
+- Each cluster's root sync comes from its `FluxInstance`, configured in
+  `clusters/<site>/bootstrap/flux-values.yaml`. There is no hand-applied root
+  Kustomization — do not create one.
+- Network facts are substituted from the `cluster-topology` ConfigMap via
+  `postBuild.substituteFrom`. Reference `${VAR}`; never hardcode the value. The
+  ConfigMap's schema is enforced by conftest in CI.
+- SOPS encrypts only `data` and `stringData` in files matching
+  `clusters/.*\.sops\.ya?ml`. **Never** put decrypted values in docs, PR
+  comments, logs, or commit messages.
+- For changes to `clusters/base/`, also use the `multi-cluster` skill.
