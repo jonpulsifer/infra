@@ -34,6 +34,4 @@
     jq
     htop
   ];
-
-  system.stateVersion = lib.mkDefault "26.05";
 }

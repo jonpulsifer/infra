@@ -12,6 +12,14 @@
     wireless.enable = lib.mkForce false;
   };
 
+  # Keep the labels already installed on the NVMe. The Pi 5 hardware module
+  # normally derives these from `name`, but changing them during a hostname
+  # migration would make the existing root and firmware filesystems disappear.
+  sdImage = {
+    rootVolumeLabel = lib.mkForce "NIXOS_DNS";
+    firmwarePartitionName = lib.mkForce "FW_DNS";
+  };
+
   services.pihole-ftl = {
     enable = true;
     openFirewallDNS = true;

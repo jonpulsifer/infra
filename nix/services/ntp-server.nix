@@ -1,4 +1,4 @@
-# Redundant LAN time service shared by dns and spore. Both hosts synchronise
+# Redundant LAN time service shared by capsule and spore. Both hosts synchronise
 # from authenticated Internet sources and poll one another. Chrony's orphan
 # mode elects one local reference if every upstream is unavailable, keeping
 # the lab internally consistent while honestly reporting low-quality stratum
@@ -8,12 +8,12 @@ let
   lab =
     (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json)).locals.lab;
   peer =
-    if name == "dns" then
+    if name == "capsule" then
       lab.hosts.spore
     else if name == "spore" then
-      lab.hosts.dns
+      lab.hosts.capsule
     else
-      throw "ntp-server.nix supports only dns and spore, not ${name}";
+      throw "ntp-server.nix supports only capsule and spore, not ${name}";
 in
 {
   services.chrony = {
@@ -41,10 +41,10 @@ in
   assertions = [
     {
       assertion = lib.elem name [
-        "dns"
+        "capsule"
         "spore"
       ];
-      message = "ntp-server.nix may only be imported by dns or spore";
+      message = "ntp-server.nix may only be imported by capsule or spore";
     }
   ];
 }
