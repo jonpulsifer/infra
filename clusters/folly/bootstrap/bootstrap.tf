@@ -38,6 +38,7 @@ locals {
     org  = "jonpulsifer"
     repo = "infra"
   }
+  topology = jsondecode(file("${path.module}/../config/cluster-topology.json"))
 }
 
 module "flux_bootstrap" {
@@ -46,6 +47,8 @@ module "flux_bootstrap" {
   cluster_name = "folly"
   github_repo  = local.github.repo
   flux_values  = file("${path.module}/flux-values.yaml")
+  cluster_dns  = local.topology.data.CLUSTER_DNS
+  router_ip    = local.topology.data.ROUTER_IP
 
   providers = {
     github     = github

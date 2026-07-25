@@ -1,0 +1,7 @@
+version: 3
+automerge: false
+projects:
+  - name: bootstrap
+    dir: .
+    autoplan:
+      enabled: false
