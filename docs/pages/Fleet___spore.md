@@ -11,7 +11,7 @@ storage:: 128 GB Patriot P300 NVMe (root 32 GB, 35% used)
 os:: NixOS 26.05 (Yarara)
 
 - NFS/PXE and signed native-boot server — boot-critical for [[Fleet/rackpi5]]; monitored by folly.
-- Only Pi with NVMe storage. Config: `nix/hosts/spore.nix`.
+- NVMe-rooted. Config: `nix/hosts/spore.nix`.
 - Reached as `spore.lolwtf.ca`.
 - Redundant LAN NTP server paired with [[Fleet/dns]] (`nix/services/ntp-server.nix`). Chrony uses authenticated NTS upstreams (`time.nrc.ca`, `time.chu.nrc.ca`), polls DNS, and serves UDP/123 to routed `10.0.0.0/8` clients. Orphan fallback reports stratum 10; neither Pi is stratum 1 without a hardware reference clock.
 - Verify with `chronyc tracking`, `chronyc sources -v`, and `chronyc authdata`.
