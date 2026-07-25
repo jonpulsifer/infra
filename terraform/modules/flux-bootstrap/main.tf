@@ -11,58 +11,8 @@ resource "github_repository_deploy_key" "this" {
 }
 
 # CoreDNS — deployed by Terraform so cluster DNS is available before Flux reconciles.
-resource "kubernetes_service_account_v1" "coredns" {
-  metadata {
-    name      = "coredns"
-    namespace = "kube-system"
-    labels = {
-      "k8s-app" = "kube-dns"
-    }
-  }
-}
-
-resource "kubernetes_cluster_role_v1" "coredns" {
-  metadata {
-    name = "system:coredns"
-    labels = {
-      "k8s-app" = "kube-dns"
-    }
-  }
-  rule {
-    api_groups = [""]
-    resources  = ["endpoints", "services", "pods", "namespaces"]
-    verbs      = ["list", "watch"]
-  }
-  rule {
-    api_groups = [""]
-    resources  = ["nodes"]
-    verbs      = ["get"]
-  }
-  rule {
-    api_groups = ["discovery.k8s.io"]
-    resources  = ["endpointslices"]
-    verbs      = ["list", "watch"]
-  }
-}
-
-resource "kubernetes_cluster_role_binding_v1" "coredns" {
-  metadata {
-    name = "system:coredns"
-    labels = {
-      "k8s-app" = "kube-dns"
-    }
-  }
-  role_ref {
-    api_group = "rbac.authorization.k8s.io"
-    kind      = "ClusterRole"
-    name      = "system:coredns"
-  }
-  subject {
-    kind      = "ServiceAccount"
-    name      = "coredns"
-    namespace = "kube-system"
-  }
-}
+# RBAC (ServiceAccount, ClusterRole, ClusterRoleBinding) already exists from the
+# legacy addonManager and persists in the cluster independently.
 
 resource "kubernetes_config_map_v1" "coredns" {
   metadata {
