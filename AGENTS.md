@@ -106,6 +106,20 @@ read by `nix/hosts/rackpi5.nix`.
 Inside `docs/`, pages link each other with Logseq `[[wikilinks]]`. This file is
 not part of the graph, so it uses paths.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as **private** local markdown under `.agent/plans/` (gitignored) — the planning surface stays off the public repo; code and PRs stay public. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, written as `Status:` values on each ticket file (local tracker, not GitHub labels). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `AGENTS.md` router + the `docs/pages/` wiki graph (no `CONTEXT.md`/ADR). See `docs/agents/domain.md`.
+
 ## Writing rule for these docs
 
 The previous docs rotted because they restated what the tree already says. When
