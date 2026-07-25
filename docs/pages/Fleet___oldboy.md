@@ -9,5 +9,6 @@ storage:: 16 GB pd-standard
 os:: NixOS
 
 - Free-tier GCE VM in the `homelab-ng` project, built from the repo's NixOS GCE image (`terraform/gcp/projects/homelab-ng/compute.tf`).
-- Not reachable from the LAN by name; no `oldboy.lolwtf.ca` or tailnet record. Specs above are from Terraform, not a live login.
+- The VM is **not currently provisioned** — its Terraform and NixOS config exist but no live instance runs. Specs above are from Terraform, not a live login. Needs to be brought back.
+- When provisioned, its `shielded_instance_config` enables GCE secure boot, a vTPM, and integrity monitoring (`terraform/gcp/projects/homelab-ng/compute.tf`). vTPM state is unverified until the VM runs.
 - Config: `nix/hosts/oldboy.nix`, tagged `gcp`.

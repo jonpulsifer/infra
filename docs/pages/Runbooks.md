@@ -10,7 +10,6 @@ icon:: 🚒
 	- [[Runbooks/Validate Infra Changes]] — validation commands by change area
 	- [[Runbooks/Inspect UniFi Network]] — read-only UniFi discovery before making changes
 	- [[Runbooks/Kiosk]] — the Raspberry Pi kiosk hosts: Cage/Wayland, Firefox, container-backed apps
-	- [[Runbooks/TPM Audit]] — TPM inventory of the Kubernetes fleet
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.
 	- Prefer `mise run <task>` where a task exists; it encodes the correct binary and flags. Give a raw invocation only where mise has no task — deploying to a live host, `sops`, `flux reconcile`.

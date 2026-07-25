@@ -11,6 +11,7 @@ icon:: 🖥️
 	  | [[Fleet/shale]] | folly | HP EliteDesk 800 G2 DM 35W, i7-6700T |
 	  | [[Fleet/retrofit]] | offsite | HP EliteDesk 800 G2 DM 65W, i7-6700T |
 	  | [[Fleet/oldschool]] | offsite | HP EliteDesk 800 G3 DM 35W, i5-6500 |
+	- TPM across the x86 fleet: only [[Fleet/riptide]] has an operational TPM 2.0; [[Fleet/shale]] and [[Fleet/retrofit]] enumerate TPM 1.2 (too old for `systemd-cryptenroll`); [[Fleet/optiplex]] needs BIOS enablement; [[Fleet/oldschool]] has none. Per-host detail is on each page.
 - ## Raspberry Pis
 	- Configured in `nix/hosts/`. See [[Architecture/NixOS]] for how they build.
 	- | Host | Purpose | Hardware |
@@ -23,6 +24,7 @@ icon:: 🖥️
 	  | [[Fleet/cloudpi4]] | utility | Pi 4B 4 GB |
 	  | [[Fleet/radiopi0]] | radio | Pi Zero W |
 	  | [[Fleet/blinkypi0]] | LED display | Pi Zero W |
+	- No Pi in the fleet has TPM hardware; the SBC class does not expose one.
 - ## Microcontroller
 	- | Host | Purpose | Hardware |
 	  | ---- | ------- | -------- |
@@ -31,6 +33,7 @@ icon:: 🖥️
 	- | Host | Where | Hardware |
 	  | ---- | ----- | -------- |
 	  | [[Fleet/oldboy]] | GCE, `homelab-ng` project | e2-micro, free tier |
+	- When provisioned, its `shielded_instance_config` gives [[Fleet/oldboy]] a GCE vTPM; see the divergence below.
 - ## Reaching hosts
 	- LAN hosts resolve as `<host>.lolwtf.ca`.
 	- [[Fleet/weatherpi4]] and the offsite nodes require the tailnet.
@@ -41,3 +44,4 @@ icon:: 🖥️
 	- [[Fleet/radiopi0]] runs Raspbian. Its NixOS config carries no radio service; the armv6l closure builds but the service is not ported.
 	- [[Fleet/blinkypi0]] is unplugged. Its NixOS config carries no device service and its device code is not in git.
 	- [[Fleet/eviropico]] is unplugged. Its MicroPython code is not in git.
+	- [[Fleet/oldboy]] is not provisioned. Its Terraform and NixOS config exist but no live instance runs; needs to be brought back.
