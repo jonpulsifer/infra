@@ -15,8 +15,8 @@ icon:: 🖥️
 	- Configured in `nix/hosts/`. See [[Architecture/NixOS]] for how they build.
 	- | Host | Purpose | Hardware |
 	  | ---- | ------- | -------- |
-	  | [[Fleet/spore]] | NFS, PXE and signed native-boot server | Pi 5 8 GB, NVMe |
-	  | [[Fleet/dns]] | LAN DNS and NTP | Pi 5 8 GB, NVMe |
+	  | [[Fleet/spore]] | NFS, PXE, signed native-boot and standby DNS | Pi 5 8 GB, NVMe |
+	  | [[Fleet/capsule]] | LAN DNS sinkhole and NTP | Pi 5 8 GB, NVMe |
 	  | [[Fleet/rackpi5]] | rack status display | Pi 5 8 GB, HTTP/RAM-booted, unused NVMe |
 	  | [[Fleet/homepi4]] | kiosk | Pi 4B 8 GB, 7" touch display |
 	  | [[Fleet/weatherpi4]] | weather kiosk | Pi 4B 8 GB |

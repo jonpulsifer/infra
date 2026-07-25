@@ -1,10 +1,10 @@
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:
-  name: dns
+  name: capsule
   namespace: monitoring
   labels:
-    kubernetes.io/service-name: dns
+    kubernetes.io/service-name: capsule
     lolwtf.ca/service: pihole
 addressType: IPv4
 ports:
@@ -13,12 +13,12 @@ ports:
     protocol: TCP
 endpoints:
   - addresses: ["10.2.0.10"]
-    nodeName: dns
+    nodeName: capsule
 --- # trivy:ignore:avd-ksv-0108
 apiVersion: v1
 kind: Service
 metadata:
-  name: dns
+  name: capsule
   namespace: monitoring
   labels:
     lolwtf.ca/service: pihole
@@ -33,7 +33,7 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: dns
+  name: capsule
   namespace: monitoring
   labels:
     lolwtf.ca/service: pihole
@@ -57,28 +57,28 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: dns
+  name: capsule
   namespace: monitoring
   labels:
     lolwtf.ca/service: pihole
     release: prom-stack
 spec:
   groups:
-    - name: dns
+    - name: capsule
       rules:
         - alert: PrometheusTargetMissing
-          expr: up {endpoint="http-metrics",  namespace="monitoring", service="dns"} == 0
+          expr: up {endpoint="http-metrics", namespace="monitoring", service="capsule"} == 0
           for: 1m
           labels:
             severity: critical
           annotations:
             message: Prometheus target missing (instance {{ $labels.instance }})
             description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-        - alert: DnsChronyDown
-          expr: (node_systemd_unit_state{instance="dns", name="chronyd.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="dns", name="chronyd.service", state="active"})
+        - alert: CapsuleChronyDown
+          expr: (node_systemd_unit_state{instance="capsule", name="chronyd.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="capsule", name="chronyd.service", state="active"})
           for: 5m
           labels:
             severity: critical
           annotations:
-            message: NTP server on dns is down
-            description: "chronyd.service is not active on dns. Clients configured to use dns as a time source have lost one half of the redundant NTP pair."
+            message: NTP server on capsule is down
+            description: "chronyd.service is not active on capsule. Clients configured to use time.lolwtf.ca have lost one half of the redundant NTP pair."

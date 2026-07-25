@@ -81,7 +81,7 @@
         "cloudpi4"
         "homepi4"
         "weatherpi4"
-        "dns"
+        "capsule"
         "rackpi5"
         "oldboy"
         "spore"
@@ -201,9 +201,9 @@
             system = "aarch64-linux";
             modules = [ ./nix/hosts/weatherpi4.nix ];
           };
-          dns = mkHost "dns" {
+          capsule = mkHost "capsule" {
             system = "aarch64-linux";
-            modules = [ ./nix/hosts/dns.nix ];
+            modules = [ ./nix/hosts/capsule.nix ];
           };
           rackpi5 = rackpi5Configuration;
           spore = mkHost "spore" {
@@ -254,17 +254,15 @@
 
       packages = {
         # sdImage derivations are pinned to aarch64-linux internally (each
-        # Pi's nixosSystem is called with system = "aarch64-linux" above),
-        # but they're only ever built by cross-compiling from the x86_64
-        # WSL/laptop dev box via the qemu binfmt emulation in
-        # nix/images/wsl.nix -- nobody builds these while logged into the Pi
-        # itself. So they live under x86_64-linux, matching how `nix build
-        # .#<host>` actually gets invoked, not under aarch64-linux.
+        # Pi's nixosSystem is called with system = "aarch64-linux" above).
+        # These x86_64 aliases remain the image-builder workflow interface;
+        # interactive ARM host builds target nixosConfigurations directly and
+        # run on spore or another native aarch64 builder.
         x86_64-linux = {
           cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
-          dns = nixosConfigurations.dns.config.system.build.sdImage;
+          capsule = nixosConfigurations.capsule.config.system.build.sdImage;
           rackpi5 = nixosConfigurations.rackpi5.config.system.build.piBootImg;
           spore = nixosConfigurations.spore.config.system.build.sdImage;
 

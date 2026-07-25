@@ -28,6 +28,7 @@
     ../hardware/pi5
     ../hardware/pi5/nvme-hat.nix
     ../services/common.nix
+    ../services/coredns-sinkhole.nix
     ../services/nfs-server.nix
     ../services/ntp-server.nix
     ../services/pxe-netboot.nix

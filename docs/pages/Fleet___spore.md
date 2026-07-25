@@ -10,10 +10,11 @@ gpu:: Broadcom VideoCore VII
 storage:: 128 GB Patriot P300 NVMe (root 32 GB, 35% used)
 os:: NixOS 26.05 (Yarara)
 
-- NFS/PXE and signed native-boot server — boot-critical for [[Fleet/rackpi5]]; monitored by folly.
+- NFS/PXE, signed native-boot, and standby DNS server — boot-critical for [[Fleet/rackpi5]]; monitored by folly.
 - NVMe-rooted. Config: `nix/hosts/spore.nix`.
 - Reached as `spore.lolwtf.ca`.
-- Redundant LAN NTP server paired with [[Fleet/dns]] (`nix/services/ntp-server.nix`). Chrony uses authenticated NTS upstreams (`time.nrc.ca`, `time.chu.nrc.ca`), polls DNS, and serves UDP/123 to routed `10.0.0.0/8` clients. Orphan fallback reports stratum 10; neither Pi is stratum 1 without a hardware reference clock.
+- Redundant LAN NTP server paired with [[Fleet/capsule]] (`nix/services/ntp-server.nix`) and published with it as `time.lolwtf.ca`. Chrony uses authenticated NTS upstreams (`time.nrc.ca`, `time.chu.nrc.ca`), polls Capsule, and serves UDP/123 to routed `10.0.0.0/8` clients. Orphan fallback reports stratum 10; neither Pi is stratum 1 without a hardware reference clock.
+- CoreDNS sinkhole using the shared `nix/services/coredns-sinkhole.nix` policy. It is not published through `dns.lolwtf.ca`.
 - Verify with `chronyc tracking`, `chronyc sources -v`, and `chronyc authdata`.
 - ## Netboot serving
 	- There is no application, database, or dynamic boot decision — the Nix-built image is the policy. Spore serves files over HTTP (nginx) plus TFTP (dnsmasq); boot integrity is enforced by the EEPROM signature and the initrd's cmdline-pinned squashfs digest.

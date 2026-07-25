@@ -41,6 +41,7 @@ in
       system = cfg.system or "x86_64-linux";
       tags = cfg.tags or [ ];
       baseModules = [
+        ../system/base.nix
         ../system/ssh.nix
         ../system/user.nix
       ];
@@ -62,7 +63,10 @@ in
     module:
     nixosSystem {
       system = "x86_64-linux";
-      modules = [ module ];
+      modules = [
+        ../system/base.nix
+        module
+      ];
       specialArgs = {
         inherit inputs;
         tags = [ ];

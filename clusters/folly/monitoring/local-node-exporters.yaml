@@ -15,7 +15,7 @@ endpoints:
   - addresses: ["10.2.0.20"]
     nodeName: cloudpi4
   - addresses: ["10.2.0.10"]
-    nodeName: dns
+    nodeName: capsule
   - addresses: ["10.2.0.24"]
     nodeName: radiopi0
   - addresses: ["10.2.0.11"]
