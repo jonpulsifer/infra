@@ -161,17 +161,17 @@ resource "kubernetes_deployment_v1" "coredns" {
         }
       }
       spec {
-        priority_class_name        = "system-cluster-critical"
-        service_account_name       = "coredns"
-        dns_policy                 = "Default"
+        priority_class_name             = "system-cluster-critical"
+        service_account_name            = "coredns"
+        dns_policy                      = "Default"
         automount_service_account_token = false
         toleration {
           key      = "CriticalAddonsOnly"
           operator = "Exists"
         }
         toleration {
-          key      = "node-role.kubernetes.io/control-plane"
-          effect   = "NoSchedule"
+          key    = "node-role.kubernetes.io/control-plane"
+          effect = "NoSchedule"
         }
         node_selector = {
           "kubernetes.io/os" = "linux"
