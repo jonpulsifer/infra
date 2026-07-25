@@ -7,4 +7,5 @@ RUN CGO_ENABLED=0 go build -o /audit-pipeline .
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /audit-pipeline /audit-pipeline
+USER nonroot:nonroot
 ENTRYPOINT ["/audit-pipeline"]
