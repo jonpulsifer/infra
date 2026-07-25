@@ -6,7 +6,7 @@ resources:
   - kube-prometheus.yaml
   - grafana-dashboards
   - local-node-exporters.yaml
-  - dns.yaml
+  - capsule.yaml
   - spore.yaml
   - git-repository-loki.yaml
   - loki.yaml

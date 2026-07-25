@@ -27,12 +27,12 @@ tags:: architecture
 		  {
 		    "lab": {
 		      "cidr": "10.2.0.0/24",
-		      "hosts": { "dns": "10.2.0.10", "spore": "10.2.0.11", "rackpi5": "10.2.0.12" }
+		      "hosts": { "capsule": "10.2.0.10", "spore": "10.2.0.11", "rackpi5": "10.2.0.12" }
 		    }
 		  }
 		  ```
 	- Consumers: `terraform/network/unifi/folly/lolwtf.ca.tf` builds `unifi_network.lab`'s subnet from it, and `nix/hosts/rackpi5.nix` reads the same file with `builtins.fromJSON` via `.locals.lab`.
-	- A `lifecycle.precondition` on `unifi_network.lab` fails the plan if `lab.tf.json`'s host IPs ever disagree with `clients.yaml`'s `rpis.{dns,spore,rackpi5}.ip` octets — the two files cannot drift silently.
+	- A `lifecycle.precondition` on `unifi_network.lab` fails the plan if `lab.tf.json`'s host IPs ever disagree with `clients.yaml`'s `rpis.{capsule,spore,rackpi5}.ip` octets — the two files cannot drift silently.
 - ## Cluster network facts
 	- The per-cluster `cluster-topology` ConfigMaps (`clusters/<site>/config/cluster-topology.json`) are the SSOT for every cluster network fact — full mechanism (Flux `substituteFrom`, `conftest` schema check, Nix/Terraform consumers) is on [[Architecture/Kubernetes]]. The current values:
 	- | key | folly | offsite |
@@ -74,7 +74,9 @@ tags:: architecture
 	- The k8s node hosts themselves run **no** Tailscale client — `nix/system/tailscale-disable.nix` force-disables `services.tailscale`, and it's imported by all five k8s hosts (`optiplex`, `riptide`, `shale`, `oldschool`, `retrofit`) inline in `flake.nix`. Tailnet reachability into the clusters goes entirely through the Connector subnet router, not per-node clients.
 	- `policy.hujson`'s `grants` explicitly permit `tag:folly` → offsite's k8s nodes/LB/LAN and `tag:offsite` → folly's k8s nodes/LB, plus `autoApprovers.routes` that auto-accept the Connectors' advertised CIDRs without manual review.
 - ## DNS
-	- The `dns` host (`10.2.0.10`, a Pi 5 — see [[Fleet]]) runs Pi-hole FTL as the LAN's resolver, forwarding upstream to `1.1.1.2`/`1.0.0.2` (Cloudflare's malware-filtering resolver), reachable itself as `dns.lolwtf.ca`.
+	- `capsule` (a Pi 5 — see [[Fleet]]) runs Pi-hole FTL as the LAN's resolver, forwarding upstream to Cloudflare's malware-filtering resolver. Its machine record is `capsule.lolwtf.ca`; `dns.lolwtf.ca` is the stable DNS service record.
+	- `spore` runs the shared CoreDNS sinkhole policy as a standby resolver. It has only its machine record and is not a target of `dns.lolwtf.ca`.
+	- `capsule` and `spore` run the redundant Chrony service described on their fleet pages. `time.lolwtf.ca` publishes both hosts as the stable NTP service name.
 	- Cloudflare hosts three Terraform-managed zones (`terraform/network/cloudflare/`): `lolwtf.ca` (lab net, cluster API endpoints, gateway/ingress records), `pulsifer.ca`, and `wishin.app`.
 	- LAN and cluster hosts resolve as `<host>.lolwtf.ca` — static A records come from `k8s.tf` (`k8s`, `optiplex`, `riptide`, `shale`, `nuc`, `erx`) and `lolwtf.ca.tf` (every `lab`/`rpis` client in `clients.yaml`), plus the per-cluster API-server and gateway records above. Reaching offsite hosts from off-net requires the tailnet.
 - ## Known gaps

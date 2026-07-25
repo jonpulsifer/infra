@@ -30,7 +30,7 @@ resource "unifi_network" "k8s" {
     start       = cidrhost(local.node_cidr, 2)
     stop        = cidrhost(local.node_cidr, 62)
     dns_enabled = true
-    dns_servers = [local.lab.hosts.dns]
+    dns_servers = [local.lab.hosts.capsule]
     tftp_server = local.lab.hosts.spore
     boot = {
       enabled  = true

@@ -4,6 +4,20 @@ locals {
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
   lab_clients = merge(local.clients.lab, local.clients.rpis)
+  lab_service_records = {
+    dns-capsule = {
+      name    = "dns"
+      content = local.lab.hosts.capsule
+    }
+    time-capsule = {
+      name    = "time"
+      content = local.lab.hosts.capsule
+    }
+    time-spore = {
+      name    = "time"
+      content = local.lab.hosts.spore
+    }
+  }
 }
 
 data "cloudflare_zone" "lab" {
@@ -26,6 +40,23 @@ resource "cloudflare_dns_record" "lab_remote_dns" {
   comment = "terraform managed"
   proxied = false
   # tags    = ["terraform-managed"]
+}
+
+moved {
+  from = cloudflare_dns_record.lab_remote_dns["dns"]
+  to   = cloudflare_dns_record.lab_service_dns["dns-capsule"]
+}
+
+resource "cloudflare_dns_record" "lab_service_dns" {
+  for_each = local.lab_service_records
+
+  zone_id = data.cloudflare_zone.lab.zone_id
+  name    = "${each.value.name}.${local.lab_domain}"
+  content = each.value.content
+  type    = "A"
+  ttl     = 1
+  comment = "terraform managed service record"
+  proxied = false
 }
 
 resource "unifi_network" "lab" {
@@ -55,7 +86,7 @@ resource "unifi_network" "lab" {
   lifecycle {
     precondition {
       condition = alltrue([
-        local.lab.hosts.dns == cidrhost(local.lab_cidr, local.clients.rpis.dns.ip),
+        local.lab.hosts.capsule == cidrhost(local.lab_cidr, local.clients.rpis.capsule.ip),
         local.lab.hosts.spore == cidrhost(local.lab_cidr, local.clients.rpis.spore.ip),
         local.lab.hosts.rackpi5 == cidrhost(local.lab_cidr, local.clients.rpis.rackpi5.ip),
       ])

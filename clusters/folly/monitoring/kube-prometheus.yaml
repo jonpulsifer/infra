@@ -61,7 +61,7 @@ spec:
             static_configs:
               - targets:
                 - cloudpi4.${SECRET_DOMAIN}:9100
-                - dns.${SECRET_DOMAIN}:9100
+                - capsule.${SECRET_DOMAIN}:9100
                 - radiopi0.${SECRET_DOMAIN}:9100
                 - spore.${SECRET_DOMAIN}:9100
                 # - blinkypi0.${SECRET_DOMAIN}:9100
