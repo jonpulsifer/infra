@@ -12,3 +12,4 @@ os:: NixOS 26.05 (Yarara)
 firmware:: N21 Ver. 02.37 (2019-01-02)
 
 - folly worker. Disko on `/dev/sda`.
+- TPM 1.2 enumerated: `tpm0` (version 1), `/dev/tpm0` present, dmesg reports `tpm_tis 00:01: 1.2 TPM (device-id 0x1B, rev-id 16)`. No SHA256 PCR bank (TPM 1.2). Too old for `systemd-cryptenroll`/TPM-backed disk encryption, which need TPM 2.0.

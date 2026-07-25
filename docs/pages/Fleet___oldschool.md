@@ -12,4 +12,4 @@ os:: NixOS 26.05 (Yarara)
 firmware:: P21 Ver. 02.15 (2018-01-31)
 
 - offsite worker. Also runs docker, a GitHub Actions runner, and yarr.
-- Offsite — reach over the tailnet.
+- No TPM: `/sys/class/tpm/` is empty and there are no `/dev/tpm*` nodes. Reachable over the LAN at `10.89.0.11` (or via the tailnet).

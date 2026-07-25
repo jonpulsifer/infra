@@ -12,4 +12,4 @@ os:: NixOS 26.05 (Yarara)
 firmware:: N21 Ver. 02.21 (2016-11-01)
 
 - offsite control-plane. Chassis asset tag matches the serial (MXL7211HNN).
-- Offsite — reach over the tailnet.
+- TPM 1.2 enumerated: `tpm0` (version 1), `/dev/tpm0` present, dmesg reports `tpm_tis 00:02: 1.2 TPM (device-id 0x1B, rev-id 16)`. Too old for `systemd-cryptenroll`/TPM-backed disk encryption, which need TPM 2.0. Reachable over the LAN at `10.89.0.10` (or via the tailnet).
