@@ -128,7 +128,7 @@ resource "kubernetes_deployment_v1" "coredns" {
         }
         container {
           name              = "coredns"
-          image             = "coredns/coredns:1.11.4"
+          image             = "coredns/coredns:1.14.6"
           image_pull_policy = "IfNotPresent"
           args              = ["-conf", "/etc/coredns/Corefile"]
           port {
