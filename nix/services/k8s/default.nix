@@ -153,22 +153,6 @@ in
 
         proxy.enable = false;
         easyCerts = true;
-        addons.dns.corefile = ''
-          .:10053 {
-            errors
-            health :10054
-            kubernetes cluster.local in-addr.arpa ip6.arpa {
-              pods insecure
-              fallthrough in-addr.arpa ip6.arpa
-            }
-            prometheus :10055
-            forward . ${networkConfig.upstreamDns}
-            cache 30
-            loop
-            reload
-            loadbalance
-          }
-        '';
       }
       (lib.mkIf (cfg.role == "control-plane") {
         apiserver = {
@@ -211,7 +195,7 @@ in
           ) config.sops.secrets."k8s-sa-signing-key".path;
         };
         scheduler.enable = true;
-        addonManager.enable = true;
+        addonManager.enable = false;
       })
     ];
 
