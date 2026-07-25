@@ -12,3 +12,13 @@ variable "flux_values" {
   type        = string
   description = "Rendered values for the flux-instance Helm release."
 }
+
+variable "cluster_dns" {
+  type        = string
+  description = "ClusterIP for the CoreDNS kube-dns Service (from cluster-topology CLUSTER_DNS)."
+}
+
+variable "router_ip" {
+  type        = string
+  description = "Upstream DNS forwarder IP for CoreDNS (from cluster-topology ROUTER_IP)."
+}
