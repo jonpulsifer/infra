@@ -114,7 +114,6 @@
             imports = [
               ./nix/system/tailscale-disable.nix
               ./nix/system/sops.nix
-              { services.k8s.serviceAccountIssuerMigrationStage = "cutover"; }
             ];
             extraConfig = {
               homelab.disko.device = "/dev/sda";
@@ -172,7 +171,6 @@
             imports = [
               ./nix/system/tailscale-disable.nix
               ./nix/system/sops.nix
-              { services.k8s.serviceAccountIssuerMigrationStage = "cutover"; }
             ];
             extraConfig = {
               homelab.disko.device = "/dev/sda";
