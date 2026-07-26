@@ -11,7 +11,7 @@ metadata:
 Read-only discovery for the homelab UniFi controller (a **UDM Pro**, Network
 app `10.4.57`, at `https://unifi.fml.pulsifer.ca` / `https://10.13.37.1`).
 This is the live counterpart to the desired state in `terraform/network/unifi/folly/`
-(the primary site; the offsite gateway is `terraform/network/unifi/offsite/`) — use
+(the on-site controller; the remote-site gateway is `terraform/network/unifi/offsite/`) — use
 it to see what the controller *actually* has before editing the Terraform.
 
 Canonical public runbook: `docs/pages/Runbooks___Inspect UniFi Network.md`.

@@ -6,7 +6,7 @@ tags:: architecture
 	- ### Layer 1 — Bare metal ([[Architecture/NixOS]])
 		- NixOS configuration under `nix/` for every host. Declared in `flake.nix`, deployed with `nixos-rebuild`, self-healing via auto-upgrades that track `main`.
 	- ### Layer 2 — Kubernetes ([[Architecture/Kubernetes]])
-		- Two clusters under `clusters/`: `folly` (primary, on-site) and `offsite` (backup), with `clusters/base/` shared between them. FluxCD reconciles every manifest on merge. ArgoCD is installed as a Flux HelmRelease and currently owns no applications.
+		- Two fully capable clusters under `clusters/`: `folly` on-site and `offsite` at the remote site, with `clusters/base/` shared between them. FluxCD reconciles every manifest on merge. ArgoCD is installed as a Flux HelmRelease and currently owns no applications.
 	- ### Layer 3 — Cloud and network ([[Architecture/Terraform]])
 		- OpenTofu root modules under `terraform/`, covering the network fabric and the cloud and identity estate. Applies run through Atlantis on the PR.
 	- ### Layer 4 — Applications ([[Architecture/Applications]])
