@@ -14,4 +14,3 @@ spec:
     /*
     # include crds directory
     !/config/crd/standard
-    !/config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml
