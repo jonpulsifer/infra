@@ -1,7 +1,7 @@
 icon:: ☸️
 tags:: architecture
 
-- **Layer 2** of [[Architecture]]: two Kubernetes clusters under `clusters/`, reconciled by FluxCD on every merge to `main`. Flux owns every piece of live cluster state. ArgoCD is installed as a Flux HelmRelease and owns no applications; `terraform/argo/` wires the provider and declares no resources. Reconciliation mechanics and the apply model live on [[Architecture/GitOps]].
+- **Layer 2** of [[Architecture]]: two Kubernetes clusters under `clusters/`, reconciled by FluxCD on every merge to `main`. The Terraform bootstrap roots own CoreDNS and Flux itself; Flux owns post-bootstrap cluster state. ArgoCD is installed as a Flux HelmRelease and owns no applications; `terraform/argo/` wires the provider and declares no resources. Reconciliation mechanics and the apply model live on [[Architecture/GitOps]].
 - ## Clusters
 	- `clusters/folly/` — primary, on-site. Nodes: `optiplex` (control-plane), `riptide`, `shale` (workers).
 	- `clusters/offsite/` — backup. Nodes: `retrofit` (control-plane), `oldschool` (worker).
@@ -13,7 +13,7 @@ tags:: architecture
 	- Where a cluster has no local override at all, its Flux `Kustomization` custom resource points `spec.path` straight at the base directory — `clusters/offsite/flux-system/storage.yaml`'s `path` is `./clusters/base/storage`, since offsite carries no cluster-specific storage overlay.
 	- `clusters/base/kustomization.yaml` itself holds just `cluster-runtimeclass.yaml` and `cluster-settings.yaml` — the `cluster-settings` ConfigMap that, alongside `cluster-topology`, every Flux Kustomization's `postBuild.substituteFrom` reads.
 - ## Bootstrap
-	- `clusters/<site>/bootstrap/` is a standalone OpenTofu root (state `gs://homelab-ng/clusters/<site>/bootstrap`) that calls the shared `terraform/modules/flux-bootstrap` module. The module cuts an ECDSA deploy key, registers it read-only against the `infra` GitHub repository, installs the `flux-operator` and `flux-instance` Helm releases (`oci://ghcr.io/controlplaneio-fluxcd/charts`) into the `flux-system` namespace, and writes the key into the `flux-github-app-credentials` Secret that Flux uses to pull.
+	- `clusters/<site>/bootstrap/` is a standalone OpenTofu root (state `gs://homelab-ng/clusters/<site>/bootstrap`) that calls the shared `terraform/modules/flux-bootstrap` module. The module deploys CoreDNS before installing the `flux-operator` and `flux-instance` Helm releases (`oci://ghcr.io/controlplaneio-fluxcd/charts`) into the `flux-system` namespace. It also cuts an ECDSA deploy key, registers it read-only against the `infra` GitHub repository, and writes the key into the `flux-github-app-credentials` Secret that Flux uses to pull.
 	- `node-labels.tf` in the same root labels each node: `node-role.kubernetes.io/control-plane` or `/worker`, plus `bgp-enabled: "true"` on every node in both clusters.
 	- `flux-values.yaml` supplies the Helm values for `flux-instance`. Its `instance.sync` block is what makes the `FluxInstance` own the root git sync: `GitRepository` name `infra`, ref `refs/heads/main`, path `clusters/<site>/flux-system`, `pullSecret: flux-github-app-credentials`. The operator generates the root `GitRepository`/`Kustomization` from that block — there is no hand-applied root manifest.
 	- This root applies through Atlantis like any other Terraform module — see [[Architecture/GitOps]].
