@@ -12,5 +12,5 @@ spec:
   ignore: |
     # exclude all
     /*
-    # include experimental bundle (standard resources plus experimental fields)
-    !/config/crd/experimental
+    # include standard bundle for the channel-transition cleanup
+    !/config/crd/standard
