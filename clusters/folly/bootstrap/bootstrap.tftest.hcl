@@ -1,6 +1,7 @@
 mock_provider "github" {}
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
+mock_provider "onepassword" {}
 mock_provider "tls" {}
 
 run "exposes_folly_bootstrap_resources" {
