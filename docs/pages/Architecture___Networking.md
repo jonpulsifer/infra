@@ -3,7 +3,7 @@ tags:: architecture
 
 - Networking spans all four layers: UniFi VLANs and BGP at Layer 1/3 (`terraform/network/`), Cilium and the Gateway API inside each cluster at Layer 2 (`clusters/*/networking/`), Cloudflare and Tailscale gluing sites together at Layer 3. This page is the single place the whole story lives. Cluster composition is on [[Architecture/Kubernetes]]; host hardware is on [[Fleet]]; live discovery of the running UniFi controller is the `unifi-network` skill ([[Runbooks/Inspect UniFi Network]]).
 - ## Sites and fabric
-	- Two UniFi consoles, each its own Terraform root: `terraform/network/unifi/folly/` (primary, on-site) and `terraform/network/unifi/offsite/` (backup). They're joined by exactly **one** inter-site data plane: a UniFi Site Magic WireGuard tunnel (`wgsts1000`).
+	- Two UniFi consoles, each its own Terraform root: `terraform/network/unifi/folly/` on-site and `terraform/network/unifi/offsite/` at the remote site. They're joined by exactly **one** inter-site data plane: a UniFi Site Magic WireGuard tunnel (`wgsts1000`).
 	- Each site's k8s nodes run Cilium with a BGP control plane (ASN 64513) peering **eBGP** with that site's own UniFi gateway (ASN 64512) — folly's UDM Pro, offsite's UCG Max.
 - ## LAN / VLANs
 	- folly (`terraform/network/unifi/folly/`), all networks domain `lolwtf.ca` unless noted:
@@ -27,12 +27,12 @@ tags:: architecture
 		  {
 		    "lab": {
 		      "cidr": "10.2.0.0/24",
-		      "hosts": { "capsule": "10.2.0.10", "spore": "10.2.0.11", "rackpi5": "10.2.0.12" }
+		      "hosts": { "capsule": "10.2.0.10", "spore": "10.2.0.11", "forge": "10.2.0.12" }
 		    }
 		  }
 		  ```
-	- Consumers: `terraform/network/unifi/folly/lolwtf.ca.tf` builds `unifi_network.lab`'s subnet from it, and `nix/hosts/rackpi5.nix` reads the same file with `builtins.fromJSON` via `.locals.lab`.
-	- A `lifecycle.precondition` on `unifi_network.lab` fails the plan if `lab.tf.json`'s host IPs ever disagree with `clients.yaml`'s `rpis.{capsule,spore,rackpi5}.ip` octets — the two files cannot drift silently.
+	- Consumers: `terraform/network/unifi/folly/lolwtf.ca.tf` builds `unifi_network.lab`'s subnet from it, and `nix/hosts/forge.nix` (and the legacy `nix/hosts/rackpi5.nix` image-only config) reads the same file with `builtins.fromJSON` via `.locals.lab`.
+	- A `lifecycle.precondition` on `unifi_network.lab` fails the plan if `lab.tf.json`'s host IPs ever disagree with `clients.yaml`'s `rpis.{capsule,spore,forge}.ip` octets — the two files cannot drift silently.
 - ## Cluster network facts
 	- The per-cluster `cluster-topology` ConfigMaps (`clusters/<site>/config/cluster-topology.json`) are the SSOT for every cluster network fact — full mechanism (Flux `substituteFrom`, `conftest` schema check, Nix/Terraform consumers) is on [[Architecture/Kubernetes]]. The current values:
 	- | key | folly | offsite |
@@ -70,6 +70,7 @@ tags:: architecture
 	- So apps exposed via the Gateway API + external-dns (jellyfin, hermes, dump, …) get plain, unproxied Cloudflare A/CNAME records pointing straight at their Cilium LB VIP — a private `10.x` address. They're reachable over the LAN or the tailnet (the per-cluster Tailscale Connector advertises the LB range — see below), not from the public internet. The Cloudflare Tunnel is the public entry point in principle, but in practice today it fronts exactly one hostname (Atlantis on offsite).
 - ## Tailscale
 	- `terraform/network/tailscale/` manages the `pirate-musical.ts.net` tailnet: devices, the ACL policy (`policy.hujson`), and a federated OIDC identity that lets the `nixos-deploy` GitHub Actions workflow join as `tag:ci` (scoped by the ACL to SSH into `tag:pi4` only, no long-lived secret).
+	- Forge enrolls with an independently revocable OAuth client restricted to `tag:lab-host`. Terraform escrows the long-lived client secret in 1Password; Forge consumes an encrypted copy through its SSH-host-key-scoped SOPS file.
 	- In-cluster, `clusters/base/networking/tailscale/` runs the `tailscale-operator` HelmRelease; each cluster's `tailscale-connectors/connector.yaml` deploys a subnet-router `Connector` advertising that site's LAN CIDRs plus `${K8S_NODE_CIDR}` and `${LB_RANGE}` — folly's connector also advertises `10.1.0.0/24` and `10.2.0.0/24`, offsite's advertises `192.168.1.0/24`.
 	- The k8s node hosts themselves run **no** Tailscale client — `nix/system/tailscale-disable.nix` force-disables `services.tailscale`, and it's imported by all five k8s hosts (`optiplex`, `riptide`, `shale`, `oldschool`, `retrofit`) inline in `flake.nix`. Tailnet reachability into the clusters goes entirely through the Connector subnet router, not per-node clients.
 	- `policy.hujson`'s `grants` explicitly permit `tag:folly` → offsite's k8s nodes/LB/LAN and `tag:offsite` → folly's k8s nodes/LB, plus `autoApprovers.routes` that auto-accept the Connectors' advertised CIDRs without manual review.

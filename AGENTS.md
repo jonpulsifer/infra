@@ -56,6 +56,15 @@ Two things the tasks settle that are easy to get wrong:
 For anything mise does not own — deploying to a live host, `sops`,
 `flux reconcile` — the runbooks carry the exact invocation.
 
+`mise` does not own the SOPS / age-key workflow. Start at
+[[Runbooks/SOPS Secrets and Age Keys]]; the matching skill
+(`.agents/skills/sops-secrets/`) holds only the agent-side notes — the
+runbook is the canonical procedure. The two facts that bite first-timers
+hardest: the operator age key is at `~/.config/age/keys.txt` (NOT the
+sops binary's default of `~/.config/sops/age/keys.txt`), and a fresh
+sops file is two-stage — operator key as the only recipient at first,
+host's own `ssh-to-age` recipient added after the first successful boot.
+
 ## Repo map
 
 One line per top-level directory. Look in the tree for what is inside; this
@@ -64,7 +73,7 @@ file does not list contents.
 | Path | What lives here |
 | --- | --- |
 | `nix/` | NixOS configuration for every host, plus image builds. Hosts are declared in `flake.nix`. |
-| `clusters/` | Kubernetes manifests for `folly` (primary) and `offsite` (backup), with `base/` shared between them. |
+| `clusters/` | Kubernetes manifests for the fully capable `folly` (on-site) and `offsite` (remote-site) clusters, with `base/` shared between them. |
 | `terraform/` | All Terraform root modules — network fabric under `network/`, cloud and identity alongside it, reusable modules in `modules/`. |
 | `apps/` | Deployable first-party services. |
 | `packages/` | Reusable building blocks, including the Helm charts Flux consumes. |
@@ -90,7 +99,7 @@ the `terraform/modules/cluster-topology` module. A conftest contract
 (`.github/workflows/topology-contract.yml`) enforces the schema.
 
 `lab.tf.json` is valid Terraform JSON auto-loaded by the folly UniFi root and
-read by `nix/hosts/rackpi5.nix`.
+read by `nix/hosts/forge.nix` (and the legacy image-only `nix/hosts/rackpi5.nix`).
 
 ## Where depth lives
 
@@ -107,6 +116,10 @@ Inside `docs/`, pages link each other with Logseq `[[wikilinks]]`. This file is
 not part of the graph, so it uses paths.
 
 ## Agent skills
+
+### sops-secrets
+
+Working with `nix/secrets/*.sops.yaml` (operator and host decryption, harmonia keypair generation, two-stage recipient setup): see `.agents/skills/sops-secrets/SKILL.md` and [[Runbooks/SOPS Secrets and Age Keys]]. The dev-machine operator key lives at `~/.config/age/keys.txt` and in 1Password (homelab vault, "sops homelab age key"); per-host recipients are derived from each host's ed25519 host key via `ssh-to-age`, which only works after the host has booted once.
 
 ### Issue tracker
 

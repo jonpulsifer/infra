@@ -49,6 +49,7 @@
 		"tag:folly":        ["tag:k8s-operator"],
 		"tag:offsite":      ["tag:k8s-operator"],
 		"tag:pi4":          ["autogroup:admin"],
+		"tag:lab-host":     ["autogroup:admin"],
 		"tag:ci":           ["autogroup:admin"],
 	},
 
@@ -137,6 +138,20 @@
 			"src":    "jonathan@pulsifer.ca",
 			"accept": ["10.1.0.1:443", "10.2.0.20:53", "10.89.0.1:443", "192.168.1.1:443"],
 			"proto":  "tcp",
+		},
+		{
+			// Lab hosts are owner-reachable but have no implicit access to
+			// other tagged infrastructure.
+			"src":    "jonathan@pulsifer.ca",
+			"accept": ["tag:lab-host:22"],
+			"proto":  "tcp",
+		},
+		{
+			// Policy-test destinations require a concrete selector and numeric
+			// port; aggregate selectors and wildcard ports are rejected.
+			"src":   "tag:lab-host",
+			"deny":  ["tag:pi4:22"],
+			"proto": "tcp",
 		},
 	],
 

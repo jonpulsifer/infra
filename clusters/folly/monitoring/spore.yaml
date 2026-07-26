@@ -142,7 +142,7 @@ spec:
             severity: critical
           annotations:
             message: rackpi5 signed boot publisher is down
-            description: "spore-native-boot-rackpi5.service is not active. Spore cannot expose a complete signed artifact set for rackpi5's sole boot path."
+            description: "spore-native-boot-rackpi5.service is not active. Spore cannot expose a complete signed artifact set for the legacy HTTP/RAM boot path -- forge's EEPROM still has it as a secondary boot, so a dead publisher is a silent loss of the last fallback."
         - alert: SporeNfsDataNotMounted
           expr: absent(node_filesystem_size_bytes{instance="spore", mountpoint="/nfs/data"})
           for: 5m

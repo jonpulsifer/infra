@@ -32,9 +32,12 @@ let
   '';
 in
 {
-  environment.systemPackages = lib.mkIf config.services.tailscale.enable (with pkgs; [
-    tailscale
-  ]);
+  environment.systemPackages = lib.mkIf config.services.tailscale.enable (
+    with pkgs;
+    [
+      tailscale
+    ]
+  );
 
   # dnssec = false is required for tailscale to work
   services.resolved = {
@@ -48,14 +51,18 @@ in
     in
     {
       enable = true;
-      authKeyFile = "/var/secrets/tailscale-auth-key";
-      extraUpFlags = [ "--advertise-tags=${tagsString}" ];
+      extraUpFlags = lib.optionals (tags != [ ]) [ "--advertise-tags=${tagsString}" ];
       # Hosts do not accept tailnet subnet routes: cluster LAN/LB ranges are
       # bridged via UniFi (10.3.0.0/26 ↔ 10.89.0.0/28) and reached over BGP,
       # not the tailnet. Accepting routes here caused LB VIP traffic to hairpin
       # into the (now-removed) k8s subnet-router connector instead of the UDM.
       extraSetFlags = [ "--accept-routes=false" ];
     };
+
+  assertions = lib.optional (config.services.tailscale.authKeyFile != null) {
+    assertion = tags != [ ];
+    message = "Tailscale credential-backed enrollment requires at least one advertised tag";
+  };
 
   systemd.services.tailscale-transport-layer-offloads = {
     # https://tailscale.com/kb/1320/performance-best-practices#ethtool-configuration

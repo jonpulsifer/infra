@@ -21,12 +21,14 @@ terraform {
 
 provider "helm" {
   kubernetes = {
-    config_path = "~/.kube/config"
+    config_path    = "~/.kube/config"
+    config_context = "folly"
   }
 }
 
 provider "kubernetes" {
-  config_path = "~/.kube/config"
+  config_path    = "~/.kube/config"
+  config_context = "folly"
 }
 
 provider "github" {
@@ -38,7 +40,11 @@ locals {
     org  = "jonpulsifer"
     repo = "infra"
   }
-  topology = jsondecode(file("${path.module}/../config/cluster-topology.json"))
+}
+
+module "topology" {
+  source = "../../../terraform/modules/cluster-topology"
+  site   = "folly"
 }
 
 module "flux_bootstrap" {
@@ -47,8 +53,8 @@ module "flux_bootstrap" {
   cluster_name = "folly"
   github_repo  = local.github.repo
   flux_values  = file("${path.module}/flux-values.yaml")
-  cluster_dns  = local.topology.data.CLUSTER_DNS
-  router_ip    = local.topology.data.ROUTER_IP
+  cluster_dns  = module.topology.data.CLUSTER_DNS
+  router_ip    = module.topology.data.ROUTER_IP
 
   providers = {
     github     = github

@@ -9,6 +9,7 @@ icon:: 🚒
 	- [[Runbooks/Add Shared Kubernetes Resource]] — use the `clusters/base/` pattern for both clusters
 	- [[Runbooks/Validate Infra Changes]] — validation commands by change area
 	- [[Runbooks/Inspect UniFi Network]] — read-only UniFi discovery before making changes
+	- [[Runbooks/SOPS Secrets and Age Keys]] — operator age key, harmonia keypairs, two-stage sops-nix recipient setup, decryption-failure triage
 	- [[Runbooks/Kiosk]] — the Raspberry Pi kiosk hosts: Cage/Wayland, Firefox, container-backed apps
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.
