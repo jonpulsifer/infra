@@ -44,7 +44,7 @@
   system = {
     autoUpgrade = {
       enable = lib.mkDefault true;
-      flake = "github.com:jonpulsifer/infra";
+      flake = "github:jonpulsifer/infra";
       flags = [ "-L" ];
       dates = "03:37";
       randomizedDelaySec = "3600";
