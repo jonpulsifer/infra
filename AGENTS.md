@@ -73,7 +73,7 @@ file does not list contents.
 | Path | What lives here |
 | --- | --- |
 | `nix/` | NixOS configuration for every host, plus image builds. Hosts are declared in `flake.nix`. |
-| `clusters/` | Kubernetes manifests for `folly` (primary) and `offsite` (backup), with `base/` shared between them. |
+| `clusters/` | Kubernetes manifests for the fully capable `folly` (on-site) and `offsite` (remote-site) clusters, with `base/` shared between them. |
 | `terraform/` | All Terraform root modules — network fabric under `network/`, cloud and identity alongside it, reusable modules in `modules/`. |
 | `apps/` | Deployable first-party services. |
 | `packages/` | Reusable building blocks, including the Helm charts Flux consumes. |

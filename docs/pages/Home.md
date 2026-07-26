@@ -8,7 +8,7 @@ icon:: 🏡
 	- [[Fleet]] — every host, its hardware, and its quirks
 - ## The stack in one breath
 	- **Bare metal** — [[Architecture/NixOS]] configuration for every host, deployed with `nixos-rebuild` and kept honest by auto-upgrades from `main`.
-	- **Kubernetes** — two clusters, `folly` on-site and `offsite` for backup, reconciled by FluxCD. See [[Architecture/Kubernetes]].
+	- **Kubernetes** — two fully capable clusters, `folly` on-site and `offsite` at the remote site, reconciled by FluxCD. See [[Architecture/Kubernetes]].
 	- **Cloud and network** — UniFi, Cloudflare, Tailscale, GCP and Google Workspace under [[Architecture/Terraform]], with applies gated through Atlantis. The network fabric itself is [[Architecture/Networking]].
 	- **Applications** — first-party services, packages and OCI images, described in [[Architecture/Applications]].
 	- Everything ships the same way: open a PR and let the operators apply it. See [[Architecture/GitOps]].

@@ -3,8 +3,8 @@ tags:: architecture
 
 - **Layer 2** of [[Architecture]]: two Kubernetes clusters under `clusters/`, reconciled by FluxCD on every merge to `main`. The Terraform bootstrap roots own CoreDNS and Flux itself; Flux owns post-bootstrap cluster state. ArgoCD is installed as a Flux HelmRelease and owns no applications; `terraform/argo/` wires the provider and declares no resources. Reconciliation mechanics and the apply model live on [[Architecture/GitOps]].
 - ## Clusters
-	- `clusters/folly/` — primary, on-site. Nodes: `optiplex` (control-plane), `riptide`, `shale` (workers).
-	- `clusters/offsite/` — backup. Nodes: `retrofit` (control-plane), `oldschool` (worker).
+	- `clusters/folly/` — independent, fully capable on-site cluster. Nodes: `optiplex` (control-plane), `riptide`, `shale` (workers).
+	- `clusters/offsite/` — independent, fully capable remote-site cluster. Nodes: `retrofit` (control-plane), `oldschool` (worker).
 	- `clusters/base/` — resources shared by both clusters, referenced by relative path from each cluster's manifests.
 	- Hardware, serials, and per-host quirks for all five nodes: [[Fleet]].
 - ## The base/ sharing pattern

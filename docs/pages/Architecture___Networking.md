@@ -3,7 +3,7 @@ tags:: architecture
 
 - Networking spans all four layers: UniFi VLANs and BGP at Layer 1/3 (`terraform/network/`), Cilium and the Gateway API inside each cluster at Layer 2 (`clusters/*/networking/`), Cloudflare and Tailscale gluing sites together at Layer 3. This page is the single place the whole story lives. Cluster composition is on [[Architecture/Kubernetes]]; host hardware is on [[Fleet]]; live discovery of the running UniFi controller is the `unifi-network` skill ([[Runbooks/Inspect UniFi Network]]).
 - ## Sites and fabric
-	- Two UniFi consoles, each its own Terraform root: `terraform/network/unifi/folly/` (primary, on-site) and `terraform/network/unifi/offsite/` (backup). They're joined by exactly **one** inter-site data plane: a UniFi Site Magic WireGuard tunnel (`wgsts1000`).
+	- Two UniFi consoles, each its own Terraform root: `terraform/network/unifi/folly/` on-site and `terraform/network/unifi/offsite/` at the remote site. They're joined by exactly **one** inter-site data plane: a UniFi Site Magic WireGuard tunnel (`wgsts1000`).
 	- Each site's k8s nodes run Cilium with a BGP control plane (ASN 64513) peering **eBGP** with that site's own UniFi gateway (ASN 64512) — folly's UDM Pro, offsite's UCG Max.
 - ## LAN / VLANs
 	- folly (`terraform/network/unifi/folly/`), all networks domain `lolwtf.ca` unless noted:
