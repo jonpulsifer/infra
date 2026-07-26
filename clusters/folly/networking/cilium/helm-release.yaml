@@ -9,8 +9,6 @@ metadata:
 spec:
   interval: 24h
   maxHistory: 2
-  dependsOn:
-    - name: cilium-preflight
   chartRef:
     kind: OCIRepository
     name: cilium
