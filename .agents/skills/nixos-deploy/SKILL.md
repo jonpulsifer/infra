@@ -34,12 +34,11 @@ background: `docs/pages/Architecture___NixOS.md`. Host inventory:
 - Kubernetes nodes are declared **inline in `flake.nix`**, not in `nix/hosts/`.
   Only the Pis and the GCE VM have a `nix/hosts/<name>.nix`.
 - `radiopi0` and `blinkypi0` are armv6l with no binary cache and
-  `system.autoUpgrade` disabled — they cross-build on `spore` (aarch64) and are
+  `system.autoUpgrade` disabled — they cross-build on `forge` (aarch64) and are
   pushed with `--target-host`. Never try to build them on-device.
-- `forge` self-boots off its installed NVMe. The legacy `rackpi5` HTTP/RAM
-  chain is kept on spore as a fallback during forge's first install —
-  `BOOT_ORDER=0xf1276` means a failed NVMe install falls back to the
-  spore-published signed image rather than bricking. Boot-order digits are
+- `forge` boots off its installed NVMe. The `rackpi5` HTTP/RAM chain on spore
+  supplies forge's EEPROM fallback. `BOOT_ORDER=0xf1276` tries the
+  spore-published signed image when NVMe boot fails. Boot-order digits are
   tried right-to-left: NVMe, HTTP, network, SD, then restart the sequence.
   That prepends NVMe to the stock `0xf127`, so every existing fallback
   survives — check the live value with `rpi-eeprom-config` before writing,

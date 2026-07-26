@@ -1,13 +1,6 @@
-# Native arm64 build host: the lab's nix build + (optional) OCI image build
-# + (optional) binary cache role. Replaces the ad-hoc "ssh to spore, hope NFS
-# stays responsive" workflow that the current Pi fleet relies on, and is what
-# cloudpi4 / homepi4 / weatherpi4 advertise as a remote builder once they
-# adopt `nix.buildMachines` (a separate change, per-host).
-#
-# Spore still does build work for the radiopi0/blinkypi0 armv6l cross path
-# (aarch64 build platform is what the sd-image actually wants); this role
-# exists for native aarch64 work and OCI image builds where cross-compiling
-# from x86 is either wrong or a maintenance burden.
+# Native arm64 build, OCI image build, and binary-cache role. Forge imports
+# this module and is the build target for the Pi fleet, including the aarch64
+# build platform used by the armv6l cross configurations.
 {
   config,
   lib,
