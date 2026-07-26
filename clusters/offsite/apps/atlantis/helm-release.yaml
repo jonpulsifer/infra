@@ -110,6 +110,9 @@ spec:
     defaultTFDistribution: opentofu
     hidePrevPlanComments: true
     hideUnchangedPlanComments: true
+    podTemplate:
+      annotations:
+        configmap.reloader.stakater.com/reload: kubeconfig-hook,plan-hook,policies
     ingress:
       enabled: true
       annotations:
