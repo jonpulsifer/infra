@@ -7,6 +7,19 @@ metadata:
 spec:
   interval: 1h0m0s
   path: ./config/crd/standard
+  patches:
+    - patch: |-
+        $patch: delete
+        apiVersion: admissionregistration.k8s.io/v1
+        kind: ValidatingAdmissionPolicy
+        metadata:
+          name: safe-upgrades.gateway.networking.k8s.io
+    - patch: |-
+        $patch: delete
+        apiVersion: admissionregistration.k8s.io/v1
+        kind: ValidatingAdmissionPolicyBinding
+        metadata:
+          name: safe-upgrades.gateway.networking.k8s.io
   prune: true
   sourceRef:
     kind: GitRepository
