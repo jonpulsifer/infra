@@ -22,6 +22,7 @@ spec:
     remediation:
       retries: 5
   values:
+    upgradeCompatibility: "1.17"
     autoDirectNodeRoutes: true
     devices: eno+ enp+ tailscale0
     kubeProxyReplacement: true
@@ -68,6 +69,9 @@ spec:
         enabled: true
     hubble:
       enabled: true
+      tls:
+        auto:
+          method: cronJob
       relay:
         enabled: true
         prometheus:

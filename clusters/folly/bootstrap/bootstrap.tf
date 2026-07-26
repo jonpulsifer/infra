@@ -16,6 +16,10 @@ terraform {
     github = {
       source = "integrations/github"
     }
+    onepassword = {
+      source  = "1password/onepassword"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -33,13 +37,27 @@ provider "kubernetes" {
 
 provider "github" {
   owner = local.github.org
+
+  app_auth {
+    id              = jsondecode(ephemeral.onepassword_item.github_app.note_value).app_id
+    installation_id = jsondecode(ephemeral.onepassword_item.github_app.note_value).installation_id
+    pem_file        = jsondecode(ephemeral.onepassword_item.github_app.note_value).private_key
+  }
 }
 
+provider "onepassword" {}
+
 locals {
+  vault_id = "ib23znjeikv74p37f6mbfk7uya"
   github = {
     org  = "jonpulsifer"
     repo = "infra"
   }
+}
+
+ephemeral "onepassword_item" "github_app" {
+  vault = local.vault_id
+  uuid  = "gppbidlscm4tb5k5wpjhen7zhu"
 }
 
 module "topology" {

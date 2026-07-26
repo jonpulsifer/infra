@@ -79,6 +79,9 @@ spec:
         allowed_overrides: []
         allow_custom_workflows: false
         pre_workflow_hooks:
+          - run: /home/atlantis/kubeconfig-hook.sh
+            description: Generate Kubernetes provider config
+            commands: plan, apply
           - run: /home/atlantis/plan-hook.sh
             description: Plan Hook
             commands: plan
@@ -107,6 +110,9 @@ spec:
     defaultTFDistribution: opentofu
     hidePrevPlanComments: true
     hideUnchangedPlanComments: true
+    podTemplate:
+      annotations:
+        configmap.reloader.stakater.com/reload: kubeconfig-hook,plan-hook,policies
     ingress:
       enabled: true
       annotations:
@@ -130,6 +136,10 @@ spec:
         configMap:
           name: plan-hook
           defaultMode: 0777
+      - name: kubeconfig-hook
+        configMap:
+          name: kubeconfig-hook
+          defaultMode: 0555
       - name: terraform-gsa
         secret:
           secretName: atlantis-github
@@ -140,6 +150,10 @@ spec:
       - name: plan-hook
         mountPath: /home/atlantis/plan-hook.sh
         subPath: plan-hook.sh
+        readOnly: true
+      - name: kubeconfig-hook
+        mountPath: /home/atlantis/kubeconfig-hook.sh
+        subPath: kubeconfig-hook.sh
         readOnly: true
       - name: terraform-gsa
         mountPath: /run/secrets/terraform.json
