@@ -147,8 +147,10 @@
 			"proto":  "tcp",
 		},
 		{
+			// Policy-test destinations require a concrete selector and numeric
+			// port; aggregate selectors and wildcard ports are rejected.
 			"src":   "tag:lab-host",
-			"deny":  ["autogroup:tagged:*"],
+			"deny":  ["tag:pi4:22"],
 			"proto": "tcp",
 		},
 	],
