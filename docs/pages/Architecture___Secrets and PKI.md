@@ -10,10 +10,11 @@ tags:: architecture
 	  sops -e -i clusters/<cluster>/<path>.sops.yaml         # encrypt a new file
 	  ```
 - ## sops-nix (bare NixOS host secrets)
-	- `nix/secrets/<host>.sops.yaml` holds secrets for a single bare host — currently `optiplex`, `retrofit`, and `oldschool`. Each file has its own `.sops.yaml` rule keyed to that host's own age recipient (an ssh-to-age conversion of its ed25519 SSH host key), in addition to the shared key.
+	- `nix/secrets/<host>.sops.yaml` holds secrets for a single bare host — currently `optiplex`, `retrofit`, `oldschool`, and `forge`. Each file has its own `.sops.yaml` rule keyed to that host's own age recipient (an ssh-to-age conversion of its ed25519 SSH host key), in addition to the shared key.
 	- `nix/system/sops.nix` sets `sops.age.sshKeyPaths` to the host's own `/etc/ssh/ssh_host_ed25519_key` — sops-nix decrypts on the host using its own key rather than a fleet-wide shared key, so a compromised host only exposes secrets scoped to itself.
-	- `flake.nix` wires each host's `sops.defaultSopsFile` and declares its secrets: `optiplex` and `retrofit` (both `role = "control-plane"`) carry `k8s-sa-signing-key` (owner `kubernetes`, restarts `kube-apiserver`/`kube-controller-manager`); `oldschool` carries `harmonia-cache-key` for its binary-cache signing (the matching public key is committed at `nix/secrets/oldschool-harmonia-cache.pub`).
+	- `flake.nix` wires each host's `sops.defaultSopsFile` and declares its secrets: `optiplex` and `retrofit` (both `role = "control-plane"`) carry `k8s-sa-signing-key` (owner `kubernetes`, restarts `kube-apiserver`/`kube-controller-manager`); `oldschool` carries `harmonia-cache-key` (cache public half at `nix/secrets/oldschool-harmonia-cache.pub`); `forge` carries `harmonia-cache-key` (public half at `nix/secrets/forge-harmonia-cache.pub`).
 	- `k8s-sa-signing-key` is the per-cluster ServiceAccount token signer private key issued by `terraform/pki` — see PKI below.
+	- The **two-stage recipient setup** (operator age key only on first commit, host's own ssh-to-age recipient added after first boot) and the operator-key location (`~/.config/age/keys.txt`, 1Password "sops homelab age key" — NOT the sops binary's default path) are spelled out in [[Runbooks/SOPS Secrets and Age Keys]].
 - ## OpenBao
 	- Deployed by Flux from `clusters/folly/apps/vault/` (HelmRelease `vault`, chart `openbao`, namespace `vault`). No other cluster runs it.
 	- Storage is integrated Raft (`storage "raft"`, single node `vault-openbao-0`); no external database.
