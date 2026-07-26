@@ -38,8 +38,12 @@ background: `docs/pages/Architecture___NixOS.md`. Host inventory:
   pushed with `--target-host`. Never try to build them on-device.
 - `forge` self-boots off its installed NVMe. The legacy `rackpi5` HTTP/RAM
   chain is kept on spore as a fallback during forge's first install —
-  `BOOT_ORDER=0xf416` (NVMe first, HTTP second) means a failed NVMe install
-  falls back to the spore-published signed image rather than bricking. The
+  `BOOT_ORDER=0xf1276` means a failed NVMe install falls back to the
+  spore-published signed image rather than bricking. Boot-order digits are
+  tried right-to-left: NVMe, HTTP, network, SD, then restart the sequence.
+  That prepends NVMe to the stock `0xf127`, so every existing fallback
+  survives — check the live value with `rpi-eeprom-config` before writing,
+  and never drop the HTTP entry while the box is headless. The
   EEPROM config (boot order, HTTP host/path) lives outside the Nix closure
   and is applied by hand with `rpi-eeprom-config --edit`; a stock EEPROM
   firmware update erases the enrolled signing key for the legacy path, so
