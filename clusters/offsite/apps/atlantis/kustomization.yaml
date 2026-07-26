@@ -15,6 +15,9 @@ configMapGenerator:
   - name: plan-hook
     files:
       - plan-hook.sh
+  - name: kubeconfig-hook
+    files:
+      - kubeconfig-hook.sh
 generatorOptions:
   disableNameSuffixHash: true
   annotations:

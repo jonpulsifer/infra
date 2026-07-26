@@ -9,6 +9,8 @@ let
   networkConfig = networks.${config.services.k8s.network};
   cfg = config.services.k8s;
   fmlIssuer = "https://oidc.lolwtf.ca/${cfg.network}";
+  peerNetwork = if cfg.network == "folly" then "offsite" else "folly";
+  peerIssuer = "https://oidc.lolwtf.ca/${peerNetwork}";
   fmlSignerCert = ../../../terraform/pki/certs/${cfg.network}-sa-signer.pem;
 in
 {
@@ -60,6 +62,25 @@ in
 
     # cilium writes its own config to /etc/cni/net.d, so we need to make sure it's writable/empty/whatever
     environment.etc."cni/net.d".enable = false;
+    environment.etc."kubernetes/authentication-config.yaml".text = builtins.toJSON {
+      apiVersion = "apiserver.config.k8s.io/v1";
+      kind = "AuthenticationConfiguration";
+      jwt = [
+        {
+          issuer = {
+            url = peerIssuer;
+            audiences = [ "api" ];
+          };
+          claimValidationRules = [
+            {
+              expression = ''claims.sub == "system:serviceaccount:atlantis:atlantis"'';
+              message = "only the Atlantis service account may authenticate across clusters";
+            }
+          ];
+          claimMappings.username.expression = ''"federated:" + claims.sub'';
+        }
+      ];
+    };
 
     environment.systemPackages =
       with pkgs;
@@ -154,6 +175,7 @@ in
           serviceAccountKeyFile = fmlSignerCert;
           serviceAccountSigningKeyFile = config.sops.secrets."k8s-sa-signing-key".path;
           extraOpts = ''
+            --authentication-config=/etc/kubernetes/authentication-config.yaml \
             --enable-aggregator-routing=true \
             --requestheader-allowed-names=front-proxy-client \
             --requestheader-extra-headers-prefix=X-Remote-Extra- \
