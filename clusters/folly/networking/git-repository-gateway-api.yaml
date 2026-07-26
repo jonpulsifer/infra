@@ -12,5 +12,5 @@ spec:
   ignore: |
     # exclude all
     /*
-    # include crds directory
-    !/config/crd/standard
+    # include experimental bundle (standard resources plus experimental fields)
+    !/config/crd/experimental
