@@ -8,6 +8,14 @@ run "exposes_folly_bootstrap_resources" {
 
   assert {
     condition = output.bootstrap_resources == {
+      coredns = {
+        cluster_role         = "system:coredns"
+        cluster_role_binding = "system:coredns"
+        config_map           = "kube-system/coredns"
+        deployment           = "kube-system/coredns"
+        service              = "kube-system/kube-dns"
+        service_account      = "kube-system/coredns"
+      }
       deploy_key = {
         repository = "infra"
         title      = "Flux (folly)"
@@ -25,6 +33,6 @@ run "exposes_folly_bootstrap_resources" {
         namespace = "flux-system"
       }
     }
-    error_message = "folly bootstrap must expose its Flux deploy key, releases, and credentials secret"
+    error_message = "folly bootstrap must expose CoreDNS and its Flux bootstrap resources"
   }
 }

@@ -10,9 +10,85 @@ resource "github_repository_deploy_key" "this" {
   read_only  = "true"
 }
 
-# CoreDNS — deployed by Terraform so cluster DNS is available before Flux reconciles.
-# RBAC (ServiceAccount, ClusterRole, ClusterRoleBinding) already exists from the
-# legacy addonManager and persists in the cluster independently.
+# CoreDNS is part of the bootstrap boundary: Flux requires cluster DNS before it
+# can fetch and reconcile its own desired state.
+
+resource "kubernetes_service_account_v1" "coredns" {
+  metadata {
+    name      = "coredns"
+    namespace = "kube-system"
+    labels = {
+      "k8s-app"                       = "kube-dns"
+      "kubernetes.io/cluster-service" = "true"
+    }
+  }
+}
+
+resource "kubernetes_cluster_role_v1" "coredns" {
+  metadata {
+    name = "system:coredns"
+    labels = {
+      "k8s-app"                       = "kube-dns"
+      "kubernetes.io/bootstrapping"   = "rbac-defaults"
+      "kubernetes.io/cluster-service" = "true"
+    }
+  }
+
+  rule {
+    api_groups = [""]
+    resources = [
+      "endpoints",
+      "namespaces",
+      "pods",
+      "services",
+    ]
+    verbs = [
+      "list",
+      "watch",
+    ]
+  }
+
+  rule {
+    api_groups = [""]
+    resources  = ["nodes"]
+    verbs      = ["get"]
+  }
+
+  rule {
+    api_groups = ["discovery.k8s.io"]
+    resources  = ["endpointslices"]
+    verbs = [
+      "list",
+      "watch",
+    ]
+  }
+}
+
+resource "kubernetes_cluster_role_binding_v1" "coredns" {
+  metadata {
+    name = "system:coredns"
+    labels = {
+      "k8s-app"                       = "kube-dns"
+      "kubernetes.io/bootstrapping"   = "rbac-defaults"
+      "kubernetes.io/cluster-service" = "true"
+    }
+    annotations = {
+      "rbac.authorization.kubernetes.io/autoupdate" = "true"
+    }
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = kubernetes_cluster_role_v1.coredns.metadata[0].name
+  }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account_v1.coredns.metadata[0].name
+    namespace = kubernetes_service_account_v1.coredns.metadata[0].namespace
+  }
+}
 
 resource "kubernetes_config_map_v1" "coredns" {
   metadata {
@@ -50,6 +126,7 @@ resource "kubernetes_service_v1" "kube_dns" {
     labels = {
       "k8s-app"                       = "kube-dns"
       "kubernetes.io/cluster-service" = "true"
+      "kubernetes.io/name"            = "CoreDNS"
     }
     annotations = {
       "prometheus.io/scrape" = "true"
@@ -83,6 +160,8 @@ resource "kubernetes_service_v1" "kube_dns" {
 }
 
 resource "kubernetes_deployment_v1" "coredns" {
+  depends_on = [kubernetes_cluster_role_binding_v1.coredns]
+
   metadata {
     name      = "coredns"
     namespace = "kube-system"
@@ -112,9 +191,9 @@ resource "kubernetes_deployment_v1" "coredns" {
       }
       spec {
         priority_class_name             = "system-cluster-critical"
-        service_account_name            = "coredns"
+        service_account_name            = kubernetes_service_account_v1.coredns.metadata[0].name
         dns_policy                      = "Default"
-        automount_service_account_token = false
+        automount_service_account_token = true
         toleration {
           key      = "CriticalAddonsOnly"
           operator = "Exists"
@@ -188,7 +267,7 @@ resource "kubernetes_deployment_v1" "coredns" {
         volume {
           name = "config-volume"
           config_map {
-            name = "coredns"
+            name = kubernetes_config_map_v1.coredns.metadata[0].name
             items {
               key  = "Corefile"
               path = "Corefile"
@@ -203,6 +282,7 @@ resource "kubernetes_deployment_v1" "coredns" {
 resource "helm_release" "flux_operator" {
   depends_on = [
     kubernetes_deployment_v1.coredns,
+    kubernetes_service_v1.kube_dns,
   ]
 
   name             = "flux-operator"

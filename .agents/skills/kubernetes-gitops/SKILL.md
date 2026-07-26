@@ -21,8 +21,11 @@ only the agent-specific guidance.
 - Changes under `clusters/` deploy via Flux after merge to `main`. **Never
   `kubectl apply` to author desired state** — `kubectl`, `flux get`, and
   `flux reconcile` are for inspection or forcing a sync.
-- Flux owns all live cluster state. ArgoCD is installed as a HelmRelease but
-  owns no applications; `terraform/argo` declares no resources.
+- Flux owns post-bootstrap cluster state. The
+  `clusters/<site>/bootstrap/` Terraform roots own CoreDNS and Flux itself so
+  DNS is available before Flux can fetch desired state. ArgoCD is installed as
+  a HelmRelease but owns no applications; `terraform/argo` declares no
+  resources.
 - Always use explicit contexts — there are two clusters and the wrong one is a
   silent mistake:
   ```bash
