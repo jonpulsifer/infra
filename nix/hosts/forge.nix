@@ -9,9 +9,11 @@
 #
 # First-boot deployment is a live install over the running rackpi5 RAM
 # image: build the sdImage on spore, dd it to /dev/nvme0n1 on the box
-# itself, set EEPROM BOOT_ORDER=0xf416, reboot. The old netboot path
-# remains in EEPROM as a secondary entry, so a failed install falls back
-# to spore's signed image rather than bricking.
+# itself, set EEPROM BOOT_ORDER=0xf1276, reboot. Boot-order digits are
+# tried right-to-left, so that is NVMe, then HTTP, then network, then SD,
+# then restart the sequence -- it prepends NVMe to the stock 0xf127 order
+# rather than replacing it, leaving the netboot path in place so a failed
+# install falls back to spore's signed image rather than bricking.
 {
   config,
   lib,
