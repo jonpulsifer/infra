@@ -9,6 +9,8 @@ metadata:
 spec:
   interval: 24h
   maxHistory: 2
+  dependsOn:
+    - name: cilium-preflight
   chartRef:
     kind: OCIRepository
     name: cilium
@@ -22,6 +24,7 @@ spec:
     remediation:
       retries: 5
   values:
+    upgradeCompatibility: "1.17"
     autoDirectNodeRoutes: true
     devices: eno+ enp+ tailscale0
     kubeProxyReplacement: true
