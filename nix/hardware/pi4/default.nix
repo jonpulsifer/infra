@@ -14,6 +14,10 @@
   # save some space
   documentation.enable = false;
 
+  # These Pi 4 hosts root on microSD. Build their generations elsewhere and
+  # push them explicitly instead of writing a new closure to flash every day.
+  system.autoUpgrade.enable = false;
+
   nixpkgs = {
     # Cross compile the system from x86_64-linux to aarch64-linux if you want
     # buildPlatform.system = "x86_64-linux";
