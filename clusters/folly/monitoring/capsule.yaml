@@ -67,7 +67,7 @@ spec:
     - name: capsule
       rules:
         - alert: PrometheusTargetMissing
-          expr: up{endpoint="dns-metrics", namespace="monitoring", service="capsule"} == 0
+          expr: (up{endpoint="dns-metrics", namespace="monitoring", service="capsule"} == 0) or absent(up{endpoint="dns-metrics", namespace="monitoring", service="capsule"})
           for: 1m
           labels:
             severity: critical

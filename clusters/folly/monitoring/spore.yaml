@@ -94,7 +94,7 @@ spec:
             message: Prometheus target missing (instance {{ $labels.instance }})
             description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
         - alert: SporeCoreDnsMetricsMissing
-          expr: up{endpoint="dns-metrics", namespace="monitoring", service="spore"} == 0
+          expr: (up{endpoint="dns-metrics", namespace="monitoring", service="spore"} == 0) or absent(up{endpoint="dns-metrics", namespace="monitoring", service="spore"})
           for: 1m
           labels:
             severity: critical

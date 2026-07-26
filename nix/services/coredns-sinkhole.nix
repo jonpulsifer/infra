@@ -6,13 +6,15 @@ let
     "1.1.1.2"
     "1.0.0.2"
   ];
+  hostResolvers = [ "127.0.0.1" ] ++ upstreams;
 in
 {
   imports = [ inputs.hosts.nixosModule ];
 
-  networking.nameservers = [ "127.0.0.1" ] ++ upstreams;
+  networking.nameservers = hostResolvers;
   networking.resolvconf.extraConfig = ''
-    name_servers='${lib.concatStringsSep " " ([ "127.0.0.1" ] ++ upstreams)}'
+    name_servers='${lib.concatStringsSep " " hostResolvers}'
+    resolv_conf_local_only='NO'
   '';
 
   # CoreDNS owns port 53 on every interface. Keep resolved and Tailscale DNS

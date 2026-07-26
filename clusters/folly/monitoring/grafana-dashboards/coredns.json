@@ -266,6 +266,52 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "Total requests handled since the selected resolvers started.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(coredns_dns_requests_total{instance=~\"$instance\"})",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Requests since resolver start",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -292,7 +338,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 5
+        "y": 9
       },
       "id": 5,
       "options": {
@@ -350,7 +396,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 9
       },
       "id": 6,
       "options": {
@@ -408,7 +454,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 13
+        "y": 17
       },
       "id": 7,
       "options": {
@@ -466,7 +512,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 13
+        "y": 17
       },
       "id": 8,
       "options": {
@@ -525,7 +571,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 13
+        "y": 17
       },
       "id": 9,
       "options": {
