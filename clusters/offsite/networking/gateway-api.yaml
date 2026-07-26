@@ -18,9 +18,11 @@ metadata:
   name: gateway-api-experimental-apis
   namespace: flux-system
 spec:
+  deletionPolicy: Orphan
   interval: 1h0m0s
   path: ./config/crd/experimental
   prune: true
+  suspend: true
   sourceRef:
     kind: GitRepository
     name: gateway-api
@@ -36,7 +38,6 @@ spec:
   prune: true
   dependsOn:
     - name: gateway-api
-    - name: gateway-api-experimental-apis
   sourceRef:
     kind: GitRepository
     name: infra
