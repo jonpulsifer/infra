@@ -11,6 +11,9 @@ in
   imports = [ inputs.hosts.nixosModule ];
 
   networking.nameservers = [ "127.0.0.1" ] ++ upstreams;
+  networking.resolvconf.extraConfig = ''
+    name_servers='${lib.concatStringsSep " " ([ "127.0.0.1" ] ++ upstreams)}'
+  '';
 
   # CoreDNS owns port 53 on every interface. Keep resolved and Tailscale DNS
   # from competing for that listener or rewriting the host's resolver path.
