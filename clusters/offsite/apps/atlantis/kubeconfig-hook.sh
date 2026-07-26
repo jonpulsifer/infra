@@ -14,7 +14,7 @@ topology_value() {
 cluster_entry() {
   cluster=$1
   topology="${DIR}/clusters/${cluster}/config/cluster-topology.json"
-  ca="${DIR}/terraform/pki/certs/${cluster}-ca.pem"
+  ca="${DIR}/clusters/${cluster}/config/kubernetes-ca.pem"
   host=$(topology_value API_SERVER_HOSTNAME "${topology}")
   port=$(topology_value API_SERVER_PORT "${topology}")
 
