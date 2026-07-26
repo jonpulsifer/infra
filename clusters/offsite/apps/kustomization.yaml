@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - ../../base/apps/iperf3
   - atlantis
+  - cloudnative-pg
   - descheduler
   - hub
   - dave.yaml
