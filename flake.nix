@@ -82,7 +82,7 @@
         "homepi4"
         "weatherpi4"
         "capsule"
-        "rackpi5"
+        "forge"
         "oldboy"
         "spore"
         "radiopi0"
@@ -102,6 +102,12 @@
 
       nixosConfigurations =
         let
+          # rackpi5 is now the minimal image-only build for spore's
+          # native-boot publisher (the legacy HTTP/RAM boot chain is
+          # kept as a fallback for forge's first boot). The live host
+          # config moved to `forge` below; once forge is verified on
+          # NVMe and the netboot fallback is removed, this whole let
+          # binding goes away with nix/hosts/rackpi5.nix.
           rackpi5Configuration = mkHost "rackpi5" {
             system = "aarch64-linux";
             modules = [ ./nix/hosts/rackpi5.nix ];
@@ -204,6 +210,20 @@
             modules = [ ./nix/hosts/capsule.nix ];
           };
           rackpi5 = rackpi5Configuration;
+          forge = mkHost "forge" {
+            system = "aarch64-linux";
+            modules = [
+              ./nix/system/sops.nix
+              ./nix/hosts/forge.nix
+              {
+                sops.defaultSopsFile = ./nix/secrets/forge.sops.yaml;
+                # harmonia's binary-cache signing key. Public half is
+                # committed in the clear at nix/secrets/forge-harmonia-cache.pub
+                # so clients can pin it in their `trusted-public-keys`.
+                sops.secrets."harmonia-cache-key" = { };
+              }
+            ];
+          };
           spore = mkHost "spore" {
             system = "aarch64-linux";
             modules = [
@@ -261,7 +281,12 @@
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
           capsule = nixosConfigurations.capsule.config.system.build.sdImage;
+          # Legacy: spore's rackpi5 native-boot publisher still signs boot.img
+          # off this derivation as a fallback while forge migrates to NVMe.
           rackpi5 = nixosConfigurations.rackpi5.config.system.build.piBootImg;
+          # Live NVMe installer: build the forge sd-image on spore and `dd`
+          # it to /dev/nvme0n1 on the running rackpi5 RAM-boot.
+          forge = nixosConfigurations.forge.config.system.build.sdImage;
           spore = nixosConfigurations.spore.config.system.build.sdImage;
 
           iso = nixosConfigurations.iso.config.system.build.isoImage;

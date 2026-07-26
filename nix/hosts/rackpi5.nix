@@ -1,21 +1,29 @@
-# rackpi5 has one boot path: the Pi 5 EEPROM HTTP-loads a signed boot.img
-# through Spore, then stage 1 downloads and verifies the matching squashfs
-# before mounting it as the read-only Nix store. The machine has no local
-# storage and no NFS/TFTP/SD fallback.
+# rackpi5 is now the image-only host config spore's signed-RAM-boot
+# publisher consumes (`services.spore.nativeBootTargets.rackpi5` in
+# flake.nix) while the live host migrates to NVMe as [[Fleet/forge]].
+# The full toplevel is still built here -- the kernelboot bootloader,
+# initrd services, and initrd SSH all stay -- so spore can keep signing
+# and serving `boot.img` + `nix-store.squashfs` for the box's EEPROM
+# `BOOT_ORDER=0xf7` HTTP fallback. The Pi 5 EEPROM HTTP-loads a signed
+# `boot.img` from spore, then stage 1 downloads and SHA-256-verifies
+# the matching squashfs Nix store before mounting it read-only, with
+# no SD/NFS/TFTP fallback.
 #
-# The EEPROM configuration lives outside the Nix closure and is applied by
-# hand with `sudo rpi-eeprom-config --edit`:
+# The EEPROM configuration lives outside the Nix closure and is applied
+# by hand with `sudo rpi-eeprom-config --edit`:
 #
 #   BOOT_ORDER=0xf7
 #   HTTP_HOST=10.2.0.11
 #   HTTP_PATH=rackpi5-ram
 #
-# Spore serves the signed artifacts as plain static files under /rackpi5-ram/
-# (nix/services/spore-native-boot.nix), matching HTTP_PATH above.
+# Spore serves the signed artifacts as plain static files under
+# /rackpi5-ram/ (nix/services/spore-native-boot.nix), matching HTTP_PATH
+# above.
 #
-# HTTP boot downloads boot.sig and boot.img. The EEPROM must contain the public
-# half of Spore's /var/lib/pi-boot-sign/private.pem; stock EEPROM updates erase
-# that key, so re-enrol it before rebooting rackpi5 after an EEPROM update.
+# HTTP boot downloads boot.sig and boot.img. The EEPROM must contain the
+# public half of Spore's /var/lib/pi-boot-sign/private.pem; stock EEPROM
+# updates erase that key, so re-enrol it before rebooting rackpi5 after
+# an EEPROM update.
 {
   config,
   lib,

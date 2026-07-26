@@ -409,7 +409,7 @@
       // Renovate bumps only the version string in nix/overlays/mise.nix;
       // the two fetchurl hashes (x64/arm64 tarballs) go stale and must be
       // refreshed by hand before the build passes — so never automerge.
-      // nix-ci builds optiplex (x86_64) + rackpi5 (aarch64), which exercise
+      // nix-ci builds optiplex (x86_64) + forge (aarch64), which exercise
       // both hashes and flag a mismatch quoting the correct replacement.
       description: 'mise prebuilt binary — manual hash refresh, no automerge',
       matchDepNames: ['jdx/mise'],

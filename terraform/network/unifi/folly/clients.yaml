@@ -67,7 +67,7 @@ rpis:
   capsule:
     mac: 2c:cf:67:dc:7e:ce
     ip: 10
-  rackpi5:
+  forge:
     mac: 2c:cf:67:dc:7e:9b
     ip: 12
     dev-id: 4133
