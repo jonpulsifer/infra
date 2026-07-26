@@ -27,12 +27,12 @@ tags:: architecture
 		  {
 		    "lab": {
 		      "cidr": "10.2.0.0/24",
-		      "hosts": { "capsule": "10.2.0.10", "spore": "10.2.0.11", "rackpi5": "10.2.0.12" }
+		      "hosts": { "capsule": "10.2.0.10", "spore": "10.2.0.11", "forge": "10.2.0.12" }
 		    }
 		  }
 		  ```
-	- Consumers: `terraform/network/unifi/folly/lolwtf.ca.tf` builds `unifi_network.lab`'s subnet from it, and `nix/hosts/rackpi5.nix` reads the same file with `builtins.fromJSON` via `.locals.lab`.
-	- A `lifecycle.precondition` on `unifi_network.lab` fails the plan if `lab.tf.json`'s host IPs ever disagree with `clients.yaml`'s `rpis.{capsule,spore,rackpi5}.ip` octets — the two files cannot drift silently.
+	- Consumers: `terraform/network/unifi/folly/lolwtf.ca.tf` builds `unifi_network.lab`'s subnet from it, and `nix/hosts/forge.nix` (and the legacy `nix/hosts/rackpi5.nix` image-only config) reads the same file with `builtins.fromJSON` via `.locals.lab`.
+	- A `lifecycle.precondition` on `unifi_network.lab` fails the plan if `lab.tf.json`'s host IPs ever disagree with `clients.yaml`'s `rpis.{capsule,spore,forge}.ip` octets — the two files cannot drift silently.
 - ## Cluster network facts
 	- The per-cluster `cluster-topology` ConfigMaps (`clusters/<site>/config/cluster-topology.json`) are the SSOT for every cluster network fact — full mechanism (Flux `substituteFrom`, `conftest` schema check, Nix/Terraform consumers) is on [[Architecture/Kubernetes]]. The current values:
 	- | key | folly | offsite |

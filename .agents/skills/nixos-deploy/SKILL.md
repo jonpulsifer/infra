@@ -36,10 +36,14 @@ background: `docs/pages/Architecture___NixOS.md`. Host inventory:
 - `radiopi0` and `blinkypi0` are armv6l with no binary cache and
   `system.autoUpgrade` disabled — they cross-build on `spore` (aarch64) and are
   pushed with `--target-host`. Never try to build them on-device.
-- `rackpi5` is diskless and HTTP-boots a signed image from `spore`. There is no
-  SD, NFS, or TFTP fallback — deploy and verify `spore`'s publisher before any
-  change that affects its boot chain, and remember the EEPROM config lives
-  outside the Nix closure.
+- `forge` self-boots off its installed NVMe. The legacy `rackpi5` HTTP/RAM
+  chain is kept on spore as a fallback during forge's first install —
+  `BOOT_ORDER=0xf416` (NVMe first, HTTP second) means a failed NVMe install
+  falls back to the spore-published signed image rather than bricking. The
+  EEPROM config (boot order, HTTP host/path) lives outside the Nix closure
+  and is applied by hand with `rpi-eeprom-config --edit`; a stock EEPROM
+  firmware update erases the enrolled signing key for the legacy path, so
+  re-enrol it before rebooting forge after any such update.
 - `nix run .#<host> -- <cmd>` reaches hosts over the tailnet only; it fails from
   a plain LAN/WSL shell. Use `<host>.lolwtf.ca` over SSH there instead.
 - Roll back on a reachable host: `nixos-rebuild switch --rollback`.

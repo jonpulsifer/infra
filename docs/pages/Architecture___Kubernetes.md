@@ -24,7 +24,7 @@ tags:: architecture
 	- `clusters/folly/storage/` layers an NFS provisioner (`nfs-provisioner/`, backed by spore) and a static PV (`spore-pv.yaml`) on top. offsite uses `base/storage` unmodified.
 - ## Monitoring
 	- `clusters/base/monitoring/` provides `metrics-server` and `vector` (log shipping), shared by both clusters.
-	- `clusters/folly/monitoring/` layers kube-prometheus-stack and Loki on top, plus Grafana dashboards and hand-written `ServiceMonitor`/`EndpointSlice` pairs that scrape node-exporter and pihole metrics off hosts Prometheus can't discover via the Kubernetes API (`capsule`, `spore`, `cloudpi4`, `radiopi0`, `rackpi5`). offsite's `monitoring/kustomization.yaml` carries no resources of its own — no Prometheus stack runs there.
+	- `clusters/folly/monitoring/` layers kube-prometheus-stack and Loki on top, plus Grafana dashboards and hand-written `ServiceMonitor`/`EndpointSlice` pairs that scrape node-exporter and pihole metrics off hosts Prometheus can't discover via the Kubernetes API (`capsule`, `spore`, `cloudpi4`, `radiopi0`, `forge`). offsite's `monitoring/kustomization.yaml` carries no resources of its own — no Prometheus stack runs there.
 - ## Networking
 	- Cilium (CNI + BGP load balancing) and the Gateway API live under each cluster's `networking/`, built from shared Helm releases in `clusters/base/networking/{cert-manager,cloudflare,external-dns,tailscale}` plus per-cluster secrets and config. Full detail, including the cross-site firewall gating, is on [[Architecture/Networking]].
 - ## Network facts: the cluster-topology SSOT

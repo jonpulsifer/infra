@@ -10,7 +10,7 @@
 final: _prev:
 let
   # When Renovate bumps `version`, the two fetchurl hashes below go stale and
-  # `nix-ci` (builds optiplex=x86_64 + rackpi5=aarch64) fails with a hash
+  # `nix-ci` (builds optiplex=x86_64 + forge=aarch64) fails with a hash
   # mismatch quoting the correct replacement. Paste each in, or refresh
   # ahead of time:
   #   nix-prefetch-url --type sha256 \
