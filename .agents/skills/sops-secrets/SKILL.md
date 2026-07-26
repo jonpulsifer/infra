@@ -88,8 +88,8 @@ key gets added on second-deploy.
    ```
 5. Commit the encrypted file + the `.pub` (in the clear, on a global
    gitignore override: `git add -f nix/secrets/<host>-harmonia-cache.pub`).
-6. Wire the host's flake entry: `imports = [ ./nix/system/sops.nix ];
-   sops.defaultSopsFile = ./nix/secrets/<host>.sops.yaml; sops.secrets."harmonia-cache-key" = { };`.
+6. Boot the host with a configuration that does not declare load-bearing
+   secrets from the operator-only file. The boot generates its ed25519 host key.
 7. **After the host's first successful boot**, grab its ed25519, derive
    the age pubkey, and add it as a second recipient:
    ```bash
@@ -98,13 +98,16 @@ key gets added on second-deploy.
 
    sops -r --add-age age1... nix/secrets/<host>.sops.yaml
    ```
-   Commit the re-encrypted file. From here, sops-nix on the host can
-   decrypt without the operator key on the host filesystem.
+   Wire the host's flake entry: `imports = [ ./nix/system/sops.nix ];
+   sops.defaultSopsFile = ./nix/secrets/<host>.sops.yaml;
+   sops.secrets."harmonia-cache-key" = { };`. Commit the re-encrypted file
+   and configuration together. From here, sops-nix on the host can decrypt
+   without the operator key on the host filesystem.
 
-The "first boot" has to happen with the operator key being the only
-recipient; that's intentional — if the host's ed25519 were the only
-key, the operator couldn't decrypt on the dev machine. The operator
-key stays in the recipient list forever; the host key is additive.
+An operator-only file is buildable but not decryptable by the host. The
+operator key stays in the recipient list; the host key is additive. A full
+wipe that replaces `/etc/ssh/ssh_host_ed25519_key` requires repeating stage 2
+with the new recipient before the host can decrypt the existing file.
 
 ## Decryption failure triage
 
@@ -122,18 +125,18 @@ key stays in the recipient list forever; the host key is additive.
    against the current rule.
 3. **"Failed to get the data key required to decrypt"** — your key
    isn't a recipient of this file. Confirm with
-   `sops -d --show-age-keys <file>` (lists recipient fingerprints)
+   `rg '^ +recipient:' <file>` (reads unencrypted recipient metadata)
    and check yours is there.
 4. **`sops-nix` activation error on a host** — host's ed25519-derived
    age pubkey isn't in the file. Run the two-stage flow above to add
-   it; the host's first activation will be the operator-key stage.
+   it; the operator-only configuration cannot activate load-bearing secrets.
 
 ## When to put a new secret in 1Password
 
 If a secret is a long-lived operational thing (the operator age key, a
-harmonia cache private, a cloud account key), commit a 1Password item
-for it as part of the same PR. Per-host session tokens and
-short-lived OAuth codes are not worth 1Password; they live only in
-the relevant `*.sops.yaml`. Naming convention:
+harmonia cache private, a cloud account key, or a durable Tailscale OAuth
+enrollment credential), commit a 1Password item for it as part of the same
+PR. Per-host session tokens, short-lived OAuth codes, and expiring Tailscale
+auth keys live only in the relevant `*.sops.yaml`. Naming convention:
 `<thing> (<host>, if scoped)` — e.g. "sops homelab age key",
 "forge harmonia cache key", "unifi-terraform (offsite)".

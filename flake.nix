@@ -212,16 +212,29 @@
           rackpi5 = rackpi5Configuration;
           forge = mkHost "forge" {
             system = "aarch64-linux";
+            tags = [ "lab-host" ];
             modules = [
               ./nix/system/sops.nix
               ./nix/hosts/forge.nix
-              {
-                sops.defaultSopsFile = ./nix/secrets/forge.sops.yaml;
-                # harmonia's binary-cache signing key. Public half is
-                # committed in the clear at nix/secrets/forge-harmonia-cache.pub
-                # so clients can pin it in their `trusted-public-keys`.
-                sops.secrets."harmonia-cache-key" = { };
-              }
+              (
+                { config, ... }:
+                {
+                  sops.defaultSopsFile = ./nix/secrets/forge.sops.yaml;
+                  # harmonia's binary-cache signing key. Public half is
+                  # committed in the clear at nix/secrets/forge-harmonia-cache.pub
+                  # so clients can pin it in their `trusted-public-keys`.
+                  sops.secrets."harmonia-cache-key" = { };
+                  sops.secrets."tailscale-auth-key" = { };
+
+                  services.tailscale = {
+                    authKeyFile = config.sops.secrets."tailscale-auth-key".path;
+                    authKeyParameters = {
+                      ephemeral = false;
+                      preauthorized = true;
+                    };
+                  };
+                }
+              )
             ];
           };
           spore = mkHost "spore" {
