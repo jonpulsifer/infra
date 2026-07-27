@@ -61,6 +61,15 @@ export interface FakeDeployAdapterOptions {
   unmet?: Readonly<Partial<Record<(typeof PREREQUISITES)[number], string>>>;
   /** When set, `inspect` throws — the Target that cannot be reached at all. */
   unreachable?: string;
+  /**
+   * When set, `apply` throws instead of returning a verdict.
+   *
+   * §6 contracts `apply` not to throw — "an adapter that cannot place the
+   * workload says so as a `FAILED` verdict, because a thrown error has no reason
+   * and therefore no blame" — but an adapter is code, and code has bugs. Core
+   * has to survive one, so the fake has to be able to be one.
+   */
+  applyThrows?: string;
 }
 
 /**
@@ -138,6 +147,10 @@ export class FakeDeployAdapter implements DeployAdapter {
     desired: DesiredState,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     this.applied.push({ target, desired });
+
+    if (this.options.applyThrows !== undefined) {
+      throw new Error(this.options.applyThrows);
+    }
 
     // An artifact type this backend never declared is a core bug, and §6 says
     // so in the adapter's own vocabulary rather than by throwing.
