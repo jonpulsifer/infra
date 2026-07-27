@@ -50,4 +50,11 @@
       randomizedDelaySec = "3600";
     };
   };
+
+  # Run pre-linked binaries (mise-managed tools, downloaded releases, vendor
+  # installers) on NixOS: `programs.nix-ld.enable` installs the dynamic loader
+  # such binaries expect and exports `NIX_LD` / `NIX_LD_LIBRARY_PATH` so they
+  # find it. Anything needing more than glibc gets its library closure surfaced
+  # by adding paths to `environment.variables.NIX_LD_LIBRARY_PATH` per host.
+  programs.nix-ld.enable = lib.mkDefault true;
 }
