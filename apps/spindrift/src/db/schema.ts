@@ -43,6 +43,11 @@ import {
   DEPLOY_PHASES,
   FAILURE_REASONS,
 } from '../adapters/deploy/contract.ts';
+import type {
+  PrerequisiteResult,
+  TargetDiscovery,
+} from '../domain/capabilities.ts';
+import type { TargetConnection } from '../domain/target.ts';
 
 // --- Enums -----------------------------------------------------------------
 //
@@ -135,6 +140,13 @@ export const targetStatus = pgEnum('target_status', [
   'connected',
   'disconnected',
 ]);
+
+/**
+ * §13: "Connect always succeeds; health is a standing prerequisite checklist."
+ * Two states rather than three — the connect act runs one pass of the checklist
+ * before it returns, so no Target ever exists unassessed.
+ */
+export const targetHealth = pgEnum('target_health', ['healthy', 'unhealthy']);
 
 /**
  * §10: "One mechanism, no secret/non-secret classification... Narrow
@@ -299,10 +311,28 @@ export const deploys = pgTable('deploys', {
   detail: text('detail'),
   /** §6: "and a raw `debug` payload." */
   debug: jsonb('debug'),
+  /**
+   * §6: the adapter's own handle on what `apply` placed — "opaque to core,
+   * which stores it and hands it back to `observe` and `destroy`." This column
+   * is that storage. Null until an `apply` places something.
+   */
+  ref: text('ref'),
   url: text('url'),
   /** §10: "a hash over a document of pinned version references." */
   configVersion: text('config_version'),
   exposure: exposureState('exposure'),
+  /**
+   * §13: "Disconnect always works: live Deploys go `orphaned`, workloads keep
+   * running." Set when the Target this Deploy sits on was disconnected, and
+   * cleared when a reconnect re-adopts it via `observe`.
+   *
+   * A timestamp beside the phase rather than a sixth phase value: the phases
+   * are the platform's verdict on a rollout (§6), and an orphaned workload is
+   * still whatever the platform last said it was — what changed is that
+   * Spindrift can no longer see it. `deployState` in `src/domain/target.ts`
+   * reads the two together.
+   */
+  orphanedAt: timestamp('orphaned_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -389,31 +419,59 @@ export const datastores = pgTable('datastores', {
 
 /**
  * §13: "`Target` keeps its name, stays flat, and has exactly one adapter
- * type." §3: capabilities (discovered, asserted, derived) belong to the
- * connect/discovery act (a later task); this table holds only what must
- * exist before anything can be placed.
+ * type."
+ *
+ * §3's four capability provenances are not four columns. Only the two that
+ * are facts about *this* Target are stored — what was `discovered`, and the
+ * one `asserted` value — because from-the-adapter-type is a property of the
+ * code and `derived` is a conclusion core redraws from the other two every
+ * time it reads them. Storing a derived value is storing something that can
+ * be stale in a way nothing will notice.
  */
-export const targets = pgTable('targets', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  adapter: targetAdapter('adapter').notNull(),
-  status: targetStatus('status').notNull().default('connected'),
-  /** §13: "set a global ordered rank across Targets." */
-  rank: integer('rank').notNull(),
-  /**
-   * §3: "`publicExposure` is the single genuine assertion: no cluster API
-   * reports whether a tunnel exists." Null until an operator states it.
-   */
-  publicExposure: boolean('public_exposure'),
-  /** §4/§13: "a Target to declare a minimum SLSA Build Level." */
-  minBuildLevel: integer('min_build_level'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const targets = pgTable(
+  'targets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    adapter: targetAdapter('adapter').notNull(),
+    status: targetStatus('status').notNull().default('connected'),
+    /** §13: "set a global ordered rank across Targets." */
+    rank: integer('rank').notNull(),
+    /**
+     * How the adapter reaches this Target — `TargetConnection` in
+     * `src/domain/target.ts`. Never a credential: §13 settles one auth mode,
+     * "native OIDC federation, nothing stored."
+     */
+    connection: jsonb('connection').$type<TargetConnection>().notNull(),
+    /** §13: the standing checklist's last verdict. */
+    health: targetHealth('health').notNull(),
+    /** One `PrerequisiteResult` per item, with the sentence behind each. */
+    prerequisites:
+      jsonb('prerequisites').$type<readonly PrerequisiteResult[]>(),
+    /** §3's discovered half, as the adapter last reported it. */
+    discovery: jsonb('discovery').$type<TargetDiscovery>(),
+    /** When the one loop (§13) last ran against this Target. */
+    inspectedAt: timestamp('inspected_at', { withTimezone: true }),
+    /**
+     * §3: "`publicExposure` is the single genuine assertion: no cluster API
+     * reports whether a tunnel exists." Null until an operator states it.
+     */
+    publicExposure: boolean('public_exposure'),
+    /** §4/§13: "a Target to declare a minimum SLSA Build Level." */
+    minBuildLevel: integer('min_build_level'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Connect is idempotent by name: reconnecting re-adopts rather than
+    // registering a second Target that would compete for the same workloads.
+    unique('targets_name_unique').on(table.name),
+  ],
+);
 
 /**
  * §"First run and identity": an operator enrolls a passkey and gets a fully

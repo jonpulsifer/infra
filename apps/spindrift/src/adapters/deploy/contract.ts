@@ -19,6 +19,7 @@
  * continuous watch (§6).
  */
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
+import type { TargetInspection } from '../../domain/capabilities.ts';
 import type { ArtifactType, DesiredState } from '../../domain/desired-state.ts';
 
 /**
@@ -268,4 +269,22 @@ export interface DeployAdapter {
 
   /** Idempotent: destroying what is already gone succeeds. */
   destroy(target: DeployTarget, ref: DeployRef): Promise<void>;
+
+  /**
+   * One pass of §13's prerequisite checklist and §3's capability discovery.
+   *
+   * A fourth verb rather than a fourth contract, because the thing that knows
+   * how to ask a backend whether its policy engine is enforcing is the same
+   * thing that knows how to place a workload on it — and §13 gives a Target
+   * exactly one adapter type, so a second registry keyed the same way would
+   * only be able to disagree with this one.
+   *
+   * It reports **observations, never judgements**: `verifiedDeploy` and
+   * `offlineDeploy` are absent from {@link TargetInspection} on purpose, both
+   * derived in core (§32, §33) so two adapters cannot draw the conclusion
+   * differently. Errors are thrown rather than reported — §13's "connect always
+   * succeeds" is core's promise to the operator, and core keeps it by catching
+   * this, not by asking every adapter to.
+   */
+  inspect(target: DeployTarget): Promise<TargetInspection>;
 }

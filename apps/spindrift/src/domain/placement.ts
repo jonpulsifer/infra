@@ -1,0 +1,371 @@
+/**
+ * Placement resolution (§3).
+ *
+ * **A filter, not a scheduler.** "Derived requirements filter connected Targets
+ * to candidates, the first by a global admin rank is suggested, and the
+ * developer may switch to any other candidate. **Non-candidates are listed,
+ * disabled, and annotated with why** — the grammar reused by prerequisites
+ * (§14), exposure (§28), quotas (§29), and offline capability (§33). This makes
+ * 'nowhere fits' expressible, catches failures before deploy, and needs no cost
+ * model because a human is the tie-break."
+ *
+ * Three things this file therefore does not have, each rejected in §3 by name:
+ *
+ * - **No requirements language.** The developer types nothing. Every
+ *   {@link Requirement} below is *derived* from the App — its Component's kind,
+ *   its exposure setting, the Datastores attached to it — and there is no field
+ *   anywhere a developer can write one in.
+ * - **No preferences and no cost model.** "Prefer cheap" is inexpressible. Rank
+ *   is one global ordered list an admin sets, and a human breaks the tie.
+ * - **No scheduling.** Nothing here bin-packs, scores, or balances. A Target
+ *   either satisfies every derived requirement or it is listed with the reason
+ *   it does not.
+ *
+ * **Resolution runs before the build**, and outputs placement *plus artifact
+ * shape* — which is why a Build's key includes the target shape and why moving
+ * across shapes forces a rebuild while moving within one does not (§3).
+ */
+import type { TargetAdapter } from '../config/manifest.schema.ts';
+import type { TargetCapabilities } from './capabilities.ts';
+import type {
+  ArtifactType,
+  ComponentKind,
+  Exposure,
+  Platform,
+  Resources,
+} from './desired-state.ts';
+
+/**
+ * The platform a workload is assumed to need until detection says otherwise.
+ *
+ * §5 owns detection, and it arrives with the build pipeline. Until it does, the
+ * derived platform is the one every Target in the model runs, so placement never
+ * excludes a Target for an architecture nothing has established.
+ */
+export const DEFAULT_PLATFORM: Platform = { os: 'linux', arch: 'amd64' };
+
+/**
+ * Why a Target is not a candidate.
+ *
+ * A closed set, like §6's failure reasons and for the same reason: §3's grammar
+ * is that a non-candidate is "listed, disabled, and annotated with why", and an
+ * annotation the UI cannot key on is a string it can only print.
+ */
+export const EXCLUSIONS = [
+  'UNHEALTHY',
+  'KIND_UNSUPPORTED',
+  'EXPOSURE_UNSUPPORTED',
+  'ARCH_UNSUPPORTED',
+  'RESOURCES_EXCEED_CEILING',
+  'NO_GPU',
+  'NO_PERSISTENCE',
+  'DATASTORE_ENGINE_MISSING',
+  'DATASTORE_IS_CLUSTER_LOCAL',
+  'STORE_UNREACHABLE',
+  'QUOTA_EXHAUSTED',
+  'NO_ADAPTER',
+] as const;
+
+export type Exclusion = (typeof EXCLUSIONS)[number];
+
+/** One Target as placement sees it: rank, health, and what it can do. */
+export interface PlacementTarget {
+  readonly id: string;
+  readonly name: string;
+  readonly adapter: TargetAdapter;
+  /** §13: "Rank is one global ordered list." Lower is considered first. */
+  readonly rank: number;
+  readonly healthy: boolean;
+  readonly capabilities: TargetCapabilities;
+  /**
+   * §8: "Quota exhaustion needs no new failure reason (`REJECTED` covers it) but
+   * surfaces at **Place time** as a non-candidate." Set by whatever last
+   * measured the Target's quota; absent means nothing has said it is full.
+   */
+  readonly quotaExhausted?: boolean;
+}
+
+/**
+ * What the App needs, derived — never authored (§3).
+ *
+ * `datastores` is the field that carries §11's consequence: an attached
+ * cluster-local Datastore pins its App to that Datastore's Target, and §11 makes
+ * that true "at attach time" rather than at deploy time, because tunnelling a
+ * database over a satellite uplink is the cloud-native path degraded.
+ */
+export interface DerivedRequirements {
+  readonly kind: ComponentKind;
+  readonly exposure: Exposure;
+  readonly platform: Platform;
+  readonly resources: Resources;
+  readonly gpu: boolean;
+  readonly persistence: boolean;
+  readonly datastores: readonly RequiredDatastore[];
+  /** §10's reach rule: the store must be reachable by the Target chosen. */
+  readonly secretStore: TargetCapabilities['reachableSecretStores'][number];
+}
+
+/** One attached Datastore, as a requirement. */
+export interface RequiredDatastore {
+  readonly name: string;
+  readonly engine: 'postgres' | 'redis';
+  /**
+   * §11: "In-cluster datastores stay cluster-local in v1." A cluster-local
+   * Datastore names the one Target its App can be placed on.
+   */
+  readonly clusterLocalTargetId: string | null;
+}
+
+/** A Target that fits, in rank order. */
+export interface Candidate {
+  readonly target: PlacementTarget;
+  /** What a Build for this placement must produce (§3). */
+  readonly artifactType: ArtifactType;
+}
+
+/** A Target that does not fit, and every reason it does not. */
+export interface NonCandidate {
+  readonly target: PlacementTarget;
+  readonly reasons: readonly Exclusion[];
+  /** The sentence a developer reads, one per reason. */
+  readonly detail: readonly string[];
+}
+
+/**
+ * The whole answer, including the negative half.
+ *
+ * `suggested` is `null` when nothing fits — which §3 insists must be
+ * *expressible*, not an error. The `nonCandidates` list is what makes that
+ * useful: "nowhere fits" with eight annotated rows is a diagnosis, and without
+ * them it is a shrug.
+ */
+export interface Placement {
+  readonly suggested: Candidate | null;
+  readonly candidates: readonly Candidate[];
+  readonly nonCandidates: readonly NonCandidate[];
+}
+
+/**
+ * The artifact shape a Component takes on a Target (§3, §6).
+ *
+ * Shape follows the Target, not the kind: a `website` is the one kind that can
+ * land on either, rendered to files on a `static` Target and to a server image
+ * anywhere else. That is the whole reason exposure "filters Targets and selects
+ * artifact shape" rather than being a chart setting (§28).
+ */
+export function artifactTypeFor(
+  kind: ComponentKind,
+  target: PlacementTarget,
+): ArtifactType {
+  if (
+    kind === 'website' &&
+    target.capabilities.artifactTypes.includes('files')
+  ) {
+    return 'files';
+  }
+  return 'image';
+}
+
+/** The sentence behind each exclusion, in the developer's terms. */
+function sentence(
+  reason: Exclusion,
+  requirements: DerivedRequirements,
+): string {
+  switch (reason) {
+    case 'UNHEALTHY':
+      return 'this Target has unmet prerequisites';
+    case 'KIND_UNSUPPORTED':
+      return `this Target does not run ${requirements.kind}s`;
+    case 'EXPOSURE_UNSUPPORTED':
+      return requirements.exposure === 'public'
+        ? 'this Target has no way to serve a public address'
+        : `this Target can only serve public workloads, and this one is ${requirements.exposure}`;
+    case 'ARCH_UNSUPPORTED':
+      return `this Target does not run ${requirements.platform.arch}`;
+    case 'RESOURCES_EXCEED_CEILING':
+      return 'this workload asks for more than this Target admits';
+    case 'NO_GPU':
+      return 'this Target has no GPU';
+    case 'NO_PERSISTENCE':
+      return 'this Target has no persistent storage';
+    case 'DATASTORE_ENGINE_MISSING':
+      return 'this Target cannot host an attached datastore';
+    case 'DATASTORE_IS_CLUSTER_LOCAL':
+      return 'an attached datastore is cluster-local and lives elsewhere';
+    case 'STORE_UNREACHABLE':
+      return 'this Target cannot reach the secret store this App is configured through';
+    case 'QUOTA_EXHAUSTED':
+      return 'this Target has no quota left';
+    case 'NO_ADAPTER':
+      return 'this installation has no adapter for this Target';
+    default:
+      return unreachable(reason);
+  }
+}
+
+function unreachable(value: never): never {
+  throw new Error(`unhandled exclusion: ${String(value)}`);
+}
+
+/**
+ * Quantities compare as opaque strings turned into one number.
+ *
+ * Core never invents a scheduler (§3), and this is the smallest thing that is
+ * not one: enough to answer "does this exceed the ceiling", nothing more. An
+ * unparseable quantity compares as unbounded on the Target side and as zero on
+ * the workload side, so an unknown unit never silently excludes a Target.
+ */
+function quantity(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const match = value.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]*)$/);
+  if (!match) return null;
+  const scale: Record<string, number> = {
+    '': 1,
+    m: 0.001,
+    Ki: 1024,
+    Mi: 1024 ** 2,
+    Gi: 1024 ** 3,
+    Ti: 1024 ** 4,
+    K: 1e3,
+    M: 1e6,
+    G: 1e9,
+    T: 1e12,
+  };
+  const unit = scale[match[2] ?? ''];
+  if (unit === undefined) return null;
+  return Number(match[1]) * unit;
+}
+
+/** Does `asked` fit under `ceiling`? Unknown on either side means yes. */
+function fits(asked: string | undefined, ceiling: string | undefined): boolean {
+  const wanted = quantity(asked);
+  const limit = quantity(ceiling);
+  if (wanted === null || limit === null) return true;
+  return wanted <= limit;
+}
+
+/** Every reason one Target fails one App's derived requirements. */
+export function exclusionsFor(
+  target: PlacementTarget,
+  requirements: DerivedRequirements,
+): readonly Exclusion[] {
+  const reasons: Exclusion[] = [];
+  const can = target.capabilities;
+
+  if (can.artifactTypes.length === 0) reasons.push('NO_ADAPTER');
+  if (!target.healthy) reasons.push('UNHEALTHY');
+  if (!can.kinds.includes(requirements.kind)) reasons.push('KIND_UNSUPPORTED');
+
+  // §9: "No non-public state may leave a bypassable origin." A Target that can
+  // only serve public traffic cannot hold a private workload, and a Target with
+  // no public path cannot hold a public one. Exposure filters both ways, which
+  // is what makes picking the static Target *mean* public (§13, §28).
+  if (requirements.exposure === 'public' && !can.publicExposure) {
+    reasons.push('EXPOSURE_UNSUPPORTED');
+  }
+  if (requirements.exposure !== 'public' && onlyPublic(target)) {
+    reasons.push('EXPOSURE_UNSUPPORTED');
+  }
+
+  if (can.arch.length > 0 && !can.arch.includes(requirements.platform.arch)) {
+    reasons.push('ARCH_UNSUPPORTED');
+  }
+  if (
+    !fits(requirements.resources.cpu, can.resourceCeiling.cpu) ||
+    !fits(requirements.resources.memory, can.resourceCeiling.memory)
+  ) {
+    reasons.push('RESOURCES_EXCEED_CEILING');
+  }
+  if (requirements.gpu && !can.gpu) reasons.push('NO_GPU');
+  if (requirements.persistence && !can.persistence) {
+    reasons.push('NO_PERSISTENCE');
+  }
+
+  for (const datastore of requirements.datastores) {
+    if (
+      datastore.clusterLocalTargetId !== null &&
+      datastore.clusterLocalTargetId !== target.id
+    ) {
+      // §11, at attach time: attaching a cluster-local Datastore is what makes
+      // the App a non-candidate everywhere else, not the deploy that follows.
+      reasons.push('DATASTORE_IS_CLUSTER_LOCAL');
+      continue;
+    }
+    const engine = datastore.engine === 'postgres' ? can.postgres : can.redis;
+    if (!engine) reasons.push('DATASTORE_ENGINE_MISSING');
+  }
+
+  // §10's reach rule: "a store must be reachable by **the Target the Component
+  // is placed on** — not by every Target."
+  if (!can.reachableSecretStores.includes(requirements.secretStore)) {
+    reasons.push('STORE_UNREACHABLE');
+  }
+
+  if (target.quotaExhausted === true) reasons.push('QUOTA_EXHAUSTED');
+
+  // Deduplicated: two attached datastores missing the same engine is one reason
+  // a developer has to act on, not two rows saying the same sentence.
+  return [...new Set(reasons)];
+}
+
+/** A Target whose only exposure state is public — §13's static Target. */
+function onlyPublic(target: PlacementTarget): boolean {
+  return (
+    target.adapter === 'static' &&
+    target.capabilities.artifactTypes.includes('files')
+  );
+}
+
+/**
+ * Filter connected Targets to candidates and annotate the rest (§3).
+ *
+ * The order of `targets` is not consulted; `rank` is, because §13 makes rank one
+ * global ordered list and a caller that happened to select rows in insertion
+ * order must not be able to change what is suggested.
+ */
+export function resolvePlacement(
+  targets: readonly PlacementTarget[],
+  requirements: DerivedRequirements,
+): Placement {
+  const ranked = [...targets].sort((a, b) => a.rank - b.rank);
+  const candidates: Candidate[] = [];
+  const nonCandidates: NonCandidate[] = [];
+
+  for (const target of ranked) {
+    const reasons = exclusionsFor(target, requirements);
+    if (reasons.length === 0) {
+      candidates.push({
+        target,
+        artifactType: artifactTypeFor(requirements.kind, target),
+      });
+    } else {
+      nonCandidates.push({
+        target,
+        reasons,
+        detail: reasons.map((reason) => sentence(reason, requirements)),
+      });
+    }
+  }
+
+  return {
+    // "The first by a global admin rank is suggested." Not the best fit — there
+    // is no fit score, and inventing one here would be the cost model §3
+    // declines to have.
+    suggested: candidates[0] ?? null,
+    candidates,
+    nonCandidates,
+  };
+}
+
+/**
+ * Whether moving a Component from one placement to another forces a rebuild.
+ *
+ * §3: "changing placement across shapes forces a rebuild" — a Build's key
+ * includes the target shape, so a website moving from a cluster to the static
+ * Target has no artifact of the right shape to deploy. Within one shape the
+ * existing Build is deployable as is, which is what makes a cluster-to-cluster
+ * move free (§10).
+ */
+export function requiresRebuild(from: ArtifactType, to: ArtifactType): boolean {
+  return from !== to;
+}

@@ -25,6 +25,9 @@ import type {
 } from '../../src/commands/types.ts';
 import { apps } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
+import { fixtureManifest } from '../harness/installation.ts';
+
+const manifest = await fixtureManifest();
 
 const database = withIsolatedDatabase();
 
@@ -51,6 +54,7 @@ function context(clock: Clock = frozenClock): CommandContext {
     clock,
     db: database().db,
     adapters: noAdapters,
+    manifest,
   };
 }
 

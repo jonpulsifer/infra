@@ -29,8 +29,17 @@
  * nothing left for a route to decide.
  */
 import type { z } from 'zod';
+import {
+  resolveComponentPlacement,
+  resolveComponentPlacementInput,
+} from './apps/resolve-placement.ts';
 import { createApp, createAppInput } from './create-app.ts';
 import type * as commands from './index.ts';
+import { connectTarget, connectTargetInput } from './targets/connect.ts';
+import {
+  disconnectTarget,
+  disconnectTargetInput,
+} from './targets/disconnect.ts';
 import {
   type Command,
   type CommandContext,
@@ -52,6 +61,15 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 /** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
   createApp: { input: createAppInput, handler: createApp },
+  connectTarget: { input: connectTargetInput, handler: connectTarget },
+  disconnectTarget: {
+    input: disconnectTargetInput,
+    handler: disconnectTarget,
+  },
+  resolveComponentPlacement: {
+    input: resolveComponentPlacementInput,
+    handler: resolveComponentPlacement,
+  },
 } as const satisfies Readonly<Record<string, AnyCommandDescriptor>>;
 
 /** The closed set of dispatchable names. */

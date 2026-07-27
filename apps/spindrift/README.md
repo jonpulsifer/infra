@@ -7,11 +7,14 @@ adapts to whatever builds and delivers underneath — a Kubernetes cluster, Clou
 Run, or static hosting. The design lives in `.agent/plans/spindrift/spec.md`
 (private) and is referenced from the source as `§N`.
 
-**The foundations exist; nothing deploys yet.** The five nouns have tables, the
-three adapter contracts are written, and commands are the only way anything is
-acted on. What has no implementation is every adapter — no real cluster, cloud
-runtime, static host, build route, or secret store is spoken to. The UI is a
-placeholder.
+**Targets are real; nothing deploys yet.** The five nouns have tables, the three
+adapter contracts are written, and commands are the only way anything is acted
+on. Targets can be connected, inspected on a loop, and resolved against — asking
+where a Component can go returns an answer with a reason for every Target it
+cannot. The two secret stores are implemented. What has no implementation is
+every *deploy* adapter — no real cluster, cloud runtime, static host, or build
+route is spoken to — so a Deploy row is still something nothing writes. The UI is
+a placeholder.
 
 ## Shape
 
@@ -22,8 +25,9 @@ One image, two processes (§19); only `web` exists so far.
 | `src/config/` | the installation manifest and its schema |
 | `src/db/` | the Drizzle schema, the connection, and the committed migrations |
 | `src/commands/` | the application command layer and its registry |
-| `src/domain/` | `DesiredState` and the attempt event log |
-| `src/adapters/` | the deploy, build, and store contracts |
+| `src/domain/` | `DesiredState`, the attempt log, Targets, capabilities, placement |
+| `src/adapters/` | the deploy, build, and store contracts, plus the two stores |
+| `src/reconciler/` | the loop that refreshes Target health and capabilities |
 | `src/web/` | the `web` process — UI, webhooks, log WebSockets |
 | `build.ts` | `Bun.build` over the client HTML entry → `dist/` |
 
@@ -38,6 +42,27 @@ domain logic**: `dispatch()` validates through the registry before a handler
 runs, so the browser endpoint is a mechanical wrap of the registry rather than a
 place decisions can accumulate. A command exported but not registered is a
 compile error, and so is a registry key that is not a command.
+
+## Targets, capabilities, and placement
+
+A `Target` is flat and has exactly one adapter type, so connecting a cloud
+project registers two of them — `cloudrun` and `static`. **Connect always
+succeeds**: an unreachable cluster still produces a Target, unhealthy, with every
+unmet prerequisite and the sentence behind it. **Disconnect strands rather than
+stops**: live Deploys go orphaned, nothing is destroyed, the confirmation names
+what it left running, and reconnecting re-adopts whatever `observe` still finds.
+
+One loop (`src/reconciler/target-loop.ts`) refreshes health and capabilities
+together, because a connect-time snapshot rots. It stores what was observed and
+never what was concluded — `verifiedDeploy` (which requires an *enforcing* policy
+engine, not an installed one) and `offlineDeploy` (a static check over the chart,
+image, and verifier references) are derived at read time.
+
+Placement is a filter, not a scheduler. Derived requirements — nothing is
+authored by a developer — narrow connected Targets to candidates, the
+highest-ranked one is suggested, and **non-candidates are returned listed and
+annotated with why**, so "nowhere fits" is an answer rather than a deploy that
+fails later.
 
 ## Testing
 
