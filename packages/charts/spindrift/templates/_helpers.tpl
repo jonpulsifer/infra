@@ -11,6 +11,10 @@ the chart rendering one, the same split `packages/charts/app` uses.
 {{- default (include "spindrift.fullname" .) .Values.namespaceOverride }}
 {{- end }}
 
+{{- define "spindrift.serviceAccountName" -}}
+{{- default (include "spindrift.fullname" .) .Values.serviceAccount.name }}
+{{- end }}
+
 {{- define "spindrift.labels" -}}
 app.kubernetes.io/name: {{ include "spindrift.fullname" . }}
 app.kubernetes.io/part-of: {{ include "spindrift.fullname" . }}

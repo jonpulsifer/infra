@@ -51,7 +51,14 @@ resource "google_binary_authorization_attestor_iam_binding" "provenance" {
   project  = google_binary_authorization_attestor.provenance.project
   attestor = google_binary_authorization_attestor.provenance.name
   role     = "roles/binaryauthorization.attestorsViewer"
-  members  = local.attester_principals
+  members  = local.attestor_viewers
+}
+
+resource "google_binary_authorization_attestor_iam_member" "bluenose_verifier" {
+  project  = google_binary_authorization_attestor.provenance.project
+  attestor = google_binary_authorization_attestor.provenance.name
+  role     = "roles/binaryauthorization.attestorsVerifier"
+  member   = local.bluenose_binary_authorization_service_agent
 }
 
 data "google_kms_crypto_key_latest_version" "signer" {
@@ -71,6 +78,11 @@ data "google_iam_policy" "provenance" {
   binding {
     role    = "roles/containeranalysis.notes.attacher"
     members = local.attester_principals
+  }
+
+  binding {
+    role    = "roles/containeranalysis.notes.occurrences.viewer"
+    members = local.attestation_viewers
   }
 }
 

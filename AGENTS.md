@@ -13,8 +13,13 @@ you touch anything, and pointers to where the depth lives. Depth lives in
 Read these before your first edit. They are prohibitions — routing you to them
 after the fact is too late.
 
-- **Never mutate live infrastructure.** Author desired state in git and let the
-  operators apply it. This repo is GitOps-first.
+- **Never mutate live infrastructure by hand.** Author platform desired state
+  in git and let the operators apply it. Spindrift is itself a declared
+  controller: Flux owns its platform namespace and prerequisites; Spindrift
+  owns resources in the `spindrift-apps` namespaces and inside pre-provisioned
+  vessel projects through their APIs. That ownership boundary is declared in
+  [Architecture/Spindrift](docs/pages/Architecture___Spindrift.md); it is not
+  permission for an agent or operator to make the same changes out of band.
 - **Never `kubectl apply`** to author state. `kubectl`, `flux get`, and
   `flux reconcile` are for inspection or forcing a sync — nothing else.
 - **Never run `tofu apply` against remote state.** Applies go through Atlantis
@@ -90,12 +95,13 @@ Do not restate these values anywhere — read them.
 | --- | --- |
 | Cluster IPs/CIDRs, API-server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
 | Lab net CIDR and lab host IPs | `terraform/network/unifi/folly/lab.tf.json` |
+| `bluenose` vessel subnet CIDR | `terraform/gcp/projects/bluenose/config/vessel-topology.json` |
 
-Each topology JSON **is** the Flux ConfigMap, applied as-is — JSON is valid
-YAML. Its `data` is flat `string→string` because Flux `substituteFrom` requires
-it, so lists and numbers are encoded as strings. Flux substitutes `${VAR}` from
-it; Nix reads it with `builtins.fromJSON`; Terraform roots consume it through
-the `terraform/modules/cluster-topology` module. A conftest contract
+Each cluster topology JSON **is** the Flux ConfigMap, applied as-is — JSON is
+valid YAML. Its `data` is flat `string→string` because Flux `substituteFrom`
+requires it, so lists and numbers are encoded as strings. Flux substitutes
+`${VAR}` from it; Nix reads it with `builtins.fromJSON`; Terraform roots consume
+it through the `terraform/modules/cluster-topology` module. A conftest contract
 (`.github/workflows/topology-contract.yml`) enforces the schema.
 
 `lab.tf.json` is valid Terraform JSON auto-loaded by the folly UniFi root and

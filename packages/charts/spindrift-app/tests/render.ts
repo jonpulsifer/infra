@@ -44,6 +44,11 @@ const BASELINE: Values = {
   },
   platform: {
     gateway: { name: 'cluster-gateway', namespace: 'gateway' },
+    externalAuth: {
+      name: 'oauth2-proxy',
+      namespace: 'oauth2-proxy',
+      port: 80,
+    },
     networkPolicy: { allowedNamespaces: ['gateway', 'monitoring'] },
   },
 };

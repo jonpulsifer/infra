@@ -8,4 +8,5 @@ resources:
   - config.yaml
   - monitoring.yaml
   - networking.yaml
+  - oauth2-proxy.yaml
   - storage.yaml

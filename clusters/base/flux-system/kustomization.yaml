@@ -4,6 +4,8 @@ kind: Kustomization
 resources:
   - arc-system.yaml
   - external-secrets-operator.yaml
+  - kyverno.yaml
   - onepassword-connect.yaml
   - sandbox.yaml
+  - spindrift-policy.yaml
   - valkey-operator.yaml

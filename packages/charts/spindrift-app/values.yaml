@@ -37,8 +37,8 @@ app:
   expose: true
 
   # internal | private | public (§9). The chart renders a route for a Component
-  # that is exposed and not `internal`; the authenticated edge in front of that
-  # route is the Target's, never this chart's.
+  # that is exposed and not `internal`; a private route delegates authentication
+  # to the Target's shared proxy while a public route is filter-free.
   exposure: private
 
   # Job only. Empty renders a suspended CronJob — a job always renders one, so
@@ -81,6 +81,13 @@ platform:
   gateway:
     name: ""
     namespace: ""
+
+  # Gateway API ExternalAuth backend for private routes. The service and the
+  # cross-namespace ReferenceGrant are vessel resources.
+  externalAuth:
+    name: ""
+    namespace: ""
+    port: 80
 
   networkPolicy:
     # Ingress is default-deny with a fixed exception list whose **names are

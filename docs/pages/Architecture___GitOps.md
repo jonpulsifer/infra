@@ -16,6 +16,7 @@ tags:: architecture
 	- Step-by-step: [[Runbooks/Terraform Change]]. Root/module layout: [[Architecture/Terraform]].
 - ## Kubernetes → Flux, and where ArgoCD fits
 	- Merge to `main` → Flux reconciles `clusters/**`. Each cluster's root sync comes from its `FluxInstance` — `clusters/<site>/bootstrap/bootstrap.tf` installs `flux-operator`/`flux-instance`, and `flux-values.yaml`'s `instance.sync` points it at the `infra` `GitRepository` (`pullSecret: flux-github-app-credentials`, `ref: refs/heads/main`, `path: clusters/<site>/flux-system`). There's no hand-applied root `Kustomization`.
+	- Flux owns platform namespaces and installs Spindrift's control plane, target RBAC, policy engine, shared authentication, and edge workload. Spindrift then reconciles only its delegated App namespace and resources inside pre-provisioned vessel projects. This controller boundary is desired state too; [[Architecture/Spindrift]] names both sides.
 	- CoreDNS is part of the Terraform bootstrap boundary alongside Flux itself. The shared bootstrap module creates cluster DNS before installing Flux; Flux owns the resources that reconcile after bootstrap.
 	- `kustomize.yml` renders `clusters/base/**` and `clusters/{folly,offsite}/apps/**` (plus their `arc` overlays) with `kubectl kustomize` on push/PR — a render check, not an apply.
 	- `topology-contract.yml` runs `conftest` against `.github/policy/cluster-topology.rego` on both clusters' `cluster-topology.json` before Flux ever substitutes those values into a manifest.

@@ -33,6 +33,9 @@ spec:
     # The Secret carries SPINDRIFT_MANIFEST — every value naming this
     # installation (§20). Nothing installation-specific is in the chart.
     envFromSecret: spindrift-env
+    serviceAccount:
+      token:
+        gcpAudience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
     ingress:
       enabled: true
     # §19's own database. Nothing connects to it yet — the web process reads no
