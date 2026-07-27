@@ -267,6 +267,9 @@ describe('the route', () => {
       { name: 'cluster-gateway', namespace: 'gateway' },
     ]);
     expect(route.spec.hostnames).toEqual(['blog-web.apps.example.test']);
+    expect(
+      route.metadata.annotations?.['external-dns.alpha.kubernetes.io/exclude'],
+    ).toBe('true');
   });
 
   test('the vanity name rides the same route as the canonical one', async () => {
@@ -289,16 +292,46 @@ describe('the route', () => {
     expect(kinds(objects)).toContain('Service');
   });
 
-  test('public and private route identically — the edge is the difference', async () => {
+  test('a private route delegates authentication to the shared proxy', async () => {
     const asPrivate = one(
       await render({ app: { exposure: 'private' } }),
       'HTTPRoute',
     );
+    expect(asPrivate.spec.rules[0].filters).toEqual([
+      {
+        type: 'ExternalAuth',
+        externalAuth: {
+          protocol: 'HTTP',
+          backendRef: {
+            name: 'oauth2-proxy',
+            namespace: 'oauth2-proxy',
+            port: 80,
+          },
+          http: {
+            allowedHeaders: [
+              'authorization',
+              'cookie',
+              'x-forwarded-host',
+              'x-forwarded-proto',
+              'x-forwarded-uri',
+            ],
+            allowedResponseHeaders: [
+              'set-cookie',
+              'x-auth-request-email',
+              'x-auth-request-user',
+            ],
+          },
+        },
+      },
+    ]);
+  });
+
+  test('a public route has no authentication filter', async () => {
     const asPublic = one(
       await render({ app: { exposure: 'public' } }),
       'HTTPRoute',
     );
-    expect(asPublic.spec).toEqual(asPrivate.spec);
+    expect(asPublic.spec.rules[0].filters).toBeUndefined();
   });
 });
 

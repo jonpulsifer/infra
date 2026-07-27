@@ -15,6 +15,7 @@ tags:: architecture
 	- [[Architecture/Networking]] — VLANs, BGP, Cilium load balancing, tunnels, and the cross-site fabric
 	- [[Architecture/Secrets and PKI]] — SOPS/age, OpenBao, and the cluster CAs
 	- [[Architecture/GitOps]] — how a change actually ships, layer by layer
+	- [[Architecture/Spindrift]] — the deploy control plane and its explicit runtime ownership boundary
 	- [[Fleet]] — the concrete hosts all of this runs on
 - ## Design principles
 	- **GitOps-first.** Desired state lives in git; the operators — Atlantis, Flux, and NixOS auto-upgrade — apply it. Mutating live infrastructure by hand is a bug, and out-of-band changes get reverted by the machinery itself.

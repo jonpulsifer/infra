@@ -4,7 +4,8 @@ The route onto the shared gateway's **existing HTTP listener** (§9).
 Three things this deliberately is not: it is not a Gateway, not a certificate,
 and not a cross-namespace grant — all three are vessel, and §7 excludes them
 from the release because a `destroy()` that could take the gateway with it is
-not a `destroy()` anybody can run.
+not a `destroy()` anybody can run. Private routes delegate authentication to
+the vessel's shared proxy; public routes have no authentication filter.
 
 An `internal` Component has no route at all. §9 makes internal Target-private,
 authenticated at the workload boundary, and a route onto the shared gateway is
@@ -20,6 +21,9 @@ metadata:
     {{- include "spindrift-app.labels" . | nindent 4 }}
   annotations:
     {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+    # The wildcard tunnel owns DNS for generated App names. Publishing the
+    # Gateway load-balancer address here would create a bypassable origin.
+    external-dns.alpha.kubernetes.io/exclude: "true"
 spec:
   parentRefs:
     - name: {{ .Values.platform.gateway.name }}
@@ -29,7 +33,29 @@ spec:
     - {{ . | quote }}
     {{- end }}
   rules:
-    - backendRefs:
+    -
+      {{- if eq .Values.app.exposure "private" }}
+      filters:
+        - type: ExternalAuth
+          externalAuth:
+            protocol: HTTP
+            backendRef:
+              name: {{ .Values.platform.externalAuth.name }}
+              namespace: {{ .Values.platform.externalAuth.namespace }}
+              port: {{ .Values.platform.externalAuth.port }}
+            http:
+              allowedHeaders:
+                - authorization
+                - cookie
+                - x-forwarded-host
+                - x-forwarded-proto
+                - x-forwarded-uri
+              allowedResponseHeaders:
+                - set-cookie
+                - x-auth-request-email
+                - x-auth-request-user
+      {{- end }}
+      backendRefs:
         - name: {{ include "spindrift-app.fullname" . }}
           port: {{ include "spindrift-app.port" . }}
 {{- end }}

@@ -14,9 +14,9 @@ report, and inventing an endpoint so it could would be inventing the surface §2
 declined to declare.
 */}}
 {{- $top := . -}}
-{{- $processes := list (dict "name" "web" "command" .Values.command "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true) -}}
+{{- $processes := list (dict "name" "web" "command" .Values.command "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" false) -}}
 {{- if .Values.reconciler.enabled -}}
-{{- $processes = append $processes (dict "name" "reconciler" "command" .Values.reconciler.command "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false) -}}
+{{- $processes = append $processes (dict "name" "reconciler" "command" .Values.reconciler.command "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false "federates" true) -}}
 {{- end -}}
 {{- range $process := $processes }}
 ---
@@ -46,6 +46,7 @@ spec:
       {{- if $top.Values.sandbox }}
       runtimeClassName: gvisor
       {{- end }}
+      serviceAccountName: {{ include "spindrift.serviceAccountName" $top }}
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -73,6 +74,14 @@ spec:
               value: /tmp
             - name: PORT
               value: {{ $top.Values.port | quote }}
+            {{- if $process.federates }}
+            - name: SPINDRIFT_IDENTITY_TOKEN_PATH
+              value: {{ printf "%s/token" $top.Values.serviceAccount.token.mountPath | quote }}
+            {{- if $top.Values.serviceAccount.token.gcpAudience }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
+            {{- end }}
+            {{- end }}
             {{- if $top.Values.database.enabled }}
             - name: DATABASE_URL
               valueFrom:
@@ -103,6 +112,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if $process.federates }}
+            - name: federated-identity
+              mountPath: {{ $top.Values.serviceAccount.token.mountPath }}
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml $process.resources | nindent 12 }}
           securityContext:
@@ -118,4 +132,24 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if $process.federates }}
+        - name: federated-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ $top.Values.serviceAccount.token.audience | quote }}
+                  expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
+                  path: token
+              {{- if $top.Values.serviceAccount.token.gcpAudience }}
+              - serviceAccountToken:
+                  audience: {{ $top.Values.serviceAccount.token.gcpAudience | quote }}
+                  expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
+                  path: gcp-token
+              - configMap:
+                  name: {{ include "spindrift.fullname" $top }}-federated-identity
+                  items:
+                    - key: gcp-credentials.json
+                      path: gcp-credentials.json
+              {{- end }}
+        {{- end }}
 {{- end }}

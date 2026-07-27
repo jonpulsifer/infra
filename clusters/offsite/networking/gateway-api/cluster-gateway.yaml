@@ -15,8 +15,13 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchLabels:
-              kubernetes.io/metadata.name: agents-sandbox
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - agents-sandbox
+                  - oauth2-proxy
+                  - spindrift-apps
         kinds:
           - kind: HTTPRoute
     - name: dave-tls

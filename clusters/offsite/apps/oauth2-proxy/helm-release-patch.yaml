@@ -1,0 +1,11 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: oauth2-proxy
+spec:
+  values:
+    extraArgs:
+      redirect-url: https://oauth2.${SPINDRIFT_DOMAIN}/oauth2/callback
+      whitelist-domain: .${SPINDRIFT_DOMAIN}
+      cookie-domain: .${SPINDRIFT_DOMAIN}

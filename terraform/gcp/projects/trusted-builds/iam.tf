@@ -13,3 +13,15 @@ resource "google_project_iam_member" "base_updater_builds" {
   member  = google_service_account.base_updater.member
   role    = "roles/cloudbuild.builds.editor"
 }
+
+resource "google_project_iam_member" "spindrift_builds" {
+  project = local.project
+  member  = local.spindrift_principal
+  role    = "roles/cloudbuild.builds.editor"
+}
+
+resource "google_project_iam_member" "spindrift_occurrences" {
+  project = local.project
+  member  = local.spindrift_principal
+  role    = "roles/containeranalysis.occurrences.editor"
+}

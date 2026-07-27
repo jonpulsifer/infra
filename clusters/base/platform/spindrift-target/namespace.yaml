@@ -1,0 +1,11 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spindrift-apps
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: spindrift
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

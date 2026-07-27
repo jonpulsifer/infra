@@ -1,0 +1,21 @@
+{{- if .Values.serviceAccount.token.gcpAudience }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "spindrift.fullname" . }}-federated-identity
+  namespace: {{ include "spindrift.namespace" . }}
+  labels:
+    {{- include "spindrift.labels" . | nindent 4 }}
+data:
+  gcp-credentials.json: |-
+    {
+      "type": "external_account",
+      "audience": {{ .Values.serviceAccount.token.gcpAudience | quote }},
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "credential_source": {
+        "file": {{ printf "%s/gcp-token" .Values.serviceAccount.token.mountPath | quote }}
+      }
+    }
+{{- end }}

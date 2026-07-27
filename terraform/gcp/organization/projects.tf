@@ -31,6 +31,25 @@ module "trusted-builds" {
   }
 }
 
+module "bluenose" {
+  source          = "./modules/project"
+  project_id      = "bluenose"
+  name            = "bluenose"
+  folder_id       = google_folder.production.name
+  billing_account = data.google_billing_account.cloudlab.id
+  labels = {
+    environment = "production"
+    platform    = "spindrift"
+  }
+}
+
+# bluenose is an existing empty project shell. Adopt it into the project
+# factory before the module moves it to Production and enables billing.
+import {
+  to = module.bluenose.google_project.project
+  id = "bluenose"
+}
+
 module "kubesec" {
   source          = "./modules/project"
   project_id      = "kubesec"

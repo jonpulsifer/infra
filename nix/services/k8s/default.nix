@@ -79,8 +79,13 @@ in
           };
           claimValidationRules = [
             {
-              expression = ''claims.sub == "system:serviceaccount:atlantis:atlantis"'';
-              message = "only the Atlantis service account may authenticate across clusters";
+              expression = ''
+                claims.sub in [
+                  "system:serviceaccount:atlantis:atlantis",
+                  "system:serviceaccount:spindrift:spindrift"
+                ]
+              '';
+              message = "only the Atlantis and Spindrift service accounts may authenticate across clusters";
             }
           ];
           claimMappings.username.expression = ''"federated:" + claims.sub'';

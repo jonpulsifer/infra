@@ -8,6 +8,7 @@ resources:
   - descheduler
   - hub
   - spindrift
+  - ../../base/platform/spindrift-target
   - dave.yaml
   - ../../base/apps/reloader
 patches:

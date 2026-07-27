@@ -24,6 +24,23 @@ resource "google_artifact_registry_repository_iam_member" "reader_vault" {
   member     = "serviceAccount:service-629296473058@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
+data "google_project" "bluenose" {
+  project_id = "bluenose"
+}
+
+resource "google_artifact_registry_repository_iam_member" "reader_spindrift" {
+  for_each = toset([
+    local.bluenose_binary_authorization_service_agent,
+    local.spindrift_principal,
+    "serviceAccount:service-${data.google_project.bluenose.number}@serverless-robot-prod.iam.gserviceaccount.com",
+  ])
+
+  location   = google_artifact_registry_repository.images.location
+  repository = google_artifact_registry_repository.images.name
+  role       = "roles/artifactregistry.reader"
+  member     = each.key
+}
+
 resource "google_artifact_registry_repository_iam_binding" "admins" {
   location   = google_artifact_registry_repository.images.location
   repository = google_artifact_registry_repository.images.name
