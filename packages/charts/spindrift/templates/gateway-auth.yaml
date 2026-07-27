@@ -1,0 +1,31 @@
+{{- if .Values.gatewayAuth.enabled }}
+{{- if empty .Values.gatewayAuth.from }}
+{{- fail "gatewayAuth.from must name at least one trusted Gateway peer when gatewayAuth.enabled=true" }}
+{{- end }}
+{{/*
+Header authentication trusts the Gateway's normalized subject. This
+default-deny policy makes that trust non-bypassable at the pod boundary: only
+the explicitly configured Gateway peers can reach the web port. The Gateway
+configuration itself remains responsible for stripping and replacing the
+identity headers before proxying.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "spindrift.fullname" . }}-gateway-auth
+  namespace: {{ include "spindrift.namespace" . }}
+  labels:
+    {{- include "spindrift.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "spindrift.selectorLabels" (dict "Release" .Release "Values" .Values "Chart" .Chart "component" "web") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- toYaml .Values.gatewayAuth.from | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.port }}
+{{- end }}

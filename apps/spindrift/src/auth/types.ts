@@ -15,7 +15,7 @@
  * and it needs it here more than anywhere, because a refusal here is the only
  * thing standing between a stranger and the installation.
  */
-import type { Clock } from '../commands/types.ts';
+import type { Clock, Principal } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import type { WebAuthnRejection } from './webauthn.ts';
 
@@ -64,7 +64,26 @@ export type AuthFailureCode =
   /** An assertion for a credential this installation has never seen. */
   | 'CREDENTIAL_UNKNOWN'
   /** Signing in to an installation nobody has enrolled against yet. */
-  | 'NOT_ENROLLED';
+  | 'NOT_ENROLLED'
+  /** Linking was requested without an assertion from the trusted Gateway. */
+  | 'GATEWAY_ASSERTION_MISSING'
+  /** The passkey being removed is the account's final root credential. */
+  | 'LAST_PASSKEY'
+  /** The credential id is already attached to an account. */
+  | 'CREDENTIAL_ALREADY_ENROLLED';
+
+/**
+ * Authentication at the request boundary.
+ *
+ * `forbidden` is deliberately distinct from anonymous: a trusted Gateway made
+ * an assertion, but the operator has not linked it. Treating that as anonymous
+ * would invite the UI to start a passkey flow without explaining why the
+ * Gateway login did not work.
+ */
+export type RequestAuthentication =
+  | { readonly kind: 'authenticated'; readonly principal: Principal }
+  | { readonly kind: 'anonymous' }
+  | { readonly kind: 'forbidden'; readonly message: string };
 
 export interface AuthFailure {
   readonly code: AuthFailureCode;

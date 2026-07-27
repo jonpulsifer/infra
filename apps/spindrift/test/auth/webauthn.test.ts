@@ -47,7 +47,12 @@ function derEncode(raw: Bytes): Bytes {
 
 /** `authenticatorData`: 32-byte RP hash, flags, then a 4-byte counter. */
 async function authenticatorData(
-  options: { rpId?: string; userPresent?: boolean; signCount?: number } = {},
+  options: {
+    rpId?: string;
+    userPresent?: boolean;
+    userVerified?: boolean;
+    signCount?: number;
+  } = {},
 ): Promise<Bytes> {
   const rpIdHash = new Uint8Array(
     await crypto.subtle.digest(
@@ -55,7 +60,9 @@ async function authenticatorData(
       new TextEncoder().encode(options.rpId ?? RP_ID),
     ),
   );
-  const flags = (options.userPresent ?? true) ? 0x05 : 0x04; // UP | UV
+  const flags =
+    ((options.userPresent ?? true) ? 0x01 : 0) |
+    ((options.userVerified ?? true) ? 0x04 : 0);
   const data = new Uint8Array(37);
   data.set(rpIdHash, 0);
   data[32] = flags;
@@ -348,6 +355,25 @@ describe.each([
 
     expect(result).toEqual({ ok: false, rejection: 'USER_NOT_PRESENT' });
   });
+
+  test('is refused when the authenticator did not verify its user', async () => {
+    const challenge = base64urlEncode(
+      crypto.getRandomValues(new Uint8Array(32)),
+    );
+    const { credential, sign } = await credentialOf(algorithm);
+    const authData = await authenticatorData({ userVerified: false });
+    const client = clientData({ challenge });
+
+    const result = await verifyAssertion({
+      credential,
+      authenticatorData: base64urlEncode(authData),
+      clientDataJSON: base64urlEncode(client),
+      signature: await sign(authData, client),
+      expected: { challenge, origin: ORIGIN, rpId: RP_ID },
+    });
+
+    expect(result).toEqual({ ok: false, rejection: 'USER_NOT_VERIFIED' });
+  });
 });
 
 describe('an algorithm outside the two supported', () => {
@@ -424,5 +450,21 @@ describe('registration', () => {
       expected: { challenge, origin: ORIGIN, rpId: RP_ID },
     });
     expect(result).toEqual({ ok: false, rejection: 'RELYING_PARTY_MISMATCH' });
+  });
+
+  test('refuses a credential that did not verify its user', async () => {
+    const challenge = base64urlEncode(
+      crypto.getRandomValues(new Uint8Array(32)),
+    );
+    const result = await verifyRegistration({
+      authenticatorData: base64urlEncode(
+        await authenticatorData({ userVerified: false }),
+      ),
+      clientDataJSON: base64urlEncode(
+        clientData({ challenge, type: 'webauthn.create' }),
+      ),
+      expected: { challenge, origin: ORIGIN, rpId: RP_ID },
+    });
+    expect(result).toEqual({ ok: false, rejection: 'USER_NOT_VERIFIED' });
   });
 });

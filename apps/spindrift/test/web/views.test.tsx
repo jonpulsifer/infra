@@ -21,6 +21,7 @@ import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { Workspace } from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
+import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 
 const deploy = (view: DeployView) =>
   renderToStaticMarkup(<DeployDetail view={view} />);
@@ -44,6 +45,49 @@ describe('the claimed front door', () => {
 
     expect(markup).toContain('Recover with a rotated token');
     expect(markup).toContain('name="recovery-token"');
+  });
+
+  test('explains how to link a first Gateway assertion', () => {
+    const markup = renderToStaticMarkup(
+      <Gate
+        claimed={true}
+        gatewayUnlinked={true}
+        onSignedIn={() => undefined}
+      />,
+    );
+    expect(markup).toContain('Gateway identity is not linked yet');
+    expect(markup).toContain('then link it in Settings');
+  });
+});
+
+describe('authentication Settings', () => {
+  test('states the fresh-passkey rule and preserves the final account root', () => {
+    const markup = renderToStaticMarkup(
+      <CredentialSettingsView
+        settings={{
+          passkeys: [
+            {
+              credentialId: 'credential-one',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              lastUsedAt: null,
+            },
+          ],
+          gatewayAvailable: true,
+          gatewayLinked: false,
+        }}
+        error={null}
+        running={null}
+        onAdd={() => undefined}
+        onRemove={() => undefined}
+        onLink={() => undefined}
+        onUnlink={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('Every change requires a fresh assertion');
+    expect(markup).toContain('At least one always remains');
+    expect(markup).toContain('disabled=""');
+    expect(markup).toContain('Link this Gateway identity');
   });
 });
 

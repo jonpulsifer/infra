@@ -34,6 +34,13 @@
  * union for the same reason §6's failure reasons are: a refusal has to have an
  * identity a test can key on.
  */
+import { type Bytes, base64urlDecode, equalBytes } from './bytes.ts';
+
+export {
+  type Bytes,
+  base64urlDecode,
+  base64urlEncode,
+} from './bytes.ts';
 
 /**
  * The two COSE algorithms this installation enrols.
@@ -72,19 +79,9 @@ export type WebAuthnRejection =
   | 'AUTHENTICATOR_DATA_MALFORMED'
   | 'RELYING_PARTY_MISMATCH'
   | 'USER_NOT_PRESENT'
+  | 'USER_NOT_VERIFIED'
   | 'UNSUPPORTED_ALGORITHM'
   | 'SIGNATURE_INVALID';
-
-/**
- * A byte string WebCrypto will accept.
- *
- * Written out rather than left as a bare `Uint8Array` because the two are not
- * the same type: a bare one is `Uint8Array<ArrayBufferLike>`, which admits a
- * `SharedArrayBuffer` and is therefore not a `BufferSource`. Every value in
- * this module ends up passed to `crypto.subtle`, so the narrower type is the
- * one worth saying once here instead of casting at each call.
- */
-export type Bytes = Uint8Array<ArrayBuffer>;
 
 /** A ceremony either held or names why it did not. */
 export type CeremonyResult =
@@ -94,51 +91,6 @@ export type CeremonyResult =
 type Checked =
   | { readonly ok: true }
   | { readonly ok: false; readonly rejection: WebAuthnRejection };
-
-// --- base64url ---------------------------------------------------------------
-//
-// WebAuthn speaks base64url everywhere, and so does every column this module's
-// values land in. These are here rather than in a shared utility because the
-// decode has one property the obvious implementation lacks: it refuses input it
-// cannot read instead of returning empty bytes, and two empty decodes compare
-// equal — which is how a "challenge mismatch" check silently passes.
-
-const BASE64URL = /^[A-Za-z0-9_-]*$/;
-
-export function base64urlEncode(bytes: Bytes): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replaceAll('=', '');
-}
-
-/** Decode, or `null` for anything that is not base64url. */
-export function base64urlDecode(value: string): Bytes | null {
-  if (!BASE64URL.test(value)) return null;
-  const padded = value.replaceAll('-', '+').replaceAll('_', '/');
-  try {
-    const binary = atob(padded);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return bytes;
-  } catch {
-    return null;
-  }
-}
-
-/** Constant-time-ish comparison, so a challenge check leaks no prefix length. */
-function equalBytes(left: Bytes, right: Bytes): boolean {
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    difference |= left[index]! ^ right[index]!;
-  }
-  return difference === 0;
-}
 
 // --- clientDataJSON ----------------------------------------------------------
 
@@ -287,6 +239,9 @@ async function verifyCeremonyEnvelope(args: {
   }
   if (!parsed.userPresent) {
     return { ok: false, rejection: 'USER_NOT_PRESENT' };
+  }
+  if (!parsed.userVerified) {
+    return { ok: false, rejection: 'USER_NOT_VERIFIED' };
   }
 
   return { ok: true, authData, clientBytes, parsed };

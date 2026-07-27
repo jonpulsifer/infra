@@ -11,6 +11,11 @@ installation: example
 controlPlane:
   hostname: spindrift.example.test
 
+# Optional identity asserted by a non-bypassable authenticated Gateway. This
+# fixture has no such edge, so no header is trusted.
+auth:
+  gateway: null
+
 dns:
   apexZone: apps.example.test
   vanityZone: example.test

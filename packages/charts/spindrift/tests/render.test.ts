@@ -68,3 +68,73 @@ describe('workload identity', () => {
     });
   });
 });
+
+describe('Secret-backed authentication configuration', () => {
+  test('rotating the enrolment token rolls every process reading the Secret', async () => {
+    const deployments = (
+      await render({ envFromSecret: 'spindrift-env' })
+    ).filter((object) => object.kind === 'Deployment');
+    expect(deployments).not.toHaveLength(0);
+    for (const deployment of deployments) {
+      expect(
+        deployment.metadata.annotations?.[
+          'secret.reloader.stakater.com/reload'
+        ],
+      ).toBe('spindrift-env');
+    }
+  });
+});
+
+describe('authenticated Gateway trust', () => {
+  test('is disabled without a network boundary', async () => {
+    const objects = await render();
+    expect(objects.some((object) => object.kind === 'NetworkPolicy')).toBe(
+      false,
+    );
+    const web = one(objects, 'Deployment', 'spindrift-web');
+    expect(
+      web.spec.template.spec.containers[0].env.some(
+        (item: { name: string }) =>
+          item.name === 'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+      ),
+    ).toBe(false);
+  });
+
+  test('renders default-deny ingress and the process attestation together', async () => {
+    const objects = await render({
+      gatewayAuth: {
+        enabled: true,
+        from: [
+          {
+            namespaceSelector: {
+              matchLabels: {
+                'kubernetes.io/metadata.name': 'gateway',
+              },
+            },
+          },
+        ],
+      },
+    });
+    const policy = one(objects, 'NetworkPolicy');
+    expect(policy.spec.policyTypes).toEqual(['Ingress']);
+    expect(policy.spec.ingress[0].from).toEqual([
+      {
+        namespaceSelector: {
+          matchLabels: { 'kubernetes.io/metadata.name': 'gateway' },
+        },
+      },
+    ]);
+
+    const web = one(objects, 'Deployment', 'spindrift-web');
+    expect(web.spec.template.spec.containers[0].env).toContainEqual({
+      name: 'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+      value: 'true',
+    });
+  });
+
+  test('cannot attest the boundary without at least one trusted peer', async () => {
+    await expect(
+      render({ gatewayAuth: { enabled: true, from: [] } }),
+    ).rejects.toThrow('gatewayAuth.from must name at least one');
+  });
+});

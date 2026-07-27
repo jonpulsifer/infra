@@ -28,10 +28,15 @@ export interface GateProps {
    * renders, and comes from the server rather than from a guess.
    */
   readonly claimed: boolean;
+  readonly gatewayUnlinked?: boolean;
   readonly onSignedIn: (principal: Principal) => void;
 }
 
-export function Gate({ claimed, onSignedIn }: GateProps) {
+export function Gate({
+  claimed,
+  gatewayUnlinked = false,
+  onSignedIn,
+}: GateProps) {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[440px] flex-col justify-center gap-5 px-5 py-10">
       <div className="flex items-center gap-2.5">
@@ -40,7 +45,7 @@ export function Gate({ claimed, onSignedIn }: GateProps) {
         </span>
       </div>
       {claimed ? (
-        <SignIn onSignedIn={onSignedIn} />
+        <SignIn gatewayUnlinked={gatewayUnlinked} onSignedIn={onSignedIn} />
       ) : (
         <Enrol onSignedIn={onSignedIn} />
       )}
@@ -124,7 +129,13 @@ function Enrol({ onSignedIn }: { onSignedIn: (p: Principal) => void }) {
   );
 }
 
-function SignIn({ onSignedIn }: { onSignedIn: (p: Principal) => void }) {
+function SignIn({
+  gatewayUnlinked,
+  onSignedIn,
+}: {
+  gatewayUnlinked: boolean;
+  onSignedIn: (p: Principal) => void;
+}) {
   const [token, setToken] = useState('');
   const { error, running, run } = useCeremony(onSignedIn);
 
@@ -137,6 +148,12 @@ function SignIn({ onSignedIn }: { onSignedIn: (p: Principal) => void }) {
           <p className="mt-1 text-sm text-muted-foreground">
             Your passkey is all this needs — there is no username here.
           </p>
+          {gatewayUnlinked && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              This Gateway identity is not linked yet. Sign in with the root
+              passkey, then link it in Settings.
+            </p>
+          )}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

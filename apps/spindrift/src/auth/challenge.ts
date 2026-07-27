@@ -13,7 +13,7 @@
  * attempt indistinguishable from a challenge that never existed, which is
  * exactly what the caller should be told.
  */
-import { and, eq, lt } from 'drizzle-orm';
+import { and, eq, isNull, lt } from 'drizzle-orm';
 import { webauthnChallenges } from '../db/schema.ts';
 import type { AuthDeps } from './types.ts';
 import { base64urlEncode } from './webauthn.ts';
@@ -29,12 +29,17 @@ export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 /** 32 bytes, which is what every authenticator expects a challenge to be. */
 const CHALLENGE_BYTES = 32;
 
-export type ChallengePurpose = 'enrol' | 'sign_in';
+export type ChallengePurpose =
+  | 'enrol'
+  | 'sign_in'
+  | 'credential_admin'
+  | 'add_passkey';
 
 /** Mint a challenge for one ceremony and remember that it was issued. */
 export async function issueChallenge(
   deps: AuthDeps,
   purpose: ChallengePurpose,
+  userId: string | null = null,
 ): Promise<string> {
   const challenge = base64urlEncode(
     crypto.getRandomValues(new Uint8Array(CHALLENGE_BYTES)),
@@ -51,6 +56,7 @@ export async function issueChallenge(
   await deps.db.insert(webauthnChallenges).values({
     challenge,
     purpose,
+    userId,
     createdAt: now,
     expiresAt: new Date(now.getTime() + CHALLENGE_TTL_MS),
   });
@@ -74,6 +80,7 @@ export async function spendChallenge(
   deps: AuthDeps,
   challenge: string,
   purpose: ChallengePurpose,
+  userId: string | null = null,
 ): Promise<boolean> {
   const spent = await deps.db
     .delete(webauthnChallenges)
@@ -81,6 +88,9 @@ export async function spendChallenge(
       and(
         eq(webauthnChallenges.challenge, challenge),
         eq(webauthnChallenges.purpose, purpose),
+        userId === null
+          ? isNull(webauthnChallenges.userId)
+          : eq(webauthnChallenges.userId, userId),
       ),
     )
     .returning();

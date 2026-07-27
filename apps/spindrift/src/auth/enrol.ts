@@ -28,6 +28,7 @@
  */
 import { eq } from 'drizzle-orm';
 import { credentials, enrolments, sessions, users } from '../db/schema.ts';
+import { equalText } from './bytes.ts';
 import { issueChallenge, spendChallenge } from './challenge.ts';
 import {
   hashToken,
@@ -81,11 +82,7 @@ async function checkToken(
   presented: string,
 ): Promise<{ ok: true; hash: string } | AuthResult<never>> {
   const shipped = deps.enrolmentToken;
-  if (
-    shipped === null ||
-    shipped === '' ||
-    !constantTimeEqual(shipped, presented)
-  ) {
+  if (shipped === null || shipped === '' || !equalText(shipped, presented)) {
     return authFailed(
       'TOKEN_INVALID',
       'that is not the enrolment token this installation shipped with',
@@ -106,19 +103,6 @@ async function checkToken(
   }
 
   return { ok: true, hash };
-}
-
-function constantTimeEqual(left: string, right: string): boolean {
-  const a = new TextEncoder().encode(left);
-  const b = new TextEncoder().encode(right);
-  // Lengths differing is not itself secret — the shipped token's length is a
-  // property of how the operator generated it, not of its value.
-  if (a.length !== b.length) return false;
-  let difference = 0;
-  for (let index = 0; index < a.length; index += 1) {
-    difference |= a[index]! ^ b[index]!;
-  }
-  return difference === 0;
 }
 
 /**

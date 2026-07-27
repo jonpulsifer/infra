@@ -155,11 +155,12 @@ describe('the cookie it travels in', () => {
     // The three attributes that make a stolen artifact hard to steal in the
     // first place. Asserted because they are one typo from being absent and
     // nothing else would notice.
-    const header = sessionCookie('a-token', new Date(START.getTime() + 1000));
+    const header = sessionCookie('a-token');
     expect(header).toContain('HttpOnly');
     expect(header).toContain('Secure');
     expect(header).toContain('SameSite=Lax');
     expect(header).toContain('Path=/');
+    expect(header).toContain('Max-Age=86400');
   });
 
   test('and clearing it sends an expiry rather than a blank value', () => {

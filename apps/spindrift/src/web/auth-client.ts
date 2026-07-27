@@ -20,6 +20,12 @@
  * assumed present rather than felt for: an authenticator old enough to lack
  * them is one this installation would rather refuse than half-support.
  */
+
+import { base64urlDecode, base64urlEncode } from '../auth/bytes.ts';
+import type {
+  AddPasskeyChallenge,
+  CredentialSettings,
+} from '../auth/credential-admin.ts';
 import { AUTH_PATH_PREFIX, type AuthAct } from '../auth/routes.ts';
 import type { AuthFailure } from '../auth/types.ts';
 import type { Principal } from '../commands/types.ts';
@@ -28,29 +34,11 @@ export type AuthClientResult<Value> =
   | { readonly ok: true; readonly value: Value }
   | { readonly ok: false; readonly failure: AuthFailure };
 
-/**
- * Base64url over an `ArrayBuffer`, matching what the server decodes.
- *
- * Written here rather than imported from `src/auth/webauthn.ts` because that
- * module's helper takes a `Uint8Array` the server side already has, and the
- * browser has buffers — one conversion in one direction each, rather than a
- * shared helper that has to take both.
- */
-function encode(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replaceAll('=', '');
-}
-
+/** Decode a server challenge, which is always valid base64url on this boundary. */
 function decode(value: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(value.replaceAll('-', '+').replaceAll('_', '/'));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
+  const bytes = base64urlDecode(value);
+  if (bytes === null) {
+    throw new Error('the server returned a malformed WebAuthn challenge');
   }
   return bytes;
 }
@@ -89,12 +77,16 @@ export interface SessionState {
   readonly principal: Principal | null;
   /** Whether anybody has enrolled here — which of the front door's two states. */
   readonly claimed: boolean;
+  /** Whether passkey sign-in is needed before this Gateway can be linked. */
+  readonly gatewayUnlinked: boolean;
 }
 
 /** Who the browser is, and whether this installation has been claimed. */
 export async function readSession(): Promise<SessionState> {
   const result = await callAuth<SessionState>('session', { method: 'GET' });
-  return result.ok ? result.value : { principal: null, claimed: false };
+  return result.ok
+    ? result.value
+    : { principal: null, claimed: false, gatewayUnlinked: false };
 }
 
 /** Raised when the operator dismisses the passkey prompt, or has no key. */
@@ -102,43 +94,41 @@ export class CeremonyAbandonedError extends Error {
   override readonly name = 'CeremonyAbandonedError';
 }
 
-/** Enrol a passkey against the token from the installation Secret. */
-export async function enrol(
-  token: string,
-): Promise<AuthClientResult<{ principal: Principal }>> {
-  const begun = await postAuth<{
-    challenge: string;
-    rpId: string;
-    rpName: string;
-    userName: string;
-    algorithms: number[];
-  }>('enrol/begin', { token });
-  if (!begun.ok) return begun;
+interface RegistrationFields {
+  readonly credentialId: string;
+  readonly publicKey: string;
+  readonly algorithm: number;
+  readonly authenticatorData: string;
+  readonly clientDataJSON: string;
+}
 
+interface AssertionFields {
+  readonly credentialId: string;
+  readonly authenticatorData: string;
+  readonly clientDataJSON: string;
+  readonly signature: string;
+}
+
+async function createPasskey(
+  options: AddPasskeyChallenge,
+): Promise<RegistrationFields> {
   const created = (await navigator.credentials.create({
     publicKey: {
-      challenge: decode(begun.value.challenge),
-      rp: { id: begun.value.rpId, name: begun.value.rpName },
+      challenge: decode(options.challenge),
+      rp: { id: options.rpId, name: options.rpName },
       user: {
-        // The user handle is a random opaque value: it is stored *by the
-        // authenticator*, and putting anything derived from the installation in
-        // it would leak that name to every device the passkey syncs to.
         id: crypto.getRandomValues(new Uint8Array(32)),
-        name: begun.value.userName,
-        displayName: begun.value.userName,
+        name: options.userName,
+        displayName: options.userName,
       },
-      pubKeyCredParams: begun.value.algorithms.map((alg) => ({
+      pubKeyCredParams: options.algorithms.map((alg) => ({
         type: 'public-key' as const,
         alg,
       })),
       authenticatorSelection: {
-        // Discoverable, so sign-in needs no username — v1 has one operator and
-        // nowhere to type one.
-        residentKey: 'required',
-        userVerification: 'preferred',
+        residentKey: options.residentKey,
+        userVerification: 'required',
       },
-      // Not requested, and not read if it arrives: `src/auth/webauthn.ts`
-      // carries why attestation proves nothing the enrolment token has not.
       attestation: 'none',
     },
   })) as PublicKeyCredential | null;
@@ -154,14 +144,59 @@ export async function enrol(
       'that authenticator did not hand over a public key this browser could read',
     );
   }
+  return {
+    credentialId: created.id,
+    publicKey: base64urlEncode(publicKey),
+    algorithm: response.getPublicKeyAlgorithm(),
+    authenticatorData: base64urlEncode(response.getAuthenticatorData()),
+    clientDataJSON: base64urlEncode(response.clientDataJSON),
+  };
+}
+
+async function assertPasskey(
+  challenge: string,
+  rpId: string,
+): Promise<AssertionFields> {
+  const asserted = (await navigator.credentials.get({
+    publicKey: {
+      challenge: decode(challenge),
+      rpId,
+      userVerification: 'required',
+    },
+  })) as PublicKeyCredential | null;
+
+  if (asserted === null) {
+    throw new CeremonyAbandonedError('no passkey was offered');
+  }
+
+  const response = asserted.response as AuthenticatorAssertionResponse;
+  return {
+    credentialId: asserted.id,
+    authenticatorData: base64urlEncode(response.authenticatorData),
+    clientDataJSON: base64urlEncode(response.clientDataJSON),
+    signature: base64urlEncode(response.signature),
+  };
+}
+
+/** Enrol a passkey against the token from the installation Secret. */
+export async function enrol(
+  token: string,
+): Promise<AuthClientResult<{ principal: Principal }>> {
+  const begun = await postAuth<{
+    challenge: string;
+    rpId: string;
+    rpName: string;
+    userName: string;
+    algorithms: number[];
+  }>('enrol/begin', { token });
+  if (!begun.ok) return begun;
 
   return postAuth('enrol/complete', {
     token,
-    credentialId: created.id,
-    publicKey: encode(publicKey),
-    algorithm: response.getPublicKeyAlgorithm(),
-    authenticatorData: encode(response.getAuthenticatorData()),
-    clientDataJSON: encode(response.clientDataJSON),
+    ...(await createPasskey({
+      ...begun.value,
+      residentKey: 'required',
+    })),
   });
 }
 
@@ -175,31 +210,72 @@ export async function signIn(): Promise<
   );
   if (!begun.ok) return begun;
 
-  const asserted = (await navigator.credentials.get({
-    publicKey: {
-      challenge: decode(begun.value.challenge),
-      rpId: begun.value.rpId,
-      // No `allowCredentials`: the credential is discoverable, so the browser
-      // finds it. A list here would need a credential id the operator has no
-      // way to supply before signing in.
-      userVerification: 'preferred',
-    },
-  })) as PublicKeyCredential | null;
-
-  if (asserted === null) {
-    throw new CeremonyAbandonedError('no passkey was offered');
-  }
-
-  const response = asserted.response as AuthenticatorAssertionResponse;
-  return postAuth('signin/complete', {
-    credentialId: asserted.id,
-    authenticatorData: encode(response.authenticatorData),
-    clientDataJSON: encode(response.clientDataJSON),
-    signature: encode(response.signature),
-  });
+  return postAuth(
+    'signin/complete',
+    await assertPasskey(begun.value.challenge, begun.value.rpId),
+  );
 }
 
 /** End the session, on the server as well as in the browser. */
 export async function signOut(): Promise<void> {
   await postAuth('signout', {});
+}
+
+/** Read the current operator's authentication methods. */
+export async function readCredentialSettings(): Promise<CredentialSettings> {
+  const result = await callAuth<CredentialSettings>('credentials', {
+    method: 'GET',
+  });
+  if (!result.ok) throw new Error(result.failure.message);
+  return result.value;
+}
+
+async function freshAssertion(): Promise<AuthClientResult<AssertionFields>> {
+  const begun = await postAuth<{ challenge: string; rpId: string }>(
+    'credentials/verify/begin',
+    {},
+  );
+  return begun.ok
+    ? {
+        ok: true,
+        value: await assertPasskey(begun.value.challenge, begun.value.rpId),
+      }
+    : begun;
+}
+
+/** Add an additional passkey without replacing the existing account roots. */
+export async function addPasskey(): Promise<AuthClientResult<unknown>> {
+  const fresh = await freshAssertion();
+  if (!fresh.ok) return fresh;
+  const begun = await postAuth<AddPasskeyChallenge>(
+    'passkeys/add/begin',
+    fresh.value,
+  );
+  if (!begun.ok) return begun;
+  return postAuth('passkeys/add/complete', await createPasskey(begun.value));
+}
+
+/** Remove one passkey. The server refuses the final account root. */
+export async function removePasskey(
+  credentialId: string,
+): Promise<AuthClientResult<unknown>> {
+  const fresh = await freshAssertion();
+  return fresh.ok
+    ? postAuth('passkeys/remove', {
+        credentialId,
+        assertion: fresh.value,
+      })
+    : fresh;
+}
+
+/** Link the identity asserted by the trusted Gateway on this request. */
+export async function linkGateway(): Promise<AuthClientResult<unknown>> {
+  const fresh = await freshAssertion();
+  return fresh.ok ? postAuth('gateway/link', fresh.value) : fresh;
+}
+
+/** Remove the linked Gateway identity while retaining passkey access. */
+export async function unlinkGateway(): Promise<AuthClientResult<unknown>> {
+  const fresh = await freshAssertion();
+  return fresh.ok ? postAuth('gateway/unlink', fresh.value) : fresh;
 }

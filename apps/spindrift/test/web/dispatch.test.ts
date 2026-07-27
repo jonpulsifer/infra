@@ -33,15 +33,25 @@ const OPERATOR: Principal = {
 
 /** A boundary with somebody behind it. */
 const authenticated: DispatchDeps = {
-  session: async () => OPERATOR,
+  authenticate: async () => ({ kind: 'authenticated', principal: OPERATOR }),
   context: () => context,
 };
 
 /** A boundary with nobody behind it — today's `server.ts`, and Task 37's before. */
 const anonymous: DispatchDeps = {
-  session: async () => null,
+  authenticate: async () => ({ kind: 'anonymous' }),
   context: () => {
     throw new Error('an unauthenticated request built a request context');
+  },
+};
+
+const forbidden: DispatchDeps = {
+  authenticate: async () => ({
+    kind: 'forbidden',
+    message: 'that Gateway identity is not linked',
+  }),
+  context: () => {
+    throw new Error('a forbidden request built a request context');
   },
 };
 
@@ -125,6 +135,24 @@ describe('the surface is session-authenticated', () => {
     const name = commandNames[0]!;
     const response = await routes[pathFor(name)]!(post(pathFor(name)));
     expect(response.status).toBe(401);
+  });
+});
+
+describe('a trusted but unlinked Gateway identity', () => {
+  test('is forbidden before a command context is built', async () => {
+    const name = commandNames[0]!;
+    const response = await commandRoutes(forbidden)[pathFor(name)]!(
+      post(pathFor(name)),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      ok: false,
+      failure: {
+        code: 'FORBIDDEN',
+        message: 'that Gateway identity is not linked',
+      },
+    });
   });
 });
 

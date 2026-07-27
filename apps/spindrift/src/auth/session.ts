@@ -26,7 +26,11 @@
 import { and, eq, gt } from 'drizzle-orm';
 import type { Principal } from '../commands/types.ts';
 import { credentials, sessions, users } from '../db/schema.ts';
-import { issueChallenge, spendChallenge } from './challenge.ts';
+import {
+  type ChallengePurpose,
+  issueChallenge,
+  spendChallenge,
+} from './challenge.ts';
 import { type AuthDeps, type AuthResult, authFailed, authOk } from './types.ts';
 import {
   base64urlDecode,
@@ -61,18 +65,14 @@ export async function hashToken(token: string): Promise<string> {
  * withholds a cookie from a cross-site POST while still sending it when the
  * operator follows a link to the UI.
  */
-export function sessionCookie(token: string, expiresAt: Date): string {
-  const maxAge = Math.max(
-    0,
-    Math.floor((expiresAt.getTime() - Date.now()) / 1000),
-  );
+export function sessionCookie(token: string): string {
   return [
     `${SESSION_COOKIE}=${token}`,
     'Path=/',
     'HttpOnly',
     'Secure',
     'SameSite=Lax',
-    `Max-Age=${maxAge}`,
+    `Max-Age=${SESSION_LIFETIME_MS / 1000}`,
   ].join('; ');
 }
 
@@ -110,7 +110,6 @@ export function sessionTokenOf(request: Request): string | null {
 /** A minted session: the token exists here and never again. */
 export interface OpenedSession {
   readonly token: string;
-  readonly expiresAt: Date;
   readonly principal: Principal;
 }
 
@@ -134,7 +133,6 @@ export async function openSession(
 
   return {
     token,
-    expiresAt,
     principal: { id: user.id, displayName: user.displayName },
   };
 }
@@ -187,6 +185,21 @@ export async function closeSession(
   await deps.db
     .delete(sessions)
     .where(eq(sessions.tokenHash, await hashToken(token)));
+}
+
+/**
+ * Perform the complete sign-out operation for the HTTP adapter.
+ *
+ * Revoking the server row and expiring the browser value are one operation:
+ * doing only either half leaves a credential alive somewhere. Returning the
+ * cookie string keeps that composition below the transport route.
+ */
+export async function endSession(
+  request: Request,
+  deps: AuthDeps,
+): Promise<string> {
+  await closeSession(request, deps);
+  return clearedSessionCookie();
 }
 
 /**
@@ -249,26 +262,32 @@ export interface SignInResponse {
 }
 
 /**
- * Complete a sign-in.
+ * Verify one enrolled passkey assertion for a particular purpose and owner.
  *
- * Order matters and is not incidental: the **challenge is spent first**, so a
- * captured ceremony is dead before any key material is looked at, and a replay
- * cannot be distinguished from a challenge that never existed by how long the
- * answer took.
+ * Sign-in and credential administration share the cryptographic operation but
+ * not the challenge namespace. The purpose and optional User binding are read
+ * from the same single-use row, so an assertion begun for signing in cannot be
+ * replayed as approval to change credentials.
  */
-export async function completeSignIn(
+export async function verifyPasskeyAssertion(
   deps: AuthDeps,
   response: SignInResponse,
-): Promise<AuthResult<OpenedSession>> {
+  {
+    purpose,
+    userId = null,
+    unknownChallengeMessage,
+  }: {
+    readonly purpose: ChallengePurpose;
+    readonly userId?: string | null;
+    readonly unknownChallengeMessage: string;
+  },
+): Promise<AuthResult<Principal>> {
   const clientData = readChallenge(response.clientDataJSON);
   if (
     clientData === null ||
-    !(await spendChallenge(deps, clientData, 'sign_in'))
+    !(await spendChallenge(deps, clientData, purpose, userId))
   ) {
-    return authFailed(
-      'CHALLENGE_UNKNOWN',
-      'that sign-in was not one this installation had open — try again',
-    );
+    return authFailed('CHALLENGE_UNKNOWN', unknownChallengeMessage);
   }
 
   const [credential] = await deps.db
@@ -276,7 +295,10 @@ export async function completeSignIn(
     .from(credentials)
     .where(eq(credentials.credentialId, response.credentialId));
 
-  if (credential === undefined) {
+  if (
+    credential === undefined ||
+    (userId !== null && credential.userId !== userId)
+  ) {
     return authFailed(
       'CREDENTIAL_UNKNOWN',
       'that passkey is not enrolled on this installation',
@@ -307,9 +329,6 @@ export async function completeSignIn(
   }
 
   if (!isNewerSignCount(credential.signCount, verdict.signCount)) {
-    // WebAuthn's clone check. It binds only when the authenticator is actually
-    // counting — see `isNewerSignCount` — so a synced passkey reporting zero
-    // forever never lands here.
     return authFailed(
       'CEREMONY_REFUSED',
       'that passkey reported a counter that went backwards, which means it has been cloned',
@@ -328,16 +347,31 @@ export async function completeSignIn(
     .from(users)
     .where(eq(users.id, credential.userId));
 
-  if (user === undefined) {
-    // Not reachable through the foreign key, and refusing beats asserting: a
-    // credential with no user is a database somebody has been editing by hand.
-    return authFailed(
-      'CREDENTIAL_UNKNOWN',
-      'that passkey has no account behind it',
-    );
-  }
+  return user === undefined
+    ? authFailed('CREDENTIAL_UNKNOWN', 'that passkey has no account behind it')
+    : authOk({ id: user.id, displayName: user.displayName });
+}
 
-  return authOk(await openSession(deps, user));
+/**
+ * Complete a sign-in.
+ *
+ * Order matters and is not incidental: the **challenge is spent first**, so a
+ * captured ceremony is dead before any key material is looked at, and a replay
+ * cannot be distinguished from a challenge that never existed by how long the
+ * answer took.
+ */
+export async function completeSignIn(
+  deps: AuthDeps,
+  response: SignInResponse,
+): Promise<AuthResult<OpenedSession>> {
+  const verified = await verifyPasskeyAssertion(deps, response, {
+    purpose: 'sign_in',
+    unknownChallengeMessage:
+      'that sign-in was not one this installation had open — try again',
+  });
+  return verified.ok
+    ? authOk(await openSession(deps, verified.value))
+    : verified;
 }
 
 /**

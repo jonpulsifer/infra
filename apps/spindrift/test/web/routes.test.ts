@@ -14,6 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { EnrolmentDeps } from '../../src/auth/enrol.ts';
+import type { GatewayDeps } from '../../src/auth/gateway.ts';
 import { AUTH_ACTS, authPathFor } from '../../src/auth/routes.ts';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { Database } from '../../src/db/client.ts';
@@ -24,7 +25,7 @@ import { HEALTH_PATH, webRoutes } from '../../src/web/routes.ts';
 const APP = join(import.meta.dir, '../..');
 
 const noSession = {
-  session: async () => null,
+  authenticate: async () => ({ kind: 'anonymous' as const }),
   context: () => {
     throw new Error('unreachable in a route-table test');
   },
@@ -34,7 +35,7 @@ const noSession = {
  * Auth deps that would throw if reached. This file asserts over the *shape* of
  * the table, so a handler running here would mean the assertion had gone wrong.
  */
-const noAuth: EnrolmentDeps = {
+const noAuth: EnrolmentDeps & GatewayDeps = {
   db: new Proxy(
     {},
     {
@@ -54,6 +55,7 @@ const noAuth: EnrolmentDeps = {
     origin: 'https://spindrift.example.test',
   },
   enrolmentToken: null,
+  gateway: null,
 };
 
 /** A stand-in for the client, so this file never depends on a build having run. */
@@ -88,9 +90,9 @@ describe('what the web process serves', () => {
     expect(handAuthored.sort()).toEqual([HEALTH_PATH, ...AUTH_PATHS].sort());
   });
 
-  test('auth is the only surface reachable without a session', () => {
-    // The property §21 rests on. Every other route either is a command — which
-    // `dispatch.ts` gates on a principal — or is a static document.
+  test('pre-session acts remain on the closed auth surface', () => {
+    // The property §21 rests on. Auth itself gates credential-administration
+    // acts; every product route is a command gated by `dispatch.ts`.
     for (const path of AUTH_PATHS) {
       expect(path.startsWith('/internal/auth/')).toBe(true);
     }

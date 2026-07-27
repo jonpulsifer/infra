@@ -178,7 +178,12 @@ export const attemptEventType = pgEnum('attempt_event_type', ['log', 'status']);
  * ceremony confusion `src/auth/webauthn.ts` refuses — so the purpose travels
  * with the challenge rather than being inferred from which endpoint replies.
  */
-export const webauthnPurpose = pgEnum('webauthn_purpose', ['enrol', 'sign_in']);
+export const webauthnPurpose = pgEnum('webauthn_purpose', [
+  'enrol',
+  'sign_in',
+  'credential_admin',
+  'add_passkey',
+]);
 
 // --- App and Component -------------------------------------------------
 
@@ -526,14 +531,23 @@ export const targets = pgTable(
  * linked identity from the front-door Gateway, kept distinct from
  * Spindrift's own user model on purpose.
  */
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  displayName: text('display_name').notNull(),
-  gatewayIdentity: text('gateway_identity'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    displayName: text('display_name').notNull(),
+    gatewayIdentity: text('gateway_identity'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // One trusted identity cannot name two internal users, even if v1 normally
+    // has only the operator. Keep the invariant where later multi-user work
+    // cannot accidentally weaken it.
+    unique('users_gateway_identity_unique').on(table.gatewayIdentity),
+  ],
+);
 
 /**
  * One enrolled passkey (§"First run and identity" story 1).
@@ -648,6 +662,11 @@ export const webauthnChallenges = pgTable('webauthn_challenges', {
   challenge: text('challenge').primaryKey(),
   /** Which ceremony it was issued for: an enrolment or a sign-in. */
   purpose: webauthnPurpose('purpose').notNull(),
+  /**
+   * Credential changes bind their challenge to the authenticated User.
+   * Bootstrap and sign-in have no principal yet, so their owner is null.
+   */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),

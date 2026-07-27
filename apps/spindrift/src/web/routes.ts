@@ -15,10 +15,9 @@
  *    production, Bun's HTML import in development. Both are generated; neither
  *    is a path anybody typed.
  * 3. **Auth**, from `src/auth/routes.ts` — generated from that module's own
- *    closed tuple of acts, for the reason stated there: §21 makes the command
- *    surface session-authenticated only, and these are the acts that *produce*
- *    a session, so they cannot be commands. This is the second hand-authored
- *    surface and the decision to add it is recorded here.
+ *    closed tuple of acts. It contains the pre-session acts that *produce* a
+ *    principal and passkey-rooted credential administration; neither belongs
+ *    in the product command registry.
  * 4. **{@link HEALTH_PATH}**, which is the whole of the rest.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
@@ -26,6 +25,7 @@
  */
 
 import type { EnrolmentDeps } from '../auth/enrol.ts';
+import type { GatewayDeps } from '../auth/gateway.ts';
 import { authRoutes } from '../auth/routes.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
 
@@ -59,7 +59,7 @@ export type ClientRoute = Response | Bun.HTMLBundle;
 export function webRoutes<Client extends Record<string, ClientRoute>>(
   client: Client,
   deps: DispatchDeps,
-  auth: EnrolmentDeps,
+  auth: EnrolmentDeps & GatewayDeps,
 ) {
   return {
     ...client,

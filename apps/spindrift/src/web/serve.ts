@@ -20,9 +20,12 @@
  */
 import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
-import { resolveSession } from '../auth/session.ts';
+import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
 import { systemClock } from '../commands/types.ts';
-import { loadManifest } from '../config/manifest.ts';
+import {
+  assertTrustedGatewayBoundary,
+  loadManifest,
+} from '../config/manifest.ts';
 import { createDb } from '../db/client.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 
@@ -42,10 +45,11 @@ export async function start(
   { development }: { development: boolean },
 ): Promise<void> {
   const manifest = await loadManifest();
+  assertTrustedGatewayBoundary(manifest);
   const db = createDb();
   const adapters = createAdapterRegistry({ manifest });
 
-  const auth: EnrolmentDeps = {
+  const auth: EnrolmentDeps & GatewayDeps = {
     db,
     clock: systemClock,
     relyingParty: {
@@ -54,6 +58,7 @@ export async function start(
       origin: `https://${manifest.controlPlane.hostname}`,
     },
     enrolmentToken: Bun.env[ENROLMENT_TOKEN_VAR]?.trim() || null,
+    gateway: manifest.auth.gateway,
   };
 
   const server = Bun.serve({
@@ -62,7 +67,7 @@ export async function start(
     routes: webRoutes(
       client,
       {
-        session: (request) => resolveSession(request, auth),
+        authenticate: (request) => authenticateRequest(request, auth),
         context: (principal) => ({
           principal,
           clock: systemClock,

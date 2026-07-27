@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {
+  assertTrustedGatewayBoundary,
   loadManifest,
   MANIFEST_INLINE_VAR,
   MANIFEST_PATH_VAR,
@@ -16,6 +17,7 @@ describe('the fixture installation', () => {
   test('boots clean from a file', async () => {
     const manifest = await loadManifest({ [MANIFEST_PATH_VAR]: FIXTURE });
     expect(manifest.installation).toBe('example');
+    expect(manifest.auth.gateway).toBeNull();
     expect(manifest.dns.apexZone).toBe('apps.example.test');
     expect(manifest.secretStore.adapter).toBe('gcp-secret-manager');
     expect(manifest.targets.map((t) => t.adapter)).toEqual([
@@ -36,6 +38,31 @@ describe('the fixture installation', () => {
       [MANIFEST_INLINE_VAR]: 'installation: inline',
     });
     expect(manifest.installation).toBe('example');
+  });
+});
+
+describe('the authenticated Gateway trust boundary', () => {
+  test('fails closed when header authentication has no deployment attestation', async () => {
+    const manifest = parseManifest(fixtureText, FIXTURE);
+    const configured = {
+      ...manifest,
+      auth: {
+        gateway: {
+          adapterKey: 'front-door',
+          issuer: 'https://issuer.example.test',
+          subjectHeader: 'x-auth-request-subject',
+        },
+      },
+    };
+
+    expect(() => assertTrustedGatewayBoundary(configured, {})).toThrow(
+      'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+    );
+    expect(() =>
+      assertTrustedGatewayBoundary(configured, {
+        SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY: 'true',
+      }),
+    ).not.toThrow();
   });
 });
 
@@ -66,6 +93,7 @@ describe('boot fails loudly', () => {
       message = (error as Error).message;
     }
     expect(message).toContain('dns');
+    expect(message).toContain('auth');
     expect(message).toContain('cloud');
     expect(message).toContain('charts');
     expect(message).toContain('github');

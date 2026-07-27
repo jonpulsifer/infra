@@ -30,11 +30,13 @@ import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
 import { Workspace } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
+import { Settings } from './views/auth/settings.tsx';
 
 const NAV = [
   { path: '/apps', label: 'Apps' },
   { path: '/deploys', label: 'Deploys' },
   { path: '/apps/new', label: 'New App' },
+  { path: '/settings', label: 'Settings' },
 ] as const;
 
 /**
@@ -47,7 +49,11 @@ const NAV = [
  */
 type Gatekeeping =
   | { readonly state: 'asking' }
-  | { readonly state: 'anonymous'; readonly claimed: boolean }
+  | {
+      readonly state: 'anonymous';
+      readonly claimed: boolean;
+      readonly gatewayUnlinked: boolean;
+    }
   | { readonly state: 'signed-in'; readonly principal: Principal };
 
 export function App() {
@@ -57,16 +63,22 @@ export function App() {
   useEffect(() => {
     let live = true;
     readSession()
-      .then(({ principal, claimed }) => {
+      .then(({ principal, claimed, gatewayUnlinked }) => {
         if (!live) return;
         setGate(
           principal === null
-            ? { state: 'anonymous', claimed }
+            ? { state: 'anonymous', claimed, gatewayUnlinked }
             : { state: 'signed-in', principal },
         );
       })
       .catch(() => {
-        if (live) setGate({ state: 'anonymous', claimed: false });
+        if (live) {
+          setGate({
+            state: 'anonymous',
+            claimed: false,
+            gatewayUnlinked: false,
+          });
+        }
       });
     return () => {
       live = false;
@@ -79,6 +91,7 @@ export function App() {
     return (
       <Gate
         claimed={gate.claimed}
+        gatewayUnlinked={gate.gatewayUnlinked}
         onSignedIn={(principal) => setGate({ state: 'signed-in', principal })}
       />
     );
@@ -92,7 +105,11 @@ export function App() {
         principal={gate.principal}
         onSignOut={() => {
           void signOut().then(() =>
-            setGate({ state: 'anonymous', claimed: true }),
+            setGate({
+              state: 'anonymous',
+              claimed: true,
+              gatewayUnlinked: false,
+            }),
           );
         }}
       />
@@ -102,6 +119,7 @@ export function App() {
 }
 
 function Screen({ path }: { path: string }) {
+  if (path.startsWith('/settings')) return <Settings />;
   if (path.startsWith('/apps/new')) {
     return <NewApp initialDraft={INITIAL_DRAFT} targets={TARGET_OPTIONS} />;
   }

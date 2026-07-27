@@ -16,6 +16,8 @@ export interface RenderedObject {
   metadata: {
     name: string;
     namespace?: string;
+    annotations?: Record<string, string>;
+    labels?: Record<string, string>;
   };
   spec?: any;
   [key: string]: unknown;

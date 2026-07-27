@@ -54,6 +54,8 @@ export interface CeremonyOptions {
   readonly signCount?: number;
   /** Emit a ceremony nobody touched the authenticator for. */
   readonly userPresent?: boolean;
+  /** Emit a ceremony that did not locally verify its user. */
+  readonly userVerified?: boolean;
 }
 
 export interface AuthenticatorOptions {
@@ -122,8 +124,9 @@ export async function createAuthenticator(
     challenge: string,
     given: CeremonyOptions,
   ) => {
-    // UP | UV, unless the test is asking for a ceremony nobody was present for.
-    const flags = (given.userPresent ?? true) ? 0x05 : 0x04;
+    const flags =
+      ((given.userPresent ?? true) ? 0x01 : 0) |
+      ((given.userVerified ?? true) ? 0x04 : 0);
     const authData = await authenticatorData(
       given.rpId ?? options.rpId,
       flags,

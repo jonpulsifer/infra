@@ -12,8 +12,12 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { EnrolmentDeps } from '../../src/auth/enrol.ts';
+import {
+  authenticateRequest,
+  type GatewayDeps,
+} from '../../src/auth/gateway.ts';
 import { authPathFor } from '../../src/auth/routes.ts';
-import { resolveSession, SESSION_COOKIE } from '../../src/auth/session.ts';
+import { SESSION_COOKIE } from '../../src/auth/session.ts';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { CommandContext } from '../../src/commands/types.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
@@ -43,17 +47,18 @@ const CLIENT = { '/': new Response('the client document') };
  * fixture the test wrote directly.
  */
 function serve() {
-  const auth: EnrolmentDeps = {
+  const auth: EnrolmentDeps & GatewayDeps = {
     db: database().db,
     clock: { now: () => new Date('2026-01-01T00:00:00Z') },
     relyingParty: RELYING_PARTY,
     enrolmentToken: SHIPPED_TOKEN,
+    gateway: null,
   };
 
   const routes = webRoutes(
     CLIENT,
     {
-      session: (request) => resolveSession(request, auth),
+      authenticate: (request) => authenticateRequest(request, auth),
       context: (principal) =>
         ({
           principal,
@@ -229,6 +234,35 @@ describe('the session route', () => {
       value: { principal: { displayName: string } | null };
     };
     expect(body.value.principal?.displayName).toBe('Operator');
+  });
+});
+
+describe('credential Settings over the route table', () => {
+  test('lists the enrolled passkey only for an authenticated operator', async () => {
+    const { routes } = serve();
+    const cookie = cookieFrom(await enrolOverHttp(routes));
+    const path = authPathFor('credentials');
+
+    const anonymous = await handlerFor(
+      routes,
+      path,
+    )(new Request(`${RELYING_PARTY.origin}${path}`));
+    expect(anonymous.status).toBe(401);
+
+    const authenticated = await handlerFor(
+      routes,
+      path,
+    )(
+      new Request(`${RELYING_PARTY.origin}${path}`, {
+        headers: { cookie: cookie! },
+      }),
+    );
+    expect(authenticated.status).toBe(200);
+    const body = (await authenticated.json()) as {
+      value: { passkeys: unknown[]; gatewayAvailable: boolean };
+    };
+    expect(body.value.passkeys).toHaveLength(1);
+    expect(body.value.gatewayAvailable).toBe(false);
   });
 });
 

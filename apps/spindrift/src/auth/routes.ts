@@ -1,13 +1,15 @@
 /**
- * The one surface that cannot be a command (Task 37).
+ * The authentication surface outside the product command registry (Task 37).
  *
  * `src/web/routes.ts` states the rule this file has to satisfy: *"A second
  * hand-authored route is a decision somebody has to make on purpose, in this
  * file, against a test that names it."* This is that decision, made once and
- * for a reason that is not a preference — §21 makes the dispatch surface
- * **session-authenticated only**, and these are the acts that produce a
- * session. A command cannot enrol the operator, because a `CommandContext`
- * requires the `Principal` enrolment is what creates.
+ * for two related reasons. §21 makes the dispatch surface
+ * **session-authenticated only**, so a command cannot enrol the operator when
+ * `CommandContext` requires the `Principal` enrolment creates. Credential
+ * administration changes how that Principal is proved, not a product resource,
+ * and is rooted in a fresh passkey assertion rather than ordinary command
+ * authorization.
  *
  * So the same discipline is applied a second time rather than abandoned:
  *
@@ -21,26 +23,40 @@
  *    `src/auth/`, and turns the result into a status code. The decisions all
  *    happen below.
  *
- * These are the only routes in the application reachable without a session, and
- * that is the property the count in `test/web/routes.test.ts` protects.
+ * The pre-session members are the only acts in the application reachable
+ * without a principal. Credential-administration members authenticate again at
+ * this boundary, and `test/web/routes.test.ts` protects the closed route set.
  */
 import { z } from 'zod';
+import type { Principal } from '../commands/types.ts';
+import {
+  beginAddPasskey,
+  beginCredentialChange,
+  type CredentialAdminDeps,
+  completeAddPasskey,
+  credentialSettings,
+  linkGatewayIdentity,
+  removePasskey,
+  unlinkGatewayIdentity,
+} from './credential-admin.ts';
 import {
   beginEnrolment,
   completeEnrolment,
   type EnrolmentDeps,
 } from './enrol.ts';
 import {
+  authenticateRequest,
+  type GatewayDeps,
+  readSessionState,
+} from './gateway.ts';
+import {
   beginSignIn,
-  clearedSessionCookie,
-  closeSession,
   completeSignIn,
-  isClaimed,
+  endSession,
   type OpenedSession,
-  resolveSession,
   sessionCookie,
 } from './session.ts';
-import type { AuthFailureCode, AuthResult } from './types.ts';
+import { type AuthFailureCode, type AuthResult, authOk } from './types.ts';
 
 /** Unversioned, and named so nobody has to be told it is not an API. */
 export const AUTH_PATH_PREFIX = '/internal/auth';
@@ -49,8 +65,8 @@ export const AUTH_PATH_PREFIX = '/internal/auth';
  * Every act on this surface.
  *
  * A tuple rather than a set of function declarations, so the route table is
- * `Object.fromEntries` over it and there is nowhere to write a sixth path
- * without a sixth member here.
+ * `Object.fromEntries` over it and there is nowhere to write another path
+ * without another member here.
  */
 export const AUTH_ACTS = [
   'enrol/begin',
@@ -59,6 +75,13 @@ export const AUTH_ACTS = [
   'signin/complete',
   'signout',
   'session',
+  'credentials',
+  'credentials/verify/begin',
+  'passkeys/add/begin',
+  'passkeys/add/complete',
+  'passkeys/remove',
+  'gateway/link',
+  'gateway/unlink',
 ] as const;
 
 export type AuthAct = (typeof AUTH_ACTS)[number];
@@ -83,6 +106,11 @@ const STATUS = {
   CEREMONY_REFUSED: 401,
   CREDENTIAL_UNKNOWN: 401,
   NOT_ENROLLED: 409,
+  GATEWAY_ASSERTION_MISSING: 401,
+  LAST_PASSKEY: 409,
+  CREDENTIAL_ALREADY_ENROLLED: 409,
+  UNAUTHENTICATED: 401,
+  GATEWAY_IDENTITY_UNLINKED: 403,
   MALFORMED_REQUEST: 400,
   METHOD_NOT_ALLOWED: 405,
   INVALID_INPUT: 422,
@@ -91,7 +119,9 @@ const STATUS = {
 type TransportCode =
   | 'MALFORMED_REQUEST'
   | 'METHOD_NOT_ALLOWED'
-  | 'INVALID_INPUT';
+  | 'INVALID_INPUT'
+  | 'UNAUTHENTICATED'
+  | 'GATEWAY_IDENTITY_UNLINKED';
 
 function refuse(
   code: AuthFailureCode | TransportCode,
@@ -125,7 +155,7 @@ function answer<Value>(
     {
       status: 200,
       headers: {
-        'set-cookie': sessionCookie(session.token, session.expiresAt),
+        'set-cookie': sessionCookie(session.token),
       },
     },
   );
@@ -153,9 +183,28 @@ const signInCompleteInput = z
   })
   .strict();
 
+const assertionInput = signInCompleteInput;
+
+const addPasskeyInput = z
+  .object({
+    credentialId: z.string().min(1),
+    publicKey: z.string().min(1),
+    algorithm: z.number().int(),
+    authenticatorData: z.string().min(1),
+    clientDataJSON: z.string().min(1),
+  })
+  .strict();
+
+const removePasskeyInput = z
+  .object({
+    credentialId: z.string().min(1),
+    assertion: assertionInput,
+  })
+  .strict();
+
 /** One route per act, and no way to write another. */
 export function authRoutes(
-  deps: EnrolmentDeps,
+  deps: EnrolmentDeps & CredentialAdminDeps,
 ): Record<string, (request: Request) => Promise<Response>> {
   const handlers: Record<AuthAct, (request: Request) => Promise<Response>> = {
     'enrol/begin': (request) =>
@@ -178,12 +227,12 @@ export function authRoutes(
       if (request.method !== 'POST') {
         return refuse('METHOD_NOT_ALLOWED', 'signing out is a POST');
       }
-      await closeSession(request, deps);
+      const cookie = await endSession(request, deps);
       // Idempotent by construction: there is nothing to report and nothing that
       // could have failed, so signing out twice is signing out.
       return Response.json(
         { ok: true, value: null },
-        { status: 200, headers: { 'set-cookie': clearedSessionCookie() } },
+        { status: 200, headers: { 'set-cookie': cookie } },
       );
     },
 
@@ -202,16 +251,97 @@ export function authRoutes(
       if (request.method !== 'GET') {
         return refuse('METHOD_NOT_ALLOWED', 'reading the session is a GET');
       }
-      const principal = await resolveSession(request, deps);
+      const state = await readSessionState(request, deps);
       return Response.json(
-        { ok: true, value: { principal, claimed: await isClaimed(deps) } },
+        {
+          ok: true,
+          value: state,
+        },
         { status: 200 },
       );
     },
+
+    credentials: async (request) => {
+      if (request.method !== 'GET') {
+        return refuse('METHOD_NOT_ALLOWED', 'reading credentials is a GET');
+      }
+      return withPrincipal(request, deps, async (principal) =>
+        Response.json(
+          { ok: true, value: await credentialSettings(deps, principal) },
+          { status: 200 },
+        ),
+      );
+    },
+
+    'credentials/verify/begin': (request) =>
+      authenticatedPost(
+        request,
+        deps,
+        z.object({}).strict(),
+        (_input, principal) =>
+          beginCredentialChange(deps, principal).then(authOk),
+      ),
+
+    'passkeys/add/begin': (request) =>
+      authenticatedPost(request, deps, assertionInput, (input, principal) =>
+        beginAddPasskey(deps, principal, input),
+      ),
+
+    'passkeys/add/complete': (request) =>
+      authenticatedPost(request, deps, addPasskeyInput, (input, principal) =>
+        completeAddPasskey(deps, principal, input),
+      ),
+
+    'passkeys/remove': (request) =>
+      authenticatedPost(request, deps, removePasskeyInput, (input, principal) =>
+        removePasskey(deps, principal, input),
+      ),
+
+    'gateway/link': (request) =>
+      authenticatedPost(request, deps, assertionInput, (input, principal) =>
+        linkGatewayIdentity(deps, principal, request, input),
+      ),
+
+    'gateway/unlink': (request) =>
+      authenticatedPost(request, deps, assertionInput, (input, principal) =>
+        unlinkGatewayIdentity(deps, principal, input),
+      ),
   };
 
   return Object.fromEntries(
     AUTH_ACTS.map((act) => [authPathFor(act), handlers[act]]),
+  );
+}
+
+async function withPrincipal(
+  request: Request,
+  deps: GatewayDeps,
+  run: (principal: Principal) => Promise<Response>,
+): Promise<Response> {
+  const authentication = await authenticateRequest(request, deps);
+  if (authentication.kind === 'anonymous') {
+    return refuse(
+      'UNAUTHENTICATED',
+      'credential settings require an authenticated operator',
+    );
+  }
+  if (authentication.kind === 'forbidden') {
+    return refuse('GATEWAY_IDENTITY_UNLINKED', authentication.message);
+  }
+  return run(authentication.principal);
+}
+
+async function authenticatedPost<Schema extends z.ZodType>(
+  request: Request,
+  deps: GatewayDeps,
+  schema: Schema,
+  run: (
+    input: z.infer<Schema>,
+    principal: Principal,
+  ) => Promise<AuthResult<unknown>>,
+): Promise<Response> {
+  return withPrincipal(request, deps, (principal) =>
+    post(request, schema, (input) => run(input, principal)),
   );
 }
 
