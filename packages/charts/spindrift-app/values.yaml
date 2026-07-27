@@ -46,10 +46,11 @@ app:
   # a manual run and a scheduled run are one object with a field flipped (§7).
   schedule: ""
 
-  # The Deploy this release came from. Rendered onto the pod template and
+  # What is running here, as a digest. Rendered onto the pod template and
   # **never** into a selector, which is immutable and would brick every
-  # upgrade (§7).
-  deployId: ""
+  # upgrade (§7). §6's description names no Deploy, so the identity that
+  # travels is the artifact's — which is what §16 correlates on anyway.
+  artifactDigest: ""
 
   # Hostnames the route answers on: the canonical name first, the vanity name
   # after it where one exists (§9).

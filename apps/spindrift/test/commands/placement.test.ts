@@ -33,7 +33,7 @@ import {
 import type { ComponentKind } from '../../src/domain/desired-state.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import { clusterInput, fixtureManifest } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -74,14 +74,7 @@ function context(registry: AdapterRegistry): CommandContext {
 
 /** The cluster and the two cloud Targets, in rank order, all healthy. */
 async function connectEverything(registry: AdapterRegistry) {
-  await connectTarget(
-    {
-      kind: 'kubernetes',
-      name: 'cluster',
-      apiServer: 'https://cluster.example.test',
-    },
-    context(registry),
-  );
+  await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
   await connectTarget(
     {
       kind: 'cloud',

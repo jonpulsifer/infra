@@ -38,12 +38,14 @@ Pod template labels: the common set plus the one label that moves per deploy.
 
 §7: "a deploy label goes on the pod template and **never** in the selector",
 because both delivery flavours enumerate applied objects and neither covers
-pods — the label is how a pod is traced back to the Deploy that placed it.
+pods — the label is how a pod is traced back to what placed it. What travels
+across the seam is the artifact's digest: §6's neutral description names no
+Deploy, and the digest is the identity §16 correlates on everywhere.
 */}}
 {{- define "spindrift-app.podLabels" -}}
 {{ include "spindrift-app.labels" . }}
-{{- with .Values.app.deployId }}
-spindrift.dev/deploy: {{ . | quote }}
+{{- with .Values.app.artifactDigest }}
+spindrift.dev/artifact: {{ . | quote }}
 {{- end }}
 {{- with .Values.shared.podLabels }}
 {{ toYaml . }}

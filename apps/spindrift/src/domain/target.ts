@@ -37,11 +37,7 @@ import type { TargetAdapter } from '../config/manifest.schema.ts';
  * eventually put a token in.
  */
 export type TargetConnection =
-  | {
-      adapter: 'kubernetes';
-      /** The API server endpoint (§13's prerequisite is OIDC against it). */
-      apiServer: string;
-    }
+  | KubernetesConnection
   | {
       adapter: 'cloudrun';
       /** The vessel project this Target deploys into (§14). */
@@ -53,6 +49,120 @@ export type TargetConnection =
       /** The vessel project this Target's sites live in (§14). */
       project: string;
     };
+
+/**
+ * How a Kubernetes Target is reached, and by which GitOps operator.
+ *
+ * §6: **the Target declares the delivery flavour.** "The GitOps operator *is*
+ * the pluggable machinery, so Spindrift applies a `HelmRelease` or an Argo
+ * `Application` **through the API**" — which is why the flavour is connection
+ * material rather than an installation-wide setting: two clusters may run
+ * different operators and neither is more correct.
+ *
+ * Everything below the flavour is an operator's statement about their own
+ * cluster. None of it is a credential (§13), and none of it is interpreted
+ * here: core stores it and hands it to the adapter, which is the only thing
+ * that knows what a `GitRepository` is.
+ */
+export interface KubernetesConnection {
+  adapter: 'kubernetes';
+  /** The API server endpoint (§13's prerequisite is OIDC against it). */
+  apiServer: string;
+  /** The namespace an App's workloads land in. Never created by Spindrift (§7). */
+  namespace: string;
+  delivery: KubernetesDelivery;
+  /**
+   * §33: hosts this Target serves itself, the input to the static reachability
+   * check `offlineDeploy` is derived from. An operator's statement, because no
+   * cluster API reports what it can reach.
+   */
+  servedHosts?: readonly string[];
+  /** Registries reachable from this Target, likewise stated (§3). */
+  reachableRegistries?: readonly string[];
+  /**
+   * §18: "how far back a tail can honestly reach", in seconds. Stated rather
+   * than discovered, because the log store is beside the cluster and not in it.
+   */
+  logHistorySeconds?: number;
+  /**
+   * §7's per-Target chart-values field: the operator's half of the value
+   * contract. Untyped here on purpose — the chart's classes are the adapter's
+   * knowledge, and the boundary between what an operator may write and what
+   * Spindrift writes is enforced where this is saved, not where it is stored.
+   */
+  chartValues?: Record<string, unknown>;
+  /**
+   * The value-contract version the App chart pinned for this Target declares
+   * (§7, read at pin time).
+   *
+   * Stated rather than read, because v1 sources the chart from a branch rather
+   * than from a pinned OCI artifact — so skew is **detected** here rather than
+   * prevented, and detection needs the operator to say what they pinned.
+   */
+  chartContract?: string;
+}
+
+/**
+ * The two delivery flavours §6 names, each carrying what its operator needs.
+ *
+ * A direct apply and a Flux Kustomization are designed-for and deferred — note
+ * the inversion §6 records: applying manifests directly is the *expensive*
+ * flavour, being the only one with no controller to report status.
+ *
+ * **Both carry the chart's source**, because until the OCI swap the App chart
+ * is fetched from a repository the Target already trusts (plan, Milestone 3).
+ * That makes "a `GitRepository` in this cluster" a Target prerequisite, and the
+ * prerequisite is checkable exactly because the reference is here.
+ */
+export const KUBERNETES_DELIVERY_FLAVOURS = [
+  'flux-helmrelease',
+  'argo-application',
+] as const;
+
+/** Which GitOps operator drives one Target. Vocabulary, never an identity. */
+export type KubernetesDeliveryFlavour =
+  (typeof KUBERNETES_DELIVERY_FLAVOURS)[number];
+
+export type KubernetesDelivery =
+  | {
+      flavour: 'flux-helmrelease';
+      /** Namespace the `HelmRelease` object itself is created in. */
+      namespace: string;
+      /** The `GitRepository` the App chart is fetched from. */
+      sourceRef: { name: string; namespace: string };
+    }
+  | {
+      flavour: 'argo-application';
+      /** Namespace the Argo `Application` object is created in. */
+      namespace: string;
+      /** The Argo project the Application belongs to. */
+      project: string;
+      /** The repository the App chart is fetched from, and at which revision. */
+      repoUrl: string;
+      revision: string;
+      /** The cluster Argo deploys to, in Argo's own vocabulary. */
+      server: string;
+    };
+
+/** What the deploy contract's verbs need to name one Target (§6). */
+export interface DeployTargetRef {
+  readonly name: string;
+  readonly adapter: TargetAdapter;
+  readonly connection: TargetConnection;
+}
+
+/** The narrow view of a Target row the adapter contract takes. */
+export function deployTargetOf(target: {
+  name: string;
+  adapter: TargetAdapter;
+  connection: TargetConnection;
+}): DeployTargetRef {
+  return {
+    name: target.name,
+    adapter: target.adapter,
+    connection: target.connection,
+  };
+}
 
 /**
  * Whether the Target passes §13's standing checklist.

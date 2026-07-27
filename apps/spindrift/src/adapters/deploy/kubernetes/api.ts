@@ -1,0 +1,235 @@
+/**
+ * The Kubernetes API, as thin as the adapter needs it.
+ *
+ * § Seam 2 names the pattern: "a fake of the far-side HTTP API behind the real
+ * client, with the test asserting the requests that were made". That only works
+ * if the client takes its transport, so `fetch` is injected and nothing here
+ * reaches for a global.
+ *
+ * There is no client library. §19 already rules out the machinery a library
+ * brings — "no CRD, no informer, no controller-runtime" — and what is left is
+ * four verbs over REST paths. A dependency for that would be a dependency whose
+ * types drift from the four objects this adapter actually writes.
+ *
+ * **Writes are server-side apply.** A `PATCH` with the apply content type makes
+ * Spindrift a named field manager, so a field an operator sets on the same
+ * object is not silently reverted by the next deploy — and re-applying an
+ * unchanged object is a no-op rather than a new generation.
+ */
+
+/** The transport, in the shape `fetch` already has. */
+export type Fetcher = (request: Request) => Promise<Response>;
+
+/** Mints a bearer token per request. Never a stored credential (§13). */
+export type TokenProvider = () => string | Promise<string>;
+
+/** Where a cluster is reached and how a request to it is authorized. */
+export interface KubernetesEndpoint {
+  /** The API server, without a trailing slash. */
+  readonly apiServer: string;
+  readonly token: TokenProvider;
+  /** Injected so a test can stand a fake far side behind the real client. */
+  readonly fetch?: Fetcher;
+}
+
+/**
+ * The field manager every write is attributed to.
+ *
+ * A constant rather than a value: two installations sharing a cluster still
+ * want their writes attributed to Spindrift, and a per-installation manager
+ * would make the same object look contended between them.
+ */
+export const FIELD_MANAGER = 'spindrift';
+
+/** A cluster that answered, but not with success. */
+export class KubernetesRequestError extends Error {
+  override readonly name = 'KubernetesRequestError';
+
+  constructor(
+    readonly method: string,
+    readonly url: string,
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`${method} ${url} failed with ${status}: ${body}`);
+  }
+}
+
+/** Any Kubernetes object, as loosely typed as the API's own JSON. */
+export interface KubernetesObject {
+  apiVersion: string;
+  kind: string;
+  metadata: {
+    name: string;
+    namespace?: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/** Where one object lives, in the API's own path vocabulary. */
+export interface ResourceRef {
+  /** `apps/v1`, or `v1` for the core group. */
+  apiVersion: string;
+  /** The lowercase plural, as the path uses it — `helmreleases`, `pods`. */
+  plural: string;
+  namespace?: string;
+  name?: string;
+}
+
+/** The path a ref addresses. Exported because the tests assert on paths. */
+export function resourcePath(ref: ResourceRef): string {
+  const prefix = ref.apiVersion.includes('/')
+    ? `/apis/${ref.apiVersion}`
+    : `/api/${ref.apiVersion}`;
+  const scope =
+    ref.namespace === undefined ? '' : `/namespaces/${ref.namespace}`;
+  const name = ref.name === undefined ? '' : `/${ref.name}`;
+  return `${prefix}${scope}/${ref.plural}${name}`;
+}
+
+/** What a list call returns, of whatever kind was listed. */
+export interface KubernetesList<Item = KubernetesObject> {
+  items: Item[];
+}
+
+export class KubernetesApi {
+  constructor(private readonly endpoint: KubernetesEndpoint) {}
+
+  /** One object, or `null` when the API says it is not there. */
+  async get(ref: ResourceRef): Promise<KubernetesObject | null> {
+    return this.json<KubernetesObject>('GET', resourcePath(ref));
+  }
+
+  /**
+   * Every object matching a ref, or `null` when the *kind* is not served.
+   *
+   * The distinction is the whole reason this returns `null` rather than an
+   * empty list: "no `HelmRelease`s exist" and "this cluster does not know what
+   * a `HelmRelease` is" are different answers, and §13's checklist turns on the
+   * second one.
+   */
+  async list(
+    ref: ResourceRef,
+    query?: Record<string, string>,
+  ): Promise<KubernetesObject[] | null> {
+    const search = query ? `?${new URLSearchParams(query)}` : '';
+    const list = await this.json<KubernetesList>(
+      'GET',
+      `${resourcePath(ref)}${search}`,
+    );
+    return list === null ? null : (list.items ?? []);
+  }
+
+  /**
+   * Server-side apply one object.
+   *
+   * `force` resolves a conflict in Spindrift's favour for the fields Spindrift
+   * owns. Without it a field another manager once set — a replica count edited
+   * by hand, say — would make every subsequent deploy fail with a conflict
+   * instead of converging.
+   */
+  async apply(object: KubernetesObject, plural: string): Promise<void> {
+    const path = resourcePath({
+      apiVersion: object.apiVersion,
+      plural,
+      namespace: object.metadata.namespace,
+      name: object.metadata.name,
+    });
+    await this.send(
+      'PATCH',
+      `${path}?fieldManager=${FIELD_MANAGER}&force=true`,
+      {
+        body: object,
+        contentType: 'application/apply-patch+yaml',
+      },
+    );
+  }
+
+  /**
+   * `POST` one object, for the APIs that answer rather than store.
+   *
+   * `SelfSubjectAccessReview` is the only such call this adapter makes: the
+   * API server replies with what the request's own identity may do, which is
+   * how §13's "OIDC both ways" is checked without holding a credential.
+   */
+  async create(
+    ref: ResourceRef,
+    object: KubernetesObject,
+  ): Promise<KubernetesObject | null> {
+    return this.json<KubernetesObject>('POST', resourcePath(ref), object);
+  }
+
+  /** Idempotent: deleting what is already gone succeeds (§6). */
+  async delete(ref: ResourceRef): Promise<void> {
+    await this.send('DELETE', resourcePath(ref));
+  }
+
+  /** Whether the API serves a kind at all — §13's checklist, one call. */
+  async servesKind(apiVersion: string, kind: string): Promise<boolean> {
+    const path = apiVersion.includes('/')
+      ? `/apis/${apiVersion}`
+      : `/api/${apiVersion}`;
+    const resources = await this.json<{ resources?: { kind: string }[] }>(
+      'GET',
+      path,
+    );
+    return (resources?.resources ?? []).some(
+      (resource) => resource.kind === kind,
+    );
+  }
+
+  private async json<Result>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<Result | null> {
+    const response = await this.send(
+      method,
+      path,
+      body === undefined ? {} : { body },
+    );
+    if (response === null) return null;
+    return (await response.json()) as Result;
+  }
+
+  private async send(
+    method: string,
+    path: string,
+    options: { body?: unknown; contentType?: string } = {},
+  ): Promise<Response | null> {
+    const url = `${this.endpoint.apiServer}${path}`;
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${await this.endpoint.token()}`,
+    };
+    if (options.body !== undefined) {
+      headers['Content-Type'] = options.contentType ?? 'application/json';
+    }
+
+    const request = new Request(url, {
+      method,
+      headers,
+      body:
+        options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+
+    const send = this.endpoint.fetch ?? ((input: Request) => fetch(input));
+    const response = await send(request);
+
+    // Absence is an answer every caller here has a value for, so it comes back
+    // rather than being raised.
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new KubernetesRequestError(
+        method,
+        url,
+        response.status,
+        await response.text(),
+      );
+    }
+    return response;
+  }
+}

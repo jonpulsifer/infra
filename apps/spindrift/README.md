@@ -129,10 +129,31 @@ fails later.
 ## Testing
 
 Tests run against a real Postgres — the concurrency design is a claim about
-transactions, and a fake cannot falsify it. `DATABASE_URL` must point at one:
+transactions, and a fake cannot falsify it. Use `wslc.exe` for service
+containers on WSL and `docker` on macOS:
 
 ```bash
-DATABASE_URL=postgres://postgres@127.0.0.1:5432/spindrift bun test
+## WSL
+wslc.exe run --detach --name spindrift-postgres \
+  --env POSTGRES_USER=postgres \
+  --env POSTGRES_PASSWORD=postgres \
+  --env POSTGRES_DB=spindrift \
+  --publish 127.0.0.1:5432:5432 \
+  postgres:18-alpine
+
+## macOS
+docker run --detach --name spindrift-postgres \
+  --env POSTGRES_USER=postgres \
+  --env POSTGRES_PASSWORD=postgres \
+  --env POSTGRES_DB=spindrift \
+  --publish 127.0.0.1:5432:5432 \
+  postgres:18-alpine
+```
+
+Point `DATABASE_URL` at that container:
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/spindrift bun test
 ```
 
 `test/harness/db.ts` gives every test its own migrated Postgres schema, so tests

@@ -38,7 +38,7 @@ const BASELINE: Values = {
     name: 'blog',
     component: 'web',
     image: 'registry.example.test/blog/web@sha256:feed',
-    deployId: '7',
+    artifactDigest: 'sha256:feed',
     hostnames: ['blog-web.apps.example.test'],
   },
   platform: {

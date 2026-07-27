@@ -55,9 +55,17 @@ import type {
  * `OIDC_FEDERATION` is one item rather than two because §13 states it as "both
  * ways": half of a federation is not a state a Target can usefully be in, and
  * splitting it would put two rows in the UI that always agree.
+ *
+ * `CHART_SOURCE` is separate from `DELIVERY_OPERATOR` because the two fail
+ * apart: a cluster can run Flux perfectly and still not carry the repository
+ * the App chart is fetched from. It exists at all because v1 sources the chart
+ * from a repository rather than from OCI (plan, Milestone 3) — **it is the
+ * first thing that breaks on extraction**, and naming it here is what makes
+ * that visible as a stated reason rather than as a deploy that fails late.
  */
 export const PREREQUISITES = [
   'DELIVERY_OPERATOR',
+  'CHART_SOURCE',
   'WRITABLE_STORE',
   'OIDC_FEDERATION',
   'VESSEL',
