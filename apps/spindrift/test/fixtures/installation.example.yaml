@@ -18,6 +18,10 @@ charts:
   app: example/spindrift-app
   installer: example/spindrift
 
+supplyChain:
+  registry: registry.example.test/artifacts
+  verifier: verifier.example.test
+
 github:
   appId: '1234567'
 

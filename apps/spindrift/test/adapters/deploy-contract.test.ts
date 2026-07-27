@@ -17,7 +17,9 @@ import {
   type FailureReason,
   reasonCovers,
 } from '../../src/adapters/deploy/contract.ts';
+import { PREREQUISITES } from '../../src/domain/capabilities.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
+import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 
 /**
  * §6's table, transcribed. A reviewer can check this against the spec without
@@ -138,6 +140,12 @@ const refuses: DeployAdapter = {
     return null;
   },
   async destroy() {},
+  async inspect() {
+    return {
+      prerequisites: PREREQUISITES.map((name) => ({ name, met: true })),
+      discovery: CAPABLE_DISCOVERY,
+    };
+  },
 };
 
 describe('apply', () => {

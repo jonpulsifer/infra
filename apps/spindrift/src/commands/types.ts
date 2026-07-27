@@ -22,7 +22,10 @@
 import type { BuildAdapter } from '../adapters/build/contract.ts';
 import type { DeployAdapter } from '../adapters/deploy/contract.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
-import type { TargetAdapter } from '../config/manifest.schema.ts';
+import type {
+  InstallationManifest,
+  TargetAdapter,
+} from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
 
 /**
@@ -85,6 +88,13 @@ export interface CommandContext {
   readonly clock: Clock;
   readonly db: Database;
   readonly adapters: AdapterRegistry;
+  /**
+   * §20: "everything naming this installation is a value in the installation
+   * manifest." A command that needs one of those values takes it from here, so
+   * the alternative — a module-level singleton read at import time — never has
+   * to exist, and a test can run two installations in one process.
+   */
+  readonly manifest: InstallationManifest;
 }
 
 /**
@@ -96,7 +106,11 @@ export interface CommandContext {
  * produce today are listed — a command that grows a domain failure adds its
  * code here alongside it, rather than the set being guessed at in advance.
  */
-export type CommandFailureCode = 'UNKNOWN_COMMAND' | 'INVALID_INPUT';
+export type CommandFailureCode =
+  | 'UNKNOWN_COMMAND'
+  | 'INVALID_INPUT'
+  /** A named thing the input refers to does not exist. */
+  | 'NOT_FOUND';
 
 /** The assertable identity of a failure, plus the sentence a user reads. */
 export interface CommandFailure {

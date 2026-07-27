@@ -29,6 +29,7 @@ import type {
   CommandContext,
 } from '../../src/commands/types.ts';
 import type { Database } from '../../src/db/client.ts';
+import { fixtureManifest } from '../harness/installation.ts';
 
 /** Reaching for any of these is the failure this file is watching for. */
 function unreachable(what: string): never {
@@ -53,6 +54,7 @@ const context: CommandContext = {
   clock: { now: () => unreachable('clock') },
   db: noDatabase,
   adapters: noAdapters,
+  manifest: await fixtureManifest(),
 };
 
 /**

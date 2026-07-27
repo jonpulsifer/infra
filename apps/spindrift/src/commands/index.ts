@@ -12,8 +12,10 @@
  * module. Keeping this file to values of one type is what lets the check above
  * be "every export", with no allowlist to fall out of date.
  *
- * v1 has exactly one act: creating an App (§2). Building, deploying,
- * rollback, placement, and desired-state changes are §21's other named
- * commands and arrive with the milestones that implement them.
+ * Building, deploying, rollback, and desired-state changes are §21's other
+ * named commands and arrive with the milestones that implement them.
  */
+export { resolveComponentPlacement } from './apps/resolve-placement.ts';
 export { createApp } from './create-app.ts';
+export { connectTarget } from './targets/connect.ts';
+export { disconnectTarget } from './targets/disconnect.ts';

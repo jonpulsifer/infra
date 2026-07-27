@@ -64,6 +64,14 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   ...storeAdapterSchema.options,
 ]);
 
+/**
+ * The product's own namespace. A far side that takes labels or annotations
+ * wants a prefix saying who wrote them, and `spindrift-…` is the same string in
+ * every installation — it names the software, never the deployment of it, which
+ * is exactly what §20 draws the line around.
+ */
+const PRODUCT_NAMESPACE = /^spindrift-/;
+
 /** Files that are not text, and would only produce noise. */
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
 
@@ -128,6 +136,7 @@ function findProjectIds(files: SourceFile[]): string[] {
     );
     for (const [, value] of source.matchAll(QUOTED)) {
       if (!value || PROJECT_ID_ALLOWLIST.has(value)) continue;
+      if (PRODUCT_NAMESPACE.test(value)) continue;
       if (imported.has(value)) continue;
       if (value.includes('/') || value.includes('.')) continue;
       if (PROJECT_ID.test(value) && NOT_A_WORD.test(value)) {
@@ -293,6 +302,16 @@ describe('the scanners catch a deliberately dirty file', () => {
     expect(
       findProjectIds(dirty("import { drizzle } from 'drizzle-orm/bun-sql';")),
     ).toEqual([]);
+  });
+
+  test('but not a key in the product’s own namespace', () => {
+    expect(findProjectIds(dirty("const label = 'spindrift-key';"))).toEqual([]);
+  });
+
+  test('and the namespace exemption is a prefix, not a substring', () => {
+    expect(
+      findProjectIds(dirty("const project = 'my-spindrift-4021';")).length,
+    ).toBe(1);
   });
 
   test('a project id in a comment', () => {

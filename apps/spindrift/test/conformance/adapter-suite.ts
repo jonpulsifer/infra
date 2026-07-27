@@ -26,6 +26,7 @@ import type {
   DeployTarget,
 } from '../../src/adapters/deploy/contract.ts';
 import type { SecretStore } from '../../src/adapters/store/contract.ts';
+import { PREREQUISITES } from '../../src/domain/capabilities.ts';
 import type {
   ArtifactType,
   DesiredState,
@@ -139,6 +140,27 @@ export function deployAdapterSuite(
       // succeeds (§6), so this must not throw and must leave nothing behind.
       await adapter.destroy(target, ref);
       expect(await adapter.observe(target, ref)).toBeNull();
+    });
+
+    test('inspect answers the whole checklist, exactly once each', async () => {
+      const inspection = await make().inspect(target);
+      // §13 merges health and capability refresh into one loop, which only
+      // works if one pass answers every item — a partial checklist would leave
+      // core deciding what an absent item means.
+      expect(inspection.prerequisites.map((item) => item.name).sort()).toEqual(
+        [...PREREQUISITES].sort(),
+      );
+    });
+
+    test('inspect reports observations, not judgements', async () => {
+      const { discovery } = await make().inspect(target);
+      // `verifiedDeploy` and `offlineDeploy` are core's conclusions (§32, §33).
+      // An adapter reporting either directly would let two adapters disagree
+      // about how the conclusion is drawn.
+      expect(discovery).not.toHaveProperty('verifiedDeploy');
+      expect(discovery).not.toHaveProperty('offlineDeploy');
+      expect(typeof discovery.logHistorySeconds).toBe('number');
+      expect(Array.isArray(discovery.arch)).toBe(true);
     });
 
     test('refuses an artifact type it did not declare', async () => {
@@ -276,7 +298,12 @@ export function storeAdapterSuite(
 export const ADAPTERS = {
   deploy: ['fake'],
   build: ['fake'],
-  store: ['fake native', 'fake immutable item per version'],
+  store: [
+    'fake native',
+    'fake immutable item per version',
+    'onepassword',
+    'gcp-secret-manager',
+  ],
 } as const;
 
 /**

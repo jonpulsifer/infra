@@ -35,6 +35,7 @@ import {
   recordDeployEvent,
 } from '../../src/domain/attempt-log.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
+import { targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 
@@ -46,11 +47,7 @@ async function seedAttempt() {
     .returning();
   const [target] = await database()
     .db.insert(targets)
-    .values({
-      name: `target-${crypto.randomUUID()}`,
-      adapter: 'kubernetes',
-      rank: 0,
-    })
+    .values(targetValues())
     .returning();
   const [component] = await database()
     .db.insert(components)

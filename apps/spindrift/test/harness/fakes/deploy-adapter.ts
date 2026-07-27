@@ -20,6 +20,11 @@ import type {
   ObservedState,
 } from '../../../src/adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../../../src/config/manifest.schema.ts';
+import {
+  PREREQUISITES,
+  type TargetDiscovery,
+  type TargetInspection,
+} from '../../../src/domain/capabilities.ts';
 import type {
   ArtifactType,
   DesiredState,
@@ -46,7 +51,38 @@ export interface FakeDeployAdapterOptions {
    * about the first attempt does not have to script the rest.
    */
   script?: readonly ScriptedAttempt[];
+  /**
+   * What `inspect` reports. Partial: whatever is not overridden comes from
+   * {@link CAPABLE_DISCOVERY}, so a test that cares about one capability says
+   * one thing rather than restating the other ten.
+   */
+  discovery?: Partial<TargetDiscovery>;
+  /** Checklist items to report unmet, with the sentence behind each. */
+  unmet?: Readonly<Partial<Record<(typeof PREREQUISITES)[number], string>>>;
+  /** When set, `inspect` throws — the Target that cannot be reached at all. */
+  unreachable?: string;
 }
+
+/**
+ * A Target that passes everything. The fake's default is deliberately capable,
+ * so a placement test that wants a Target excluded has to say which capability
+ * it is missing — an inert default would exclude Targets for reasons the test
+ * never stated.
+ */
+export const CAPABLE_DISCOVERY: TargetDiscovery = {
+  arch: ['amd64', 'arm64'],
+  gpu: false,
+  resourceCeiling: { cpu: '8', memory: '32Gi' },
+  persistence: true,
+  postgres: true,
+  redis: true,
+  egressFiltering: true,
+  policyEngine: { installed: true, mode: 'ENFORCE' },
+  logHistorySeconds: 7 * 24 * 60 * 60,
+  servedHosts: [],
+  reachableRegistries: [],
+  reachableSecretStores: ['gcp-secret-manager'],
+};
 
 /** A clock the fake stamps events with, so a test's assertions stay stable. */
 const AT = new Date('2000-01-01T00:00:00.000Z');
@@ -64,15 +100,37 @@ export class FakeDeployAdapter implements DeployAdapter {
   /** Every `destroy`, including the repeats that prove idempotence. */
   readonly destroyed: DeployRef[] = [];
 
+  /** Every `inspect`, so a test can prove the loop ran without a reconnect. */
+  readonly inspected: DeployTarget[] = [];
+
   private readonly script: readonly ScriptedAttempt[];
+  private readonly options: FakeDeployAdapterOptions;
   private attempts = 0;
   /** What `apply` placed, so `observe` can report it back (§6). */
   private readonly placed = new Map<DeployRef, ObservedState>();
 
   constructor(options: FakeDeployAdapterOptions = {}) {
+    this.options = options;
     this.adapter = options.adapter ?? 'kubernetes';
     this.artifactTypes = options.artifactTypes ?? ['image'];
     this.script = options.script?.length ? options.script : [DEFAULT_ATTEMPT];
+  }
+
+  /**
+   * Put a workload on the far side that this fake did not place.
+   *
+   * What `observe` reports has to be arrangeable independently of `apply`, or
+   * "the adapter is the authority on what is running, not core's memory" is
+   * untestable — the only way to tell the two apart is a workload core never
+   * saw placed.
+   */
+  place(ref: DeployRef, state: ObservedState): void {
+    this.placed.set(ref, state);
+  }
+
+  /** Change what the next `inspect` reports — a capability flip, mid-test. */
+  discover(discovery: Partial<TargetDiscovery>): void {
+    this.options.discovery = { ...this.options.discovery, ...discovery };
   }
 
   async *apply(
@@ -116,6 +174,24 @@ export class FakeDeployAdapter implements DeployAdapter {
   async destroy(_target: DeployTarget, ref: DeployRef): Promise<void> {
     this.destroyed.push(ref);
     this.placed.delete(ref);
+  }
+
+  async inspect(target: DeployTarget): Promise<TargetInspection> {
+    this.inspected.push(target);
+    if (this.options.unreachable !== undefined) {
+      // §13's "connect always succeeds" is core's promise, not the adapter's:
+      // the adapter is allowed to fail, and core has to survive it.
+      throw new Error(this.options.unreachable);
+    }
+    const unmet = this.options.unmet ?? {};
+    return {
+      prerequisites: PREREQUISITES.map((name) =>
+        unmet[name] === undefined
+          ? { name, met: true }
+          : { name, met: false, detail: unmet[name] },
+      ),
+      discovery: { ...CAPABLE_DISCOVERY, ...this.options.discovery },
+    };
   }
 
   /** The last scripted attempt repeats once the script is exhausted. */

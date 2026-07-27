@@ -102,6 +102,23 @@ export const installationManifestSchema = z
       })
       .strict(),
 
+    supplyChain: z
+      .object({
+        /**
+         * Registry every artifact is pushed to and pulled from (§16). Named
+         * here rather than derived from the artifacts project because a
+         * mirror in front of it is a legitimate installation choice, and
+         * `offlineDeploy` (§3, §33) is derived from which host this names.
+         */
+        registry: nonEmptyString,
+        /**
+         * Where signature verification fetches its material (§16) — the third
+         * of the deploy path's references `offlineDeploy` is checked over.
+         */
+        verifier: nonEmptyString,
+      })
+      .strict(),
+
     github: z
       .object({
         /** Numeric id of the GitHub App used for repository integration (§15). */
