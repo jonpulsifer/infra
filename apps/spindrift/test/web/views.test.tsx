@@ -134,14 +134,50 @@ describe('a runner that withholds log text', () => {
 describe('the App workspace', () => {
   test('a website states that it has no runtime', () => {
     // §17: the `static` adapter gets an honest empty state, and §18 puts it one
-    // level down rather than disabling a tab. `runtime: null` is the difference
-    // between "nothing to show" and "nothing here to show it from".
+    // level down rather than disabling a tab. `kind: 'none'` carries the reason
+    // with it — the difference between "nothing to show" and "nothing here to
+    // show it from".
     const website = WORKSPACE_SCENARIOS.website;
-    expect(website.runtime).toBeNull();
+    expect(website.runtime.kind).toBe('none');
 
     const markup = workspace(website);
     expect(markup).toContain('No runtime exists for this Component');
     expect(markup).toContain('Static files are served by the Target');
+  });
+
+  test('a job is a list of executions, not a stream', () => {
+    // §17: "A job is not a stream but a list of executions. An execution
+    // terminates, so it is attempt-shaped; this pipe covers services only."
+    // Rendering one through the log tail would say a job has something to
+    // follow, which is exactly the conflation §17 refuses.
+    const job = WORKSPACE_SCENARIOS.job;
+    expect(job.runtime.kind).toBe('executions');
+
+    const markup = workspace(job);
+    expect(markup).toContain('Recent runs');
+    expect(markup).toContain('Execution 118');
+    expect(markup).toContain('passed');
+    expect(markup).toContain('failed');
+    // The retention depth is stated, and stated as configured rather than
+    // stored — §17 fixes the platform asymmetry "by rendering a larger history
+    // limit, not by storing logs".
+    expect(markup).toContain('last 10 executions');
+    expect(markup).toContain('configured on the Target');
+  });
+
+  test('a service states how far its log reaches', () => {
+    // §17: `logHistory` "is how far back `since` can honestly reach... so a
+    // Target never *lacks* logs; it only has a shorter memory, and the UI
+    // states reach rather than disabling a tab."
+    const service = WORKSPACE_SCENARIOS.service;
+    expect(service.runtime.kind).toBe('stream');
+
+    const markup = workspace(service);
+    expect(markup).toContain('7 days');
+    expect(markup).toContain('of history');
+    // Deploys are markers on the stream, never a filter (§17) — the only shape
+    // that lets a human read across a rollback boundary.
+    expect(markup).toContain('never a filter');
   });
 
   test('a website attaches no Datastore', () => {

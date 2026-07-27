@@ -322,12 +322,18 @@ export const WORKSPACE_SCENARIOS = {
         status: 'failed',
       },
     ],
-    runtime: [
-      { text: '── Deploy 42 · 8m ago ──', tone: 'muted' },
-      { text: 'web-6d9f  listening on :3000' },
-      { text: 'web-6d9f  GET /healthz 200  4ms' },
-      { text: 'web-6d9f  GET / 200  31ms' },
-    ],
+    runtime: {
+      kind: 'stream',
+      // The Deploy marker is in the stream rather than filtering it — §17's
+      // "Deploys are markers on the timeline, never a filter".
+      lines: [
+        { text: '── Deploy 42 · 8m ago ──', tone: 'muted' },
+        { text: 'web-6d9f  listening on :3000' },
+        { text: 'web-6d9f  GET /healthz 200  4ms' },
+        { text: 'web-6d9f  GET / 200  31ms' },
+      ],
+      reach: '7 days',
+    },
   },
 
   website: {
@@ -364,7 +370,11 @@ export const WORKSPACE_SCENARIOS = {
         status: 'ok',
       },
     ],
-    runtime: null,
+    runtime: {
+      kind: 'none',
+      because:
+        'Static files are served by the Target, so there is no process output to stream. Build and deploy events remain in Activity.',
+    },
   },
 
   job: {
@@ -408,10 +418,33 @@ export const WORKSPACE_SCENARIOS = {
         status: 'failed',
       },
     ],
-    runtime: [
-      { text: '── Execution 118 · 8m ago ──', tone: 'muted' },
-      { text: 'copied 1284 objects in 2m14s' },
-    ],
+    // §17: a job is a list of executions, not a stream. The depth is achieved
+    // by configuring the platform's own limit, never by storing logs — hence a
+    // count here rather than a duration.
+    runtime: {
+      kind: 'executions',
+      retained: 10,
+      executions: [
+        {
+          name: 'Execution 118',
+          outcome: 'passed',
+          detail: '1,284 objects copied in 2m14s',
+          when: '8m ago',
+        },
+        {
+          name: 'Execution 117',
+          outcome: 'passed',
+          detail: '1,190 objects copied in 2m02s',
+          when: '1d ago',
+        },
+        {
+          name: 'Execution 116',
+          outcome: 'failed',
+          detail: 'exit 1 · bucket unavailable',
+          when: '2d ago',
+        },
+      ],
+    },
   },
 } as const satisfies Record<string, WorkspaceView>;
 
@@ -481,7 +514,12 @@ export const TARGET_OPTIONS: readonly TargetOptionView[] = [
 /** The draft a developer who pressed "Link repo" lands on. */
 export const INITIAL_DRAFT: Draft = {
   entry: 'repo',
-  source: { kind: 'repo', repo: 'example/almanac', subpath: 'apps/web' },
+  source: {
+    kind: 'repo',
+    repo: 'example/almanac',
+    url: 'https://vcs.example/example/almanac',
+    subpath: 'apps/web',
+  },
   appName: 'almanac',
   componentName: 'web',
   detection: {

@@ -16,6 +16,7 @@
  * a plain serialisable object with a reducer precisely so moving it is a
  * transport change and not a rewrite.
  */
+import type { CreateAppInput } from '../../../../commands/create-app.ts';
 import type {
   ComponentKind,
   Exposure,
@@ -67,8 +68,31 @@ export const STEPS = [
  * scans a tree.
  */
 export type DraftSource =
-  | { readonly kind: 'repo'; readonly repo: string; readonly subpath: string }
-  | { readonly kind: 'archive'; readonly filename: string };
+  | {
+      readonly kind: 'repo';
+      /** The owner/name a human reads. */
+      readonly repo: string;
+      /**
+       * The clone URL, carried rather than composed from {@link repo}.
+       *
+       * Composing it would mean writing a VCS host into the client, and the
+       * host an installation integrates with is not this layer's to know — the
+       * repository picker (§15, Task 24) has both facts from the API that
+       * listed the repository, so it supplies both.
+       */
+      readonly url: string;
+      readonly subpath: string;
+    }
+  | {
+      readonly kind: 'archive';
+      readonly filename: string;
+      /**
+       * Minted when the bundle is staged (§4, Task 18) — the digest is what
+       * joins the source receipt to the provenance document, so the draft
+       * carries the one the upload produced rather than computing its own.
+       */
+      readonly digest: string;
+    };
 
 /**
  * What detection proposed (§5).
@@ -209,4 +233,40 @@ export function blockersFor(
   }
 
   return blockers;
+}
+
+/**
+ * The draft, as `createApp` takes it.
+ *
+ * This function is small and is the most valuable thing in the file: it is the
+ * one place the flow's own shape meets the command's schema, so the compiler
+ * checks that Review can actually produce what §21's command demands. A flow
+ * that collected the wrong fields would otherwise not find out until somebody
+ * pressed the button.
+ *
+ * Two of the draft's fields are deliberately not here. The Component's kind and
+ * the placement belong to the Component and Deploy commands (Task 19) —
+ * `createApp` "writes one row and nothing else" — and the config values belong
+ * to the store, which core never reads back (§10).
+ */
+export function createAppInputFor(draft: Draft): CreateAppInput {
+  const common = {
+    name: draft.appName,
+    vesselRef: draft.vessel.name,
+  };
+
+  return draft.source.kind === 'repo'
+    ? {
+        ...common,
+        sourceKind: 'repo',
+        repoUrl: draft.source.url,
+        subpath: draft.source.subpath,
+      }
+    : {
+        ...common,
+        sourceKind: 'archive',
+        // The digest is minted when the archive is staged (§4, Task 18); the
+        // draft carries the upload, and this is where the two are joined.
+        archiveDigest: draft.source.digest,
+      };
 }

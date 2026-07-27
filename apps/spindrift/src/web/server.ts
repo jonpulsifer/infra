@@ -24,27 +24,27 @@
  */
 import { loadManifest } from '../config/manifest.ts';
 import index from './client/index.html';
-import { commandRoutes } from './dispatch.ts';
+import { webRoutes } from './routes.ts';
 
 const manifest = await loadManifest();
 
 const server = Bun.serve({
   port: Number(Bun.env.PORT ?? 3000),
   development: Bun.env.NODE_ENV !== 'production',
-  routes: {
-    '/': index,
-    '/healthz': new Response('ok\n'),
-    ...commandRoutes({
-      // Task 37 replaces this with a session lookup. Until it does, nobody is
-      // authenticated, and the surface says so rather than assuming an operator.
-      session: async () => null,
-      context: () => {
-        throw new Error(
-          'no request context: commands are unreachable until sessions exist',
-        );
-      },
-    }),
-  },
+  // The table is assembled in `routes.ts` so a test can read it. Written
+  // inline here it would sit beside this top-level `Bun.serve`, which no test
+  // can import without starting a server — and this file is exactly where a
+  // hand-authored route would appear.
+  routes: webRoutes(index, {
+    // Task 37 replaces this with a session lookup. Until it does, nobody is
+    // authenticated, and the surface says so rather than assuming an operator.
+    session: async () => null,
+    context: () => {
+      throw new Error(
+        'no request context: commands are unreachable until sessions exist',
+      );
+    },
+  }),
 });
 
 console.log(`spindrift web → ${server.url} (${manifest.installation})`);

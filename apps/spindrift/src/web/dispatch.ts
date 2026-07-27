@@ -25,7 +25,11 @@
  * and choose a status code. Every decision about the act itself was already
  * made by the command.
  */
-import { commandNames, dispatch } from '../commands/registry.ts';
+import {
+  type CommandName,
+  commandNames,
+  dispatch,
+} from '../commands/registry.ts';
 import type {
   CommandContext,
   CommandFailureCode,
@@ -39,8 +43,14 @@ import type {
  */
 export const COMMAND_PATH_PREFIX = '/internal/commands';
 
-/** The route a command is reached at. The one place the path is composed. */
-export function pathFor(name: string): string {
+/**
+ * The route a command is reached at, and the one place the path is composed.
+ *
+ * It takes a {@link CommandName} rather than a string on purpose: this file's
+ * whole claim is that a path with no command behind it cannot be written, and a
+ * `string` parameter here would be the one place somebody could write one.
+ */
+export function pathFor(name: CommandName): string {
   return `${COMMAND_PATH_PREFIX}/${name}`;
 }
 
@@ -61,20 +71,54 @@ export interface DispatchDeps {
 }
 
 /**
+ * Why a request was refused before, or instead of, a command running.
+ *
+ * The command layer's codes plus the two only a transport can produce. Both
+ * additions are genuinely not the command layer's business: a request with no
+ * session never reaches a command, and neither does one whose body is not JSON,
+ * so neither could be a `CommandFailureCode` without inventing a failure the
+ * command layer cannot cause.
+ *
+ * Keeping them in one union is what makes {@link STATUS} total. `client.ts`
+ * imports this rather than widening to `string`, so a browser switching on a
+ * refusal is switching over a closed set.
+ */
+export type TransportFailureCode =
+  | CommandFailureCode
+  | 'UNAUTHENTICATED'
+  | 'METHOD_NOT_ALLOWED'
+  | 'MALFORMED_REQUEST';
+
+/**
  * The HTTP status a refusal reads as.
  *
- * Deliberately a total map over the closed failure set rather than a default:
- * a ninth failure code should make somebody decide what it means over HTTP,
- * and `satisfies` is what forces that.
+ * Deliberately a total map rather than a default with a fallback: a new code
+ * should make somebody decide what it means over HTTP, and `satisfies` is what
+ * forces that at the point the code is added.
  */
 const STATUS = {
   UNKNOWN_COMMAND: 404,
   INVALID_INPUT: 422,
   NOT_FOUND: 404,
-} as const satisfies Record<CommandFailureCode, number>;
+  UNAUTHENTICATED: 401,
+  METHOD_NOT_ALLOWED: 405,
+  MALFORMED_REQUEST: 400,
+} as const satisfies Record<TransportFailureCode, number>;
 
-function json(body: unknown, status: number): Response {
-  return Response.json(body, { status });
+/**
+ * Refuse in the same envelope a command refuses in.
+ *
+ * The browser has one shape to read whether the refusal came from a schema or
+ * from this file, which is the property that lets `client.ts` return one result
+ * type instead of branching on where the answer was decided.
+ */
+function refuse(code: TransportFailureCode, message: string): Response {
+  return Response.json(
+    { ok: false, failure: { code, message } },
+    {
+      status: STATUS[code],
+    },
+  );
 }
 
 /**
@@ -96,7 +140,7 @@ export function commandRoutes(
 }
 
 async function handle(
-  name: string,
+  name: CommandName,
   request: Request,
   deps: DispatchDeps,
 ): Promise<Response> {
@@ -104,29 +148,14 @@ async function handle(
     // A command is an act. Making one reachable by GET would make it
     // link-followable, pre-fetchable, and cacheable — three ways to run it
     // without anybody asking.
-    return json(
-      {
-        ok: false,
-        failure: {
-          code: 'INVALID_INPUT',
-          message: 'a command is dispatched with POST',
-        },
-      },
-      405,
-    );
+    return refuse('METHOD_NOT_ALLOWED', 'a command is dispatched with POST');
   }
 
   const principal = await deps.session(request);
   if (principal === null) {
-    return json(
-      {
-        ok: false,
-        failure: {
-          code: 'UNAUTHENTICATED',
-          message: 'this surface is reachable only with a session',
-        },
-      },
-      401,
+    return refuse(
+      'UNAUTHENTICATED',
+      'this surface is reachable only with a session',
     );
   }
 
@@ -134,20 +163,11 @@ async function handle(
   try {
     input = await request.json();
   } catch {
-    return json(
-      {
-        ok: false,
-        failure: {
-          code: 'INVALID_INPUT',
-          message: 'the request body is not JSON',
-        },
-      },
-      400,
-    );
+    return refuse('MALFORMED_REQUEST', 'the request body is not JSON');
   }
 
   const result = await dispatch(name, input, deps.context(principal));
   return result.ok
-    ? json(result, 200)
-    : json(result, STATUS[result.failure.code]);
+    ? Response.json(result, { status: 200 })
+    : Response.json(result, { status: STATUS[result.failure.code] });
 }

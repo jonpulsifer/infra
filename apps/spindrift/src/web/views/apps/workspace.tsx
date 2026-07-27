@@ -16,6 +16,7 @@
  *   not a disabled tab.
  */
 import { ChevronRight, ExternalLink } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { EmptyState, LogPane } from '../../components/log-pane.tsx';
 import { PhasePill } from '../../components/status.tsx';
 import type {
@@ -135,10 +136,10 @@ function Row({
   detail,
   trailing,
 }: {
-  badge: React.ReactNode;
+  badge: ReactNode;
   title: string;
   detail: string;
-  trailing?: React.ReactNode;
+  trailing?: ReactNode;
 }) {
   return (
     <div className="flex items-center gap-3 border-b border-border-soft py-2.5 last:border-b-0">
@@ -263,35 +264,82 @@ function Activity({ entries }: { entries: readonly ActivityEntry[] }) {
 }
 
 /**
- * The runtime tail (§17), or the honest reason there is none.
+ * A Component's output surface — one of §17's three, kept honestly distinct.
  *
- * The view **follows the Component**: Deploys are markers on this stream, never
- * a filter, which is the only shape that lets a human read across a rollback
- * boundary.
+ * §17 draws two lines this branch exists to hold. **A job is not a stream but a
+ * list of executions**: an execution terminates, so it is attempt-shaped, and
+ * the tail pipe covers services only. And a **`static` Target gets an honest
+ * empty state** rather than a disabled tab, because there is no process to
+ * follow rather than a stream that happens to be quiet.
+ *
+ * For the one case that *is* a stream, the view **follows the Component**:
+ * Deploys are markers on it, never a filter, which is the only shape that lets
+ * a human read across a rollback boundary. Its reach is stated — §17 makes
+ * `logHistory` a duration rather than a capability, so a Target never lacks
+ * logs, it only has a shorter memory, and saying how short is the whole point.
  */
 function Runtime({ view }: { view: WorkspaceView }) {
-  const website = view.components.some(
-    (component) => component.kind === 'website',
-  );
+  const runtime = view.runtime;
 
   return (
     <Card>
       <SectionHeader
         eyebrow="Component output"
-        title="Runtime"
-        action={view.runtime === null ? 'Build activity' : 'Open logs'}
+        title={TITLE[runtime.kind]}
+        action={ACTION[runtime.kind]}
       />
       <CardContent className="pt-0">
-        {view.runtime === null ? (
+        {runtime.kind === 'none' ? (
           <EmptyState title="No runtime exists for this Component.">
-            {website
-              ? 'Static files are served by the Target, so there is no process output to stream. Build and deploy events remain in Activity.'
-              : 'Nothing is running yet. Build and deploy events remain in Activity.'}
+            {runtime.because}
           </EmptyState>
+        ) : runtime.kind === 'executions' ? (
+          <>
+            {runtime.executions.map((execution) => (
+              <Row
+                key={execution.name}
+                badge={
+                  <Badge tone={EXECUTION_TONE[execution.outcome]}>
+                    {execution.outcome}
+                  </Badge>
+                }
+                title={execution.name}
+                detail={`${execution.detail} · ${execution.when}`}
+              />
+            ))}
+            <p className="pt-2 text-xs text-muted-foreground">
+              The last {runtime.retained} executions are kept. Depth is
+              configured on the Target, not stored here.
+            </p>
+          </>
         ) : (
-          <LogPane lines={view.runtime} />
+          <>
+            <LogPane lines={runtime.lines} />
+            <p className="pt-2 text-xs text-muted-foreground">
+              This Target keeps {runtime.reach} of history. Deploys are markers
+              on this stream, never a filter.
+            </p>
+          </>
         )}
       </CardContent>
     </Card>
   );
 }
+
+const TITLE = {
+  stream: 'Runtime',
+  executions: 'Recent runs',
+  none: 'Runtime',
+} as const satisfies Record<WorkspaceView['runtime']['kind'], string>;
+
+const ACTION = {
+  stream: 'Open logs',
+  executions: 'All executions',
+  none: 'Build activity',
+} as const satisfies Record<WorkspaceView['runtime']['kind'], string>;
+
+const EXECUTION_TONE = {
+  passed: 'success',
+  failed: 'destructive',
+  running: 'warning',
+} as const;

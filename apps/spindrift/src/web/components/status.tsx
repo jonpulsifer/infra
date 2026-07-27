@@ -64,37 +64,36 @@ export function BlameChip({ blame }: { blame: Blame | null }) {
   );
 }
 
-const GLYPH = {
-  done: Check,
-  running: DotIcon,
-  failed: X,
-  waiting: CircleDashed,
-} as const satisfies Record<StepStatus, typeof Check>;
-
-const GLYPH_TONE = {
-  done: 'text-success',
-  running: 'text-warning',
-  failed: 'text-destructive',
-  waiting: 'text-muted-foreground',
-} as const satisfies Record<StepStatus, string>;
+/**
+ * Everything a step status renders as, in one row per status.
+ *
+ * Three parallel maps keyed by the same union is three chances to add a status
+ * to two of them. One record makes a missing field a compile error, which is
+ * the same discipline `BLAME` and `KINDS_BY_ADAPTER` use in the domain — and
+ * `waiting` is the row that proves it earns its keep: it is the only status
+ * whose glyph, tone, and word all disagree with its key.
+ */
+const STATUS = {
+  done: { icon: Check, tone: 'text-success', word: 'done' },
+  running: { icon: DotIcon, tone: 'text-warning', word: 'running' },
+  failed: { icon: X, tone: 'text-destructive', word: 'failed' },
+  waiting: {
+    icon: CircleDashed,
+    tone: 'text-muted-foreground',
+    word: 'queued',
+  },
+} as const satisfies Record<
+  StepStatus,
+  { icon: typeof Check; tone: string; word: string }
+>;
 
 /** The leading glyph on a checklist line. */
 export function StepGlyph({ status }: { status: StepStatus }) {
-  const Icon = GLYPH[status];
-  return (
-    <Icon
-      aria-hidden="true"
-      className={cn('size-3.5 shrink-0', GLYPH_TONE[status])}
-    />
-  );
+  const { icon: Icon, tone } = STATUS[status];
+  return <Icon aria-hidden="true" className={cn('size-3.5 shrink-0', tone)} />;
 }
 
 /** The word a step status reads as, where one is written out. */
 export function statusWord(status: StepStatus): string {
-  return {
-    done: 'done',
-    running: 'running',
-    failed: 'failed',
-    waiting: 'queued',
-  }[status];
+  return STATUS[status].word;
 }

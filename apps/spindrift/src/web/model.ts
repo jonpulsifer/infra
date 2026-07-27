@@ -146,6 +146,48 @@ export interface ActivityEntry {
   readonly status: 'ok' | 'failed' | 'info';
 }
 
+/**
+ * One run of a job (§17).
+ *
+ * §17: "**A job is not a stream but a list of executions.** An execution
+ * terminates, so it is attempt-shaped; this pipe covers services only." That
+ * sentence is why this type exists rather than a job's output being rendered
+ * through the same `LogLine[]` a service uses — the two are different surfaces,
+ * and giving a job a tail would say it has something to follow.
+ */
+export interface Execution {
+  readonly name: string;
+  readonly outcome: 'passed' | 'failed' | 'running';
+  readonly detail: string;
+  readonly when: string;
+}
+
+/**
+ * What a Component's output surface is, and there are exactly three (§17, §18).
+ *
+ * §18: "Service logs, job executions, and the website no-runtime state stay
+ * honestly distinct one level beneath it." A discriminated union rather than a
+ * nullable log, because the three are different things and collapsing two of
+ * them is precisely the dishonesty §17 names.
+ *
+ * `reach` on the service case is §17's other requirement: `logHistory` "is how
+ * far back `since` can honestly reach... so a Target never *lacks* logs; it
+ * only has a shorter memory, and the UI **states reach** rather than disabling
+ * a tab."
+ */
+export type Runtime =
+  | {
+      readonly kind: 'stream';
+      readonly lines: readonly LogLine[];
+      readonly reach: string;
+    }
+  | {
+      readonly kind: 'executions';
+      readonly executions: readonly Execution[];
+      readonly retained: number;
+    }
+  | { readonly kind: 'none'; readonly because: string };
+
 /** One Datastore as the workspace lists it (§11). */
 export interface DatastoreView {
   readonly name: string;
@@ -186,11 +228,12 @@ export interface WorkspaceView {
   readonly datastores: readonly DatastoreView[];
   readonly activity: readonly ActivityEntry[];
   /**
-   * The runtime tail (§17), or `null` for a Component that has no runtime.
-   * A `website` on a static Target is the case that matters: §17 gives it an
-   * **honest empty state** rather than a disabled tab.
+   * The Component's output surface (§17) — one of three, never a nullable log.
+   * A `website` on a static Target is the case that forced the union: §17 gives
+   * it an **honest empty state** rather than a disabled tab, and a job gets a
+   * list of executions rather than a tail it has nothing to put in.
    */
-  readonly runtime: readonly LogLine[] | null;
+  readonly runtime: Runtime;
 }
 
 /**

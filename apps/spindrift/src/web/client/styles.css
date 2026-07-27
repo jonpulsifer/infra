@@ -18,9 +18,10 @@
  *
  * Theme resolution has three inputs, in increasing precedence: the shipped
  * default (light), the reader's OS preference, and an explicit choice stamped
- * on the root as `data-theme`. The explicit choice must win in both directions,
- * so `data-theme="light"` restates the light values rather than relying on
- * their being the default.
+ * on the root as `data-theme`. The explicit choice has to win in **both**
+ * directions — forcing light on a dark OS is as real a request as the reverse —
+ * which is why the OS block excludes `[data-theme="light"]` rather than a
+ * fourth block restating the light values to beat it.
  */
 
 @import "tailwindcss";
@@ -50,8 +51,14 @@
   --terminal-dim: #6d838b;
 }
 
+/*
+ * The OS preference, unless an explicit choice overrules it. The
+ * `:not([data-theme='light'])` is what lets the light values live in `:root`
+ * alone: without it, a reader forcing light on a dark OS would need a third
+ * block restating every value a fourth time.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ground: #0e1619;
     --surface: #141f23;
     --surface-2: #1b282d;
@@ -92,27 +99,6 @@
   --bad-soft: #351e1b;
   --terminal: #0a1113;
   --terminal-ink: #b6c8ce;
-}
-
-:root[data-theme="light"] {
-  --ground: #f6f8f9;
-  --surface: #ffffff;
-  --surface-2: #eef2f4;
-  --line: #d5dee1;
-  --line-soft: #e4ebed;
-  --ink: #10191d;
-  --ink-2: #40565e;
-  --ink-3: #6e858e;
-  --accent: #2b8ba0;
-  --accent-soft: #d9edf1;
-  --good: #3d8a60;
-  --good-soft: #dcefe4;
-  --warn: #a97a26;
-  --warn-soft: #f6ebd6;
-  --bad: #b94b3f;
-  --bad-soft: #f8e2df;
-  --terminal: #0e1619;
-  --terminal-ink: #c3d3d8;
 }
 
 @theme inline {

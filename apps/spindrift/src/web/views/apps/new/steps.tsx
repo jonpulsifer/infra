@@ -8,7 +8,7 @@
  * is a readable answer here rather than an empty list.
  */
 import { AlertTriangle, Lock } from 'lucide-react';
-import type { Dispatch } from 'react';
+import type { Dispatch, ReactNode } from 'react';
 import type {
   ComponentKind,
   Exposure,
@@ -30,19 +30,29 @@ type StepProps = {
   dispatch: Dispatch<DraftAction>;
 };
 
-/** A selectable tile. Disabled tiles keep their reason on the tile (§3). */
+/**
+ * A selectable tile — the one affordance this flow chooses with.
+ *
+ * Every choice on every step is one of these, including the Target rows on
+ * Place, which is why it takes `children` rather than only a note: they all
+ * share §3's grammar, where an option that does not apply stays **on screen,
+ * disabled, wearing its reason**, and giving Place its own button was how the
+ * disabled styling drifted apart from the rest.
+ */
 function Choice({
   selected,
   disabled,
   title,
   note,
   onClick,
+  children,
 }: {
   selected: boolean;
   disabled?: boolean;
-  title: string;
-  note: string;
+  title?: string;
+  note?: string;
   onClick?: () => void;
+  children?: ReactNode;
 }) {
   return (
     <button
@@ -54,11 +64,14 @@ function Choice({
         selected
           ? 'border-primary bg-accent'
           : 'border-border bg-card hover:border-primary',
-        disabled && 'cursor-not-allowed opacity-55 hover:border-border',
+        disabled && 'cursor-not-allowed opacity-60 hover:border-border',
       )}
     >
-      <span className="text-sm font-semibold">{title}</span>
-      <span className="text-xs text-muted-foreground">{note}</span>
+      {title ? <span className="text-sm font-semibold">{title}</span> : null}
+      {note ? (
+        <span className="text-xs text-muted-foreground">{note}</span>
+      ) : null}
+      {children}
     </button>
   );
 }
@@ -70,7 +83,7 @@ function StepHeading({
 }: {
   index: number;
   label: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="mb-4">
@@ -145,13 +158,19 @@ export function StepSource({ draft, dispatch }: StepProps) {
   );
 }
 
-const KINDS: readonly ComponentKind[] = ['service', 'website', 'job'];
-
 const KIND_NOTE = {
   service: 'A long-running process. A worker is a service that is not exposed.',
   website: 'Rendered to files or to a server image, depending on placement.',
   job: 'Runs to completion. A schedule is a field on it, never a separate noun.',
 } as const satisfies Record<ComponentKind, string>;
+
+/**
+ * Derived from the note map rather than listed again, so a fourth
+ * {@link ComponentKind} is a compile error here instead of a tile that silently
+ * never renders. The `satisfies Record<…>` above is what makes the derivation
+ * total — the list and the exhaustiveness check are then the same fact.
+ */
+const KINDS = Object.keys(KIND_NOTE) as readonly ComponentKind[];
 
 /**
  * Step 2 — Component.
@@ -263,21 +282,13 @@ export function StepPlace({
       <Eyebrow>Targets, in admin rank order</Eyebrow>
       <div className="mt-2 flex flex-col gap-2">
         {targets.map((target) => (
-          <button
+          <Choice
             key={target.targetId}
-            type="button"
+            selected={draft.targetId === target.targetId}
             disabled={!target.candidate}
             onClick={() =>
               dispatch({ type: 'target', targetId: target.targetId })
             }
-            className={cn(
-              'flex flex-col gap-1 rounded-md border px-3 py-2.5 text-left transition-colors',
-              draft.targetId === target.targetId
-                ? 'border-primary bg-accent'
-                : 'border-border bg-card hover:border-primary',
-              !target.candidate &&
-                'cursor-not-allowed opacity-60 hover:border-border',
-            )}
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold">{target.name}</span>
@@ -303,14 +314,12 @@ export function StepPlace({
                 ))}
               </ul>
             )}
-          </button>
+          </Choice>
         ))}
       </div>
     </>
   );
 }
-
-const EXPOSURES: readonly Exposure[] = ['internal', 'private', 'public'];
 
 const EXPOSURE_NOTE = {
   internal:
@@ -319,6 +328,9 @@ const EXPOSURE_NOTE = {
     'Internet reachable, behind the Target-native authenticated edge. The default.',
   public: 'Intentionally unauthenticated. Confirmed once, explicitly.',
 } as const satisfies Record<Exposure, string>;
+
+/** Derived, for the same reason {@link KINDS} is. */
+const EXPOSURES = Object.keys(EXPOSURE_NOTE) as readonly Exposure[];
 
 /**
  * Step 4 — Configure.

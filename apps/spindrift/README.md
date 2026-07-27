@@ -137,6 +137,13 @@ is a complete one for an installation that does not exist. A literal outside
 that document is a bug, and `test/extraction/no-literals.test.ts` is what
 notices.
 
+It has two scanners with different reach. The **literal** scanner — the half
+with teeth, which knows the words that name this installation — reads every file
+under `src/`. The **project-id shape** scanner skips `src/web/`: web platform
+vocabulary is lowercase hyphenated words, and so is a project id, so over a
+browser bundle it reports dozens of findings and no bugs. The test says so at
+length, and the exemption is itself tested.
+
 Point the process at one:
 
 ```bash

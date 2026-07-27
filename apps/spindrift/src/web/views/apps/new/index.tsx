@@ -12,12 +12,19 @@
  * click past it, and the one time it says otherwise is the one time that
  * matters.
  */
-import { useReducer } from 'react';
+import { type Dispatch, useReducer, useState } from 'react';
+import { command, type TransportFailure } from '../../../client.ts';
 import type { TargetOptionView } from '../../../model.ts';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { cn } from '../../../ui/utils.ts';
-import { blockersFor, type Draft, draftReducer, STEPS } from './draft.ts';
+import {
+  blockersFor,
+  createAppInputFor,
+  type Draft,
+  draftReducer,
+  STEPS,
+} from './draft.ts';
 import {
   Ledger,
   StepComponent,
@@ -35,12 +42,33 @@ export function NewApp({
   targets: readonly TargetOptionView[];
 }) {
   const [draft, dispatch] = useReducer(draftReducer, initialDraft);
+  const [refusal, setRefusal] = useState<TransportFailure | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const candidateIds = targets
     .filter((target) => target.candidate)
     .map((target) => target.targetId);
   const blockers = blockersFor(draft, candidateIds);
   const last = draft.step === STEPS.length - 1;
+
+  /**
+   * Review's terminal act: create the App (§21's `createApp`), which locks its
+   * vessel and — once Task 19 lands the Component and Build commands — starts
+   * the first Build.
+   *
+   * Today this reaches a real endpoint and comes back `UNAUTHENTICATED`,
+   * because nobody can sign in until Task 37. That is deliberately not hidden
+   * behind a disabled button: a refusal the developer can read is the honest
+   * state of the system, and wiring the call now is what proves the typed
+   * client and the generated dispatch surface actually join up.
+   */
+  async function start() {
+    setSubmitting(true);
+    setRefusal(null);
+    const result = await command('createApp', createAppInputFor(draft));
+    if (!result.ok) setRefusal(result.failure);
+    setSubmitting(false);
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-5 px-5 py-6">
@@ -87,6 +115,7 @@ export function NewApp({
               targets={targets}
               blockers={blockers}
             />
+            {refusal ? <Refusal failure={refusal} /> : null}
           </div>
 
           <footer className="flex items-center gap-2 border-t border-border px-5 py-3">
@@ -99,8 +128,11 @@ export function NewApp({
             </Button>
             <div className="ml-auto">
               {last ? (
-                <Button disabled={blockers.length > 0}>
-                  Start first Build
+                <Button
+                  disabled={blockers.length > 0 || submitting}
+                  onClick={start}
+                >
+                  {submitting ? 'Creating…' : 'Start first Build'}
                 </Button>
               ) : (
                 <Button
@@ -123,6 +155,34 @@ export function NewApp({
   );
 }
 
+/**
+ * What the server said when it would not do it.
+ *
+ * The code is shown alongside the sentence because it is a closed vocabulary
+ * (`TransportFailureCode`) and therefore searchable — the same reason §6 keeps
+ * its eight failure reasons rather than writing friendlier prose. `issues`
+ * arrive when a schema refused, and each one names the field it refused.
+ */
+function Refusal({ failure }: { failure: TransportFailure }) {
+  return (
+    <div className="mt-4 rounded-md border border-destructive bg-destructive-soft px-3 py-2.5">
+      <p className="font-mono text-xs font-semibold text-destructive">
+        {failure.code}
+      </p>
+      <p className="mt-0.5 text-sm text-subtle">{failure.message}</p>
+      {failure.issues?.length ? (
+        <ul className="mt-1.5 flex flex-col gap-0.5">
+          {failure.issues.map((issue) => (
+            <li key={issue.path} className="font-mono text-xs text-subtle">
+              {issue.path}: {issue.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function StepBody({
   draft,
   dispatch,
@@ -130,7 +190,7 @@ function StepBody({
   blockers,
 }: {
   draft: Draft;
-  dispatch: React.Dispatch<Parameters<typeof draftReducer>[1]>;
+  dispatch: Dispatch<Parameters<typeof draftReducer>[1]>;
   targets: readonly TargetOptionView[];
   blockers: ReturnType<typeof blockersFor>;
 }) {

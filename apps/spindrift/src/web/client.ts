@@ -13,7 +13,7 @@
  */
 import type { commandRegistry } from '../commands/registry.ts';
 import type { CommandResult } from '../commands/types.ts';
-import { pathFor } from './dispatch.ts';
+import { pathFor, type TransportFailureCode } from './dispatch.ts';
 
 type Registry = typeof commandRegistry;
 
@@ -32,12 +32,16 @@ export type OutputOf<Name extends keyof Registry> = Registry[Name] extends {
   : never;
 
 /**
- * The failure a caller sees. It is the command layer's own closed set plus the
- * one code only the transport can produce — a request with no session never
- * reaches a command, so `UNAUTHENTICATED` cannot come from one.
+ * The failure a caller sees.
+ *
+ * `code` is {@link TransportFailureCode} — the command layer's own closed set
+ * plus the codes only a transport can produce — rather than a bare `string`.
+ * Widening it here would quietly spend the property the rest of this layer is
+ * built on: a view branching on a refusal is branching over a closed set, and
+ * a code it forgot is a compile error rather than a silent fallthrough.
  */
 export interface TransportFailure {
-  readonly code: string;
+  readonly code: TransportFailureCode;
   readonly message: string;
   readonly issues?: readonly { path: string; message: string }[];
 }
