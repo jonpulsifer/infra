@@ -35,11 +35,17 @@ spec:
     envFromSecret: spindrift-env
     ingress:
       enabled: true
+    # §19's own database. Nothing connects to it yet — the web process reads no
+    # rows — but it is the installation's store and the reconciler will need it,
+    # so it is provisioned now rather than bolted on later.
     database:
       enabled: true
       size: 2Gi
+      # No runner exists: src/db/migrate.ts is a library by design, because
+      # "migrations are applied as an out-of-band operator act". The schema
+      # arrives that way, not from a Job that would exit 0 having done nothing.
       migration:
-        enabled: true
+        enabled: false
     # §19's second Deployment. The reconciler entrypoint does not exist yet, so
     # rendering it would be a crash-looping pod that says nothing true.
     reconciler:
