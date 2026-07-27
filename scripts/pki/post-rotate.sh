@@ -23,6 +23,11 @@ repo_root="$(git rev-parse --show-toplevel)"
 pki_dir="$repo_root/terraform/pki"
 certs_dir="$pki_dir/certs"
 
+if (($# == 0)); then
+  echo "usage: $0 <folly|offsite> [<folly|offsite> ...]" >&2
+  exit 2
+fi
+
 # cluster -> control-plane host (sops secret target)
 declare -A control_plane=(
   [folly]="optiplex"
@@ -42,8 +47,12 @@ sops_set_key() {
   output_name=$3
   cluster=$4
 
-  jq -cer ".${output_name}.value.\"$cluster\"" <<<"$outputs" \
+  jq -ce ".${output_name}.value.\"$cluster\"" <<<"$outputs" \
     | sops set --value-stdin "$secret_file" "[\"$secret_name\"]"
+}
+
+cert_fingerprint() {
+  openssl x509 -outform DER | openssl sha256
 }
 
 verify_key_pair() {
@@ -68,7 +77,11 @@ verify_key_pair() {
   fi
 }
 
-for cluster in folly offsite; do
+for cluster in "$@"; do
+  if [[ ! -v control_plane[$cluster] ]]; then
+    echo "error: unknown cluster: $cluster" >&2
+    exit 2
+  fi
   host="${control_plane[$cluster]}"
   issuer="$(jq -er ".issuers.value.\"$cluster\"" <<<"$outputs")"
   ca_pem="$certs_dir/$cluster-ca.pem"
@@ -83,11 +96,17 @@ for cluster in folly offsite; do
   # Preserve the old CA before replacement. Consumers stage ca-bundle.pem,
   # rotate every leaf, and only then retire ca-prev.pem in a later commit.
   new_ca="$(jq -er ".cluster_ca_certs.value.\"$cluster\"" <<<"$outputs")"
-  if [[ -s $ca_pem ]] && ! diff -q <(printf '%s' "$new_ca") "$ca_pem" >/dev/null 2>&1; then
+  new_ca_fingerprint="$(printf '%s\n' "$new_ca" | cert_fingerprint)"
+  current_ca_fingerprint="$([[ -s $ca_pem ]] && cert_fingerprint <"$ca_pem" || true)"
+  if [[ -n $current_ca_fingerprint ]] && [[ $new_ca_fingerprint != "$current_ca_fingerprint" ]]; then
     echo "==> $cluster: previous CA kept for overlap ($ca_prev_pem)" >&2
     cp "$ca_pem" "$ca_prev_pem"
   fi
-  printf '%s' "$new_ca" >"$ca_pem"
+  printf '%s\n' "$new_ca" >"$ca_pem"
+  if [[ -s $ca_prev_pem ]] && [[ $(cert_fingerprint <"$ca_prev_pem") == "$new_ca_fingerprint" ]]; then
+    echo "==> $cluster: removing duplicate previous CA artifact" >&2
+    rm "$ca_prev_pem"
+  fi
   cp "$ca_pem" "$ca_bundle_pem"
   if [[ -s $ca_prev_pem ]]; then
     printf '\n' >>"$ca_bundle_pem"
@@ -96,11 +115,17 @@ for cluster in folly offsite; do
 
   # Preserve a replaced signer cert for JWKS overlap during rotation.
   new_signer="$(jq -er ".sa_signer_certs.value.\"$cluster\"" <<<"$outputs")"
-  if [[ -s $signer_pem ]] && ! diff -q <(printf '%s' "$new_signer") "$signer_pem" >/dev/null 2>&1; then
+  new_signer_fingerprint="$(printf '%s\n' "$new_signer" | cert_fingerprint)"
+  current_signer_fingerprint="$([[ -s $signer_pem ]] && cert_fingerprint <"$signer_pem" || true)"
+  if [[ -n $current_signer_fingerprint ]] && [[ $new_signer_fingerprint != "$current_signer_fingerprint" ]]; then
     echo "==> $cluster: previous signer kept for overlap ($prev_pem)" >&2
     cp "$signer_pem" "$prev_pem"
   fi
-  printf '%s' "$new_signer" >"$signer_pem"
+  printf '%s\n' "$new_signer" >"$signer_pem"
+  if [[ -s $prev_pem ]] && [[ $(cert_fingerprint <"$prev_pem") == "$new_signer_fingerprint" ]]; then
+    echo "==> $cluster: removing duplicate previous signer artifact" >&2
+    rm "$prev_pem"
+  fi
 
   # Drop the overlap cert once it has expired.
   if [[ -s $prev_pem ]] && ! openssl x509 -checkend 0 -noout -in "$prev_pem" >/dev/null; then

@@ -8,8 +8,9 @@
 # The intermediate's private key is read from 1Password at plan/apply time and
 # therefore transits Terraform state, as do the generated private keys. This is
 # a deliberate tradeoff (state lives in the IAM-gated homelab-ng bucket); the
-# root CA key never touches Terraform. Signer private keys reach the NixOS
-# control planes via scripts/pki/post-rotate.sh -> sops (never committed).
+# root CA key never touches Terraform. Cluster CA keys are escrowed to
+# 1Password and delivered to NixOS through SOPS; signer keys use SOPS only.
+# scripts/pki/post-rotate.sh performs that delivery without committing keys.
 
 locals {
   clusters = toset(["folly", "offsite"])
@@ -55,6 +56,33 @@ resource "tls_private_key" "cluster_ca" {
 
   algorithm = "RSA"
   rsa_bits  = 4096
+}
+
+# Escrow the long-lived cluster CA keys outside Terraform state. The
+# write-only field keeps the 1Password resource from duplicating key material
+# in its own state.
+resource "onepassword_item" "cluster_ca" {
+  for_each = local.clusters
+
+  vault    = local.op_vault_homelab
+  title    = "FML K8s ${each.key} CA"
+  category = "secure_note"
+
+  password_wo         = tls_private_key.cluster_ca[each.key].private_key_pem
+  password_wo_version = 1
+
+  lifecycle {
+    # Rotation must first preserve this item under a versioned resource/title.
+    # Do not make rollback depend on 1Password trash or item history.
+    prevent_destroy      = true
+    replace_triggered_by = [tls_private_key.cluster_ca[each.key]]
+  }
+
+  tags = [
+    each.key,
+    "kubernetes",
+    "pki",
+  ]
 }
 
 resource "tls_cert_request" "cluster_ca" {

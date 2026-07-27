@@ -114,6 +114,9 @@
           optiplex = mkHost "optiplex" {
             role = "control-plane";
             tags = [ "folly" ];
+            clusterCa = {
+              enable = true;
+            };
             imports = [
               ./nix/system/tailscale-disable.nix
               ./nix/system/sops.nix
@@ -130,10 +133,20 @@
                   "kube-controller-manager.service"
                 ];
               };
+              sops.secrets."k8s-cluster-ca-key" = {
+                owner = "cfssl";
+                group = "cfssl";
+                mode = "0400";
+                path = "/var/lib/cfssl/ca-key.pem";
+                restartUnits = [ "cfssl.service" ];
+              };
             };
           };
           riptide = mkHost "riptide" {
             tags = [ "folly" ];
+            clusterCa = {
+              enable = true;
+            };
             imports = [
               ./nix/system/tailscale-disable.nix
             ];
@@ -141,6 +154,9 @@
           };
           shale = mkHost "shale" {
             tags = [ "folly" ];
+            clusterCa = {
+              enable = true;
+            };
             imports = [
               ./nix/system/tailscale-disable.nix
             ];
