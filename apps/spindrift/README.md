@@ -7,14 +7,27 @@ adapts to whatever builds and delivers underneath — a Kubernetes cluster, Clou
 Run, or static hosting. The design lives in `.agent/plans/spindrift/spec.md`
 (private) and is referenced from the source as `§N`.
 
-**Targets are real; nothing deploys yet.** The five nouns have tables, the three
-adapter contracts are written, and commands are the only way anything is acted
-on. Targets can be connected, inspected on a loop, and resolved against — asking
-where a Component can go returns an answer with a reason for every Target it
-cannot. The two secret stores are implemented. What has no implementation is
-every *deploy* adapter — no real cluster, cloud runtime, static host, or build
-route is spoken to — so a Deploy row is still something nothing writes. The UI is
-a placeholder.
+**Targets are real, the screens are drawn, nothing deploys yet.** The five nouns
+have tables, the three adapter contracts are written, and commands are the only
+way anything is acted on. Targets can be connected, inspected on a loop, and
+resolved against — asking where a Component can go returns an answer with a
+reason for every Target it cannot. The two secret stores are implemented.
+
+What has no implementation is every *deploy* adapter — no real cluster, cloud
+runtime, static host, or build route is spoken to — so a Deploy row is still
+something nothing writes. **The three screens therefore render placeholder
+data** from `src/web/demo/`, which is scaffolding meant to be deleted: the views
+are typed against `src/web/model.ts`, so the query commands that replace it have
+a contract to meet rather than a shape to guess.
+
+Two named gaps behind the screens, both deliberate:
+
+- **Nobody can sign in.** Passkey enrolment and sessions are unbuilt, so every
+  command route answers 401. The boundary is complete and rejects everything,
+  rather than carrying a development bypass that would become permanent.
+- **The creation draft is client state**, so a refresh mid-flow loses it. It
+  wants a table and a pair of commands, which belong with the App and Component
+  commands rather than in front of them.
 
 ## Shape
 
@@ -28,11 +41,48 @@ One image, two processes (§19); only `web` exists so far.
 | `src/domain/` | `DesiredState`, the attempt log, Targets, capabilities, placement |
 | `src/adapters/` | the deploy, build, and store contracts, plus the two stores |
 | `src/reconciler/` | the loop that refreshes Target health and capabilities |
-| `src/web/` | the `web` process — UI, webhooks, log WebSockets |
+| `src/web/` | the `web` process — the server, the dispatch surface, and the client |
+| `src/web/ui/` | shadcn primitives, in this installation's palette |
+| `src/web/views/` | the three screens (§18) |
 | `build.ts` | `Bun.build` over the client HTML entry → `dist/` |
 
 There is no framework, no bundler beyond Bun, and no test runner beyond
-`bun test`.
+`bun test`. Navigation, form state, and data loading are hand-rolled, which is
+the cost the plan accepted for staying Bun-native.
+
+## The UI
+
+Tailwind v4 and shadcn primitives, compiled by `bun-plugin-tailwind` inside the
+same graph walk that bundles the client — one build step, and `bunfig.toml`
+declares the same plugin so `bun run dev` compiles it identically.
+
+The palette is not a choice made here: `src/web/client/styles.css` carries the
+tokens the prototypes settled, bound to shadcn's token names so `bg-card` and
+`text-muted-foreground` resolve to them. Light and dark both ship; the toggle
+stamps `data-theme` on the root, and its absence means "follow the OS".
+
+Three screens, each implementing rules §18 settled rather than choices made
+while building them:
+
+- **Deploy** (`views/apps/deploy-detail.tsx`) — App-first, not attempt-first.
+  State and URL, then diagnosis, then a dense resource list, then the log. No
+  stage rail. `blame` gets a chip, the build log opens only when the *build* is
+  what failed, and **the red screen says the previous release is still serving**.
+- **Workspace** (`views/apps/workspace.tsx`) — live state and URL lead; Target
+  and the immutable vessel are visible; Components and Datastores are peer
+  sections. A website states that it has no runtime instead of showing an empty
+  log.
+- **Create** (`views/apps/new/`) — Source → Component → Place → Configure →
+  Review, defaults carrying every step, preflight folded into Review. An unmet
+  prerequisite stops before any Build exists, keeps the draft, and names what
+  clears it.
+
+The browser reaches the server through **one dispatch surface generated from the
+command registry** (`src/web/dispatch.ts`): one route per command, built by
+`Object.fromEntries` over `commandNames`, so there is nowhere to write a route
+that is not a command. It is unversioned, marked internal, and
+session-authenticated only — never a token, because a token is what turns an
+internal protocol into an API §21 declined to declare.
 
 ## The command layer
 

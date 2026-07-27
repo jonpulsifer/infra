@@ -72,6 +72,46 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
  */
 const PRODUCT_NAMESPACE = /^spindrift-/;
 
+/**
+ * An abbreviated git object id or digest prefix: hex, and nothing else.
+ *
+ * It wears the project-id shape exactly — `dd9b103` is a lowercase letter
+ * followed by letters and digits — and it is this system's own vocabulary.
+ * §16 correlates on digests everywhere in the supply chain, so a commit or a
+ * digest prefix is a value Spindrift prints about anybody's code, never a name
+ * for the installation printing it.
+ */
+const OBJECT_ID = /^[0-9a-f]{6,40}$/;
+
+/**
+ * The browser bundle's source, which the project-id scanner does not read.
+ *
+ * This is a deliberate narrowing, and it is worth stating why rather than
+ * discovering it later. The scanner's shape test cannot distinguish a project
+ * id from a lowercase hyphenated word, and **web platform vocabulary is nothing
+ * but lowercase hyphenated words**: `bg-card`, `text-muted-foreground`,
+ * `prefers-color-scheme`, `data-theme`, `content-type`, `same-origin`. There is
+ * no lexical rule that exempts those and still catches `trusted-builds`, and no
+ * positional rule either — they appear in class attributes, in variant tables,
+ * in fetch options, in HTML, and in prose about all four.
+ *
+ * Left in place, the scanner reports dozens of findings and no bugs, which is
+ * the state in which a detector gets deleted by whoever hits it next. Scoped
+ * out, it keeps full strength over the code that could actually hold one: the
+ * adapters, the config layer, the domain, and the reconciler.
+ *
+ * What still covers `src/web/`:
+ *
+ * - **The literal scanner, at full strength.** It is the half with teeth for
+ *   §20's rule, and an installation's name inside a className is still a bug it
+ *   finds. Only the shape heuristic is scoped out.
+ * - **The shape of the boundary.** The browser reaches the far side through one
+ *   generated dispatch surface (Task 36b) that carries command names, never
+ *   endpoints or project identifiers; anything installation-specific the UI
+ *   shows arrives from the manifest, which is where §20 puts it.
+ */
+const BROWSER_SOURCE = 'src/web/';
+
 /** Files that are not text, and would only produce noise. */
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
 
@@ -126,6 +166,7 @@ const QUOTED = /['"`]([^'"`\n]{6,30})['"`]/g;
 function findProjectIds(files: SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
+    if (file.path.startsWith(BROWSER_SOURCE)) continue;
     const source = scannable(file);
     // A package name is not an identity. `drizzle-orm` and `bun-sql` wear the
     // same shape as a project id, so the file's own import specifiers are
@@ -137,6 +178,7 @@ function findProjectIds(files: SourceFile[]): string[] {
     for (const [, value] of source.matchAll(QUOTED)) {
       if (!value || PROJECT_ID_ALLOWLIST.has(value)) continue;
       if (PRODUCT_NAMESPACE.test(value)) continue;
+      if (OBJECT_ID.test(value)) continue;
       if (imported.has(value)) continue;
       if (value.includes('/') || value.includes('.')) continue;
       if (PROJECT_ID.test(value) && NOT_A_WORD.test(value)) {
@@ -311,6 +353,42 @@ describe('the scanners catch a deliberately dirty file', () => {
   test('and the namespace exemption is a prefix, not a substring', () => {
     expect(
       findProjectIds(dirty("const project = 'my-spindrift-4021';")).length,
+    ).toBe(1);
+  });
+
+  test('but not an abbreviated git object id', () => {
+    expect(findProjectIds(dirty("const commit = 'dd9b103';"))).toEqual([]);
+  });
+
+  test('and the object-id exemption is hex only', () => {
+    expect(findProjectIds(dirty("const commit = 'dd9b103z';")).length).toBe(1);
+  });
+
+  test('but not web platform vocabulary in the browser bundle', () => {
+    for (const source of [
+      '<div className="bg-card" />',
+      "const tone = { error: 'text-terminal-destructive' };",
+      "matchMedia('prefers-color-scheme: dark')",
+      "root.setAttribute('data-theme', theme)",
+      "headers: { 'content-type': 'application/json' }",
+    ]) {
+      expect(findProjectIds(dirty(source, 'src/web/views/dirty.tsx'))).toEqual(
+        [],
+      );
+    }
+  });
+
+  test('and the same string outside the browser bundle is still found', () => {
+    expect(
+      findProjectIds(dirty("const project = 'trusted-builds';")).length,
+    ).toBe(1);
+  });
+
+  test('and the browser bundle still hides no installation name', () => {
+    expect(
+      findLiterals(
+        dirty('<div className="folly-grid" />', 'src/web/views/dirty.tsx'),
+      ).length,
     ).toBe(1);
   });
 
