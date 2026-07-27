@@ -1,0 +1,17 @@
+{
+  "name": "@repo/charts",
+  "private": true,
+  "type": "module",
+  "//": "The Helm charts Flux consumes. This package.json exists so chart correctness is asserted where the chart lives (Spindrift spec, § Not a seam) — `helm template` goldens run by `bun test`, in the workspace's own runner, rather than a second test harness bolted on beside it.",
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "1.3.14",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,170 @@
+{{/*
+The release's object name: one App's one Component.
+
+Names are already DNS labels by the time Spindrift writes them (§9 mints the
+canonical hostname from the same two), so this composes rather than sanitizes —
+a value that needed sanitizing here would be a value that could not be a
+hostname either.
+*/}}
+{{- define "spindrift-app.fullname" -}}
+{{- printf "%s-%s" .Values.app.name .Values.app.component | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Selector labels: what a Deployment's selector and a Service's selector match on.
+
+**Immutable by construction.** Nothing that changes deploy to deploy is here —
+the deploy label lives on the pod template only (§7), because a selector cannot
+be edited on an existing Deployment and putting a per-deploy value in one would
+brick every upgrade after the first.
+*/}}
+{{- define "spindrift-app.selectorLabels" -}}
+app.kubernetes.io/name: {{ .Values.app.component }}
+app.kubernetes.io/part-of: {{ .Values.app.name }}
+{{- end }}
+
+{{/*
+Common labels, on every object this chart renders.
+*/}}
+{{- define "spindrift-app.labels" -}}
+{{ include "spindrift-app.selectorLabels" . }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/component: {{ .Values.app.kind }}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+{{- end }}
+
+{{/*
+Pod template labels: the common set plus the one label that moves per deploy.
+
+§7: "a deploy label goes on the pod template and **never** in the selector",
+because both delivery flavours enumerate applied objects and neither covers
+pods — the label is how a pod is traced back to the Deploy that placed it.
+*/}}
+{{- define "spindrift-app.podLabels" -}}
+{{ include "spindrift-app.labels" . }}
+{{- with .Values.app.deployId }}
+spindrift.dev/deploy: {{ . | quote }}
+{{- end }}
+{{- with .Values.shared.podLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+The value-contract version the chart declares, read back onto every object.
+
+The pin-time read is of `Chart.yaml`; this puts the same number on what was
+rendered, so an object in a cluster can be traced to the contract it was
+rendered under without holding the chart that did it.
+*/}}
+{{- define "spindrift-app.contractAnnotations" -}}
+spindrift.dev/values-contract: {{ index .Chart.Annotations "spindrift.dev/values-contract" | quote }}
+{{- end }}
+
+{{/*
+The port this Component serves on.
+
+A website is a service with a fixed port (§7) — the difference is a value, not
+a template branch, so nothing downstream of here knows which kind it rendered.
+*/}}
+{{- define "spindrift-app.port" -}}
+{{- if eq .Values.app.kind "website" }}{{ .Values.app.websitePort }}{{ else }}{{ .Values.app.port }}{{ end }}
+{{- end }}
+
+{{/*
+Whether this Component serves traffic at all.
+
+`expose` is a field on a service; a website has it forced on (§2, §7). A job
+never serves.
+*/}}
+{{- define "spindrift-app.serving" -}}
+{{- if eq .Values.app.kind "website" }}true{{ else if and (eq .Values.app.kind "service") .Values.app.expose }}true{{ end }}
+{{- end }}
+
+{{/*
+The container: identical between the Deployment and the CronJob.
+
+Hardening is fixed with no per-App opt-out (§7), which is why every security
+field here is a literal rather than a value. The readiness probe is the other
+half of that rule — **readiness on the port, no liveness probe** — and it is
+absent for a job, which has no port to probe.
+*/}}
+{{- define "spindrift-app.container" -}}
+- name: app
+  image: {{ .Values.app.image | quote }}
+  imagePullPolicy: IfNotPresent
+  {{- with .Values.app.command }}
+  command:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.app.args }}
+  args:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if ne .Values.app.kind "job" }}
+  ports:
+    - name: http
+      containerPort: {{ include "spindrift-app.port" . }}
+      protocol: TCP
+  readinessProbe:
+    tcpSocket:
+      port: {{ include "spindrift-app.port" . }}
+  {{- end }}
+  env:
+    # readOnlyRootFilesystem below leaves /tmp as the only writable path, so
+    # the two variables every runtime reaches for point at it.
+    - name: TMPDIR
+      value: /tmp
+    - name: HOME
+      value: /tmp
+    {{- range .Values.app.env }}
+    - name: {{ .name }}
+      value: {{ .value | quote }}
+    {{- end }}
+    {{- range .Values.app.secretEnv }}
+    - name: {{ .name }}
+      valueFrom:
+        secretKeyRef:
+          name: {{ .secretName }}
+          key: {{ .key }}
+    {{- end }}
+  volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+  resources:
+    {{- toYaml .Values.shared.resources | nindent 4 }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    seccompProfile:
+      type: RuntimeDefault
+    capabilities:
+      drop:
+        - ALL
+{{- end }}
+
+{{/*
+The pod spec around that container, likewise shared by both workload objects.
+*/}}
+{{- define "spindrift-app.podSpec" -}}
+automountServiceAccountToken: false
+securityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+{{- with .Values.platform.runtimeClassName }}
+runtimeClassName: {{ . }}
+{{- end }}
+{{- with .Values.platform.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+containers:
+  {{- include "spindrift-app.container" . | nindent 2 }}
+volumes:
+  - name: tmp
+    emptyDir: {}
+{{- end }}
