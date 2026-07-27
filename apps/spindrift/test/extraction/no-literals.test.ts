@@ -118,8 +118,17 @@ const QUOTED = /['"`]([^'"`\n]{6,30})['"`]/g;
 function findProjectIds(files: SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
-    for (const [, value] of scannable(file).matchAll(QUOTED)) {
+    const source = scannable(file);
+    // A package name is not an identity. `drizzle-orm` and `bun-sql` wear the
+    // same shape as a project id, so the file's own import specifiers are
+    // exempt — and an import that names something it should not is the other
+    // scanner's finding, not this one's.
+    const imported = new Set(
+      importSpecifiers(source).flatMap((specifier) => specifier.split('/')),
+    );
+    for (const [, value] of source.matchAll(QUOTED)) {
       if (!value || PROJECT_ID_ALLOWLIST.has(value)) continue;
+      if (imported.has(value)) continue;
       if (value.includes('/') || value.includes('.')) continue;
       if (PROJECT_ID.test(value) && NOT_A_WORD.test(value)) {
         offenders.push(`${file.path}: '${value}'`);
@@ -133,18 +142,21 @@ const FROM_IMPORT =
   /(?:^|\s)(?:import|export)[\s\S]*?from\s*['"]([^'"]+)['"]/gm;
 const BARE_IMPORT = /(?:^|\s)import\s*['"]([^'"]+)['"]/gm;
 
+/** Every module specifier a source imports, in either form. */
+function importSpecifiers(source: string): string[] {
+  return [
+    ...[...source.matchAll(FROM_IMPORT)].map((m) => m[1]),
+    ...[...source.matchAll(BARE_IMPORT)].map((m) => m[1]),
+  ].filter((s): s is string => s !== undefined);
+}
+
 /** Imports that reach outside the package or outside its declared dependencies. */
 function findForeignImports(files: SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
     if (!/\.[jt]sx?$/.test(file.path)) continue;
     const source = stripComments(file.source);
-    const specifiers = [
-      ...[...source.matchAll(FROM_IMPORT)].map((m) => m[1]),
-      ...[...source.matchAll(BARE_IMPORT)].map((m) => m[1]),
-    ].filter((s): s is string => s !== undefined);
-
-    for (const specifier of specifiers) {
+    for (const specifier of importSpecifiers(source)) {
       const where = `${file.path}: '${specifier}'`;
       if (specifier.startsWith('.')) {
         const resolved = join(APP, file.path, '..', specifier);
@@ -275,6 +287,12 @@ describe('the scanners catch a deliberately dirty file', () => {
     ]) {
       expect(findProjectIds(dirty(source, 'src/dirty.tsx')).length).toBe(1);
     }
+  });
+
+  test('but not a package name wearing the same shape', () => {
+    expect(
+      findProjectIds(dirty("import { drizzle } from 'drizzle-orm/bun-sql';")),
+    ).toEqual([]);
   });
 
   test('a project id in a comment', () => {

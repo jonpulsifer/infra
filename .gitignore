@@ -21,6 +21,9 @@ build/
 dist/
 out/
 *.tgz
+# Source that happens to be named after one: spindrift's build adapter is the
+# contract for build backends, not a build output.
+!apps/spindrift/src/adapters/build/
 
 # ─── Logseq (docs/ wiki graph) ───────────────────────────────────────────────
 # Track pages/journals + logseq/{config.edn,custom.css}; ignore app state.
