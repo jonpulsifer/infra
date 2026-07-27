@@ -1,0 +1,38 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: oauth2-proxy
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/folly/apps/oauth2-proxy
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    - name: config
+    - name: networking
+    - name: onepassword-connect
+  healthChecks:
+    - apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      name: oauth2-proxy
+      namespace: oauth2-proxy
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: oauth2-proxy
+      namespace: oauth2-proxy
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-settings
+      - kind: ConfigMap
+        name: cluster-topology
+      - kind: Secret
+        name: cluster-secrets
