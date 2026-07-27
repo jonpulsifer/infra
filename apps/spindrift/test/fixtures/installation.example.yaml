@@ -1,0 +1,34 @@
+# A complete installation manifest for an installation that does not exist.
+#
+# This is the fixture install of spec §20: everything naming a particular
+# Spindrift installation appears here and nowhere in src/. If a new
+# installation-specific value is added to the schema, this file is where it
+# gets a value, and the extraction test is what notices when it does not.
+installation: example
+
+dns:
+  apexZone: apps.example.test
+  vanityZone: example.test
+
+cloud:
+  artifactsProject: example-artifacts
+  homeVesselProject: example-home
+
+charts:
+  app: example/spindrift-app
+  installer: example/spindrift
+
+github:
+  appId: '1234567'
+
+secretStore:
+  adapter: gcp-secret-manager
+
+# Rank order: placement considers these top to bottom.
+targets:
+  - name: cluster
+    adapter: kubernetes
+  - name: cloud
+    adapter: cloudrun
+  - name: hosting
+    adapter: static

@@ -37,12 +37,7 @@
     },
     "test": {
       "dependsOn": ["build"],
-      "inputs": [
-        "src/**/*.tsx",
-        "src/**/*.ts",
-        "test/**/*.ts",
-        "test/**/*.tsx"
-      ],
+      "inputs": ["src/**", "test/**", "package.json"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "typecheck": {
