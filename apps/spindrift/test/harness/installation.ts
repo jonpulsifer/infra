@@ -80,6 +80,12 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
         apiServer: input.apiServer,
         namespace: input.namespace,
         delivery: input.delivery,
+        // Mirrors what the connect act stores, field for field: a helper that
+        // drops one of them makes every "the row holds what was connected"
+        // assertion pass for the wrong reason.
+        ...(input.chartContract === undefined
+          ? {}
+          : { chartContract: input.chartContract }),
       };
     }
     case 'cloudrun':

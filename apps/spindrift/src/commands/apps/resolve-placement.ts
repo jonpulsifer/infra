@@ -16,25 +16,13 @@
  */
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
-import {
-  apps,
-  components,
-  datastores,
-  type Target,
-  targets,
-} from '../../db/schema.ts';
-import {
-  deployPathReferences,
-  noCapabilities,
-  resolveCapabilities,
-  type TargetCapabilities,
-} from '../../domain/capabilities.ts';
+import { apps, components, datastores, targets } from '../../db/schema.ts';
 import type { ArtifactType, Exposure } from '../../domain/desired-state.ts';
 import {
   DEFAULT_PLATFORM,
   type DerivedRequirements,
   type Exclusion,
-  type PlacementTarget,
+  placementTargetOf,
   type RequiredDatastore,
   resolvePlacement,
 } from '../../domain/placement.ts';
@@ -69,31 +57,6 @@ export interface ResolveComponentPlacementResult {
   readonly suggestedTargetId: string | null;
   /** Every Target, in rank order, candidates and non-candidates alike. */
   readonly options: readonly PlacementOption[];
-}
-
-/**
- * A Target's capabilities as of its last inspection.
- *
- * The two provenances that are not stored are supplied here: from-the-adapter-
- * type comes off the adapter itself, and the derived values are recomputed. A
- * Target whose adapter this installation does not ship, or that has never been
- * inspected, resolves to no capabilities — which excludes it, with a reason,
- * rather than dropping it silently from the list.
- */
-function capabilitiesOf(
-  context: CommandContext,
-  target: Target,
-): TargetCapabilities {
-  const adapter = context.adapters.deploy(target.adapter);
-  const capabilityContext = {
-    adapter: target.adapter,
-    artifactTypes: adapter?.artifactTypes ?? [],
-    publicExposure: target.publicExposure,
-    deployPath: deployPathReferences(context.manifest),
-  };
-  return target.discovery === null || adapter === null
-    ? noCapabilities(capabilityContext)
-    : resolveCapabilities(target.discovery, capabilityContext);
 }
 
 export const resolveComponentPlacement: Command<
@@ -145,14 +108,11 @@ export const resolveComponentPlacement: Command<
   ]);
 
   const placement = resolvePlacement(
-    connected.map(
-      (target): PlacementTarget => ({
-        id: target.id,
-        name: target.name,
-        adapter: target.adapter,
-        rank: target.rank,
-        healthy: target.health === 'healthy',
-        capabilities: capabilitiesOf(context, target),
+    connected.map((target) =>
+      placementTargetOf(target, {
+        artifactTypes:
+          context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+        manifest: context.manifest,
       }),
     ),
     requirements,

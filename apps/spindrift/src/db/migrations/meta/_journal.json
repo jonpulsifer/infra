@@ -15,6 +15,20 @@
       "when": 1785153497731,
       "tag": "0001_targets",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785187708931,
+      "tag": "0002_bundle_staging",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785188201016,
+      "tag": "0003_drift_state",
+      "breakpoints": true
     }
   ]
 }

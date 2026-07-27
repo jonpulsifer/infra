@@ -25,8 +25,15 @@
  * shape* — which is why a Build's key includes the target shape and why moving
  * across shapes forces a rebuild while moving within one does not (§3).
  */
-import type { TargetAdapter } from '../config/manifest.schema.ts';
-import type { TargetCapabilities } from './capabilities.ts';
+import type {
+  InstallationManifest,
+  TargetAdapter,
+} from '../config/manifest.schema.ts';
+import {
+  capabilitiesOfRow,
+  type TargetCapabilities,
+  type TargetDiscovery,
+} from './capabilities.ts';
 import type {
   ArtifactType,
   ComponentKind,
@@ -143,6 +150,49 @@ export interface Placement {
   readonly suggested: Candidate | null;
   readonly candidates: readonly Candidate[];
   readonly nonCandidates: readonly NonCandidate[];
+}
+
+/**
+ * The `targets` columns {@link placementTargetOf} reads.
+ *
+ * Structural rather than an import of the row type: this file is domain, and a
+ * domain module that imports the schema is a domain module the schema can break.
+ */
+interface RankedTargetRow {
+  id: string;
+  name: string;
+  adapter: TargetAdapter;
+  rank: number;
+  health: 'healthy' | 'unhealthy';
+  discovery: TargetDiscovery | null;
+  publicExposure: boolean | null;
+}
+
+/**
+ * One stored Target row, as placement sees it.
+ *
+ * Three commands now need a `PlacementTarget` out of a `targets` row —
+ * resolution, upload, and deploy creation — and each was rebuilding the same
+ * six-field object around the same `capabilitiesOfRow` call. That is one shape,
+ * so it is one function: a Target that looked capable to the command that
+ * resolved it and incapable to the command that deployed to it is a bug with no
+ * single place to fix it.
+ */
+export function placementTargetOf(
+  target: RankedTargetRow,
+  options: {
+    readonly artifactTypes: readonly ArtifactType[] | null;
+    readonly manifest: InstallationManifest;
+  },
+): PlacementTarget {
+  return {
+    id: target.id,
+    name: target.name,
+    adapter: target.adapter,
+    rank: target.rank,
+    healthy: target.health === 'healthy',
+    capabilities: capabilitiesOfRow(target, options),
+  };
 }
 
 /**

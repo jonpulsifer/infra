@@ -7,21 +7,22 @@ adapts to whatever builds and delivers underneath — a Kubernetes cluster, Clou
 Run, or static hosting. The design lives in `.agent/plans/spindrift/spec.md`
 (private) and is referenced from the source as `§N`.
 
-**Targets are real, the screens are drawn, and Kubernetes delivery works at the
-adapter seam.** The five nouns have tables, the three adapter contracts are
-written, and commands are the only way anything is acted on. Targets can be
-connected, inspected on a loop, and resolved against — asking where a Component
-can go returns an answer with a reason for every Target it cannot. The two
-secret stores and the Kubernetes deploy adapter are implemented.
+**An uploaded bundle reaches a Kubernetes cluster and comes back with a URL.**
+The five nouns have tables, the three adapter contracts are written, and
+commands are the only way anything is acted on. Targets can be connected,
+inspected on a loop, and resolved against — asking where a Component can go
+returns an answer with a reason for every Target it cannot. Uploading finished
+output records an artifact without a builder; creating a Deploy writes an intent
+under a locking read; the reconciler claims that intent, applies it through the
+Kubernetes adapter, and records what the platform said.
 
-What has no implementation is the command that creates a Deploy, the Cloud Run
-and static deploy adapters, and every build route, so a Deploy row is still
-something nothing writes. **The three screens therefore render placeholder
-data** from `src/web/demo/`, which is scaffolding meant to be deleted: the views
-are typed against `src/web/model.ts`, so the query commands that replace it have
-a contract to meet rather than a shape to guess.
+What has no implementation is the Cloud Run and static deploy adapters, every
+real build route, config delivery, and datastores. **The three screens still
+render placeholder data** from `src/web/demo/`, which is scaffolding meant to be
+deleted: the views are typed against `src/web/model.ts`, so the query commands
+that replace it have a contract to meet rather than a shape to guess.
 
-Two named gaps behind the screens, both deliberate:
+Three named gaps, all deliberate:
 
 - **Nobody can sign in.** Passkey enrolment and sessions are unbuilt, so every
   command route answers 401. The boundary is complete and rejects everything,
@@ -29,6 +30,11 @@ Two named gaps behind the screens, both deliberate:
 - **The creation draft is client state**, so a refresh mid-flow loses it. It
   wants a table and a pair of commands, which belong with the App and Component
   commands rather than in front of them.
+- **The status page is not served yet.** §9 wants a URL that resolves from the
+  moment an App exists, on a lowest-precedence wildcard route. Naming is here and
+  a deployed Component's names resolve through its route; the wildcard route and
+  the page it points at are not, so an App's address stays dark until something
+  has actually been deployed to it.
 
 ## Shape
 
@@ -39,9 +45,9 @@ One image, two processes (§19); only `web` exists so far.
 | `src/config/` | the installation manifest and its schema |
 | `src/db/` | the Drizzle schema, the connection, and the committed migrations |
 | `src/commands/` | the application command layer and its registry |
-| `src/domain/` | `DesiredState`, the attempt log, Targets, capabilities, placement |
-| `src/adapters/` | the adapter contracts, Kubernetes delivery, and the two stores |
-| `src/reconciler/` | the loop that refreshes Target health and capabilities |
+| `src/domain/` | `DesiredState`, the attempt log, Targets, capabilities, placement, sources, naming, diagnosis |
+| `src/adapters/` | the adapter contracts, Kubernetes delivery, DNS records, and the two stores |
+| `src/reconciler/` | two loops — Target health and capabilities, and deploy convergence |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |
 | `src/web/views/` | the three screens (§18) |
@@ -127,22 +133,97 @@ highest-ranked one is suggested, and **non-candidates are returned listed and
 annotated with why**, so "nowhere fits" is an answer rather than a deploy that
 fails later.
 
+## Build, Deploy, and the loop
+
+A **Build** records an artifact; it never deploys one. Uploading an archive of
+finished output produces a `SUCCEEDED` Build with the bundle digest naming the
+artifact and **no build route consulted at all** — there is nothing to run, and
+running one would produce a second digest over the same bytes. Everything else
+goes through a route, and the route's name and log fidelity land on the Build so
+a thin log reads as the runner it is rather than as a bug.
+
+A **Deploy** is an intent, written under `SELECT ... FOR UPDATE` on the one
+`(Component, Target)` desired row. That locking read is the whole of the
+concurrency design: two intents for one pair serialize, and the second reads what
+the first committed rather than what preceded both. **Rollback is an ordinary
+deploy** — a newer intent naming an older Build — and it asks only one extra
+question, under the same lock, so it cannot become a way to place what a forward
+deploy refused.
+
+`src/reconciler/deploy-loop.ts` is what turns an intent into a workload. It
+**claims with `FOR UPDATE SKIP LOCKED` and then lets the lock go**, because the
+claim is the `APPLYING` phase rather than a held transaction — a lock does not
+survive a reconciler restart and a phase does. Phases after that come from the
+adapter and never from core's own idea of readiness, and on red the verdict's
+reason, detail, and raw payload are written to the Deploy row, because cluster
+events expire in about an hour and core's copy is the one that will still exist
+tomorrow. **Exposure is never touched by a failure** — the previous release is
+still serving. Drift is reported and never corrected: the re-converge is an
+ordinary Deploy a person presses.
+
+**The interval is adaptive and the poll is the correctness path.** Seconds while
+an attempt is in flight, minutes once converged — which is also the drift
+cadence, since drift is information rather than an alarm. `LISTEN/NOTIFY` can
+shorten a sleep and can never be required to: a notification is lost when no
+listener is connected, so every test here runs with no wake-up wired.
+
+## Naming and DNS
+
+Two layers (§9), with different rules for a reason. **Canonical names nest**
+(`web.shop.<apex>`) because they are unproxied; **vanity names are one flat
+label** because a single apex's free certificate covers one subdomain level, and
+that is where §9's ceiling of roughly twenty of them comes from. Core mints a
+canonical name only for a cluster — Cloud Run and static hosting name their own
+workloads, and there the adapter reports the address back across the deploy seam.
+
+**Spindrift publishes no record itself, and holds no zone credential.** On a
+cluster the names travel on the `HTTPRoute` the App chart renders — the
+installation's external-dns runs with `gateway-httproute` among its sources, so
+a route carrying a hostname *is* the record, and it is garbage collected with
+the release that owns it.
+
+`src/adapters/dns/cr.ts` builds `DNSEndpoint` objects for the names that have no
+route to hang on — the live-from-creation status name, and the vanity leg on a
+non-metal Target. **Neither of those is built, so nothing calls it yet**; it is
+here because external-dns's `crd` source is configured for exactly that gap.
+`test/extraction/no-dns-credential.test.ts` is the grep that keeps "no zone
+credential" true, and it also asserts DNS is still being described somewhere, so
+the negative claim cannot be satisfied by there being no DNS at all.
+
+One name is contended and one is not. The canonical is per Component, so it
+never collides. The **vanity name is per App**, so an App with two
+network-serving Components has one name and two claimants — it goes to a sole
+serving Component and otherwise to none, because putting one hostname on two
+routes lets the platform pick a winner arbitrarily. Which Component is the front
+door is the developer's to say, and there is nowhere to say it yet.
+
 ## Testing
 
 Tests run against a real Postgres — the concurrency design is a claim about
-transactions, and a fake cannot falsify it. Use `wslc.exe` for service
-containers on WSL and `docker` on macOS:
+transactions, and a fake cannot falsify it.
+
+**On WSL, `wslc.exe` containers are not reachable from this distro.** They run in
+their own WSL VM, so `--publish` binds a port in *that* VM's namespace: the
+container is healthy (`wslc.exe exec <name> pg_isready -U postgres` succeeds) and
+nothing in this distro can connect to it. The symptom is every database test
+failing on a `beforeEach` hook timeout, which reads like a code bug and is not
+one. Run Postgres natively instead:
 
 ```bash
-## WSL
-wslc.exe run --detach --name spindrift-postgres \
-  --env POSTGRES_USER=postgres \
-  --env POSTGRES_PASSWORD=postgres \
-  --env POSTGRES_DB=spindrift \
-  --publish 127.0.0.1:5432:5432 \
-  postgres:18-alpine
+## WSL — native, because a published container port does not reach this distro
+nix shell nixpkgs#postgresql_16 -c bash -c '
+  initdb -D /tmp/spg-data -U postgres --auth=trust &&
+  pg_ctl -D /tmp/spg-data -l /tmp/spg-data/log \
+    -o "-p 15432 -c listen_addresses=127.0.0.1 -c fsync=off" start &&
+  createdb -h 127.0.0.1 -p 15432 -U postgres spindrift'
 
-## macOS
+DATABASE_URL=postgres://postgres@127.0.0.1:15432/spindrift bun test
+```
+
+On macOS, and anywhere a container's published port is genuinely reachable, a
+container is fine:
+
+```bash
 docker run --detach --name spindrift-postgres \
   --env POSTGRES_USER=postgres \
   --env POSTGRES_PASSWORD=postgres \
@@ -151,7 +232,7 @@ docker run --detach --name spindrift-postgres \
   postgres:18-alpine
 ```
 
-Point `DATABASE_URL` at that container:
+and `DATABASE_URL` points at it:
 
 ```bash
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/spindrift bun test

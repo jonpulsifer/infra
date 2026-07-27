@@ -33,7 +33,12 @@ import {
   resolveComponentPlacement,
   resolveComponentPlacementInput,
 } from './apps/resolve-placement.ts';
+import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
+import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
+import { createComponent, createComponentInput } from './components/create.ts';
 import { createApp, createAppInput } from './create-app.ts';
+import { createDeploy, createDeployInput } from './deploys/create.ts';
+import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import type * as commands from './index.ts';
 import { connectTarget, connectTargetInput } from './targets/connect.ts';
 import {
@@ -61,6 +66,11 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 /** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
   createApp: { input: createAppInput, handler: createApp },
+  createComponent: { input: createComponentInput, handler: createComponent },
+  uploadArchive: { input: uploadArchiveInput, handler: uploadArchive },
+  dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },
+  createDeploy: { input: createDeployInput, handler: createDeploy },
+  rollbackDeploy: { input: rollbackDeployInput, handler: rollbackDeploy },
   connectTarget: { input: connectTargetInput, handler: connectTarget },
   disconnectTarget: {
     input: disconnectTargetInput,

@@ -16,6 +16,11 @@
  * named commands and arrive with the milestones that implement them.
  */
 export { resolveComponentPlacement } from './apps/resolve-placement.ts';
+export { uploadArchive } from './apps/upload-archive.ts';
+export { dispatchBuild } from './builds/dispatch.ts';
+export { createComponent } from './components/create.ts';
 export { createApp } from './create-app.ts';
+export { createDeploy } from './deploys/create.ts';
+export { rollbackDeploy } from './deploys/rollback.ts';
 export { connectTarget } from './targets/connect.ts';
 export { disconnectTarget } from './targets/disconnect.ts';

@@ -272,6 +272,25 @@ export const builds = pgTable(
      * the join between a source receipt and its provenance document.
      */
     bundleDigest: text('bundle_digest'),
+    /**
+     * Where the staged bundle is fetched from (§15: "fetches the exact commit
+     * once and stages an immutable source bundle for either builder").
+     *
+     * Beside the digest rather than folded into `artifactRefs`: those are
+     * addresses the *artifact* can be pulled by, and a bundle that has not been
+     * built yet has no artifact. Conflating them makes a source upload's
+     * location vanish the moment it is not a supplied artifact.
+     */
+    bundleLocation: text('bundle_location'),
+    /**
+     * §5's named scope for this bundle, after a lone top-level directory has
+     * been unwrapped.
+     *
+     * Per Build rather than per App because the unwrap is a fact about the bytes
+     * that were uploaded, and two uploads to one App may wrap differently. A
+     * repo App keeps its scope on the App, where the developer named it.
+     */
+    bundleSubpath: text('bundle_subpath'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -333,6 +352,25 @@ export const deploys = pgTable('deploys', {
    * reads the two together.
    */
   orphanedAt: timestamp('orphaned_at', { withTimezone: true }),
+  /**
+   * §6: "**Drift is detected and surfaced, never silently corrected** — a
+   * visible state with a one-click re-converge."
+   *
+   * *Visible* is what makes this a column. A loop that noticed drift and only
+   * returned it would surface it to nobody: the UI reads rows, and a fact that
+   * lives for the length of one pass is a fact the screen can never show.
+   * Cleared when what is running matches again, so a drift that somebody fixed
+   * out of band stops being reported without anyone having to dismiss it.
+   */
+  driftedAt: timestamp('drifted_at', { withTimezone: true }),
+  /**
+   * The digest `observe` last reported as actually serving.
+   *
+   * Stored beside the drift flag rather than derived from it because "what is
+   * running instead" is the first question anyone asks, and by the time they
+   * ask, the answer is one poll interval old at best.
+   */
+  observedDigest: text('observed_digest'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
