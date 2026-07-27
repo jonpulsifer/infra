@@ -8,6 +8,12 @@ output "cluster_ca_certs" {
   value       = { for c in local.clusters : c => tls_locally_signed_cert.cluster_ca[c].cert_pem }
 }
 
+output "cluster_ca_private_keys" {
+  description = "Per-cluster FML K8s CA private keys (PEM). Consumed only by scripts/pki/post-rotate.sh, which sops-encrypts each key for its control-plane host."
+  sensitive   = true
+  value       = { for c in local.clusters : c => tls_private_key.cluster_ca[c].private_key_pem }
+}
+
 output "sa_signer_certs" {
   description = "Per-cluster ServiceAccount token signer certificates (PEM)."
   value       = { for c in local.clusters : c => tls_locally_signed_cert.sa_signer[c].cert_pem }
