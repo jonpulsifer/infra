@@ -7,7 +7,10 @@
  * out with it, which is why it is one component in one place rather than a prop
  * threaded through the views.
  */
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { LogOut, Monitor, Moon, Sun } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import type { Principal } from '../commands/types.ts';
+import { readSession, signOut } from './auth-client.ts';
 import {
   DEPLOY_SCENARIO_NAMES,
   DEPLOY_SCENARIOS,
@@ -26,6 +29,7 @@ import { cn } from './ui/utils.ts';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
 import { Workspace } from './views/apps/workspace.tsx';
+import { Gate } from './views/auth/gate.tsx';
 
 const NAV = [
   { path: '/apps', label: 'Apps' },
@@ -33,12 +37,65 @@ const NAV = [
   { path: '/apps/new', label: 'New App' },
 ] as const;
 
+/**
+ * Nobody, somebody, or not asked yet.
+ *
+ * Three states rather than a nullable principal, because the third is real and
+ * short: between mount and the first answer the shell knows nothing, and
+ * rendering the front door during it would flash a sign-in screen at an
+ * operator who is already signed in.
+ */
+type Gatekeeping =
+  | { readonly state: 'asking' }
+  | { readonly state: 'anonymous'; readonly claimed: boolean }
+  | { readonly state: 'signed-in'; readonly principal: Principal };
+
 export function App() {
   const route = useRoute();
+  const [gate, setGate] = useState<Gatekeeping>({ state: 'asking' });
+
+  useEffect(() => {
+    let live = true;
+    readSession()
+      .then(({ principal, claimed }) => {
+        if (!live) return;
+        setGate(
+          principal === null
+            ? { state: 'anonymous', claimed }
+            : { state: 'signed-in', principal },
+        );
+      })
+      .catch(() => {
+        if (live) setGate({ state: 'anonymous', claimed: false });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (gate.state === 'asking') return null;
+
+  if (gate.state === 'anonymous') {
+    return (
+      <Gate
+        claimed={gate.claimed}
+        onSignedIn={(principal) => setGate({ state: 'signed-in', principal })}
+      />
+    );
+  }
 
   return (
     <div className="min-h-dvh">
-      <TopBar path={route.path} onNavigate={route.navigate} />
+      <TopBar
+        path={route.path}
+        onNavigate={route.navigate}
+        principal={gate.principal}
+        onSignOut={() => {
+          void signOut().then(() =>
+            setGate({ state: 'anonymous', claimed: true }),
+          );
+        }}
+      />
       <Screen path={route.path} />
     </div>
   );
@@ -55,9 +112,13 @@ function Screen({ path }: { path: string }) {
 function TopBar({
   path,
   onNavigate,
+  principal,
+  onSignOut,
 }: {
   path: string;
   onNavigate: (path: string) => void;
+  principal: Principal;
+  onSignOut: () => void;
 }) {
   return (
     <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border bg-card px-5 py-3">
@@ -84,6 +145,16 @@ function TopBar({
       </nav>
       <div className="ml-auto flex items-center gap-3">
         <ThemeToggle />
+        <span className="text-sm text-subtle">{principal.displayName}</span>
+        <Button
+          size="icon"
+          variant="ghost"
+          title="Sign out"
+          aria-label="Sign out"
+          onClick={onSignOut}
+        >
+          <LogOut aria-hidden="true" />
+        </Button>
       </div>
     </header>
   );

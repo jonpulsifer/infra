@@ -56,6 +56,26 @@ export const installationManifestSchema = z
      */
     installation: nonEmptyString,
 
+    controlPlane: z
+      .object({
+        /**
+         * Where this control plane's own UI is served.
+         *
+         * Two things read it and both genuinely need it. A passkey is scoped to
+         * a **relying party id**, which is this name, and a ceremony performed
+         * against any other origin is refused (Task 37) — so an installation
+         * that guessed this wrong could enrol nobody. And the status page
+         * (§9) has to tell its own address apart from an App's, which is the
+         * only way one process can serve both.
+         *
+         * It is not derived from `dns.apexZone`: the control plane is a
+         * platform workload (§19) and never one of its own Apps, so it does not
+         * live in the zone Apps are named in.
+         */
+        hostname: zone,
+      })
+      .strict(),
+
     dns: z
       .object({
         /**

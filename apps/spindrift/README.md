@@ -14,7 +14,9 @@ inspected on a loop, and resolved against — asking where a Component can go
 returns an answer with a reason for every Target it cannot. Uploading finished
 output records an artifact without a builder; creating a Deploy writes an intent
 under a locking read; the reconciler claims that intent, applies it through the
-Kubernetes adapter, and records what the platform said.
+Kubernetes adapter, and records what the platform said. The operator claims the
+installation with a passkey and reaches every command through an opaque
+session.
 
 What has no implementation is the Cloud Run and static deploy adapters, every
 real build route, config delivery, and datastores. **The three screens still
@@ -22,11 +24,8 @@ render placeholder data** from `src/web/demo/`, which is scaffolding meant to be
 deleted: the views are typed against `src/web/model.ts`, so the query commands
 that replace it have a contract to meet rather than a shape to guess.
 
-Three named gaps, all deliberate:
+Two named gaps, both deliberate:
 
-- **Nobody can sign in.** Passkey enrolment and sessions are unbuilt, so every
-  command route answers 401. The boundary is complete and rejects everything,
-  rather than carrying a development bypass that would become permanent.
 - **The creation draft is client state**, so a refresh mid-flow loses it. It
   wants a table and a pair of commands, which belong with the App and Component
   commands rather than in front of them.
@@ -102,6 +101,24 @@ command registry** (`src/web/dispatch.ts`): one route per command, built by
 that is not a command. It is unversioned, marked internal, and
 session-authenticated only — never a token, because a token is what turns an
 internal protocol into an API §21 declined to declare.
+
+## Identity
+
+The first visit claims the installation with a WebAuthn passkey and the
+enrolment token from the installation Secret. The token is stored only as a
+hash and is consumed on use. A rotated token is the recovery path: a successful
+ceremony preserves the sole `User`, replaces every local passkey, and revokes
+every local session.
+
+Sign-in creates a random server-side session with a fixed 24-hour lifetime. The
+database holds only its hash; the browser receives the value in a `Secure`,
+`HttpOnly`, `SameSite=Lax` cookie. Sign-out revokes the row as well as clearing
+the cookie.
+
+The optional authenticated-Gateway identity has a storage seam on the stable
+`User`, but no adapter reads identity headers. The deployment has no
+non-bypassable authenticated edge to trust, so local passkeys are the active
+human-authentication path.
 
 ## The command layer
 

@@ -1,5 +1,5 @@
 /**
- * The two view assertions Tasks 39 and 40 name, and the §18 rules around them.
+ * The view assertions Tasks 37, 39, and 40 name, and the rules around them.
  *
  * These are rendered to static markup rather than driven in a browser. That is
  * the right depth for what is being claimed: every rule under test is a
@@ -20,6 +20,7 @@ import {
 import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { Workspace } from '../../src/web/views/apps/workspace.tsx';
+import { Gate } from '../../src/web/views/auth/gate.tsx';
 
 const deploy = (view: DeployView) =>
   renderToStaticMarkup(<DeployDetail view={view} />);
@@ -30,6 +31,21 @@ const workspace = (view: WorkspaceView) =>
 const RED = Object.entries(DEPLOY_SCENARIOS).filter(
   ([, view]) => view.phase === 'FAILED',
 );
+
+describe('the claimed front door', () => {
+  test('offers recovery with a rotated enrolment token', () => {
+    // §"First run and identity" story 4 makes token rotation the whole recovery
+    // procedure. The server already accepts that ceremony; the claimed screen
+    // must expose it, or an operator who lost their passkey has no way to start
+    // the procedure the product promises.
+    const markup = renderToStaticMarkup(
+      <Gate claimed={true} onSignedIn={() => undefined} />,
+    );
+
+    expect(markup).toContain('Recover with a rotated token');
+    expect(markup).toContain('name="recovery-token"');
+  });
+});
 
 describe('the deploy screen, on red', () => {
   test('there is a red state to test', () => {
