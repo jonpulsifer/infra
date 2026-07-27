@@ -21,7 +21,7 @@
   # NixOS's binfmt module takes over the whole binfmt_misc table on
   # activation; without this, adding the aarch64 registration above wipes
   # out WSL2's own .exe interop handler and breaks running Windows binaries
-  # (explorer.exe, code.exe, Docker Desktop, ...) from inside WSL.
+  # (explorer.exe, code.exe, wslc.exe, ...) from inside WSL.
   wsl.interop.register = true;
 
   wsl = {
@@ -29,13 +29,6 @@
     defaultUser = "jawn";
     useWindowsDriver = true;
     ssh-agent.enable = true;
-    # Enable integration with Docker Desktop (needs to be installed separately)
-    docker-desktop.enable = true;
-    # https://github.com/nix-community/NixOS-WSL/issues/1081 Docker Desktop v4.80.0+
-    extraBin = [
-      { src = "${pkgs.coreutils}/bin/install"; }
-      { src = "${pkgs.coreutils}/bin/mv"; }
-    ];
   };
 
   i18n.defaultLocale = "en_US.UTF-8";
@@ -49,8 +42,6 @@
     pkgs.bubblewrap
     # pkgs.pipx
   ];
-
-  programs.nix-ld.enable = true;
 
   programs.zsh.enable = true;
 }
