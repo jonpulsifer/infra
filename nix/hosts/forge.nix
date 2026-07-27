@@ -1,19 +1,8 @@
-# forge: aarch64 build host. The former rackpi5, but now self-booting off
-# its installed NVMe (256 GB Patriot P300) instead of HTTP-booting a signed
-# image from spore. Runs `services.buildHost` (Nix remote builder, docker +
-# buildx for native arm64 OCI, harmonia for a local arm64 binary cache
-# fronted by nginx on the lab VLAN).
+# forge: NVMe-rooted aarch64 build host. Runs `services.buildHost` (Nix remote
+# builder, docker + buildx for native arm64 OCI, and harmonia for a local arm64
+# binary cache fronted by nginx on the lab VLAN).
 #
-# The old rackpi5 native-boot chain stays in place on spore (still
-# publishing, harmless) as a fallback -- spore's role is unchanged.
-#
-# First-boot deployment is a live install over the running rackpi5 RAM
-# image: build the sdImage on spore, dd it to /dev/nvme0n1 on the box
-# itself, set EEPROM BOOT_ORDER=0xf1276, reboot. Boot-order digits are
-# tried right-to-left, so that is NVMe, then HTTP, then network, then SD,
-# then restart the sequence -- it prepends NVMe to the stock 0xf127 order
-# rather than replacing it, leaving the netboot path in place so a failed
-# install falls back to spore's signed image rather than bricking.
+# Spore publishes the signed rackpi5 RAM image used by forge's EEPROM fallback.
 {
   config,
   lib,

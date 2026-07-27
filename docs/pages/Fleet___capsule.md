@@ -10,7 +10,7 @@ gpu:: Broadcom VideoCore VII
 storage:: 256 GB Patriot P300 NVMe
 os:: NixOS 26.05 (Yarara)
 
-- LAN Pi-hole DNS sinkhole, rooted on the NVMe through the retained `NIXOS_DNS`/`FW_DNS` filesystem layout. Config: `nix/hosts/capsule.nix`.
+- LAN CoreDNS sinkhole, rooted on the NVMe through the retained `NIXOS_DNS`/`FW_DNS` filesystem layout. It shares `nix/services/coredns-sinkhole.nix` with [[Fleet/spore]]. Config: `nix/hosts/capsule.nix`.
 - Redundant LAN NTP server paired with [[Fleet/spore]] (`nix/services/ntp-server.nix`). Chrony uses authenticated NTS upstreams (`time.nrc.ca`, `time.chu.nrc.ca`), polls Spore, and serves UDP/123 to routed `10.0.0.0/8` clients. If all upstream time disappears, orphan mode elects one Pi to preserve a common timebase at stratum 10.
 - Verify with `chronyc tracking`, `chronyc sources -v`, and `chronyc authdata`.
-- Reached as `capsule.lolwtf.ca`. Stable role records are `dns.lolwtf.ca` for Pi-hole and `time.lolwtf.ca` for the redundant NTP pair.
+- Reached as `capsule.lolwtf.ca`. `dns.lolwtf.ca` publishes capsule and spore as the resolver pair; `time.lolwtf.ca` publishes the same hosts as the redundant NTP pair.

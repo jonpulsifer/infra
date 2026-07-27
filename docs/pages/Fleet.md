@@ -16,12 +16,12 @@ icon:: 🖥️
 	- Configured in `nix/hosts/`. See [[Architecture/NixOS]] for how they build.
 	- | Host | Purpose | Hardware |
 	  | ---- | ------- | -------- |
-	  | [[Fleet/spore]] | NFS, PXE, signed native-boot and standby DNS | Pi 5 8 GB, NVMe |
-	  | [[Fleet/capsule]] | LAN DNS sinkhole and NTP | Pi 5 8 GB, NVMe |
+	  | [[Fleet/spore]] | NFS, PXE, signed native-boot, DNS and NTP | Pi 5 8 GB, NVMe |
+	  | [[Fleet/capsule]] | DNS sinkhole and NTP | Pi 5 8 GB, NVMe |
 	  | [[Fleet/forge]] | arm64 build host, harmonia cache, OCI builder | Pi 5 8 GB, NVMe |
 	  | [[Fleet/homepi4]] | kiosk | Pi 4B 8 GB, 7" touch display |
 	  | [[Fleet/weatherpi4]] | weather kiosk | Pi 4B 8 GB |
-	  | [[Fleet/cloudpi4]] | utility | Pi 4B 4 GB |
+	  | [[Fleet/cloudpi4]] | utility and CoreDNS canary | Pi 4B 4 GB |
 	  | [[Fleet/radiopi0]] | radio | Pi Zero W |
 	  | [[Fleet/blinkypi0]] | LED display | Pi Zero W |
 	- No Pi in the fleet has TPM hardware; the SBC class does not expose one.
