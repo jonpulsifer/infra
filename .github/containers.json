@@ -8,7 +8,8 @@
     "atlantis",
     "actions-runner",
     "hub",
-    "slingshot"
+    "slingshot",
+    "spindrift"
   ],
   "ignore": [
     "bashcurljq",

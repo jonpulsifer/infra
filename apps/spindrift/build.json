@@ -1,0 +1,15 @@
+[
+  {
+    "image": "spindrift",
+    "context": ".",
+    "file": "apps/spindrift/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "apps/spindrift",
+      "packages/typescript-config",
+      "package.json",
+      "bun.lock",
+      "turbo.json"
+    ]
+  }
+]

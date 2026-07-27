@@ -1,0 +1,35 @@
+{{/*
+§19: "Its chart renders **its own database cluster with a keep policy,
+overridable** — the orphan-tracking objection does not bind at one instance, and
+this is not the refused escape hatch, since it undermines no guarantee about
+Apps."
+
+The keep policy is the load-bearing half. §12 ships no backups deliberately and
+the loss story is reconcile-from-sources — but the desired-state rows, the
+attempt log, and the config version pins are not in any source. So the PVC
+outlives the Cluster: deleting the release must not be the thing that discards
+them.
+*/}}
+{{- if .Values.database.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "spindrift.databaseName" . }}
+  namespace: {{ include "spindrift.namespace" . }}
+  labels:
+    {{- include "spindrift.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.database.instances }}
+  enableSuperuserAccess: false
+  storage:
+    storageClass: {{ .Values.database.storageClass }}
+    size: {{ .Values.database.size }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+      encoding: UTF8
+      localeCollate: C
+      localeCType: C
+      dataChecksums: true
+{{- end }}

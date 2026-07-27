@@ -13,7 +13,7 @@
  *    appear is an entry here pointing at something else.
  *
  * Neither assertion needs a database: the failure paths under test refuse
- * before a handler runs, and the context below proves it by throwing if
+ * before a handler runs, and `unreachableContext` proves it by throwing if
  * anything reaches for the connection.
  */
 import { describe, expect, test } from 'bun:test';
@@ -24,38 +24,9 @@ import {
   dispatch,
   isCommandName,
 } from '../../src/commands/registry.ts';
-import type {
-  AdapterRegistry,
-  CommandContext,
-} from '../../src/commands/types.ts';
-import type { Database } from '../../src/db/client.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import { unreachableContext } from '../harness/context.ts';
 
-/** Reaching for any of these is the failure this file is watching for. */
-function unreachable(what: string): never {
-  throw new Error(`a refused command reached the ${what}`);
-}
-
-const noDatabase = new Proxy(
-  {},
-  {
-    get: () => unreachable('database'),
-  },
-) as Database;
-
-const noAdapters: AdapterRegistry = {
-  deploy: () => unreachable('deploy adapter'),
-  build: () => unreachable('build adapter'),
-  store: () => unreachable('secret store'),
-};
-
-const context: CommandContext = {
-  principal: { id: crypto.randomUUID(), displayName: 'Operator' },
-  clock: { now: () => unreachable('clock') },
-  db: noDatabase,
-  adapters: noAdapters,
-  manifest: await fixtureManifest(),
-};
+const context = await unreachableContext();
 
 /**
  * Every value `src/commands/index.ts` exports. That file's contract is that

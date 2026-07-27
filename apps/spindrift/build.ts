@@ -7,6 +7,7 @@
  */
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import tailwind from 'bun-plugin-tailwind';
 
 const OUT = join(import.meta.dir, 'dist');
 
@@ -20,6 +21,10 @@ const result = await Bun.build({
   target: 'browser',
   minify: production,
   sourcemap: 'linked',
+  // The stylesheet is reached through the HTML entry's `<link>`, so Tailwind
+  // has to compile inside the same graph walk. `bunfig.toml` declares the same
+  // plugin for `Bun.serve`'s HTML import, which is the development path.
+  plugins: [tailwind],
   // React ships a development build unless this is set.
   define: {
     'process.env.NODE_ENV': JSON.stringify(

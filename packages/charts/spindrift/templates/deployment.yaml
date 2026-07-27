@@ -1,0 +1,121 @@
+{{/*
+§19: "One image, two Deployments — `web` (UI, webhooks, log WebSockets) and
+`reconciler` — forced, because the transactional desired-state row assumes a
+loop that owns its own lifecycle."
+
+They are rendered from one template with one difference each — the command and
+the component label — so the two processes cannot drift apart in the things
+that must not differ: the image, the database credential, the manifest, and the
+security context.
+
+The reconciler serves nothing and is therefore given no port and no probe. A
+loop that claims work with `SELECT … FOR UPDATE SKIP LOCKED` has no readiness to
+report, and inventing an endpoint so it could would be inventing the surface §21
+declined to declare.
+*/}}
+{{- $top := . -}}
+{{- $processes := list (dict "name" "web" "command" .Values.command "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true) -}}
+{{- if .Values.reconciler.enabled -}}
+{{- $processes = append $processes (dict "name" "reconciler" "command" .Values.reconciler.command "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false) -}}
+{{- end -}}
+{{- range $process := $processes }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spindrift.fullname" $top }}-{{ $process.name }}
+  namespace: {{ include "spindrift.namespace" $top }}
+  labels:
+    {{- include "spindrift.labels" $top | nindent 4 }}
+    app.kubernetes.io/component: {{ $process.name }}
+  {{- if $top.Values.database.enabled }}
+  annotations:
+    app.kubernetes.io/database: {{ include "spindrift.databaseName" $top }}
+  {{- end }}
+spec:
+  replicas: {{ $process.replicas }}
+  selector:
+    matchLabels:
+      {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "spindrift.labels" $top | nindent 8 }}
+        app.kubernetes.io/component: {{ $process.name }}
+    spec:
+      {{- if $top.Values.sandbox }}
+      runtimeClassName: gvisor
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ $process.name }}
+          image: {{ $top.Values.image }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - {{ $process.command | quote }}
+          {{- if $process.serves }}
+          ports:
+            - containerPort: {{ $top.Values.port }}
+              protocol: TCP
+          {{- end }}
+          env:
+            # readOnlyRootFilesystem below leaves /tmp as the only writable
+            # path, and `Bun.serve` bundles the client at boot.
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+            - name: PORT
+              value: {{ $top.Values.port | quote }}
+            {{- if $top.Values.database.enabled }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "spindrift.databaseName" $top }}-app
+                  key: uri
+            {{- end }}
+            {{- range $top.Values.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          {{- with $top.Values.envFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          {{- if $process.serves }}
+          # No liveness probe, deliberately — the same rule §7 fixes for App
+          # workloads. A liveness probe on a process whose slow path is a
+          # database query restarts it exactly when it is least able to recover.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $top.Values.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml $process.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

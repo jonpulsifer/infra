@@ -1,0 +1,27 @@
+{{/*
+One route, and the client owns everything below it.
+
+`src/web/routes.ts` serves one HTML document, a health probe, and the generated
+command surface; navigation is a hash router. So there is no path matching here
+and there is nothing for a second rule to route to — a path split at the edge
+would be the first place the browser's protocol grew a shape the server does
+not have.
+*/}}
+{{- if and .Values.ingress.enabled .Values.hostname }}
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: {{ include "spindrift.fullname" . }}-http-route
+  namespace: {{ include "spindrift.namespace" . }}
+  labels:
+    {{- include "spindrift.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ include "spindrift.fullname" . }}-gateway
+  hostnames:
+    - {{ .Values.hostname }}
+  rules:
+    - backendRefs:
+        - name: {{ include "spindrift.fullname" . }}
+          port: {{ .Values.port }}
+{{- end }}

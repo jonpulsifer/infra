@@ -1,0 +1,68 @@
+/**
+ * The form atoms: a label, a text input, and the pairing of the two.
+ *
+ * `Field` exists so that no screen writes a label and an input that are not
+ * associated — the `htmlFor`/`id` pair is generated from one `name` prop, so
+ * forgetting it is not a shape this component can be called in.
+ *
+ * `Label` is Radix's rather than a bare `<label>`, which is what shadcn uses
+ * and what the lint rule is asking for. The behaviour worth having is small and
+ * annoying to reproduce: it suppresses the text selection a double-click on a
+ * label otherwise causes, so clicking twice at a field focuses it instead of
+ * highlighting its caption.
+ */
+import { Root as LabelRoot } from '@radix-ui/react-label';
+import type { ComponentProps, ReactNode } from 'react';
+import { cn } from './utils.ts';
+
+export function Label({
+  className,
+  ...props
+}: ComponentProps<typeof LabelRoot>) {
+  return (
+    <LabelRoot
+      className={cn(
+        'text-[11.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function Input({ className, ...props }: ComponentProps<'input'>) {
+  return (
+    <input
+      className={cn(
+        'h-9 w-full rounded-md border border-input bg-background px-3',
+        'font-mono text-sm text-foreground',
+        'placeholder:text-muted-foreground',
+        'disabled:cursor-not-allowed disabled:opacity-60',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function Field({
+  name,
+  label,
+  hint,
+  className,
+  children,
+  ...props
+}: Omit<ComponentProps<'input'>, 'children'> & {
+  name: string;
+  label: string;
+  hint?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={cn('flex flex-col gap-1.5', className)}>
+      <Label htmlFor={name}>{label}</Label>
+      {children ?? <Input id={name} name={name} {...props} />}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}

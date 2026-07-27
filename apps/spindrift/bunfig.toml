@@ -1,0 +1,7 @@
+# `bun run dev` serves `src/web/client/index.html` through `Bun.serve`'s HTML
+# import rather than through `build.ts`, so the Tailwind plugin has to be
+# declared for that path too. `build.ts` passes the same plugin to `Bun.build`;
+# these two lines are what keep the development server and the shipped bundle
+# compiling the one stylesheet the same way.
+[serve.static]
+plugins = ["bun-plugin-tailwind"]

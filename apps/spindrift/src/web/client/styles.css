@@ -1,0 +1,196 @@
+/*
+ * The design tokens, and the only stylesheet.
+ *
+ * The palette is not invented here — it is the one the prototypes in the
+ * effort's `assets/` directory settled, carried over value for value: a
+ * cold-water teal against slate, with a near-black terminal for anything that
+ * is machine output. The three status colours are semantic rather than
+ * decorative, because §6 makes `blame` and phase the two things the deploy
+ * screen exists to say, and a UI that renders them in an arbitrary hue is a UI
+ * that has to explain itself in words.
+ *
+ * Every token is declared twice — once as a raw CSS variable that flips with
+ * the theme, once mapped into Tailwind's namespace by `@theme inline` so
+ * `bg-card` and `text-muted-foreground` resolve to it. The mapping is `inline`
+ * on purpose: the utilities reference the variable rather than copying its
+ * value, which is what lets one attribute on `<html>` re-theme the whole page
+ * with no second stylesheet.
+ *
+ * Theme resolution has three inputs, in increasing precedence: the shipped
+ * default (light), the reader's OS preference, and an explicit choice stamped
+ * on the root as `data-theme`. The explicit choice has to win in **both**
+ * directions — forcing light on a dark OS is as real a request as the reverse —
+ * which is why the OS block excludes `[data-theme="light"]` rather than a
+ * fourth block restating the light values to beat it.
+ */
+
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --ground: #f6f8f9;
+  --surface: #ffffff;
+  --surface-2: #eef2f4;
+  --line: #d5dee1;
+  --line-soft: #e4ebed;
+  --ink: #10191d;
+  --ink-2: #40565e;
+  --ink-3: #6e858e;
+  --accent: #2b8ba0;
+  --accent-soft: #d9edf1;
+  --good: #3d8a60;
+  --good-soft: #dcefe4;
+  --warn: #a97a26;
+  --warn-soft: #f6ebd6;
+  --bad: #b94b3f;
+  --bad-soft: #f8e2df;
+  --terminal: #0e1619;
+  --terminal-ink: #c3d3d8;
+  --terminal-bad: #f0938a;
+  --terminal-dim: #6d838b;
+}
+
+/*
+ * The OS preference, unless an explicit choice overrules it. The
+ * `:not([data-theme='light'])` is what lets the light values live in `:root`
+ * alone: without it, a reader forcing light on a dark OS would need a third
+ * block restating every value a fourth time.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0e1619;
+    --surface: #141f23;
+    --surface-2: #1b282d;
+    --line: #2a3a40;
+    --line-soft: #223036;
+    --ink: #e6eef0;
+    --ink-2: #a3b7bd;
+    --ink-3: #718890;
+    --accent: #5fb8c9;
+    --accent-soft: #17323a;
+    --good: #5eb083;
+    --good-soft: #163024;
+    --warn: #d0a052;
+    --warn-soft: #322614;
+    --bad: #d97668;
+    --bad-soft: #351e1b;
+    --terminal: #0a1113;
+    --terminal-ink: #b6c8ce;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0e1619;
+  --surface: #141f23;
+  --surface-2: #1b282d;
+  --line: #2a3a40;
+  --line-soft: #223036;
+  --ink: #e6eef0;
+  --ink-2: #a3b7bd;
+  --ink-3: #718890;
+  --accent: #5fb8c9;
+  --accent-soft: #17323a;
+  --good: #5eb083;
+  --good-soft: #163024;
+  --warn: #d0a052;
+  --warn-soft: #322614;
+  --bad: #d97668;
+  --bad-soft: #351e1b;
+  --terminal: #0a1113;
+  --terminal-ink: #b6c8ce;
+}
+
+@theme inline {
+  --color-background: var(--ground);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--ground);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--ink-3);
+  --color-subtle: var(--ink-2);
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--accent);
+  --color-border: var(--line);
+  --color-border-soft: var(--line-soft);
+  --color-input: var(--line);
+  --color-ring: var(--accent);
+
+  --color-success: var(--good);
+  --color-success-soft: var(--good-soft);
+  --color-warning: var(--warn);
+  --color-warning-soft: var(--warn-soft);
+  --color-destructive: var(--bad);
+  --color-destructive-soft: var(--bad-soft);
+
+  --color-terminal: var(--terminal);
+  --color-terminal-foreground: var(--terminal-ink);
+  --color-terminal-destructive: var(--terminal-bad);
+  --color-terminal-muted: var(--terminal-dim);
+
+  --radius-sm: 4px;
+  --radius-md: 5px;
+  --radius-lg: 7px;
+
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * Machine output is tabular by nature — digests, durations, replica counts.
+   * Proportional digits make a column of them jitter as it streams, which reads
+   * as movement that means nothing.
+   */
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * Reduced motion is handled at the one place that moves — the pulsing status
+ * dot, which declares `motion-safe:animate-pulse` — rather than by a blanket
+ * `!important` reset here.
+ *
+ * The reset is the usual pattern and it is the wrong one for this app. It
+ * cancels animation by overriding every rule that could declare it, which means
+ * a future component cannot opt back in for something a reader genuinely needs
+ * to see move. Tailwind's `motion-safe` variant compiles the media query into
+ * the utility itself, so the preference is respected at the declaration and
+ * nothing has to be beaten into submission.
+ */

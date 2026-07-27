@@ -1,27 +1,18 @@
 /**
- * The `web` process (§19) — UI, webhooks, and log WebSockets. Today it is a
- * scaffold: it validates the installation manifest at boot and serves the
- * client bundle.
+ * The `web` process (§19) — UI, webhooks, and log WebSockets. Production entry.
  *
- * It deliberately serves no route but the UI and a health probe. Every act the
- * browser performs will reach one dispatch endpoint generated from the command
- * registry; the first hand-authored route is the drift that turns an internal
- * protocol into the API §21 declined to declare.
+ * It serves a client that was built into the image and **imports nothing from
+ * the bundler**. That is the whole difference from `dev.ts`, and it is what
+ * keeps `tailwindcss`, `bun-plugin-tailwind`, and the rest of the compile-time
+ * toolchain out of the runtime: an HTML import anywhere in this module's graph
+ * would pull them back in whether or not a request ever reached one.
  *
  * `reconciler`, the second Deployment off the same image, does not exist yet.
  */
-import { loadManifest } from '../config/manifest.ts';
-import index from './client/index.html';
+import { join } from 'node:path';
+import { bundleRoutes } from './bundle.ts';
+import { start } from './serve.ts';
 
-const manifest = await loadManifest();
+const DIST = join(import.meta.dir, '../../dist');
 
-const server = Bun.serve({
-  port: Number(Bun.env.PORT ?? 3000),
-  development: Bun.env.NODE_ENV !== 'production',
-  routes: {
-    '/': index,
-    '/healthz': new Response('ok\n'),
-  },
-});
-
-console.log(`spindrift web → ${server.url} (${manifest.installation})`);
+await start(await bundleRoutes(DIST), { development: false });

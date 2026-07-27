@@ -1,0 +1,87 @@
+# The installer chart's values (Task 41, §19, §20).
+#
+# §20 line 3: "everything naming this installation is a value in the
+# installation manifest; a literal outside it is a bug." This file holds no
+# installation name at all — not a zone, not a project, not a cluster. The one
+# installation-shaped value a release supplies is `hostname`, which is where
+# *this control plane* is served, and it is empty here.
+#
+# The installation manifest itself does not appear as chart values either. It
+# reaches the process through `envFromSecret` as `SPINDRIFT_MANIFEST`, because
+# it carries a GitHub App id and this repository is public — the same reason
+# Atlantis keeps its app id in a SOPS Secret rather than in a HelmRelease.
+
+image: ""
+
+# Where the control plane's own UI is served. Empty renders no Gateway and no
+# HTTPRoute, which is a valid installation — the UI is then reachable only
+# in-cluster.
+hostname: ""
+
+# §19: "One image, two Deployments." The reconciler is the second entrypoint off
+# the same image and does not exist yet, so it is off by default rather than
+# rendered as a Deployment that would crash-loop on a missing module.
+web:
+  replicas: 1
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+reconciler:
+  enabled: false
+  replicas: 1
+  command: "bun run src/reconciler/main.ts"
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+port: 3000
+command: "bun run src/web/server.ts"
+
+# gVisor is available on some nodes and not others; a release that wants it says
+# so rather than the chart assuming a runtime class exists.
+sandbox: false
+
+# The Secret carrying `SPINDRIFT_MANIFEST` and, later, the enrolment token and
+# repository credentials (Task 42). Required in practice: the process refuses to
+# boot without a manifest, which is the §20 discipline working as intended.
+envFromSecret: ""
+
+env: []
+
+# §19: "Its chart renders its own database cluster with a keep policy,
+# overridable." Off by default so the chart can be installed without CNPG; the
+# offsite release turns it on.
+database:
+  enabled: false
+  instances: 1
+  size: 2Gi
+  name: spindrift
+  storageClass: local-path
+  # There is no migration runner to point this at.
+  #
+  # `src/db/migrate.ts` exports `applyMigrations` and has no main, deliberately:
+  # "production never calls this at runtime... a running process mutating its
+  # own schema on boot is the same shape of mistake as a process mutating live
+  # infrastructure. Migrations are applied as an out-of-band operator act."
+  #
+  # The Job template is kept because that decision is about *this* installation
+  # applying its own schema on boot, not about the shape being wrong forever —
+  # but enabling it today would render a Job that exits 0 having done nothing,
+  # which is worse than not having one.
+  migration:
+    enabled: false
+    command: ""
+
+ingress:
+  enabled: true
+  clusterIssuer: letsencrypt-production
+  gatewayClassName: cilium
