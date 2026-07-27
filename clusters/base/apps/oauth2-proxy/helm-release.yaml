@@ -1,0 +1,115 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: oauth2-proxy
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: oauth2-proxy
+      version: 10.7.0
+      sourceRef:
+        kind: HelmRepository
+        name: oauth2-proxy
+      interval: 10m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    config:
+      existingSecret: oauth2-proxy
+      cookieName: __Secure-oauth2_proxy
+      emailDomains:
+        - "*"
+      upstreams:
+        - static://200
+
+    extraArgs:
+      provider: github
+      github-user: jonpulsifer
+      scope: user:email
+      reverse-proxy: "true"
+      trusted-proxy-ip: ${K8S_NODE_CIDR}
+      redirect-url: https://oauth2.${SECRET_DOMAIN}/oauth2/callback
+      whitelist-domain: .${SECRET_DOMAIN}
+      cookie-domain: .${SECRET_DOMAIN}
+      cookie-httponly: "true"
+      cookie-secure: "true"
+      cookie-samesite: lax
+      set-xauthrequest: "true"
+      skip-provider-button: "true"
+      ping-path: ""
+      ready-path: ""
+
+    replicaCount: 2
+    enableServiceLinks: false
+
+    podAnnotations:
+      secret.reloader.stakater.com/reload: oauth2-proxy
+
+    serviceAccount:
+      enabled: true
+      automountServiceAccountToken: false
+
+    livenessProbe:
+      enabled: false
+
+    readinessProbe:
+      enabled: false
+
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+      maxUnavailable: null
+
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/instance: oauth2-proxy
+                  app.kubernetes.io/name: oauth2-proxy
+
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              version: v1
+              kind: Deployment
+              name: oauth2-proxy
+            patch: |-
+              - op: add
+                path: /spec/template/spec/containers/0/livenessProbe
+                value:
+                  tcpSocket:
+                    port: http
+                  initialDelaySeconds: 0
+                  periodSeconds: 10
+                  timeoutSeconds: 1
+                  failureThreshold: 5
+              - op: add
+                path: /spec/template/spec/containers/0/readinessProbe
+                value:
+                  tcpSocket:
+                    port: http
+                  initialDelaySeconds: 0
+                  periodSeconds: 10
+                  timeoutSeconds: 1
+                  failureThreshold: 3
