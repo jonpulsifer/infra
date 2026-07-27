@@ -24,6 +24,8 @@ resource "google_compute_global_address" "private_services" {
 }
 
 resource "google_service_networking_connection" "private_services" {
+  provider = google.bluenose_quota
+
   network                 = google_compute_network.vessel.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_services.name]

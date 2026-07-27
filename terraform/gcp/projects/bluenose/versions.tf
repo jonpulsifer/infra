@@ -27,6 +27,18 @@ provider "google-beta" {
   impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
 }
 
+# Service Networking otherwise charges its API request to the project that
+# owns the impersonated service account, even though the consumer network and
+# enabled API both belong to this vessel.
+provider "google" {
+  alias                       = "bluenose_quota"
+  project                     = local.project
+  region                      = local.region
+  impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
+  user_project_override       = true
+  billing_project             = local.project
+}
+
 terraform {
   backend "gcs" {
     bucket                      = "homelab-ng"
