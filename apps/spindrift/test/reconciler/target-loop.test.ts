@@ -21,6 +21,7 @@ import type {
 } from '../../src/commands/types.ts';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import { apps, components, targets } from '../../src/db/schema.ts';
+import { PREREQUISITES } from '../../src/domain/capabilities.ts';
 import {
   refreshAllTargets,
   refreshTarget,
@@ -28,7 +29,11 @@ import {
 } from '../../src/reconciler/target-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  clusterInput,
+  fixtureManifest,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -99,7 +104,7 @@ describe('one pass over every connected Target', () => {
     expect(refresh?.health).toBe('healthy');
     const row = await targetRow('cluster');
     expect(row.discovery?.arch).toEqual(['amd64', 'arm64']);
-    expect(row.prerequisites).toHaveLength(5);
+    expect(row.prerequisites).toHaveLength(PREREQUISITES.length);
     expect(row.inspectedAt).toEqual(clock.now());
     expect(of('kubernetes').inspected.map((t) => t.name)).toEqual(['cluster']);
   });
@@ -175,14 +180,7 @@ describe('a capability flip changes candidacy on the next pass', () => {
     const clock = ticking();
     const ctx = () => context(registry, clock);
 
-    await connectTarget(
-      {
-        kind: 'kubernetes',
-        name: 'cluster',
-        apiServer: 'https://cluster.example.test',
-      },
-      ctx(),
-    );
+    await connectTarget(clusterInput({ name: 'cluster' }), ctx());
 
     const [app] = await database()
       .db.insert(apps)

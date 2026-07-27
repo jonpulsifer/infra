@@ -1,0 +1,48 @@
+{{/*
+A job **always** renders a CronJob, suspended when unscheduled (§7).
+
+Two facts force it: a Job's template is immutable, so a chart rendering one
+cannot be upgraded — and Helm then prunes the old Job on the next upgrade,
+which would silently cut an N-deep execution history to one. A CronJob owns its
+executions, so a scheduled run and a manual run are the same object with a
+field flipped, and `apply` for a job becomes two acts rather than two objects.
+*/}}
+{{- if eq .Values.app.kind "job" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "spindrift-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spindrift-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+spec:
+  # An unscheduled job is a suspended CronJob, not an absent one — the object
+  # has to exist for a manual run to have something to trigger.
+  suspend: {{ not .Values.app.schedule }}
+  # A date that never occurs, so an unscheduled job cannot fire even if
+  # something un-suspends it. Suspension is the mechanism; this is the belt.
+  schedule: {{ default "0 0 31 2 *" .Values.app.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 10
+  failedJobsHistoryLimit: 10
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "spindrift-app.labels" . | nindent 8 }}
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            {{- include "spindrift-app.podLabels" . | nindent 12 }}
+          annotations:
+            {{- include "spindrift-app.contractAnnotations" . | nindent 12 }}
+            {{- with .Values.shared.podAnnotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          {{- include "spindrift-app.podSpec" . | nindent 10 }}
+{{- end }}

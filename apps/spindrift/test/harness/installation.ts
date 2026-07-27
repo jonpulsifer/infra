@@ -14,6 +14,8 @@
  * ranks silently deciding what a healthy Target looks like.
  */
 import { join } from 'node:path';
+import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
+import type { ConnectTargetInput } from '../../src/commands/targets/connect.ts';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
   type InstallationManifest,
@@ -34,11 +36,52 @@ export async function fixtureManifest(): Promise<InstallationManifest> {
   return cached;
 }
 
+/**
+ * The connect input a cluster takes, with anything a test cares about
+ * overridden.
+ *
+ * A Kubernetes Target carries more than an endpoint — §6 makes the delivery
+ * flavour a Target's own declaration, and the App chart's source is a
+ * prerequisite until the OCI swap — and none of it has a default (§20). So the
+ * shape lives here once rather than in every test that connects a cluster and
+ * does not care which operator it runs.
+ */
+export function clusterInput(
+  overrides: Partial<KubernetesConnectInput> = {},
+): KubernetesConnectInput {
+  return {
+    kind: 'kubernetes',
+    name: 'cluster',
+    apiServer: 'https://cluster.example.test',
+    namespace: 'apps',
+    delivery: {
+      flavour: 'flux-helmrelease',
+      namespace: 'apps',
+      sourceRef: { name: 'charts', namespace: 'delivery' },
+    },
+    chartContract: VALUES_CONTRACT,
+    ...overrides,
+  };
+}
+
+/** The kubernetes arm of `connectTargetInput`. */
+export type KubernetesConnectInput = Extract<
+  ConnectTargetInput,
+  { kind: 'kubernetes' }
+>;
+
 /** A connection of the shape one adapter type needs. */
 export function connectionFor(adapter: TargetAdapter): TargetConnection {
   switch (adapter) {
-    case 'kubernetes':
-      return { adapter, apiServer: 'https://cluster.example.test' };
+    case 'kubernetes': {
+      const input = clusterInput();
+      return {
+        adapter,
+        apiServer: input.apiServer,
+        namespace: input.namespace,
+        delivery: input.delivery,
+      };
+    }
     case 'cloudrun':
       return { adapter, project: 'example-vessel', region: 'somewhere' };
     case 'static':

@@ -7,14 +7,15 @@ adapts to whatever builds and delivers underneath — a Kubernetes cluster, Clou
 Run, or static hosting. The design lives in `.agent/plans/spindrift/spec.md`
 (private) and is referenced from the source as `§N`.
 
-**Targets are real, the screens are drawn, nothing deploys yet.** The five nouns
-have tables, the three adapter contracts are written, and commands are the only
-way anything is acted on. Targets can be connected, inspected on a loop, and
-resolved against — asking where a Component can go returns an answer with a
-reason for every Target it cannot. The two secret stores are implemented.
+**Targets are real, the screens are drawn, and Kubernetes delivery works at the
+adapter seam.** The five nouns have tables, the three adapter contracts are
+written, and commands are the only way anything is acted on. Targets can be
+connected, inspected on a loop, and resolved against — asking where a Component
+can go returns an answer with a reason for every Target it cannot. The two
+secret stores and the Kubernetes deploy adapter are implemented.
 
-What has no implementation is every *deploy* adapter — no real cluster, cloud
-runtime, static host, or build route is spoken to — so a Deploy row is still
+What has no implementation is the command that creates a Deploy, the Cloud Run
+and static deploy adapters, and every build route, so a Deploy row is still
 something nothing writes. **The three screens therefore render placeholder
 data** from `src/web/demo/`, which is scaffolding meant to be deleted: the views
 are typed against `src/web/model.ts`, so the query commands that replace it have
@@ -39,7 +40,7 @@ One image, two processes (§19); only `web` exists so far.
 | `src/db/` | the Drizzle schema, the connection, and the committed migrations |
 | `src/commands/` | the application command layer and its registry |
 | `src/domain/` | `DesiredState`, the attempt log, Targets, capabilities, placement |
-| `src/adapters/` | the deploy, build, and store contracts, plus the two stores |
+| `src/adapters/` | the adapter contracts, Kubernetes delivery, and the two stores |
 | `src/reconciler/` | the loop that refreshes Target health and capabilities |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |
@@ -129,10 +130,31 @@ fails later.
 ## Testing
 
 Tests run against a real Postgres — the concurrency design is a claim about
-transactions, and a fake cannot falsify it. `DATABASE_URL` must point at one:
+transactions, and a fake cannot falsify it. Use `wslc.exe` for service
+containers on WSL and `docker` on macOS:
 
 ```bash
-DATABASE_URL=postgres://postgres@127.0.0.1:5432/spindrift bun test
+## WSL
+wslc.exe run --detach --name spindrift-postgres \
+  --env POSTGRES_USER=postgres \
+  --env POSTGRES_PASSWORD=postgres \
+  --env POSTGRES_DB=spindrift \
+  --publish 127.0.0.1:5432:5432 \
+  postgres:18-alpine
+
+## macOS
+docker run --detach --name spindrift-postgres \
+  --env POSTGRES_USER=postgres \
+  --env POSTGRES_PASSWORD=postgres \
+  --env POSTGRES_DB=spindrift \
+  --publish 127.0.0.1:5432:5432 \
+  postgres:18-alpine
+```
+
+Point `DATABASE_URL` at that container:
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/spindrift bun test
 ```
 
 `test/harness/db.ts` gives every test its own migrated Postgres schema, so tests

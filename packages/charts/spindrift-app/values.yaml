@@ -1,0 +1,105 @@
+# The App chart's values (§7).
+#
+# Three value classes, not two: some keys are written by both the operator and
+# Spindrift, so a disjointness rule would reject a correct config. The classes
+# are the three top-level keys below, and the boundary between them is enforced
+# where a Target's chart-values are saved — not here, because a chart cannot
+# know who set a value.
+#
+#   app.*       Spindrift writes. Never an operator's to set.
+#   platform.*  The operator writes, per Target. Spindrift never renders into it.
+#   shared.*    Either may write. Spindrift's value wins where both do.
+#
+# Everything a Component is, is a value. `website` is not a template branch —
+# it is a service with `expose` forced and a fixed port (§7).
+
+# --- Spindrift's class ------------------------------------------------------
+app:
+  # The App and Component this release runs. Both appear in selector labels, so
+  # neither is changeable in place — a rename is a new release.
+  name: ""
+  component: ""
+
+  # service | website | job. `job` is the one branch: it renders a CronJob
+  # rather than a Deployment (§7).
+  kind: service
+
+  # Digest-pinned image reference. §16 correlates on digest everywhere, so a
+  # tag here would break the join between what was signed and what runs.
+  image: ""
+
+  # The port this non-job Component listens on. Spindrift supplies the fixed
+  # website port as this value, leaving `job` as the only chart branch.
+  port: 8080
+
+  # Whether this non-job Component serves traffic. Spindrift forces this on
+  # when it normalizes a website; an unexposed service is a queue worker (§2).
+  expose: true
+
+  # internal | private | public (§9). The chart renders a route for a Component
+  # that is exposed and not `internal`; the authenticated edge in front of that
+  # route is the Target's, never this chart's.
+  exposure: private
+
+  # Job only. Empty renders a suspended CronJob — a job always renders one, so
+  # a manual run and a scheduled run are one object with a field flipped (§7).
+  schedule: ""
+
+  # The Deploy this release came from. Rendered onto the pod template and
+  # **never** into a selector, which is immutable and would brick every
+  # upgrade (§7).
+  deployId: ""
+
+  # What is running here, as a digest. Kept on the delivery object so observe
+  # can report drift against core's desired state (§6).
+  artifactDigest: ""
+
+  # Hostnames the route answers on: the canonical name first, the vanity name
+  # after it where one exists (§9).
+  hostnames: []
+
+  # Plain environment. §10 keeps no secret/non-secret classification; a value
+  # that is a secret arrives through `secretEnv` as a reference, never here.
+  env: []
+  # [{ name, secretName, key }] — one secret per variable, not a blob (§10).
+  # Delivered by the platform's own secret machinery; the chart only names it.
+  secretEnv: []
+
+  # Entrypoint overrides. Empty means the image's own.
+  command: []
+  args: []
+
+# --- The operator's class ---------------------------------------------------
+platform:
+  # Sandbox runtime class, defaulting to unset (§7).
+  runtimeClassName: ""
+
+  imagePullSecrets: []
+
+  # The shared gateway routes attach to. No Gateway and no certificate are
+  # rendered here — routes attach to the existing HTTP listener (§7, §9).
+  gateway:
+    name: ""
+    namespace: ""
+
+  networkPolicy:
+    # Ingress is default-deny with a fixed exception list whose **names are
+    # Target configuration while the shape is fixed** (§8). Same-namespace
+    # siblings are always allowed; these are the namespaces outside it.
+    allowedNamespaces: []
+
+# --- Written by both --------------------------------------------------------
+shared:
+  # The operator sets a Target's defaults; Spindrift overrides them per
+  # Component. Both are legitimate authors of the same key, which is the whole
+  # reason this class exists.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+  podAnnotations: {}
+  podLabels: {}

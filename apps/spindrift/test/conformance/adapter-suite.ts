@@ -31,6 +31,7 @@ import type {
   ArtifactType,
   DesiredState,
 } from '../../src/domain/desired-state.ts';
+import { connectionFor } from '../harness/installation.ts';
 
 /** Names the suite has been run over, collected as the suites declare them. */
 const enrolled = {
@@ -45,11 +46,19 @@ export function desiredState(
   digest = 'sha256:conformance',
 ): DesiredState {
   return {
+    deploy: 'conformance-deploy',
     app: 'conformance',
     component: 'web',
     target: 'target',
     kind: artifactType === 'files' ? 'website' : 'service',
-    artifact: { type: artifactType, digest, refs: [] },
+    // A real address, because an adapter that has to pull one cannot place
+    // anything without it — and "the artifact carries no address" is a core
+    // bug, not a shape the contract's own suite should exercise.
+    artifact: {
+      type: artifactType,
+      digest,
+      refs: [`registry.example.test/conformance@${digest}`],
+    },
     exposure: 'private',
     config: [],
     requirements: {
@@ -88,7 +97,12 @@ export function deployAdapterSuite(
   enrolled.deploy.add(label);
 
   describe(`deploy contract: ${label}`, () => {
-    const target: DeployTarget = { name: 'target', adapter: make().adapter };
+    const adapter = make().adapter;
+    const target: DeployTarget = {
+      name: 'target',
+      adapter,
+      connection: connectionFor(adapter),
+    };
 
     test('declares at least one artifact type it accepts', () => {
       expect(make().artifactTypes.length).toBeGreaterThan(0);
@@ -296,7 +310,7 @@ export function storeAdapterSuite(
  * inferred from a directory listing that would silently agree with itself.
  */
 export const ADAPTERS = {
-  deploy: ['fake'],
+  deploy: ['fake', 'kubernetes'],
   build: ['fake'],
   store: [
     'fake native',

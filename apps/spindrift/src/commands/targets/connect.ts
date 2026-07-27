@@ -26,6 +26,7 @@
  */
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { operatorValuesIssues } from '../../adapters/deploy/kubernetes/values.ts';
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { deploys, targets } from '../../db/schema.ts';
 import {
@@ -33,12 +34,13 @@ import {
   type PrerequisiteResult,
 } from '../../domain/capabilities.ts';
 import {
+  type DeployTargetRef,
   type TargetConnection,
   type TargetHealth,
   targetNames,
 } from '../../domain/target.ts';
 import { inspectTarget } from '../../reconciler/target-loop.ts';
-import { type Command, type CommandContext, ok } from '../types.ts';
+import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
 /** A stable identifier, unique within the installation (§13). */
 const targetName = z
@@ -51,6 +53,39 @@ const targetName = z
     'must be lowercase letters, digits and hyphens',
   );
 
+/**
+ * The delivery flavour a Kubernetes Target declares (§6).
+ *
+ * Required, with no default: an installation-wide default would be a guess
+ * about somebody else's cluster, and §20 puts every such value in the manifest
+ * or in the operator's hands rather than in a literal.
+ */
+const kubernetesDelivery = z.discriminatedUnion('flavour', [
+  z
+    .object({
+      flavour: z.literal('flux-helmrelease'),
+      namespace: z.string().trim().min(1),
+      /** The `GitRepository` the App chart is fetched from (Milestone 3). */
+      sourceRef: z
+        .object({
+          name: z.string().trim().min(1),
+          namespace: z.string().trim().min(1),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      flavour: z.literal('argo-application'),
+      namespace: z.string().trim().min(1),
+      project: z.string().trim().min(1),
+      repoUrl: z.string().trim().min(1),
+      revision: z.string().trim().min(1),
+      server: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
 export const connectTargetInput = z.discriminatedUnion('kind', [
   z
     .object({
@@ -58,6 +93,16 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       name: targetName,
       /** §13's prerequisite is OIDC against this, not a credential for it. */
       apiServer: z.url(),
+      /** Where an App's workloads land. Never created by Spindrift (§7). */
+      namespace: z.string().trim().min(1),
+      delivery: kubernetesDelivery,
+      /** §33's static reachability input, and §3's stated capabilities. */
+      servedHosts: z.array(z.string().trim().min(1)).optional(),
+      reachableRegistries: z.array(z.string().trim().min(1)).optional(),
+      logHistorySeconds: z.number().int().nonnegative().optional(),
+      /** §7's per-Target chart-values field, and what the pin declares. */
+      chartValues: z.record(z.string(), z.unknown()).optional(),
+      chartContract: z.string().trim().min(1).optional(),
     })
     .strict(),
   z
@@ -100,7 +145,27 @@ function connectionFor(
     if (input.kind !== 'kubernetes') {
       throw new Error('a cloud project does not register a cluster Target');
     }
-    return { adapter, apiServer: input.apiServer };
+    return {
+      adapter,
+      apiServer: input.apiServer,
+      namespace: input.namespace,
+      delivery: input.delivery,
+      ...(input.servedHosts === undefined
+        ? {}
+        : { servedHosts: input.servedHosts }),
+      ...(input.reachableRegistries === undefined
+        ? {}
+        : { reachableRegistries: input.reachableRegistries }),
+      ...(input.logHistorySeconds === undefined
+        ? {}
+        : { logHistorySeconds: input.logHistorySeconds }),
+      ...(input.chartValues === undefined
+        ? {}
+        : { chartValues: input.chartValues }),
+      ...(input.chartContract === undefined
+        ? {}
+        : { chartContract: input.chartContract }),
+    };
   }
   if (input.kind !== 'cloud') {
     throw new Error('a cluster does not register a cloud Target');
@@ -114,6 +179,24 @@ export const connectTarget: Command<
   ConnectTargetInput,
   ConnectTargetResult
 > = async (input, context) => {
+  // §7: the boundary between the value classes is "enforced at save time".
+  // This is that time — the operator who typed these is still here to be told
+  // which key was not theirs, which is not true of the deploy that would
+  // otherwise discover it.
+  if (input.kind === 'kubernetes') {
+    const issues = operatorValuesIssues(input.chartValues);
+    if (issues.length > 0) {
+      return failed(
+        'INVALID_INPUT',
+        'these chart values are not an operator’s to set',
+        issues.map((issue) => ({
+          path: `chartValues.${issue.path}`,
+          message: issue.message,
+        })),
+      );
+    }
+  }
+
   const now = context.clock.now();
   const registered: ConnectedTarget[] = [];
   const readopted: string[] = [];
@@ -123,15 +206,15 @@ export const connectTarget: Command<
       await context.db.select().from(targets).where(eq(targets.name, name))
     )[0];
 
+    const connection = connectionFor(input, adapter);
     // One pass of the same loop §13 runs on a schedule — not a second notion of
     // what "healthy" means that happens to run at connect time.
-    const { prerequisites, discovery } = await inspectTarget(
-      context,
+    const { prerequisites, discovery } = await inspectTarget(context, {
       name,
       adapter,
-    );
+      connection,
+    });
     const health = deriveHealth(prerequisites);
-    const connection = connectionFor(input, adapter);
 
     if (existing === undefined) {
       // §13: "Rank is one global ordered list." A new Target joins the end of
@@ -182,7 +265,12 @@ export const connectTarget: Command<
 
     if (existing.status === 'disconnected') {
       readopted.push(
-        ...(await readopt(context, existing.id, name, adapter, now)),
+        ...(await readopt(
+          context,
+          existing.id,
+          { name, adapter, connection },
+          now,
+        )),
       );
     }
 
@@ -210,11 +298,10 @@ export const connectTarget: Command<
 async function readopt(
   context: CommandContext,
   targetId: string,
-  name: string,
-  adapter: TargetAdapter,
+  target: DeployTargetRef,
   now: Date,
 ): Promise<string[]> {
-  const deployAdapter = context.adapters.deploy(adapter);
+  const deployAdapter = context.adapters.deploy(target.adapter);
   if (deployAdapter === null) return [];
 
   const stranded = await context.db
@@ -232,7 +319,7 @@ async function readopt(
   for (const deploy of stranded) {
     let observed: Awaited<ReturnType<typeof deployAdapter.observe>>;
     try {
-      observed = await deployAdapter.observe({ name, adapter }, deploy.ref!);
+      observed = await deployAdapter.observe(target, deploy.ref!);
     } catch {
       // Connect still succeeds. An adapter that cannot answer leaves the
       // Deploy stranded, which is the honest state — not an error to raise.

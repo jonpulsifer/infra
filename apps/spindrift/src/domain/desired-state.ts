@@ -125,6 +125,8 @@ export interface Hostname {
  * §7's chart takes the same flat values.
  */
 export interface DesiredState {
+  /** The Deploy placing this state, used to trace controller-created pods (§7). */
+  deploy: string;
   /** The App this Component belongs to. */
   app: string;
   /** The Component being deployed. */

@@ -21,6 +21,7 @@
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import type { TargetInspection } from '../../domain/capabilities.ts';
 import type { ArtifactType, DesiredState } from '../../domain/desired-state.ts';
+import type { TargetConnection } from '../../domain/target.ts';
 
 /**
  * What the verbs need to name a Target. The Target model (§13) carries
@@ -33,6 +34,20 @@ export interface DeployTarget {
   readonly name: string;
   /** Exactly one adapter type per Target (§13). */
   readonly adapter: TargetAdapter;
+  /**
+   * How this Target is reached, in its adapter's own terms (§13).
+   *
+   * One adapter instance serves every Target of its type, so the connection
+   * travels with the call rather than with the construction. The alternative —
+   * an adapter per Target held in the registry — would make the registry a
+   * factory over live connection state, and would still have to be rebuilt
+   * whenever an operator reconnected one.
+   *
+   * **Never a credential** (§13: "one auth mode — native OIDC federation,
+   * nothing stored"). What authorizes a call is minted per request by whatever
+   * federates, and is injected when the adapter is constructed.
+   */
+  readonly connection: TargetConnection;
 }
 
 /**

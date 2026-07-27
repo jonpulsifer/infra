@@ -1,0 +1,20 @@
+{{- if include "spindrift-app.serving" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spindrift-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spindrift-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "spindrift-app.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ include "spindrift-app.port" . }}
+      targetPort: http
+{{- end }}

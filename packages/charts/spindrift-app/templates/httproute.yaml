@@ -1,0 +1,35 @@
+{{/*
+The route onto the shared gateway's **existing HTTP listener** (§9).
+
+Three things this deliberately is not: it is not a Gateway, not a certificate,
+and not a cross-namespace grant — all three are vessel, and §7 excludes them
+from the release because a `destroy()` that could take the gateway with it is
+not a `destroy()` anybody can run.
+
+An `internal` Component has no route at all. §9 makes internal Target-private,
+authenticated at the workload boundary, and a route onto the shared gateway is
+exactly the alternate origin a non-public state may not leave open.
+*/}}
+{{- if and (include "spindrift-app.serving" .) (ne .Values.app.exposure "internal") }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "spindrift-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spindrift-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.platform.gateway.name }}
+      namespace: {{ .Values.platform.gateway.namespace }}
+  hostnames:
+    {{- range .Values.app.hostnames }}
+    - {{ . | quote }}
+    {{- end }}
+  rules:
+    - backendRefs:
+        - name: {{ include "spindrift-app.fullname" . }}
+          port: {{ include "spindrift-app.port" . }}
+{{- end }}

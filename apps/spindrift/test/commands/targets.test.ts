@@ -39,7 +39,11 @@ import {
   FakeDeployAdapter,
   type FakeDeployAdapterOptions,
 } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import {
+  clusterInput,
+  connectionFor,
+  fixtureManifest,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -136,11 +140,7 @@ describe('connect always succeeds', () => {
   test('a reachable cluster is registered healthy, at the end of the rank', async () => {
     const { registry, of } = fakes();
     const result = await connectTarget(
-      {
-        kind: 'kubernetes',
-        name: 'cluster',
-        apiServer: 'https://cluster.example.test',
-      },
+      clusterInput({ name: 'cluster' }),
       context(registry),
     );
 
@@ -150,10 +150,7 @@ describe('connect always succeeds', () => {
     expect(row?.rank).toBe(0);
     expect(row?.status).toBe('connected');
     expect(row?.inspectedAt).toEqual(FROZEN);
-    expect(row?.connection).toEqual({
-      adapter: 'kubernetes',
-      apiServer: 'https://cluster.example.test',
-    });
+    expect(row?.connection).toEqual(connectionFor('kubernetes'));
     expect(of('kubernetes').inspected).toHaveLength(1);
   });
 
@@ -162,11 +159,7 @@ describe('connect always succeeds', () => {
       kubernetes: { unreachable: 'dial tcp: no route to host' },
     });
     const result = await connectTarget(
-      {
-        kind: 'kubernetes',
-        name: 'cluster',
-        apiServer: 'https://cluster.example.test',
-      },
+      clusterInput({ name: 'cluster' }),
       context(registry),
     );
 
@@ -183,11 +176,7 @@ describe('connect always succeeds', () => {
   test('a Target whose adapter this installation does not ship', async () => {
     const { registry } = fakes({ kubernetes: null });
     const result = await connectTarget(
-      {
-        kind: 'kubernetes',
-        name: 'cluster',
-        apiServer: 'https://cluster.example.test',
-      },
+      clusterInput({ name: 'cluster' }),
       context(registry),
     );
 
@@ -233,11 +222,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
 
   test('connect is idempotent by name and keeps the rank', async () => {
     const { registry } = fakes();
-    const input = {
-      kind: 'kubernetes',
-      name: 'cluster',
-      apiServer: 'https://cluster.example.test',
-    } as const;
+    const input = clusterInput({ name: 'cluster' });
 
     await connectTarget(
       { kind: 'cloud', name: 'vessel', project: 'p', region: 'r' },
@@ -259,14 +244,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
 describe('disconnect strands rather than stops', () => {
   test('live Deploys go orphaned and are named, and nothing is destroyed', async () => {
     const { registry, of } = fakes();
-    await connectTarget(
-      {
-        kind: 'kubernetes',
-        name: 'cluster',
-        apiServer: 'https://cluster.example.test',
-      },
-      context(registry),
-    );
+    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
     const target = (await targetRow('cluster'))!;
     const { app, component } = await seedLiveDeploy(target.id, 'ref-1');
 
@@ -305,14 +283,7 @@ describe('disconnect strands rather than stops', () => {
 
   test('disconnecting a Target with nothing on it strands nothing', async () => {
     const { registry } = fakes();
-    await connectTarget(
-      {
-        kind: 'kubernetes',
-        name: 'cluster',
-        apiServer: 'https://cluster.example.test',
-      },
-      context(registry),
-    );
+    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
     const result = await disconnectTarget(
       { name: 'cluster' },
       context(registry),
@@ -336,11 +307,7 @@ describe('disconnect strands rather than stops', () => {
 describe('reconnect re-adopts via observe', () => {
   test('a workload the adapter still sees is adopted back', async () => {
     const { registry, of } = fakes();
-    const input = {
-      kind: 'kubernetes',
-      name: 'cluster',
-      apiServer: 'https://cluster.example.test',
-    } as const;
+    const input = clusterInput({ name: 'cluster' });
 
     await connectTarget(input, context(registry));
     const target = (await targetRow('cluster'))!;
@@ -372,11 +339,7 @@ describe('reconnect re-adopts via observe', () => {
 
   test('a workload that is gone stays orphaned rather than resurrected', async () => {
     const { registry } = fakes();
-    const input = {
-      kind: 'kubernetes',
-      name: 'cluster',
-      apiServer: 'https://cluster.example.test',
-    } as const;
+    const input = clusterInput({ name: 'cluster' });
 
     await connectTarget(input, context(registry));
     const target = (await targetRow('cluster'))!;

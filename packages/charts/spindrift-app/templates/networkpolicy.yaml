@@ -1,0 +1,47 @@
+{{/*
+Ingress is default-deny with a fixed exception list (§8).
+
+"**Internal is a workload boundary, not a network location.**" Without this,
+any pod in any namespace could reach an Internal Component directly and skip
+the authenticated gateway — so the policy is on for every Component, whatever
+its exposure, and there is no per-App opt-out.
+
+**The shape is fixed; the names are Target configuration.** Same-namespace
+siblings are always allowed because a release's own pods are the one caller
+that cannot be named ahead of time; everything else arrives as a namespace name
+an operator set on the Target.
+
+Egress is not here. §8 wants an FQDN allowlist rather than an IP blocklist, and
+a portable NetworkPolicy cannot express one — which is why egress filtering is
+a *discovered capability* rather than a prerequisite (§8), and why the ingress
+half is the half that ships in a portable chart.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "spindrift-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spindrift-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "spindrift-app.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Same-namespace siblings.
+        - podSelector: {}
+        {{- range .Values.platform.networkPolicy.allowedNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+{{- if include "spindrift-app.serving" . }}
+      ports:
+        - port: {{ include "spindrift-app.port" . }}
+          protocol: TCP
+{{- end }}

@@ -22,7 +22,6 @@
  */
 import { eq } from 'drizzle-orm';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
-import type { TargetAdapter } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
 import { type Target, targets } from '../db/schema.ts';
 import {
@@ -31,7 +30,11 @@ import {
   type TargetDiscovery,
   unreachablePrerequisites,
 } from '../domain/capabilities.ts';
-import type { TargetHealth } from '../domain/target.ts';
+import {
+  type DeployTargetRef,
+  deployTargetOf,
+  type TargetHealth,
+} from '../domain/target.ts';
 
 /**
  * What the loop needs. Narrower than a `CommandContext` on purpose — the loop
@@ -59,23 +62,22 @@ export interface TargetInspectionResult {
  */
 export async function inspectTarget(
   context: TargetLoopContext,
-  name: string,
-  adapter: TargetAdapter,
+  target: DeployTargetRef,
 ): Promise<TargetInspectionResult> {
-  const deployAdapter = context.adapters.deploy(adapter);
+  const deployAdapter = context.adapters.deploy(target.adapter);
   if (deployAdapter === null) {
     // Not a fault: an installation is allowed to have a Target whose adapter it
     // does not ship. It is simply a Target nothing can be placed on, and saying
     // so is more useful than refusing to record it.
     return {
       prerequisites: unreachablePrerequisites(
-        `this installation has no ${adapter} adapter`,
+        `this installation has no ${target.adapter} adapter`,
       ),
       discovery: null,
     };
   }
   try {
-    const inspection = await deployAdapter.inspect({ name, adapter });
+    const inspection = await deployAdapter.inspect(target);
     return {
       prerequisites: inspection.prerequisites,
       discovery: inspection.discovery,
@@ -109,13 +111,12 @@ export interface TargetRefresh {
  */
 export async function refreshTarget(
   context: TargetLoopContext,
-  target: Pick<Target, 'id' | 'name' | 'adapter' | 'health'>,
+  target: Pick<Target, 'id' | 'name' | 'adapter' | 'health' | 'connection'>,
 ): Promise<TargetRefresh> {
   const now = context.clock.now();
   const { prerequisites, discovery } = await inspectTarget(
     context,
-    target.name,
-    target.adapter,
+    deployTargetOf(target),
   );
   const health = deriveHealth(prerequisites);
 

@@ -20,6 +20,7 @@ import {
 import { PREREQUISITES } from '../../src/domain/capabilities.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
+import { connectionFor } from '../harness/installation.ts';
 
 /**
  * §6's table, transcribed. A reviewer can check this against the spec without
@@ -104,9 +105,14 @@ describe("§6's failure vocabulary", () => {
   });
 });
 
-const target = { name: 'somewhere', adapter: 'kubernetes' } as const;
+const target = {
+  name: 'somewhere',
+  adapter: 'kubernetes',
+  connection: connectionFor('kubernetes'),
+} as const;
 
 const desired: DesiredState = {
+  deploy: 'deploy-1',
   app: 'app',
   component: 'web',
   target: target.name,

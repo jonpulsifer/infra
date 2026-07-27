@@ -1,0 +1,32 @@
+{{/*
+A service and a website are one object. §7: "`kind` branches; **`website` is
+not a branch**" — every difference between the two is a value, so this template
+never asks which of the two it is rendering.
+*/}}
+{{- if ne .Values.app.kind "job" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spindrift-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spindrift-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "spindrift-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "spindrift-app.podLabels" . | nindent 8 }}
+      annotations:
+        {{- include "spindrift-app.contractAnnotations" . | nindent 8 }}
+        {{- with .Values.shared.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "spindrift-app.podSpec" . | nindent 6 }}
+{{- end }}

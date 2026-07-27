@@ -21,6 +21,7 @@ import {
   storeAdapterSchema,
   targetAdapterSchema,
 } from '../../src/config/manifest.schema.ts';
+import { KUBERNETES_DELIVERY_FLAVOURS } from '../../src/domain/target.ts';
 
 const APP = join(import.meta.dir, '../..');
 
@@ -62,6 +63,9 @@ const NOT_A_WORD = /[-\d]/;
 const PROJECT_ID_ALLOWLIST = new Set<string>([
   ...targetAdapterSchema.options,
   ...storeAdapterSchema.options,
+  // Delivery flavours wear the same shape and are the same kind of thing: the
+  // name of a mechanism this software knows, identical in every installation.
+  ...KUBERNETES_DELIVERY_FLAVOURS,
 ]);
 
 /**
@@ -189,9 +193,19 @@ function findProjectIds(files: SourceFile[]): string[] {
   return offenders;
 }
 
-const FROM_IMPORT =
-  /(?:^|\s)(?:import|export)[\s\S]*?from\s*['"]([^'"]+)['"]/gm;
-const BARE_IMPORT = /(?:^|\s)import\s*['"]([^'"]+)['"]/gm;
+/**
+ * An import statement, and nothing that merely reads like one.
+ *
+ * Three narrowings, each closing a false positive this scanner produced when it
+ * was looser: the statement starts a line, because that is the only place an
+ * `import` may appear; the `from` clause is in the same statement, so a `;`
+ * between the two ends the match; and a specifier holds no newline, because
+ * none ever does. Without them, `export class Foo {` followed a hundred lines
+ * later by a sentence ending in the word `from` is reported as an import of
+ * everything in between.
+ */
+const FROM_IMPORT = /^(?:import|export)\b[^;]*?from\s*['"]([^'"\n]+)['"]/gm;
+const BARE_IMPORT = /^import\s*['"]([^'"\n]+)['"]/gm;
 
 /** Every module specifier a source imports, in either form. */
 function importSpecifiers(source: string): string[] {
@@ -423,6 +437,19 @@ describe('the scanners catch a deliberately dirty file', () => {
     expect(findForeignImports(dirty("import express from 'express';"))).toEqual(
       ["src/dirty.ts: 'express' is not a declared dependency"],
     );
+  });
+
+  test('but not an export followed by prose ending in the word from', () => {
+    // The shape that broke the looser scanner: a declaration at column zero,
+    // and further down a sentence whose last word is followed by a quote.
+    const source = [
+      'export class Adapter {',
+      '  detail() {',
+      "    return 'the repository this chart is fetched from';",
+      '  }',
+      '}',
+    ].join('\n');
+    expect(findForeignImports(dirty(source))).toEqual([]);
   });
 
   test('a side-effect import of an undeclared dependency', () => {
