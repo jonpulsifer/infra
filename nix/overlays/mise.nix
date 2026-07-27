@@ -9,10 +9,10 @@
 # so pkgs.mise is never instantiated there and this throw never fires.
 final: _prev:
 let
-  # When Renovate bumps `version`, the two fetchurl hashes below go stale and
-  # `nix-ci` (builds optiplex=x86_64 + forge=aarch64) fails with a hash
-  # mismatch quoting the correct replacement. Paste each in, or refresh
-  # ahead of time:
+  # When Renovate bumps `version`, a postUpgradeTask runs
+  # .github/scripts/update-mise-hashes.sh to refresh both fetchurl hashes
+  # before the commit lands. If CI still fails with a hash mismatch, fix
+  # manually:
   #   nix-prefetch-url --type sha256 \
   #     https://github.com/jdx/mise/releases/download/v<ver>/mise-v<ver>-linux-arm64.tar.gz
   #   nix-prefetch-url --type sha256 \

@@ -29,6 +29,14 @@
     'prEditedNotification',
     'prIgnoreNotification',
   ],
+  allowedPostUpgradeCommands: [
+    '^\\.github/scripts/update-mise-hashes\\.sh$',
+  ],
+  postUpgradeTasks: {
+    commands: ['.github/scripts/update-mise-hashes.sh'],
+    fileFilters: ['nix/overlays/mise.nix'],
+    executionMode: 'update',
+  },
   // 'auto' rebases automerging PRs (most of this repo) whenever they fall
   // behind main — Atlantis plans stay fresh and GitHub native auto-merge can
   // satisfy require-up-to-date rules — while manual-review PRs only rebase on
@@ -406,15 +414,15 @@
       automerge: true,
     },
     {
-      // Renovate bumps only the version string in nix/overlays/mise.nix;
-      // the two fetchurl hashes (x64/arm64 tarballs) go stale and must be
-      // refreshed by hand before the build passes — so never automerge.
+      // Renovate bumps the version string in nix/overlays/mise.nix; a
+      // postUpgradeTask runs .github/scripts/update-mise-hashes.sh to
+      // refresh both fetchurl hashes (x64/arm64) before the commit.
       // nix-ci builds optiplex (x86_64) + forge (aarch64), which exercise
       // both hashes and flag a mismatch quoting the correct replacement.
-      description: 'mise prebuilt binary — manual hash refresh, no automerge',
+      description: 'mise prebuilt binary — auto hash refresh, automerge',
       matchDepNames: ['jdx/mise'],
       matchDatasources: ['github-releases'],
-      automerge: false,
+      automerge: true,
       addLabels: ['renovate/nix-mise'],
     },
     // ============================================================
