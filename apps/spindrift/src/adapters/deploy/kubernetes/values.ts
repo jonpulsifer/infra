@@ -93,6 +93,7 @@ export interface AppValues {
   component: string;
   kind: DesiredState['kind'];
   image: string;
+  port: number;
   expose: boolean;
   exposure: DesiredState['exposure'];
   schedule: string;
@@ -148,8 +149,11 @@ export function appValues(desired: DesiredState, image: string): AppValues {
     component: desired.component,
     kind: desired.kind,
     image,
-    // A website's `expose` is forced by the chart; a job never serves.
-    expose: desired.expose ?? false,
+    // `website` is not a chart branch: normalize it to service values here.
+    port: 8080,
+    expose:
+      desired.kind === 'website' ||
+      (desired.kind === 'service' && desired.expose === true),
     exposure: desired.exposure,
     // An absent schedule is a suspended CronJob, which is why this is '' and
     // not omitted: the chart branches on emptiness, not on presence.

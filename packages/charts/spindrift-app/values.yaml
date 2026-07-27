@@ -28,13 +28,12 @@ app:
   # tag here would break the join between what was signed and what runs.
   image: ""
 
-  # The port a service listens on. Ignored for `website`, which serves on
-  # `websitePort` — the fixed port its rendering always uses.
+  # The port this non-job Component listens on. Spindrift supplies the fixed
+  # website port as this value, leaving `job` as the only chart branch.
   port: 8080
-  websitePort: 8080
 
-  # Service only, and forced on for a website. An unexposed service is a queue
-  # worker (§2).
+  # Whether this non-job Component serves traffic. Spindrift forces this on
+  # when it normalizes a website; an unexposed service is a queue worker (§2).
   expose: true
 
   # internal | private | public (§9). The chart renders a route for a Component

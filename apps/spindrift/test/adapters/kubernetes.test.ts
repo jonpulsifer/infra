@@ -137,8 +137,10 @@ interface RenderedValues {
   shared: { resources?: unknown; podLabels?: unknown };
   app: {
     artifactDigest?: string;
+    expose?: boolean;
     hostnames?: readonly string[];
     kind?: string;
+    port?: number;
   };
 }
 
@@ -305,6 +307,8 @@ describe('the delivery object', () => {
     );
     const values = renderedValues(cluster);
     expect(values.app.kind).toBe('website');
+    expect(values.app.expose).toBe(true);
+    expect(values.app.port).toBe(8080);
     expect(values.app.hostnames).toEqual([
       'blog-web.apps.example.test',
       'blog.example.test',

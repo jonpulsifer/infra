@@ -44,7 +44,9 @@ describe('kind branches', () => {
 
 describe('website is not a branch', () => {
   test('it renders a Deployment and a Service, exactly like a service', async () => {
-    const website = await render({ app: { kind: 'website' } });
+    const website = await render({
+      app: { kind: 'website', expose: true, port: 8080 },
+    });
     expect(kinds(website).sort()).toEqual([
       'Deployment',
       'HTTPRoute',
@@ -53,24 +55,14 @@ describe('website is not a branch', () => {
     ]);
   });
 
-  test('expose is forced: `expose: false` does not un-expose a website', async () => {
-    // §7: a website is "a service with `expose` forced and a fixed port, every
-    // difference a value rather than a template". A value that could turn a
-    // website into a queue worker would make it a branch after all.
+  test('the fixed website port arrives as the ordinary service value', async () => {
     const objects = await render({
-      app: { kind: 'website', expose: false },
+      app: { kind: 'website', expose: true, port: 8080 },
     });
-    expect(kinds(objects)).toContain('Service');
-  });
-
-  test('the port is the fixed one, not the service port', async () => {
-    const objects = await render({
-      app: { kind: 'website', port: 9999, websitePort: 3000 },
-    });
-    expect(one(objects, 'Service').spec.ports[0].port).toBe(3000);
+    expect(one(objects, 'Service').spec.ports[0].port).toBe(8080);
     const container = one(objects, 'Deployment').spec.template.spec
       .containers[0];
-    expect(container.ports[0].containerPort).toBe(3000);
+    expect(container.ports[0].containerPort).toBe(8080);
   });
 });
 

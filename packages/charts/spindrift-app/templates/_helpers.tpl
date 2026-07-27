@@ -64,21 +64,21 @@ spindrift.dev/values-contract: {{ index .Chart.Annotations "spindrift.dev/values
 {{/*
 The port this Component serves on.
 
-A website is a service with a fixed port (§7) — the difference is a value, not
-a template branch, so nothing downstream of here knows which kind it rendered.
+A website is already normalized to a service with a fixed port in values (§7),
+so this helper never needs to know which non-job kind it rendered.
 */}}
 {{- define "spindrift-app.port" -}}
-{{- if eq .Values.app.kind "website" }}{{ .Values.app.websitePort }}{{ else }}{{ .Values.app.port }}{{ end }}
+{{- .Values.app.port }}
 {{- end }}
 
 {{/*
 Whether this Component serves traffic at all.
 
-`expose` is a field on a service; a website has it forced on (§2, §7). A job
-never serves.
+`expose` is a field on a service; website normalization has already forced it
+on (§2, §7). A job is the only workload branch and never serves.
 */}}
 {{- define "spindrift-app.serving" -}}
-{{- if eq .Values.app.kind "website" }}true{{ else if and (eq .Values.app.kind "service") .Values.app.expose }}true{{ end }}
+{{- if and (ne .Values.app.kind "job") .Values.app.expose }}true{{ end }}
 {{- end }}
 
 {{/*
