@@ -328,6 +328,48 @@ export function noCapabilities(context: CapabilityContext): TargetCapabilities {
   );
 }
 
+/**
+ * One stored Target row, as capabilities.
+ *
+ * §3 gives capabilities four provenances and this is where the two that are not
+ * stored get supplied: from-the-adapter-type comes off the adapter instance, and
+ * the derived values are recomputed from the manifest every read (see
+ * `target-loop.ts` — "a stored derivation can never be stale in a way nothing
+ * notices").
+ *
+ * It lives here rather than in whichever command needed it first because three
+ * of them now do — placement, build dispatch, and deploy creation — and a Target
+ * that looks capable to one and incapable to another is a bug with no single
+ * place to fix it. A Target whose adapter this installation does not ship, or
+ * that has never been inspected, resolves to no capabilities: excluded with a
+ * reason, never silently dropped.
+ */
+export function capabilitiesOfRow(
+  target: Pick<TargetRow, 'adapter' | 'discovery' | 'publicExposure'>,
+  options: {
+    /** The adapter instance, or `null` when this installation ships none. */
+    readonly artifactTypes: readonly ArtifactType[] | null;
+    readonly manifest: InstallationManifest;
+  },
+): TargetCapabilities {
+  const context: CapabilityContext = {
+    adapter: target.adapter,
+    artifactTypes: options.artifactTypes ?? [],
+    publicExposure: target.publicExposure,
+    deployPath: deployPathReferences(options.manifest),
+  };
+  return target.discovery === null || options.artifactTypes === null
+    ? noCapabilities(context)
+    : resolveCapabilities(target.discovery, context);
+}
+
+/** The columns {@link capabilitiesOfRow} reads, without importing the schema. */
+interface TargetRow {
+  adapter: TargetAdapter;
+  discovery: TargetDiscovery | null;
+  publicExposure: boolean | null;
+}
+
 /** Healthy is every item met. §13 makes an unmet item a non-candidate. */
 export function deriveHealth(
   prerequisites: readonly PrerequisiteResult[],

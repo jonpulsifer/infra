@@ -100,6 +100,13 @@ const STATUS = {
   UNKNOWN_COMMAND: 404,
   INVALID_INPUT: 422,
   NOT_FOUND: 404,
+  // 409, not 422: the request is well formed and the caller has nothing to fix
+  // in it. What they are being told is a fact about the world — this Build has
+  // no artifact, this Target takes a different shape — which is the
+  // disabled-with-reasons grammar §3 uses everywhere, and a conflict is the
+  // status that means "not in this state".
+  NOT_DEPLOYABLE: 409,
+  NOT_BUILDABLE: 409,
   UNAUTHENTICATED: 401,
   METHOD_NOT_ALLOWED: 405,
   MALFORMED_REQUEST: 400,

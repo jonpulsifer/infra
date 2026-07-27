@@ -110,7 +110,22 @@ export type CommandFailureCode =
   | 'UNKNOWN_COMMAND'
   | 'INVALID_INPUT'
   /** A named thing the input refers to does not exist. */
-  | 'NOT_FOUND';
+  | 'NOT_FOUND'
+  /**
+   * Everything named exists, but this artifact cannot go on this Target — a
+   * Build that has not succeeded, a shape the Target does not take (§3), a
+   * disconnected Target (§13), a rollback that is not backwards (§6).
+   *
+   * Distinct from `INVALID_INPUT` because the input was well formed and the
+   * caller is not being told to fix a field: they are being told a fact about
+   * the world, which is the disabled-with-reasons grammar §3 uses everywhere.
+   */
+  | 'NOT_DEPLOYABLE'
+  /**
+   * A Build exists but no route can be handed it — §16's bundle digest is
+   * missing, so a provenance document would have nothing to join against.
+   */
+  | 'NOT_BUILDABLE';
 
 /** The assertable identity of a failure, plus the sentence a user reads. */
 export interface CommandFailure {

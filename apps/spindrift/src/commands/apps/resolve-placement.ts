@@ -24,9 +24,7 @@ import {
   targets,
 } from '../../db/schema.ts';
 import {
-  deployPathReferences,
-  noCapabilities,
-  resolveCapabilities,
+  capabilitiesOfRow,
   type TargetCapabilities,
 } from '../../domain/capabilities.ts';
 import type { ArtifactType, Exposure } from '../../domain/desired-state.ts';
@@ -74,26 +72,20 @@ export interface ResolveComponentPlacementResult {
 /**
  * A Target's capabilities as of its last inspection.
  *
- * The two provenances that are not stored are supplied here: from-the-adapter-
- * type comes off the adapter itself, and the derived values are recomputed. A
- * Target whose adapter this installation does not ship, or that has never been
- * inspected, resolves to no capabilities — which excludes it, with a reason,
- * rather than dropping it silently from the list.
+ * The fold itself lives in `domain/capabilities.ts` because build dispatch and
+ * deploy creation now ask the same question, and a Target that looked capable to
+ * one of them and incapable to another would be a bug with no single place to
+ * fix it.
  */
 function capabilitiesOf(
   context: CommandContext,
   target: Target,
 ): TargetCapabilities {
-  const adapter = context.adapters.deploy(target.adapter);
-  const capabilityContext = {
-    adapter: target.adapter,
-    artifactTypes: adapter?.artifactTypes ?? [],
-    publicExposure: target.publicExposure,
-    deployPath: deployPathReferences(context.manifest),
-  };
-  return target.discovery === null || adapter === null
-    ? noCapabilities(capabilityContext)
-    : resolveCapabilities(target.discovery, capabilityContext);
+  return capabilitiesOfRow(target, {
+    artifactTypes:
+      context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+    manifest: context.manifest,
+  });
 }
 
 export const resolveComponentPlacement: Command<
