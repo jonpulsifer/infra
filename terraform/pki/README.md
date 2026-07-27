@@ -24,13 +24,19 @@ permanent. Signer certs live 1 year (`early_renewal_hours` makes plans flag them
 about 30 days out).
 
 After Atlantis applies a CA or signer replacement, run
-`scripts/pki/post-rotate.sh`. It writes public certificates under `certs/`,
-SOPS-encrypts each cluster CA and signer private key for the matching
+`scripts/pki/post-rotate.sh <cluster>`. It writes public certificates under
+`certs/`, SOPS-encrypts each cluster CA and signer private key for the matching
 control-plane host, and regenerates
 `oidc/<cluster>/{jwks.json,openid-configuration.json}`. Commit those outputs
 before deploying the control planes. The OIDC workflow publishes the discovery
 documents on merge. The helper verifies that each private key matches its
 certificate and prints the certificate expiry inventory.
+
+Terraform also escrows each long-lived cluster CA key to a write-only
+1Password item in the `homelab` vault. SOPS is the deployment copy; 1Password
+is the operator recovery copy. Terraform prevents destroying an escrow item:
+before rotating a CA, preserve the old item under a versioned resource and
+title so rollback remains available for the full overlap window.
 
 ServiceAccount signer overlap and Kubernetes TLS CA overlap are separate
 rotation concerns: JWKS retains the previous signer while its tokens remain

@@ -30,6 +30,9 @@ let
       services.k8s = {
         inherit network;
         role = cfg.role or "worker";
+      }
+      // lib.optionalAttrs (cfg ? clusterCa) {
+        inherit (cfg) clusterCa;
       };
     }
     // (cfg.extraConfig or { });

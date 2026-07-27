@@ -12,6 +12,9 @@ let
   peerNetwork = if cfg.network == "folly" then "offsite" else "folly";
   peerIssuer = "https://oidc.lolwtf.ca/${peerNetwork}";
   fmlSignerCert = ../../../terraform/pki/certs/${cfg.network}-sa-signer.pem;
+  fmlClusterCaCert = ../../../terraform/pki/certs/${cfg.network}-ca.pem;
+  fmlClusterCaBundle = ../../../terraform/pki/certs/${cfg.network}-ca-bundle.pem;
+  cfsslCaPrefix = "${config.services.cfssl.dataDir}/ca";
 in
 {
 
@@ -31,6 +34,9 @@ in
       ];
       description = "K8s node role";
       default = "worker";
+    };
+    clusterCa = {
+      enable = lib.mkEnableOption "the repo-managed FML Kubernetes cluster CA";
     };
   };
 
@@ -132,6 +138,13 @@ in
 
     services.certmgr.renewInterval = "21d"; # we want to check and renew certs every 3 weeks instead of every 30m
 
+    systemd.tmpfiles.rules = lib.mkIf cfg.clusterCa.enable (
+      [
+        "L+ /var/lib/kubernetes/secrets/ca.pem - - - - ${fmlClusterCaBundle}"
+      ]
+      ++ lib.optional (cfg.role == "control-plane") "L+ ${cfsslCaPrefix}.pem - - - - ${fmlClusterCaCert}"
+    );
+
     # Add static host entries using the networkConfig directly to avoid circular dependency
     networking.extraHosts = "${networkConfig.apiServerIP} ${networkConfig.apiServerHostname}";
 
@@ -139,6 +152,15 @@ in
     services.etcd.enable = lib.mkIf (cfg.role == "control-plane") true;
 
     services.kubernetes = lib.mkMerge [
+      (lib.mkIf cfg.clusterCa.enable {
+        caFile = "/var/lib/kubernetes/secrets/ca.pem";
+        pki = {
+          enable = true;
+          caCertPathPrefix = cfsslCaPrefix;
+          genCfsslCACert = false;
+          pkiTrustOnBootstrap = false;
+        };
+      })
       {
         masterAddress = networkConfig.apiServerHostname;
         clusterCidr = networkConfig.podCidr;
@@ -158,7 +180,7 @@ in
         };
 
         proxy.enable = false;
-        easyCerts = true;
+        easyCerts = !cfg.clusterCa.enable;
       }
       (lib.mkIf (cfg.role == "control-plane") {
         apiserver = {
