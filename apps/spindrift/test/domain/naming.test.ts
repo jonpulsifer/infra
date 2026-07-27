@@ -21,7 +21,6 @@ import {
   recordsFor,
 } from '../../src/adapters/dns/cr.ts';
 import {
-  appCanonical,
   componentCanonical,
   coreMintsCanonical,
   displayUrl,
@@ -38,7 +37,6 @@ describe('§9: two layers, two different rules', () => {
     expect(
       componentCanonical({ app: 'shop', component: 'web', apexZone: APEX }),
     ).toBe('web.shop.apps.example.test');
-    expect(appCanonical('shop', APEX)).toBe('shop.apps.example.test');
   });
 
   test('a vanity name is one flat label in the vanity zone', () => {

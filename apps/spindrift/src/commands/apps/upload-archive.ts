@@ -25,18 +25,18 @@
  * the bytes that were staged, and the only thing that saw those is the thing
  * that staged them.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { builds, components, targets } from '../../db/schema.ts';
-import { capabilitiesOfRow } from '../../domain/capabilities.ts';
 import type { ArtifactType } from '../../domain/desired-state.ts';
-import { artifactTypeFor } from '../../domain/placement.ts';
+import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
 import {
   type ArchiveSource,
   commitOf,
+  isSuppliedArtifact,
   SUPPLIED_ARTIFACT_TYPE,
 } from '../../domain/source.ts';
-import { type Command, failed, ok } from '../types.ts';
+import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
 /** A content digest over the staged bundle (§16). */
 const bundleDigest = z
@@ -110,26 +110,20 @@ export const uploadArchive: Command<
     subpath: input.subpath,
   };
 
-  // §3: shape follows the Target, not the kind. A website lands as `files` on a
-  // static Target and as a server image anywhere else, and the Build's key
-  // carries whichever it was.
-  const shape =
-    input.contents === 'artifact'
-      ? SUPPLIED_ARTIFACT_TYPE
-      : artifactTypeFor(component.kind, {
-          id: target.id,
-          name: target.name,
-          adapter: target.adapter,
-          rank: target.rank,
-          healthy: target.health === 'healthy',
-          capabilities: capabilitiesOfRow(target, {
-            artifactTypes:
-              context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
-            manifest: context.manifest,
-          }),
-        });
+  const supplied = isSuppliedArtifact(source);
 
-  const supplied = input.contents === 'artifact';
+  // §3: shape follows the Target, not the kind.
+  const shape = supplied
+    ? SUPPLIED_ARTIFACT_TYPE
+    : artifactTypeFor(
+        component.kind,
+        placementTargetOf(target, {
+          artifactTypes:
+            context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+          manifest: context.manifest,
+        }),
+      );
+
   const now = context.clock.now();
 
   // §2 keys a Build on (component, commit, target-shape), and for an upload the
@@ -148,6 +142,13 @@ export const uploadArchive: Command<
       artifactDigest: supplied ? input.bundleDigest : null,
       artifactRefs: supplied ? [input.location] : null,
       bundleDigest: input.bundleDigest,
+      // Recorded on **both** arms, unlike `artifactRefs`. A source bundle has no
+      // artifact to be addressed by, and if its location only survived on the
+      // supplied arm then `dispatchBuild` would hand every source upload's
+      // builder an empty location — a build that cannot fetch what it is
+      // building.
+      bundleLocation: input.location,
+      bundleSubpath: input.subpath,
       status: supplied ? 'SUCCEEDED' : 'PENDING',
       // §4 makes the backend and its fidelity visible on the Build. A supplied
       // artifact has neither, and saying so is more useful than naming a runner
@@ -156,16 +157,50 @@ export const uploadArchive: Command<
       logFidelity: null,
       createdAt: now,
     })
-    .onConflictDoUpdate({
-      target: [builds.componentId, builds.commit, builds.targetShape],
-      set: { artifactRefs: supplied ? [input.location] : null },
-    })
+    // Nothing is overwritten on conflict. The key is (component, commit,
+    // target-shape) and the commit *is* the bundle digest, so a conflict means
+    // byte-identical input for the same shape — there is nothing new to write,
+    // and writing anyway is how a re-upload blanks the artifact refs of a Build
+    // that had already succeeded.
+    .onConflictDoNothing()
     .returning();
 
+  // `DO NOTHING` returns no row when it did nothing, so the existing one is
+  // read back: the caller asked which Build describes these bytes, and the
+  // answer is the same either way.
+  const build =
+    row ?? (await existingBuild(context, component.id, source, shape));
+  if (build === undefined) {
+    return failed(
+      'NOT_FOUND',
+      'the Build for this bundle could not be read back after writing it',
+    );
+  }
+
   return ok({
-    buildId: row!.id,
+    buildId: build.id,
     artifactType: shape,
-    status: supplied ? 'SUCCEEDED' : 'PENDING',
+    status: build.status === 'SUCCEEDED' ? 'SUCCEEDED' : 'PENDING',
     bundleDigest: input.bundleDigest,
   });
 };
+
+/** The Build this upload's key already names, when the insert conflicted. */
+async function existingBuild(
+  context: CommandContext,
+  componentId: string,
+  source: ArchiveSource,
+  shape: ArtifactType,
+) {
+  const [row] = await context.db
+    .select()
+    .from(builds)
+    .where(
+      and(
+        eq(builds.componentId, componentId),
+        eq(builds.commit, commitOf(source)),
+        eq(builds.targetShape, shape),
+      ),
+    );
+  return row;
+}

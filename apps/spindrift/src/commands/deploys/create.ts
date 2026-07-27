@@ -42,8 +42,7 @@ import {
   deploys,
   targets,
 } from '../../db/schema.ts';
-import { capabilitiesOfRow } from '../../domain/capabilities.ts';
-import { artifactTypeFor } from '../../domain/placement.ts';
+import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
 import {
   type Command,
   type CommandContext,
@@ -304,18 +303,14 @@ export async function checkDeployable(
   // carries the shape it was built for, so a `files` artifact reaching a Target
   // that runs images is not a deploy that fails later — it is one that never
   // starts, which is the whole reason resolution runs before the build.
-  const shape = artifactTypeFor(component.kind, {
-    id: target.id,
-    name: target.name,
-    adapter: target.adapter,
-    rank: target.rank,
-    healthy: target.health === 'healthy',
-    capabilities: capabilitiesOfRow(target, {
+  const shape = artifactTypeFor(
+    component.kind,
+    placementTargetOf(target, {
       artifactTypes:
         context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
       manifest: context.manifest,
     }),
-  });
+  );
   if (build.targetShape !== shape) {
     return refuse(
       'NOT_DEPLOYABLE',

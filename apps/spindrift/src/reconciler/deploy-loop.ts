@@ -33,7 +33,7 @@
  * `test/reconciler/deploy-loop.test.ts` runs the whole convergence with
  * notifications disabled to keep that true.
  */
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import type {
   DeployAdapter,
   DeployEvent,
@@ -58,7 +58,7 @@ import {
   failureColumns,
   hasDrifted,
 } from '../domain/diagnosis.ts';
-import { hostnameFor } from '../domain/naming.ts';
+import { displayUrl, hostnameFor } from '../domain/naming.ts';
 import { DEFAULT_PLATFORM } from '../domain/placement.ts';
 import { deployTargetOf } from '../domain/target.ts';
 
@@ -70,8 +70,17 @@ export interface DeployLoopContext {
   readonly manifest: InstallationManifest;
 }
 
-/** The phases an attempt is still in flight in (§6). */
-const IN_FLIGHT: readonly DeployPhase[] = ['APPLYING', 'WAITING'];
+/**
+ * The phases that mean something is still owed work (§6).
+ *
+ * `PENDING` is here alongside §6's two in-flight phases because an intent nobody
+ * has claimed is the most urgent thing there is — it is a developer waiting.
+ * `APPLYING` and `WAITING` appear *between* passes only when an attempt did not
+ * finish inside one: a reconciler that died mid-apply leaves exactly that, and
+ * the fast cadence is how it gets picked back up rather than sitting for the
+ * converged interval.
+ */
+const UNSETTLED: readonly DeployPhase[] = ['PENDING', 'APPLYING', 'WAITING'];
 
 /** How often to look, given what the Deploy is doing (§6, plan Transport). */
 export interface LoopIntervals {
@@ -89,18 +98,41 @@ export const DEFAULT_INTERVALS: LoopIntervals = {
 /**
  * The interval to wait before looking again.
  *
- * Fast only while something is in flight. §6 is explicit that drift is
+ * Fast only while something is unsettled. §6 is explicit that drift is
  * "information, not an alarm", so the converged cadence is minutes: polling a
  * settled workload every two seconds would be a watch built out of polls, which
  * is the thing this design declined.
+ *
+ * **The phases must come from the database, not from what the last pass
+ * returned.** A pass only ever returns terminal outcomes — an attempt runs to
+ * `LIVE` or `FAILED` inside it — so deciding from those would mean the fast
+ * cadence never once fired, and the adaptive interval would be a fixed one
+ * wearing a switch.
  */
 export function intervalFor(
   phases: readonly DeployPhase[],
   intervals: LoopIntervals = DEFAULT_INTERVALS,
 ): number {
-  return phases.some((phase) => IN_FLIGHT.includes(phase))
+  return phases.some((phase) => UNSETTLED.includes(phase))
     ? intervals.fastMs
     : intervals.slowMs;
+}
+
+/**
+ * The phases of everything still owed work, straight from the database.
+ *
+ * Read after a pass rather than derived from it, so an intent that arrived while
+ * the pass was running is picked up on the fast cadence instead of waiting out a
+ * converged interval.
+ */
+export async function unsettledPhases(
+  context: DeployLoopContext,
+): Promise<readonly DeployPhase[]> {
+  const rows = await context.db
+    .select({ phase: deploys.phase })
+    .from(deploys)
+    .where(inArray(deploys.phase, [...UNSETTLED]));
+  return rows.map((row) => row.phase);
 }
 
 /**
@@ -158,6 +190,20 @@ interface AttemptSubject {
 export function desiredStateFor(
   subject: AttemptSubject,
   manifest: InstallationManifest,
+  /**
+   * Whether this Component may carry the App's vanity name.
+   *
+   * §9 puts the vanity name on the **App** — "the name a developer shares" — and
+   * the canonical name on each Component. An App with two network-serving
+   * Components therefore has one vanity name and two claimants, and handing it to
+   * both puts the same hostname on two HTTPRoutes: a collision the platform
+   * resolves arbitrarily, which is worse than not having the name at all.
+   *
+   * So it goes to a sole network-serving Component and otherwise to none. Picking
+   * a winner among several would be a policy §9 does not state, and the developer
+   * is the one who knows which of their Components is the front door.
+   */
+  vanityIsUnambiguous: boolean,
 ): DesiredState {
   const { deploy, app, component, build, target } = subject;
   return {
@@ -187,7 +233,7 @@ export function desiredStateFor(
       adapter: target.adapter,
       apexZone: manifest.dns.apexZone,
       vanityZone: manifest.dns.vanityZone,
-      vanityLabel: app.vanityDomain,
+      vanityLabel: vanityIsUnambiguous ? app.vanityDomain : null,
     }),
   };
 }
@@ -225,7 +271,11 @@ export async function runAttempt(
     componentId: subject.component.id,
     deployId: deploy.id,
   };
-  const desired = desiredStateFor(subject, context.manifest);
+  const desired = desiredStateFor(
+    subject,
+    context.manifest,
+    await soleServingComponent(context, subject),
+  );
   const targetRef = deployTargetOf(subject.target);
 
   let verdict: DeployVerdict;
@@ -245,7 +295,32 @@ export async function runAttempt(
     };
   }
 
-  return settle(context, subject, verdict);
+  return settle(context, subject, desired, verdict);
+}
+
+/**
+ * Whether this Component is the only network-serving one its App has.
+ *
+ * A job serves nothing, and an unexposed service is a queue worker (§2), so
+ * neither can claim the App's front-door name.
+ */
+async function soleServingComponent(
+  context: DeployLoopContext,
+  subject: AttemptSubject,
+): Promise<boolean> {
+  const siblings = await context.db
+    .select({
+      id: components.id,
+      kind: components.kind,
+      expose: components.expose,
+    })
+    .from(components)
+    .where(eq(components.appId, subject.app.id));
+
+  const serving = siblings.filter(
+    (sibling) => sibling.kind === 'website' || sibling.expose === true,
+  );
+  return serving.length === 1 && serving[0]?.id === subject.component.id;
 }
 
 /** Write one adapter event to the log, and its phase to the row. */
@@ -286,6 +361,7 @@ async function absorb(
 async function settle(
   context: DeployLoopContext,
   subject: AttemptSubject,
+  desired: DesiredState,
   verdict: DeployVerdict,
 ): Promise<AttemptOutcome> {
   const now = context.clock.now();
@@ -301,8 +377,7 @@ async function settle(
     // seam. Where core minted one, the adapter has nothing to add and core's
     // name stands.
     const url =
-      verdict.url ??
-      urlOf(desiredStateFor(subject, context.manifest).hostname.canonical);
+      verdict.url ?? displayUrl({ canonical: desired.hostname.canonical });
 
     await context.db
       .update(deploys)
@@ -314,6 +389,10 @@ async function settle(
         blame: null,
         detail: null,
         debug: null,
+        // A deploy that just landed is by definition what was asked for. Left
+        // set, a previous attempt's drift would follow the new release around.
+        driftedAt: null,
+        observedDigest: desired.artifact.digest,
         updatedAt: now,
       })
       .where(eq(deploys.id, deployId));
@@ -349,10 +428,6 @@ async function settle(
   return { deployId, phase: 'FAILED', url: null };
 }
 
-function urlOf(canonical: string): string | null {
-  return canonical === '' ? null : `https://${canonical}`;
-}
-
 /** One pass of `observe` over what has converged, to notice drift (§6). */
 export interface DriftReport {
   readonly deployId: number;
@@ -372,6 +447,7 @@ export interface DriftReport {
 export async function observeConverged(
   context: DeployLoopContext,
 ): Promise<readonly DriftReport[]> {
+  const now = context.clock.now();
   const live = await context.db
     .select()
     .from(deploys)
@@ -397,15 +473,31 @@ export async function observeConverged(
       continue;
     }
 
-    reports.push({
-      deployId: deploy.id,
-      drifted: hasDrifted({
-        phase: deploy.phase,
-        desiredDigest: subject.build.artifactDigest ?? '',
-        observedDigest: observed,
-      }),
+    const drifted = hasDrifted({
+      phase: deploy.phase,
+      desiredDigest: subject.build.artifactDigest ?? '',
       observedDigest: observed,
     });
+
+    // §6 wants drift to be "a visible state", and visible means a row: the UI
+    // reads rows, so a finding that lived only for the length of this pass
+    // would be surfaced to nobody. Cleared when it matches again, so drift
+    // somebody fixed out of band stops being reported without a dismissal.
+    if (
+      drifted !== (deploy.driftedAt !== null) ||
+      observed !== deploy.observedDigest
+    ) {
+      await context.db
+        .update(deploys)
+        .set({
+          driftedAt: drifted ? now : null,
+          observedDigest: observed,
+          updatedAt: now,
+        })
+        .where(eq(deploys.id, deploy.id));
+    }
+
+    reports.push({ deployId: deploy.id, drifted, observedDigest: observed });
   }
   return reports;
 }
@@ -457,6 +549,14 @@ export interface DeployLoopOptions {
 export interface LoopPass {
   readonly applied: readonly AttemptOutcome[];
   readonly drift: readonly DriftReport[];
+  /**
+   * What is still owed work when the pass ended, read from the database.
+   *
+   * This — not {@link applied} — is what sets the next interval. A pass returns
+   * terminal outcomes only, so choosing from those could never select the fast
+   * cadence.
+   */
+  readonly unsettled: readonly DeployPhase[];
 }
 
 /**
@@ -476,7 +576,11 @@ export async function runDeployPass(
     const outcome = await runAttempt(context, claimed);
     if (outcome !== null) applied.push(outcome);
   }
-  return { applied, drift: await observeConverged(context) };
+  return {
+    applied,
+    drift: await observeConverged(context),
+    unsettled: await unsettledPhases(context),
+  };
 }
 
 /** Run until aborted. */
@@ -490,8 +594,7 @@ export async function runDeployLoop(
     options.onPass?.(pass);
     if (options.signal?.aborted) return;
 
-    const phases = pass.applied.map((outcome) => outcome.phase);
-    await sleep(intervalFor(phases, intervals), options);
+    await sleep(intervalFor(pass.unsettled, intervals), options);
   }
 }
 

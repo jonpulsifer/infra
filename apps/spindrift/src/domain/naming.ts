@@ -76,17 +76,6 @@ export function componentCanonical(name: CanonicalName): string {
   return `${name.component}.${name.app}.${name.apexZone}`;
 }
 
-/**
- * The App's own name (§9: "the URL is live from App creation").
- *
- * An App has an address before any Component is deployed — a lowest-precedence
- * route serving a status page hangs off this — so it is a name in its own right
- * rather than something derived from whichever Component happened to be first.
- */
-export function appCanonical(app: string, apexZone: string): string {
-  return `${app}.${apexZone}`;
-}
-
 /** §9's flat single-label vanity name, in the installation's vanity zone. */
 export function vanity(label: string, vanityZone: string): string {
   return `${label}.${vanityZone}`;

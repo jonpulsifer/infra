@@ -140,6 +140,9 @@ async function succeededBuild(
       artifactType: shape,
       artifactDigest: digest(seed),
       bundleDigest: digest(seed),
+      // Where the bundle was staged. A Build without one cannot be dispatched
+      // at all — a route would have nothing to fetch.
+      bundleLocation: `bundles/${seed}.zip`,
       status: 'SUCCEEDED',
     })
     .returning();
@@ -659,6 +662,71 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
     expect(row?.artifactDigest).toBeNull();
   });
 
+  test('a source bundle reaches its builder with the location it was staged at', async () => {
+    // The bug this pins: the staged location was only kept on the supplied arm,
+    // so every source upload handed its route an empty location — a build that
+    // cannot fetch what it is building, with nothing saying so.
+    const { component, target } = await fixture();
+    const builder = new FakeBuildAdapter();
+    const registry = registryOf(capableAdapter(), builder);
+
+    const uploaded = await uploadArchive(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        bundleDigest: digest(63),
+        location: 'bundles/shop-web/63.zip',
+        contents: 'source',
+        subpath: 'apps/web',
+      },
+      context(registry),
+    );
+    expect(uploaded.ok).toBe(true);
+    if (!uploaded.ok) return;
+
+    const dispatched = await dispatchBuild(
+      { buildId: uploaded.value.buildId, route: builder.name },
+      context(registry),
+    );
+    expect(dispatched.ok).toBe(true);
+
+    expect(builder.built).toHaveLength(1);
+    const origin = builder.built[0]!.source.origin;
+    expect(origin.type).toBe('archive');
+    if (origin.type !== 'archive') return;
+    expect(origin.location).toBe('bundles/shop-web/63.zip');
+    // §5's scope, per Build: the unwrap is a fact about the uploaded bytes.
+    expect(origin.subpath).toBe('apps/web');
+    // §16's join reaches the route on every path.
+    expect(builder.built[0]!.source.bundleDigest).toBe(digest(63));
+  });
+
+  test('a Build with no staged bundle is refused rather than dispatched empty', async () => {
+    const { component } = await fixture();
+    const [orphan] = await database()
+      .db.insert(builds)
+      .values({
+        componentId: component.id,
+        commit: digest(64),
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest: digest(64),
+        status: 'PENDING',
+      })
+      .returning();
+
+    const builder = new FakeBuildAdapter();
+    const result = await dispatchBuild(
+      { buildId: orphan!.id, route: builder.name },
+      context(registryOf(capableAdapter(), builder)),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_BUILDABLE');
+    expect(builder.built).toHaveLength(0);
+  });
+
   test('re-uploading identical bytes lands on the same Build', async () => {
     // §2 keys a Build on (component, commit, target-shape), and for an upload
     // the bundle digest is the commit. Identical bytes are the same input, so
@@ -680,5 +748,50 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
     expect(second.value.buildId).toBe(first.value.buildId);
+
+    // And the second upload changed nothing. The bug this pins: an upsert that
+    // wrote on conflict blanked the artifact refs of a Build that had already
+    // succeeded — a finished artifact quietly losing the address it is pulled by.
+    const [row] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, first.value.buildId));
+    expect(row?.status).toBe('SUCCEEDED');
+    expect(row?.artifactDigest).toBe(digest(62));
+    expect(row?.artifactRefs).toEqual(['bundles/shop-web/62.zip']);
+  });
+
+  test('a source re-upload cannot blank a Build that already succeeded', async () => {
+    const { component, target } = await fixture({ kind: 'website' });
+    const registry = registryOf(capableAdapter());
+    const common = {
+      componentId: component.id,
+      targetId: target.id,
+      bundleDigest: digest(65),
+      location: 'bundles/shop-web/65.zip',
+      subpath: '.',
+    };
+
+    const supplied = await uploadArchive(
+      { ...common, contents: 'artifact' as const },
+      context(registry),
+    );
+    expect(supplied.ok).toBe(true);
+    if (!supplied.ok) return;
+
+    // Same bytes, now claimed to be source. The key is identical, so it lands on
+    // the same row — which must not be demoted out from under a live Deploy.
+    await uploadArchive(
+      { ...common, contents: 'source' as const },
+      context(registry),
+    );
+
+    const [row] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, supplied.value.buildId));
+    expect(row?.status).toBe('SUCCEEDED');
+    expect(row?.artifactDigest).toBe(digest(65));
+    expect(row?.artifactRefs).toEqual(['bundles/shop-web/65.zip']);
   });
 });

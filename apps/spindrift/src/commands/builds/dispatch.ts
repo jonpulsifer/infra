@@ -120,20 +120,33 @@ export const dispatchBuild: Command<
     );
   }
 
+  // The staged bundle's own columns, not the artifact's. §15 stages a bundle for
+  // either builder, and a Build that has not run has no artifact refs to borrow
+  // an address from — reading them here is how a source upload reaches its
+  // builder with an empty location.
+  if (app.sourceKind === 'archive' && build.bundleLocation === null) {
+    return failed(
+      'NOT_BUILDABLE',
+      `Build ${build.id} has no staged bundle location, so no route can fetch it`,
+    );
+  }
+
   const source: Source =
     app.sourceKind === 'repo'
       ? {
           kind: 'repo',
           url: app.sourceRepoUrl ?? '',
           commit: build.commit,
+          // §5: an App is repo plus subpath, and the developer named it there.
           subpath: app.sourceRepoSubpath ?? '.',
         }
       : {
           kind: 'archive',
           digest: build.bundleDigest,
-          location: build.artifactRefs?.[0] ?? '',
+          location: build.bundleLocation ?? '',
           contents: 'source',
-          subpath: app.sourceRepoSubpath ?? '.',
+          // Per Build: the unwrap is a fact about the bytes that were uploaded.
+          subpath: build.bundleSubpath ?? '.',
         };
 
   const buildSource: BuildSource = {

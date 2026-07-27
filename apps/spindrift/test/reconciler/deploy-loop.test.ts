@@ -319,6 +319,80 @@ describe('§12: the diagnosis outlives the platform', () => {
   });
 });
 
+describe('§9: one vanity name, and never two claimants', () => {
+  test('a sole serving Component carries the App’s vanity name', async () => {
+    const { app } = await pendingDeploy();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
+      `shop.${manifest.dns.vanityZone}`,
+    );
+  });
+
+  test('a second serving Component means neither gets it', async () => {
+    // §9 puts the vanity name on the App and the canonical on each Component.
+    // Handing one name to two Components puts the same hostname on two routes,
+    // and the platform resolves that collision arbitrarily — which is worse
+    // than the App simply not having a front-door name yet.
+    const { app, component, target, build } = await pendingDeploy();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+    await database().db.insert(components).values({
+      appId: app.id,
+      name: 'admin',
+      kind: 'service',
+      expose: true,
+    });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    const desired = adapter.applied[0]?.desired;
+    expect(desired?.hostname.vanity).toBeUndefined();
+    // The canonical still resolves — it is per Component and never contended.
+    expect(desired?.hostname.canonical).toBe(
+      `web.shop.${manifest.dns.apexZone}`,
+    );
+    expect(component.id).toBeDefined();
+    expect(target.id).toBeDefined();
+    expect(build.id).toBeDefined();
+  });
+
+  test('an unexposed sibling is not a claimant', async () => {
+    // §2: an unexposed service is a queue worker, and a job serves nothing.
+    // Neither can contend for the App's front door.
+    const { app } = await pendingDeploy();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+    await database().db.insert(components).values({
+      appId: app.id,
+      name: 'worker',
+      kind: 'service',
+      expose: false,
+    });
+    await database()
+      .db.insert(components)
+      .values({ appId: app.id, name: 'nightly', kind: 'job' });
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
+      `shop.${manifest.dns.vanityZone}`,
+    );
+  });
+});
+
 describe('§9: exposure never mutates on red', () => {
   test('a failed attempt leaves the Component and the Deploy as they were', async () => {
     const { deploy, component } = await pendingDeploy({ exposure: 'public' });
@@ -368,8 +442,46 @@ describe('drift is surfaced, never corrected (§6)', () => {
     // §6 — the re-converge is one click a human takes, not something a loop does
     // to a cluster somebody may have changed on purpose during an incident.
     expect(adapter.applied).toHaveLength(1);
+
+    // And it is a *state*, not just a return value. §6 asks for drift to be
+    // visible, and the UI reads rows — a finding that lived for the length of
+    // one pass would be surfaced to nobody.
     const row = await deployRow(deploy.id);
     expect(row?.phase).toBe('LIVE');
+    expect(row?.driftedAt).toEqual(FROZEN);
+    expect(row?.observedDigest).toBe(`sha256:${'b'.repeat(64)}`);
+  });
+
+  test('drift fixed out of band stops being reported, with no dismissal', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({
+      script: [{ verdict: { phase: 'LIVE', ref: 'hr/apps/web' } }],
+    });
+    await runDeployPass(context(adapter));
+
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'LIVE',
+      artifactDigest: `sha256:${'b'.repeat(64)}`,
+    });
+    await runDeployPass(context(adapter));
+    expect((await deployRow(deploy.id))?.driftedAt).toEqual(FROZEN);
+
+    // Somebody put it back by hand. Nothing should have to be clicked for the
+    // state to clear — it is an observation, not an acknowledgement.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'LIVE',
+      artifactDigest: DIGEST,
+    });
+    const pass = await runDeployPass(context(adapter));
+
+    expect(
+      pass.drift.find((entry) => entry.deployId === deploy.id)?.drifted,
+    ).toBe(false);
+    const row = await deployRow(deploy.id);
+    expect(row?.driftedAt).toBeNull();
+    expect(row?.observedDigest).toBe(DIGEST);
   });
 
   test('a Target that cannot be reached has not drifted', async () => {

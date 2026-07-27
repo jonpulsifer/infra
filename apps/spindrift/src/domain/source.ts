@@ -3,12 +3,9 @@
  *
  * §4 settles the shape this file exists to keep honest: **repo and archive share
  * one pipeline** — unpack, detect, build — so a source is an *origin*, not a
- * second contract. The one place the two genuinely diverge is retention (§15:
- * "repo bundles are ephemeral, archives durable"), and that divergence is a
- * property of where the bytes came from rather than a branch anything downstream
- * takes.
+ * second contract.
  *
- * The other distinction §4 draws is inside the archive, not between the two:
+ * The distinction §4 does draw is inside the archive, not between the two:
  *
  * > An archive of *finished output* is a supplied artifact, digested over the
  * > uploaded bundle; an archive of *source* builds normally.
@@ -19,8 +16,8 @@
  * receipt and the provenance document name one digest whether or not a build
  * happened between them.
  *
- * Nothing here writes. The commands own the rows; this owns the three questions
- * they both have to answer the same way.
+ * Nothing here writes. The commands own the rows; this owns the questions they
+ * both have to answer the same way.
  */
 import type { BuildOrigin } from '../adapters/build/contract.ts';
 import type { ArtifactType } from './desired-state.ts';
@@ -62,20 +59,6 @@ export interface ArchiveSource {
 }
 
 export type Source = RepoSource | ArchiveSource;
-
-/**
- * How long a staged bundle is kept (§15).
- *
- * "Repo bundles are ephemeral, archives durable." The asymmetry is not a policy
- * choice — a repo bundle can be fetched again from the commit that produced it,
- * and an upload cannot be fetched again from anywhere. Losing the second one
- * loses the only copy.
- */
-export type Retention = 'durable' | 'ephemeral';
-
-export function retentionOf(source: Source): Retention {
-  return source.kind === 'archive' ? 'durable' : 'ephemeral';
-}
 
 /**
  * Whether this source is finished output core records rather than builds (§4).
@@ -126,27 +109,4 @@ export function buildOriginOf(source: Source): BuildOrigin {
         location: source.location,
         subpath: source.subpath,
       };
-}
-
-/**
- * §5's unwrap: "archives use the identical ladder **after unwrapping a lone
- * top-level directory**."
- *
- * A ZIP made by right-clicking a folder contains that folder; one made by
- * selecting its contents does not. Both are the same upload as far as the person
- * doing it is concerned, so the ladder must see the same tree either way.
- *
- * **A lone top-level directory, and nothing else.** Two directories are a
- * monorepo whose scope is named rather than searched (§5), and one directory
- * beside a stray `README.md` is a project that happens to have a directory in
- * it. Unwrapping either would be the search §5 refuses to do.
- */
-export function unwrapSubpath(topLevelEntries: readonly string[]): string {
-  const entries = topLevelEntries.filter((entry) => entry.length > 0);
-  const [only] = entries;
-  if (entries.length !== 1 || only === undefined) return '.';
-  // Directory entries carry the trailing slash the archive format wrote; a lone
-  // top-level *file* is a one-file upload, not a wrapper to unwrap.
-  if (!only.endsWith('/')) return '.';
-  return only.slice(0, -1);
 }

@@ -31,9 +31,10 @@ Three named gaps, all deliberate:
   wants a table and a pair of commands, which belong with the App and Component
   commands rather than in front of them.
 - **The status page is not served yet.** §9 wants a URL that resolves from the
-  moment an App exists, on a lowest-precedence wildcard route. Naming and the
-  DNS records are here; the route and the page it points at are not, so an App's
-  address only resolves once something has actually been deployed to it.
+  moment an App exists, on a lowest-precedence wildcard route. Naming is here and
+  a deployed Component's names resolve through its route; the wildcard route and
+  the page it points at are not, so an App's address stays dark until something
+  has actually been deployed to it.
 
 ## Shape
 
@@ -175,11 +176,26 @@ that is where §9's ceiling of roughly twenty of them comes from. Core mints a
 canonical name only for a cluster — Cloud Run and static hosting name their own
 workloads, and there the adapter reports the address back across the deploy seam.
 
-Records are written as `DNSEndpoint` objects for the DNS controller to publish,
-so **Spindrift holds no zone credential** and gets garbage collection free: a
-record lives in the App's namespace and dies with it.
-`test/extraction/no-dns-credential.test.ts` is the grep that keeps the first half
-of that true.
+**Spindrift publishes no record itself, and holds no zone credential.** On a
+cluster the names travel on the `HTTPRoute` the App chart renders — the
+installation's external-dns runs with `gateway-httproute` among its sources, so
+a route carrying a hostname *is* the record, and it is garbage collected with
+the release that owns it.
+
+`src/adapters/dns/cr.ts` builds `DNSEndpoint` objects for the names that have no
+route to hang on — the live-from-creation status name, and the vanity leg on a
+non-metal Target. **Neither of those is built, so nothing calls it yet**; it is
+here because external-dns's `crd` source is configured for exactly that gap.
+`test/extraction/no-dns-credential.test.ts` is the grep that keeps "no zone
+credential" true, and it also asserts DNS is still being described somewhere, so
+the negative claim cannot be satisfied by there being no DNS at all.
+
+One name is contended and one is not. The canonical is per Component, so it
+never collides. The **vanity name is per App**, so an App with two
+network-serving Components has one name and two claimants — it goes to a sole
+serving Component and otherwise to none, because putting one hostname on two
+routes lets the platform pick a winner arbitrarily. Which Component is the front
+door is the developer's to say, and there is nowhere to say it yet.
 
 ## Testing
 

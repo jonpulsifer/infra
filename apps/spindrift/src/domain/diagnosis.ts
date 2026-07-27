@@ -24,6 +24,7 @@
 import {
   type Blame,
   blameFor,
+  type DeployPhase,
   type DeployVerdict,
   type FailureReason,
 } from '../adapters/deploy/contract.ts';
@@ -94,7 +95,7 @@ export function failureColumns(diagnosis: Diagnosis): {
  * converging has not drifted; it has not arrived.
  */
 export function hasDrifted(args: {
-  readonly phase: string;
+  readonly phase: DeployPhase;
   /** The digest the Deploy's Build named. */
   readonly desiredDigest: string;
   /** The digest `observe` says is actually serving, or `null` when nothing is. */

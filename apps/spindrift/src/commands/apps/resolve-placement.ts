@@ -16,23 +16,13 @@
  */
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
-import {
-  apps,
-  components,
-  datastores,
-  type Target,
-  targets,
-} from '../../db/schema.ts';
-import {
-  capabilitiesOfRow,
-  type TargetCapabilities,
-} from '../../domain/capabilities.ts';
+import { apps, components, datastores, targets } from '../../db/schema.ts';
 import type { ArtifactType, Exposure } from '../../domain/desired-state.ts';
 import {
   DEFAULT_PLATFORM,
   type DerivedRequirements,
   type Exclusion,
-  type PlacementTarget,
+  placementTargetOf,
   type RequiredDatastore,
   resolvePlacement,
 } from '../../domain/placement.ts';
@@ -67,25 +57,6 @@ export interface ResolveComponentPlacementResult {
   readonly suggestedTargetId: string | null;
   /** Every Target, in rank order, candidates and non-candidates alike. */
   readonly options: readonly PlacementOption[];
-}
-
-/**
- * A Target's capabilities as of its last inspection.
- *
- * The fold itself lives in `domain/capabilities.ts` because build dispatch and
- * deploy creation now ask the same question, and a Target that looked capable to
- * one of them and incapable to another would be a bug with no single place to
- * fix it.
- */
-function capabilitiesOf(
-  context: CommandContext,
-  target: Target,
-): TargetCapabilities {
-  return capabilitiesOfRow(target, {
-    artifactTypes:
-      context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
-    manifest: context.manifest,
-  });
 }
 
 export const resolveComponentPlacement: Command<
@@ -137,14 +108,11 @@ export const resolveComponentPlacement: Command<
   ]);
 
   const placement = resolvePlacement(
-    connected.map(
-      (target): PlacementTarget => ({
-        id: target.id,
-        name: target.name,
-        adapter: target.adapter,
-        rank: target.rank,
-        healthy: target.health === 'healthy',
-        capabilities: capabilitiesOf(context, target),
+    connected.map((target) =>
+      placementTargetOf(target, {
+        artifactTypes:
+          context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+        manifest: context.manifest,
       }),
     ),
     requirements,
