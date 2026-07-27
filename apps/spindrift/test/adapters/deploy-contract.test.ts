@@ -112,6 +112,7 @@ const target = {
 } as const;
 
 const desired: DesiredState = {
+  deploy: 'deploy-1',
   app: 'app',
   component: 'web',
   target: target.name,

@@ -46,6 +46,7 @@ export function desiredState(
   digest = 'sha256:conformance',
 ): DesiredState {
   return {
+    deploy: 'conformance-deploy',
     app: 'conformance',
     component: 'web',
     target: 'target',

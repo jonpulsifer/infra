@@ -14,6 +14,7 @@
  * ranks silently deciding what a healthy Target looks like.
  */
 import { join } from 'node:path';
+import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
 import type { ConnectTargetInput } from '../../src/commands/targets/connect.ts';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
@@ -58,6 +59,7 @@ export function clusterInput(
       namespace: 'apps',
       sourceRef: { name: 'charts', namespace: 'delivery' },
     },
+    chartContract: VALUES_CONTRACT,
     ...overrides,
   };
 }

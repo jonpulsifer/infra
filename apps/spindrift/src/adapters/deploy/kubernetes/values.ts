@@ -96,6 +96,7 @@ export interface AppValues {
   expose: boolean;
   exposure: DesiredState['exposure'];
   schedule: string;
+  deployId: string;
   artifactDigest: string;
   hostnames: string[];
   secretEnv: SecretEnvValue[];
@@ -137,14 +138,9 @@ export function imageReference(desired: DesiredState): string | null {
 /**
  * Render Spindrift's class from the neutral description (§6).
  *
- * The one value that needs explaining is `artifactDigest`. §7 puts a per-deploy
- * label on the pod template — never in the selector — because both delivery
- * flavours enumerate applied objects and neither covers pods, so a pod needs
- * something on it that says what placed it. **Core's description names no
- * Deploy**: §6's `DesiredState` has no such field, and adding one would put a
- * row identity across a seam whose whole point is that the adapter knows
- * nothing about core's tables. The digest does the job and is already there —
- * it is the identity §16 correlates on everywhere in the supply chain.
+ * Deploy identity and artifact identity remain separate. The Deploy label lets
+ * diagnosis select only the pods created by this rollout (§7); the digest lets
+ * core compare what the delivery object still carries with desired state (§6).
  */
 export function appValues(desired: DesiredState, image: string): AppValues {
   return {
@@ -158,6 +154,7 @@ export function appValues(desired: DesiredState, image: string): AppValues {
     // An absent schedule is a suspended CronJob, which is why this is '' and
     // not omitted: the chart branches on emptiness, not on presence.
     schedule: desired.schedule ?? '',
+    deployId: desired.deploy,
     artifactDigest: desired.artifact.digest,
     hostnames: [
       desired.hostname.canonical,

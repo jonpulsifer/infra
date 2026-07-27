@@ -131,8 +131,8 @@ describe('the deploy label', () => {
   test('it is on the pod template', async () => {
     const deployment = one(await render(), 'Deployment');
     expect(
-      deployment.spec.template.metadata.labels['spindrift.dev/artifact'],
-    ).toBe('sha256:feed');
+      deployment.spec.template.metadata.labels['spindrift.dev/deploy'],
+    ).toBe('deploy-1');
   });
 
   test('it is never in a selector', async () => {
@@ -144,13 +144,13 @@ describe('the deploy label', () => {
     const policy = one(objects, 'NetworkPolicy');
 
     expect(Object.keys(deployment.spec.selector.matchLabels)).not.toContain(
-      'spindrift.dev/artifact',
+      'spindrift.dev/deploy',
     );
     expect(Object.keys(service.spec.selector)).not.toContain(
-      'spindrift.dev/artifact',
+      'spindrift.dev/deploy',
     );
     expect(Object.keys(policy.spec.podSelector.matchLabels)).not.toContain(
-      'spindrift.dev/artifact',
+      'spindrift.dev/deploy',
     );
   });
 
@@ -158,18 +158,18 @@ describe('the deploy label', () => {
     const cronJob = one(await render({ app: { kind: 'job' } }), 'CronJob');
     expect(
       cronJob.spec.jobTemplate.spec.template.metadata.labels[
-        'spindrift.dev/artifact'
+        'spindrift.dev/deploy'
       ],
-    ).toBe('sha256:feed');
+    ).toBe('deploy-1');
   });
 
   test('two deploys of the same Component keep one selector', async () => {
     const first = one(
-      await render({ app: { artifactDigest: 'sha256:feed' } }),
+      await render({ app: { deployId: 'deploy-1' } }),
       'Deployment',
     );
     const second = one(
-      await render({ app: { artifactDigest: 'sha256:two' } }),
+      await render({ app: { deployId: 'deploy-2' } }),
       'Deployment',
     );
     expect(second.spec.selector).toEqual(first.spec.selector);

@@ -421,7 +421,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const pinned = connection.chartContract;
     set(
       'CHART_CONTRACT',
-      pinned === undefined || pinned === VALUES_CONTRACT,
+      pinned === VALUES_CONTRACT,
       `the App chart at this Target declares value contract ${pinned}; this Spindrift renders ${VALUES_CONTRACT}`,
     );
 

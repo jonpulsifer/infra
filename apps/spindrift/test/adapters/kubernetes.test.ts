@@ -75,6 +75,7 @@ function connection(
     apiServer: 'https://cluster.example.test',
     namespace: 'apps',
     delivery: FLUX,
+    chartContract: VALUES_CONTRACT,
     ...overrides,
   };
 }
@@ -91,6 +92,7 @@ function target(
 
 function desiredState(overrides: Partial<DesiredState> = {}): DesiredState {
   return {
+    deploy: 'deploy-1',
     app: 'blog',
     component: 'web',
     target: 'cluster',
@@ -648,6 +650,17 @@ describe('the checklist', () => {
     );
     expect(contract?.met).toBe(false);
     expect(contract?.detail).toContain(VALUES_CONTRACT);
+  });
+
+  test('an unread chart contract is a prerequisite failure', async () => {
+    const { adapter } = adapterFor();
+    const { prerequisites } = await adapter.inspect(
+      target({ chartContract: undefined }),
+    );
+    const contract = prerequisites.find(
+      (item) => item.name === 'CHART_CONTRACT',
+    );
+    expect(contract?.met).toBe(false);
   });
 });
 
