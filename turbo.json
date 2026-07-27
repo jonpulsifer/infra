@@ -38,6 +38,7 @@
     "test": {
       "dependsOn": ["build"],
       "inputs": ["src/**", "test/**", "package.json"],
+      "env": ["DATABASE_URL"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "typecheck": {

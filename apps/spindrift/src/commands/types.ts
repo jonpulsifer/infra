@@ -1,0 +1,156 @@
+/**
+ * The application command layer (§21 Boundaries).
+ *
+ * §21: "v1 exposes neither a supported external API nor a CLI... The boundary
+ * is nevertheless explicit inside the application. Creation, building,
+ * deployment, rollback, and desired-state changes are application commands,
+ * not logic embedded in pages, so a later thin API or CLI can wrap them
+ * without reconstructing the domain from UI handlers. This is the primary
+ * test seam."
+ *
+ * Hence the shape here: **one exported function per user act**, taking an
+ * explicit input object and a request context, returning a typed result.
+ * Nothing in this layer knows it is reached over HTTP, from a page, or from a
+ * test — `registry.ts` is the only thing that knows a command can be named,
+ * and a route above it may hold no domain logic whatsoever.
+ *
+ * The context is the whole of what a command may reach for. Anything absent
+ * from it — the wall clock, a connection string, an ambient adapter — is a
+ * dependency a test cannot replace, and the seam is only primary if every one
+ * of them can be replaced.
+ */
+import type { BuildAdapter } from '../adapters/build/contract.ts';
+import type { DeployAdapter } from '../adapters/deploy/contract.ts';
+import type { SecretStore } from '../adapters/store/contract.ts';
+import type { TargetAdapter } from '../config/manifest.schema.ts';
+import type { Database } from '../db/client.ts';
+
+/**
+ * Who is acting.
+ *
+ * §"First run and identity": every enrolled user is one fully privileged
+ * kind, so there is no role here to branch on — a command knows *who*, and v1
+ * never asks *whether*.
+ */
+export interface Principal {
+  /** The `users` row this act is attributed to. */
+  readonly id: string;
+  readonly displayName: string;
+}
+
+/**
+ * Time, injected.
+ *
+ * A handler calling `Date.now()` is a handler whose result cannot be asserted,
+ * and every row this layer writes carries a timestamp. The clock is therefore
+ * part of the context rather than a global.
+ */
+export interface Clock {
+  now(): Date;
+}
+
+/** The clock every non-test caller passes. */
+export const systemClock: Clock = {
+  now: () => new Date(),
+};
+
+/**
+ * The adapters a command may reach the outside world through (§6, §20).
+ *
+ * Lookups return `null` rather than throwing: an installation that has no
+ * adapter for a Target's declared type is a configuration fact a command must
+ * report, not an exception it should propagate. Tests substitute fakes here —
+ * "fake the far side, not our side" (§ Testing) — and this is the only
+ * far side there is.
+ */
+export interface AdapterRegistry {
+  /** The delivery adapter for a Target's one adapter type (§13). */
+  deploy(adapter: TargetAdapter): DeployAdapter | null;
+  /**
+   * A build route by name. §4: which routes exist is an installation's
+   * configuration, not a closed vocabulary.
+   */
+  build(route: string): BuildAdapter | null;
+  /** §10: one store of record per installation, selected by the manifest. */
+  store(): SecretStore;
+}
+
+/**
+ * Everything a command is allowed to reach: who, when, the database, and the
+ * far side. A command takes exactly this and its own input — never a module
+ * singleton, never `Bun.env`.
+ */
+export interface CommandContext {
+  readonly principal: Principal;
+  readonly clock: Clock;
+  readonly db: Database;
+  readonly adapters: AdapterRegistry;
+}
+
+/**
+ * Why a command did not do what was asked.
+ *
+ * Closed on purpose, in the spirit of §6's failure reasons: "a failure test
+ * asserts the sentence the user reads", which requires the failure to have an
+ * identity a test can key on. Only the two codes the layer can actually
+ * produce today are listed — a command that grows a domain failure adds its
+ * code here alongside it, rather than the set being guessed at in advance.
+ */
+export type CommandFailureCode = 'UNKNOWN_COMMAND' | 'INVALID_INPUT';
+
+/** The assertable identity of a failure, plus the sentence a user reads. */
+export interface CommandFailure {
+  readonly code: CommandFailureCode;
+  /** The sentence the user reads. */
+  readonly message: string;
+  /** Field-level detail, where the failure has any. */
+  readonly issues?: readonly CommandIssue[];
+}
+
+/** One thing wrong with one part of the input. */
+export interface CommandIssue {
+  /** Dotted path into the input object, empty for the object itself. */
+  readonly path: string;
+  readonly message: string;
+}
+
+/**
+ * What every command returns.
+ *
+ * A refusal is a value, not an exception: the dispatch surface above this
+ * layer has to turn a refusal into something a browser can render, and a
+ * thrown error carries no code to render. Genuine faults — a database that is
+ * gone — still throw, because they are not answers to the user's act.
+ */
+export type CommandResult<Output> =
+  | { readonly ok: true; readonly value: Output }
+  | { readonly ok: false; readonly failure: CommandFailure };
+
+/** Succeed with a value. */
+export function ok<Output>(value: Output): CommandResult<Output> {
+  return { ok: true, value };
+}
+
+/** Refuse, with an identity and a sentence. */
+export function failed<Output>(
+  code: CommandFailureCode,
+  message: string,
+  issues?: readonly CommandIssue[],
+): CommandResult<Output> {
+  return {
+    ok: false,
+    failure: issues ? { code, message, issues } : { code, message },
+  };
+}
+
+/**
+ * One user act.
+ *
+ * Every export of `./index.ts` has this type, and `registry.ts` asserts that
+ * at compile time — which is what makes "no route may contain domain logic"
+ * enforceable rather than aspirational.
+ */
+export type Command<Input, Output> = (
+  input: Input,
+  context: CommandContext,
+) => Promise<CommandResult<Output>>;
