@@ -50,6 +50,7 @@ spec:
               - *prom
         pathType: Prefix
       prometheusSpec:
+        serviceDiscoveryRole: EndpointSlice
         retention: 30d
         retentionSize: 40GB
         additionalScrapeConfigs:
@@ -202,5 +203,5 @@ spec:
         monitor:
           relabelings:
             - action: replace
-              sourceLabels: [__meta_kubernetes_endpoint_node_name]
+              sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
               targetLabel: instance

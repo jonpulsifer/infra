@@ -19,9 +19,9 @@
     };
   };
 
-  # No armv6l builder or cache exists anywhere -- generations are always
-  # cross-built elsewhere (spore) and pushed via `nixos-rebuild --target-host`,
-  # never attempted on-device.
+  # No armv6l builder or cache exists -- forge supplies the aarch64 build
+  # platform for this cross configuration, and generations are pushed via
+  # `nixos-rebuild --target-host` rather than built on-device.
   system.autoUpgrade.enable = false;
 
   # mise (from system/user.nix) has no armv6l-linux release; keep the rest of

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Post-apply glue for terraform/pki signer (re)issuance.
+# Post-apply glue for terraform/pki cluster CA and signer (re)issuance.
 #
-# After `atlantis apply` (or a local tofu apply) creates/rotates the per-cluster
-# SA token signers, this script:
+# After `atlantis apply` creates/rotates the per-cluster CAs or SA token
+# signers, this script:
 #   1. writes the public cert material to terraform/pki/certs/ (committed);
-#      a replaced signer's previous cert is kept as *-prev.pem so the JWKS
-#      retains the old key while tokens signed by it are still live,
-#   2. sops-encrypts each signer private key into the control-plane host's
-#      nix/secrets/<host>.sops.yaml (key: k8s-sa-signing-key) — plaintext never
+#      replaced CA and signer certs are kept as *-prev.pem for trust overlap,
+#      and each cluster CA gets a current-plus-previous *-ca-bundle.pem,
+#   2. sops-encrypts each cluster CA and signer private key into the matching
+#      control-plane host's nix/secrets/<host>.sops.yaml — plaintext never
 #      touches disk,
 #   3. regenerates terraform/pki/oidc/<cluster>/{jwks.json,openid-configuration.json}
 #      via scripts/pki/jwks_from_certs.py.
@@ -23,6 +23,11 @@ repo_root="$(git rev-parse --show-toplevel)"
 pki_dir="$repo_root/terraform/pki"
 certs_dir="$pki_dir/certs"
 
+if (($# == 0)); then
+  echo "usage: $0 <folly|offsite> [<folly|offsite> ...]" >&2
+  exit 2
+fi
+
 # cluster -> control-plane host (sops secret target)
 declare -A control_plane=(
   [folly]="optiplex"
@@ -36,21 +41,91 @@ mkdir -p "$certs_dir"
 jq -er '.fml_root_cert.value' <<<"$outputs" >"$certs_dir/fml-root.pem"
 jq -er '.fml_intermediate_cert.value' <<<"$outputs" >"$certs_dir/fml-intermediate.pem"
 
-for cluster in folly offsite; do
+sops_set_key() {
+  secret_file=$1
+  secret_name=$2
+  output_name=$3
+  cluster=$4
+
+  jq -ce ".${output_name}.value.\"$cluster\"" <<<"$outputs" \
+    | sops set --value-stdin "$secret_file" "[\"$secret_name\"]"
+}
+
+cert_fingerprint() {
+  openssl x509 -outform DER | openssl sha256
+}
+
+verify_key_pair() {
+  cert_output=$1
+  key_output=$2
+  cluster=$3
+
+  cert_spki="$(
+    jq -er ".${cert_output}.value.\"$cluster\"" <<<"$outputs" \
+      | openssl x509 -pubkey -noout \
+      | openssl pkey -pubin -outform DER \
+      | openssl sha256
+  )"
+  key_spki="$(
+    jq -er ".${key_output}.value.\"$cluster\"" <<<"$outputs" \
+      | openssl pkey -pubout -outform DER \
+      | openssl sha256
+  )"
+  if [[ $cert_spki != "$key_spki" ]]; then
+    echo "error: $cluster $cert_output does not match $key_output" >&2
+    return 1
+  fi
+}
+
+for cluster in "$@"; do
+  if [[ ! -v control_plane[$cluster] ]]; then
+    echo "error: unknown cluster: $cluster" >&2
+    exit 2
+  fi
   host="${control_plane[$cluster]}"
   issuer="$(jq -er ".issuers.value.\"$cluster\"" <<<"$outputs")"
+  ca_pem="$certs_dir/$cluster-ca.pem"
+  ca_prev_pem="$certs_dir/$cluster-ca-prev.pem"
+  ca_bundle_pem="$certs_dir/$cluster-ca-bundle.pem"
   signer_pem="$certs_dir/$cluster-sa-signer.pem"
   prev_pem="$certs_dir/$cluster-sa-signer-prev.pem"
 
-  jq -er ".cluster_ca_certs.value.\"$cluster\"" <<<"$outputs" >"$certs_dir/$cluster-ca.pem"
+  verify_key_pair cluster_ca_certs cluster_ca_private_keys "$cluster"
+  verify_key_pair sa_signer_certs sa_signer_private_keys "$cluster"
+
+  # Preserve the old CA before replacement. Consumers stage ca-bundle.pem,
+  # rotate every leaf, and only then retire ca-prev.pem in a later commit.
+  new_ca="$(jq -er ".cluster_ca_certs.value.\"$cluster\"" <<<"$outputs")"
+  new_ca_fingerprint="$(printf '%s\n' "$new_ca" | cert_fingerprint)"
+  current_ca_fingerprint="$([[ -s $ca_pem ]] && cert_fingerprint <"$ca_pem" || true)"
+  if [[ -n $current_ca_fingerprint ]] && [[ $new_ca_fingerprint != "$current_ca_fingerprint" ]]; then
+    echo "==> $cluster: previous CA kept for overlap ($ca_prev_pem)" >&2
+    cp "$ca_pem" "$ca_prev_pem"
+  fi
+  printf '%s\n' "$new_ca" >"$ca_pem"
+  if [[ -s $ca_prev_pem ]] && [[ $(cert_fingerprint <"$ca_prev_pem") == "$new_ca_fingerprint" ]]; then
+    echo "==> $cluster: removing duplicate previous CA artifact" >&2
+    rm "$ca_prev_pem"
+  fi
+  cp "$ca_pem" "$ca_bundle_pem"
+  if [[ -s $ca_prev_pem ]]; then
+    printf '\n' >>"$ca_bundle_pem"
+    cat "$ca_prev_pem" >>"$ca_bundle_pem"
+  fi
 
   # Preserve a replaced signer cert for JWKS overlap during rotation.
   new_signer="$(jq -er ".sa_signer_certs.value.\"$cluster\"" <<<"$outputs")"
-  if [[ -s $signer_pem ]] && ! diff -q <(printf '%s' "$new_signer") "$signer_pem" >/dev/null 2>&1; then
+  new_signer_fingerprint="$(printf '%s\n' "$new_signer" | cert_fingerprint)"
+  current_signer_fingerprint="$([[ -s $signer_pem ]] && cert_fingerprint <"$signer_pem" || true)"
+  if [[ -n $current_signer_fingerprint ]] && [[ $new_signer_fingerprint != "$current_signer_fingerprint" ]]; then
     echo "==> $cluster: previous signer kept for overlap ($prev_pem)" >&2
     cp "$signer_pem" "$prev_pem"
   fi
-  printf '%s' "$new_signer" >"$signer_pem"
+  printf '%s\n' "$new_signer" >"$signer_pem"
+  if [[ -s $prev_pem ]] && [[ $(cert_fingerprint <"$prev_pem") == "$new_signer_fingerprint" ]]; then
+    echo "==> $cluster: removing duplicate previous signer artifact" >&2
+    rm "$prev_pem"
+  fi
 
   # Drop the overlap cert once it has expired.
   if [[ -s $prev_pem ]] && ! openssl x509 -checkend 0 -noout -in "$prev_pem" >/dev/null; then
@@ -58,16 +133,22 @@ for cluster in folly offsite; do
     rm "$prev_pem"
   fi
 
-  echo "==> $cluster: sops-encrypting signer key for $host" >&2
+  echo "==> $cluster: sops-encrypting cluster CA and signer keys for $host" >&2
   secret_file="$repo_root/nix/secrets/$host.sops.yaml"
-  key_json="$(jq -c ".sa_signer_private_keys.value.\"$cluster\"" <<<"$outputs")"
   if [[ -s $secret_file ]]; then
-    # NB: sops set takes the value on argv — briefly visible in process listings
-    # on the operator machine; acceptable for a single-user laptop.
-    sops set "$secret_file" '["k8s-sa-signing-key"]' "$key_json"
+    sops_set_key "$secret_file" "k8s-cluster-ca-key" cluster_ca_private_keys "$cluster"
+    sops_set_key "$secret_file" "k8s-sa-signing-key" sa_signer_private_keys "$cluster"
   else
-    encrypted="$(jq -n --argjson key "$key_json" '{"k8s-sa-signing-key": $key}' \
-      | sops encrypt --filename-override "$secret_file" --input-type json --output-type yaml /dev/stdin)"
+    encrypted="$(
+      jq -n \
+        --argjson cluster_ca_key "$(jq -c ".cluster_ca_private_keys.value.\"$cluster\"" <<<"$outputs")" \
+        --argjson signer_key "$(jq -c ".sa_signer_private_keys.value.\"$cluster\"" <<<"$outputs")" \
+        '{
+          "k8s-cluster-ca-key": $cluster_ca_key,
+          "k8s-sa-signing-key": $signer_key
+        }' \
+        | sops encrypt --filename-override "$secret_file" --input-type json --output-type yaml /dev/stdin
+    )"
     printf '%s\n' "$encrypted" >"$secret_file"
   fi
 
@@ -78,6 +159,13 @@ for cluster in folly offsite; do
     --issuer "$issuer" \
     --out "$pki_dir/oidc/$cluster" \
     "${jwks_args[@]}"
+
+  echo "==> $cluster: certificate inventory" >&2
+  for cert in "$ca_pem" "$ca_prev_pem" "$signer_pem" "$prev_pem"; do
+    [[ -s $cert ]] || continue
+    openssl x509 -noout -subject -serial -dates -in "$cert" \
+      | sed "s|^|    $(basename "$cert"): |" >&2
+  done
 done
 
 cat >&2 <<'EOF'
@@ -85,6 +173,8 @@ cat >&2 <<'EOF'
 Done. Next steps:
   1. git add terraform/pki/certs terraform/pki/oidc nix/secrets && commit + PR
      (the next atlantis apply uploads the refreshed OIDC documents)
-  2. deploy the control planes (optiplex, retrofit) per the runbook
-  3. after old tokens age out, remove *-sa-signer-prev.pem and rerun this script
+  2. deploy the control planes only after the matching NixOS configuration
+     consumes the refreshed keys
+  3. after every TLS leaf uses the new CA, remove *-ca-prev.pem and rerun this
+     script; after old tokens age out, do the same for *-sa-signer-prev.pem
 EOF

@@ -5,11 +5,11 @@ metadata:
   namespace: monitoring
   labels:
     kubernetes.io/service-name: capsule
-    lolwtf.ca/service: pihole
+    lolwtf.ca/service: coredns
 addressType: IPv4
 ports:
-  - name: http-metrics
-    port: 9617
+  - name: dns-metrics
+    port: 9253
     protocol: TCP
 endpoints:
   - addresses: ["10.2.0.10"]
@@ -21,14 +21,14 @@ metadata:
   name: capsule
   namespace: monitoring
   labels:
-    lolwtf.ca/service: pihole
-    jobLabel: pihole
+    lolwtf.ca/service: coredns
+    jobLabel: coredns
 spec:
   ports:
-    - name: http-metrics
-      port: 9617
+    - name: dns-metrics
+      port: 9253
       protocol: TCP
-      targetPort: 9617
+      targetPort: 9253
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -36,20 +36,20 @@ metadata:
   name: capsule
   namespace: monitoring
   labels:
-    lolwtf.ca/service: pihole
+    lolwtf.ca/service: coredns
     release: prom-stack
 spec:
   jobLabel: jobLabel
   endpoints:
-    - port: http-metrics
+    - port: dns-metrics
       interval: 30s
       relabelings:
         - action: replace
-          sourceLabels: [__meta_kubernetes_endpoint_node_name]
+          sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
           targetLabel: instance
   selector:
     matchLabels:
-      lolwtf.ca/service: pihole
+      lolwtf.ca/service: coredns
   namespaceSelector:
     matchNames:
       - monitoring
@@ -60,20 +60,28 @@ metadata:
   name: capsule
   namespace: monitoring
   labels:
-    lolwtf.ca/service: pihole
+    lolwtf.ca/service: coredns
     release: prom-stack
 spec:
   groups:
     - name: capsule
       rules:
         - alert: PrometheusTargetMissing
-          expr: up {endpoint="http-metrics", namespace="monitoring", service="capsule"} == 0
+          expr: (up{endpoint="dns-metrics", namespace="monitoring", service="capsule"} == 0) or absent(up{endpoint="dns-metrics", namespace="monitoring", service="capsule"})
           for: 1m
           labels:
             severity: critical
           annotations:
             message: Prometheus target missing (instance {{ $labels.instance }})
             description: "A Prometheus target has disappeared. An exporter might be crashed.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+        - alert: CapsuleCoreDnsDown
+          expr: (node_systemd_unit_state{instance="capsule", name="coredns.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="capsule", name="coredns.service", state="active"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: CoreDNS sinkhole on capsule is down
+            description: "coredns.service is not active on capsule. One half of the production DNS sinkhole pair is unavailable."
         - alert: CapsuleChronyDown
           expr: (node_systemd_unit_state{instance="capsule", name="chronyd.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="capsule", name="chronyd.service", state="active"})
           for: 5m

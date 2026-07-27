@@ -6,7 +6,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./config/crd/standard
+  path: ./config/crd/experimental
   prune: true
   sourceRef:
     kind: GitRepository

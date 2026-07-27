@@ -102,12 +102,9 @@
 
       nixosConfigurations =
         let
-          # rackpi5 is now the minimal image-only build for spore's
-          # native-boot publisher (the legacy HTTP/RAM boot chain is
-          # kept as a fallback for forge's first boot). The live host
-          # config moved to `forge` below; once forge is verified on
-          # NVMe and the netboot fallback is removed, this whole let
-          # binding goes away with nix/hosts/rackpi5.nix.
+          # rackpi5 is the minimal image-only source for spore's native-boot
+          # publisher. Forge's EEPROM keeps this signed HTTP/RAM artifact as
+          # its fallback path.
           rackpi5Configuration = mkHost "rackpi5" {
             system = "aarch64-linux";
             modules = [ ./nix/hosts/rackpi5.nix ];
@@ -117,6 +114,9 @@
           optiplex = mkHost "optiplex" {
             role = "control-plane";
             tags = [ "folly" ];
+            clusterCa = {
+              enable = true;
+            };
             imports = [
               ./nix/system/tailscale-disable.nix
               ./nix/system/sops.nix
@@ -133,10 +133,20 @@
                   "kube-controller-manager.service"
                 ];
               };
+              sops.secrets."k8s-cluster-ca-key" = {
+                owner = "cfssl";
+                group = "cfssl";
+                mode = "0400";
+                path = "/var/lib/cfssl/ca-key.pem";
+                restartUnits = [ "cfssl.service" ];
+              };
             };
           };
           riptide = mkHost "riptide" {
             tags = [ "folly" ];
+            clusterCa = {
+              enable = true;
+            };
             imports = [
               ./nix/system/tailscale-disable.nix
             ];
@@ -144,6 +154,9 @@
           };
           shale = mkHost "shale" {
             tags = [ "folly" ];
+            clusterCa = {
+              enable = true;
+            };
             imports = [
               ./nix/system/tailscale-disable.nix
             ];
@@ -253,8 +266,8 @@
 
           # armv6l Pi Zero W: no native builder/cache exists for this arch, so
           # this is cross-compiled (nix/hardware/pi0.nix sets nixpkgs.crossSystem)
-          # from whatever machine builds it -- in practice spore, hence the
-          # aarch64-linux system below matching spore's native arch.
+          # on forge, hence the aarch64-linux system below matching its native
+          # architecture.
           radiopi0 = mkHost "radiopi0" {
             system = "aarch64-linux";
             modules = [ ./nix/hosts/radiopi0.nix ];
@@ -288,17 +301,16 @@
         # Pi's nixosSystem is called with system = "aarch64-linux" above).
         # These x86_64 aliases remain the image-builder workflow interface;
         # interactive ARM host builds target nixosConfigurations directly and
-        # run on spore or another native aarch64 builder.
+        # run on forge.
         x86_64-linux = {
           cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
           homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
           weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
           capsule = nixosConfigurations.capsule.config.system.build.sdImage;
           # Legacy: spore's rackpi5 native-boot publisher still signs boot.img
-          # off this derivation as a fallback while forge migrates to NVMe.
+          # off this derivation for forge's EEPROM fallback.
           rackpi5 = nixosConfigurations.rackpi5.config.system.build.piBootImg;
-          # Live NVMe installer: build the forge sd-image on spore and `dd`
-          # it to /dev/nvme0n1 on the running rackpi5 RAM-boot.
+          # Forge's installable NVMe image.
           forge = nixosConfigurations.forge.config.system.build.sdImage;
           spore = nixosConfigurations.spore.config.system.build.sdImage;
 
@@ -319,7 +331,7 @@
         };
 
         # radiopi0's armv6l target is cross-compiled, not natively built, so
-        # its build platform (aarch64-linux, matching spore) actually needs to
+        # its build platform (aarch64-linux, matching forge) actually needs to
         # be the system running `nix build`, unlike the x86_64-linux aliases
         # above.
         aarch64-linux = {

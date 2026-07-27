@@ -4,10 +4,18 @@ locals {
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
   lab_clients = merge(local.clients.lab, local.clients.rpis)
+  dns_servers = [
+    local.lab.hosts.capsule,
+    local.lab.hosts.spore,
+  ]
   lab_service_records = {
     dns-capsule = {
       name    = "dns"
       content = local.lab.hosts.capsule
+    }
+    dns-spore = {
+      name    = "dns"
+      content = local.lab.hosts.spore
     }
     time-capsule = {
       name    = "time"

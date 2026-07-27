@@ -2,30 +2,28 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: gateway-api
+  name: oauth2-proxy
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./config/crd/experimental
+  path: ./clusters/offsite/apps/oauth2-proxy
   prune: true
-  sourceRef:
-    kind: GitRepository
-    name: gateway-api
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: gateway-api-cluster-gateway
-  namespace: flux-system
-spec:
-  interval: 1h0m0s
-  path: ./clusters/offsite/networking/gateway-api
-  prune: true
-  dependsOn:
-    - name: gateway-api
   sourceRef:
     kind: GitRepository
     name: infra
+  dependsOn:
+    - name: config
+    - name: networking
+    - name: onepassword-connect
+  healthChecks:
+    - apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      name: oauth2-proxy
+      namespace: oauth2-proxy
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: oauth2-proxy
+      namespace: oauth2-proxy
   decryption:
     provider: sops
     secretRef:
