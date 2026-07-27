@@ -1,70 +1,204 @@
 /**
  * The served route table — the file a hand-authored route would actually
- * appear in.
+ * appear in — and the dependency boundary that keeps the build toolchain out of
+ * production.
  *
  * `dispatch.test.ts` asserts over `commandRoutes`, which is generated and so
  * cannot fail the assertion; that test proves the generator is right, not that
  * the server is. The plan's warning is about somewhere else entirely — "watch
  * for the first hand-authored route; that is the drift" — and the place to
- * write one is the table that spreads the generated set alongside the document
+ * write one is the table that spreads the generated set alongside the client
  * and the health probe.
- *
- * So this file reads that table. Adding a route to `routes.ts` without adding
- * it to {@link NON_COMMAND_ROUTES}, which is a list somebody has to edit on
- * purpose, fails here.
  */
 import { describe, expect, test } from 'bun:test';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { commandNames } from '../../src/commands/registry.ts';
+import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
-import { NON_COMMAND_ROUTES, webRoutes } from '../../src/web/routes.ts';
+import { HEALTH_PATH, webRoutes } from '../../src/web/routes.ts';
 
-/** The document is a bundler artifact in production; its identity is irrelevant. */
-const INDEX = { html: true };
+const APP = join(import.meta.dir, '../..');
 
-const served = webRoutes(INDEX, {
+const noSession = {
   session: async () => null,
   context: () => {
     throw new Error('unreachable in a route-table test');
   },
-});
+};
+
+/** A stand-in for the client, so this file never depends on a build having run. */
+const CLIENT = { '/': new Response('the client document') };
+
+const served = webRoutes(CLIENT, noSession);
 
 describe('what the web process serves', () => {
-  test('is command routes plus the two exceptions, and nothing else', () => {
+  test('is the client, the probe, and commands — nothing else', () => {
     expect(Object.keys(served).sort()).toEqual(
-      [...Object.keys(NON_COMMAND_ROUTES), ...commandNames.map(pathFor)].sort(),
+      [
+        ...Object.keys(CLIENT),
+        HEALTH_PATH,
+        ...commandNames.map(pathFor),
+      ].sort(),
     );
   });
 
-  test('every route that is not a command is one somebody listed', () => {
+  test('the only hand-authored route is the health probe', () => {
+    // Everything else traces to a generator: a command name, or a file the
+    // build emitted. This is the number that must not grow without somebody
+    // editing `routes.ts` and this test together.
     const commandPaths = new Set<string>(commandNames.map(pathFor));
-    const unlisted = Object.keys(served).filter(
-      (path) => !commandPaths.has(path) && !(path in NON_COMMAND_ROUTES),
+    const handAuthored = Object.keys(served).filter(
+      (path) => !commandPaths.has(path) && !(path in CLIENT),
     );
-    expect(unlisted).toEqual([]);
-  });
-
-  test('and the exceptions are only the document and the probe', () => {
-    // Deliberately restated as a literal rather than derived. This is the list
-    // whose *growth* is the thing being watched, so the test has to disagree
-    // when it grows — a derivation would grow with it silently.
-    expect(Object.keys(NON_COMMAND_ROUTES).sort()).toEqual(['/', '/healthz']);
+    expect(handAuthored).toEqual([HEALTH_PATH]);
   });
 
   test('the health probe reaches nothing', async () => {
-    // §21: no route may hold domain logic. The probe is a constant, which is
-    // the strongest form of that — it cannot consult anything.
-    const probe = served['/healthz'];
+    // §21: no route may hold domain logic. A constant is the strongest form of
+    // that — it cannot consult anything.
+    const probe = served[HEALTH_PATH];
     expect(probe).toBeInstanceOf(Response);
     expect(await (probe as Response).clone().text()).toBe('ok\n');
   });
 
-  test('the document is served at the root and nowhere else', () => {
+  test('the client is served at the root and nowhere else', () => {
     // The client owns navigation (a hash router), so there is no per-screen
-    // route and no catch-all. A second HTML route would mean the server had
+    // route and no catch-all. A second document route would mean the server had
     // started routing screens.
-    expect(served['/']).toBe(INDEX);
-    expect(
-      Object.entries(served).filter(([, handler]) => handler === INDEX),
-    ).toHaveLength(1);
+    expect(served['/']).toBe(CLIENT['/']);
+  });
+});
+
+describe('the production client comes from a built bundle', () => {
+  test('a missing bundle is a named failure, not a 404 at request time', async () => {
+    // The failure mode this guards is an image built without the build step:
+    // the server would come up, answer the probe, and serve nothing. Refusing
+    // at boot turns that into a pod that never goes ready.
+    await expect(
+      bundleRoutes(join(APP, 'dist-does-not-exist')),
+    ).rejects.toThrow(BundleMissingError);
+  });
+
+  test('every emitted file becomes exactly one route', async () => {
+    const dist = join(APP, 'dist');
+    const files = await readdir(dist).catch(() => null);
+    if (files === null) {
+      // `bun test` is run without a build in CI's typecheck job; the assertion
+      // above already covers the missing case, and skipping beats asserting
+      // against a directory that is legitimately absent.
+      return;
+    }
+
+    const routes = await bundleRoutes(dist);
+    expect(Object.keys(routes)).toHaveLength(files.length);
+    // The document is the root; everything else keeps its hashed name, which is
+    // what the document's relative `./chunk-….js` references resolve to.
+    expect(routes['/']).toBeDefined();
+    for (const file of files.filter((name) => name !== 'index.html')) {
+      expect(routes[`/${file}`]).toBeDefined();
+    }
+  });
+
+  test('hashed assets are immutable and the document is not', async () => {
+    const dist = join(APP, 'dist');
+    if ((await readdir(dist).catch(() => null)) === null) return;
+
+    const routes = await bundleRoutes(dist);
+    expect(routes['/']!.headers.get('cache-control')).toBe('no-cache');
+
+    const asset = Object.entries(routes).find(([path]) => path !== '/');
+    expect(asset).toBeDefined();
+    expect(asset![1].headers.get('cache-control')).toContain('immutable');
+  });
+});
+
+describe('the production entry carries no build toolchain', () => {
+  /**
+   * The claim the Dockerfile depends on: `server.ts` runs with
+   * devDependencies absent. An HTML import anywhere in its graph would pull the
+   * bundler and Tailwind back in, and it would do so at import time — a
+   * `NODE_ENV` check inside the module would be far too late.
+   *
+   * Checked by reading the graph rather than by uninstalling anything, because
+   * the failure is a wrong import, and that is what this reads.
+   *
+   * The list is what `bun install --production` leaves out, plus the client's
+   * own libraries: those end up inside `dist/`, so the server importing one
+   * would mean it had started rendering rather than serving.
+   */
+  const ABSENT_FROM_PRODUCTION = [
+    'tailwindcss',
+    'bun-plugin-tailwind',
+    'drizzle-kit',
+    'react',
+    'react-dom',
+    'lucide-react',
+    '@radix-ui/react-slot',
+  ];
+
+  /**
+   * The module specifiers an entry's graph still reaches for once bundled with
+   * `packages: 'external'` — which leaves every package import standing, so
+   * what survives is exactly the runtime dependency list.
+   *
+   * Reading specifiers rather than grepping the whole output matters: the
+   * string `index.html` legitimately appears in `bundle.ts` as the name of a
+   * file it looks for, and a substring match on `.html` would call that an
+   * import.
+   */
+  async function importsOf(entry: string): Promise<string[]> {
+    const built = await Bun.build({
+      entrypoints: [join(APP, entry)],
+      target: 'bun',
+      packages: 'external',
+    });
+    expect(built.success).toBe(true);
+    const source = await built.outputs[0]!.text();
+    return [
+      ...source.matchAll(/(?:^|\s)(?:import|export)[^;]*?from\s*"([^"]+)"/gm),
+    ]
+      .map((match) => match[1]!)
+      .concat(
+        [...source.matchAll(/(?:^|\s)import\s*"([^"]+)"/gm)].map((m) => m[1]!),
+      );
+  }
+
+  test('server.ts imports no HTML module', async () => {
+    // The load-bearing one. An HTML import is a bundler directive: it pulls the
+    // compile-time toolchain into the graph at import, which no runtime check
+    // could undo.
+    const specifiers = await importsOf('src/web/server.ts');
+    expect(specifiers.filter((s) => s.endsWith('.html'))).toEqual([]);
+  });
+
+  test('and no package that production does not install', async () => {
+    const specifiers = await importsOf('src/web/server.ts');
+    const offenders = specifiers.filter((specifier) =>
+      ABSENT_FROM_PRODUCTION.some(
+        (dependency) =>
+          specifier === dependency || specifier.startsWith(`${dependency}/`),
+      ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  test('the graph it does have is small and boring', async () => {
+    // A sanity check on the two above: a graph that reached nothing at all
+    // would pass them for the wrong reason.
+    const specifiers = await importsOf('src/web/server.ts');
+    expect(specifiers).toContain('zod');
+    expect(specifiers.some((s) => s.startsWith('drizzle-orm'))).toBe(true);
+  });
+
+  test('and dev.ts is the entry that does', async () => {
+    // The mirror: if this ever stops being true, the split has collapsed and
+    // the test above is passing for the wrong reason.
+    const packageJson = await Bun.file(join(APP, 'package.json')).json();
+    expect(packageJson.scripts.dev).toContain('dev.ts');
+    expect(packageJson.scripts.start).toContain('server.ts');
+
+    const entry = await Bun.file(join(APP, 'src/web/dev.ts')).text();
+    expect(entry).toContain('client/index.html');
   });
 });

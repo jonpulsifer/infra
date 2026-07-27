@@ -53,8 +53,20 @@ the cost the plan accepted for staying Bun-native.
 ## The UI
 
 Tailwind v4 and shadcn primitives, compiled by `bun-plugin-tailwind` inside the
-same graph walk that bundles the client — one build step, and `bunfig.toml`
-declares the same plugin so `bun run dev` compiles it identically.
+same graph walk that bundles the client.
+
+**Two entries, because the client is compiled at two different times.**
+`src/web/dev.ts` uses Bun's HTML import, so `bun run dev` compiles on demand and
+an edit is visible without a build step. `src/web/server.ts` — what the image
+runs — serves `dist/` as files and imports no HTML module at all, which is what
+keeps Tailwind, the bundler, and TypeScript out of the runtime: the shipped
+image installs `drizzle-orm` and `zod` and nothing else. Both build their route
+tables the same way, and `src/web/serve.ts` is everything else they share.
+
+That split is the reason the UI's libraries — React, Radix, lucide — are
+`devDependencies` rather than dependencies. They are build inputs that end up
+inside `dist/`; the server never resolves one. `test/web/routes.test.ts` reads
+the server's module graph and fails if that stops being true.
 
 The palette is not a choice made here: `src/web/client/styles.css` carries the
 tokens the prototypes settled, bound to shadcn's token names so `bg-card` and
@@ -158,12 +170,18 @@ Nothing has a default, because a default here would name someone's homelab.
 ## Usage
 
 ```bash
-bun install                       # once, at repo root (workspace member)
+bun install                             # once, at repo root (workspace member)
 bun run --cwd apps/spindrift build      # client → dist/
 bun run --cwd apps/spindrift test       # bun test
 bun run --cwd apps/spindrift typecheck  # tsc --noEmit
+
+# The UI, compiled on demand — no build step, hot reload.
 SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
   bun run --cwd apps/spindrift dev      # http://localhost:3000
+
+# What the image runs: serves dist/, so `build` has to have happened.
+SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
+  bun run --cwd apps/spindrift start
 ```
 
 `mise run ts:check` typechecks and lints the whole workspace, this package
