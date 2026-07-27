@@ -29,14 +29,17 @@
     'prEditedNotification',
     'prIgnoreNotification',
   ],
-  allowedPostUpgradeCommands: [
-    '^\\.github/scripts/update-mise-hashes\\.sh$',
-  ],
-  postUpgradeTasks: {
-    commands: ['.github/scripts/update-mise-hashes.sh'],
-    fileFilters: ['nix/overlays/mise.nix'],
-    executionMode: 'update',
-  },
+  // No postUpgradeTasks: the only task we would want (refreshing the mise
+  // fetchurl hashes) is gated by `allowedCommands`, a globalOnly option the
+  // Mend-hosted `renovate[bot]` app does not expose for this repo. Setting it
+  // in repo config is rejected (`Configuration Error: ... cannot be
+  // configured within a repository's config file`), and with no global entry
+  // the task is skipped with a `has not been added to the allowed list in
+  // allowedCommands` log on every bump. So Renovate bumps the mise version
+  // string only; refresh the fetchurl hashes by hand — run
+  // .github/scripts/update-mise-hashes.sh locally (see nix/overlays/mise.nix)
+  // before merge. nix-ci on optiplex (x86_64) + forge (aarch64) exercises both
+  // hashes and blocks a stale PR, quoting the correct replacement.
   // 'auto' rebases automerging PRs (most of this repo) whenever they fall
   // behind main — Atlantis plans stay fresh and GitHub native auto-merge can
   // satisfy require-up-to-date rules — while manual-review PRs only rebase on
@@ -414,12 +417,13 @@
       automerge: true,
     },
     {
-      // Renovate bumps the version string in nix/overlays/mise.nix; a
-      // postUpgradeTask runs .github/scripts/update-mise-hashes.sh to
-      // refresh both fetchurl hashes (x64/arm64) before the commit.
+      // Renovate bumps the version string in nix/overlays/mise.nix only; the
+      // two fetchurl hashes are refreshed by hand — run
+      // .github/scripts/update-mise-hashes.sh before merge (postUpgradeTasks
+      // can't do it: `allowedCommands` is global-only and unset on this bot).
       // nix-ci builds optiplex (x86_64) + forge (aarch64), which exercise
-      // both hashes and flag a mismatch quoting the correct replacement.
-      description: 'mise prebuilt binary — auto hash refresh, automerge',
+      // both hashes and block a stale PR quoting the correct replacement.
+      description: 'mise prebuilt binary — manual hash refresh, automerge (CI-guarded)',
       matchDepNames: ['jdx/mise'],
       matchDatasources: ['github-releases'],
       automerge: true,

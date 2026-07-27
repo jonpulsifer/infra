@@ -9,10 +9,13 @@
 # so pkgs.mise is never instantiated there and this throw never fires.
 final: _prev:
 let
-  # When Renovate bumps `version`, a postUpgradeTask runs
-  # .github/scripts/update-mise-hashes.sh to refresh both fetchurl hashes
-  # before the commit lands. If CI still fails with a hash mismatch, fix
-  # manually:
+  # Renovate bumps `version` only (the fetchurl hashes are not covered).
+  # A postUpgradeTask can't refresh them automatically: `allowedCommands` is
+  # a Renovate global-only option the Mend-hosted `renovate[bot]` app does not
+  # expose for this repo, so the task would be skipped. Refresh the hashes by
+  # hand before merging the bump PR — run .github/scripts/update-mise-hashes.sh,
+  # or the nix-prefetch-url commands below. CI flags a stale hash, quoting the
+  # correct replacement:
   #   nix-prefetch-url --type sha256 \
   #     https://github.com/jdx/mise/releases/download/v<ver>/mise-v<ver>-linux-arm64.tar.gz
   #   nix-prefetch-url --type sha256 \
