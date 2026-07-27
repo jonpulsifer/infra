@@ -1,0 +1,77 @@
+{{/*
+Migrations run as a Job, before the Deployments reach a database that has not
+been migrated.
+
+The Job's name carries the image digest, so a redeploy of the same image is the
+same Job (already complete, nothing rerun) and a new image is a new Job — rather
+than an attempted mutation of a completed Job's immutable pod template. That is
+`packages/charts/app`'s pattern, kept rather than replaced with a Helm hook:
+a hook would make Flux block on the Job, and the digest-named Job already gives
+run-once-per-image without the coupling.
+*/}}
+{{- if and .Values.database.enabled .Values.database.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "spindrift.migrationName" . }}
+  namespace: {{ include "spindrift.namespace" . }}
+  labels:
+    {{- include "spindrift.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "spindrift.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: OnFailure
+      {{- if .Values.sandbox }}
+      runtimeClassName: gvisor
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ .Values.image }}
+          command:
+            - sh
+            - -c
+            - {{ .Values.database.migration.command | quote }}
+          env:
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "spindrift.databaseName" . }}-app
+                  key: uri
+          {{- with .Values.envFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

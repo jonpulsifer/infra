@@ -1,0 +1,54 @@
+---
+# Spindrift is a **platform workload, never one of its own Apps** (§19). The
+# bootstrap circularity — a deploy layer that would otherwise have to deploy
+# itself — resolves by classification, not machinery: Flux owns this namespace
+# exactly as it owns Atlantis's and hub's.
+#
+# The chart is sourced from GitRepository/infra rather than OCI, which is the
+# plan's stated deferral. It costs the per-Target chart pinning §7 wants and
+# leaves the extraction path unexercised; reversing it is one workflow plus a
+# source swap, and it must happen before extraction is claimed.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: spindrift
+  namespace: spindrift
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: packages/charts/spindrift
+      reconcileStrategy: Revision
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
+  values:
+    image: ghcr.io/jonpulsifer/spindrift:latest
+    # Substituted by the apps Kustomization from the cluster-secrets Secret, so
+    # the zone is read rather than restated. external-dns publishes the record
+    # from the HTTPRoute and cert-manager issues the certificate, so this line
+    # is the whole of what makes the UI reachable with TLS.
+    hostname: spindrift.${SECRET_DOMAIN}
+    # The Secret carries SPINDRIFT_MANIFEST — every value naming this
+    # installation (§20). Nothing installation-specific is in the chart.
+    envFromSecret: spindrift-env
+    ingress:
+      enabled: true
+    database:
+      enabled: true
+      size: 2Gi
+      migration:
+        enabled: true
+    # §19's second Deployment. The reconciler entrypoint does not exist yet, so
+    # rendering it would be a crash-looping pod that says nothing true.
+    reconciler:
+      enabled: false
+    web:
+      resources:
+        requests:
+          memory: 256Mi
+          cpu: 100m
+        limits:
+          memory: 768Mi
+          cpu: 1000m

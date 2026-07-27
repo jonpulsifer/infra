@@ -1,0 +1,23 @@
+{{/*
+The Service targets `web` alone.
+
+Both Deployments carry the same `app.kubernetes.io/name`, so a selector built
+only from that would round-robin the UI's traffic into the reconciler, which
+serves nothing. The component label is what keeps them apart.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spindrift.fullname" . }}
+  namespace: {{ include "spindrift.namespace" . }}
+  labels:
+    {{- include "spindrift.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "spindrift.selectorLabels" (dict "Release" .Release "Values" .Values "Chart" .Chart "component" "web") | nindent 4 }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.port }}
+      targetPort: {{ .Values.port }}
