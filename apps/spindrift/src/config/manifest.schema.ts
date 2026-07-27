@@ -22,6 +22,28 @@ const zone = nonEmptyString.regex(
   'must be a lowercase dotted DNS name',
 );
 
+/** A trusted HTTP request header configured by the front-door Gateway. */
+const headerName = nonEmptyString.regex(
+  /^[A-Za-z0-9-]+$/,
+  'must be an HTTP header name',
+);
+
+/**
+ * The optional authenticated-Gateway adapter.
+ *
+ * The Gateway owns the provider protocol and presents a normalized subject to
+ * Spindrift over a non-bypassable hop. `adapterKey` distinguishes two Gateway
+ * configurations that happen to use the same issuer and subject.
+ */
+export const gatewayAuthSchema = z
+  .object({
+    adapterKey: nonEmptyString,
+    issuer: z.string().url(),
+    subjectHeader: headerName,
+    displayNameHeader: headerName.optional(),
+  })
+  .strict();
+
 /**
  * The delivery adapter a Target speaks (§6). One Target has exactly one
  * adapter type, because placement determines artifact shape (§13).
@@ -55,6 +77,37 @@ export const installationManifestSchema = z
      * carries no behaviour.
      */
     installation: nonEmptyString,
+
+    controlPlane: z
+      .object({
+        /**
+         * Where this control plane's own UI is served.
+         *
+         * Two things read it and both genuinely need it. A passkey is scoped to
+         * a **relying party id**, which is this name, and a ceremony performed
+         * against any other origin is refused (Task 37) — so an installation
+         * that guessed this wrong could enrol nobody. And the status page
+         * (§9) has to tell its own address apart from an App's, which is the
+         * only way one process can serve both.
+         *
+         * It is not derived from `dns.apexZone`: the control plane is a
+         * platform workload (§19) and never one of its own Apps, so it does not
+         * live in the zone Apps are named in.
+         */
+        hostname: zone,
+      })
+      .strict(),
+
+    auth: z
+      .object({
+        /**
+         * Null means passkeys are the only authentication path. A configured
+         * Gateway is additive: its assertions authenticate only after an
+         * operator links one from a fresh passkey-authenticated session.
+         */
+        gateway: gatewayAuthSchema.nullable(),
+      })
+      .strict(),
 
     dns: z
       .object({
@@ -155,4 +208,5 @@ export const installationManifestSchema = z
 export type TargetAdapter = z.infer<typeof targetAdapterSchema>;
 export type StoreAdapter = z.infer<typeof storeAdapterSchema>;
 export type TargetSeed = z.infer<typeof targetSeedSchema>;
+export type GatewayAuthConfig = z.infer<typeof gatewayAuthSchema>;
 export type InstallationManifest = z.infer<typeof installationManifestSchema>;

@@ -65,10 +65,20 @@ command: "bun run src/web/server.ts"
 # so rather than the chart assuming a runtime class exists.
 sandbox: false
 
-# The Secret carrying `SPINDRIFT_MANIFEST` and, later, the enrolment token and
-# repository credentials (Task 42). Required in practice: the process refuses to
-# boot without a manifest, which is the §20 discipline working as intended.
+# The Secret carrying `SPINDRIFT_MANIFEST`, `SPINDRIFT_ENROLMENT_TOKEN`, and
+# repository credentials when that integration is configured. Required in
+# practice: the process refuses to boot without a manifest, which is the §20
+# discipline working as intended.
 envFromSecret: ""
+
+# Header authentication is safe only behind a Gateway that strips and replaces
+# identity headers and is the sole network path to the web pod. Enabling this
+# renders a default-deny ingress NetworkPolicy, admits exactly these peers, and
+# attests that boundary to the process. `from` is a list of Kubernetes
+# NetworkPolicyPeer objects and must be non-empty when enabled.
+gatewayAuth:
+  enabled: false
+  from: []
 
 env: []
 

@@ -28,9 +28,16 @@ metadata:
   labels:
     {{- include "spindrift.labels" $top | nindent 4 }}
     app.kubernetes.io/component: {{ $process.name }}
-  {{- if $top.Values.database.enabled }}
+  {{- if or $top.Values.database.enabled $top.Values.envFromSecret }}
   annotations:
+    {{- if $top.Values.database.enabled }}
     app.kubernetes.io/database: {{ include "spindrift.databaseName" $top }}
+    {{- end }}
+    {{- with $top.Values.envFromSecret }}
+    # Recovery is token rotation. Reloader turns that desired-state Secret
+    # change into the restart needed for the process to read the new value.
+    secret.reloader.stakater.com/reload: {{ . | quote }}
+    {{- end }}
   {{- end }}
 spec:
   replicas: {{ $process.replicas }}
@@ -81,6 +88,11 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- end }}
+            {{- end }}
+            {{- if $top.Values.gatewayAuth.enabled }}
+            # Rendered only beside the NetworkPolicy in gateway-auth.yaml.
+            - name: SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY
+              value: "true"
             {{- end }}
             {{- if $top.Values.database.enabled }}
             - name: DATABASE_URL

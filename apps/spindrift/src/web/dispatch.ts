@@ -17,14 +17,16 @@
  *    page, and nothing outside this repo may depend on it.
  * 3. **Session-authenticated only, never a token.** A token is what turns an
  *    internal protocol into an API somebody scripts against, so there is no
- *    code path here that reads one — {@link DispatchDeps.session} returns a
- *    principal or nothing.
+ *    code path here that reads one — {@link DispatchDeps.authenticate} returns
+ *    a principal or a typed refusal.
  *
  * There is no domain logic in this file, and §21 requires that there be none.
  * What is left is transport: decode JSON, find a principal, call `dispatch`,
  * and choose a status code. Every decision about the act itself was already
  * made by the command.
  */
+
+import type { RequestAuthentication } from '../auth/types.ts';
 import {
   type CommandName,
   commandNames,
@@ -65,7 +67,7 @@ export interface DispatchDeps {
    * a boundary whose authentication is not built yet, and is the reason this is
    * not a stub that returns a fake principal.
    */
-  session(request: Request): Promise<Principal | null>;
+  authenticate(request: Request): Promise<RequestAuthentication>;
   /** Everything a command may reach, assembled per request (§21). */
   context(principal: Principal): CommandContext;
 }
@@ -86,6 +88,7 @@ export interface DispatchDeps {
 export type TransportFailureCode =
   | CommandFailureCode
   | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
   | 'METHOD_NOT_ALLOWED'
   | 'MALFORMED_REQUEST';
 
@@ -108,6 +111,7 @@ const STATUS = {
   NOT_DEPLOYABLE: 409,
   NOT_BUILDABLE: 409,
   UNAUTHENTICATED: 401,
+  FORBIDDEN: 403,
   METHOD_NOT_ALLOWED: 405,
   MALFORMED_REQUEST: 400,
 } as const satisfies Record<TransportFailureCode, number>;
@@ -158,13 +162,17 @@ async function handle(
     return refuse('METHOD_NOT_ALLOWED', 'a command is dispatched with POST');
   }
 
-  const principal = await deps.session(request);
-  if (principal === null) {
+  const authentication = await deps.authenticate(request);
+  if (authentication.kind === 'anonymous') {
     return refuse(
       'UNAUTHENTICATED',
       'this surface is reachable only with a session',
     );
   }
+  if (authentication.kind === 'forbidden') {
+    return refuse('FORBIDDEN', authentication.message);
+  }
+  const { principal } = authentication;
 
   let input: unknown;
   try {

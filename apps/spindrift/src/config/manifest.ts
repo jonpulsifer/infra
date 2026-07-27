@@ -16,6 +16,12 @@ import {
 export const MANIFEST_PATH_VAR = 'SPINDRIFT_MANIFEST_PATH';
 /** An inline YAML or JSON manifest document, used in place of a file. */
 export const MANIFEST_INLINE_VAR = 'SPINDRIFT_MANIFEST';
+/**
+ * Deployment attestation set by the chart only when it renders a default-deny
+ * NetworkPolicy admitting the configured trusted Gateway peers.
+ */
+export const TRUSTED_GATEWAY_BOUNDARY_VAR =
+  'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY';
 
 /** Raised when the manifest is absent, unparseable, or invalid. */
 export class ManifestError extends Error {
@@ -86,4 +92,28 @@ export async function loadManifest(
   );
 }
 
-export type { InstallationManifest } from './manifest.schema.ts';
+/**
+ * Refuse to enable header authentication without its non-bypassable boundary.
+ *
+ * The process cannot observe a Kubernetes NetworkPolicy from inside its own
+ * pod. The installer chart therefore sets this attestation beside the policy;
+ * a manifest copied into an unrestricted deployment fails closed at boot.
+ */
+export function assertTrustedGatewayBoundary(
+  manifest: InstallationManifest,
+  env: Env = Bun.env,
+): void {
+  if (
+    manifest.auth.gateway !== null &&
+    env[TRUSTED_GATEWAY_BOUNDARY_VAR] !== 'true'
+  ) {
+    throw new ManifestError(
+      `auth.gateway requires ${TRUSTED_GATEWAY_BOUNDARY_VAR}=true from a deployment that strips identity headers and restricts ingress to the trusted Gateway`,
+    );
+  }
+}
+
+export type {
+  GatewayAuthConfig,
+  InstallationManifest,
+} from './manifest.schema.ts';

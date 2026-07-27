@@ -30,8 +30,8 @@ spec:
     # from the HTTPRoute and cert-manager issues the certificate, so this line
     # is the whole of what makes the UI reachable with TLS.
     hostname: spindrift.${SECRET_DOMAIN}
-    # The Secret carries SPINDRIFT_MANIFEST — every value naming this
-    # installation (§20). Nothing installation-specific is in the chart.
+    # The Secret carries the installation manifest and its one-time enrolment
+    # token. Nothing installation-specific is in the chart.
     envFromSecret: spindrift-env
     serviceAccount:
       token:

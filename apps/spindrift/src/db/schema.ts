@@ -172,6 +172,19 @@ export const attemptKind = pgEnum('attempt_kind', ['build', 'deploy']);
  */
 export const attemptEventType = pgEnum('attempt_event_type', ['log', 'status']);
 
+/**
+ * Which WebAuthn ceremony a challenge was issued for. The two are not
+ * interchangeable — a `create` response answering a `get` challenge is the
+ * ceremony confusion `src/auth/webauthn.ts` refuses — so the purpose travels
+ * with the challenge rather than being inferred from which endpoint replies.
+ */
+export const webauthnPurpose = pgEnum('webauthn_purpose', [
+  'enrol',
+  'sign_in',
+  'credential_admin',
+  'add_passkey',
+]);
+
 // --- App and Component -------------------------------------------------
 
 /**
@@ -518,13 +531,146 @@ export const targets = pgTable(
  * linked identity from the front-door Gateway, kept distinct from
  * Spindrift's own user model on purpose.
  */
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  displayName: text('display_name').notNull(),
-  gatewayIdentity: text('gateway_identity'),
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    displayName: text('display_name').notNull(),
+    gatewayIdentity: text('gateway_identity'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // One trusted identity cannot name two internal users, even if v1 normally
+    // has only the operator. Keep the invariant where later multi-user work
+    // cannot accidentally weaken it.
+    unique('users_gateway_identity_unique').on(table.gatewayIdentity),
+  ],
+);
+
+/**
+ * One enrolled passkey (§"First run and identity" story 1).
+ *
+ * Both stored halves come from the browser's own parse of the attestation
+ * response — `publicKey` is SPKI from `getPublicKey()`, `algorithm` is the COSE
+ * id it reported — which is what lets `src/auth/webauthn.ts` exist without a
+ * CBOR decoder. That module's header carries why that is sound; the short form
+ * is that the enrolment token is the trust anchor, not the authenticator.
+ *
+ * `signCount` is stored because WebAuthn defines a clone check over it, and is
+ * expected to stay `0` forever: a synced passkey has nothing to count. The
+ * check binds only when an authenticator is actually counting.
+ */
+export const credentials = pgTable(
+  'credentials',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The credential id the authenticator minted, base64url. */
+    credentialId: text('credential_id').notNull(),
+    /** SPKI, base64url. A public key: this is not a secret. */
+    publicKey: text('public_key').notNull(),
+    /** COSE algorithm id — `-7` (ES256) or `-257` (RS256). */
+    algorithm: integer('algorithm').notNull(),
+    signCount: bigint('sign_count', { mode: 'number' }).notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (table) => [
+    // A credential id is the handle a sign-in arrives with, so it must name at
+    // most one row — a duplicate would make "whose passkey is this" ambiguous
+    // at exactly the moment it has to be answered.
+    unique('credentials_credential_id_unique').on(table.credentialId),
+  ],
+);
+
+/**
+ * §"First run and identity" story 3: "an opaque session that lasts a day, so
+ * that a stolen browser artifact is not a permanent credential."
+ *
+ * **The token is not here.** Only its SHA-256 is, which is the same posture
+ * §10 takes with config values and for the same reason: a database that cannot
+ * produce a credential is a database whose disclosure does not produce one
+ * either. A session is looked up by hashing what the cookie presented, never by
+ * comparing against something stored.
+ */
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** SHA-256 of the opaque cookie value, base64url. Never the value itself. */
+    tokenHash: text('token_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [unique('sessions_token_hash_unique').on(table.tokenHash)],
+);
+
+/**
+ * §"First run and identity" story 2: "the enrolment token consumed on use, so
+ * that the window in which anyone else could claim my installation closes the
+ * moment I finish."
+ *
+ * Consumption is a row rather than a flag on a token, because Spindrift never
+ * held the token in the first place — it arrives in the installation Secret and
+ * is read from the environment. What core owns is the *fact that this one has
+ * been spent*, and the unique index is what makes spending it twice impossible
+ * rather than merely checked.
+ *
+ * Story 4 falls out of the same row: recovery is "rotate the token and replace
+ * every passkey", so a token whose hash is not already here is a new token, and
+ * consuming it clears the credentials that came before it. Rotating the Secret
+ * *is* the recovery, with no second act to remember.
+ */
+export const enrolments = pgTable(
+  'enrolments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** SHA-256 of the token that was spent, base64url. Never the token. */
+    tokenHash: text('token_hash').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    consumedAt: timestamp('consumed_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [unique('enrolments_token_hash_unique').on(table.tokenHash)],
+);
+
+/**
+ * A challenge issued for one WebAuthn ceremony, and spent by it.
+ *
+ * A table rather than a signed cookie, because the property being bought is
+ * single use: a cookie proves the server issued the challenge and cannot prove
+ * it has not already been answered. Deleting the row on use is what makes a
+ * captured ceremony worthless the second time, and it is checkable at the same
+ * seam every other claim here is.
+ */
+export const webauthnChallenges = pgTable('webauthn_challenges', {
+  /** The random value, base64url. */
+  challenge: text('challenge').primaryKey(),
+  /** Which ceremony it was issued for: an enrolment or a sign-in. */
+  purpose: webauthnPurpose('purpose').notNull(),
+  /**
+   * Credential changes bind their challenge to the authenticated User.
+   * Bootstrap and sign-in have no principal yet, so their owner is null.
+   */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
 // --- Config -----------------------------------------------------------------
@@ -726,6 +872,19 @@ export const configItemsRelations = relations(configItems, ({ one }) => ({
   }),
 }));
 
+export const usersRelations = relations(users, ({ many }) => ({
+  credentials: many(credentials),
+  sessions: many(sessions),
+}));
+
+export const credentialsRelations = relations(credentials, ({ one }) => ({
+  user: one(users, { fields: [credentials.userId], references: [users.id] }),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, { fields: [sessions.userId], references: [users.id] }),
+}));
+
 export const attemptEventsRelations = relations(attemptEvents, ({ one }) => ({
   app: one(apps, { fields: [attemptEvents.appId], references: [apps.id] }),
   component: one(components, {
@@ -761,6 +920,14 @@ export type Target = typeof targets.$inferSelect;
 export type NewTarget = typeof targets.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type Credential = typeof credentials.$inferSelect;
+export type NewCredential = typeof credentials.$inferInsert;
+export type Session = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;
+export type Enrolment = typeof enrolments.$inferSelect;
+export type NewEnrolment = typeof enrolments.$inferInsert;
+export type WebauthnChallenge = typeof webauthnChallenges.$inferSelect;
+export type NewWebauthnChallenge = typeof webauthnChallenges.$inferInsert;
 export type ConfigItem = typeof configItems.$inferSelect;
 export type NewConfigItem = typeof configItems.$inferInsert;
 export type AttemptEvent = typeof attemptEvents.$inferSelect;

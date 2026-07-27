@@ -13,7 +13,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { EnrolmentDeps } from '../../src/auth/enrol.ts';
+import type { GatewayDeps } from '../../src/auth/gateway.ts';
+import { AUTH_ACTS, authPathFor } from '../../src/auth/routes.ts';
 import { commandNames } from '../../src/commands/registry.ts';
+import type { Database } from '../../src/db/client.ts';
 import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
 import { HEALTH_PATH, webRoutes } from '../../src/web/routes.ts';
@@ -21,37 +25,78 @@ import { HEALTH_PATH, webRoutes } from '../../src/web/routes.ts';
 const APP = join(import.meta.dir, '../..');
 
 const noSession = {
-  session: async () => null,
+  authenticate: async () => ({ kind: 'anonymous' as const }),
   context: () => {
     throw new Error('unreachable in a route-table test');
   },
 };
 
+/**
+ * Auth deps that would throw if reached. This file asserts over the *shape* of
+ * the table, so a handler running here would mean the assertion had gone wrong.
+ */
+const noAuth: EnrolmentDeps & GatewayDeps = {
+  db: new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error('a route-table test reached the database');
+      },
+    },
+  ) as Database,
+  clock: {
+    now: () => {
+      throw new Error('a route-table test read the clock');
+    },
+  },
+  relyingParty: {
+    id: 'spindrift.example.test',
+    name: 'example',
+    origin: 'https://spindrift.example.test',
+  },
+  enrolmentToken: null,
+  gateway: null,
+};
+
 /** A stand-in for the client, so this file never depends on a build having run. */
 const CLIENT = { '/': new Response('the client document') };
 
-const served = webRoutes(CLIENT, noSession);
+const served = webRoutes(CLIENT, noSession, noAuth);
+
+const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
 
 describe('what the web process serves', () => {
-  test('is the client, the probe, and commands — nothing else', () => {
+  test('is the client, the probe, auth, and commands — nothing else', () => {
     expect(Object.keys(served).sort()).toEqual(
       [
         ...Object.keys(CLIENT),
         HEALTH_PATH,
+        ...AUTH_PATHS,
         ...commandNames.map(pathFor),
       ].sort(),
     );
   });
 
-  test('the only hand-authored route is the health probe', () => {
+  test('the hand-authored surface is the probe and auth, and stops there', () => {
     // Everything else traces to a generator: a command name, or a file the
-    // build emitted. This is the number that must not grow without somebody
-    // editing `routes.ts` and this test together.
-    const commandPaths = new Set<string>(commandNames.map(pathFor));
+    // build emitted. Auth is generated too — from `AUTH_ACTS` — but it is the
+    // one generator whose tuple a person writes by hand, so it is counted here
+    // rather than exempted. This is the number that must not grow without
+    // somebody editing `routes.ts` and this test together.
+    const generated = new Set<string>(commandNames.map(pathFor));
     const handAuthored = Object.keys(served).filter(
-      (path) => !commandPaths.has(path) && !(path in CLIENT),
+      (path) => !generated.has(path) && !(path in CLIENT),
     );
-    expect(handAuthored).toEqual([HEALTH_PATH]);
+    expect(handAuthored.sort()).toEqual([HEALTH_PATH, ...AUTH_PATHS].sort());
+  });
+
+  test('pre-session acts remain on the closed auth surface', () => {
+    // The property §21 rests on. Auth itself gates credential-administration
+    // acts; every product route is a command gated by `dispatch.ts`.
+    for (const path of AUTH_PATHS) {
+      expect(path.startsWith('/internal/auth/')).toBe(true);
+    }
+    expect(AUTH_PATHS).toHaveLength(AUTH_ACTS.length);
   });
 
   test('the health probe reaches nothing', async () => {

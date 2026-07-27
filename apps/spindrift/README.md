@@ -9,12 +9,15 @@ Run, or static hosting. The design lives in `.agent/plans/spindrift/spec.md`
 
 **An uploaded bundle reaches a Kubernetes cluster and comes back with a URL.**
 The five nouns have tables, the three adapter contracts are written, and
-commands are the only way anything is acted on. Targets can be connected,
+commands are the only way authenticated product operations are acted on;
+pre-session authentication has its own closed internal surface. Targets can be connected,
 inspected on a loop, and resolved against — asking where a Component can go
 returns an answer with a reason for every Target it cannot. Uploading finished
 output records an artifact without a builder; creating a Deploy writes an intent
 under a locking read; the reconciler claims that intent, applies it through the
-Kubernetes adapter, and records what the platform said.
+Kubernetes adapter, and records what the platform said. The operator claims the
+installation with a passkey and reaches every command through an opaque
+session.
 
 What has no implementation is the Cloud Run and static deploy adapters, every
 real build route, config delivery, and datastores. **The three screens still
@@ -22,11 +25,8 @@ render placeholder data** from `src/web/demo/`, which is scaffolding meant to be
 deleted: the views are typed against `src/web/model.ts`, so the query commands
 that replace it have a contract to meet rather than a shape to guess.
 
-Three named gaps, all deliberate:
+Two named gaps, both deliberate:
 
-- **Nobody can sign in.** Passkey enrolment and sessions are unbuilt, so every
-  command route answers 401. The boundary is complete and rejects everything,
-  rather than carrying a development bypass that would become permanent.
 - **The creation draft is client state**, so a refresh mid-flow loses it. It
   wants a table and a pair of commands, which belong with the App and Component
   commands rather than in front of them.
@@ -80,7 +80,7 @@ tokens the prototypes settled, bound to shadcn's token names so `bg-card` and
 `text-muted-foreground` resolve to them. Light and dark both ship; the toggle
 stamps `data-theme` on the root, and its absence means "follow the OS".
 
-Three screens, each implementing rules §18 settled rather than choices made
+Four screens, each implementing rules §18 and identity settled rather than choices made
 while building them:
 
 - **Deploy** (`views/apps/deploy-detail.tsx`) — App-first, not attempt-first.
@@ -95,22 +95,52 @@ while building them:
   Review, defaults carrying every step, preflight folded into Review. An unmet
   prerequisite stops before any Build exists, keeps the draft, and names what
   clears it.
+- **Authentication Settings** (`views/auth/settings.tsx`) — additive passkeys
+  and the optional Gateway binding. Every mutation requires a fresh passkey
+  assertion, and the final account-root passkey cannot be removed.
 
-The browser reaches the server through **one dispatch surface generated from the
-command registry** (`src/web/dispatch.ts`): one route per command, built by
-`Object.fromEntries` over `commandNames`, so there is nowhere to write a route
-that is not a command. It is unversioned, marked internal, and
-session-authenticated only — never a token, because a token is what turns an
-internal protocol into an API §21 declined to declare.
+Authenticated product operations reach the server through a dispatch surface
+generated from the command registry (`src/web/dispatch.ts`): one route per
+command, built by `Object.fromEntries` over `commandNames`. Authentication uses
+a second closed internal surface generated from `AUTH_ACTS`. Both are
+unversioned; product commands are session-authenticated only and neither surface
+offers a bearer token that would turn this internal protocol into an API §21
+declined to declare.
+
+## Identity
+
+The first visit claims the installation with a WebAuthn passkey and the
+enrolment token from the installation Secret. The token is stored only as a
+hash and is consumed on use. A rotated token is the recovery path: a successful
+ceremony preserves the sole `User`, replaces every local passkey, and revokes
+every local session.
+
+Sign-in creates a random server-side session with a fixed 24-hour lifetime. The
+database holds only its hash; the browser receives the value in a `Secure`,
+`HttpOnly`, `SameSite=Lax` cookie. Sign-out revokes the row as well as clearing
+the cookie.
+
+The optional authenticated-Gateway adapter maps configured, trusted
+issuer/subject headers to an explicitly linked stable `User`; it never
+provisions an account or stores a provider token. Unknown assertions receive
+`403`. The offsite manifest leaves the adapter disabled until its Gateway strips
+and replaces the configured identity headers and the Service is non-bypassable,
+so local passkeys are the active human-authentication path there.
+
+Authenticated Settings can add passkeys or link and unlink the current Gateway
+identity. Every authentication-method change requires a fresh passkey
+assertion. Recovery remains the deployment-token path above: it replaces local
+passkeys and sessions while preserving the stable `User` and Gateway binding.
 
 ## The command layer
 
-Every user act is a command taking an explicit input and a request context, and
-the registry maps name → `{ input schema, handler }`. **A route may never hold
-domain logic**: `dispatch()` validates through the registry before a handler
-runs, so the browser endpoint is a mechanical wrap of the registry rather than a
-place decisions can accumulate. A command exported but not registered is a
-compile error, and so is a registry key that is not a command.
+Every authenticated product act is a command taking an explicit input and a
+request context, and the registry maps name → `{ input schema, handler }`.
+Authentication is the narrow exception described above: pre-session acts create
+that context, and credential Settings changes how its Principal is proved.
+**A route may never hold domain logic**: both internal surfaces validate and
+delegate before choosing an HTTP response. A command exported but not registered
+is a compile error, and so is a registry key that is not a command.
 
 ## Targets, capabilities, and placement
 

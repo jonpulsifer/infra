@@ -6,6 +6,16 @@
 # gets a value, and the extraction test is what notices when it does not.
 installation: example
 
+# Where this control plane serves its own UI. A passkey is scoped to it, and it
+# is how one process tells a request for itself from a request for an App.
+controlPlane:
+  hostname: spindrift.example.test
+
+# Optional identity asserted by a non-bypassable authenticated Gateway. This
+# fixture has no such edge, so no header is trusted.
+auth:
+  gateway: null
+
 dns:
   apexZone: apps.example.test
   vanityZone: example.test
