@@ -9,7 +9,8 @@
     "actions-runner",
     "hub",
     "slingshot",
-    "spindrift"
+    "spindrift",
+    "spindrift-verifier"
   ],
   "ignore": [
     "bashcurljq",

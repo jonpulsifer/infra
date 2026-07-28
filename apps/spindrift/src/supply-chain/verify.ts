@@ -99,7 +99,7 @@ export class SlsaVerifier implements ProvenanceVerifier {
   private readonly now: () => Date;
 
   constructor(options: SlsaVerifierOptions = {}) {
-    this.executable = options.executable ?? 'slsa-verifier';
+    this.executable = options.executable ?? 'spindrift-verifier';
     this.processes = options.processes ?? bunProcessExecutor;
     this.now = options.now ?? (() => new Date());
   }
