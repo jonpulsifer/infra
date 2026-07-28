@@ -12,7 +12,7 @@ const OUT = join(import.meta.dir, "dist");
 
 // ── build-time facts ────────────────────────────────────────────────────────
 
-const commit = (() => {
+const commit = Bun.env.BUILD_COMMIT || (() => {
   const proc = Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], {
     stdout: "pipe",
     stderr: "pipe",
@@ -20,7 +20,7 @@ const commit = (() => {
   return proc.stdout.toString().trim() || "unknown";
 })();
 
-const branch = (() => {
+const branch = Bun.env.BUILD_BRANCH || (() => {
   const proc = Bun.spawnSync(["git", "rev-parse", "--abbrev-ref", "HEAD"], {
     stdout: "pipe",
     stderr: "pipe",
@@ -28,7 +28,7 @@ const branch = (() => {
   return proc.stdout.toString().trim() || "unknown";
 })();
 
-const stamp = new Date().toISOString();
+const stamp = Bun.env.BUILD_TIME || new Date().toISOString();
 
 // ── inject ──────────────────────────────────────────────────────────────────
 

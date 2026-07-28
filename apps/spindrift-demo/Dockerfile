@@ -7,13 +7,16 @@ FROM cgr.dev/chainguard/node:latest-dev@sha256:5ca3303bfbcd7eeec7e71466d56a334c8
 ARG BUN_VERSION=1.3.14
 ENV BUN_INSTALL=/usr/local
 USER root
-RUN apk add --no-cache bash curl git \
+RUN apk add --no-cache bash curl \
   && curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
 
 FROM base AS builder
+ARG BUILD_COMMIT=unknown
+ARG BUILD_BRANCH=unknown
+ARG BUILD_TIME
 WORKDIR /app
 COPY . .
-RUN bun run build.ts
+RUN cd apps/spindrift-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
 
 FROM cgr.dev/chainguard/node:latest@sha256:2b9627fec21321fad828adf6c5ceb91c6f377b772b48a738533a1225c0145a90 AS runner
 ENV NODE_ENV=production \
