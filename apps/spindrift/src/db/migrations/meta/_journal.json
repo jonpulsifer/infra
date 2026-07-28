@@ -57,6 +57,13 @@
       "when": 1785210438248,
       "tag": "0007_config",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785264152666,
+      "tag": "0008_supply_chain",
+      "breakpoints": true
     }
   ]
 }

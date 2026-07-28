@@ -157,5 +157,7 @@ jobs:
               digest: $digest,
               refs: [$ref],
               baseDigest: (if $base == "" then null else $base end),
+              buildkitProvenanceRef: $ref,
+              sbomRef: $ref,
               statement: {run: $run, workflow: $workflow}}')"
           echo "spindrift-result $(printf '%s' "$report" | base64 | tr -d '\n')"

@@ -109,31 +109,42 @@ export interface DispatchBuildResult {
  * whose threshold could apply — which is also why a build for a shape rather
  * than for a Target is legitimate (§2).
  */
-async function routeRefusedByTarget(
-  context: CommandContext,
-  input: DispatchBuildInput,
-  adapter: BuildAdapter,
-): Promise<string | null> {
-  if (input.placementTargetId === undefined) return null;
+interface TargetBuildPolicy {
+  readonly name: string;
+  readonly minimumLevel: 1 | 2 | 3;
+}
 
+async function targetBuildPolicy(
+  context: CommandContext,
+  targetId: string | undefined,
+): Promise<TargetBuildPolicy | null> {
+  if (targetId === undefined) return null;
   const [target] = await context.db
     .select({ name: targets.name, minBuildLevel: targets.minBuildLevel })
     .from(targets)
-    .where(eq(targets.id, input.placementTargetId));
+    .where(eq(targets.id, targetId));
   if (target === undefined) return null;
+  return {
+    name: target.name,
+    minimumLevel: (target.minBuildLevel ?? DEFAULT_MINIMUM_BUILD_LEVEL) as
+      | 1
+      | 2
+      | 3,
+  };
+}
 
+function routeRefusedByTarget(
+  policy: TargetBuildPolicy | null,
+  adapter: BuildAdapter,
+): string | null {
+  if (policy === null) return null;
   const [candidate] = buildRouteCandidates(
     [{ name: adapter.name, level: adapter.buildLevel }],
-    {
-      minimumLevel: (target.minBuildLevel ?? DEFAULT_MINIMUM_BUILD_LEVEL) as
-        | 1
-        | 2
-        | 3,
-    },
+    { minimumLevel: policy.minimumLevel },
   );
   return candidate === undefined || candidate.eligible
     ? null
-    : `${target.name} will not take a build from ${adapter.name}: ${candidate.reason}`;
+    : `${policy.name} will not take a build from ${adapter.name}: ${candidate.reason}`;
 }
 
 export const dispatchBuild: Command<
@@ -220,7 +231,11 @@ export const dispatchBuild: Command<
   // is the Target's, so it is only checkable where a placement is named — and
   // where one is, a route below it is refused here rather than producing an
   // artifact the Target would refuse to admit anyway.
-  const refusal = await routeRefusedByTarget(context, input, adapter);
+  const targetPolicy = await targetBuildPolicy(
+    context,
+    input.placementTargetId,
+  );
+  const refusal = routeRefusedByTarget(targetPolicy, adapter);
   if (refusal !== null) return failed('NOT_BUILDABLE', refusal);
 
   // The staged bundle's own columns, not the artifact's. §15 stages a bundle for
@@ -344,6 +359,41 @@ export const dispatchBuild: Command<
     });
   }
 
+  const finalized = await context.adapters.supplyChain().finalize({
+    artifact: result.artifact,
+    provenance: result.provenance,
+    backend: adapter.name,
+    expectedBuilderId: adapter.provenanceBuilderId,
+    maximumLevel: adapter.buildLevel,
+    // A shape-only Build has no Target policy yet. It is assessed at the
+    // route's achieved level and every actual Deploy checks the Target's current
+    // threshold again, which is what makes a later policy raise prospective.
+    minimumLevel: targetPolicy?.minimumLevel ?? 1,
+    source: buildSource,
+  });
+  if (!finalized.ok) {
+    await recordBuildEvent(context.db, attempt, {
+      type: 'log',
+      line: `supply-chain admission failed: ${finalized.message}`,
+      resource: 'provenance',
+    });
+    await recordBuildEvent(context.db, attempt, {
+      type: 'status',
+      phase: 'FAILED',
+      reason: 'BUILD_FAILED',
+    });
+    await context.db
+      .update(builds)
+      .set({ status: 'FAILED' })
+      .where(eq(builds.id, build.id));
+    return ok({
+      buildId: build.id,
+      status: 'FAILED' as const,
+      artifactDigest: null,
+      runner: adapter.name,
+    });
+  }
+
   await recordBuildEvent(context.db, attempt, {
     type: 'status',
     phase: 'SUCCEEDED',
@@ -356,7 +406,11 @@ export const dispatchBuild: Command<
       artifactDigest: result.artifact.digest,
       artifactRefs: [...result.artifact.refs],
       baseDigest: result.baseDigest,
-      provenance: result.provenance,
+      provenance: finalized.assessment,
+      verifiedBuildLevel: finalized.assessment.achievedLevel,
+      signature: finalized.signature,
+      buildkitProvenanceRef: result.buildkitProvenanceRef,
+      sbomRef: result.sbomRef,
     })
     .where(eq(builds.id, build.id));
 

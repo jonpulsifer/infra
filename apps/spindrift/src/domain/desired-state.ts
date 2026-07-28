@@ -38,6 +38,14 @@ export interface Artifact {
   refs: readonly string[];
 }
 
+/** The digest-pinned image address shared by verification and signing. */
+export function immutableImageRef(artifact: Artifact): string | null {
+  if (artifact.type !== 'image') return null;
+  return (
+    artifact.refs.find((ref) => ref.endsWith(`@${artifact.digest}`)) ?? null
+  );
+}
+
 /**
  * The address an adapter pulls the artifact by, or `null` when it has none.
  *

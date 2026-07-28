@@ -47,6 +47,9 @@ const noAdapters: AdapterRegistry = {
     throw new Error('no store adapter is configured for this test');
   },
   repository: () => null,
+  supplyChain: () => {
+    throw new Error('smoke command reached the supply chain');
+  },
 };
 
 function context(clock: Clock = frozenClock): CommandContext {

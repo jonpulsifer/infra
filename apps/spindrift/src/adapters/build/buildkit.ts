@@ -114,12 +114,15 @@ fi
 buildctl-daemonless.sh build "$@" \\
   --local context=. \\
 ${args}
+  --attest=type=provenance,mode=max \\
+  --attest=type=sbom \\
   --output ${quote(`type=image,name=${input.destination},push=true`)} \\
   --metadata-file "$workspace/metadata.json"
 
 digest=$(sed -n 's/.*"containerimage.digest"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$workspace/metadata.json")
-report=$(printf '{"bundleDigest":"%s","digest":"%s","refs":["%s@%s"],"baseDigest":null}' \\
-  ${quote(input.bundleDigest)} "$digest" ${quote(input.destination)} "$digest")
+ref=${quote(input.destination)}@"$digest"
+report=$(printf '{"bundleDigest":"%s","digest":"%s","refs":["%s"],"baseDigest":null,"buildkitProvenanceRef":"%s","sbomRef":"%s"}' \\
+  ${quote(input.bundleDigest)} "$digest" "$ref" "$ref" "$ref")
 echo "${BUILD_REPORT_MARKER} $(printf '%s' "$report" | base64 | tr -d '\\n')"
 `;
 }

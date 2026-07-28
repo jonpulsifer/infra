@@ -32,6 +32,7 @@ import type {
   Clock,
   CommandContext,
 } from '../../src/commands/types.ts';
+import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
   apps,
   builds,
@@ -41,9 +42,11 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { configVersionOf } from '../../src/domain/config-version.ts';
+import { policyDrift } from '../../src/supply-chain/posture.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
+import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -83,6 +86,7 @@ function registryOf(
       throw new Error('a deploy command reached the secret store');
     },
     repository: () => null,
+    supplyChain: () => new SupplyChainHarness(),
   };
 }
 
@@ -98,7 +102,7 @@ function context(adapters: AdapterRegistry): CommandContext {
 
 /** An App, a Component, and a connected Target that accepts images. */
 async function fixture(
-  options: { kind?: 'service' | 'website'; adapter?: 'kubernetes' } = {},
+  options: { kind?: 'service' | 'website'; adapter?: TargetAdapter } = {},
 ) {
   const db = database().db;
   const [app] = await db
@@ -132,6 +136,7 @@ async function succeededBuild(
   componentId: string,
   seed: number,
   shape: 'image' | 'files' = 'image',
+  verifiedBuildLevel = 2,
 ) {
   const [build] = await database()
     .db.insert(builds)
@@ -146,6 +151,14 @@ async function succeededBuild(
       // at all — a route would have nothing to fetch.
       bundleLocation: `bundles/${seed}.zip`,
       status: 'SUCCEEDED',
+      verifiedBuildLevel,
+      signature: {
+        artifactDigest: digest(seed),
+        signer: 'gcpkms://test/signer',
+        format: 'cosign',
+        bundle: { mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json' },
+        signedAt: FROZEN.toISOString(),
+      },
     })
     .returning();
   return build!;
@@ -259,6 +272,90 @@ describe('createDeploy writes an intent, and only an intent', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+  });
+
+  test('supplied files need no image provenance or image signature', async () => {
+    const { component, target } = await fixture({
+      kind: 'website',
+      adapter: 'static',
+    });
+    const deployAdapter = new FakeDeployAdapter({
+      adapter: 'static',
+      artifactTypes: ['files'],
+    });
+    const ctx = context(registryOf(deployAdapter));
+    const uploaded = await uploadArchive(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        bundleDigest: digest(5),
+        location: 'bundles/shop/site.zip',
+        contents: 'artifact',
+        subpath: '.',
+      },
+      ctx,
+    );
+    expect(uploaded.ok).toBe(true);
+    if (!uploaded.ok) return;
+
+    const placed = await createDeploy(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        buildId: uploaded.value.buildId,
+      },
+      ctx,
+    );
+    expect(placed.ok).toBe(true);
+  });
+
+  test('raised policy leaves LIVE serving but blocks every new placement', async () => {
+    const { component, target } = await fixture();
+    const build = await succeededBuild(component.id, 4);
+    const first = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter())),
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    await database()
+      .db.update(deploys)
+      .set({ phase: 'LIVE' })
+      .where(eq(deploys.id, first.value.deployId));
+    await database()
+      .db.update(targets)
+      .set({ minBuildLevel: 3 })
+      .where(eq(targets.id, target.id));
+
+    expect(
+      policyDrift({
+        phase: 'LIVE',
+        achievedLevel: build.verifiedBuildLevel as 2,
+        requiredLevel: 3,
+      }),
+    ).toEqual({
+      drifted: true,
+      reason: 'verified Build Level 2 is below this Target’s current L3 policy',
+    });
+    expect(
+      await database()
+        .db.select({ phase: deploys.phase })
+        .from(deploys)
+        .where(eq(deploys.id, first.value.deployId)),
+    ).toEqual([{ phase: 'LIVE' }]);
+
+    const next = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter())),
+    );
+    expect(next).toEqual({
+      ok: false,
+      failure: {
+        code: 'NOT_DEPLOYABLE',
+        message: `Build ${build.id} achieved verified Build Level 2, and ${target.name} currently requires L3`,
+      },
+    });
   });
 });
 
@@ -598,6 +695,35 @@ describe('§6: rollback is an ordinary deploy', () => {
     expect(rolled.ok).toBe(false);
     if (rolled.ok) return;
     expect(rolled.failure.message).toContain('nothing has been deployed');
+  });
+
+  test('rollback cannot bypass the Target’s current build policy', async () => {
+    const { component, target } = await fixture();
+    const older = await succeededBuild(component.id, 42);
+    const newer = await succeededBuild(component.id, 43, 'image', 3);
+    const deployed = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: newer.id },
+      context(registryOf(capableAdapter())),
+    );
+    expect(deployed.ok).toBe(true);
+
+    await database()
+      .db.update(targets)
+      .set({ minBuildLevel: 3 })
+      .where(eq(targets.id, target.id));
+
+    expect(
+      await rollbackDeploy(
+        { componentId: component.id, targetId: target.id, buildId: older.id },
+        context(registryOf(capableAdapter())),
+      ),
+    ).toEqual({
+      ok: false,
+      failure: {
+        code: 'NOT_DEPLOYABLE',
+        message: `Build ${older.id} achieved verified Build Level 2, and ${target.name} currently requires L3`,
+      },
+    });
   });
 });
 

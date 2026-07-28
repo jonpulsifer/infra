@@ -651,6 +651,10 @@ describe('the BuildKit program', () => {
 
   test('ends by printing the one line core reads', () => {
     expect(program).toContain('spindrift-result');
+    expect(program).toContain('--attest=type=provenance,mode=max');
+    expect(program).toContain('--attest=type=sbom');
+    expect(program).toContain('"buildkitProvenanceRef":"%s"');
+    expect(program).toContain('"sbomRef":"%s"');
     // A folded payload is a payload core cannot decode.
     expect(program).toContain("tr -d '\\n'");
   });

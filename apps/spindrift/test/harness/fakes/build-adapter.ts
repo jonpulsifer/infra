@@ -45,6 +45,7 @@ export interface FakeBuildAdapterOptions {
   name?: string;
   logFidelity?: LogFidelity;
   buildLevel?: BuildLevel;
+  provenanceBuilderId?: string;
   script?: readonly ScriptedBuild[];
 }
 
@@ -54,6 +55,7 @@ export class FakeBuildAdapter implements BuildAdapter {
   readonly name: string;
   readonly logFidelity: LogFidelity;
   readonly buildLevel: BuildLevel;
+  readonly provenanceBuilderId: string;
 
   /** Every `build`, in call order. */
   readonly built: RecordedBuild[] = [];
@@ -65,6 +67,8 @@ export class FakeBuildAdapter implements BuildAdapter {
     this.name = options.name ?? 'fake';
     this.logFidelity = options.logFidelity ?? 'LIVE_TEXT';
     this.buildLevel = options.buildLevel ?? 2;
+    this.provenanceBuilderId =
+      options.provenanceBuilderId ?? 'https://spindrift.dev/builders/fake';
     this.script = options.script?.length ? options.script : [DEFAULT_BUILD];
   }
 
@@ -86,6 +90,8 @@ export class FakeBuildAdapter implements BuildAdapter {
         logs,
         provenance: null,
         baseDigest: null,
+        buildkitProvenanceRef: null,
+        sbomRef: null,
         reason: scripted.result.reason,
         ...(scripted.result.detail === undefined
           ? {}
@@ -108,6 +114,8 @@ export class FakeBuildAdapter implements BuildAdapter {
         statement: { fake: true },
       },
       baseDigest: scripted.result.baseDigest ?? null,
+      buildkitProvenanceRef: `${spec.destination}@${scripted.result.digest ?? 'fake'}#buildkit`,
+      sbomRef: `${spec.destination}@${scripted.result.digest ?? 'fake'}#spdx`,
     };
   }
 

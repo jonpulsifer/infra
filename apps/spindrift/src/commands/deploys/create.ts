@@ -42,6 +42,7 @@ import {
   deploys,
   targets,
 } from '../../db/schema.ts';
+import { DEFAULT_MINIMUM_BUILD_LEVEL } from '../../domain/build-route.ts';
 import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
 import { demandSentence, migrationFor } from '../config/migration.ts';
 import { type PinnedConfig, readPinnedConfig } from '../config/pinned.ts';
@@ -315,6 +316,25 @@ export async function checkDeployable(
       'NOT_DEPLOYABLE',
       `Build ${build.id} has no artifact — it is ${build.status.toLowerCase()}`,
     );
+  }
+
+  // §16: policy is read at the moment of every placement, including rollback.
+  // A Build is deployable only after core has verified its backend provenance
+  // and recorded the signature it created over the admitted artifact.
+  if (build.artifactType === 'image') {
+    const requiredLevel = target.minBuildLevel ?? DEFAULT_MINIMUM_BUILD_LEVEL;
+    if (build.verifiedBuildLevel === null || build.signature === null) {
+      return refuse(
+        'NOT_DEPLOYABLE',
+        `Build ${build.id} has no verified provenance and core signature`,
+      );
+    }
+    if (build.verifiedBuildLevel < requiredLevel) {
+      return refuse(
+        'NOT_DEPLOYABLE',
+        `Build ${build.id} achieved verified Build Level ${build.verifiedBuildLevel}, and ${target.name} currently requires L${requiredLevel}`,
+      );
+    }
   }
 
   // §3: "changing placement across shapes forces a rebuild." The Build's key

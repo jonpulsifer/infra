@@ -185,6 +185,8 @@ export interface BuildRequestSpec {
 export class GitHubActionsBuildRoute implements BuildAdapter {
   readonly name: string;
   readonly logFidelity: LogFidelity = 'LIVE_STATUS';
+  readonly provenanceBuilderId =
+    'https://github.com/actions/runner/github-hosted';
   /**
    * §16's profile level. A reusable workflow pinned by commit, running on a
    * runner the repository does not control, producing signed provenance — that

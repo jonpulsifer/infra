@@ -46,6 +46,7 @@ const route: BuildAdapter = {
   name: 'example',
   logFidelity: 'LIVE_TEXT',
   buildLevel: 2,
+  provenanceBuilderId: 'https://spindrift.dev/builders/example',
   async *build(
     given: BuildSource,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {
@@ -60,6 +61,8 @@ const route: BuildAdapter = {
         statement: null,
       },
       baseDigest: 'sha256:base',
+      buildkitProvenanceRef: null,
+      sbomRef: null,
     };
   },
 };
@@ -122,6 +125,8 @@ describe('a red build', () => {
       logs: { backend: 'example', fidelity: 'ON_COMPLETION' },
       provenance: null,
       baseDigest: null,
+      buildkitProvenanceRef: null,
+      sbomRef: null,
       reason: 'BUILD_FAILED',
       detail: 'step 3 exited 1',
     };

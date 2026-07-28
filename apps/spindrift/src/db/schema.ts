@@ -49,6 +49,8 @@ import type {
 } from '../domain/capabilities.ts';
 import type { ConfigEntry } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
+import type { CoreSignature } from '../supply-chain/sign.ts';
+import type { BackendProvenanceAssessment } from '../supply-chain/verify.ts';
 
 // --- Enums -----------------------------------------------------------------
 //
@@ -374,8 +376,27 @@ export const builds = pgTable(
     /** §4: "The build backend and its fidelity are visible on the Build." */
     runner: text('runner'),
     logFidelity: logFidelity('log_fidelity'),
-    /** §16: the normalized provenance envelope Core derived, if assessed. */
-    provenance: jsonb('provenance'),
+    /** §16: the backend envelope plus the facts core verified from it. */
+    provenance: jsonb('provenance').$type<BackendProvenanceAssessment>(),
+    /**
+     * The concrete achieved level, normalized for policy queries.
+     *
+     * It is deliberately beside the full envelope: deploy admission must compare
+     * every new intent with the Target's current threshold without teaching SQL
+     * the shape of a SLSA document.
+     */
+    verifiedBuildLevel: integer('verified_build_level'),
+    /** Core's one cosign record, written only after provenance passes (§16). */
+    signature: jsonb('signature').$type<CoreSignature>(),
+    /**
+     * The unsigned BuildKit materials document attached to the artifact.
+     *
+     * Raw evidence dies with the registry object; this durable reference and the
+     * normalized `baseDigest` preserve what core derived from it.
+     */
+    buildkitProvenanceRef: text('buildkit_provenance_ref'),
+    /** SPDX evidence attached to the artifact; deliberately not assessed in v1. */
+    sbomRef: text('sbom_ref'),
     /**
      * §4/§32: "The bundle digest must be a build parameter on every route,"
      * the join between a source receipt and its provenance document.

@@ -66,6 +66,9 @@ async function context(fake: FakeGitHub | null): Promise<CommandContext> {
       throw new Error('no store adapter is configured for this test');
     },
     repository: () => host,
+    supplyChain: () => {
+      throw new Error('repository connection reached the supply chain');
+    },
   };
 
   return {

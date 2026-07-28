@@ -35,6 +35,7 @@ const noAdapters: AdapterRegistry = {
   build: () => unreachable('build adapter'),
   store: () => unreachable('secret store'),
   repository: () => unreachable('repository host'),
+  supplyChain: () => unreachable('supply chain'),
 };
 
 /**

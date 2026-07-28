@@ -98,6 +98,9 @@ function registryOf(
     // §15's repository host plays no part in config: a value reaches the store,
     // never a repository.
     repository: () => null,
+    supplyChain: () => {
+      throw new Error('config reached the supply chain');
+    },
   };
 }
 
@@ -174,6 +177,14 @@ async function succeededBuild(componentId: string, seed: number) {
       bundleDigest: digest(seed),
       bundleLocation: `bundles/${seed}.zip`,
       status: 'SUCCEEDED',
+      verifiedBuildLevel: 2,
+      signature: {
+        artifactDigest: digest(seed),
+        signer: 'gcpkms://test/signer',
+        format: 'cosign',
+        bundle: { mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json' },
+        signedAt: FROZEN.toISOString(),
+      },
     })
     .returning();
   return build!;

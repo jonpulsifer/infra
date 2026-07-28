@@ -95,6 +95,8 @@ const TERMINAL = new Set([
 export class CloudBuildRoute implements BuildAdapter {
   readonly name: string;
   readonly logFidelity: LogFidelity = 'LIVE_TEXT';
+  readonly provenanceBuilderId =
+    'https://cloudbuild.googleapis.com/GoogleHostedWorker';
   /**
    * §16's profile level. A managed, ephemeral worker nobody outside the build
    * service can reach, running a program submitted by an authenticated caller —
