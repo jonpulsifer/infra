@@ -48,6 +48,7 @@ spec:
       supplyChain:
         registry: ghcr.io/jonpulsifer
         verifier: ghcr.io/jonpulsifer/spindrift-verifier
+        signer: gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer
       github:
         appId: "334190"
         apiBaseUrl: https://api.github.com
