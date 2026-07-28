@@ -22,5 +22,6 @@ export { createComponent } from './components/create.ts';
 export { createApp } from './create-app.ts';
 export { createDeploy } from './deploys/create.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';
+export { connectRepository } from './repositories/connect.ts';
 export { connectTarget } from './targets/connect.ts';
 export { disconnectTarget } from './targets/disconnect.ts';

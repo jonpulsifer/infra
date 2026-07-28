@@ -27,6 +27,7 @@ import type {
   TargetAdapter,
 } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
+import type { RepositoryHost } from '../domain/repository.ts';
 
 /**
  * Who is acting.
@@ -76,6 +77,18 @@ export interface AdapterRegistry {
   build(route: string): BuildAdapter | null;
   /** §10: one store of record per installation, selected by the manifest. */
   store(): SecretStore;
+  /**
+   * §15's repository host. `null` when this installation has no repository
+   * integration configured — which is a legitimate installation, not a fault:
+   * §2's other source is an uploaded archive, and it needs no repository at all.
+   *
+   * Not one of §6's three adapter contracts, and it is here anyway, because
+   * this interface is "the adapters a command may reach the outside world
+   * through" and a repository is unambiguously one of those. Keeping it out
+   * would only mean threading a second far side through the command layer
+   * beside the context, which is the shape the context exists to prevent.
+   */
+  repository(): RepositoryHost | null;
 }
 
 /**

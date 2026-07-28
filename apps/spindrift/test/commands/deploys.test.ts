@@ -81,6 +81,7 @@ function registryOf(
     store: () => {
       throw new Error('a deploy command reached the secret store');
     },
+    repository: () => null,
   };
 }
 

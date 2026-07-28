@@ -43,6 +43,13 @@
       "when": 1785195253314,
       "tag": "0005_credential_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785208095073,
+      "tag": "0006_repositories",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,9 @@
 import type { AdapterRegistry } from '../commands/types.ts';
 import type { StoreAdapter, TargetAdapter } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
+import type { RepositoryHost } from '../domain/repository.ts';
+import { GitHubApp } from '../integrations/github/app.ts';
+import type { Fetcher } from '../integrations/github/http.ts';
 import type { BuildAdapter } from './build/contract.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
 import type { TokenProvider } from './deploy/kubernetes/api.ts';
@@ -62,10 +65,27 @@ export function projectedServiceAccountToken(
   };
 }
 
+/**
+ * Where the GitHub App's private key is read from (§15: "bootstrapped from a
+ * SOPS Secret").
+ *
+ * An environment variable rather than a manifest key, and the split is the one
+ * §20 already draws: the manifest is non-secret installation configuration and
+ * is rendered into a ConfigMap, while this is the one long-lived credential
+ * this integration has. An installation without it simply has no repository
+ * integration — which is a supported installation, because §2's other source is
+ * an uploaded archive.
+ */
+export const GITHUB_APP_KEY_VAR = 'SPINDRIFT_GITHUB_APP_KEY';
+
 export interface RegistryOptions {
   readonly manifest: InstallationManifest;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly token?: TokenProvider;
+  /** Injected for the same reason, for the repository host's transport. */
+  readonly fetch?: Fetcher;
+  /** Defaults to the process environment; a test passes its own. */
+  readonly env?: Record<string, string | undefined>;
 }
 
 /**
@@ -82,6 +102,19 @@ export function createAdapterRegistry(
     chart: options.manifest.charts.app,
     token: options.token ?? projectedServiceAccountToken(),
   });
+
+  // §15's repository host, when this installation was given the App key. Built
+  // once: it caches the imported signing key and one installation token per
+  // installation, and a per-request instance would mint a JWT per call.
+  const appKey = (options.env ?? Bun.env)[GITHUB_APP_KEY_VAR]?.trim();
+  const repositoryHost: RepositoryHost | null = appKey
+    ? new GitHubApp({
+        appId: options.manifest.github.appId,
+        privateKeyPem: appKey,
+        baseUrl: options.manifest.github.apiBaseUrl,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      })
+    : null;
 
   const deployAdapters: Partial<Record<TargetAdapter, DeployAdapter>> = {
     kubernetes,
@@ -125,6 +158,18 @@ export function createAdapterRegistry(
         `this installation selected the ${options.manifest.secretStore.adapter satisfies StoreAdapter} store, ` +
           'but no endpoint is configured for it — config delivery is not built yet',
       );
+    },
+
+    /**
+     * §15's repository host, or `null` when no App key was supplied.
+     *
+     * `null` rather than a throw, following the same rule the other lookups
+     * do: an installation with no repository integration is a configuration
+     * fact, and `connectRepository` reports it as a refusal an operator can
+     * act on.
+     */
+    repository(): RepositoryHost | null {
+      return repositoryHost;
     },
   };
 }

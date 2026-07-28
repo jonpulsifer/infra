@@ -34,6 +34,7 @@ const noAdapters: AdapterRegistry = {
   deploy: () => unreachable('deploy adapter'),
   build: () => unreachable('build adapter'),
   store: () => unreachable('secret store'),
+  repository: () => unreachable('repository host'),
 };
 
 /**

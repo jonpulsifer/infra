@@ -40,6 +40,10 @@ import { createApp, createAppInput } from './create-app.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import type * as commands from './index.ts';
+import {
+  connectRepository,
+  connectRepositoryInput,
+} from './repositories/connect.ts';
 import { connectTarget, connectTargetInput } from './targets/connect.ts';
 import {
   disconnectTarget,
@@ -71,6 +75,10 @@ export const commandRegistry = {
   dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },
   createDeploy: { input: createDeployInput, handler: createDeploy },
   rollbackDeploy: { input: rollbackDeployInput, handler: rollbackDeploy },
+  connectRepository: {
+    input: connectRepositoryInput,
+    handler: connectRepository,
+  },
   connectTarget: { input: connectTargetInput, handler: connectTarget },
   disconnectTarget: {
     input: disconnectTargetInput,

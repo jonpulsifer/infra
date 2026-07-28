@@ -64,6 +64,7 @@ function fakes() {
     store: () => {
       throw new Error('no store adapter is configured for this test');
     },
+    repository: () => null,
   };
   return {
     registry,
