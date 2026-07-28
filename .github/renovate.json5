@@ -357,8 +357,17 @@
     // Containers & Helm charts — auto-merge low-risk updates
     // ============================================================
     {
-      description: 'Auto-merge container & Helm patch + digest updates',
-      matchDatasources: ['docker', 'helm'],
+      // Container image bumps go through the `containers` workflow (CI builds
+      // on merge to main), not Renovate. Renovate docker digest bumps silently
+      // auto-merge but don't trigger HelmRelease upgrades with
+      // reconcileStrategy: Revision, so they're pure noise.
+      description: 'Renovate does not bump container images (use the containers workflow)',
+      matchDatasources: ['docker'],
+      enabled: false,
+    },
+    {
+      description: 'Auto-merge Helm patch + digest updates',
+      matchDatasources: ['helm'],
       matchUpdateTypes: ['patch', 'digest', 'pin', 'pinDigest'],
       automerge: true,
     },
