@@ -12,10 +12,14 @@ import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
 import {
+  APP_LIST,
   DEPLOY_SCENARIO_NAMES,
   DEPLOY_SCENARIOS,
   type DeployScenarioName,
   INITIAL_DRAFT,
+  LINKED_REPOS,
+  REPOSITORY_OPTIONS,
+  TARGET_LIST,
   TARGET_OPTIONS,
   WORKSPACE_SCENARIO_NAMES,
   WORKSPACE_SCENARIOS,
@@ -27,14 +31,18 @@ import { Button } from './ui/button.tsx';
 import { Eyebrow } from './ui/card.tsx';
 import { cn } from './ui/utils.ts';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
+import { AppList } from './views/apps/list.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
 import { Workspace } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
 import { Settings } from './views/auth/settings.tsx';
+import { RepositoryList } from './views/repos/list.tsx';
+import { TargetList } from './views/targets/list.tsx';
 
 const NAV = [
   { path: '/apps', label: 'Apps' },
-  { path: '/deploys', label: 'Deploys' },
+  { path: '/targets', label: 'Targets' },
+  { path: '/repos', label: 'Repos' },
   { path: '/apps/new', label: 'New App' },
   { path: '/settings', label: 'Settings' },
 ] as const;
@@ -113,17 +121,33 @@ export function App() {
           );
         }}
       />
-      <Screen path={route.path} />
+      <Screen path={route.path} onNavigate={route.navigate} />
     </div>
   );
 }
 
-function Screen({ path }: { path: string }) {
+function Screen({
+  path,
+  onNavigate,
+}: {
+  path: string;
+  onNavigate: (path: string) => void;
+}) {
   if (path.startsWith('/settings')) return <Settings />;
   if (path.startsWith('/apps/new')) {
-    return <NewApp initialDraft={INITIAL_DRAFT} targets={TARGET_OPTIONS} />;
+    return (
+      <NewApp
+        initialDraft={INITIAL_DRAFT}
+        targets={TARGET_OPTIONS}
+        repos={REPOSITORY_OPTIONS}
+      />
+    );
   }
+  if (path.startsWith('/targets')) return <TargetList targets={TARGET_LIST} />;
+  if (path.startsWith('/repos')) return <RepositoryList repos={LINKED_REPOS} />;
   if (path.startsWith('/deploys')) return <DeployScreen />;
+  if (path === '/apps' || path === '')
+    return <AppList apps={APP_LIST} onNavigate={onNavigate} />;
   return <WorkspaceScreen />;
 }
 

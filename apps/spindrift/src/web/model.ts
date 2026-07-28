@@ -256,3 +256,75 @@ export interface TargetOptionView {
   readonly reasons: readonly Exclusion[];
   readonly detail: readonly string[];
 }
+
+/**
+ * A connected repository as the repository picker lists it.
+ *
+ * §20: `Link repo` lists repositories currently granted to the installation.
+ * Spindrift stores installation and stable repository IDs; the display fields
+ * (fullName, defaultBranch) are refreshable.
+ */
+export interface RepositoryOptionView {
+  /** GitHub's stable numeric repository ID, used as the selection key. */
+  readonly repositoryId: number;
+  /** The owner/name a human reads — e.g. `example-org/hub`. */
+  readonly fullName: string;
+  /** The branch Spindrift watches. */
+  readonly defaultBranch: string;
+  /** Whether this repository already has an App connected to it. */
+  readonly connected: boolean;
+}
+
+/** The connection health of a linked repository (§20). */
+export type RepoConnectionHealth = 'connected' | 'connection_lost';
+
+/**
+ * A linked repository as the repositories management view lists it.
+ *
+ * §20: Postgres stores installation and repository IDs, refreshable display
+ * data, App subpaths, last-reconciled SHA, connection health, and error.
+ */
+export interface LinkedRepoView {
+  readonly repositoryId: number;
+  readonly fullName: string;
+  readonly defaultBranch: string;
+  readonly health: RepoConnectionHealth;
+  /** The error message when health is `connection_lost`. */
+  readonly error: string | null;
+  /** The last commit SHA Spindrift reconciled. */
+  readonly lastReconciledSha: string | null;
+  /** App subpaths connected to this repository. */
+  readonly appSubpaths: readonly string[];
+}
+
+/**
+ * One App as the app list presents it.
+ *
+ * Not the workspace — the list is the fast scan of what exists, and clicking
+ * one navigates to the workspace.
+ */
+export interface AppListItem {
+  readonly name: string;
+  readonly phase: DeployPhase;
+  readonly target: string;
+  readonly vessel: string;
+  readonly url: string;
+  readonly urlLive: boolean;
+  /** The first Component's kind, for the list's icon. */
+  readonly kind: ComponentKind;
+  /** The source: repo fullName or 'archive'. */
+  readonly source: string;
+  readonly release: string;
+}
+
+/** A Target as the targets management view lists it. */
+export interface TargetListItem {
+  readonly name: string;
+  readonly adapter: string;
+  readonly rank: number;
+  readonly health: 'healthy' | 'unhealthy';
+  /** Supported component kinds on this target. */
+  readonly kinds: readonly ComponentKind[];
+  /** The canonical hostname prefix for apps on this target. */
+  readonly canonical: string;
+}

@@ -14,7 +14,7 @@
  */
 import { type Dispatch, useReducer, useState } from 'react';
 import { command, type TransportFailure } from '../../../client.ts';
-import type { TargetOptionView } from '../../../model.ts';
+import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { cn } from '../../../ui/utils.ts';
@@ -37,9 +37,11 @@ import {
 export function NewApp({
   initialDraft,
   targets,
+  repos,
 }: {
   initialDraft: Draft;
   targets: readonly TargetOptionView[];
+  repos: readonly RepositoryOptionView[];
 }) {
   const [draft, dispatch] = useReducer(draftReducer, initialDraft);
   const [refusal, setRefusal] = useState<TransportFailure | null>(null);
@@ -114,6 +116,7 @@ export function NewApp({
               dispatch={dispatch}
               targets={targets}
               blockers={blockers}
+              repos={repos}
             />
             {refusal ? <Refusal failure={refusal} /> : null}
           </div>
@@ -188,15 +191,17 @@ function StepBody({
   dispatch,
   targets,
   blockers,
+  repos,
 }: {
   draft: Draft;
   dispatch: Dispatch<Parameters<typeof draftReducer>[1]>;
   targets: readonly TargetOptionView[];
   blockers: ReturnType<typeof blockersFor>;
+  repos: readonly RepositoryOptionView[];
 }) {
   switch (draft.step) {
     case 0:
-      return <StepSource draft={draft} dispatch={dispatch} />;
+      return <StepSource draft={draft} dispatch={dispatch} repos={repos} />;
     case 1:
       return <StepComponent draft={draft} dispatch={dispatch} />;
     case 2:

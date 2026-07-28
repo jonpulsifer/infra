@@ -13,7 +13,8 @@ import type {
   ComponentKind,
   Exposure,
 } from '../../../../domain/desired-state.ts';
-import type { TargetOptionView } from '../../../model.ts';
+import { RepoPicker } from '../../../components/repo-picker.tsx';
+import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Card, CardContent, Eyebrow } from '../../../ui/card.tsx';
 import { Field } from '../../../ui/field.tsx';
@@ -103,7 +104,11 @@ function StepHeading({
  * form asks for a root directory because §5 names the scope and never searches
  * for it.
  */
-export function StepSource({ draft, dispatch }: StepProps) {
+export function StepSource({
+  draft,
+  dispatch,
+  repos,
+}: StepProps & { repos: readonly RepositoryOptionView[] }) {
   return (
     <>
       <StepHeading index={1} label="Source">
@@ -128,16 +133,21 @@ export function StepSource({ draft, dispatch }: StepProps) {
       </p>
 
       {draft.source.kind === 'repo' ? (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <Field
-            name="repo"
-            label="Repository"
-            defaultValue={draft.source.repo}
+        <div className="mt-5 flex flex-col gap-3">
+          <RepoPicker
+            repos={repos}
+            selected={draft.source.repo}
+            onSelect={(fullName, url) =>
+              dispatch({ type: 'repo', fullName, url })
+            }
           />
           <Field
             name="subpath"
             label="Root directory"
-            defaultValue={draft.source.subpath}
+            value={draft.source.subpath}
+            onChange={(event) =>
+              dispatch({ type: 'subpath', subpath: event.target.value })
+            }
             hint="Named, never searched — Spindrift does not roam the tree."
           />
         </div>

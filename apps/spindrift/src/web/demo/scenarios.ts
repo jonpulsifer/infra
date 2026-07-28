@@ -20,9 +20,13 @@
  */
 import type { ComponentKind, Exposure } from '../../domain/desired-state.ts';
 import type {
+  AppListItem,
   ChecklistItem,
   DeployView,
+  LinkedRepoView,
   LogLine,
+  RepositoryOptionView,
+  TargetListItem,
   TargetOptionView,
   WorkspaceView,
 } from '../model.ts';
@@ -544,3 +548,153 @@ export const INITIAL_DRAFT: Draft = {
   ],
   step: 0,
 };
+
+/** Available repositories from the GitHub App installation. */
+export const REPOSITORY_OPTIONS: readonly RepositoryOptionView[] = [
+  {
+    repositoryId: 100001,
+    fullName: 'example-org/infra',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 100002,
+    fullName: 'example-org/hub',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 100003,
+    fullName: 'example-org/site',
+    defaultBranch: 'main',
+    connected: false,
+  },
+  {
+    repositoryId: 100004,
+    fullName: 'example-org/api',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 100005,
+    fullName: 'example-org/weather-card',
+    defaultBranch: 'main',
+    connected: false,
+  },
+];
+
+/** Linked repositories for the management view. */
+export const LINKED_REPOS: readonly LinkedRepoView[] = [
+  {
+    repositoryId: 100001,
+    fullName: 'example-org/infra',
+    defaultBranch: 'main',
+    health: 'connected',
+    error: null,
+    lastReconciledSha: 'a1b2c3d',
+    appSubpaths: ['apps/hub', 'apps/api', 'apps/wiki'],
+  },
+  {
+    repositoryId: 100002,
+    fullName: 'example-org/hub',
+    defaultBranch: 'main',
+    health: 'connected',
+    error: null,
+    lastReconciledSha: 'e4f5g6h',
+    appSubpaths: ['.'],
+  },
+  {
+    repositoryId: 100004,
+    fullName: 'example-org/api',
+    defaultBranch: 'main',
+    health: 'connection_lost',
+    error:
+      'Installation suspended — the GitHub App installation was suspended by the account owner.',
+    lastReconciledSha: 'i7j8k9l',
+    appSubpaths: ['.'],
+  },
+];
+
+/** App list demo data. */
+export const APP_LIST: readonly AppListItem[] = [
+  {
+    name: 'hub',
+    phase: 'LIVE',
+    target: 'Primary',
+    vessel: 'vessel-a',
+    url: 'hub.apps.example',
+    urlLive: true,
+    kind: 'service',
+    source: 'example-org/infra',
+    release: 'Deploy #14 · a1b2c3d',
+  },
+  {
+    name: 'api',
+    phase: 'LIVE',
+    target: 'Primary',
+    vessel: 'vessel-a',
+    url: 'api.apps.example',
+    urlLive: true,
+    kind: 'service',
+    source: 'example-org/api',
+    release: 'Deploy #8 · m3n4o5p',
+  },
+  {
+    name: 'wiki',
+    phase: 'FAILED',
+    target: 'Cloud Run · vessel-a',
+    vessel: 'vessel-a',
+    url: 'wiki.apps.example',
+    urlLive: true,
+    kind: 'website',
+    source: 'example-org/infra',
+    release: 'Deploy #3 · q6r7s8t',
+  },
+  {
+    name: 'weather-card',
+    phase: 'APPLYING',
+    target: 'Firebase · vessel-a',
+    vessel: 'vessel-a',
+    url: 'weather-card.web.app',
+    urlLive: false,
+    kind: 'website',
+    source: 'archive',
+    release: 'Deploy #1 · sha256:d82a…',
+  },
+];
+
+/** Target list demo data. */
+export const TARGET_LIST: readonly TargetListItem[] = [
+  {
+    name: 'Primary',
+    adapter: 'kubernetes',
+    rank: 1,
+    health: 'healthy',
+    kinds: ['service', 'website', 'job'],
+    canonical: '*.primary.apps.example',
+  },
+  {
+    name: 'Cloud Run · vessel-a',
+    adapter: 'cloudrun',
+    rank: 2,
+    health: 'healthy',
+    kinds: ['service', 'website', 'job'],
+    canonical: '*.northamerica-northeast1.run.app',
+  },
+  {
+    name: 'Firebase · vessel-a',
+    adapter: 'static',
+    rank: 3,
+    health: 'healthy',
+    kinds: ['website'],
+    canonical: '*.web.app',
+  },
+  {
+    name: 'Secondary',
+    adapter: 'kubernetes',
+    rank: 4,
+    health: 'unhealthy',
+    kinds: ['service', 'website', 'job'],
+    canonical: '*.secondary.apps.example',
+  },
+];

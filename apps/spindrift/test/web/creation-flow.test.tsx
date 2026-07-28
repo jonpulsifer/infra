@@ -14,7 +14,11 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { INITIAL_DRAFT, TARGET_OPTIONS } from '../../src/web/demo/scenarios.ts';
+import {
+  INITIAL_DRAFT,
+  REPOSITORY_OPTIONS,
+  TARGET_OPTIONS,
+} from '../../src/web/demo/scenarios.ts';
 import {
   blockersFor,
   type Draft,
@@ -35,7 +39,11 @@ const clean: Draft = {
 
 const render = (draft: Draft) =>
   renderToStaticMarkup(
-    <NewApp initialDraft={draft} targets={TARGET_OPTIONS} />,
+    <NewApp
+      initialDraft={draft}
+      targets={TARGET_OPTIONS}
+      repos={REPOSITORY_OPTIONS}
+    />,
   );
 
 describe('the preflight', () => {
