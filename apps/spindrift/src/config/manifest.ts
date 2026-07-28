@@ -73,22 +73,30 @@ export function validateManifest(
   return result.data;
 }
 
+/** Default file path where the installer chart mounts the ConfigMap. */
+export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
+
 /**
  * Read the manifest the environment points at.
  *
- * `SPINDRIFT_MANIFEST_PATH` wins over `SPINDRIFT_MANIFEST`; neither being set is
- * an error, because there is no manifest this code could invent.
+ * `SPINDRIFT_MANIFEST_PATH` wins over `SPINDRIFT_MANIFEST`. If neither is set,
+ * checks `DEFAULT_MANIFEST_PATH` (/etc/spindrift/manifest.yaml) before erroring.
  */
 export async function loadManifest(
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  const path = env[MANIFEST_PATH_VAR]?.trim();
-  if (path) {
-    const file = Bun.file(path);
-    if (!(await file.exists())) {
-      throw new ManifestError(`${MANIFEST_PATH_VAR}=${path}: no such file`);
-    }
+  const explicitPath = env[MANIFEST_PATH_VAR]?.trim();
+  const path = explicitPath || DEFAULT_MANIFEST_PATH;
+
+  const file = Bun.file(path);
+  if (await file.exists()) {
     return parseManifest(await file.text(), path);
+  }
+
+  if (explicitPath) {
+    throw new ManifestError(
+      `${MANIFEST_PATH_VAR}=${explicitPath}: no such file`,
+    );
   }
 
   const inline = env[MANIFEST_INLINE_VAR];

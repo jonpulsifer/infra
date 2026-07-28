@@ -1,4 +1,4 @@
-{{- with .Values.installationManifest }}
+{{- if not (empty .Values.installationManifest) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,5 +11,5 @@ data:
   # document before atomically seeding its singleton database row; later boots
   # read the stored row and ignore this bootstrap copy.
   manifest.yaml: |
-    {{- toYaml . | nindent 4 }}
+    {{- toYaml .Values.installationManifest | nindent 4 }}
 {{- end }}

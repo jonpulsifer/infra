@@ -101,7 +101,7 @@ spec:
                   name: {{ include "spindrift.databaseName" $top }}-app
                   key: uri
             {{- end }}
-            {{- if $top.Values.installationManifest }}
+            {{- if not (empty $top.Values.installationManifest) }}
             - name: SPINDRIFT_MANIFEST_PATH
               value: /etc/spindrift/manifest.yaml
             {{- end }}
@@ -128,7 +128,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            {{- if $top.Values.installationManifest }}
+            {{- if not (empty $top.Values.installationManifest) }}
             - name: installation-manifest
               mountPath: /etc/spindrift
               readOnly: true
@@ -153,7 +153,7 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        {{- if $top.Values.installationManifest }}
+        {{- if not (empty $top.Values.installationManifest) }}
         - name: installation-manifest
           configMap:
             name: {{ include "spindrift.fullname" $top }}-installation-manifest
