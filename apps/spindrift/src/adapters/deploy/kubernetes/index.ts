@@ -27,8 +27,9 @@ import type {
 } from '../../../config/manifest.schema.ts';
 import {
   type PolicyEngineState,
-  PREREQUISITES,
+  type Prerequisite,
   type PrerequisiteResult,
+  prerequisitesFor,
   type TargetDiscovery,
   type TargetInspection,
 } from '../../../domain/capabilities.ts';
@@ -371,11 +372,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   ): Promise<readonly PrerequisiteResult[]> {
     const delivery = connection.delivery;
     const results = new Map<string, PrerequisiteResult>();
-    const set = (
-      name: (typeof PREREQUISITES)[number],
-      met: boolean,
-      detail?: string,
-    ): void => {
+    const set = (name: Prerequisite, met: boolean, detail?: string): void => {
       results.set(name, met ? { name, met } : { name, met: false, detail });
     };
 
@@ -425,7 +422,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       `the App chart at this Target declares value contract ${pinned}; this Spindrift renders ${VALUES_CONTRACT}`,
     );
 
-    return PREREQUISITES.map(
+    return prerequisitesFor(this.adapter).map(
       (name) =>
         results.get(name) ?? {
           name,

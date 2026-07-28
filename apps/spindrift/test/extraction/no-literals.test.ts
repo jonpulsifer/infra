@@ -72,10 +72,14 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // Why a build route is not usable for a Target — vocabulary again, read from
   // the domain rather than restated, so adding one does not break a test here.
   ...BUILD_ROUTE_REFUSALS,
-  // An encoding, and a key in a workflow file. Neither names anything; both
-  // wear the shape because they are lowercase words carrying a digit or a
-  // hyphen, which is the whole of what this scanner can see.
+  // An encoding, a digest algorithm, and a key in a workflow file. None of the
+  // three names anything; all wear the shape because they are lowercase words
+  // carrying a digit or a hyphen, which is the whole of what this scanner can
+  // see. The algorithm is §16's — correlation joins on digests everywhere in
+  // the supply chain, so naming the function that produces one is this
+  // system's vocabulary in every installation.
   'base64',
+  'sha256',
   'run-name',
   // HTTP header names. `src/web/` is scoped out of this scanner for exactly
   // this reason (see BROWSER_SOURCE), but the auth surface writes headers from

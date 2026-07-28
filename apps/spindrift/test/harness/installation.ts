@@ -70,6 +70,38 @@ export type KubernetesConnectInput = Extract<
   { kind: 'kubernetes' }
 >;
 
+/**
+ * The control APIs a connected cloud project is driven through.
+ *
+ * Constants rather than per-test strings because both a Target's connection and
+ * the fake standing behind it have to agree on them: a fake serving one host
+ * while the adapter addresses another is a test that fails for a reason nobody
+ * would look for. The fakes default to these.
+ */
+export const CLOUD_ENDPOINTS = {
+  run: 'https://run.example.test',
+  hosting: 'https://hosting.example.test',
+  policy: 'https://admission.example.test',
+} as const;
+
+/** The connect input a cloud project takes, with anything overridden. */
+export function cloudInput(
+  overrides: Partial<CloudConnectInput> = {},
+): CloudConnectInput {
+  return {
+    kind: 'cloud',
+    name: 'cloud',
+    project: 'example-vessel',
+    region: 'somewhere',
+    runEndpoint: CLOUD_ENDPOINTS.run,
+    hostingEndpoint: CLOUD_ENDPOINTS.hosting,
+    ...overrides,
+  };
+}
+
+/** The cloud arm of `connectTargetInput`. */
+export type CloudConnectInput = Extract<ConnectTargetInput, { kind: 'cloud' }>;
+
 /** A connection of the shape one adapter type needs. */
 export function connectionFor(adapter: TargetAdapter): TargetConnection {
   switch (adapter) {
@@ -88,10 +120,24 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
           : { chartContract: input.chartContract }),
       };
     }
-    case 'cloudrun':
-      return { adapter, project: 'example-vessel', region: 'somewhere' };
-    case 'static':
-      return { adapter, project: 'example-vessel' };
+    case 'cloudrun': {
+      const input = cloudInput();
+      return {
+        adapter,
+        project: input.project,
+        region: input.region,
+        endpoint: input.runEndpoint,
+        policyEndpoint: CLOUD_ENDPOINTS.policy,
+      };
+    }
+    case 'static': {
+      const input = cloudInput();
+      return {
+        adapter,
+        project: input.project,
+        endpoint: input.hostingEndpoint,
+      };
+    }
   }
 }
 

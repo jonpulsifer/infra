@@ -21,7 +21,8 @@ import type {
 } from '../../../src/adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../../../src/config/manifest.schema.ts';
 import {
-  PREREQUISITES,
+  type Prerequisite,
+  prerequisitesFor,
   type TargetDiscovery,
   type TargetInspection,
 } from '../../../src/domain/capabilities.ts';
@@ -58,7 +59,7 @@ export interface FakeDeployAdapterOptions {
    */
   discovery?: Partial<TargetDiscovery>;
   /** Checklist items to report unmet, with the sentence behind each. */
-  unmet?: Readonly<Partial<Record<(typeof PREREQUISITES)[number], string>>>;
+  unmet?: Readonly<Partial<Record<Prerequisite, string>>>;
   /** When set, `inspect` throws — the Target that cannot be reached at all. */
   unreachable?: string;
   /**
@@ -198,7 +199,7 @@ export class FakeDeployAdapter implements DeployAdapter {
     }
     const unmet = this.options.unmet ?? {};
     return {
-      prerequisites: PREREQUISITES.map((name) =>
+      prerequisites: prerequisitesFor(this.adapter).map((name) =>
         unmet[name] === undefined
           ? { name, met: true }
           : { name, met: false, detail: unmet[name] },

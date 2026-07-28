@@ -33,7 +33,11 @@ import {
 import type { ComponentKind } from '../../src/domain/desired-state.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { clusterInput, fixtureManifest } from '../harness/installation.ts';
+import {
+  cloudInput,
+  clusterInput,
+  fixtureManifest,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -77,12 +81,7 @@ function context(registry: AdapterRegistry): CommandContext {
 async function connectEverything(registry: AdapterRegistry) {
   await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
   await connectTarget(
-    {
-      kind: 'cloud',
-      name: 'vessel',
-      project: 'example-vessel',
-      region: 'here',
-    },
+    cloudInput({ name: 'vessel', region: 'here' }),
     context(registry),
   );
   const rows = await database().db.select().from(targets);

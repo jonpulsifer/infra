@@ -26,8 +26,13 @@ Job — and every one of them runs the same BuildKit program over the same
 staged bundle, so which route ran is a property of a Build rather than a
 different pipeline.
 
-What has no implementation is the Cloud Run and static deploy adapters,
-datastores, and signing. **The three screens still render placeholder data**
+All three deploy backends exist too — a cluster through its GitOps operator, the
+cloud runtime through its own API, and static hosting through a release — and
+one conformance suite runs over every one of them, which is what keeps "core
+describes, the adapter renders" a tested claim rather than a stated one.
+
+What has no implementation is datastores, jobs, runtime log tails, and signing.
+**The three screens still render placeholder data**
 from `src/web/demo/`, which is scaffolding meant to be deleted: the views are
 typed against `src/web/model.ts`, so the query commands that replace it have a
 contract to meet rather than a shape to guess.
@@ -53,7 +58,7 @@ One image, two processes (§19); only `web` exists so far.
 | `src/db/` | the Drizzle schema, the connection, and the committed migrations |
 | `src/commands/` | the application command layer and its registry |
 | `src/domain/` | backend-neutral product rules and value types |
-| `src/adapters/` | the adapter contracts, Kubernetes delivery, the three build routes, DNS records, and the two stores |
+| `src/adapters/` | the adapter contracts, the three deploy backends, the three build routes, DNS records, and the two stores |
 | `src/reconciler/` | two loops — Target health and capabilities, and deploy convergence |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |
@@ -152,7 +157,11 @@ is a compile error, and so is a registry key that is not a command.
 ## Targets, capabilities, and placement
 
 A `Target` is flat and has exactly one adapter type, so connecting a cloud
-project registers two of them — `cloudrun` and `static`. **Connect always
+project registers two of them — `cloudrun` and `static`. That one act asks for
+both control APIs, and each Target keeps only the endpoint its own adapter
+drives: an endpoint is connection material for exactly the reason a cluster's
+API server is, because two connected projects may sit behind different regional
+or perimeter-fronted endpoints and neither is more correct. **Connect always
 succeeds**: an unreachable cluster still produces a Target, unhealthy, with every
 unmet prerequisite and the sentence behind it. **Disconnect strands rather than
 stops**: live Deploys go orphaned, nothing is destroyed, the confirmation names
@@ -160,9 +169,14 @@ what it left running, and reconnecting re-adopts whatever `observe` still finds.
 
 One loop (`src/reconciler/target-loop.ts`) refreshes health and capabilities
 together, because a connect-time snapshot rots. It stores what was observed and
-never what was concluded — `verifiedDeploy` (which requires an *enforcing* policy
-engine, not an installed one) and `offlineDeploy` (a static check over the chart,
-image, and verifier references) are derived at read time.
+never what was concluded — `verifiedDeploy` and `offlineDeploy` are derived at
+read time. `verifiedDeploy` requires an *enforcing* verifier rather than an
+installed one, and that rule holds across both of §16's verifiers: a cluster
+whose policy engine is auditing and a project whose admission policy is dry-run —
+or whose evaluation mode admits everything however it enforces — both report
+capable of nothing. A Cloud Run Target whose connection names no policy endpoint
+reports the same, because nobody said where to look, which is the direction a
+claim about verification has to fail in.
 
 Placement is a filter, not a scheduler. Derived requirements — nothing is
 authored by a developer — narrow connected Targets to candidates, the
@@ -310,7 +324,13 @@ two artifacts the Build key cannot tell apart. `dispatchBuild` takes the
 placement it is building for and the second dispatch collides on the unique key
 rather than quietly serving the first one's values.
 
-Delivery on a Kubernetes Target is the App chart's `ExternalSecret`, which
+Delivery follows the Target, and both renderings carry a pinned *reference*
+rather than a value because that is all core has. On a Cloud Run Target each
+variable is a `secretKeyRef` the revision resolves at start from its own
+project's store, over the runtime's access path rather than core's — which is
+why no credential appears anywhere in that document.
+
+On a Kubernetes Target it is the App chart's `ExternalSecret`, which
 fetches each pinned reference into one Secret keyed by variable name. Two things
 an installation has to supply for that to work: the operator names the
 `ClusterSecretStore` in the Target's chart-values (`platform.secretStore.name`,
@@ -324,6 +344,78 @@ same reason and with the same posture: two access paths to two services, each
 read per call so a rotated Secret takes effect without a restart. The other two
 routes need neither — hosted CI goes through the App key, and the in-cluster
 Job authorizes with the projected service account token.
+
+## The three deploy backends
+
+One contract, three renderings, and **one conformance suite that every one of
+them passes** (`test/conformance/`). What differs between them is not how much
+of the contract they implement — it is what their backend is actually able to
+be honest about.
+
+**A cluster** is driven through its GitOps operator, as above. **Cloud Run** is
+driven through the runtime's own API: `apply` writes one Service with
+`allowMissing`, so create-and-update are the same call and idempotence costs
+core no memory of whether it placed this before. **Static hosting** is five
+calls, because the product's contract is that a version is immutable once
+finalized and a release is what makes one serve — version, populate, upload,
+finalize, release. The hash offered on populate is over the *gzipped* bytes,
+which is what the product stores and therefore what it deduplicates on, so a
+redeploy of an unchanged site uploads nothing.
+
+**A `files` artifact is a gzipped tar**, and the static adapter reads one with
+`src/adapters/deploy/static/bundle.ts` rather than a dependency: it is the same
+format `buildkit.ts` already unpacks, read from the other end, and §20 wants a
+package that prunes to something self-contained. The bundle is untrusted input,
+so a path that escapes the bundle is refused rather than normalized away — that
+would be the only path in this system by which one App could reach another's.
+
+**The checklist a Target is assessed against is its adapter type's**, not one
+list for all three (`PREREQUISITES_BY_ADAPTER`). §13's list is written in a
+cluster's terms because a cluster is the backend it was written about, and a
+Cloud Run Target has no delivery operator to run and no chart to pin — a row
+that can never fail teaches a reader that something was checked when nothing
+was. Both cloud backends answer three items from **one probe**, separated by the
+shape of the refusal: a `SERVICE_DISABLED` is the API being off, a bare `403` is
+the federated identity, a `404` is the vessel. Three separate calls would be
+three answers that can disagree, so that a Target reads authorized against a
+project that does not exist.
+
+**A store is reachable, or the kind does not need one.** A cluster's writable
+store is discovered and can genuinely be absent; a Cloud Run revision resolves
+its own project's store natively; **static hosting reaches no store at all**,
+because it has no runtime to resolve a reference with. That last one is why
+§10's website exception matters structurally rather than only as a convenience:
+placement does not apply the reach rule to a `website`, so a Target that
+delivers no config still holds the one kind that asks for none. Applying it
+anyway would make "picking the static Target *means* public" (§13) unreachable
+by construction.
+
+Two things stated rather than worked around:
+
+- **Cloud Run advertises no egress filtering** (§8). It has network controls and
+  not the by-name allowlist §8 specifies, and a capability reported on the
+  strength of something adjacent is a workload placed somewhere its egress was
+  never actually constrained.
+- **Cloud Run runs no job yet**, and `KINDS_BY_ADAPTER` says so. A job there is
+  a second resource with its own API and a schedule living in a separate
+  scheduling service, which belongs with jobs rather than with this Service
+  path. Until it exists a job is a non-candidate there with the reason stated
+  (§3's grammar), refused at Place rather than accepted and failed at apply.
+
+Exposure reaches the cloud runtime as two mechanisms, because the runtime
+answers two separate questions: *who can route to it* is ingress, and *who may
+invoke it* is IAM. Only `public` relaxes the second. §9's **transitions fail
+closed**, and the ordering is where that lives: a tightening exposure writes the
+invoker policy *before* the Service and again after it, so the closed state is
+asserted on every deploy rather than inherited from the platform's default;
+opening can only happen after, because granting invoke on something that is not
+there is not a call the API takes. A public deploy whose grant fails is red, not
+quietly private.
+
+**Static hosting serves `Public` only** (§9), and a non-public Component
+reaching it is refused as `INTERNAL` rather than `REJECTED` — placement already
+excludes this Target for one, so one arriving is core's bug and not a
+developer's.
 
 ## Naming and DNS
 
@@ -341,12 +433,39 @@ a route carrying a hostname *is* the record, and it is garbage collected with
 the release that owns it.
 
 `src/adapters/dns/cr.ts` builds `DNSEndpoint` objects for the names that have no
-route to hang on — the live-from-creation status name, and the vanity leg on a
-non-metal Target. **Neither of those is built, so nothing calls it yet**; it is
-here because external-dns's `crd` source is configured for exactly that gap.
+route to hang on — the live-from-creation status name, and a vanity leg standing
+in front of a backend that cannot carry the name itself. **The status name is
+not built, so nothing calls it for that yet**; it is here because external-dns's
+`crd` source is configured for exactly that gap.
 `test/extraction/no-dns-credential.test.ts` is the grep that keeps "no zone
 credential" true, and it also asserts DNS is still being described somewhere, so
 the negative claim cannot be satisfied by there being no DNS at all.
+
+**Proxying is a per-Target property**, and §9's sentence makes it one with the
+causality running the opposite way to how it reads: "the vanity record is
+unproxied on that leg, **so** proxying becomes a per-Target property." The proxy
+is not a preference — it is the only way a name reaches a metal cluster at all,
+because the cluster's load-balancer range is RFC1918 and public reach goes
+through the tunnel. A backend that answers on the public internet by itself
+needs no such hop. So `vanityProxied` is derived from the adapter type, which
+*is* a per-Target property because a Target has exactly one (§13), and storing
+it would let an operator assert something the backend contradicts.
+
+The unproxied leg costs something, and §9 absorbs it on purpose:
+`VANITY_LEG_LOSSES` says the leg buffers the whole response, so **WebSockets and
+SSE die there and requests cap at sixty seconds**. Two-layer naming is what
+makes that absorbable — the app stays fully capable at its canonical name — so
+these are constants the UI **states**, never something worked around. A
+workaround would be a second edge, which is the external load balancer §9
+declines to have. `VANITY_CEILING` is reported the same way: roughly twenty is a
+fact about one apex's certificate, so `vanityRation` counts and nothing refuses
+the twenty-first.
+
+On a static Target the vanity name is a **domain on the site that is already
+serving**, which is what makes §9's "moving an App between backends is one
+record re-point" true there rather than aspirational: the name is a function of
+the label and the zone alone, so a move changes what is underneath it and never
+what anyone bookmarked.
 
 One name is contended and one is not. The canonical is per Component, so it
 never collides. The **vanity name is per App**, so an App with two

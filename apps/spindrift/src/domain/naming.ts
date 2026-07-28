@@ -81,6 +81,93 @@ export function vanity(label: string, vanityZone: string): string {
   return `${label}.${vanityZone}`;
 }
 
+/**
+ * §9's hard ceiling on vanity names: "roughly 20".
+ *
+ * **Not a policy anyone chose.** One apex gets one free universal certificate,
+ * and that certificate is what caps how many single-label names can be minted
+ * under it. So this is a fact about the zone being reported, not a limit being
+ * imposed — which is why {@link vanityRation} returns a count rather than
+ * throwing, and why the UI's job is to say how many are left rather than to
+ * refuse the twenty-first.
+ */
+export const VANITY_CEILING = 20;
+
+/** What is left of the ration, for the UI to state rather than enforce. */
+export interface VanityRation {
+  readonly used: number;
+  readonly ceiling: number;
+  readonly remaining: number;
+  /** True once the next name may not get a certificate. */
+  readonly exhausted: boolean;
+}
+
+/** The ration, given how many vanity names this installation has minted. */
+export function vanityRation(used: number): VanityRation {
+  const remaining = Math.max(0, VANITY_CEILING - used);
+  return {
+    used,
+    ceiling: VANITY_CEILING,
+    remaining,
+    exhausted: remaining === 0,
+  };
+}
+
+/**
+ * Whether a Target's vanity name is served through the proxying edge (§9).
+ *
+ * §9 makes this **a per-Target property**, and the sentence it makes it one in
+ * is worth quoting because the causality runs the opposite way to how it reads:
+ * "the vanity record is unproxied on that leg, **so** proxying becomes a
+ * per-Target property." The proxy is not a preference — it is the only way a
+ * name reaches a metal cluster at all, because §9's forcing fact is that the
+ * cluster's load-balancer range is RFC1918 and public reach goes through the
+ * tunnel. A backend that answers on the public internet by itself needs no such
+ * hop, and putting one in front of it would buy nothing and cost the losses in
+ * {@link VANITY_LEG_LOSSES}.
+ *
+ * It is derived from the adapter type rather than stored, which is a per-Target
+ * property exactly because a Target has exactly one adapter type (§13). Storing
+ * it would let an operator assert something the backend contradicts.
+ */
+export function vanityProxied(adapter: TargetAdapter): boolean {
+  return coreMintsCanonical(adapter);
+}
+
+/**
+ * What is lost at a vanity name that is not proxied (§9).
+ *
+ * §9 records these as a **real loss, absorbed on purpose**: "the vanity leg
+ * buffers the full response, so WebSockets and SSE die there and requests cap at
+ * 60 seconds". Two-layer naming is what makes that absorbable — the app stays
+ * fully capable at its canonical name — so the answer is to **state them in the
+ * UI, never to work around them**. A workaround would be a second edge, which
+ * is the external load balancer §9 declines to have.
+ *
+ * They are constants rather than prose in a component so that the screen showing
+ * them and the test asserting they are shown read the same values.
+ */
+export const VANITY_LEG_LOSSES = {
+  /** The leg buffers the whole response before sending any of it. */
+  buffersResponse: true,
+  /** Which is why a stream never arrives: it is complete or it is nothing. */
+  streamingProtocols: false,
+  /** And why a slow request is cut rather than waited out. */
+  maxRequestSeconds: 60,
+} as const;
+
+/**
+ * Whether a Component reached at its vanity name still works as intended.
+ *
+ * The one thing the losses above make a *decision* rather than a caveat: an App
+ * that streams is an App whose vanity name is worse than no vanity name, and
+ * saying so at the moment a name is chosen is cheaper than saying it after
+ * somebody's WebSocket has been failing in production for a week.
+ */
+export function vanityCarriesStreams(adapter: TargetAdapter): boolean {
+  return vanityProxied(adapter) || VANITY_LEG_LOSSES.streamingProtocols;
+}
+
 /** What {@link hostnameFor} needs to answer §6's `hostname` field. */
 export interface HostnameContext {
   readonly app: string;

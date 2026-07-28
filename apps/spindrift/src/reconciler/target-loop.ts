@@ -72,6 +72,7 @@ export async function inspectTarget(
     return {
       prerequisites: unreachablePrerequisites(
         `this installation has no ${target.adapter} adapter`,
+        target.adapter,
       ),
       discovery: null,
     };
@@ -86,6 +87,7 @@ export async function inspectTarget(
     return {
       prerequisites: unreachablePrerequisites(
         cause instanceof Error ? cause.message : String(cause),
+        target.adapter,
       ),
       discovery: null,
     };
@@ -118,7 +120,7 @@ export async function refreshTarget(
     context,
     deployTargetOf(target),
   );
-  const health = deriveHealth(prerequisites);
+  const health = deriveHealth(prerequisites, target.adapter);
 
   await context.db
     .update(targets)

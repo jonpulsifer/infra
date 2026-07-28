@@ -17,21 +17,27 @@ import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import { GitHubActionsBuildRoute } from '../../src/adapters/build/github-actions.ts';
 import { InClusterBuildRoute } from '../../src/adapters/build/in-cluster.ts';
 import { encodeBuildReport } from '../../src/adapters/build/report.ts';
+import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
+import { StaticDeployAdapter } from '../../src/adapters/deploy/static/index.ts';
 import { SecretManagerStore } from '../../src/adapters/store/gcp-secret-manager.ts';
 import { OnePasswordStore } from '../../src/adapters/store/onepassword.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeCloudBuild } from '../harness/fakes/cloud-build-api.ts';
+import { FakeCloudRun } from '../harness/fakes/cloudrun-api.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
+import { FakeHosting } from '../harness/fakes/hosting-api.ts';
 import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 import { FakeOnePasswordConnect } from '../harness/fakes/onepassword-connect.ts';
 import { FakeSecretManager } from '../harness/fakes/secret-manager-api.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
+import { bytes, tarball } from '../harness/tar.ts';
 import {
   assertEveryAdapterEnrolled,
+  BUNDLE_DEPOT,
   buildAdapterSuite,
   deployAdapterSuite,
   storeAdapterSuite,
@@ -109,6 +115,38 @@ deployAdapterSuite(
     });
   },
   'files',
+);
+
+deployAdapterSuite(
+  'cloudrun',
+  () => {
+    const api = new FakeCloudRun();
+    return new CloudRunDeployAdapter({
+      token: api.token,
+      fetch: api.fetch,
+      pollIntervalMs: 1,
+      sleep: async () => {},
+    });
+  },
+  'files',
+);
+
+deployAdapterSuite(
+  'static',
+  () => {
+    const api = new FakeHosting({
+      // The one file every website has, so the release has something to carry
+      // and the upload step actually runs.
+      bundle: {
+        origin: BUNDLE_DEPOT,
+        bytes: tarball([
+          { name: 'index.html', bytes: bytes('<!doctype html>hello') },
+        ]),
+      },
+    });
+    return new StaticDeployAdapter({ token: api.token, fetch: api.fetch });
+  },
+  'image',
 );
 
 buildAdapterSuite('fake', () => new FakeBuildAdapter());

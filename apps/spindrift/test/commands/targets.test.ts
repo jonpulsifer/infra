@@ -40,6 +40,8 @@ import {
   type FakeDeployAdapterOptions,
 } from '../harness/fakes/deploy-adapter.ts';
 import {
+  CLOUD_ENDPOINTS,
+  cloudInput,
   clusterInput,
   connectionFor,
   fixtureManifest,
@@ -192,12 +194,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
   test('connecting a cloud project registers both of its Targets', async () => {
     const { registry } = fakes();
     const result = await connectTarget(
-      {
-        kind: 'cloud',
-        name: 'vessel',
-        project: 'example-vessel',
-        region: 'here',
-      },
+      cloudInput({ name: 'vessel', region: 'here' }),
       context(registry),
     );
 
@@ -210,14 +207,18 @@ describe('the act is credential-shaped though the noun is flat', () => {
     ]);
     expect(result.value.targets.map((t) => t.rank)).toEqual([0, 1]);
 
+    // Each Target keeps only the endpoint its own adapter drives: one connect
+    // act asked for both, and neither Target carries the other's.
     expect((await targetRow('vessel-cloudrun'))?.connection).toEqual({
       adapter: 'cloudrun',
       project: 'example-vessel',
       region: 'here',
+      endpoint: CLOUD_ENDPOINTS.run,
     });
     expect((await targetRow('vessel-static'))?.connection).toEqual({
       adapter: 'static',
       project: 'example-vessel',
+      endpoint: CLOUD_ENDPOINTS.hosting,
     });
   });
 
@@ -226,7 +227,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
     const input = clusterInput({ name: 'cluster' });
 
     await connectTarget(
-      { kind: 'cloud', name: 'vessel', project: 'p', region: 'r' },
+      cloudInput({ name: 'vessel', project: 'p', region: 'r' }),
       context(registry),
     );
     const first = await connectTarget(input, context(registry));

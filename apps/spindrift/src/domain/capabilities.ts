@@ -44,13 +44,20 @@ import type {
 } from './desired-state.ts';
 
 /**
- * §13's standing prerequisite checklist.
+ * Every prerequisite any Target can be asked about (§13).
  *
  * "Connect always succeeds; health is a standing prerequisite checklist —
  * Flux-or-Argo, a reachable writable store, OIDC both ways, the vessel, chart
  * contract compatibility. An unmet item makes the Target a non-candidate with a
  * stated reason, which merges capability refresh and health into one loop, not
  * two."
+ *
+ * This list is the **vocabulary**, not any one Target's checklist — see
+ * {@link PREREQUISITES_BY_ADAPTER}, which is what a Target is actually assessed
+ * against. §13's list is written in a cluster's terms because a cluster is the
+ * backend it was written about; a Cloud Run Target has no delivery operator and
+ * no chart, and a checklist row that can never fail is a row that teaches a
+ * reader the wrong thing about what was checked.
  *
  * `OIDC_FEDERATION` is one item rather than two because §13 states it as "both
  * ways": half of a federation is not a state a Target can usefully be in, and
@@ -62,6 +69,12 @@ import type {
  * from a repository rather than from OCI (plan, Milestone 3) — **it is the
  * first thing that breaks on extraction**, and naming it here is what makes
  * that visible as a stated reason rather than as a deploy that fails late.
+ *
+ * `PLATFORM_API` is the cloud backends' equivalent of `DELIVERY_OPERATOR`, and
+ * it is a separate name rather than a reuse because the two are unmet for
+ * unrelated reasons and clear by unrelated remediations: one is an operator
+ * this cluster does not run, the other is a service this project has not
+ * enabled.
  */
 export const PREREQUISITES = [
   'DELIVERY_OPERATOR',
@@ -70,9 +83,47 @@ export const PREREQUISITES = [
   'OIDC_FEDERATION',
   'VESSEL',
   'CHART_CONTRACT',
+  'PLATFORM_API',
 ] as const;
 
 export type Prerequisite = (typeof PREREQUISITES)[number];
+
+/**
+ * The checklist one adapter type is assessed against.
+ *
+ * A Target has exactly one adapter type (§13), so its checklist is decided by
+ * the code that drives it rather than by anything an operator states. The two
+ * cloud rows are identical and deliberately short: what a cloud Target can fail
+ * at before anything is deployed to it is the service being off, the identity
+ * being unauthorized, and the vessel not existing.
+ *
+ * The store is absent from both, and that is not an oversight. A cluster can
+ * genuinely have no writable store — nothing installs one by default — so
+ * `WRITABLE_STORE` is a real failure there. A cloud runtime reads its own
+ * project's secret manager natively, and static hosting has no runtime to read
+ * anything at all; both facts belong in `reachableSecretStores`, where
+ * placement's reach rule (§10) already consumes them, rather than as a health
+ * row that would be permanently green on one and permanently red on the other.
+ */
+export const PREREQUISITES_BY_ADAPTER = {
+  kubernetes: [
+    'DELIVERY_OPERATOR',
+    'CHART_SOURCE',
+    'WRITABLE_STORE',
+    'OIDC_FEDERATION',
+    'VESSEL',
+    'CHART_CONTRACT',
+  ],
+  cloudrun: ['PLATFORM_API', 'OIDC_FEDERATION', 'VESSEL'],
+  static: ['PLATFORM_API', 'OIDC_FEDERATION', 'VESSEL'],
+} as const satisfies Record<TargetAdapter, readonly Prerequisite[]>;
+
+/** What a Target of this adapter type is asked, in the order it is shown. */
+export function prerequisitesFor(
+  adapter: TargetAdapter,
+): readonly Prerequisite[] {
+  return PREREQUISITES_BY_ADAPTER[adapter];
+}
 
 /** One checklist item, and the sentence behind an unmet one. */
 export interface PrerequisiteResult {
@@ -197,14 +248,24 @@ export interface TargetCapabilities {
 /**
  * Which Component kinds each adapter type can run.
  *
- * From the adapter type, per §3 — a property of the code, not of a Target. The
- * `static` row is the one that matters: it takes a website and nothing else,
- * which is what makes "picking the static Target *mean* public" (§13) a
- * consequence of the model rather than a rule bolted on top of it.
+ * From the adapter type, per §3 — **a property of the code, not of a Target**,
+ * and that phrase decides what belongs in each row: what the adapter driving it
+ * actually renders. The `static` row is the one that matters most: it takes a
+ * website and nothing else, which is what makes "picking the static Target
+ * *mean* public" (§13) a consequence of the model rather than a rule bolted on
+ * top of it.
+ *
+ * **`cloudrun` runs no job yet**, and that is this table's honest reading
+ * rather than a disagreement with §3. A job on this backend is a second
+ * resource with its own API and a schedule that lives in a separate scheduling
+ * service — Task 33's work, not the Service path Task 28 built. Until it
+ * exists, a job's placement here is a non-candidate with the sentence "this
+ * Target does not run jobs" (§3's grammar), which is refused at Place rather
+ * than accepted and failed at apply.
  */
 export const KINDS_BY_ADAPTER = {
   kubernetes: ['service', 'website', 'job'],
-  cloudrun: ['service', 'website', 'job'],
+  cloudrun: ['service', 'website'],
   static: ['website'],
 } as const satisfies Record<TargetAdapter, readonly ComponentKind[]>;
 
@@ -303,8 +364,13 @@ export function resolveCapabilities(
  */
 export function unreachablePrerequisites(
   detail: string,
+  adapter: TargetAdapter,
 ): readonly PrerequisiteResult[] {
-  return PREREQUISITES.map((name) => ({ name, met: false, detail }));
+  return prerequisitesFor(adapter).map((name) => ({
+    name,
+    met: false,
+    detail,
+  }));
 }
 
 /** Capabilities for a Target nothing could be discovered about. */
@@ -370,12 +436,20 @@ interface TargetRow {
   publicExposure: boolean | null;
 }
 
-/** Healthy is every item met. §13 makes an unmet item a non-candidate. */
+/**
+ * Healthy is every item met. §13 makes an unmet item a non-candidate.
+ *
+ * The adapter is a parameter because it decides *which* items had to be met: a
+ * checklist that answered fewer rows than its Target is asked is treated as
+ * unhealthy, so an adapter that silently stops reporting one cannot make a
+ * Target look healthier than it was assessed.
+ */
 export function deriveHealth(
   prerequisites: readonly PrerequisiteResult[],
+  adapter: TargetAdapter,
 ): 'healthy' | 'unhealthy' {
   const seen = new Set(prerequisites.filter((p) => p.met).map((p) => p.name));
-  return PREREQUISITES.every((name) => seen.has(name))
+  return prerequisitesFor(adapter).every((name) => seen.has(name))
     ? 'healthy'
     : 'unhealthy';
 }

@@ -21,7 +21,7 @@ import type {
 } from '../../src/commands/types.ts';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import { apps, components, targets } from '../../src/db/schema.ts';
-import { PREREQUISITES } from '../../src/domain/capabilities.ts';
+import { prerequisitesFor } from '../../src/domain/capabilities.ts';
 import {
   refreshAllTargets,
   refreshTarget,
@@ -105,7 +105,9 @@ describe('one pass over every connected Target', () => {
     expect(refresh?.health).toBe('healthy');
     const row = await targetRow('cluster');
     expect(row.discovery?.arch).toEqual(['amd64', 'arm64']);
-    expect(row.prerequisites).toHaveLength(PREREQUISITES.length);
+    expect(row.prerequisites).toHaveLength(
+      prerequisitesFor('kubernetes').length,
+    );
     expect(row.inspectedAt).toEqual(clock.now());
     expect(of('kubernetes').inspected.map((t) => t.name)).toEqual(['cluster']);
   });

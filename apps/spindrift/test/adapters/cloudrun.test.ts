@@ -1,0 +1,484 @@
+/**
+ * The Cloud Run deploy adapter (Task 28, §6, §8, §9, §16).
+ *
+ * Every test drives the real adapter against a fake of the runtime's HTTP API
+ * (§ Seam 2) and asserts what the project would have been sent, or what the
+ * adapter concluded from what it was told. Nothing here reaches core.
+ *
+ * The claims worth stating up front, because each is a rule §4, §6, §8 or §9
+ * makes that a plausible implementation would break:
+ *
+ * - **The document carries an image and nothing that could cause a build.** The
+ *   runtime offers a source-to-image path and taking it would give this
+ *   installation a second build engine reachable from one backend only (§4).
+ * - **Exposure is written before the Service when it tightens** and after it
+ *   when it opens, because §9's transitions fail closed.
+ * - **Phases come from the revision.** The adapter polls; it never decides that
+ *   something is ready.
+ * - **`ARTIFACT_UNAVAILABLE` blames the platform**, which is §6's whole reason
+ *   for having blame at all: the build is green and the instinct is wrong.
+ * - **No egress filtering is advertised** (§8), and `verifiedDeploy` needs an
+ *   *enforcing* policy rather than a configured one (§32).
+ */
+import { describe, expect, test } from 'bun:test';
+import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.ts';
+import {
+  cloudRunService,
+  INGRESS,
+  ingressFor,
+} from '../../src/adapters/deploy/cloudrun/service.ts';
+import { cloudRunStatus } from '../../src/adapters/deploy/cloudrun/status.ts';
+import type {
+  DeployEvent,
+  DeployTarget,
+  DeployVerdict,
+} from '../../src/adapters/deploy/contract.ts';
+import { blameFor } from '../../src/adapters/deploy/contract.ts';
+import {
+  deriveHealth,
+  deriveVerifiedDeploy,
+} from '../../src/domain/capabilities.ts';
+import type { DesiredState, Exposure } from '../../src/domain/desired-state.ts';
+import type { CloudRunConnection } from '../../src/domain/target.ts';
+import {
+  FakeCloudRun,
+  type FakeCloudRunOptions,
+  permissionDenied,
+  serviceDisabled,
+} from '../harness/fakes/cloudrun-api.ts';
+import { CLOUD_ENDPOINTS } from '../harness/installation.ts';
+
+const CONNECTION: CloudRunConnection = {
+  adapter: 'cloudrun',
+  project: 'example-vessel',
+  region: 'somewhere',
+  endpoint: CLOUD_ENDPOINTS.run,
+  policyEndpoint: CLOUD_ENDPOINTS.policy,
+};
+
+function target(overrides: Partial<CloudRunConnection> = {}): DeployTarget {
+  return {
+    name: 'cloud',
+    adapter: 'cloudrun',
+    connection: { ...CONNECTION, ...overrides },
+  };
+}
+
+function desired(overrides: Partial<DesiredState> = {}): DesiredState {
+  return {
+    deploy: 'deploy-1',
+    app: 'shop',
+    component: 'web',
+    target: 'cloud',
+    kind: 'service',
+    artifact: {
+      type: 'image',
+      digest: 'sha256:abc',
+      refs: ['registry.example.test/shop@sha256:abc'],
+    },
+    exposure: 'private',
+    config: [],
+    requirements: { platform: { os: 'linux', arch: 'amd64' }, resources: {} },
+    hostname: { canonical: '' },
+    ...overrides,
+  };
+}
+
+/** The adapter, with the waiting stubbed: the polling is real, the sleep is not. */
+function adapterFor(options: FakeCloudRunOptions = {}): {
+  api: FakeCloudRun;
+  adapter: CloudRunDeployAdapter;
+} {
+  const api = new FakeCloudRun(options);
+  return {
+    api,
+    adapter: new CloudRunDeployAdapter({
+      token: api.token,
+      fetch: api.fetch,
+      pollIntervalMs: 1,
+      sleep: async () => {},
+    }),
+  };
+}
+
+async function drain(
+  stream: AsyncGenerator<DeployEvent, DeployVerdict, void>,
+): Promise<{ events: DeployEvent[]; verdict: DeployVerdict }> {
+  const events: DeployEvent[] = [];
+  let step = await stream.next();
+  while (!step.done) {
+    events.push(step.value);
+    step = await stream.next();
+  }
+  return { events, verdict: step.value };
+}
+
+describe('§4: never the build-from-source path', () => {
+  test('the applied document carries an image and nothing that builds', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), desired()));
+
+    const service = api.service('shop-web') as Record<string, unknown>;
+    const template = service.template as {
+      containers: { image: string }[];
+    };
+    expect(template.containers[0]?.image).toBe(
+      'registry.example.test/shop@sha256:abc',
+    );
+    // The runtime would happily accept either of these and build the result,
+    // which is the second engine §4 forbids.
+    expect(service).not.toHaveProperty('buildConfig');
+    expect(template).not.toHaveProperty('source');
+    expect(JSON.stringify(service)).not.toContain('sourceArchive');
+  });
+
+  test('a files artifact is refused as core’s bug, not the developer’s', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(
+        target(),
+        desired({
+          artifact: { type: 'files', digest: 'sha256:f', refs: ['x'] },
+        }),
+      ),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('INTERNAL');
+      expect(blameFor(verdict.reason)).toBe('platform');
+    }
+  });
+});
+
+describe('§9: exposure reaches the runtime as two mechanisms', () => {
+  test('internal is the only state that closes ingress', () => {
+    expect(ingressFor('internal')).toBe(INGRESS.internalOnly);
+    expect(ingressFor('private')).toBe(INGRESS.all);
+    expect(ingressFor('public')).toBe(INGRESS.all);
+  });
+
+  test('only public leaves an unauthenticated invoker', async () => {
+    for (const exposure of ['internal', 'private', 'public'] as const) {
+      const { api, adapter } = adapterFor();
+      const { verdict } = await drain(
+        adapter.apply(target(), desired({ exposure })),
+      );
+      expect(verdict.phase).toBe('LIVE');
+
+      const policy = api.policy('shop-web') as {
+        policy: { bindings: { members: string[] }[] };
+      };
+      const members = policy.policy.bindings.flatMap(
+        (binding) => binding.members,
+      );
+      expect(members.includes('allUsers')).toBe(exposure === 'public');
+    }
+  });
+
+  test('tightening writes the policy before the Service, opening after it', async () => {
+    // §9: "tightening drops public reach first and stays red if the stricter
+    // boundary does not come up." Ordering is the whole of that promise, so it
+    // is asserted on the request log rather than on the end state.
+    const tightening = adapterFor();
+    await drain(
+      tightening.adapter.apply(target(), desired({ exposure: 'private' })),
+    );
+    const beforeApply = tightening.api.requests.findIndex((request) =>
+      request.path.endsWith(':setIamPolicy'),
+    );
+    const applyAt = tightening.api.requests.findIndex(
+      (request) => request.method === 'PATCH',
+    );
+    expect(beforeApply).toBeGreaterThan(-1);
+    expect(beforeApply).toBeLessThan(applyAt);
+
+    const opening = adapterFor();
+    await drain(
+      opening.adapter.apply(target(), desired({ exposure: 'public' })),
+    );
+    const grantAt = opening.api.requests.findIndex((request) =>
+      request.path.endsWith(':setIamPolicy'),
+    );
+    const placedAt = opening.api.requests.findIndex(
+      (request) => request.method === 'PATCH',
+    );
+    expect(grantAt).toBeGreaterThan(placedAt);
+  });
+
+  test('a public deploy whose grant fails is red, not quietly private', async () => {
+    const { adapter } = adapterFor({ refuseIam: permissionDenied() });
+    const { verdict } = await drain(
+      adapter.apply(target(), desired({ exposure: 'public' })),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.detail).toContain('invoker policy');
+    }
+  });
+});
+
+describe('§6: phases come from the revision', () => {
+  test('apply polls until the terminal condition succeeds', async () => {
+    const { api, adapter } = adapterFor();
+    const { events, verdict } = await drain(adapter.apply(target(), desired()));
+
+    expect(verdict.phase).toBe('LIVE');
+    // The default fake reports reconciling first, so an adapter that trusted
+    // its own write would never have seen WAITING.
+    const phases = events
+      .filter((event) => event.type === 'status')
+      .map((event) => (event.type === 'status' ? event.phase : ''));
+    expect(phases).toContain('WAITING');
+    expect(api.pathsOf('GET').length).toBeGreaterThan(1);
+  });
+
+  test('the platform names its own, and the name comes back on the verdict', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    // §9: core mints nothing here, so a canonical address that core never
+    // supplied must arrive across this seam or the App has no address at all.
+    expect(verdict.phase).toBe('LIVE');
+    if (verdict.phase === 'LIVE') {
+      expect(verdict.url).toBe('https://shop-web.run.example.test');
+    }
+  });
+
+  test('a pull failure blames the platform, not the developer', () => {
+    // §6 singles this case out: the build is green and every instinct says
+    // "look at my app".
+    const status = cloudRunStatus({
+      terminalCondition: {
+        type: 'Ready',
+        state: 'CONDITION_FAILED',
+        revisionReason: 'CONTAINER_IMAGE_UNAUTHORIZED',
+        message: 'the image could not be pulled',
+      },
+    });
+    expect(status.phase).toBe('FAILED');
+    expect(status.reason).toBe('ARTIFACT_UNAVAILABLE');
+    expect(blameFor('ARTIFACT_UNAVAILABLE')).toBe('platform');
+  });
+
+  test('a failure with no stated reason is a revision that would not start', () => {
+    const status = cloudRunStatus({
+      terminalCondition: { type: 'Ready', state: 'CONDITION_FAILED' },
+    });
+    expect(status.reason).toBe('STARTUP_FAILED');
+    expect(status.detail).toContain('gave no reason');
+  });
+
+  test('a red verdict keeps what the platform said, because it will not', async () => {
+    const { adapter } = adapterFor({
+      service: () => ({
+        terminalCondition: {
+          type: 'Ready',
+          state: 'CONDITION_FAILED',
+          revisionReason: 'HEALTH_CHECK_CONTAINER_ERROR',
+          message: 'the container did not become ready',
+        },
+      }),
+    });
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      // §12: the diagnosis is persisted because the platform's own retention
+      // will outlive nothing.
+      expect(verdict.reason).toBe('UNHEALTHY');
+      expect(verdict.debug).toBeDefined();
+    }
+  });
+
+  test('a project that refuses the write is REJECTED, an unreachable one is not', async () => {
+    const refused = adapterFor({
+      refuse: { status: 400, body: { error: { message: 'invalid spec' } } },
+    });
+    const first = await drain(refused.adapter.apply(target(), desired()));
+    expect(first.verdict.phase).toBe('FAILED');
+    if (first.verdict.phase === 'FAILED') {
+      expect(first.verdict.reason).toBe('REJECTED');
+    }
+
+    const denied = adapterFor({ refuse: permissionDenied() });
+    const second = await drain(denied.adapter.apply(target(), desired()));
+    if (second.verdict.phase === 'FAILED') {
+      expect(second.verdict.reason).toBe('TARGET_UNREACHABLE');
+      expect(blameFor('TARGET_UNREACHABLE')).toBe('platform');
+    }
+  });
+});
+
+describe('observe and destroy', () => {
+  test('observe reports the digest the Service still carries', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    if (verdict.phase !== 'LIVE') throw new Error('nothing was placed');
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.artifactDigest).toBe('sha256:abc');
+  });
+
+  test('a ref from another project is not read against this one', async () => {
+    const { adapter } = adapterFor();
+    await drain(adapter.apply(target(), desired()));
+    // An operator may reconnect a Target against a different project; a ref
+    // that did not say which would report somebody else's workload as this
+    // Deploy's.
+    const elsewhere = 'projects/other/locations/somewhere/services/shop-web';
+    expect(await adapter.observe(target(), elsewhere)).toBeNull();
+  });
+
+  test('destroy removes the Service and is idempotent', async () => {
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    if (verdict.phase !== 'LIVE') throw new Error('nothing was placed');
+
+    await adapter.destroy(target(), verdict.ref);
+    expect(api.service('shop-web')).toBeUndefined();
+    await adapter.destroy(target(), verdict.ref);
+    expect(await adapter.observe(target(), verdict.ref)).toBeNull();
+  });
+});
+
+describe('§13: one probe, three answers', () => {
+  test('a reachable project meets every item', async () => {
+    const { adapter } = adapterFor();
+    const { prerequisites } = await adapter.inspect(target());
+    expect(prerequisites.every((item) => item.met)).toBe(true);
+    expect(deriveHealth(prerequisites, 'cloudrun')).toBe('healthy');
+  });
+
+  test('a disabled service is not a permission problem', async () => {
+    // The remediation is entirely different, and sending an operator to fix a
+    // permission that is already correct is the failure this distinction
+    // exists to prevent.
+    const { adapter } = adapterFor({ refuseList: serviceDisabled() });
+    const { prerequisites } = await adapter.inspect(target());
+    const platform = prerequisites.find((item) => item.name === 'PLATFORM_API');
+    expect(platform?.met).toBe(false);
+    expect(platform?.detail).toContain('not enabled');
+    expect(
+      prerequisites.find((item) => item.name === 'OIDC_FEDERATION')?.detail,
+    ).toContain('not assessed');
+  });
+
+  test('a refusal is the federation, and a missing project is the vessel', async () => {
+    const denied = adapterFor({ refuseList: permissionDenied() });
+    const first = await denied.adapter.inspect(target());
+    expect(
+      first.prerequisites.find((item) => item.name === 'OIDC_FEDERATION')?.met,
+    ).toBe(false);
+    expect(
+      first.prerequisites.find((item) => item.name === 'PLATFORM_API')?.met,
+    ).toBe(true);
+
+    const absent = adapterFor({
+      refuseList: { status: 404, body: { error: { message: 'no project' } } },
+    });
+    const second = await absent.adapter.inspect(target());
+    const vessel = second.prerequisites.find((item) => item.name === 'VESSEL');
+    expect(vessel?.met).toBe(false);
+    expect(vessel?.detail).toContain('never creates a project');
+  });
+});
+
+describe('§8 and §32: what this Target is honest about', () => {
+  test('no egress filtering is advertised', async () => {
+    const { adapter } = adapterFor();
+    const { discovery } = await adapter.inspect(target());
+    // §8's egress control is a by-name allowlist. This backend has network
+    // controls and not that one, and a capability reported on the strength of
+    // something adjacent is a workload placed where its egress was never
+    // constrained.
+    expect(discovery.egressFiltering).toBe(false);
+  });
+
+  test('an enforcing policy verifies and a dry-run one does not', async () => {
+    const enforcing = adapterFor({
+      admissionPolicy: {
+        defaultAdmissionRule: {
+          evaluationMode: 'REQUIRE_ATTESTATION',
+          enforcementMode: 'ENFORCED_BLOCK_AND_AUDIT_LOG',
+        },
+      },
+    });
+    const strict = await enforcing.adapter.inspect(target());
+    expect(deriveVerifiedDeploy(strict.discovery.policyEngine)).toBe(true);
+
+    const auditing = adapterFor({
+      admissionPolicy: {
+        defaultAdmissionRule: {
+          evaluationMode: 'REQUIRE_ATTESTATION',
+          enforcementMode: 'DRYRUN_AUDIT_LOG_ONLY',
+        },
+      },
+    });
+    const lax = await auditing.adapter.inspect(target());
+    expect(lax.discovery.policyEngine.installed).toBe(true);
+    expect(deriveVerifiedDeploy(lax.discovery.policyEngine)).toBe(false);
+  });
+
+  test('a policy that admits everything verifies nothing, however it enforces', async () => {
+    const { adapter } = adapterFor({
+      admissionPolicy: {
+        defaultAdmissionRule: {
+          evaluationMode: 'ALWAYS_ALLOW',
+          enforcementMode: 'ENFORCED_BLOCK_AND_AUDIT_LOG',
+        },
+      },
+    });
+    const { discovery } = await adapter.inspect(target());
+    expect(deriveVerifiedDeploy(discovery.policyEngine)).toBe(false);
+  });
+
+  test('a Target naming no policy endpoint claims no verified deploy', async () => {
+    const { adapter } = adapterFor();
+    const { discovery } = await adapter.inspect(
+      target({ policyEndpoint: undefined }),
+    );
+    // Nobody said where to look, so nothing was verified. This is the
+    // direction a claim about verification has to fail in.
+    expect(discovery.policyEngine).toEqual({ installed: false, mode: null });
+  });
+});
+
+describe('§10: config crosses as a pinned reference and never as a value', () => {
+  test('every variable is a reference into the vessel’s own store', () => {
+    const document = cloudRunService(
+      desired({
+        config: [
+          { name: 'TOKEN', secret: { key: 'shop-web-token', version: '3' } },
+        ],
+      }),
+      {
+        project: 'example-vessel',
+        image: 'registry.example.test/shop@sha256:abc',
+      },
+    );
+    const template = document.template as {
+      containers: { env: { name: string; valueSource: unknown }[] }[];
+    };
+    const variable = template.containers[0]?.env[0];
+    expect(variable?.name).toBe('TOKEN');
+    expect(variable?.valueSource).toEqual({
+      secretKeyRef: {
+        secret: 'projects/example-vessel/secrets/shop-web-token',
+        version: '3',
+      },
+    });
+    // There is nothing here that could be a value: core never read one.
+    expect(JSON.stringify(document)).not.toContain('"value"');
+  });
+});
+
+describe('the exposure a Target rejects is a state, not a crash', () => {
+  test('every exposure state produces a document', () => {
+    const states: Exposure[] = ['internal', 'private', 'public'];
+    for (const exposure of states) {
+      const document = cloudRunService(desired({ exposure }), {
+        project: 'example-vessel',
+        image: 'registry.example.test/shop@sha256:abc',
+      });
+      expect(document.ingress).toBe(ingressFor(exposure));
+    }
+  });
+});

@@ -39,6 +39,22 @@ export interface Artifact {
 }
 
 /**
+ * The address an adapter pulls the artifact by, or `null` when it has none.
+ *
+ * §4 lets a Build report several — the same digest is reachable at a mirror as
+ * well as at the registry it was pushed to — and every backend needs exactly
+ * one. The first is taken rather than a preferred one selected, because
+ * preference would need a cost model, and §3 declines to have one.
+ *
+ * `null` is a real answer, and every adapter treats it as `INTERNAL`: an
+ * artifact with no address is a Build that recorded a digest and nowhere to get
+ * it, which is core's bug rather than the backend's.
+ */
+export function artifactAddress(artifact: Artifact): string | null {
+  return artifact.refs[0] ?? null;
+}
+
+/**
  * The three exposure states, with `private` the default (§9).
  *
  * - `internal` — Target-private, authenticated at the workload boundary.

@@ -11,6 +11,7 @@
  *   references rather than assumed from one.
  */
 import { describe, expect, test } from 'bun:test';
+import { targetAdapterSchema } from '../../src/config/manifest.schema.ts';
 import {
   type CapabilityContext,
   deriveHealth,
@@ -20,6 +21,7 @@ import {
   KINDS_BY_ADAPTER,
   noCapabilities,
   PREREQUISITES,
+  prerequisitesFor,
   resolveCapabilities,
   type TargetDiscovery,
 } from '../../src/domain/capabilities.ts';
@@ -156,21 +158,64 @@ describe('the provenances that are not discovered', () => {
 describe('health is the whole checklist', () => {
   test('healthy is every item met', () => {
     expect(
-      deriveHealth(PREREQUISITES.map((name) => ({ name, met: true }))),
+      deriveHealth(
+        prerequisitesFor('kubernetes').map((name) => ({ name, met: true })),
+        'kubernetes',
+      ),
     ).toBe('healthy');
   });
 
   test('one unmet item is unhealthy', () => {
-    const checklist = PREREQUISITES.map((name) => ({
+    const checklist = prerequisitesFor('kubernetes').map((name) => ({
       name,
       met: name !== 'OIDC_FEDERATION',
     }));
-    expect(deriveHealth(checklist)).toBe('unhealthy');
+    expect(deriveHealth(checklist, 'kubernetes')).toBe('unhealthy');
   });
 
   test('a partial checklist is unhealthy, never healthy by omission', () => {
     // An item nobody answered is an item nobody checked. Reading absence as
     // success is how a Target ends up green on a prerequisite it never met.
-    expect(deriveHealth([{ name: 'VESSEL', met: true }])).toBe('unhealthy');
+    expect(deriveHealth([{ name: 'VESSEL', met: true }], 'kubernetes')).toBe(
+      'unhealthy',
+    );
+  });
+});
+
+describe('the checklist is the adapter type\u2019s, not one list for all three', () => {
+  test('every adapter type is assessed against a non-empty checklist', () => {
+    for (const adapter of targetAdapterSchema.options) {
+      expect(prerequisitesFor(adapter).length).toBeGreaterThan(0);
+    }
+  });
+
+  test('a cloud Target is never asked about a chart or a delivery operator', () => {
+    // §13's list is written in a cluster's terms because a cluster is what it
+    // was written about. A Cloud Run Target has no operator to run and no chart
+    // to pin, and a row that can never fail teaches a reader that something was
+    // checked when nothing was.
+    for (const adapter of ['cloudrun', 'static'] as const) {
+      expect(prerequisitesFor(adapter)).not.toContain('DELIVERY_OPERATOR');
+      expect(prerequisitesFor(adapter)).not.toContain('CHART_SOURCE');
+      expect(prerequisitesFor(adapter)).not.toContain('CHART_CONTRACT');
+    }
+  });
+
+  test('every checklist is drawn from the one vocabulary', () => {
+    for (const adapter of targetAdapterSchema.options) {
+      for (const name of prerequisitesFor(adapter)) {
+        expect(PREREQUISITES).toContain(name);
+      }
+    }
+  });
+
+  test('a cloud Target answering a cluster checklist is unhealthy', () => {
+    // The rows it answered are all met; they are simply not the rows a Cloud
+    // Run Target is asked, so health must not read them as an answer.
+    const cluster = prerequisitesFor('kubernetes').map((name) => ({
+      name,
+      met: true,
+    }));
+    expect(deriveHealth(cluster, 'cloudrun')).toBe('unhealthy');
   });
 });
