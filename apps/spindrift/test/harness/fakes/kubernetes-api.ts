@@ -52,6 +52,14 @@ export interface FakeKubernetesOptions {
   /** What a `SelfSubjectAccessReview` answers. */
   allowed?: boolean;
   token?: string;
+  /**
+   * What a pod's log reads, by pod name and by read count.
+   *
+   * A function of the read rather than a string because a build's log grows
+   * while the build runs: a fake that served the whole log on the first read
+   * would let a route that never polled — and never yielded a timeline — pass.
+   */
+  logs?: (pod: string, reads: number) => string | null;
 }
 
 const HOST = 'https://cluster.invalid';
@@ -147,6 +155,17 @@ export class FakeKubernetes {
       });
     }
 
+    if (parsed.subresource === 'log') {
+      const reads = (this.reads.get(url.pathname) ?? 0) + 1;
+      this.reads.set(url.pathname, reads);
+      const text = this.options.logs?.(parsed.name ?? '', reads) ?? null;
+      // A pod whose container has not started answers `400`, which is not a
+      // fault: the honest answer is that there is no log yet.
+      return text === null
+        ? json(400, { message: 'container is waiting to start' })
+        : new Response(text);
+    }
+
     if (parsed.name === undefined) return this.listResponse(parsed.plural);
 
     const key = `${parsed.plural}/${parsed.namespace ?? ''}/${parsed.name}`;
@@ -224,6 +243,8 @@ interface ParsedPath {
   plural: string;
   namespace?: string;
   name?: string;
+  /** `log`, `status`, and the rest — a segment after the object's name. */
+  subresource?: string;
 }
 
 /** The inverse of `resourcePath` — what the adapter addressed. */
@@ -243,6 +264,7 @@ function parsePath(path: string): ParsedPath | null {
       namespace: rest[1] as string,
       plural: rest[2] as string,
       ...(rest[3] === undefined ? {} : { name: rest[3] }),
+      ...(rest[4] === undefined ? {} : { subresource: rest[4] }),
     };
   }
   if (rest.length === 0) return null;

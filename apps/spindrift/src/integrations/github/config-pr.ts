@@ -38,6 +38,27 @@ export const SPINDRIFT_FILE = 'spindrift.yaml';
 /** The one CI caller the transaction carries. */
 export const WORKFLOW_PATH = '.github/workflows/spindrift.yml';
 
+/**
+ * The caller's file name, which is what a dispatch addresses.
+ *
+ * The same in every repository — including the platform's own, which commits a
+ * caller by hand for the archive builds that have no repository of their own —
+ * so the build route addresses one name rather than branching on which kind of
+ * repository it is dispatching into.
+ */
+export const CALLER_WORKFLOW_FILE = WORKFLOW_PATH.slice(
+  WORKFLOW_PATH.lastIndexOf('/') + 1,
+);
+
+/**
+ * The prefix a correlated run's name carries, so a human can read it too.
+ *
+ * Declared beside the caller that stamps it rather than beside the route that
+ * matches on it: the two have to agree exactly, and the file that *writes* the
+ * `run-name` is the one that decides what it says.
+ */
+export const RUN_NAME_PREFIX = 'spindrift';
+
 /** The branch the configuration PR is opened from. */
 export const CONFIG_BRANCH = 'spindrift/configure';
 
@@ -128,6 +149,13 @@ export function serializeSpindriftFile(proposal: DetectionProposal): string {
  * reusable workflow is pinned by commit and versioned by the platform, so it is
  * the right place for that shape to live.
  *
+ * **`correlation` is the one exception, and it is not a build parameter.** The
+ * dispatch API answers `204` and names no run, so a dispatched build has to be
+ * found again; stamping the value into `run-name` is what makes finding it
+ * exact rather than a race against whoever else pushed. It stays out of `spec`
+ * because nothing about the build depends on it — the reusable workflow never
+ * reads it.
+ *
  * `id-token: write` is the workflow-ref-scoped cloud identity §15 names: the
  * job federates as itself rather than holding a credential this file would
  * have to carry.
@@ -138,12 +166,17 @@ export function buildWorkflowCaller(buildWorkflow: string): string {
 # Spindrift dispatches this workflow when it needs a build. The run happens
 # here, on this repository’s own Actions minutes; everything it does lives in
 # the reusable workflow below, which is pinned by commit.
-name: spindrift
+name: ${RUN_NAME_PREFIX}
+run-name: ${RUN_NAME_PREFIX} \${{ inputs.correlation }}
 on:
   workflow_dispatch:
     inputs:
       spec:
         description: The build request, as JSON. Spindrift fills this in.
+        required: true
+        type: string
+      correlation:
+        description: How Spindrift finds this run again. Not a build input.
         required: true
         type: string
 permissions:

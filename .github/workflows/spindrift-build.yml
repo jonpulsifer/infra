@@ -1,0 +1,161 @@
+# The machinery behind Spindrift's hosted build route (spec §4, §15).
+#
+# §15 puts the run in the *connected* repository, on its own Actions minutes,
+# and keeps everything it does here: what lands in somebody's repo is a thin
+# caller pinned to a commit of this file. That is why this workflow reads one
+# opaque `spec` input — a caller does not have to be regenerated when a build
+# gains a parameter.
+#
+# It also answers `workflow_dispatch`, because an uploaded archive has no
+# repository of its own and builds here instead.
+#
+# Two things it deliberately does not do:
+#
+#   * It never posts anything back. Logs are read, not pushed (§4), so the
+#     result leaves on the one channel Spindrift already reads — the last line
+#     this workflow prints.
+#   * It never signs. The build adapter returns the artifact and digest exactly
+#     as built and *core* signs that digest (§16), so no backend is
+#     disqualifiable and the claim made is the honest one.
+name: spindrift-build
+run-name: spindrift ${{ inputs.correlation }}
+
+on:
+  workflow_call:
+    inputs:
+      spec:
+        description: The build request, as JSON.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: The build request, as JSON.
+        required: true
+        type: string
+      correlation:
+        description: How Spindrift finds this run again. Not a build input.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  # The workflow-ref-scoped cloud identity §15 names: the job federates as
+  # itself rather than holding a credential anything here has to carry.
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the build request
+        id: request
+        env:
+          SPEC: ${{ inputs.spec }}
+        run: |
+          set -euo pipefail
+          read_key() { printf '%s' "$SPEC" | jq -r "$1"; }
+          {
+            printf 'bundleDigest=%s\n' "$(read_key '.bundleDigest')"
+            printf 'location=%s\n'     "$(read_key '.origin.location')"
+            printf 'subpath=%s\n'      "$(read_key '.origin.subpath')"
+            printf 'destination=%s\n'  "$(read_key '.destination')"
+            printf 'frontend=%s\n'     "$(read_key '.zeroConfigFrontend')"
+            printf 'registry=%s\n'     "$(read_key '.destination | split("/")[0]')"
+            printf 'buildArgs<<SPINDRIFT_EOF\n'
+            read_key '.buildArgs | to_entries[] | "\(.key)=\(.value)"'
+            printf 'SPINDRIFT_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+      # The bundle, not the repository. §15 fetches the exact commit once and
+      # stages one immutable bundle for either builder — cloning again here
+      # would build a second tree the source receipt does not describe.
+      - name: Fetch the staged bundle
+        env:
+          LOCATION: ${{ steps.request.outputs.location }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/bundle"
+          curl --fail --silent --show-error --location "$LOCATION" \
+            | tar -xz -C "${RUNNER_TEMP}/bundle"
+
+      # §5's ladder, and the only decision made here: a Dockerfile settles how
+      # to build and never what the thing is. Where there is none, a one-line
+      # Dockerfile hands the same directory to the pinned zero-config frontend —
+      # which is what makes "one engine, two frontends" true rather than two
+      # build systems to operate (§4).
+      - name: Choose the frontend
+        id: frontend
+        env:
+          SUBPATH: ${{ steps.request.outputs.subpath }}
+          FRONTEND: ${{ steps.request.outputs.frontend }}
+        run: |
+          set -euo pipefail
+          scope="${RUNNER_TEMP}/bundle/${SUBPATH}"
+          if [ -f "${scope}/Dockerfile" ]; then
+            printf 'context=%s\nfile=%s\n' "$scope" "${scope}/Dockerfile"
+          else
+            printf '#syntax=%s\n' "$FRONTEND" > "${scope}/Dockerfile.spindrift"
+            printf 'context=%s\nfile=%s\n' "$scope" "${scope}/Dockerfile.spindrift"
+          fi >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      # The run's own token, which is the only credential this job can hold
+      # without one being stored somewhere (§13). An installation whose registry
+      # does not accept it uses the cloud route, which federates instead.
+      - name: Log in to the destination registry
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4
+        with:
+          registry: ${{ steps.request.outputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: ${{ steps.frontend.outputs.context }}
+          file: ${{ steps.frontend.outputs.file }}
+          build-args: ${{ steps.request.outputs.buildArgs }}
+          push: true
+          tags: ${{ steps.request.outputs.destination }}
+          # BuildKit's own provenance, with materials. §16 calls this the second
+          # document — unsigned, not the isolation claim, and where the base
+          # digest comes from.
+          provenance: mode=max
+          sbom: true
+
+      # The one line Spindrift reads. Base64 because this stdout goes through
+      # the host's log processing on the way back, and a folded or decorated
+      # payload is a payload core cannot decode.
+      - name: Report what was built
+        env:
+          BUNDLE_DIGEST: ${{ steps.request.outputs.bundleDigest }}
+          DESTINATION: ${{ steps.request.outputs.destination }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Best effort, and null when it is not there: a base is fresh only at
+          # build time, so §16 surfaces a stale one and never corrects it — but
+          # a builder that cannot report one says so rather than guessing.
+          base="$(docker buildx imagetools inspect "${DESTINATION}@${DIGEST}" \
+            --format '{{ json .Provenance }}' 2>/dev/null \
+            | jq -r '[.. | .uri? // empty | select(startswith("pkg:docker"))][0] // empty' \
+            | grep -oE 'sha256(:|%3A)[0-9a-f]{64}' \
+            | sed 's/%3A/:/' || true)"
+          report="$(jq -nc \
+            --arg bundleDigest "$BUNDLE_DIGEST" \
+            --arg digest "$DIGEST" \
+            --arg ref "${DESTINATION}@${DIGEST}" \
+            --arg base "$base" \
+            --arg run "${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg workflow "$GITHUB_WORKFLOW_REF" \
+            '{bundleDigest: $bundleDigest,
+              digest: $digest,
+              refs: [$ref],
+              baseDigest: (if $base == "" then null else $base end),
+              statement: {run: $run, workflow: $workflow}}')"
+          echo "spindrift-result $(printf '%s' "$report" | base64 | tr -d '\n')"

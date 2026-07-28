@@ -37,6 +37,7 @@ const source: BuildSource = {
     repository: 'https://git.example.test/app',
     commit: 'c0ffee',
     subpath: '.',
+    location: 'staged://bundle',
   },
 };
 

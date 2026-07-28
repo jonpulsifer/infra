@@ -39,6 +39,27 @@ github:
   # the connected repository's own permissions.
   buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
 
+# Rank order: a build takes the first route that clears the Target's minimum
+# SLSA Build Level, so the order of this list is the admin rank §16 names.
+build:
+  routes:
+    - name: hosted
+      adapter: github-actions
+    - name: managed
+      adapter: cloud-build
+      endpoint: https://builds.example.test
+      logsEndpoint: https://logs.example.test
+      project: example-builds
+      region: example-region
+      image: registry.example.test/buildkit:pinned
+    - name: local
+      adapter: in-cluster
+      endpoint: https://cluster.example.test
+      namespace: example-builds
+      image: registry.example.test/buildkit:pinned
+      serviceAccount: example-builder
+  zeroConfigFrontend: registry.example.test/zero-config:pinned
+
 secretStore:
   adapter: gcp-secret-manager
   endpoint: https://secrets.example.test

@@ -428,6 +428,189 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
     return pull.number;
   }
 
+  // --- Actions, which the hosted build route runs on --------------------
+  //
+  // §4 puts the build on "hosted CI on the fast-pipe side" and §15 puts the run
+  // in the connected repository, on its own minutes. Everything below is what
+  // dispatching one and then *reading* it takes — there is no push endpoint
+  // here, and that is the point: logs are read, not pushed (§4).
+
+  /**
+   * Which installation covers a repository.
+   *
+   * Authorized by the App's own JWT rather than an installation token, because
+   * the answer is what an installation token would have to be minted *from* —
+   * and it is why a build route can start from a repository name alone, without
+   * core threading an installation id through the build contract.
+   */
+  async installationFor(fullName: string): Promise<InstallationRef> {
+    const jwt = await this.appJwt();
+    const http = new GitHubHttp({
+      baseUrl: this.config.baseUrl,
+      authorization: () => `Bearer ${jwt}`,
+      ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
+    });
+    const installation = await http.json<{ id: number }>({
+      method: 'GET',
+      path: `/repos/${fullName}/installation`,
+    });
+    if (installation === null) {
+      throw new TypeError('the installation endpoint tolerates no status');
+    }
+    return { installationId: String(installation.id) };
+  }
+
+  /**
+   * Ask a workflow to run.
+   *
+   * `ref` is a **branch**, never a commit: the dispatch API only accepts a ref
+   * a workflow file can be read from, so which commit gets *built* travels in
+   * the inputs instead. That split is why the build route resolves the default
+   * branch first and puts the exact commit in the spec.
+   */
+  async dispatchWorkflow(
+    ref: InstallationRef,
+    fullName: string,
+    input: {
+      readonly workflow: string;
+      readonly branch: string;
+      readonly inputs: Readonly<Record<string, string>>;
+    },
+  ): Promise<void> {
+    await this.http(ref).send({
+      method: 'POST',
+      path: `/repos/${fullName}/actions/workflows/${encodeURIComponent(input.workflow)}/dispatches`,
+      body: { ref: input.branch, inputs: input.inputs },
+    });
+  }
+
+  /**
+   * Recent runs of one workflow on one branch, newest first.
+   *
+   * The dispatch API answers `204` and names no run, so the run has to be found
+   * afterwards — which is the whole reason the caller workflow carries a
+   * correlation input and stamps it into `run-name`. This returns the page; the
+   * route matches on the name, because only the route knows what it sent.
+   */
+  async workflowRuns(
+    ref: InstallationRef,
+    fullName: string,
+    input: { readonly workflow: string; readonly branch: string },
+  ): Promise<
+    readonly {
+      readonly id: number;
+      readonly name: string | null;
+      readonly status: string;
+      readonly conclusion: string | null;
+    }[]
+  > {
+    const runs = await this.http(ref).json<{
+      workflow_runs?: {
+        id: number;
+        name?: string | null;
+        status: string;
+        conclusion: string | null;
+      }[];
+    }>({
+      method: 'GET',
+      path:
+        `/repos/${fullName}/actions/workflows/${encodeURIComponent(input.workflow)}/runs` +
+        `?event=workflow_dispatch&branch=${encodeURIComponent(input.branch)}&per_page=30`,
+    });
+    if (runs === null) {
+      throw new TypeError('the runs endpoint tolerates no status');
+    }
+    return (runs.workflow_runs ?? []).map((run) => ({
+      id: run.id,
+      name: run.name ?? null,
+      status: run.status,
+      conclusion: run.conclusion,
+    }));
+  }
+
+  /** One run's current status. */
+  async workflowRun(
+    ref: InstallationRef,
+    fullName: string,
+    runId: number,
+  ): Promise<{
+    readonly id: number;
+    readonly status: string;
+    readonly conclusion: string | null;
+  } | null> {
+    return this.http(ref).json({
+      method: 'GET',
+      path: `/repos/${fullName}/actions/runs/${runId}`,
+    });
+  }
+
+  /**
+   * The jobs of one run and the steps inside them.
+   *
+   * This is the whole of `LIVE_STATUS` (§4): on a hosted runner the step
+   * transitions are readable while the run is going, and the text is not — so
+   * the route yields these as they change and fetches the log at the end.
+   */
+  async runJobs(
+    ref: InstallationRef,
+    fullName: string,
+    runId: number,
+  ): Promise<
+    readonly {
+      readonly id: number;
+      readonly name: string;
+      readonly status: string;
+      readonly conclusion: string | null;
+      readonly steps?: readonly {
+        readonly name: string;
+        readonly status: string;
+        readonly conclusion: string | null;
+      }[];
+    }[]
+  > {
+    const jobs = await this.http(ref).json<{
+      jobs?: {
+        id: number;
+        name: string;
+        status: string;
+        conclusion: string | null;
+        steps?: { name: string; status: string; conclusion: string | null }[];
+      }[];
+    }>({
+      method: 'GET',
+      path: `/repos/${fullName}/actions/runs/${runId}/jobs?per_page=100`,
+    });
+    if (jobs === null) {
+      throw new TypeError('the jobs endpoint tolerates no status');
+    }
+    return jobs.jobs ?? [];
+  }
+
+  /**
+   * One job's log as text, or `null` when the host has none for it.
+   *
+   * Per job rather than per run on purpose: the run-level endpoint answers with
+   * a zip archive, and unpacking one to read text this endpoint already serves
+   * as text would be a decompressor in the dependency graph for nothing.
+   *
+   * A `404` is tolerated because a job that never started has no log, and an
+   * empty log is a truthful thing to show — unlike lost access, which every
+   * other call in this module still classifies.
+   */
+  async jobLog(
+    ref: InstallationRef,
+    fullName: string,
+    jobId: number,
+  ): Promise<string | null> {
+    const response = await this.http(ref).send({
+      method: 'GET',
+      path: `/repos/${fullName}/actions/jobs/${jobId}/logs`,
+      accept: 'text/plain',
+      tolerate: [404],
+    });
+    return response === null ? null : await response.text();
+  }
+
   /**
    * §15's one fetch: "fetches the exact commit **once** and stages an immutable
    * source bundle for either builder, storing no token."

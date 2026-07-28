@@ -57,6 +57,84 @@ export const targetAdapterSchema = z.enum(['kubernetes', 'cloudrun', 'static']);
 export const storeAdapterSchema = z.enum(['onepassword', 'gcp-secret-manager']);
 
 /**
+ * Which of §4's three build routes a configured route is one of.
+ *
+ * The *kind* is a closed vocabulary because each one is a different piece of
+ * code; the *set of routes an installation has* is not, which is why `routes`
+ * below is a list an operator writes rather than one of these three per
+ * installation. §4: "which routes exist is an installation's configuration."
+ */
+export const buildRouteAdapterSchema = z.enum([
+  'github-actions',
+  'cloud-build',
+  'in-cluster',
+]);
+
+/**
+ * One configured build route.
+ *
+ * A discriminated union rather than a bag of optional keys, for the same reason
+ * `TargetConnection` is one: a `github-actions` route with a cluster namespace
+ * is not a state this model has a name for.
+ *
+ * **No credential appears in any variant** (§13). Each route's access path is
+ * minted per request — the App key for hosted CI, a federated token for the
+ * cloud builder, the projected service account token in-cluster.
+ */
+export const buildRouteSchema = z.discriminatedUnion('adapter', [
+  z
+    .object({
+      /** What this route is called, as `Target.buildRoutes` names it. */
+      name: nonEmptyString,
+      adapter: z.literal('github-actions'),
+    })
+    .strict(),
+  z
+    .object({
+      name: nonEmptyString,
+      adapter: z.literal('cloud-build'),
+      /**
+       * The build service's API root, without a trailing slash. A value for
+       * the same reason `github.apiBaseUrl` is one: a regional or
+       * perimeter-fronted endpoint is a legitimate installation choice.
+       */
+      endpoint: z.url(),
+      /** Where the build's own logs are read from — §4's "logs are read". */
+      logsEndpoint: z.url(),
+      /** The project builds run in — §14's shared artifacts project. */
+      project: nonEmptyString,
+      /** The location builds are submitted to. */
+      region: nonEmptyString,
+      /**
+       * The BuildKit image the build step runs, pinned by the installation.
+       *
+       * Present here as well as on the in-cluster route because §4 makes the
+       * engine one thing that runs in several places — the route decides where,
+       * never what.
+       */
+      image: nonEmptyString,
+    })
+    .strict(),
+  z
+    .object({
+      name: nonEmptyString,
+      adapter: z.literal('in-cluster'),
+      /** The API server the build Job is created against. */
+      endpoint: z.url(),
+      /** The namespace it is created in. Never created by Spindrift. */
+      namespace: nonEmptyString,
+      /** The BuildKit image the Job runs, pinned by the installation. */
+      image: nonEmptyString,
+      /**
+       * The service account the Job runs as — how it authorizes a push
+       * without this process holding a registry credential.
+       */
+      serviceAccount: nonEmptyString,
+    })
+    .strict(),
+]);
+
+/**
  * A Target as the manifest seeds it. The connect act (Task 13) owns the rest of
  * the model; this is only what must exist before the first boot can place
  * anything.
@@ -218,6 +296,38 @@ export const installationManifestSchema = z
       })
       .strict(),
 
+    build: z
+      .object({
+        /**
+         * Every build route this installation has, **in admin rank order**
+         * (§16: "an ordered list of build routes... the level is a threshold,
+         * then admin rank wins"). The order of this array is the rank.
+         *
+         * May be empty. An installation with no route can still deploy an
+         * uploaded archive of finished output, because a supplied artifact
+         * consults no route at all (§4) — so an empty list is a supported
+         * installation rather than a misconfiguration.
+         */
+        routes: z
+          .array(buildRouteSchema)
+          .refine(
+            (routes) =>
+              new Set(routes.map((r) => r.name)).size === routes.length,
+            'build route names must be unique',
+          ),
+        /**
+         * The zero-config BuildKit frontend, pinned by the installation (§4:
+         * "one engine, two frontends — the repo's Dockerfile if present, else
+         * a zero-config builder").
+         *
+         * A value rather than a constant because it is an image every build
+         * this installation runs pulls and trusts, so which one — and pinned to
+         * which digest — is the operator's call, not the software's.
+         */
+        zeroConfigFrontend: nonEmptyString,
+      })
+      .strict(),
+
     secretStore: z
       .object({
         /** Which store adapter this installation delivers config through. */
@@ -261,6 +371,8 @@ export const installationManifestSchema = z
 
 export type TargetAdapter = z.infer<typeof targetAdapterSchema>;
 export type StoreAdapter = z.infer<typeof storeAdapterSchema>;
+export type BuildRouteAdapter = z.infer<typeof buildRouteAdapterSchema>;
+export type BuildRouteConfig = z.infer<typeof buildRouteSchema>;
 export type TargetSeed = z.infer<typeof targetSeedSchema>;
 export type GatewayAuthConfig = z.infer<typeof gatewayAuthSchema>;
 export type InstallationManifest = z.infer<typeof installationManifestSchema>;

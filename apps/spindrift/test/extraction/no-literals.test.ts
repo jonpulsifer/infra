@@ -18,9 +18,11 @@ import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
+  buildRouteAdapterSchema,
   storeAdapterSchema,
   targetAdapterSchema,
 } from '../../src/config/manifest.schema.ts';
+import { BUILD_ROUTE_REFUSALS } from '../../src/domain/build-route.ts';
 import { KUBERNETES_DELIVERY_FLAVOURS } from '../../src/domain/target.ts';
 
 const APP = join(import.meta.dir, '../..');
@@ -63,9 +65,18 @@ const NOT_A_WORD = /[-\d]/;
 const PROJECT_ID_ALLOWLIST = new Set<string>([
   ...targetAdapterSchema.options,
   ...storeAdapterSchema.options,
+  ...buildRouteAdapterSchema.options,
   // Delivery flavours wear the same shape and are the same kind of thing: the
   // name of a mechanism this software knows, identical in every installation.
   ...KUBERNETES_DELIVERY_FLAVOURS,
+  // Why a build route is not usable for a Target — vocabulary again, read from
+  // the domain rather than restated, so adding one does not break a test here.
+  ...BUILD_ROUTE_REFUSALS,
+  // An encoding, and a key in a workflow file. Neither names anything; both
+  // wear the shape because they are lowercase words carrying a digit or a
+  // hyphen, which is the whole of what this scanner can see.
+  'base64',
+  'run-name',
   // HTTP header names. `src/web/` is scoped out of this scanner for exactly
   // this reason (see BROWSER_SOURCE), but the auth surface writes headers from
   // outside that directory and must not be scoped out wholesale — it is one of

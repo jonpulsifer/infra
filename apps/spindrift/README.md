@@ -21,11 +21,16 @@ session. Source detection classifies one named repo or archive scope, honours an
 authoritative `spindrift.yaml`, derives workspace watch paths, and keeps
 Dockerfile selection separate from Component-kind inference.
 
-What has no implementation is the Cloud Run and static deploy adapters, every
-real build route, config delivery, and datastores. **The three screens still
-render placeholder data** from `src/web/demo/`, which is scaffolding meant to be
-deleted: the views are typed against `src/web/model.ts`, so the query commands
-that replace it have a contract to meet rather than a shape to guess.
+All three build routes exist — hosted CI, the cloud builder, and an in-cluster
+Job — and every one of them runs the same BuildKit program over the same
+staged bundle, so which route ran is a property of a Build rather than a
+different pipeline.
+
+What has no implementation is the Cloud Run and static deploy adapters,
+datastores, and signing. **The three screens still render placeholder data**
+from `src/web/demo/`, which is scaffolding meant to be deleted: the views are
+typed against `src/web/model.ts`, so the query commands that replace it have a
+contract to meet rather than a shape to guess.
 
 Two named gaps, both deliberate:
 
@@ -48,7 +53,7 @@ One image, two processes (§19); only `web` exists so far.
 | `src/db/` | the Drizzle schema, the connection, and the committed migrations |
 | `src/commands/` | the application command layer and its registry |
 | `src/domain/` | backend-neutral product rules and value types |
-| `src/adapters/` | the adapter contracts, Kubernetes delivery, DNS records, and the two stores |
+| `src/adapters/` | the adapter contracts, Kubernetes delivery, the three build routes, DNS records, and the two stores |
 | `src/reconciler/` | two loops — Target health and capabilities, and deploy convergence |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |
@@ -174,6 +179,53 @@ running one would produce a second digest over the same bytes. Everything else
 goes through a route, and the route's name and log fidelity land on the Build so
 a thin log reads as the runner it is rather than as a bug.
 
+**Three routes, one engine.** §4 settles BuildKit with two frontends — the
+repo's Dockerfile if present, else the pinned zero-config frontend — and
+`src/adapters/build/buildkit.ts` is what keeps that from being three
+implementations of the same idea: the cloud builder runs the program in a build
+step, the cluster runs it in a Job, and the reusable workflow runs the same
+ladder through buildx. The ladder itself runs *inside* the builder, because a
+Dockerfile settles how to build and never what the thing is (§5) — the kind was
+decided before the build was dispatched.
+
+**The result comes back through the log**, because logs are read and never
+pushed (§4). That decision has a consequence nobody states: with no ingest
+endpoint there is nowhere for a runner to hand back a digest either, so the
+runner prints one base64 marker line and core reads it out of the log it was
+already fetching. No callback, no second channel, nothing to authenticate. What
+it echoes is the bundle digest it was *handed*, and the route checks rather than
+copies it — §16's join is only a check if the runner can disagree.
+
+Each route declares a profile level and a Target sets a threshold:
+`src/domain/build-route.ts` filters on the level and then takes the
+highest-ranked survivor, which is §16's "the level is a threshold, then admin
+rank wins" in that order. The in-cluster route is L1, so an L2 Target refuses
+it however highly it is ranked — which is also why a Target cannot be both
+offline-capable and require L2. `dispatchBuild` enforces the threshold half
+wherever a placement is named, because refusing to start costs nothing while an
+artifact built below a Target's minimum is a green build followed by an
+admission failure nobody reading the build log can explain.
+
+Two halves of that are still missing and neither is this package's to finish
+alone. `targets.min_build_level` is read but nothing sets it, and there is no
+ordered per-Target route list — both belong to the Target model and the connect
+act. And **the provenance a route returns is the runner's own account of
+itself**: §16 wants core to verify the backend's provenance against the
+Target's minimum *before* signing, which means fetching the attestation the
+builder attached to the artifact and checking it. The Actions route asks
+BuildKit for one (`provenance: mode=max`) and never reads it back. Until Task 26
+does, a green Build carries a claim rather than evidence, and `route.ts` says so
+where the claim is assembled.
+
+The hosted route runs in the *connected* repository, on its own Actions minutes
+(§15), through the thin caller the configuration PR wrote there. An uploaded
+archive has no repository, so it runs where the reusable workflow lives —
+which is why `.github/workflows/spindrift-build.yml` declares both
+`workflow_call` and `workflow_dispatch`. A dispatch names no run, so the caller
+carries a correlation input it stamps into `run-name` and the route finds its
+run by that name; the correlation stays out of the spec because no part of the
+build depends on it.
+
 A **Deploy** is an intent, written under `SELECT ... FOR UPDATE` on the one
 `(Component, Target)` desired row. That locking read is the whole of the
 concurrency design: two intents for one pair serialize, and the second reads what
@@ -238,6 +290,26 @@ shallower one makes a rollback come up green and unconfigured.
 `src/reconciler/config-loop.ts` reaps on a loop; the write path reaps the key it
 just touched as a fast path.
 
+**A website is the one exception, and it is derived rather than chosen.** §10
+allows it because whatever a website bakes becomes public the moment the site
+is served, so the asymmetry that sends everything else to the store does not
+exist there — and §4 states the payoff: build arguments are ordinary rows, so
+**no builder ever holds a store credential**. `isBuildTimeConfig` takes a
+Component kind and nothing else, which is what keeps the exception too narrow
+for a developer to opt a credential into. Two consequences fall out of it: a
+website reaches no store, so the reach rule does not apply to one, and a
+website's config change produces **no Deploy** — the value was baked into the
+artifact that is already serving, so re-applying it would deliver the old value
+under a new `configVersion`. The new value arrives with the next build, and the
+act says so.
+
+The known limit, stated rather than worked around: configuration is scoped to
+(Component, Target) while a Build is keyed on (Component, commit, target-shape),
+so two Targets of the same shape wanting different website build arguments want
+two artifacts the Build key cannot tell apart. `dispatchBuild` takes the
+placement it is building for and the second dispatch collides on the unique key
+rather than quietly serving the first one's values.
+
 Delivery on a Kubernetes Target is the App chart's `ExternalSecret`, which
 fetches each pinned reference into one Secret keyed by variable name. Two things
 an installation has to supply for that to work: the operator names the
@@ -246,6 +318,12 @@ without which the chart refuses to render rather than producing an
 ExternalSecret that never syncs), and the process needs `SPINDRIFT_STORE_TOKEN`
 in its environment — the access path core writes over. A config act refuses with
 that sentence when it is missing.
+
+The cloud build route reads a second variable, `SPINDRIFT_BUILD_TOKEN`, for the
+same reason and with the same posture: two access paths to two services, each
+read per call so a rotated Secret takes effect without a restart. The other two
+routes need neither — hosted CI goes through the App key, and the in-cluster
+Job authorizes with the projected service account token.
 
 ## Naming and DNS
 

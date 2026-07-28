@@ -23,14 +23,34 @@
  *   fidelity are recorded on the Build so an operator can see why a log is thin
  *   rather than reading it as a bug.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import type { BuildSource, BuildSpec } from '../../adapters/build/contract.ts';
-import { apps, builds, components } from '../../db/schema.ts';
+import type {
+  BuildAdapter,
+  BuildSource,
+  BuildSpec,
+} from '../../adapters/build/contract.ts';
+import { apps, builds, components, targets } from '../../db/schema.ts';
 import { recordBuildEvent } from '../../domain/attempt-log.ts';
+import {
+  buildRouteCandidates,
+  DEFAULT_MINIMUM_BUILD_LEVEL,
+} from '../../domain/build-route.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
-import { type Command, failed, ok } from '../types.ts';
+import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
+import { type Command, type CommandContext, failed, ok } from '../types.ts';
+
+/**
+ * §4's per-App build limit.
+ *
+ * A constant rather than a manifest value: it exists to stop one App's push
+ * loop from taking every runner an installation has, and the number that does
+ * that is a property of "how many is obviously too many" rather than of any
+ * particular installation. It becomes configuration the first time an operator
+ * has a reason to disagree with it.
+ */
+export const CONCURRENT_BUILDS_PER_APP = 3;
 
 export const dispatchBuildInput = z
   .object({
@@ -42,6 +62,22 @@ export const dispatchBuildInput = z
      * not interpret — it hands it to the registry and reports what comes back.
      */
     route: z.string().trim().min(1),
+    /**
+     * The Target this build's placement resolved to, where the artifact's
+     * contents depend on it.
+     *
+     * Only a `website` needs it, and only because §10 scopes configuration to
+     * (Component, Target) while §2 keys a Build on (Component, commit,
+     * target-shape). For everything else configuration is delivered at runtime
+     * and the shape is the whole of what a build depends on, so this is absent
+     * and nothing reads it.
+     *
+     * **The known limit, stated rather than worked around**: two Targets of the
+     * same shape with different website build arguments want two artifacts and
+     * the Build key cannot tell them apart. The second dispatch collides on the
+     * unique key rather than silently serving the first one's values.
+     */
+    placementTargetId: z.uuid().optional(),
   })
   .strict();
 
@@ -54,6 +90,50 @@ export interface DispatchBuildResult {
   readonly artifactDigest: string | null;
   /** The route that ran, as recorded on the Build (§4). */
   readonly runner: string;
+}
+
+/**
+ * Why this Target will not take a build from this route, or `null`.
+ *
+ * §16: "each Target has a minimum build level defaulting to L2 plus an ordered
+ * list of build routes: **the level is a threshold, then admin rank wins**."
+ * The rank half belongs to whoever *chooses* a route; by the time a route has
+ * been named the only question left is the threshold, which is the Target's.
+ *
+ * Checked here rather than left to admission because the failure is cheaper and
+ * far more legible now: refusing to start costs nothing, while an artifact
+ * built below a Target's minimum is a green build followed by a deploy that a
+ * policy engine rejects for reasons nobody reading the build log can see.
+ *
+ * A dispatch that names no placement is not checked, because there is no Target
+ * whose threshold could apply — which is also why a build for a shape rather
+ * than for a Target is legitimate (§2).
+ */
+async function routeRefusedByTarget(
+  context: CommandContext,
+  input: DispatchBuildInput,
+  adapter: BuildAdapter,
+): Promise<string | null> {
+  if (input.placementTargetId === undefined) return null;
+
+  const [target] = await context.db
+    .select({ name: targets.name, minBuildLevel: targets.minBuildLevel })
+    .from(targets)
+    .where(eq(targets.id, input.placementTargetId));
+  if (target === undefined) return null;
+
+  const [candidate] = buildRouteCandidates(
+    [{ name: adapter.name, level: adapter.buildLevel }],
+    {
+      minimumLevel: (target.minBuildLevel ?? DEFAULT_MINIMUM_BUILD_LEVEL) as
+        | 1
+        | 2
+        | 3,
+    },
+  );
+  return candidate === undefined || candidate.eligible
+    ? null
+    : `${target.name} will not take a build from ${adapter.name}: ${candidate.reason}`;
 }
 
 export const dispatchBuild: Command<
@@ -120,11 +200,34 @@ export const dispatchBuild: Command<
     );
   }
 
+  // §4: "concurrent builds up to a per-App limit". Counted rather than queued,
+  // because §4 also removes the ordinal — a build records an artifact rather
+  // than deploying one, so nothing is waiting on a slot and refusing is a more
+  // honest answer than a queue whose position means nothing.
+  const running = await context.db
+    .select({ id: builds.id })
+    .from(builds)
+    .innerJoin(components, eq(builds.componentId, components.id))
+    .where(and(eq(components.appId, app.id), eq(builds.status, 'RUNNING')));
+  if (running.length >= CONCURRENT_BUILDS_PER_APP) {
+    return failed(
+      'NOT_BUILDABLE',
+      `${app.name} already has ${running.length} builds running, which is this installation's limit`,
+    );
+  }
+
+  // §16: "the level is a threshold, then admin rank wins." The threshold half
+  // is the Target's, so it is only checkable where a placement is named — and
+  // where one is, a route below it is refused here rather than producing an
+  // artifact the Target would refuse to admit anyway.
+  const refusal = await routeRefusedByTarget(context, input, adapter);
+  if (refusal !== null) return failed('NOT_BUILDABLE', refusal);
+
   // The staged bundle's own columns, not the artifact's. §15 stages a bundle for
-  // either builder, and a Build that has not run has no artifact refs to borrow
-  // an address from — reading them here is how a source upload reaches its
-  // builder with an empty location.
-  if (app.sourceKind === 'archive' && build.bundleLocation === null) {
+  // either builder — a repo commit and an upload alike — and a Build that has
+  // not run has no artifact refs to borrow an address from, so a missing
+  // location is what would otherwise reach a route as an empty URL.
+  if (build.bundleLocation === null) {
     return failed(
       'NOT_BUILDABLE',
       `Build ${build.id} has no staged bundle location, so no route can fetch it`,
@@ -139,11 +242,12 @@ export const dispatchBuild: Command<
           commit: build.commit,
           // §5: an App is repo plus subpath, and the developer named it there.
           subpath: app.sourceRepoSubpath ?? '.',
+          location: build.bundleLocation,
         }
       : {
           kind: 'archive',
           digest: build.bundleDigest,
-          location: build.bundleLocation ?? '',
+          location: build.bundleLocation,
           contents: 'source',
           // Per Build: the unwrap is a fact about the bytes that were uploaded.
           subpath: build.bundleSubpath ?? '.',
@@ -167,7 +271,23 @@ export const dispatchBuild: Command<
      * choice the build makes. An adapter never picks its own destination (§4).
      */
     destination: context.manifest.supplyChain.registry,
-    buildArgs: {},
+    /**
+     * §4: "a website's build-time config is passed as build arguments as
+     * ordinary rows, not fetched from a store — whatever a website bakes
+     * becomes public anyway, so no builder ever holds a store credential."
+     *
+     * Read here rather than by the route, so that the one place a value
+     * reaches a builder is the one place the contract says it may.
+     */
+    buildArgs:
+      input.placementTargetId === undefined ||
+      !isBuildTimeConfig(component.kind)
+        ? {}
+        : await readBuildArgs(
+            context.db,
+            component.id,
+            input.placementTargetId,
+          ),
   };
 
   const attempt = {

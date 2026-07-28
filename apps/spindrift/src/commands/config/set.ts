@@ -51,6 +51,7 @@ import {
   storeOfRecordFor,
   VARIABLE_NAME,
 } from '../../domain/config.ts';
+import type { ComponentKind } from '../../domain/desired-state.ts';
 import { checkDeployable, placeIntent } from '../deploys/create.ts';
 import {
   type AdapterRegistry,
@@ -61,6 +62,7 @@ import {
   failed,
   ok,
 } from '../types.ts';
+import { isBuildTimeConfig } from './build-args.ts';
 import {
   configScopeFor,
   type PinnedConfig,
@@ -141,8 +143,19 @@ export const setConfig: Command<SetConfigInput, ConfigChangeResult> = async (
 export interface ConfigSubject {
   readonly componentId: string;
   readonly targetId: string;
+  /** §10's exception is derived from this and from nothing else. */
+  readonly kind: ComponentKind;
   readonly scope: ConfigScope;
-  readonly store: SecretStore;
+  /**
+   * `null` exactly when this Component's configuration is baked at build time
+   * (§10's narrow website exception).
+   *
+   * A website reaches no store because it needs none: its configuration is
+   * ordinary rows a builder receives as build arguments, which is what keeps
+   * §4's "no builder ever holds a store credential" structural rather than a
+   * rule somebody has to remember.
+   */
+  readonly store: SecretStore | null;
 }
 
 /**
@@ -184,8 +197,12 @@ export async function configSubject(
     };
   }
 
-  const adapter = storeOfRecordOf(context, target);
-  if (adapter === null) {
+  // The reach rule is about delivery, and a website's configuration is not
+  // delivered — it is baked (§10). Checking a store a website will never touch
+  // would refuse a perfectly good act on a Target that reaches no vault.
+  const buildTime = isBuildTimeConfig(component.kind);
+  const adapter = buildTime ? null : storeOfRecordOf(context, target);
+  if (!buildTime && adapter === null) {
     return {
       failure: {
         code: 'NOT_DEPLOYABLE',
@@ -207,10 +224,11 @@ export async function configSubject(
   return {
     componentId: component.id,
     targetId: target.id,
+    kind: component.kind,
     scope,
-    // Non-null by construction: `storeOfRecordOf` only chooses an adapter the
-    // registry answered for.
-    store: context.adapters.store(adapter)!,
+    // Non-null unless this is a website: `storeOfRecordOf` only ever chooses an
+    // adapter the registry answered for.
+    store: adapter === null ? null : context.adapters.store(adapter),
   };
 }
 
@@ -258,13 +276,25 @@ export async function applyConfigChange(
 ): Promise<CommandResult<ConfigChangeResult>> {
   const now = context.clock.now();
   const written: string[] = [];
+  // Narrowed once, here, so nothing below asserts a store it cannot see: the
+  // store is present exactly when the configuration is delivered rather than
+  // baked, and `configSubject` is what established that.
+  const { store } = subject;
 
   for (const entry of entries) {
-    const reference = await subject.store.put(
-      subject.scope,
-      entry.key,
-      entry.value,
-    );
+    // §10's narrow exception, and the one place it is applied: a website's
+    // value never crosses the store seam, because it is going to be public the
+    // moment the site is served. Everything else goes to the store, unread.
+    const row =
+      store === null
+        ? {
+            kind: 'plain' as const,
+            storeRef: null,
+            storeVersion: null,
+            plainValue: entry.value,
+          }
+        : await pinnedRow(store, subject.scope, entry);
+
     await context.db
       .insert(configItems)
       .values({
@@ -272,11 +302,9 @@ export async function applyConfigChange(
         targetId: subject.targetId,
         environment: PINNED_ENVIRONMENT,
         key: entry.key,
-        kind: 'secret_ref',
-        storeRef: reference.key,
-        storeVersion: reference.version,
         createdAt: now,
         updatedAt: now,
+        ...row,
       })
       .onConflictDoUpdate({
         target: [
@@ -285,12 +313,7 @@ export async function applyConfigChange(
           configItems.environment,
           configItems.key,
         ],
-        set: {
-          kind: 'secret_ref',
-          storeRef: reference.key,
-          storeVersion: reference.version,
-          updatedAt: now,
-        },
+        set: { ...row, updatedAt: now },
       });
     written.push(entry.key);
     await audit(context, subject, entry.key, 'set', now);
@@ -315,8 +338,13 @@ export async function applyConfigChange(
   // is gone from the document still has versions in the store that nothing else
   // will ever come back for. The newest N survive either way, so a rollback
   // inside the retention window still resolves.
-  for (const key of [...written, ...removals]) {
-    await reapKey(subject, key);
+  //
+  // A website has nothing to reap: its rows *are* the values, so there are no
+  // versions in a store to fall past a depth.
+  if (store !== null) {
+    for (const key of [...written, ...removals]) {
+      await reapKey(subject, key);
+    }
   }
 
   const pinned = await readPinnedConfig(
@@ -337,12 +365,39 @@ export async function applyConfigChange(
   });
 }
 
+/**
+ * Write one value to the store and return the row that pins it (§10).
+ *
+ * The value is an argument and never a return: what comes back is the reference
+ * the store minted, which is the only thing above this line that a database
+ * column will ever hold.
+ */
+async function pinnedRow(
+  store: SecretStore,
+  scope: ConfigScope,
+  entry: { key: string; value: string },
+): Promise<{
+  kind: 'secret_ref';
+  storeRef: string;
+  storeVersion: string;
+  plainValue: null;
+}> {
+  const reference = await store.put(scope, entry.key, entry.value);
+  return {
+    kind: 'secret_ref',
+    storeRef: reference.key,
+    storeVersion: reference.version,
+    plainValue: null,
+  };
+}
+
 /** Destroy every version of one key past the retention depth (§10). */
 export async function reapKey(
   subject: ConfigSubject,
   key: string,
   retention: number = CONFIG_RETENTION,
 ): Promise<number> {
+  if (subject.store === null) return 0;
   const versions = await subject.store.versions(subject.scope, key);
   const expired = reapable(versions, retention);
   for (const version of expired) {
@@ -365,6 +420,18 @@ async function deployChange(
   subject: ConfigSubject,
   pinned: PinnedConfig,
 ): Promise<{ deployId: number | null; notDeployed: string | null }> {
+  // A website's value was baked into the artifact that is already serving, so
+  // re-applying that artifact would deliver the old value with a new
+  // `configVersion` beside it — green, and wrong. The new value reaches the
+  // site the next time one is built, and saying so is the honest answer.
+  if (isBuildTimeConfig(subject.kind)) {
+    return {
+      deployId: null,
+      notDeployed:
+        'a website bakes its configuration into the artifact, so this value reaches the site on its next build',
+    };
+  }
+
   const [desired] = await context.db
     .select({ buildId: componentTargetDesired.desiredBuildId })
     .from(componentTargetDesired)
