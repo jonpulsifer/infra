@@ -43,6 +43,7 @@ import {
   DEPLOY_PHASES,
   FAILURE_REASONS,
 } from '../adapters/deploy/contract.ts';
+import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type {
   PrerequisiteResult,
   TargetDiscovery,
@@ -203,6 +204,28 @@ export const webauthnPurpose = pgEnum('webauthn_purpose', [
   'credential_admin',
   'add_passkey',
 ]);
+
+// --- Installation ----------------------------------------------------------
+
+/**
+ * The one installation this control plane represents.
+ *
+ * The manifest is ordinary configuration, not a credential, and §12 makes
+ * Postgres the durable source for Spindrift-owned state. A bootstrap document
+ * may seed this row once; after that, every process reads the same database
+ * value instead of treating a mounted file as a second source of truth.
+ */
+export const installation = pgTable(
+  'installation',
+  {
+    id: integer('id').primaryKey().default(1),
+    manifest: jsonb('manifest').$type<InstallationManifest>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [check('installation_singleton', sql`${table.id} = 1`)],
+);
 
 // --- Repository ------------------------------------------------------------
 

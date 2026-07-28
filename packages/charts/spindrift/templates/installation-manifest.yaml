@@ -1,0 +1,15 @@
+{{- with .Values.installationManifest }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "spindrift.fullname" $ }}-installation-manifest
+  namespace: {{ include "spindrift.namespace" $ }}
+  labels:
+    {{- include "spindrift.labels" $ | nindent 4 }}
+data:
+  # Ordinary, non-secret first-boot configuration. Core validates this
+  # document before atomically seeding its singleton database row; later boots
+  # read the stored row and ignore this bootstrap copy.
+  manifest.yaml: |
+    {{- toYaml . | nindent 4 }}
+{{- end }}

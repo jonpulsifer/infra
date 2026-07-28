@@ -5,8 +5,8 @@ loop that owns its own lifecycle."
 
 They are rendered from one template with one difference each — the command and
 the component label — so the two processes cannot drift apart in the things
-that must not differ: the image, the database credential, the manifest, and the
-security context.
+that must not differ: the image, the database credential, the manifest
+bootstrap, and the security context.
 
 The reconciler serves nothing and is therefore given no port and no probe. A
 loop that claims work with `SELECT … FOR UPDATE SKIP LOCKED` has no readiness to
@@ -101,6 +101,10 @@ spec:
                   name: {{ include "spindrift.databaseName" $top }}-app
                   key: uri
             {{- end }}
+            {{- if $top.Values.installationManifest }}
+            - name: SPINDRIFT_MANIFEST_PATH
+              value: /etc/spindrift/manifest.yaml
+            {{- end }}
             {{- range $top.Values.env }}
             - name: {{ .name }}
               value: {{ .value | quote }}
@@ -124,6 +128,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if $top.Values.installationManifest }}
+            - name: installation-manifest
+              mountPath: /etc/spindrift
+              readOnly: true
+            {{- end }}
             {{- if $process.federates }}
             - name: federated-identity
               mountPath: {{ $top.Values.serviceAccount.token.mountPath }}
@@ -144,6 +153,11 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if $top.Values.installationManifest }}
+        - name: installation-manifest
+          configMap:
+            name: {{ include "spindrift.fullname" $top }}-installation-manifest
+        {{- end }}
         {{- if $process.federates }}
         - name: federated-identity
           projected:

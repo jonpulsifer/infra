@@ -22,10 +22,8 @@ import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
 import { systemClock } from '../commands/types.ts';
-import {
-  assertTrustedGatewayBoundary,
-  loadManifest,
-} from '../config/manifest.ts';
+import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
+import { loadStoredManifest } from '../config/manifest-store.ts';
 import { createDb } from '../db/client.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 
@@ -44,9 +42,9 @@ export async function start(
   client: Record<string, ClientRoute>,
   { development }: { development: boolean },
 ): Promise<void> {
-  const manifest = await loadManifest();
-  assertTrustedGatewayBoundary(manifest);
   const db = createDb();
+  const manifest = await loadStoredManifest(db);
+  assertTrustedGatewayBoundary(manifest);
   const adapters = createAdapterRegistry({ manifest });
 
   const auth: EnrolmentDeps & GatewayDeps = {

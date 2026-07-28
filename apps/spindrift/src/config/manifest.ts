@@ -1,12 +1,13 @@
 /**
  * Loading and validating the installation manifest.
  *
- * The manifest is read once at boot from a mounted file (the chart renders it
- * from values into a ConfigMap) or, for tests and local runs, from an inline
- * document in the environment. Validation failures are fatal and name every
- * offending key at once — a half-configured installation must not reach the
- * point where it can place a workload.
+ * The manifest lives in Postgres. An empty installation bootstraps it from a
+ * mounted file (the chart renders one from values into a ConfigMap) or, for
+ * tests and local runs, from an inline environment document. Validation
+ * failures are fatal and name every offending key at once — a half-configured
+ * installation must not reach the point where it can place a workload.
  */
+
 import {
   type InstallationManifest,
   installationManifestSchema,
@@ -49,7 +50,15 @@ export function parseManifest(
     );
   }
 
-  const result = installationManifestSchema.safeParse(parsed);
+  return validateManifest(parsed, source);
+}
+
+/** Validate a parsed or stored manifest and report every bad field together. */
+export function validateManifest(
+  manifest: unknown,
+  source: string,
+): InstallationManifest {
+  const result = installationManifestSchema.safeParse(manifest);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => {
