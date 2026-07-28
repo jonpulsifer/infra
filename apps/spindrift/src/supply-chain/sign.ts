@@ -114,7 +114,7 @@ export class CosignSigner implements ArtifactSigner {
   private readonly now: () => Date;
 
   constructor(private readonly options: CosignSignerOptions) {
-    this.executable = options.executable ?? 'cosign';
+    this.executable = options.executable ?? 'spindrift-verifier';
     this.processes = options.processes ?? bunProcessExecutor;
     this.now = options.now ?? (() => new Date());
   }

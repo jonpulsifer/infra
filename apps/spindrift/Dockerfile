@@ -43,32 +43,8 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
-# Supply-chain tools are release binaries rather than packages from Alpine's
-# moving repositories. Versions and publisher-reported digests are both pinned;
-# the build fails before copying a byte whose digest does not match.
-FROM base AS supply-chain-tools
-ARG TARGETARCH
-ARG COSIGN_VERSION=3.0.6
-ARG SLSA_VERIFIER_VERSION=2.7.1
-RUN set -eux; \
-  case "${TARGETARCH}" in \
-    amd64) \
-      cosign_sha='c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74'; \
-      slsa_sha='946dbec729094195e88ef78e1734324a27869f03e2c6bd2f61cbc06bd5350339' ;; \
-    arm64) \
-      cosign_sha='bedac92e8c3729864e13d4a17048007cfafa79d5deca993a43a90ffe018ef2b8'; \
-      slsa_sha='5d3b2349ede7bfec19e7a21569f18b9f7410145ad12e9584b175370669e14061' ;; \
-    *) echo "unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-  esac; \
-  curl -fsSL \
-    "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-${TARGETARCH}" \
-    -o /usr/local/bin/cosign; \
-  echo "${cosign_sha}  /usr/local/bin/cosign" | sha256sum -c -; \
-  curl -fsSL \
-    "https://github.com/slsa-framework/slsa-verifier/releases/download/v${SLSA_VERIFIER_VERSION}/slsa-verifier-linux-${TARGETARCH}" \
-    -o /usr/local/bin/slsa-verifier; \
-  echo "${slsa_sha}  /usr/local/bin/slsa-verifier" | sha256sum -c -; \
-  chmod 0755 /usr/local/bin/cosign /usr/local/bin/slsa-verifier
+# First-party artifact verifier (§35). Replaces upstream release binaries (cosign & slsa-verifier).
+FROM ghcr.io/jonpulsifer/spindrift-verifier:v0.1.0@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 AS supply-chain-tools
 
 FROM base AS runner
 ENV NODE_ENV=production \
@@ -79,8 +55,7 @@ WORKDIR /app
 COPY --from=deps --chmod=755 /app ./
 COPY --from=builder --chmod=755 /app/apps/spindrift/src ./apps/spindrift/src
 COPY --from=builder --chmod=755 /app/apps/spindrift/dist ./apps/spindrift/dist
-COPY --from=supply-chain-tools /usr/local/bin/cosign /usr/local/bin/cosign
-COPY --from=supply-chain-tools /usr/local/bin/slsa-verifier /usr/local/bin/slsa-verifier
+COPY --from=supply-chain-tools /spindrift-verifier /usr/local/bin/spindrift-verifier
 WORKDIR /app/apps/spindrift
 USER 65532:65532
 EXPOSE 3000
