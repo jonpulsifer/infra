@@ -10,6 +10,7 @@
     "hub",
     "slingshot",
     "spindrift",
+    "spindrift-demo",
     "spindrift-verifier"
   ],
   "ignore": [

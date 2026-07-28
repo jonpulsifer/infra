@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spindrift Fleet Command</title>
+<meta name="description" content="A demo static site — spindrift fleet status dashboard">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌊</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="spray"></canvas>
+
+<div class="shell">
+  <header class="masthead">
+    <div class="logo">
+      <span class="logo-mark">🌊</span>
+      <h1>Spindrift <b>Fleet Command</b></h1>
+    </div>
+    <p class="tagline">Every vessel accounted for. Every wave ridden.</p>
+  </header>
+
+  <section class="build-card">
+    <div class="build-label">build</div>
+    <div class="build-rows">
+      <div class="build-row">
+        <span class="key">commit</span>
+        <code class="val">{{BUILD_COMMIT}}</code>
+      </div>
+      <div class="build-row">
+        <span class="key">branch</span>
+        <code class="val">{{BUILD_BRANCH}}</code>
+      </div>
+      <div class="build-row">
+        <span class="key">stamped</span>
+        <code class="val">{{BUILD_TIME}}</code>
+      </div>
+    </div>
+  </section>
+
+  <section class="fleet">
+    <h2>Fleet Status</h2>
+    <div class="vessels" id="vessels">
+      <!-- populated by client.js -->
+    </div>
+  </section>
+
+  <section class="logbook">
+    <h2>Deploy Log</h2>
+    <div class="terminal" id="terminal">
+      <div class="terminal-lines" id="terminal-lines"></div>
+      <span class="cursor">▊</span>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>⚡ static site demo · <span id="render-ms"></span> ms to paint</p>
+  </footer>
+</div>
+
+<script src="client.js"></script>
+</body>
+</html>
