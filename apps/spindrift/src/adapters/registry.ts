@@ -32,6 +32,8 @@ import type { BuildRouteProfile } from '../domain/build-route.ts';
 import type { RepositoryHost } from '../domain/repository.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
+import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
+import { SlsaVerifier } from '../supply-chain/verify.ts';
 import { CloudBuildRoute } from './build/cloud-build.ts';
 import type { BuildAdapter } from './build/contract.ts';
 import { GitHubActionsBuildRoute } from './build/github-actions.ts';
@@ -143,6 +145,10 @@ export function createAdapterRegistry(
     options.manifest,
     options.storeToken ?? storeToken(options.env ?? Bun.env),
   );
+  const supplyChain = new CoreSupplyChain(
+    new SlsaVerifier(),
+    new CosignSigner({ key: options.manifest.supplyChain.signer }),
+  );
 
   // §16's ordered list: the manifest's order *is* the admin rank, so the map is
   // built from it in order and `buildRouteProfiles` reads it back the same way.
@@ -220,6 +226,10 @@ export function createAdapterRegistry(
      */
     repository(): RepositoryHost | null {
       return repositoryHost;
+    },
+
+    supplyChain() {
+      return supplyChain;
     },
   };
 }

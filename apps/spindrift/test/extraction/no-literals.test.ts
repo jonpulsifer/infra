@@ -81,6 +81,20 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'base64',
   'sha256',
   'run-name',
+  // Supply-chain posture keys and pinned tool vocabulary. These are product
+  // terms identical in every installation, not cloud project identifiers.
+  'source-receipt',
+  'backend-provenance',
+  'core-signature',
+  'source-controls',
+  'buildkit-provenance',
+  'base-freshness',
+  'target-verification',
+  'platform-verdict',
+  'artifact-digest',
+  'sign-blob',
+  'slsa-verifier',
+  'verify-image',
   // HTTP header names. `src/web/` is scoped out of this scanner for exactly
   // this reason (see BROWSER_SOURCE), but the auth surface writes headers from
   // outside that directory and must not be scoped out wholesale — it is one of

@@ -43,6 +43,7 @@ import {
   FakeDeployAdapter,
 } from '../harness/fakes/deploy-adapter.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
+import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -51,10 +52,12 @@ const clock: Clock = { now: () => new Date('2024-06-01T00:00:00.000Z') };
 
 let store: FakeSecretStore;
 let route: FakeBuildAdapter;
+let supplyChain: SupplyChainHarness;
 
 beforeEach(() => {
   store = new FakeSecretStore({ adapter: manifest.secretStore.adapter });
   route = new FakeBuildAdapter({ name: 'hosted' });
+  supplyChain = new SupplyChainHarness();
 });
 
 function registry(
@@ -68,6 +71,7 @@ function registry(
     store: (adapter) =>
       options.store === false || adapter !== store.adapter ? null : store,
     repository: () => null,
+    supplyChain: () => supplyChain,
   };
 }
 
@@ -365,6 +369,72 @@ describe('a Target’s minimum build level is a threshold', () => {
     );
 
     expect(dispatched.ok).toBe(true);
+  });
+});
+
+describe('verified evidence is core’s green gate', () => {
+  test('records only the assessment and signature returned after verification', async () => {
+    const { component, target } = await fixture('service', {
+      minBuildLevel: 2,
+    });
+    const ctx = await context(
+      registry(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+    );
+    const build = await stagedBuild(component.id);
+
+    const dispatched = await dispatchBuild(
+      { buildId: build.id, route: 'hosted', placementTargetId: target.id },
+      ctx,
+    );
+
+    expect(dispatched.ok).toBe(true);
+    expect(supplyChain.finalized).toHaveLength(1);
+    expect(supplyChain.finalized[0]?.minimumLevel).toBe(2);
+
+    const [recorded] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, build.id));
+    expect(recorded?.status).toBe('SUCCEEDED');
+    expect(recorded?.provenance?.backend).toBe('hosted');
+    expect(recorded?.verifiedBuildLevel).toBe(2);
+    expect(recorded?.signature?.format).toBe('cosign');
+    expect(recorded?.buildkitProvenanceRef).toContain('#buildkit');
+    expect(recorded?.sbomRef).toContain('#spdx');
+  });
+
+  test('a provenance refusal leaves no admitted artifact or signature', async () => {
+    const { component, target } = await fixture('service', {
+      minBuildLevel: 2,
+    });
+    supplyChain = new SupplyChainHarness(async () => ({
+      ok: false,
+      code: 'PROVENANCE_INVALID',
+      message: 'the backend provenance signature is invalid',
+    }));
+    const ctx = await context(
+      registry(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+    );
+    const build = await stagedBuild(component.id);
+
+    const dispatched = await dispatchBuild(
+      { buildId: build.id, route: 'hosted', placementTargetId: target.id },
+      ctx,
+    );
+
+    expect(dispatched).toMatchObject({
+      ok: true,
+      value: { status: 'FAILED', artifactDigest: null },
+    });
+    const [recorded] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, build.id));
+    expect(recorded?.status).toBe('FAILED');
+    expect(recorded?.artifactDigest).toBeNull();
+    expect(recorded?.provenance).toBeNull();
+    expect(recorded?.verifiedBuildLevel).toBeNull();
+    expect(recorded?.signature).toBeNull();
   });
 });
 

@@ -109,6 +109,8 @@ export function buildFailed(
     logs,
     provenance: null,
     baseDigest: null,
+    buildkitProvenanceRef: null,
+    sbomRef: null,
     reason,
     ...(detail === undefined ? {} : { detail }),
     ...(debug === undefined ? {} : { debug }),
@@ -165,5 +167,7 @@ export function buildSucceeded(input: {
       statement: report.statement ?? null,
     },
     baseDigest: report.baseDigest,
+    buildkitProvenanceRef: report.buildkitProvenanceRef ?? null,
+    sbomRef: report.sbomRef ?? null,
   };
 }

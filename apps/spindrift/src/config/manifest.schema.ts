@@ -288,6 +288,11 @@ export const installationManifestSchema = z
          * of the deploy path's references `offlineDeploy` is checked over.
          */
         verifier: nonEmptyString,
+        /**
+         * KMS key URI core hands to cosign (§16). It is a reference, not key
+         * material; the process authenticates through its workload identity.
+         */
+        signer: nonEmptyString,
       })
       .strict(),
 

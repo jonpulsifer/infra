@@ -17,12 +17,15 @@
 import { describe, expect, test } from 'bun:test';
 import {
   apps,
+  builds,
   components,
   componentTargetDesired,
   configItems,
   PINNED_ENVIRONMENT,
   targets,
 } from '../../src/db/schema.ts';
+import type { CoreSignature } from '../../src/supply-chain/sign.ts';
+import type { BackendProvenanceAssessment } from '../../src/supply-chain/verify.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { targetValues } from '../harness/installation.ts';
 
@@ -179,5 +182,54 @@ describe('config_items: the pinned environment', () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+});
+
+describe('builds: assessed supply-chain evidence', () => {
+  test('round-trips normalized provenance and the core signature', async () => {
+    const { component } = await seedPlacement();
+    const artifactDigest = `sha256:${'a'.repeat(64)}`;
+    const bundleDigest = `sha256:${'b'.repeat(64)}`;
+    const provenance: BackendProvenanceAssessment = {
+      artifactDigest,
+      bundleDigest,
+      backend: 'hosted',
+      builderId: 'https://github.com/example/build.yml',
+      slsaVersion: '1.2',
+      achievedLevel: 2,
+      verifiedAt: '2024-06-01T00:00:00.000Z',
+      envelope: { predicateType: 'https://slsa.dev/provenance/v1' },
+    };
+    const signature: CoreSignature = {
+      artifactDigest,
+      signer: 'gcpkms://example/signer',
+      format: 'cosign',
+      bundle: { mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json' },
+      signedAt: '2024-06-01T00:00:01.000Z',
+    };
+
+    const [build] = await database()
+      .db.insert(builds)
+      .values({
+        componentId: component.id,
+        commit: 'abc123',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest,
+        status: 'SUCCEEDED',
+        bundleDigest,
+        provenance,
+        verifiedBuildLevel: 2,
+        signature,
+        buildkitProvenanceRef: `${artifactDigest}.buildkit`,
+        sbomRef: `${artifactDigest}.spdx`,
+      })
+      .returning();
+
+    expect(build?.provenance).toEqual(provenance);
+    expect(build?.verifiedBuildLevel).toBe(2);
+    expect(build?.signature).toEqual(signature);
+    expect(build?.buildkitProvenanceRef).toBe(`${artifactDigest}.buildkit`);
+    expect(build?.sbomRef).toBe(`${artifactDigest}.spdx`);
   });
 });

@@ -40,6 +40,7 @@ charts:
 supplyChain:
   registry: registry.example.test/artifacts
   verifier: verifier.example.test
+  signer: gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer
 
 github:
   appId: '1234567'

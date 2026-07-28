@@ -31,7 +31,7 @@ cloud runtime through its own API, and static hosting through a release — and
 one conformance suite runs over every one of them, which is what keeps "core
 describes, the adapter renders" a tested claim rather than a stated one.
 
-What has no implementation is datastores, jobs, runtime log tails, and signing.
+What has no implementation is datastores, jobs, and runtime log tails.
 **The three screens still render placeholder data**
 from `src/web/demo/`, which is scaffolding meant to be deleted: the views are
 typed against `src/web/model.ts`, so the query commands that replace it have a
@@ -60,6 +60,7 @@ One image, two processes (§19); only `web` exists so far.
 | `src/domain/` | backend-neutral product rules and value types |
 | `src/adapters/` | the adapter contracts, the three deploy backends, the three build routes, DNS records, and the two stores |
 | `src/reconciler/` | two loops — Target health and capabilities, and deploy convergence |
+| `src/supply-chain/` | provenance verification, core signing, and derived posture |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |
 | `src/web/views/` | the three screens (§18) |
@@ -220,16 +221,29 @@ wherever a placement is named, because refusing to start costs nothing while an
 artifact built below a Target's minimum is a green build followed by an
 admission failure nobody reading the build log can explain.
 
-Two halves of that are still missing and neither is this package's to finish
-alone. `targets.min_build_level` is read but nothing sets it, and there is no
-ordered per-Target route list — both belong to the Target model and the connect
-act. And **the provenance a route returns is the runner's own account of
-itself**: §16 wants core to verify the backend's provenance against the
-Target's minimum *before* signing, which means fetching the attestation the
-builder attached to the artifact and checking it. The Actions route asks
-BuildKit for one (`provenance: mode=max`) and never reads it back. Until Task 26
-does, a green Build carries a claim rather than evidence, and `route.ts` says so
-where the claim is assembled.
+One half is still missing from the Target surface:
+`targets.min_build_level` is read but nothing sets it, and there is no ordered
+per-Target route list — both belong to the Target model and the connect act.
+
+Core's supply-chain gate is verify → sign → record. It joins the source receipt
+and backend envelope on the bundle digest, invokes the pinned verifier against
+an immutable artifact reference, caps the achieved level by the route's
+code-defined maximum, and calls the KMS-backed signer only after the Target's
+current threshold passes. A failed assessment leaves no admitted artifact or
+signature. Every later deploy and rollback checks the recorded level against
+the Target's policy again, so a policy raise marks a serving release as drift
+without stopping it and governs every new placement. The builder's unsigned
+materials and SPDX references stay separate; posture calls the SBOM not
+assessed and surfaces a stale base without changing it.
+
+The hosted route normalizes a base digest from its BuildKit materials. The
+cloud and in-cluster routes retain the attached materials reference but report
+base freshness as unknown until their registry-attestation read path is wired.
+
+The route adapters still return runner-account placeholders where a
+verifier-compatible backend envelope belongs. The gate rejects those
+fail-closed; a production build cannot become green until its backend returns
+the native signed envelope the pinned verifier accepts.
 
 The hosted route runs in the *connected* repository, on its own Actions minutes
 (§15), through the thin caller the configuration PR wrote there. An uploaded

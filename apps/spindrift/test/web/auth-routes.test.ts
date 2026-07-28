@@ -71,6 +71,9 @@ function serve() {
               throw new Error('no store in this test');
             },
             repository: () => null,
+            supplyChain: () => {
+              throw new Error('auth route reached the supply chain');
+            },
           },
           manifest: manifest,
         }) satisfies CommandContext,

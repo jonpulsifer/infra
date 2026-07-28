@@ -65,6 +65,9 @@ function fakes() {
       throw new Error('no store adapter is configured for this test');
     },
     repository: () => null,
+    supplyChain: () => {
+      throw new Error('Target loop reached the supply chain');
+    },
   };
   return {
     registry,

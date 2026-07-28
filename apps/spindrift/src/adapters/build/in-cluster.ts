@@ -79,6 +79,7 @@ export class InClusterBuildRoute implements BuildAdapter {
   readonly name: string;
   readonly logFidelity: LogFidelity = 'LIVE_TEXT';
   readonly buildLevel: BuildLevel = 1;
+  readonly provenanceBuilderId = 'https://spindrift.dev/builders/in-cluster';
 
   constructor(private readonly options: InClusterRouteOptions) {
     this.name = options.name;

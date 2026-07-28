@@ -29,6 +29,7 @@ import type {
 } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
 import type { RepositoryHost } from '../domain/repository.ts';
+import type { SupplyChain } from '../supply-chain/sign.ts';
 
 /**
  * Who is acting.
@@ -100,6 +101,13 @@ export interface AdapterRegistry {
    * beside the context, which is the shape the context exists to prevent.
    */
   repository(): RepositoryHost | null;
+  /**
+   * Core's verifier and signer (§16).
+   *
+   * Kept behind the same far-side registry as builders and stores: both tools
+   * cross a process or KMS boundary and must be replaceable at the command seam.
+   */
+  supplyChain(): SupplyChain;
 }
 
 /**

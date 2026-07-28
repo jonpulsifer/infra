@@ -69,6 +69,10 @@ export const buildReportSchema = z
      * missing is one Task 26 refuses to sign, which is the point.
      */
     statement: z.unknown().optional(),
+    /** Registry reference to BuildKit's unsigned materials attestation. */
+    buildkitProvenanceRef: z.string().trim().min(1).optional(),
+    /** Registry reference to the SPDX SBOM attached beside it. */
+    sbomRef: z.string().trim().min(1).optional(),
   })
   .strict();
 

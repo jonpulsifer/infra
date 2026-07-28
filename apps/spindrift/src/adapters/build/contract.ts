@@ -208,6 +208,10 @@ export type BuildResult =
        * at build time, and a repo's Dockerfile stays sovereign (§16).
        */
       baseDigest: string | null;
+      /** Raw BuildKit materials evidence, attached to the artifact. */
+      buildkitProvenanceRef: string | null;
+      /** SPDX evidence, deliberately not assessed in v1. */
+      sbomRef: string | null;
     }
   | {
       status: 'FAILED';
@@ -215,6 +219,8 @@ export type BuildResult =
       logs: BuildLogs;
       provenance: null;
       baseDigest: null;
+      buildkitProvenanceRef: null;
+      sbomRef: null;
       reason: FailureReason;
       detail?: string;
       debug?: unknown;
@@ -242,6 +248,11 @@ export interface BuildAdapter {
    * (§16).
    */
   readonly buildLevel: BuildLevel;
+  /**
+   * The trusted builder identity this code-defined profile expects provenance
+   * verification to authenticate. Evidence never gets to choose its verifier.
+   */
+  readonly provenanceBuilderId: string;
 
   build(
     source: BuildSource,
