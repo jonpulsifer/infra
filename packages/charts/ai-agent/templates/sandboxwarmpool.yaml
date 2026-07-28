@@ -1,0 +1,13 @@
+{{- if not .Values.hermes.enabled -}}
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxWarmPool
+metadata:
+  name: shadow-pool-{{ include "ai-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ai-agent.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  sandboxTemplateRef:
+    name: {{ include "ai-agent.fullname" . }}
+{{- end }}
