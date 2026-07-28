@@ -24,6 +24,10 @@ spec:
         name: infra
         namespace: flux-system
   values:
+    # This line is the deploy trigger: the `containers` workflow rewrites the
+    # digest and opens an automerging PR as soon as a build of `apps/spindrift`
+    # lands on main, so Spindrift ships on merge instead of on Renovate's
+    # cadence. Renovate still bumps it if that path ever fails.
     image: ghcr.io/jonpulsifer/spindrift:latest@sha256:da984976318a8cd119e6240b111f98996472ec699218f449725200178bd6bc84
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record

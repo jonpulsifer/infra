@@ -106,3 +106,104 @@ jobs:
           secret-files: ${{ matrix.image == 'slingshot' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
           sbom: true
           provenance: true
+
+  # Spindrift ships continuously. Its HelmRelease pins a digest, so an image
+  # that nothing rewrites into git never reaches the cluster — Renovate does
+  # rewrite it, but on its own cadence. This opens the same bump PR the moment
+  # the image exists and leaves Renovate as the backstop.
+  #
+  # The PR is authored by GITHUB_TOKEN, so no workflow runs on it — GitHub does
+  # not recurse. Nothing on `main` requires one for a clusters-only change, and
+  # `kustomize.yml` renders `clusters/offsite/apps/**` on push, so the render is
+  # still exercised, one commit later than a human PR would exercise it.
+  deploy-spindrift:
+    needs: [detect, build]
+    if: >-
+      github.event_name == 'push' &&
+      contains(needs.detect.outputs.matrix, '"image":"spindrift"')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/spindrift
+      RELEASE: clusters/offsite/apps/spindrift/helm-release.yaml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Branch from the tip rather than this run's commit: `main` may have
+          # moved while the image built, and the PR should carry the digest line
+          # and nothing else.
+          ref: main
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve the digest this build pushed
+        id: digest
+        run: |
+          set -euo pipefail
+          # The build tagged the image with the full commit sha (metadata-action
+          # format=long) and every tag on that push shares one manifest, so this
+          # resolves to the same digest Renovate would pin for :latest.
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${GITHUB_SHA}" --format '{{ .Manifest.Digest }}')
+          case "$digest" in
+            sha256:*) ;;
+            *)
+              echo "::error::unexpected digest for ${IMAGE}:${GITHUB_SHA}: ${digest}"
+              exit 1
+              ;;
+          esac
+          echo "digest=${digest}" >>"$GITHUB_OUTPUT"
+      - name: Pin the digest in the HelmRelease
+        id: bump
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          before=$(grep -E "^[[:space:]]*image: ${IMAGE}:" "$RELEASE") || {
+            echo "::error::no image line for ${IMAGE} in ${RELEASE}"
+            exit 1
+          }
+          sed -i -E "s|^([[:space:]]*image: )${IMAGE}:.*|\1${IMAGE}:latest@${DIGEST}|" "$RELEASE"
+          if git diff --quiet -- "$RELEASE"; then
+            echo "::notice::${RELEASE} already pins ${DIGEST}"
+            echo "changed=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          old=unpinned
+          [[ "$before" =~ @sha256:([0-9a-f]{7}) ]] && old="${BASH_REMATCH[1]}"
+          echo "changed=true" >>"$GITHUB_OUTPUT"
+          echo "old=${old}" >>"$GITHUB_OUTPUT"
+      - name: Open the deploy PR and queue it for merge
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          OLD: ${{ steps.bump.outputs.old }}
+        run: |
+          set -euo pipefail
+          new=${DIGEST#sha256:}
+          new=${new:0:7}
+          branch="deploy/spindrift-${new}"
+          # Renovate's own subject line for this file, so the two paths read the
+          # same in the log.
+          title="chore(container): update image ${IMAGE} ( ${OLD} → ${new} )"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git commit -am "$title"
+          git push --force origin "$branch"
+          gh pr view "$branch" --json number >/dev/null 2>&1 || gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "$title" \
+            --body "Built from ${GITHUB_SHA} by the \`containers\` workflow. Flux rolls this out once it merges and the \`infra\` GitRepository next syncs."
+          # Atlantis posts the three required contexts on any PR, so auto-merge
+          # normally waits a moment for them. If they already landed the PR is
+          # mergeable and enabling auto-merge is rejected — merge it directly.
+          gh pr merge --auto --squash --delete-branch "$branch" ||
+            gh pr merge --squash --delete-branch "$branch"
