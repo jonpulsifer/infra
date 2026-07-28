@@ -1,0 +1,7 @@
+# Trivy global configuration.
+# Loaded in CI via the trivy-config input (see .github/workflows/trivy.yml).
+scan:
+  skip-dirs:
+    - "**/tests"
+    - "**/test"
+    - "**/fixtures"
