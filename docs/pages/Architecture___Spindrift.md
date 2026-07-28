@@ -14,6 +14,10 @@ tags:: architecture
 	- `bluenose` is the home project and default shared GCP vessel. The organization root adopts its project boundary; `terraform/gcp/projects/bluenose/` owns the vessel's platform prerequisites. Atlantis applies both roots.
 	- Build artifacts and signing stay in `trusted-builds`. Spindrift can invoke builds and sign the one artifact digest; vessel runtimes receive pull-only access. Cloud Run is restricted to the vessel's enforcing Binary Authorization policy.
 	- Kyverno is installed on both clusters from `clusters/base/platform/kyverno/`. The Spindrift image policy in `clusters/base/platform/spindrift-policy/` rejects an unsigned digest at admission and keeps background reporting enabled, using the public half of the `trusted-builds` signer.
+- ## Config delivery
+	- Spindrift writes config values into the installation's secret store and keeps only pinned references. The App chart renders an `ExternalSecret` per configured Component, and `clusters/base/platform/onepassword-connect/` is the store the offsite Target fetches through.
+	- A Target's `ClusterSecretStore` is operator-stated in that Target's chart-values. The chart refuses to render config without it rather than producing an ExternalSecret that never syncs.
+	- Config that cannot follow a Component to another Target is named and demanded before the move commits, because Spindrift reads no value back and so cannot copy one.
 - ## Exposure
 	- The App chart at `packages/charts/spindrift-app/` renders no route for Internal, an HTTPRoute with the shared oauth2-proxy ExternalAuth filter for Private, and a filter-free route for Public. The cross-namespace grant belongs to the shared proxy platform resources.
 	- The dedicated Cloudflare tunnel is the only published origin for generated App hostnames. Its wildcard Access application is the Target's default Private audience and admits the operator identity.

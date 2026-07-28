@@ -223,9 +223,11 @@ export function desiredStateFor(
     // retroactively change what a running attempt is placing.
     exposure: deploy.exposure ?? component.exposure,
     ...(component.schedule === null ? {} : { schedule: component.schedule }),
-    // §10's config arrives with Milestone 6. Empty is honest: no config item has
-    // been written yet, so there is no pinned reference to deliver.
-    config: [],
+    // §10: the document this Deploy recorded when its intent was written, not
+    // whatever config says now. An attempt that re-read the items would deliver
+    // a configuration nobody asked for, and a rollback would come back up with
+    // the config of the release it was rolling away from.
+    config: deploy.configDocument ?? [],
     requirements: { platform: DEFAULT_PLATFORM, resources: {} },
     hostname: hostnameFor({
       app: app.name,

@@ -36,6 +36,9 @@ import {
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
+import { placeComponent, placeComponentInput } from './components/place.ts';
+import { replaceConfig, replaceConfigInput } from './config/replace.ts';
+import { setConfig, setConfigInput } from './config/set.ts';
 import { createApp, createAppInput } from './create-app.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
@@ -71,6 +74,9 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 export const commandRegistry = {
   createApp: { input: createAppInput, handler: createApp },
   createComponent: { input: createComponentInput, handler: createComponent },
+  placeComponent: { input: placeComponentInput, handler: placeComponent },
+  setConfig: { input: setConfigInput, handler: setConfig },
+  replaceConfig: { input: replaceConfigInput, handler: replaceConfig },
   uploadArchive: { input: uploadArchiveInput, handler: uploadArchive },
   dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },
   createDeploy: { input: createDeployInput, handler: createDeploy },

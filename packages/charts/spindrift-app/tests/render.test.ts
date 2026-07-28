@@ -175,7 +175,7 @@ describe('the value contract', () => {
   test('the chart declares its version where pin time reads it', async () => {
     const chart = await chartMetadata();
     expect(chart.name).toBe('spindrift-app');
-    expect(chart.annotations?.['spindrift.dev/values-contract']).toBe('1');
+    expect(chart.annotations?.['spindrift.dev/values-contract']).toBe('2');
   });
 
   test('every rendered object carries the version it was rendered under', async () => {
@@ -336,19 +336,29 @@ describe('the route', () => {
 });
 
 describe('config delivery', () => {
+  /** Two variables, as Spindrift renders them from a pinned document (§10). */
+  const CONFIGURED = {
+    app: {
+      secretEnv: [
+        {
+          name: 'TOKEN',
+          secretName: 'blog-web',
+          remote: { key: 'blog--web--metal--TOKEN', version: '7' },
+        },
+        {
+          name: 'DSN',
+          secretName: 'blog-web',
+          remote: { key: 'blog--web--metal--DSN', version: '2' },
+        },
+      ],
+    },
+    platform: { secretStore: { kind: 'ClusterSecretStore', name: 'vault' } },
+  };
+
   test('one secret per variable, never a blob', async () => {
     // §10: per-key, not per-blob. An `envFrom` here would be the blob.
-    const container = one(
-      await render({
-        app: {
-          secretEnv: [
-            { name: 'TOKEN', secretName: 'blog-web-token', key: 'value' },
-            { name: 'DSN', secretName: 'blog-web-dsn', key: 'value' },
-          ],
-        },
-      }),
-      'Deployment',
-    ).spec.template.spec.containers[0];
+    const container = one(await render(CONFIGURED), 'Deployment').spec.template
+      .spec.containers[0];
 
     expect(container.envFrom).toBeUndefined();
     const names = container.env.map((entry: { name: string }) => entry.name);
@@ -357,10 +367,47 @@ describe('config delivery', () => {
     const token = container.env.find(
       (entry: { name: string }) => entry.name === 'TOKEN',
     );
+    // The variable's own name is the Secret key: a store's name for an item is
+    // not a legal Secret key everywhere, so it is never used as one.
     expect(token.valueFrom.secretKeyRef).toEqual({
-      name: 'blog-web-token',
-      key: 'value',
+      name: 'blog-web',
+      key: 'TOKEN',
     });
+  });
+
+  test('the pinned references are fetched, and no value is rendered', async () => {
+    const external = one(await render(CONFIGURED), 'ExternalSecret');
+    expect(external.spec.secretStoreRef).toEqual({
+      kind: 'ClusterSecretStore',
+      name: 'vault',
+    });
+    expect(external.spec.target.name).toBe('blog-web');
+    expect(external.spec.data).toEqual([
+      {
+        secretKey: 'TOKEN',
+        remoteRef: { key: 'blog--web--metal--TOKEN', version: '7' },
+      },
+      {
+        secretKey: 'DSN',
+        remoteRef: { key: 'blog--web--metal--DSN', version: '2' },
+      },
+    ]);
+    // Pinned means there is nothing to poll for: a change arrives as a new
+    // Deploy that re-renders this object (§10).
+    expect(external.spec.refreshInterval).toBe('0');
+  });
+
+  test('an unconfigured Component renders no ExternalSecret', async () => {
+    const kinds = (await render()).map((object) => object.kind);
+    expect(kinds).not.toContain('ExternalSecret');
+  });
+
+  test('config with no store named on the Target refuses to render', async () => {
+    // The alternative is an ExternalSecret that never syncs and a workload
+    // waiting forever for a Secret nobody is creating.
+    await expect(render({ app: CONFIGURED.app })).rejects.toThrow(
+      /platform.secretStore.name/,
+    );
   });
 
   test('no Component-declared volumes beyond the writable /tmp', async () => {

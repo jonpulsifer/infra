@@ -50,6 +50,13 @@
       "when": 1785208095073,
       "tag": "0006_repositories",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785210438248,
+      "tag": "0007_config",
+      "breakpoints": true
     }
   ]
 }

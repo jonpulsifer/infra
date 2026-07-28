@@ -61,8 +61,11 @@ app:
   # Plain environment. §10 keeps no secret/non-secret classification; a value
   # that is a secret arrives through `secretEnv` as a reference, never here.
   env: []
-  # [{ name, secretName, key }] — one secret per variable, not a blob (§10).
-  # Delivered by the platform's own secret machinery; the chart only names it.
+  # [{ name, secretName, remote: { key, version } }] — one secret per variable,
+  # not a blob (§10). `name` is both the variable and the key inside the
+  # materialized Secret; `remote` is the **pinned** reference in the store of
+  # record, never a floating latest. The chart renders one ExternalSecret from
+  # these and the platform's own secret operator materializes it.
   secretEnv: []
 
   # Entrypoint overrides. Empty means the image's own.
@@ -88,6 +91,14 @@ platform:
     name: ""
     namespace: ""
     port: 80
+
+  # The ClusterSecretStore config is fetched through. A Target property: §10
+  # gives a Kubernetes Target an admin-chosen store, and the operator is the
+  # one who knows what theirs is called. Rendering config without it is refused
+  # rather than guessed — see templates/externalsecret.yaml.
+  secretStore:
+    kind: ClusterSecretStore
+    name: ""
 
   networkPolicy:
     # Ingress is default-deny with a fixed exception list whose **names are

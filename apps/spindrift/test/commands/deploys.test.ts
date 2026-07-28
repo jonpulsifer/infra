@@ -40,6 +40,7 @@ import {
   deploys,
   targets,
 } from '../../src/db/schema.ts';
+import { configVersionOf } from '../../src/domain/config-version.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
@@ -366,6 +367,9 @@ describe('concurrency: the locking read (§6)', () => {
       componentId: component.id,
       targetId: target.id,
       exposure: 'private' as const,
+      // Nothing is configured here, and the empty document still has a version
+      // (§10) — "no config" is a state a Deploy is pinned to like any other.
+      config: { document: [], version: await configVersionOf([]) },
     };
 
     let announceRead = (): void => {};

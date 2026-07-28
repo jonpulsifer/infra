@@ -32,6 +32,8 @@ import type { DeployAdapter } from './deploy/contract.ts';
 import type { TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
 import type { SecretStore } from './store/contract.ts';
+import { SecretManagerStore } from './store/gcp-secret-manager.ts';
+import { OnePasswordStore } from './store/onepassword.ts';
 
 /**
  * Where Kubernetes projects a pod's service account token.
@@ -86,6 +88,8 @@ export interface RegistryOptions {
   readonly fetch?: Fetcher;
   /** Defaults to the process environment; a test passes its own. */
   readonly env?: Record<string, string | undefined>;
+  /** Likewise for the store's own access path, which authorizes separately. */
+  readonly storeToken?: () => string | Promise<string>;
 }
 
 /**
@@ -115,6 +119,10 @@ export function createAdapterRegistry(
         ...(options.fetch ? { fetch: options.fetch } : {}),
       })
     : null;
+  const store = createSecretStore(
+    options.manifest,
+    options.storeToken ?? storeToken(options.env ?? Bun.env),
+  );
 
   const deployAdapters: Partial<Record<TargetAdapter, DeployAdapter>> = {
     kubernetes,
@@ -143,21 +151,19 @@ export function createAdapterRegistry(
     },
 
     /**
-     * §10's one store of record.
+     * §10's store of record, built from the access path the manifest names.
      *
-     * The manifest selects *which adapter*, and both are implemented — but
-     * neither can be constructed without an endpoint, a token, and a
-     * vault-or-project, none of which the manifest carries. Nothing calls this
-     * yet: config delivery is Milestone 6, and the commands that will call it
-     * are the same change that has to add those values. Throwing with that
-     * sentence beats returning a store pointed at nowhere, which would fail
-     * later and less clearly.
+     * One today: the manifest configures a single store, so every other adapter
+     * answers `null` — and a Target that reaches only those is a Target this
+     * installation cannot deliver config to, which is a configuration fact a
+     * command reports rather than an exception it should propagate.
+     *
+     * Built once, like the deploy adapters and for the same reason: it holds no
+     * per-request state, and its credential is a provider called per request
+     * rather than a value captured here.
      */
-    store(): SecretStore {
-      throw new AdapterUnavailableError(
-        `this installation selected the ${options.manifest.secretStore.adapter satisfies StoreAdapter} store, ` +
-          'but no endpoint is configured for it — config delivery is not built yet',
-      );
+    store(adapter: StoreAdapter): SecretStore | null {
+      return adapter === options.manifest.secretStore.adapter ? store : null;
     },
 
     /**
@@ -172,4 +178,53 @@ export function createAdapterRegistry(
       return repositoryHost;
     },
   };
+}
+
+/**
+ * The bearer token core writes to the store with.
+ *
+ * Read per call, never captured: the installation Secret is the only place it
+ * lives, and a value read once at boot is a value that stops working the moment
+ * the Secret is rotated. The name is the software's, identical in every
+ * installation — it names no installation, so it is not a §20 literal.
+ *
+ * §13's "native OIDC federation, nothing stored" is where this ends up for the
+ * cloud store: the pod already projects a token with a cloud audience, and
+ * exchanging it belongs with the cloud Targets that need it. Until then the
+ * access path is a token the installation Secret carries, which is the same
+ * posture the 1Password Connect path has permanently.
+ */
+export const STORE_TOKEN_VARIABLE = 'SPINDRIFT_STORE_TOKEN';
+
+export function storeToken(env: Record<string, string | undefined> = Bun.env) {
+  return (): string => {
+    const token = env[STORE_TOKEN_VARIABLE]?.trim();
+    if (!token) {
+      throw new AdapterUnavailableError(
+        `${STORE_TOKEN_VARIABLE} is not set: this installation cannot write to its secret store`,
+      );
+    }
+    return token;
+  };
+}
+
+/** The store this installation's manifest selects, over the path it names. */
+export function createSecretStore(
+  manifest: InstallationManifest,
+  token: () => string | Promise<string> = storeToken(),
+): SecretStore {
+  const endpoint = { baseUrl: manifest.secretStore.endpoint, token };
+  const adapter = manifest.secretStore.adapter satisfies StoreAdapter;
+  switch (adapter) {
+    case 'onepassword':
+      return new OnePasswordStore({
+        ...endpoint,
+        vault: manifest.secretStore.container,
+      });
+    case 'gcp-secret-manager':
+      return new SecretManagerStore({
+        ...endpoint,
+        project: manifest.secretStore.container,
+      });
+  }
 }

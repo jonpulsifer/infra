@@ -222,6 +222,24 @@ export const installationManifestSchema = z
       .object({
         /** Which store adapter this installation delivers config through. */
         adapter: storeAdapterSchema,
+        /**
+         * The access path core writes over — §10's "store of record plus one or
+         * more access paths", named as the one this process reaches.
+         *
+         * Core's path, not a Target's: the platform's own secret operator
+         * fetches from the same store of record over its own path, and neither
+         * needs to know the other's.
+         */
+        endpoint: z.string().url(),
+        /**
+         * What holds the items inside that store: the vessel project for Secret
+         * Manager, the vault for 1Password.
+         *
+         * One key rather than one per adapter, because the two are the same
+         * thing under different names, and a per-adapter block would let an
+         * installation configure a store it does not use.
+         */
+        container: nonEmptyString,
       })
       .strict(),
 

@@ -199,6 +199,54 @@ cadence, since drift is information rather than an alarm. `LISTEN/NOTIFY` can
 shorten a sleep and can never be required to: a notification is lost when no
 listener is connected, so every test here runs with no wake-up wired.
 
+## Config
+
+**Values are write-only, and the database is where that is proved.** A value
+crosses one seam — `SecretStore.put` — and what comes back is a pinned
+reference; nothing above the store contract has a verb that returns a value,
+because the contract has none. `test/commands/config.test.ts` searches every
+column of every table for the plaintext after a set, so a future shortcut that
+kept one has somewhere to fail.
+
+A Deploy records the **document** it delivers, not just its hash. That is what
+makes a rollback come back up with the configuration the release originally had:
+re-reading current config at apply time would give a rollback the configuration
+of the release it is rolling away from. `configVersion` is the hash over that
+document, canonicalized by variable name so two reads in different row order are
+one version.
+
+**A config change produces a new Deploy** of whatever is already desired at that
+pair — a changed reference nothing re-applies is a workload still running the
+old value. Where nothing is deployed there yet, the act says so instead of
+inventing a Deploy with no Build.
+
+**Uploads are replace-with-diff, and the diff is over keys.** Core cannot read a
+value back, so it cannot tell a changed value from an identical one: the review
+names what is added, what is removed, and what will be rewritten, and every key
+in the upload is rewritten because "unchanged" is a claim only something that had
+read the old value could make.
+
+**Core never retrieves, therefore core cannot migrate.** Two Targets in front of
+the same store of record make a re-placement free — the pinned *reference* is
+carried and no value moves. Two Targets in front of different ones cannot:
+`placeComponent` names the keys that will not follow and demands them before the
+move commits, and `createDeploy` refuses the same move for the same reason, so
+skipping Place is not a way around it.
+
+Retention is core's, at ten versions — the same depth as artifacts, because a
+shallower one makes a rollback come up green and unconfigured.
+`src/reconciler/config-loop.ts` reaps on a loop; the write path reaps the key it
+just touched as a fast path.
+
+Delivery on a Kubernetes Target is the App chart's `ExternalSecret`, which
+fetches each pinned reference into one Secret keyed by variable name. Two things
+an installation has to supply for that to work: the operator names the
+`ClusterSecretStore` in the Target's chart-values (`platform.secretStore.name`,
+without which the chart refuses to render rather than producing an
+ExternalSecret that never syncs), and the process needs `SPINDRIFT_STORE_TOKEN`
+in its environment — the access path core writes over. A config act refuses with
+that sentence when it is missing.
+
 ## Naming and DNS
 
 Two layers (§9), with different rules for a reason. **Canonical names nest**
