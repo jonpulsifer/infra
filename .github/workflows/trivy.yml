@@ -53,10 +53,11 @@ jobs:
       - name: Run Trivy vulnerability scanner in IaC mode
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
-          TRIVY_IGNOREFILE: ${{ github.workspace }}/.trivyignore.yaml
+          TRIVY_IGNOREFILE: ${{ github.workspace }}/.github/trivyignore.yaml
         with:
           scan-type: config
           scan-ref: ${{ matrix.dir }}
+          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
           hide-progress: false
           ignore-unfixed: true
           limit-severities-for-sarif: true # only include critical and high severity vulnerabilities in the SARIF file (default is false)
