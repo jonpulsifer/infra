@@ -13,11 +13,19 @@
  * tell `NATIVE` from `IMMUTABLE_ITEM_PER_VERSION` — a tested claim rather than a
  * stated one.
  */
+import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
+import { GitHubActionsBuildRoute } from '../../src/adapters/build/github-actions.ts';
+import { InClusterBuildRoute } from '../../src/adapters/build/in-cluster.ts';
+import { encodeBuildReport } from '../../src/adapters/build/report.ts';
+import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { SecretManagerStore } from '../../src/adapters/store/gcp-secret-manager.ts';
 import { OnePasswordStore } from '../../src/adapters/store/onepassword.ts';
+import { GitHubApp } from '../../src/integrations/github/app.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
+import { FakeCloudBuild } from '../harness/fakes/cloud-build-api.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
+import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
 import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 import { FakeOnePasswordConnect } from '../harness/fakes/onepassword-connect.ts';
 import { FakeSecretManager } from '../harness/fakes/secret-manager-api.ts';
@@ -28,6 +36,30 @@ import {
   deployAdapterSuite,
   storeAdapterSuite,
 } from './adapter-suite.ts';
+
+/**
+ * One key for every hosted-CI route the suite constructs.
+ *
+ * Generated once at module load rather than per construction: the suite builds
+ * a fresh adapter for each assertion, and an RSA keypair per test is seconds of
+ * wall clock spent proving nothing about the contract.
+ */
+const appKey = await testAppKey();
+
+/** What the in-cluster Job prints, ending with the one line core reads. */
+function inClusterBuildLog(): string {
+  const digest = `sha256:${'c'.repeat(64)}`;
+  return [
+    '#1 load build definition',
+    '#8 exporting to image',
+    encodeBuildReport({
+      bundleDigest: 'sha256:bundle',
+      digest,
+      refs: [`registry.example.test/app@${digest}`],
+      baseDigest: null,
+    }),
+  ].join('\n');
+}
 
 deployAdapterSuite('fake', () => new FakeDeployAdapter(), 'files');
 
@@ -80,6 +112,78 @@ deployAdapterSuite(
 );
 
 buildAdapterSuite('fake', () => new FakeBuildAdapter());
+
+// The three real routes, each with a fake of its far-side HTTP API behind the
+// real client. They run the identical assertions, which is what makes §4's
+// claim — that a Build is the same object whoever built it — a tested one.
+// Every one of them is driven with `sleep` stubbed and a one-millisecond
+// interval: the polling is real, the waiting is not.
+buildAdapterSuite('github-actions', () => {
+  const host = new FakeGitHub();
+  return new GitHubActionsBuildRoute({
+    name: 'github-actions',
+    host: new GitHubApp({
+      appId: '1',
+      privateKeyPem: appKey.pem,
+      baseUrl: host.baseUrl,
+      fetch: host.fetch,
+    }),
+    buildWorkflow: `${host.fullName}/.github/workflows/spindrift-build.yml@${'f'.repeat(40)}`,
+    zeroConfigFrontend: 'registry.example.test/zero-config:pinned',
+    correlation: () => 'conformance',
+    intervalMs: 1,
+    sleep: async () => {},
+  });
+});
+
+buildAdapterSuite('cloud-build', () => {
+  const api = new FakeCloudBuild();
+  return new CloudBuildRoute({
+    name: 'cloud-build',
+    endpoint: api.endpoint,
+    logsEndpoint: api.logsEndpoint,
+    project: 'example-builds',
+    region: 'example-region',
+    image: 'registry.example.test/buildkit:pinned',
+    zeroConfigFrontend: 'registry.example.test/zero-config:pinned',
+    token: api.token,
+    fetch: api.fetch,
+    intervalMs: 1,
+    sleep: async () => {},
+  });
+});
+
+buildAdapterSuite('in-cluster', () => {
+  const cluster = new FakeKubernetes({
+    status: () => ({ succeeded: 1 }),
+    lists: {
+      pods: [
+        {
+          apiVersion: 'v1',
+          kind: 'Pod',
+          metadata: { name: 'build-pod', namespace: 'builds' },
+        },
+      ],
+    },
+    logs: (_pod, reads) =>
+      reads < 2 ? '#1 load build definition' : inClusterBuildLog(),
+  });
+  return new InClusterBuildRoute({
+    name: 'in-cluster',
+    api: new KubernetesApi({
+      apiServer: cluster.apiServer,
+      token: cluster.token,
+      fetch: cluster.fetch,
+    }),
+    namespace: 'builds',
+    image: 'registry.example.test/buildkit:pinned',
+    serviceAccount: 'builder',
+    zeroConfigFrontend: 'registry.example.test/zero-config:pinned',
+    id: () => 'conformance',
+    intervalMs: 1,
+    sleep: async () => {},
+  });
+});
 
 // Both pinning strategies run the same suite, because §10's claim is that
 // nothing above the seam can tell them apart. One of them passing would not

@@ -167,6 +167,34 @@ export class KubernetesApi {
     await this.send('DELETE', resourcePath(ref));
   }
 
+  /**
+   * One pod's log as text, or `null` when the pod has none yet.
+   *
+   * Read rather than followed: a `follow=true` connection is a long-lived
+   * stream, and every other read in this adapter is a poll for the reason §6
+   * gives — a watch over the uplink stays open while delivering nothing. A
+   * caller that wants the tail asks again and takes what is new.
+   *
+   * A pod that has not started yet answers `400`, which is not a fault: the
+   * container is pulling, and the honest answer is that there is no log.
+   */
+  async logs(
+    namespace: string,
+    pod: string,
+    options: { readonly container?: string } = {},
+  ): Promise<string | null> {
+    const query =
+      options.container === undefined
+        ? ''
+        : `?container=${encodeURIComponent(options.container)}`;
+    const response = await this.send(
+      'GET',
+      `/api/v1/namespaces/${namespace}/pods/${pod}/log${query}`,
+      { tolerate: [400] },
+    );
+    return response === null ? null : await response.text();
+  }
+
   /** Whether the API serves a kind at all — §13's checklist, one call. */
   async servesKind(apiVersion: string, kind: string): Promise<boolean> {
     const path = apiVersion.includes('/')
@@ -198,7 +226,12 @@ export class KubernetesApi {
   private async send(
     method: string,
     path: string,
-    options: { body?: unknown; contentType?: string } = {},
+    options: {
+      body?: unknown;
+      contentType?: string;
+      /** Statuses the caller has a value for, returned instead of thrown. */
+      tolerate?: readonly number[];
+    } = {},
   ): Promise<Response | null> {
     const url = `${this.endpoint.apiServer}${path}`;
     const headers: Record<string, string> = {
@@ -222,6 +255,7 @@ export class KubernetesApi {
     // Absence is an answer every caller here has a value for, so it comes back
     // rather than being raised.
     if (response.status === 404) return null;
+    if (options.tolerate?.includes(response.status)) return null;
     if (!response.ok) {
       throw new KubernetesRequestError(
         method,

@@ -44,6 +44,15 @@ export interface RepoSource {
   readonly commit: string;
   /** §5: "the scope is named, never searched." */
   readonly subpath: string;
+  /**
+   * Where the staged bundle for that commit is fetched from.
+   *
+   * A repo source carries an address for the same reason an archive does: §15
+   * fetches the commit **once** and stages one immutable bundle "for either
+   * builder", so what a route pulls is the bundle and never the repository. The
+   * url and commit above name what was fetched; this names what exists now.
+   */
+  readonly location: string;
 }
 
 /** An App sourced from an upload (§4). */
@@ -103,6 +112,7 @@ export function buildOriginOf(source: Source): BuildOrigin {
         repository: source.url,
         commit: source.commit,
         subpath: source.subpath,
+        location: source.location,
       }
     : {
         type: 'archive',

@@ -22,14 +22,22 @@
  */
 
 import type { AdapterRegistry } from '../commands/types.ts';
-import type { StoreAdapter, TargetAdapter } from '../config/manifest.schema.ts';
+import type {
+  BuildRouteConfig,
+  StoreAdapter,
+  TargetAdapter,
+} from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
+import type { BuildRouteProfile } from '../domain/build-route.ts';
 import type { RepositoryHost } from '../domain/repository.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
+import { CloudBuildRoute } from './build/cloud-build.ts';
 import type { BuildAdapter } from './build/contract.ts';
+import { GitHubActionsBuildRoute } from './build/github-actions.ts';
+import { InClusterBuildRoute } from './build/in-cluster.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
-import type { TokenProvider } from './deploy/kubernetes/api.ts';
+import { KubernetesApi, type TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
 import type { SecretStore } from './store/contract.ts';
 import { SecretManagerStore } from './store/gcp-secret-manager.ts';
@@ -90,6 +98,8 @@ export interface RegistryOptions {
   readonly env?: Record<string, string | undefined>;
   /** Likewise for the store's own access path, which authorizes separately. */
   readonly storeToken?: () => string | Promise<string>;
+  /** And for the cloud builder's, which authorizes separately again. */
+  readonly buildToken?: () => string | Promise<string>;
 }
 
 /**
@@ -111,7 +121,11 @@ export function createAdapterRegistry(
   // once: it caches the imported signing key and one installation token per
   // installation, and a per-request instance would mint a JWT per call.
   const appKey = (options.env ?? Bun.env)[GITHUB_APP_KEY_VAR]?.trim();
-  const repositoryHost: RepositoryHost | null = appKey
+  // Held as its concrete type, not as `RepositoryHost`, because the hosted
+  // build route needs the Actions calls the repository interfaces do not
+  // declare — and one object serves both so a build and a configuration PR
+  // share the App's token cache rather than each minting their own.
+  const app = appKey
     ? new GitHubApp({
         appId: options.manifest.github.appId,
         privateKeyPem: appKey,
@@ -119,10 +133,19 @@ export function createAdapterRegistry(
         ...(options.fetch ? { fetch: options.fetch } : {}),
       })
     : null;
+  const repositoryHost: RepositoryHost | null = app;
   const store = createSecretStore(
     options.manifest,
     options.storeToken ?? storeToken(options.env ?? Bun.env),
   );
+
+  // §16's ordered list: the manifest's order *is* the admin rank, so the map is
+  // built from it in order and `buildRouteProfiles` reads it back the same way.
+  const buildRoutes = new Map<string, BuildAdapter>();
+  for (const route of options.manifest.build.routes) {
+    const built = createBuildRoute(route, options, app);
+    if (built !== null) buildRoutes.set(route.name, built);
+  }
 
   const deployAdapters: Partial<Record<TargetAdapter, DeployAdapter>> = {
     kubernetes,
@@ -138,16 +161,17 @@ export function createAdapterRegistry(
     },
 
     /**
-     * No build route exists yet (Milestone 4).
+     * The build route the installation configured under that name (§4).
      *
      * §4 makes the set of routes an installation's configuration rather than a
-     * closed vocabulary, so "this installation has no build route named X" is
-     * already the sentence `dispatchBuild` prints for every name — including,
-     * for now, all of them. An archive of finished output still deploys,
-     * because a supplied artifact consults no route at all.
+     * closed vocabulary, so an unknown name is answered with `null` and
+     * `dispatchBuild` prints "this installation has no build route named X".
+     * The same `null` covers a route this installation configured but cannot
+     * construct — a hosted-CI route with no App key — because the two are one
+     * fact to whoever is trying to build: the route is not available here.
      */
-    build(_route: string): BuildAdapter | null {
-      return null;
+    build(route: string): BuildAdapter | null {
+      return buildRoutes.get(route) ?? null;
     },
 
     /**
@@ -177,6 +201,121 @@ export function createAdapterRegistry(
     repository(): RepositoryHost | null {
       return repositoryHost;
     },
+  };
+}
+
+/**
+ * The build routes this installation has, in rank order, as selection sees them.
+ *
+ * Derived from the manifest rather than from the registry map, so a route the
+ * installation configured but cannot construct still appears — placement should
+ * be able to say "the hosted route is configured and this process has no App
+ * key" rather than silently pretending the route was never named.
+ */
+export function buildRouteProfiles(
+  manifest: InstallationManifest,
+): BuildRouteProfile[] {
+  return manifest.build.routes.map((route) => ({
+    name: route.name,
+    level: BUILD_ROUTE_LEVELS[route.adapter],
+  }));
+}
+
+/**
+ * Each route kind's profile level (§16).
+ *
+ * A table rather than a construction, because a level has to be readable
+ * *without* building the route: placement asks whether a Target could ever use
+ * a route, and building one to find out would mean an installation missing a
+ * credential also lost the ability to explain why.
+ *
+ * Kept in step with the classes themselves by `test/adapters/build-routes.test.ts`,
+ * which constructs each one and compares.
+ */
+const BUILD_ROUTE_LEVELS = {
+  'github-actions': 2,
+  'cloud-build': 3,
+  'in-cluster': 1,
+} as const satisfies Record<BuildRouteConfig['adapter'], 1 | 2 | 3>;
+
+/**
+ * One configured route, or `null` where this process cannot construct it.
+ *
+ * The hosted route is the only one that can come back `null`: it runs through
+ * the repository host, and an installation with no App key has no repository
+ * integration at all (§15). The other two authorize with tokens read at the
+ * moment of use, so they construct even where those tokens are absent — and
+ * fail loudly on the first build rather than silently at boot.
+ */
+function createBuildRoute(
+  route: BuildRouteConfig,
+  options: RegistryOptions,
+  app: GitHubApp | null,
+): BuildAdapter | null {
+  const { manifest } = options;
+  const zeroConfigFrontend = manifest.build.zeroConfigFrontend;
+
+  switch (route.adapter) {
+    case 'github-actions': {
+      const workflow = manifest.github.buildWorkflow;
+      // Both halves are §15's: no App key means no repository integration, and
+      // no pinned workflow means there is nothing to dispatch. Either way this
+      // installation has not finished wiring hosted CI.
+      if (app === null || workflow === null) return null;
+      return new GitHubActionsBuildRoute({
+        name: route.name,
+        host: app,
+        buildWorkflow: workflow,
+        zeroConfigFrontend,
+      });
+    }
+    case 'cloud-build':
+      return new CloudBuildRoute({
+        name: route.name,
+        endpoint: route.endpoint,
+        logsEndpoint: route.logsEndpoint,
+        project: route.project,
+        region: route.region,
+        image: route.image,
+        zeroConfigFrontend,
+        token: options.buildToken ?? buildToken(options.env ?? Bun.env),
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
+    case 'in-cluster':
+      return new InClusterBuildRoute({
+        name: route.name,
+        api: new KubernetesApi({
+          apiServer: route.endpoint,
+          token: options.token ?? projectedServiceAccountToken(),
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+        }),
+        namespace: route.namespace,
+        image: route.image,
+        serviceAccount: route.serviceAccount,
+        zeroConfigFrontend,
+      });
+  }
+}
+
+/**
+ * The bearer token the cloud build route submits with.
+ *
+ * A second variable rather than the store's, because they are two access paths
+ * to two different services and one value good for both would be a value
+ * broader than either needs. Read per call for the same reason the store's is:
+ * a value captured at boot stops working the moment the Secret is rotated.
+ */
+export const BUILD_TOKEN_VARIABLE = 'SPINDRIFT_BUILD_TOKEN';
+
+export function buildToken(env: Record<string, string | undefined> = Bun.env) {
+  return (): string => {
+    const token = env[BUILD_TOKEN_VARIABLE]?.trim();
+    if (!token) {
+      throw new AdapterUnavailableError(
+        `${BUILD_TOKEN_VARIABLE} is not set: this installation cannot submit a cloud build`,
+      );
+    }
+    return token;
   };
 }
 

@@ -18,6 +18,7 @@
  * new endpoint fails here rather than silently passing against a permissive
  * stand-in.
  */
+import { encodeBuildReport } from '../../../src/adapters/build/report.ts';
 import type { Fetcher } from '../../../src/integrations/github/http.ts';
 
 const BASE = 'https://api.git.invalid';
@@ -48,12 +49,49 @@ interface StoredCommit {
   parents: string[];
 }
 
+/** One dispatch the client asked for. */
+export interface RecordedDispatch {
+  workflow: string;
+  branch: string;
+  inputs: Record<string, string>;
+}
+
+/**
+ * How this host's Actions behave.
+ *
+ * The two delays are what make the fake worth having: a dispatch that named its
+ * run immediately, or a run that was finished the moment it was found, would let
+ * a route that never polled pass — and polling is most of what the route does.
+ */
+export interface FakeActionsOptions {
+  /** List calls before a dispatched run becomes visible. `0` is immediate. */
+  discoveryDelay?: number;
+  /** Status reads before the run completes. */
+  duration?: number;
+  /** How it ends. Anything but `success` is a failed build. */
+  conclusion?: string;
+  /**
+   * The job log, given the spec that was dispatched. The default composes a
+   * valid report, because a green run that reports nothing is its own test
+   * rather than the state every other test wants to start from.
+   */
+  log?: (spec: Record<string, unknown>) => string;
+}
+
+interface FakeRun {
+  id: number;
+  name: string;
+  reads: number;
+  log: string;
+}
+
 export interface FakeGitHubOptions {
   /** `owner/name` of the one repository this host serves. */
   fullName?: string;
   defaultBranch?: string;
   /** The installation the App must present a token for. */
   installationId?: string;
+  actions?: FakeActionsOptions;
   /**
    * The clock token expiry is measured from.
    *
@@ -83,6 +121,8 @@ export class FakeGitHub {
   readonly pulls: RecordedPullRequest[] = [];
   /** Every commit whose archive was downloaded — "fetch once" is checkable. */
   readonly tarballs: string[] = [];
+  /** Every workflow dispatch, in order — the assertion surface for a build. */
+  readonly dispatches: RecordedDispatch[] = [];
 
   defaultBranch: string;
 
@@ -102,6 +142,10 @@ export class FakeGitHub {
   private counter = 0;
   private pullNumber = 0;
   private tokenCounter = 0;
+  private runNumber = 0;
+  private listCalls = 0;
+  private readonly runs: FakeRun[] = [];
+  private readonly actions: Required<FakeActionsOptions>;
   private readonly now: () => Date;
 
   constructor(options: FakeGitHubOptions = {}) {
@@ -109,6 +153,12 @@ export class FakeGitHub {
     this.defaultBranch = options.defaultBranch ?? 'main';
     this.installationId = options.installationId ?? '4242';
     this.now = options.now ?? (() => new Date());
+    this.actions = {
+      discoveryDelay: options.actions?.discoveryDelay ?? 1,
+      duration: options.actions?.duration ?? 1,
+      conclusion: options.actions?.conclusion ?? 'success',
+      log: options.actions?.log ?? defaultBuildLog,
+    };
   }
 
   get baseUrl(): string {
@@ -227,11 +277,109 @@ export class FakeGitHub {
 
     const body = raw === null || raw === '' ? {} : JSON.parse(raw);
     return (
+      this.actionsEndpoints(rest, request.method, body) ??
       this.readEndpoints(rest, url, request.method) ??
       this.writeEndpoints(rest, request.method, body) ??
       this.notFound()
     );
   };
+
+  /**
+   * The Actions half, which models one thing carefully: **a dispatch names no
+   * run.** It answers `204`, and the run has to be found afterwards by the name
+   * the caller stamped — so this fake creates the run without telling anyone,
+   * makes it visible only after `discoveryDelay` list calls, and finishes it
+   * after `duration` status reads.
+   */
+  private actionsEndpoints(
+    rest: string,
+    method: string,
+    body: Record<string, unknown>,
+  ): Response | null {
+    if (rest === '/installation' && method === 'GET') {
+      return this.json({ id: Number(this.installationId) });
+    }
+
+    const dispatch = rest.match(/^\/actions\/workflows\/([^/]+)\/dispatches$/);
+    if (dispatch && method === 'POST') {
+      const inputs = (body.inputs ?? {}) as Record<string, string>;
+      this.dispatches.push({
+        workflow: decodeURIComponent(dispatch[1] ?? ''),
+        branch: String(body.ref ?? ''),
+        inputs,
+      });
+      this.runNumber += 1;
+      const spec = JSON.parse(inputs.spec ?? '{}') as Record<string, unknown>;
+      this.runs.push({
+        id: this.runNumber,
+        // Exactly what the caller workflow's `run-name` would produce.
+        name: `spindrift ${inputs.correlation ?? ''}`,
+        reads: 0,
+        log: this.actions.log(spec),
+      });
+      return new Response(null, { status: 204 });
+    }
+
+    const list = rest.match(/^\/actions\/workflows\/([^/]+)\/runs$/);
+    if (list && method === 'GET') {
+      this.listCalls += 1;
+      const visible =
+        this.listCalls > this.actions.discoveryDelay ? this.runs : [];
+      return this.json({
+        workflow_runs: visible.map((run) => ({
+          id: run.id,
+          name: run.name,
+          status: 'queued',
+          conclusion: null,
+        })),
+      });
+    }
+
+    const read = rest.match(/^\/actions\/runs\/(\d+)$/);
+    if (read && method === 'GET') {
+      const run = this.runs.find((each) => each.id === Number(read[1]));
+      if (run === undefined) return this.notFound();
+      run.reads += 1;
+      const done = run.reads > this.actions.duration;
+      return this.json({
+        id: run.id,
+        status: done ? 'completed' : 'in_progress',
+        conclusion: done ? this.actions.conclusion : null,
+      });
+    }
+
+    const jobs = rest.match(/^\/actions\/runs\/(\d+)\/jobs$/);
+    if (jobs && method === 'GET') {
+      const run = this.runs.find((each) => each.id === Number(jobs[1]));
+      if (run === undefined) return this.notFound();
+      const done = run.reads > this.actions.duration;
+      return this.json({
+        jobs: [
+          {
+            id: run.id,
+            name: 'build',
+            status: done ? 'completed' : 'in_progress',
+            conclusion: done ? this.actions.conclusion : null,
+            steps: [
+              {
+                name: 'Build and push',
+                status: done ? 'completed' : 'in_progress',
+                conclusion: done ? this.actions.conclusion : null,
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    const log = rest.match(/^\/actions\/jobs\/(\d+)\/logs$/);
+    if (log && method === 'GET') {
+      const run = this.runs.find((each) => each.id === Number(log[1]));
+      return run === undefined ? this.notFound() : new Response(run.log);
+    }
+
+    return null;
+  }
 
   private readEndpoints(
     rest: string,
@@ -345,6 +493,28 @@ export class FakeGitHub {
 
     return null;
   }
+}
+
+/**
+ * What a green run's log looks like: some output, then the one line core reads.
+ *
+ * The bundle digest is echoed from the spec that was dispatched rather than
+ * fixed, which is what lets a test assert §16's join is real — and what lets a
+ * test break it deliberately by supplying its own log.
+ */
+function defaultBuildLog(spec: Record<string, unknown>): string {
+  const digest = `sha256:${'a'.repeat(64)}`;
+  const destination = String(spec.destination ?? 'registry.invalid/app');
+  return [
+    '2026-07-28T00:00:00Z #1 [internal] load build definition',
+    '2026-07-28T00:00:01Z #8 exporting to image',
+    encodeBuildReport({
+      bundleDigest: String(spec.bundleDigest ?? ''),
+      digest,
+      refs: [`${destination}@${digest}`],
+      baseDigest: null,
+    }),
+  ].join('\n');
 }
 
 /**

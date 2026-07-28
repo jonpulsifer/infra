@@ -311,7 +311,7 @@ export function storeAdapterSuite(
  */
 export const ADAPTERS = {
   deploy: ['fake', 'kubernetes'],
-  build: ['fake'],
+  build: ['fake', 'github-actions', 'cloud-build', 'in-cluster'],
   store: [
     'fake native',
     'fake immutable item per version',

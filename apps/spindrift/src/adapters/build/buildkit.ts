@@ -1,0 +1,125 @@
+/**
+ * The program every route runs (§4).
+ *
+ * §4 settles the engine and refuses to make it a per-route choice: "**BuildKit
+ * with two frontends** — the repo's Dockerfile if present, else a zero-config
+ * builder", and "because Railpack *is* a BuildKit frontend, 'Dockerfile if
+ * present, else Railpack' is **not two build systems to operate** — it is one
+ * engine with two frontends."
+ *
+ * This module is what makes that true rather than aspirational. The cloud
+ * builder runs this in a build step, the cluster runs it in a Job, and hosted CI
+ * runs the same two frontends over the same ladder — so a build that works on
+ * one route is a build that works on the others, and the routes differ only in
+ * *where* they run and what provenance they can claim.
+ *
+ * **The ladder runs here and not in core**, which is what the build contract
+ * means by "the frontend is not here". A Dockerfile settles how to build and
+ * never what the thing is (§5) — core already decided the `kind`, and this
+ * script decides nothing except which frontend gets handed the same directory.
+ *
+ * **What the image must provide.** Declared, not discovered, so an installation
+ * that pins an image knows what it is promising: a POSIX `sh`, `wget`, `tar`,
+ * `sed`, `base64`, and `buildctl-daemonless.sh` on the path. Every one of those
+ * is in the stock BuildKit image; a hardened replacement that drops one will
+ * fail loudly on the first build rather than subtly on the hundredth.
+ */
+import type { BuildSource, BuildSpec } from './contract.ts';
+import { BUILD_REPORT_MARKER } from './report.ts';
+
+/** Everything the program needs to know, all of it already decided by core. */
+export interface BuildKitProgramInput {
+  /** Where the staged bundle is fetched from — a depot URL, opaque here. */
+  readonly bundleUrl: string;
+  /** §16's join, echoed back in the report so core can check it. */
+  readonly bundleDigest: string;
+  /** The scope inside the bundle, after §5's unwrap. */
+  readonly subpath: string;
+  /** Where the artifact is pushed. Core chose it; the route never does (§4). */
+  readonly destination: string;
+  /** The zero-config frontend the installation pinned. */
+  readonly zeroConfigFrontend: string;
+  /** §4: ordinary rows, never fetched from a store. */
+  readonly buildArgs: BuildSpec['buildArgs'];
+}
+
+/**
+ * The program for one build, from what the contract already carries.
+ *
+ * The two routes that run this in a container — the cloud builder and the
+ * cluster Job — differ in *where* they run it and in nothing else, so composing
+ * the input is here rather than twice over. §4's "one engine" is only true if
+ * one place decides what the engine is told.
+ *
+ * The frontend is the exception: it is installation configuration rather than
+ * anything the contract carries, so a route supplies it.
+ */
+export function buildKitProgramFor(
+  source: BuildSource,
+  spec: BuildSpec,
+  zeroConfigFrontend: string,
+): string {
+  return buildKitProgram({
+    // One expression for both origins, which is §4's "repo and archive share
+    // one pipeline" made literal: the program never learns which it is
+    // building, because by then the difference is only a principal on a
+    // receipt (§16).
+    bundleUrl: source.origin.location,
+    bundleDigest: source.bundleDigest,
+    subpath: source.origin.subpath,
+    destination: spec.destination,
+    zeroConfigFrontend,
+    buildArgs: spec.buildArgs,
+  });
+}
+
+/**
+ * Single-quote a value for `sh`.
+ *
+ * Every value below reaches a shell, and two of them — the destination and the
+ * build arguments — carry developer-influenced text. Quoting is therefore not
+ * tidiness: it is the boundary between a build argument and an extra command.
+ */
+function quote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * The `sh -c` program that turns a staged bundle into a pushed artifact.
+ *
+ * It ends by printing the report marker, because logs are read and never pushed
+ * (§4) — there is no endpoint for it to report a digest to, so it reports on
+ * the one channel core is already reading. `base64` output is folded by some
+ * implementations and not others, hence the `tr`: a wrapped payload is a
+ * payload core cannot decode.
+ */
+export function buildKitProgram(input: BuildKitProgramInput): string {
+  const args = Object.entries(input.buildArgs)
+    .map(([key, value]) => `  --opt ${quote(`build-arg:${key}=${value}`)} \\`)
+    .join('\n');
+
+  return `set -eu
+workspace=$(mktemp -d)
+wget -qO- ${quote(input.bundleUrl)} | tar -xz -C "$workspace"
+cd "$workspace"/${quote(input.subpath)}
+
+# §5's ladder, and the only decision this script makes: a Dockerfile settles
+# how to build. What the thing *is* was decided before the build was dispatched.
+if [ -f Dockerfile ]; then
+  set -- --frontend dockerfile.v0 --local dockerfile=.
+else
+  set -- --frontend gateway.v0 --opt source=${quote(input.zeroConfigFrontend)}
+fi
+
+buildctl-daemonless.sh build "$@" \\
+  --local context=. \\
+${args}
+  --output ${quote(`type=image,name=${input.destination},push=true`)} \\
+  --metadata-file "$workspace/metadata.json"
+
+digest=$(sed -n 's/.*"containerimage.digest"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$workspace/metadata.json")
+report=$(printf '{"bundleDigest":"%s","digest":"%s","refs":["%s@%s"],"baseDigest":null}' \\
+  ${quote(input.bundleDigest)} "$digest" ${quote(input.destination)} "$digest")
+echo "${BUILD_REPORT_MARKER} $(printf '%s' "$report" | base64 | tr -d '\\n')"
+`;
+}

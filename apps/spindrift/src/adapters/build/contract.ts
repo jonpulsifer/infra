@@ -43,6 +43,17 @@ export type BuildOrigin =
       commit: string;
       /** An App is repo plus subpath; the scope is named, never searched (§5). */
       subpath: string;
+      /**
+       * Where the builder fetches the staged bundle for that commit from.
+       *
+       * Present on **both** arms, because §15 stages one immutable bundle "for
+       * either builder" and a route that cloned the commit again would build a
+       * second tree — one the source receipt's digest does not describe. The
+       * repository and commit stay beside it because a backend that can bind
+       * them natively produces stronger provenance for having them (§16); they
+       * are not what gets fetched.
+       */
+      location: string;
     }
   | {
       type: 'archive';
