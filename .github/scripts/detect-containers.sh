@@ -57,7 +57,10 @@ path_changed() {
 includes='[]'
 declare -A unclassified
 
-mapfile -t dockerfiles < <(find apps images -name "Dockerfile" | sort)
+# Prune `fixtures` directories: test fixtures (e.g. apps/<x>/test/fixtures/...)
+# contain Dockerfiles that are inputs to a project's own tests, not buildable
+# images owned by this workflow.
+mapfile -t dockerfiles < <(find apps images -path '*/fixtures' -prune -o -name "Dockerfile" -print | sort)
 
 for dockerfile in "${dockerfiles[@]}"; do
   dir=$(dirname "$dockerfile")
