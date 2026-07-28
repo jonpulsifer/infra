@@ -69,6 +69,7 @@ spec:
           tenant_id: "1"
           encoding:
             codec: json
+          dangerously_allow_unconfined_template_resolution: true
           labels:
             job: "kubernetes"
             cluster: "${CLUSTER_NAME}"
@@ -84,6 +85,7 @@ spec:
           tenant_id: "1"
           encoding:
             codec: json
+          dangerously_allow_unconfined_template_resolution: true
           labels:
             job: "systemd-journal"
             cluster: "${CLUSTER_NAME}"
