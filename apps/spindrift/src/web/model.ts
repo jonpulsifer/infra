@@ -267,7 +267,7 @@ export interface TargetOptionView {
 export interface RepositoryOptionView {
   /** GitHub's stable numeric repository ID, used as the selection key. */
   readonly repositoryId: number;
-  /** The owner/name a human reads — e.g. `jonpulsifer/hub`. */
+  /** The owner/name a human reads — e.g. `example-org/hub`. */
   readonly fullName: string;
   /** The branch Spindrift watches. */
   readonly defaultBranch: string;
