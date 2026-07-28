@@ -46,6 +46,7 @@ const noAdapters: AdapterRegistry = {
   store: () => {
     throw new Error('no store adapter is configured for this test');
   },
+  repository: () => null,
 };
 
 function context(clock: Clock = frozenClock): CommandContext {

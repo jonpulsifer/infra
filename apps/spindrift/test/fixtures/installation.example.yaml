@@ -34,6 +34,10 @@ supplyChain:
 
 github:
   appId: '1234567'
+  apiBaseUrl: https://api.git.example.test
+  # Pinned to a commit, never a branch: the caller this ref lands in runs with
+  # the connected repository's own permissions.
+  buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
 
 secretStore:
   adapter: gcp-secret-manager

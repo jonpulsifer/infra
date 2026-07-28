@@ -179,6 +179,42 @@ export const installationManifestSchema = z
           /^[0-9]+$/,
           'must be a numeric GitHub App id',
         ),
+        /**
+         * Base URL of the repository host's REST API, without a trailing
+         * slash.
+         *
+         * A value rather than a constant because an installation running
+         * against a self-hosted enterprise deployment reaches its own host, and
+         * §20 puts anything that names one installation's world here. The
+         * public host is a legitimate value for it; it is not a default,
+         * because there are none.
+         */
+        apiBaseUrl: z
+          .url()
+          .refine((value) => !value.endsWith('/'), 'must not end with a slash'),
+        /**
+         * The reusable build workflow the configuration PR's one caller calls
+         * (§15).
+         *
+         * **Pinned to a commit, and the schema is what enforces it.** §15 gives
+         * the connected repository the Actions minutes and the billing, which
+         * means the workflow runs with that repository's own permissions —
+         * so a mutable ref here would let whoever can move it run arbitrary
+         * steps in every connected repository at once. A branch or tag is
+         * refused rather than warned about.
+         *
+         * Nullable, stated the way `auth.gateway` is: an installation that has
+         * not published a reusable workflow yet has no honest value to put here,
+         * and a placeholder commit would be a configuration that looks complete
+         * and fails at the first build. Null means repositories cannot be
+         * connected — `connectRepository` says so — and nothing else changes.
+         */
+        buildWorkflow: nonEmptyString
+          .regex(
+            /^[^/@\s]+\/[^/@\s]+\/\.github\/workflows\/[^@\s]+@[0-9a-f]{40}$/,
+            'must be owner/repo/.github/workflows/<file>@<40-character commit sha>',
+          )
+          .nullable(),
       })
       .strict(),
 

@@ -70,6 +70,7 @@ function serve() {
             store: () => {
               throw new Error('no store in this test');
             },
+            repository: () => null,
           },
           manifest: manifest,
         }) satisfies CommandContext,

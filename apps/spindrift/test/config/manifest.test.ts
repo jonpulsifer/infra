@@ -137,3 +137,45 @@ describe('boot fails loudly', () => {
     );
   });
 });
+
+/**
+ * §15 gives the connected repository the Actions minutes and the billing, so
+ * the caller Spindrift writes into somebody's repository runs with that
+ * repository's own permissions. A ref that can be moved is therefore a way to
+ * run arbitrary steps in every connected repository at once, and the schema is
+ * where that is refused rather than warned about.
+ */
+describe('the reusable build workflow ref', () => {
+  const line = (value: string) => `  buildWorkflow: ${value}`;
+  const current = fixtureText
+    .split('\n')
+    .find((row) => row.trim().startsWith('buildWorkflow:'));
+
+  test.each([
+    ['a branch', 'example/platform/.github/workflows/build.yml@main'],
+    ['a tag', 'example/platform/.github/workflows/build.yml@v1.2.3'],
+    [
+      'an abbreviated sha',
+      'example/platform/.github/workflows/build.yml@4bf1f21',
+    ],
+    ['no ref at all', 'example/platform/.github/workflows/build.yml'],
+    [
+      'a path that is not a workflow',
+      `example/platform/build.yml@${'0'.repeat(40)}`,
+    ],
+  ] as const)('refuses %s', (_name, ref) => {
+    expect(() =>
+      parseManifest(fixtureText.replace(current ?? '', line(ref)), 'test'),
+    ).toThrow(/buildWorkflow/);
+  });
+
+  test('accepts null, which is an installation that has published none', () => {
+    // Stated the way `auth.gateway` is. A placeholder commit would be a
+    // configuration that looks complete and fails at the first build.
+    const manifest = parseManifest(
+      fixtureText.replace(current ?? '', line('null')),
+      'test',
+    );
+    expect(manifest.github.buildWorkflow).toBeNull();
+  });
+});

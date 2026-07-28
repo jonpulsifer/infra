@@ -59,6 +59,22 @@ import type { TargetConnection } from '../domain/target.ts';
 /** §2: "source = repo(url, subpath) | archive(upload)". */
 export const appSourceKind = pgEnum('app_source_kind', ['repo', 'archive']);
 
+/**
+ * §15: "Lost access **freezes source-driven changes and never destroys a
+ * Deploy**."
+ *
+ * Two states, and the pair is the whole point. `frozen` has to be a value a
+ * query can select on, because the alternative to a state is an action — and
+ * the only actions available to code that has just lost read access to a
+ * repository are to do nothing quietly or to tear something down. The first is
+ * indistinguishable from a repository nobody pushes to, and the second is the
+ * outage §15 forbids.
+ */
+export const repositoryAccess = pgEnum('repository_access', [
+  'active',
+  'frozen',
+]);
+
 /** §2: "kind = service | website | job". */
 export const componentKind = pgEnum('component_kind', [
   'service',
@@ -185,6 +201,73 @@ export const webauthnPurpose = pgEnum('webauthn_purpose', [
   'add_passkey',
 ]);
 
+// --- Repository ------------------------------------------------------------
+
+/**
+ * One connected repository (§15).
+ *
+ * Not one of §2's five nouns, and deliberately not folded into `apps`: a
+ * repository is reached through one App *installation*, has one default branch,
+ * and can lose access — three facts that belong to the repository and would have
+ * to be repeated on, and kept consistent across, every App that names it. A
+ * monorepo with four Apps in four subpaths is one row here and four there.
+ *
+ * **No credential column.** §15: Spindrift "stages an immutable source bundle
+ * for either builder, storing no token." What is stored is the installation's
+ * identity; the token is minted per request from the App's own key and never
+ * survives the call it was minted for.
+ */
+export const repositories = pgTable(
+  'repositories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** `owner/name` — the only handle the repository API takes. */
+    fullName: text('full_name').notNull(),
+    /**
+     * Which installation of the GitHub App reaches it. A string because the
+     * far side's numeric id is an opaque handle here, not an integer core does
+     * arithmetic on.
+     */
+    installationId: text('installation_id').notNull(),
+    /** §15: only the default branch is authoritative, so it is stored, not assumed. */
+    defaultBranch: text('default_branch').notNull(),
+    /**
+     * §15: "**only its default-branch merge push becomes authoritative**."
+     *
+     * This is the commit whose configuration Spindrift has adopted — never a PR
+     * head, never a branch tip it merely observed. It stays null until a
+     * default-branch commit has actually been reconciled, which is what makes
+     * "an unmerged PR changes nothing" a fact about a column rather than a
+     * promise about a code path.
+     */
+    authoritativeCommit: text('authoritative_commit'),
+    /** The configuration pull request this connection opened, once it exists. */
+    configPullRequest: integer('config_pull_request'),
+    access: repositoryAccess('access').notNull().default('active'),
+    /** Set exactly when `access = 'frozen'`; the sentence an operator reads. */
+    frozenReason: text('frozen_reason'),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+    /** When the repo loop last completed a pass against it. */
+    reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Connecting a repository twice must re-adopt the existing row rather than
+    // produce a second one: two rows for one repository would each reconcile it,
+    // and the loop would race itself over one authoritative commit.
+    unique('repositories_full_name_unique').on(table.fullName),
+    check(
+      'repositories_frozen_has_reason',
+      sql`(${table.access} = 'frozen') = (${table.frozenReason} is not null)`,
+    ),
+  ],
+);
+
 // --- App and Component -------------------------------------------------
 
 /**
@@ -201,6 +284,18 @@ export const apps = pgTable('apps', {
   sourceRepoUrl: text('source_repo_url'),
   /** Set when `sourceKind = 'repo'`; the scope is named, never searched (§5). */
   sourceRepoSubpath: text('source_repo_subpath'),
+  /**
+   * The connected repository this App's scope lives in, when there is one.
+   *
+   * Nullable because an archive App has no repository and a repo App may have
+   * been created before anyone connected its repository — §15 makes Git
+   * integration a thing an operator turns on, not a precondition of authoring.
+   * `restrict` rather than `cascade`: disconnecting a repository must never be
+   * a way to delete an App, which is the same rule §15 states about Deploys.
+   */
+  repositoryId: uuid('repository_id').references(() => repositories.id, {
+    onDelete: 'restrict',
+  }),
   /** Set when `sourceKind = 'archive'`: the uploaded bundle's digest. */
   sourceArchiveDigest: text('source_archive_digest'),
   /** §14: the cloud project this App's own resources live in, if any. */
@@ -794,9 +889,17 @@ export const attemptEvents = pgTable(
 
 // --- Relations (query-builder convenience; no schema effect) ---------------
 
-export const appsRelations = relations(apps, ({ many }) => ({
+export const appsRelations = relations(apps, ({ one, many }) => ({
   components: many(components),
   datastores: many(datastores),
+  repository: one(repositories, {
+    fields: [apps.repositoryId],
+    references: [repositories.id],
+  }),
+}));
+
+export const repositoriesRelations = relations(repositories, ({ many }) => ({
+  apps: many(apps),
 }));
 
 export const componentsRelations = relations(components, ({ one, many }) => ({
@@ -905,6 +1008,8 @@ export const attemptEventsRelations = relations(attemptEvents, ({ one }) => ({
 
 export type App = typeof apps.$inferSelect;
 export type NewApp = typeof apps.$inferInsert;
+export type Repository = typeof repositories.$inferSelect;
+export type NewRepository = typeof repositories.$inferInsert;
 export type Component = typeof components.$inferSelect;
 export type NewComponent = typeof components.$inferInsert;
 export type Build = typeof builds.$inferSelect;
