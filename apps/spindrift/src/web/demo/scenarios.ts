@@ -20,9 +20,13 @@
  */
 import type { ComponentKind, Exposure } from '../../domain/desired-state.ts';
 import type {
+  AppListItem,
   ChecklistItem,
   DeployView,
+  LinkedRepoView,
   LogLine,
+  RepositoryOptionView,
+  TargetListItem,
   TargetOptionView,
   WorkspaceView,
 } from '../model.ts';
@@ -544,3 +548,153 @@ export const INITIAL_DRAFT: Draft = {
   ],
   step: 0,
 };
+
+/** Available repositories from the GitHub App installation. */
+export const REPOSITORY_OPTIONS: readonly RepositoryOptionView[] = [
+  {
+    repositoryId: 100001,
+    fullName: 'jonpulsifer/infra',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 100002,
+    fullName: 'jonpulsifer/hub',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 100003,
+    fullName: 'jonpulsifer/site',
+    defaultBranch: 'main',
+    connected: false,
+  },
+  {
+    repositoryId: 100004,
+    fullName: 'jonpulsifer/dave',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 100005,
+    fullName: 'jonpulsifer/weather-card',
+    defaultBranch: 'main',
+    connected: false,
+  },
+];
+
+/** Linked repositories for the management view. */
+export const LINKED_REPOS: readonly LinkedRepoView[] = [
+  {
+    repositoryId: 100001,
+    fullName: 'jonpulsifer/infra',
+    defaultBranch: 'main',
+    health: 'connected',
+    error: null,
+    lastReconciledSha: 'a1b2c3d',
+    appSubpaths: ['apps/hub', 'apps/dave', 'apps/wiki'],
+  },
+  {
+    repositoryId: 100002,
+    fullName: 'jonpulsifer/hub',
+    defaultBranch: 'main',
+    health: 'connected',
+    error: null,
+    lastReconciledSha: 'e4f5g6h',
+    appSubpaths: ['.'],
+  },
+  {
+    repositoryId: 100004,
+    fullName: 'jonpulsifer/dave',
+    defaultBranch: 'main',
+    health: 'connection_lost',
+    error:
+      'Installation suspended — the GitHub App installation was suspended by the account owner.',
+    lastReconciledSha: 'i7j8k9l',
+    appSubpaths: ['.'],
+  },
+];
+
+/** App list demo data. */
+export const APP_LIST: readonly AppListItem[] = [
+  {
+    name: 'hub',
+    phase: 'LIVE',
+    target: 'Folly',
+    vessel: 'bluenose',
+    url: 'hub.folly.lolwtf.dev',
+    urlLive: true,
+    kind: 'service',
+    source: 'jonpulsifer/infra',
+    release: 'Deploy #14 · a1b2c3d',
+  },
+  {
+    name: 'dave',
+    phase: 'LIVE',
+    target: 'Folly',
+    vessel: 'bluenose',
+    url: 'dave.folly.lolwtf.dev',
+    urlLive: true,
+    kind: 'service',
+    source: 'jonpulsifer/dave',
+    release: 'Deploy #8 · m3n4o5p',
+  },
+  {
+    name: 'wiki',
+    phase: 'FAILED',
+    target: 'Cloud Run · bluenose',
+    vessel: 'bluenose',
+    url: 'wiki.lolwtf.dev',
+    urlLive: true,
+    kind: 'website',
+    source: 'jonpulsifer/infra',
+    release: 'Deploy #3 · q6r7s8t',
+  },
+  {
+    name: 'weather-card',
+    phase: 'APPLYING',
+    target: 'Firebase · bluenose',
+    vessel: 'bluenose',
+    url: 'weather-card.web.app',
+    urlLive: false,
+    kind: 'website',
+    source: 'archive',
+    release: 'Deploy #1 · sha256:d82a…',
+  },
+];
+
+/** Target list demo data. */
+export const TARGET_LIST: readonly TargetListItem[] = [
+  {
+    name: 'Folly',
+    adapter: 'kubernetes',
+    rank: 1,
+    health: 'healthy',
+    kinds: ['service', 'website', 'job'],
+    canonical: '*.folly.lolwtf.dev',
+  },
+  {
+    name: 'Cloud Run · bluenose',
+    adapter: 'cloudrun',
+    rank: 2,
+    health: 'healthy',
+    kinds: ['service', 'website', 'job'],
+    canonical: '*.northamerica-northeast1.run.app',
+  },
+  {
+    name: 'Firebase · bluenose',
+    adapter: 'static',
+    rank: 3,
+    health: 'healthy',
+    kinds: ['website'],
+    canonical: '*.web.app',
+  },
+  {
+    name: 'Offsite',
+    adapter: 'kubernetes',
+    rank: 4,
+    health: 'unhealthy',
+    kinds: ['service', 'website', 'job'],
+    canonical: '*.offsite.lolwtf.dev',
+  },
+];

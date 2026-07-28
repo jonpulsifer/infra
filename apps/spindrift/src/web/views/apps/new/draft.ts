@@ -154,7 +154,9 @@ export type DraftAction =
   | { type: 'kind'; kind: ComponentKind }
   | { type: 'target'; targetId: string }
   | { type: 'exposure'; exposure: Exposure }
-  | { type: 'step'; step: number };
+  | { type: 'step'; step: number }
+  | { type: 'repo'; fullName: string; url: string }
+  | { type: 'subpath'; subpath: string };
 
 /**
  * Choosing an entry tile preselects a kind where the tile names one, and leaves
@@ -184,6 +186,26 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
         ...draft,
         step: Math.min(Math.max(action.step, 0), STEPS.length - 1),
       };
+    case 'repo': {
+      const name = action.fullName.split('/').pop() ?? action.fullName;
+      return {
+        ...draft,
+        source: {
+          kind: 'repo',
+          repo: action.fullName,
+          url: action.url,
+          subpath: draft.source.kind === 'repo' ? draft.source.subpath : '.',
+        },
+        appName: name,
+      };
+    }
+    case 'subpath':
+      return draft.source.kind === 'repo'
+        ? {
+            ...draft,
+            source: { ...draft.source, subpath: action.subpath },
+          }
+        : draft;
   }
 }
 
