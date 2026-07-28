@@ -1,0 +1,10 @@
+{
+  "name": "fixture-website",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "latest"
+  }
+}

@@ -17,7 +17,9 @@ output records an artifact without a builder; creating a Deploy writes an intent
 under a locking read; the reconciler claims that intent, applies it through the
 Kubernetes adapter, and records what the platform said. The operator claims the
 installation with a passkey and reaches every command through an opaque
-session.
+session. Source detection classifies one named repo or archive scope, honours an
+authoritative `spindrift.yaml`, derives workspace watch paths, and keeps
+Dockerfile selection separate from Component-kind inference.
 
 What has no implementation is the Cloud Run and static deploy adapters, every
 real build route, config delivery, and datastores. **The three screens still
@@ -45,7 +47,7 @@ One image, two processes (§19); only `web` exists so far.
 | `src/config/` | the installation manifest and its schema |
 | `src/db/` | the Drizzle schema, the connection, and the committed migrations |
 | `src/commands/` | the application command layer and its registry |
-| `src/domain/` | `DesiredState`, the attempt log, Targets, capabilities, placement, sources, naming, diagnosis |
+| `src/domain/` | backend-neutral product rules and value types |
 | `src/adapters/` | the adapter contracts, Kubernetes delivery, DNS records, and the two stores |
 | `src/reconciler/` | two loops — Target health and capabilities, and deploy convergence |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |

@@ -1,0 +1,7 @@
+{
+  "name": "fixture-authoritative-file",
+  "private": true,
+  "scripts": {
+    "report": "bun run report.ts"
+  }
+}
