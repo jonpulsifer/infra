@@ -85,6 +85,50 @@ describe('Secret-backed authentication configuration', () => {
   });
 });
 
+describe('installation manifest bootstrap', () => {
+  test('mounts ordinary configuration from a ConfigMap in every process', async () => {
+    const objects = await render({
+      installationManifest: { installation: 'example' },
+      reconciler: { enabled: true },
+      envFromSecret: 'spindrift-env',
+    });
+    const manifest = one(
+      objects,
+      'ConfigMap',
+      'spindrift-installation-manifest',
+    );
+    expect(Bun.YAML.parse(manifest.data?.['manifest.yaml'] ?? '')).toEqual({
+      installation: 'example',
+    });
+
+    const deployments = objects.filter(
+      (object) => object.kind === 'Deployment',
+    );
+    expect(deployments).toHaveLength(2);
+    for (const deployment of deployments) {
+      const pod = deployment.spec.template.spec;
+      expect(pod.volumes).toContainEqual({
+        name: 'installation-manifest',
+        configMap: { name: 'spindrift-installation-manifest' },
+      });
+      expect(pod.containers[0].volumeMounts).toContainEqual({
+        name: 'installation-manifest',
+        mountPath: '/etc/spindrift',
+        readOnly: true,
+      });
+      expect(pod.containers[0].env).toContainEqual({
+        name: 'SPINDRIFT_MANIFEST_PATH',
+        value: '/etc/spindrift/manifest.yaml',
+      });
+      expect(
+        pod.containers[0].env.some(
+          (item: { name: string }) => item.name === 'SPINDRIFT_MANIFEST',
+        ),
+      ).toBe(false);
+    }
+  });
+});
+
 describe('authenticated Gateway trust', () => {
   test('is disabled without a network boundary', async () => {
     const objects = await render();

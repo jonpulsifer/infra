@@ -31,17 +31,50 @@ spec:
     # from the HTTPRoute and cert-manager issues the certificate, so this line
     # is the whole of what makes the UI reachable with TLS.
     hostname: spindrift.${SECRET_DOMAIN}
-    # The Secret carries the installation manifest and its one-time enrolment
-    # token. Nothing installation-specific is in the chart.
+    # Non-secret first-boot configuration. Core stores the validated document
+    # in Postgres; the database row is authoritative after bootstrap.
+    installationManifest:
+      installation: offsite
+      dns:
+        apexZone: lolwtf.dev
+        vanityZone: lolwtf.dev
+      cloud:
+        artifactsProject: trusted-builds
+        homeVesselProject: homelab-ng
+        federation: null
+      charts:
+        app: packages/charts/spindrift-app
+        installer: packages/charts/spindrift
+      supplyChain:
+        registry: ghcr.io/jonpulsifer
+        verifier: ghcr.io/jonpulsifer/spindrift-verifier
+      github:
+        appId: "334190"
+        apiBaseUrl: https://api.github.com
+        buildWorkflow: null
+      build:
+        routes: []
+        zeroConfigFrontend: ghcr.io/railwayapp/railpack:railpack-frontend
+      secretStore:
+        adapter: onepassword
+        endpoint: http://onepassword-connect.external-secrets.svc.cluster.local:8080
+        container: homelab
+      targets:
+        - name: offsite
+          adapter: kubernetes
+      controlPlane:
+        hostname: spindrift.lolwtf.ca
+      auth:
+        gateway: null
+    # The Secret carries only the one-time enrolment token and optional
+    # integration credentials.
     envFromSecret: spindrift-env
     serviceAccount:
       token:
         gcpAudience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
     ingress:
       enabled: true
-    # §19's own database. Nothing connects to it yet — the web process reads no
-    # rows — but it is the installation's store and the reconciler will need it,
-    # so it is provisioned now rather than bolted on later.
+    # §19's own database, including the installation manifest singleton.
     database:
       enabled: true
       size: 2Gi

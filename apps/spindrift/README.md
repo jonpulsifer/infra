@@ -590,7 +590,8 @@ vocabulary is lowercase hyphenated words, and so is a project id, so over a
 browser bundle it reports dozens of findings and no bugs. The test says so at
 length, and the exemption is itself tested.
 
-Point the process at one:
+The validated manifest lives in Spindrift's Postgres database. Point the first
+boot of an empty installation at a bootstrap document:
 
 ```bash
 export SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml
@@ -598,8 +599,11 @@ export SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml
 export SPINDRIFT_MANIFEST="$(cat test/fixtures/installation.example.yaml)"
 ```
 
-Boot fails loudly, naming every offending key, if it is missing or incomplete.
-Nothing has a default, because a default here would name someone's homelab.
+The first process atomically stores the document; later boots read the database
+row and ignore changed bootstrap input. Boot fails loudly, naming every
+offending key, when the stored document is invalid or when both the row and
+bootstrap are absent. Nothing has a default, because a default here would name
+someone's homelab.
 
 ## Usage
 

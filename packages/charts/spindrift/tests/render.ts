@@ -13,6 +13,7 @@ const CHART = dirname(import.meta.dir);
 export interface RenderedObject {
   apiVersion: string;
   kind: string;
+  data?: Record<string, string>;
   metadata: {
     name: string;
     namespace?: string;

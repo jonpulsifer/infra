@@ -2,14 +2,14 @@
 #
 # §20 line 3: "everything naming this installation is a value in the
 # installation manifest; a literal outside it is a bug." This file holds no
-# installation name at all — not a zone, not a project, not a cluster. The one
-# installation-shaped value a release supplies is `hostname`, which is where
-# *this control plane* is served, and it is empty here.
+# installation name at all — not a zone, not a project, not a cluster. A
+# release supplies the manifest document plus `hostname`, which is where this
+# control plane is served; both are empty here.
 #
-# The installation manifest itself does not appear as chart values either. It
-# reaches the process through `envFromSecret` as `SPINDRIFT_MANIFEST`, because
-# it carries a GitHub App id and this repository is public — the same reason
-# Atlantis keeps its app id in a SOPS Secret rather than in a HelmRelease.
+# The installation manifest is ordinary configuration. On the first boot it is
+# mounted from a ConfigMap and atomically seeds Spindrift's database; the stored
+# row is authoritative afterward. Public identifiers such as a GitHub App id do
+# not make the document a credential.
 
 image: ""
 
@@ -65,10 +65,12 @@ command: "bun run src/web/server.ts"
 # so rather than the chart assuming a runtime class exists.
 sandbox: false
 
-# The Secret carrying `SPINDRIFT_MANIFEST`, `SPINDRIFT_ENROLMENT_TOKEN`, and
-# repository credentials when that integration is configured. Required in
-# practice: the process refuses to boot without a manifest, which is the §20
-# discipline working as intended.
+# First-boot configuration only. Once the database has an installation row,
+# changing this value does not overwrite it.
+installationManifest: {}
+
+# The Secret carrying `SPINDRIFT_ENROLMENT_TOKEN` and repository credentials
+# when those integrations are configured. It contains credentials only.
 envFromSecret: ""
 
 # Header authentication is safe only behind a Gateway that strips and replaces

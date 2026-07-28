@@ -64,6 +64,13 @@
       "when": 1785264152666,
       "tag": "0008_supply_chain",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785273764040,
+      "tag": "0009_installation_manifest",
+      "breakpoints": true
     }
   ]
 }
