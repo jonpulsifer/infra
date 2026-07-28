@@ -24,7 +24,7 @@ spec:
         name: infra
         namespace: flux-system
   values:
-    image: ghcr.io/jonpulsifer/spindrift:latest
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:613eb3be2955952e6082f1d451ee34ad854e14fc2376f43eb8e621bc129a3dc7
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
