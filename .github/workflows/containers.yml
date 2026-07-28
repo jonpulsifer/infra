@@ -92,6 +92,7 @@ jobs:
           tags: |
             type=sha,enable=true,priority=100,prefix=,suffix=,format=long
       - name: Build and push ${{ matrix.image }}
+        id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           push: ${{ github.event_name != 'pull_request' }}
@@ -106,3 +107,14 @@ jobs:
           secret-files: ${{ matrix.image == 'slingshot' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
           sbom: true
           provenance: true
+      - name: Scan ${{ matrix.image }} image with Trivy
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
+          hide-progress: false
+          ignore-unfixed: true
+          exit-code: 1
+          severity: CRITICAL,HIGH

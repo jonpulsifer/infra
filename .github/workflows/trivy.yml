@@ -6,51 +6,60 @@ on:
     paths:
       - '**/*.tf'
       - 'clusters/**'
+      - '**/go.mod'
+      - '**/go.sum'
+      - '**/package.json'
+      - 'bun.lock'
+      - '**/Dockerfile'
   pull_request:
     paths:
       - '**/*.tf'
       - 'clusters/**'
+      - '**/go.mod'
+      - '**/go.sum'
+      - '**/package.json'
+      - 'bun.lock'
+      - '**/Dockerfile'
 
 jobs:
-  changed-directories:
-    name: Get Changed Files
+  # ── Config (IaC misconfiguration) scanning ──────────────────────────
+  changed-config:
+    name: Changed Config Dirs
     runs-on: ubuntu-latest
     outputs:
-      # Output a JSON string list of unique directories containing changed files matching the patterns
-      directories: ${{ steps.changed-directories.outputs.all_changed_files }} 
-      # Output 'true' or 'false' as a string
-      any_changed: ${{ steps.changed-directories.outputs.any_changed }}
+      directories: ${{ steps.changed.outputs.all_changed_files }}
+      any_changed: ${{ steps.changed.outputs.any_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 2
-      - name: Directories with Changes
-        id: changed-directories
+      - name: Directories with Config Changes
+        id: changed
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
+          files: |
+            **/*.tf
+            clusters/**
           dir_names: true
           dir_names_exclude_current_dir: true
           matrix: true
 
-  scan:
-    needs: [changed-directories]
+  scan-config:
+    needs: [changed-config]
     runs-on: ubuntu-latest
-    if: needs.changed-directories.outputs.any_changed == 'true'
+    if: needs.changed-config.outputs.any_changed == 'true'
     permissions:
-      contents: read # for actions/checkout to fetch code
-      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+      contents: read
+      security-events: write
     strategy:
-      fail-fast: false # Keep running other matrix jobs even if one fails
+      fail-fast: false
       matrix:
-        dir: ${{ fromJSON(needs.changed-directories.outputs.directories) }}
-    # defaults:
-    #   run:
-    #     working-directory: ${{ matrix.dir }}
+        dir: ${{ fromJSON(needs.changed-config.outputs.directories) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Run Trivy vulnerability scanner in IaC mode
+      - name: Run Trivy config scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_IGNOREFILE: ${{ github.workspace }}/.github/trivyignore.yaml
@@ -60,22 +69,88 @@ jobs:
           trivy-config: ${{ github.workspace }}/.github/trivy.yaml
           hide-progress: false
           ignore-unfixed: true
-          limit-severities-for-sarif: true # only include critical and high severity vulnerabilities in the SARIF file (default is false)
-          output: trivy.txt
+          limit-severities-for-sarif: true
+          output: trivy-config.txt
           exit-code: 1
           severity: CRITICAL,HIGH
-      - name: Output Trivy results
+      - name: Output Trivy config results
         if: always()
         run: |
-          if [[ -s trivy.txt ]]; then
+          if [[ -s trivy-config.txt ]]; then
             {
-              echo "### Security Output"
+              echo "### Config Scan"
               echo "<details><summary>Click to expand</summary>"
               echo ""
               echo '```terraform'
-              cat trivy.txt
+              cat trivy-config.txt
               echo '```'
               echo "</details>"
             } >> $GITHUB_STEP_SUMMARY
-            cat trivy.txt
+            cat trivy-config.txt
+          fi
+
+  # ── Filesystem (dependency CVE) scanning ────────────────────────────
+  changed-fs:
+    name: Changed Filesystem Dirs
+    runs-on: ubuntu-latest
+    outputs:
+      directories: ${{ steps.changed.outputs.all_changed_files }}
+      any_changed: ${{ steps.changed.outputs.any_changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2
+      - name: Directories with Dep Changes
+        id: changed
+        uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
+        with:
+          files: |
+            **/go.mod
+            **/go.sum
+            **/package.json
+            bun.lock
+          dir_names: true
+          dir_names_exclude_current_dir: true
+          matrix: true
+
+  scan-fs:
+    needs: [changed-fs]
+    runs-on: ubuntu-latest
+    if: needs.changed-fs.outputs.any_changed == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJSON(needs.changed-fs.outputs.directories) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: filesystem
+          scan-ref: ${{ matrix.dir }}
+          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
+          hide-progress: false
+          ignore-unfixed: true
+          output: trivy-fs.txt
+          exit-code: 1
+          severity: CRITICAL,HIGH
+      - name: Output Trivy filesystem results
+        if: always()
+        run: |
+          if [[ -s trivy-fs.txt ]]; then
+            {
+              echo "### Filesystem Scan"
+              echo "<details><summary>Click to expand</summary>"
+              echo ""
+              echo '```'
+              cat trivy-fs.txt
+              echo '```'
+              echo "</details>"
+            } >> $GITHUB_STEP_SUMMARY
+            cat trivy-fs.txt
           fi
