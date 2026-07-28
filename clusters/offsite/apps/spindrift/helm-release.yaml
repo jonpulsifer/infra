@@ -18,16 +18,13 @@ spec:
   chart:
     spec:
       chart: packages/charts/spindrift
-      reconcileStrategy: ChartVersion
       sourceRef:
         kind: GitRepository
         name: infra
         namespace: flux-system
   values:
-    # This line is the deploy trigger: the `containers` workflow rewrites the
-    # digest and opens an automerging PR as soon as a build of `apps/spindrift`
-    # lands on main, so Spindrift ships on merge instead of on Renovate's
-    # cadence. Renovate still bumps it if that path ever fails.
+    # Renovate pins the digest on this line. Flux picks up the change
+    # and rolls out the new image automatically.
     image: ghcr.io/jonpulsifer/spindrift:latest@sha256:868c823117de088bb5469697cab1f9fc66769c7392856e3757aab000d062307c
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
