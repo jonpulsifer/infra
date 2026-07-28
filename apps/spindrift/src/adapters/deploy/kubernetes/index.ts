@@ -41,6 +41,7 @@ import type {
   KubernetesConnection,
   KubernetesDelivery,
 } from '../../../domain/target.ts';
+import { workloadName } from '../../../domain/workload-name.ts';
 import type {
   DeployAdapter,
   DeployEvent,
@@ -723,9 +724,12 @@ function appliedDigest(flavour: Flavour, object: KubernetesObject): string {
   return app?.artifactDigest ?? '';
 }
 
+/** The longest name an object may carry, which every adapter shortens to. */
+const RELEASE_NAME_LIMIT = 63;
+
 /** One release per (Component, Target), so a re-deploy is an upgrade. */
 function releaseName(desired: DesiredState): string {
-  return `${desired.app}-${desired.component}`.slice(0, 63);
+  return workloadName(desired, RELEASE_NAME_LIMIT);
 }
 
 function resourceLabel(object: KubernetesObject): string {

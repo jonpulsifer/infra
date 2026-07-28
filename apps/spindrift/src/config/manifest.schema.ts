@@ -215,6 +215,47 @@ export const installationManifestSchema = z
          * do not choose one (§14).
          */
         homeVesselProject: nonEmptyString,
+        /**
+         * How this installation reaches a cloud Target, with nothing stored
+         * (§13's one auth mode).
+         *
+         * The shape is an `external_account` credential document's, field for
+         * field, because an operator configuring this has one already and
+         * copying it should be the whole of the work.
+         *
+         * Nullable, stated the way `auth.gateway` and `github.buildWorkflow`
+         * are: an installation with no cloud Targets has no honest value to put
+         * here, and a placeholder would be a configuration that looks complete
+         * and fails on the first deploy. Null means cloud Targets cannot be
+         * reached, and nothing else changes.
+         */
+        federation: z
+          .object({
+            /** The workload-identity pool provider this cluster is trusted by. */
+            audience: nonEmptyString,
+            /** Where a projected token is exchanged for a federated one. */
+            tokenUrl: z.url(),
+            /**
+             * Where the projected token is read from.
+             *
+             * No default, and deliberately so: the convenient path — the
+             * default service account token — is minted for this cluster's own
+             * API server and a cloud API refuses it. Requiring the operator to
+             * name the volume they projected keeps the wrong token from being
+             * the easy one.
+             */
+            tokenPath: nonEmptyString.regex(
+              /^\//,
+              'must be an absolute path inside the pod',
+            ),
+            /**
+             * The service account to impersonate, as a `generateAccessToken`
+             * url, or null to use the federated identity's own grants.
+             */
+            impersonationUrl: z.url().nullable(),
+          })
+          .strict()
+          .nullable(),
       })
       .strict(),
 

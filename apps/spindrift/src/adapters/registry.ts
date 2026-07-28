@@ -36,6 +36,7 @@ import { CloudBuildRoute } from './build/cloud-build.ts';
 import type { BuildAdapter } from './build/contract.ts';
 import { GitHubActionsBuildRoute } from './build/github-actions.ts';
 import { InClusterBuildRoute } from './build/in-cluster.ts';
+import { workloadIdentityToken } from './deploy/cloud/federation.ts';
 import { CloudRunDeployAdapter } from './deploy/cloudrun/index.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
 import { KubernetesApi, type TokenProvider } from './deploy/kubernetes/api.ts';
@@ -102,6 +103,8 @@ export interface RegistryOptions {
   readonly storeToken?: () => string | Promise<string>;
   /** And for the cloud builder's, which authorizes separately again. */
   readonly buildToken?: () => string | Promise<string>;
+  /** And for the cloud runtimes a Target is deployed to. */
+  readonly cloudToken?: () => string | Promise<string>;
 }
 
 /**
@@ -153,15 +156,21 @@ export function createAdapterRegistry(
   // connection carries its own endpoint and project, so one instance drives
   // every connected project the same way the cluster adapter drives every
   // cluster.
-  const cloudToken = options.token ?? projectedServiceAccountToken();
+  //
+  // **Not the projected service account token this cluster is reached with.**
+  // That one is minted for this cluster's own API server and a cloud API
+  // refuses it; the failure would be a `401` on every cloud deploy, blamed on
+  // the Target. What belongs here is a federated token, which is what
+  // `cloudTokenFor` mints — see `cloud/federation.ts`.
+  const cloud = cloudTokenFor(options);
   const deployAdapters: Partial<Record<TargetAdapter, DeployAdapter>> = {
     kubernetes,
     cloudrun: new CloudRunDeployAdapter({
-      token: cloudToken,
+      token: cloud,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
     static: new StaticDeployAdapter({
-      token: cloudToken,
+      token: cloud,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
   };
@@ -328,6 +337,33 @@ export function buildToken(env: Record<string, string | undefined> = Bun.env) {
     }
     return token;
   };
+}
+
+/**
+ * How this installation reaches a cloud Target's control API.
+ *
+ * **No credential, in either arm.** §13 settles one auth mode — "native OIDC
+ * federation, nothing stored" — and `cloud/federation.ts` is the whole of it:
+ * a projected token, exchanged, optionally impersonating. An installation that
+ * configured no federation gets a provider that refuses rather than one that is
+ * absent, because §13's "connect always succeeds" means a cloud Target still
+ * exists and still has to be able to say why it is unreachable.
+ */
+function cloudTokenFor(options: RegistryOptions): TokenProvider {
+  if (options.cloudToken !== undefined) return options.cloudToken;
+
+  const federation = options.manifest.cloud.federation;
+  if (federation === null) {
+    return () => {
+      throw new AdapterUnavailableError(
+        'this installation configured no cloud federation, so it cannot reach a cloud Target',
+      );
+    };
+  }
+  return workloadIdentityToken({
+    ...federation,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
 }
 
 /**

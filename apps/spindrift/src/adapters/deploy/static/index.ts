@@ -28,11 +28,9 @@ import type {
   StoreAdapter,
   TargetAdapter,
 } from '../../../config/manifest.schema.ts';
-import {
-  type PrerequisiteResult,
-  prerequisitesFor,
-  type TargetDiscovery,
-  type TargetInspection,
+import type {
+  TargetDiscovery,
+  TargetInspection,
 } from '../../../domain/capabilities.ts';
 import {
   type ArtifactType,
@@ -40,13 +38,14 @@ import {
   type DesiredState,
 } from '../../../domain/desired-state.ts';
 import type { StaticConnection } from '../../../domain/target.ts';
+import { workloadName } from '../../../domain/workload-name.ts';
 import { cloudChecklist } from '../cloud/checklist.ts';
+import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
 import {
-  CloudHttp,
-  type CloudResponse,
-  type Fetcher,
-  type TokenProvider,
-} from '../cloud/http.ts';
+  type CloudFailure,
+  cloudWriteFailure,
+  orderedChecklist,
+} from '../cloud/verdict.ts';
 import type {
   DeployAdapter,
   DeployEvent,
@@ -71,18 +70,13 @@ export interface StaticAdapterOptions {
 const SERVICE_NAME = 'static hosting';
 
 /** The API version every call below hangs off. */
-const V = '/v1beta1';
+const API_VERSION = '/v1beta1';
 
 /** The label a version carries so `observe` can report what is serving. */
 const DIGEST_LABEL = 'spindrift-digest';
 const DEPLOY_LABEL = 'spindrift-deploy';
 
-/**
- * A site id is capped well below a DNS label, so a long App plus a long
- * Component has to be shortened — and shortened *deterministically*, because a
- * second deploy that produced a different id would create a second site rather
- * than release to the first.
- */
+/** A site id is capped well below a DNS label. See `domain/workload-name.ts`. */
 const SITE_ID_LIMIT = 30;
 
 /** What a version looks like coming back, as much as this adapter reads. */
@@ -164,14 +158,14 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const created = await this.ensureSite(http, connection, site);
     if (created.ok === false) {
-      const failure = writeFailure(created.failure, ref);
+      const failure = cloudWriteFailure(created.failure, ref);
       yield this.status('FAILED', { resource: site, reason: failure.reason });
       return failure;
     }
 
     const released = await this.release(http, site, desired, files);
     if (released.ok === false) {
-      const failure = writeFailure(released.failure, ref);
+      const failure = cloudWriteFailure(released.failure, ref);
       yield this.status('FAILED', { resource: site, reason: failure.reason });
       return failure;
     }
@@ -187,7 +181,7 @@ export class StaticDeployAdapter implements DeployAdapter {
         desired.hostname.vanity,
       );
       if (attached.ok === false) {
-        const failure = writeFailure(attached.failure, ref);
+        const failure = cloudWriteFailure(attached.failure, ref);
         yield this.status('FAILED', { resource: site, reason: failure.reason });
         return failure;
       }
@@ -230,7 +224,7 @@ export class StaticDeployAdapter implements DeployAdapter {
       releases?: readonly HostingRelease[];
     }>({
       method: 'GET',
-      path: `${V}/sites/${encodeURIComponent(site)}/releases`,
+      path: `${API_VERSION}/sites/${encodeURIComponent(site)}/releases`,
       query: { pageSize: '1' },
     });
     if (!releases.ok) return null;
@@ -253,7 +247,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const deleted = await this.http(connection).json<unknown>({
       method: 'DELETE',
-      path: `${V}/sites/${encodeURIComponent(site)}`,
+      path: `${API_VERSION}/sites/${encodeURIComponent(site)}`,
     });
     if (deleted.ok) return;
     if (deleted.kind === 'status' && deleted.status === 404) return;
@@ -273,12 +267,12 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const probe = await this.http(connection).json<unknown>({
       method: 'GET',
-      path: `${V}/projects/${encodeURIComponent(connection.project)}/sites`,
+      path: `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites`,
       query: { pageSize: '1' },
     });
 
     return {
-      prerequisites: order(
+      prerequisites: orderedChecklist(
         cloudChecklist(probe, {
           project: connection.project,
           service: SERVICE_NAME,
@@ -318,7 +312,7 @@ export class StaticDeployAdapter implements DeployAdapter {
   ): Promise<Outcome<HostingSite>> {
     const read = await http.json<HostingSite>({
       method: 'GET',
-      path: `${V}/sites/${encodeURIComponent(site)}`,
+      path: `${API_VERSION}/sites/${encodeURIComponent(site)}`,
     });
     if (read.ok && read.value !== undefined) {
       return { ok: true, value: read.value };
@@ -329,7 +323,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const created = await http.json<HostingSite>({
       method: 'POST',
-      path: `${V}/projects/${encodeURIComponent(connection.project)}/sites`,
+      path: `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites`,
       query: { siteId: site },
       body: {},
     });
@@ -361,7 +355,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const version = await http.json<HostingVersion>({
       method: 'POST',
-      path: `${V}/sites/${encodeURIComponent(site)}/versions`,
+      path: `${API_VERSION}/sites/${encodeURIComponent(site)}/versions`,
       body: {
         labels: {
           [DIGEST_LABEL]: desired.artifact.digest,
@@ -377,7 +371,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const populated = await http.json<PopulateResult>({
       method: 'POST',
-      path: `${V}/${name}:populateFiles`,
+      path: `${API_VERSION}/${name}:populateFiles`,
       body: {
         files: Object.fromEntries(
           [...compressed].map(([path, file]) => [path, file.hash]),
@@ -408,7 +402,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const finalized = await http.json<HostingVersion>({
       method: 'PATCH',
-      path: `${V}/${name}`,
+      path: `${API_VERSION}/${name}`,
       query: { updateMask: 'status' },
       body: { status: 'FINALIZED' },
     });
@@ -416,7 +410,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
     const released = await http.json<HostingRelease>({
       method: 'POST',
-      path: `${V}/sites/${encodeURIComponent(site)}/releases`,
+      path: `${API_VERSION}/sites/${encodeURIComponent(site)}/releases`,
       query: { versionName: name },
       body: {},
     });
@@ -432,7 +426,7 @@ export class StaticDeployAdapter implements DeployAdapter {
   ): Promise<Outcome<void>> {
     const attached = await http.json<unknown>({
       method: 'POST',
-      path: `${V}/sites/${encodeURIComponent(site)}/domains`,
+      path: `${API_VERSION}/sites/${encodeURIComponent(site)}/domains`,
       body: { site, domainName: domain },
     });
     if (attached.ok) return { ok: true, value: undefined };
@@ -528,29 +522,17 @@ type Outcome<Value> =
   | { readonly ok: true; readonly value: Value }
   | {
       readonly ok: false;
-      readonly failure: Extract<CloudResponse<unknown>, { ok: false }>;
+      readonly failure: CloudFailure;
     };
 
 /** A far side that answered successfully and left out what was asked for. */
-function missing(
-  message: string,
-): Extract<CloudResponse<unknown>, { ok: false }> {
+function missing(message: string): CloudFailure {
   return { ok: false, kind: 'transport', message };
 }
 
-/**
- * One site per (App, Component), shortened deterministically when it must be.
- *
- * A site id is capped at thirty characters, which two ordinary names exceed
- * easily. Truncating alone would make two Components of one App collide on a
- * site — the worse failure, since the second deploy would silently replace the
- * first — so the tail carries a digest of the full name, which cannot.
- */
+/** One site per (App, Component), within the length the product allows. */
 export function siteId(desired: DesiredState): string {
-  const full = `${desired.app}-${desired.component}`;
-  if (full.length <= SITE_ID_LIMIT) return full;
-  const hash = new Bun.CryptoHasher('sha256').update(full).digest('hex');
-  return `${full.slice(0, SITE_ID_LIMIT - 8)}-${hash.slice(0, 7)}`;
+  return workloadName(desired, SITE_ID_LIMIT);
 }
 
 /** The adapter's own handle on what `apply` placed — opaque to core (§6). */
@@ -603,39 +585,4 @@ function bundleFailure(
     reason: 'INTERNAL',
     detail: cause instanceof Error ? cause.message : String(cause),
   };
-}
-
-/** A call that never landed, in §6's vocabulary. */
-function writeFailure(
-  failure: Extract<CloudResponse<unknown>, { ok: false }>,
-  ref: DeployRef,
-): Extract<DeployVerdict, { phase: 'FAILED' }> {
-  if (failure.kind === 'transport') {
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'TARGET_UNREACHABLE',
-      detail: failure.message,
-    };
-  }
-  const rejected = failure.status >= 400 && failure.status < 500;
-  const authFailure = failure.status === 401 || failure.status === 403;
-  return {
-    phase: 'FAILED',
-    ref,
-    reason: rejected && !authFailure ? 'REJECTED' : 'TARGET_UNREACHABLE',
-    detail: failure.message,
-    debug: { status: failure.status, reason: failure.reason },
-  };
-}
-
-/** The checklist in its adapter's declared order, so the UI never reorders it. */
-function order(
-  results: readonly PrerequisiteResult[],
-  adapter: TargetAdapter,
-): readonly PrerequisiteResult[] {
-  const found = new Map(results.map((result) => [result.name, result]));
-  return prerequisitesFor(adapter).map(
-    (name) => found.get(name) ?? { name, met: false, detail: 'not assessed' },
-  );
 }

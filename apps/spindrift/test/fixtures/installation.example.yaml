@@ -23,6 +23,15 @@ dns:
 cloud:
   artifactsProject: example-artifacts
   homeVesselProject: example-home
+  # §13's one auth mode: the pod projects a token, the token is exchanged, and
+  # nothing is stored. The path is a *separately* projected volume whose
+  # audience is the pool below — not the default service account token, which is
+  # minted for this cluster's own API server and which a cloud API refuses.
+  federation:
+    audience: //iam.example.test/projects/1/locations/global/workloadIdentityPools/example/providers/cluster
+    tokenUrl: https://sts.example.test/v1/token
+    tokenPath: /var/run/secrets/cloud/token
+    impersonationUrl: https://iamcredentials.example.test/v1/projects/-/serviceAccounts/spindrift@example-home.example.test:generateAccessToken
 
 charts:
   app: example/spindrift-app

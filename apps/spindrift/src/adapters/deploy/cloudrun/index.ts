@@ -29,12 +29,10 @@ import type {
   StoreAdapter,
   TargetAdapter,
 } from '../../../config/manifest.schema.ts';
-import {
-  type PolicyEngineState,
-  type PrerequisiteResult,
-  prerequisitesFor,
-  type TargetDiscovery,
-  type TargetInspection,
+import type {
+  PolicyEngineState,
+  TargetDiscovery,
+  TargetInspection,
 } from '../../../domain/capabilities.ts';
 import {
   type ArtifactType,
@@ -44,12 +42,8 @@ import {
 } from '../../../domain/desired-state.ts';
 import type { CloudRunConnection } from '../../../domain/target.ts';
 import { cloudChecklist } from '../cloud/checklist.ts';
-import {
-  CloudHttp,
-  type CloudResponse,
-  type Fetcher,
-  type TokenProvider,
-} from '../cloud/http.ts';
+import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
+import { cloudWriteFailure, orderedChecklist } from '../cloud/verdict.ts';
 import type {
   DeployAdapter,
   DeployEvent,
@@ -199,7 +193,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       body: document,
     });
     if (!applied.ok) {
-      const verdict = writeFailure(applied, ref);
+      const verdict = cloudWriteFailure(applied, ref);
       yield this.status('FAILED', { resource: id, reason: verdict.reason });
       return verdict;
     }
@@ -301,7 +295,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     });
 
     return {
-      prerequisites: order(prerequisites, this.adapter),
+      prerequisites: orderedChecklist(prerequisites, this.adapter),
       discovery: await this.discover(connection),
     };
   }
@@ -400,7 +394,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     ) {
       return null;
     }
-    const failure = writeFailure(written, id);
+    const failure = cloudWriteFailure(written, id);
     return {
       phase: 'FAILED',
       reason: failure.reason,
@@ -576,43 +570,4 @@ function parseRef(
   if (!ref.startsWith(prefix)) return null;
   const id = ref.slice(prefix.length);
   return id.length === 0 || id.includes('/') ? null : id;
-}
-
-/** A call that never landed, in §6's vocabulary. */
-function writeFailure(
-  failure: Extract<CloudResponse<unknown>, { ok: false }>,
-  ref: DeployRef,
-): Extract<DeployVerdict, { phase: 'FAILED' }> {
-  if (failure.kind === 'transport') {
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'TARGET_UNREACHABLE',
-      detail: failure.message,
-    };
-  }
-  // A 4xx that is not an auth failure is the project refusing this document —
-  // an org policy, a quota, an invalid spec — which §6 puts under one reason.
-  // An auth failure or a 5xx is the project being unavailable to Spindrift,
-  // which is a different blame entirely.
-  const rejected = failure.status >= 400 && failure.status < 500;
-  const authFailure = failure.status === 401 || failure.status === 403;
-  return {
-    phase: 'FAILED',
-    ref,
-    reason: rejected && !authFailure ? 'REJECTED' : 'TARGET_UNREACHABLE',
-    detail: failure.message,
-    debug: { status: failure.status, reason: failure.reason },
-  };
-}
-
-/** The checklist in its adapter's declared order, so the UI never reorders it. */
-function order(
-  results: readonly PrerequisiteResult[],
-  adapter: TargetAdapter,
-): readonly PrerequisiteResult[] {
-  const found = new Map(results.map((result) => [result.name, result]));
-  return prerequisitesFor(adapter).map(
-    (name) => found.get(name) ?? { name, met: false, detail: 'not assessed' },
-  );
 }

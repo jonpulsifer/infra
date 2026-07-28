@@ -348,13 +348,19 @@ export function exclusionsFor(
   // §10's reach rule: "a store must be reachable by **the Target the Component
   // is placed on** — not by every Target."
   //
-  // It does not bind a `website`, because a website reaches no store at all:
-  // §10's one exception makes its configuration build arguments derived from
-  // the kind, so there is nothing at run time for a store to deliver. Applying
-  // the rule anyway would exclude every Target that cannot deliver config from
-  // holding a Component that never asks for any — which is exactly what static
-  // hosting is, and it would make §13's "picking the static Target *means*
-  // public" unreachable by construction.
+  // It does not bind a `website`, because a website reaches no store at all.
+  // That is not a judgement made here: §10's one exception makes a website's
+  // configuration build arguments **derived mechanically from Component kind**,
+  // and `commands/config/isBuildTimeConfig` is that derivation — it takes a
+  // kind and nothing else, so a website has no runtime rows for a store to
+  // deliver whichever rendering it takes. The two must agree, and this comment
+  // is where a future reader is told they are locked together rather than
+  // re-deriving the question from the spec.
+  //
+  // Applying the rule anyway would exclude every Target that cannot deliver
+  // config from holding a Component that never asks for any — which is exactly
+  // what static hosting is, and it would make §13's "picking the static Target
+  // *means* public" unreachable by construction.
   if (
     requirements.kind !== 'website' &&
     !can.reachableSecretStores.includes(requirements.secretStore)

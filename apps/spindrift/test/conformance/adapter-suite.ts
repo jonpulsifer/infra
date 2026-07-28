@@ -26,7 +26,10 @@ import type {
   DeployTarget,
 } from '../../src/adapters/deploy/contract.ts';
 import type { SecretStore } from '../../src/adapters/store/contract.ts';
-import { prerequisitesFor } from '../../src/domain/capabilities.ts';
+import {
+  PREREQUISITES,
+  prerequisitesFor,
+} from '../../src/domain/capabilities.ts';
 import type {
   ArtifactType,
   DesiredState,
@@ -185,6 +188,17 @@ export function deployAdapterSuite(
       expect(inspection.prerequisites.map((item) => item.name).sort()).toEqual(
         [...prerequisitesFor(made.adapter)].sort(),
       );
+      // Comparing against the adapter's own list is a weaker pin than comparing
+      // against one global list, so the teeth it gives up are put back here:
+      // an adapter cannot shrink its checklist to nothing and be trivially
+      // healthy, and every row it does answer has to be from the one
+      // vocabulary. `test/domain/capabilities.test.ts` holds the other half —
+      // that no cloud Target is asked a chart question, and that a checklist
+      // answered against the wrong adapter's list reads unhealthy.
+      expect(inspection.prerequisites.length).toBeGreaterThan(0);
+      for (const item of inspection.prerequisites) {
+        expect(PREREQUISITES).toContain(item.name);
+      }
     });
 
     test('inspect reports observations, not judgements', async () => {

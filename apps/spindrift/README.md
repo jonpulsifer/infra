@@ -345,6 +345,22 @@ read per call so a rotated Secret takes effect without a restart. The other two
 routes need neither — hosted CI goes through the App key, and the in-cluster
 Job authorizes with the projected service account token.
 
+**A cloud Target needs no variable at all**, and that is §13's one auth mode
+arriving where the spec wanted it: "native OIDC federation, nothing stored".
+`src/adapters/deploy/cloud/federation.ts` reads a projected token, exchanges it
+at the pool's STS endpoint, and optionally impersonates a service account —
+`cloud.federation` in the manifest is that `external_account` credential
+document, field for field, so an operator who has one copies it.
+
+The mistake it exists to prevent is worth naming, because it is the convenient
+one: **the default service account token is the wrong token.** It is minted for
+this cluster's own API server, and a cloud API refuses it — the symptom would be
+a `401` on every cloud deploy, blamed on the Target. So `tokenPath` is required
+configuration naming the *separately* projected volume whose audience is the
+pool, with no default that could quietly be the wrong one. An installation that
+configured no federation gets a provider that refuses with that sentence, rather
+than a Target that silently cannot be assessed.
+
 ## The three deploy backends
 
 One contract, three renderings, and **one conformance suite that every one of
@@ -390,17 +406,25 @@ delivers no config still holds the one kind that asks for none. Applying it
 anyway would make "picking the static Target *means* public" (§13) unreachable
 by construction.
 
-Two things stated rather than worked around:
+Three things stated rather than worked around:
 
 - **Cloud Run advertises no egress filtering** (§8). It has network controls and
   not the by-name allowlist §8 specifies, and a capability reported on the
   strength of something adjacent is a workload placed somewhere its egress was
   never actually constrained.
-- **Cloud Run runs no job yet**, and `KINDS_BY_ADAPTER` says so. A job there is
-  a second resource with its own API and a schedule living in a separate
-  scheduling service, which belongs with jobs rather than with this Service
-  path. Until it exists a job is a non-candidate there with the reason stated
-  (§3's grammar), refused at Place rather than accepted and failed at apply.
+- **Cloud Run runs no job yet**, and `KINDS_BY_ADAPTER` says so. This diverges
+  from §3 and §6, which give `cloudrun` all three kinds: a job there is a second
+  resource with its own API and a schedule living in a separate scheduling
+  service, and none of that is the Service path. Until it exists a job is a
+  non-candidate there with the reason stated (§3's grammar), refused at Place
+  rather than accepted and failed at apply — and widening the row is the first
+  thing jobs will do.
+- **`Private` has no audience on Cloud Run.** §9 gives it "one
+  admin-configured Private audience per Target" and no Target carries one, so a
+  `private` Component gets an empty invoker policy: reachable at its address and
+  refusing everyone. Wrong in the safe direction, and it stays there until the
+  authenticated edge lands — which the plan already calls the largest
+  non-Spindrift dependency.
 
 Exposure reaches the cloud runtime as two mechanisms, because the runtime
 answers two separate questions: *who can route to it* is ingress, and *who may
@@ -455,17 +479,33 @@ The unproxied leg costs something, and §9 absorbs it on purpose:
 `VANITY_LEG_LOSSES` says the leg buffers the whole response, so **WebSockets and
 SSE die there and requests cap at sixty seconds**. Two-layer naming is what
 makes that absorbable — the app stays fully capable at its canonical name — so
-these are constants the UI **states**, never something worked around. A
-workaround would be a second edge, which is the external load balancer §9
-declines to have. `VANITY_CEILING` is reported the same way: roughly twenty is a
-fact about one apex's certificate, so `vanityRation` counts and nothing refuses
-the twenty-first.
+the answer is to **state** them, never to work around them. A workaround would
+be a second edge, which is the external load balancer §9 declines to have.
+`VANITY_CEILING` is the same kind of fact: roughly twenty is a property of one
+apex's certificate, so `vanityRation` counts and nothing refuses the
+twenty-first.
+
+**Both are values with no reader yet.** The rules are here and tested; the
+screens that state them are Milestone 8, and nothing counts minted names, so
+`vanityRation` is only ever asked about a number a caller supplies. They are
+here rather than later because the leg they describe exists now and the rule is
+what an adapter would otherwise each invent.
 
 On a static Target the vanity name is a **domain on the site that is already
 serving**, which is what makes §9's "moving an App between backends is one
 record re-point" true there rather than aspirational: the name is a function of
 the label and the zone alone, so a move changes what is underneath it and never
 what anyone bookmarked.
+
+**The non-metal vanity leg itself is not built.** §9 closes it with "the same
+site with a zero-file version carrying a rewrite", which is what a *Cloud Run*
+Component's vanity name would need — and the Cloud Run adapter reads no
+hostname at all, because there the platform names its own and the canonical
+comes back across the seam. So an App on Cloud Run with a vanity label has a
+name nothing serves. The static path above is the case where the name lands on
+the site that already holds the files; the leg in front of another backend
+wants the same `DNSEndpoint` machinery the status name does, and it waits with
+it.
 
 One name is contended and one is not. The canonical is per Component, so it
 never collides. The **vanity name is per App**, so an App with two

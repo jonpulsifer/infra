@@ -20,6 +20,7 @@ import type {
   DesiredState,
   Exposure,
 } from '../../../domain/desired-state.ts';
+import { workloadName } from '../../../domain/workload-name.ts';
 
 /** The ingress settings the runtime accepts, in its own vocabulary. */
 export const INGRESS = {
@@ -82,6 +83,7 @@ export function cloudRunService(
   desired: DesiredState,
   context: CloudRunRenderContext,
 ): Record<string, unknown> {
+  const limits = resourceLimits(desired);
   const labels = {
     'spindrift-managed': 'true',
     'spindrift-app': desired.app,
@@ -98,9 +100,7 @@ export function cloudRunService(
           image: context.image,
           ports: [{ containerPort: CONTAINER_PORT }],
           env: environment(desired.config, context.project),
-          ...(resourceLimits(desired) === null
-            ? {}
-            : { resources: { limits: resourceLimits(desired) } }),
+          ...(limits === null ? {} : { resources: { limits } }),
         },
       ],
     },
@@ -157,6 +157,14 @@ function resourceLimits(desired: DesiredState): Record<string, string> | null {
  * of public reach to be as expressible as the grant, and a client that could
  * only add would leave a tightened Component reachable by the binding nobody
  * took away.
+ *
+ * **A named gap, in the direction that fails closed.** §9 gives `Private` "one
+ * admin-configured Private audience per Target", and no Target carries one yet
+ * — so a `private` Component gets an empty binding list, which is invokable by
+ * nobody rather than by an audience. It is reachable at its address and
+ * refuses everyone, which is wrong in the safe direction; the plan already
+ * treats the authenticated edge as the largest non-Spindrift dependency (Risk
+ * 2), and the audience belongs with it rather than being invented here.
  */
 export function invokerPolicy(exposure: Exposure): Record<string, unknown> {
   return {
@@ -168,10 +176,13 @@ export function invokerPolicy(exposure: Exposure): Record<string, unknown> {
   };
 }
 
+/**
+ * The longest name the runtime accepts for a Service — the same ceiling a
+ * Kubernetes object name has, which is why both go through one helper.
+ */
+const SERVICE_ID_LIMIT = 63;
+
 /** One Service per (App, Component), so a re-deploy is a new revision. */
 export function serviceId(desired: DesiredState): string {
-  // The runtime caps a service id at 63 characters, the same ceiling a
-  // Kubernetes name has, so the two adapters truncate identically rather than
-  // each inventing a limit.
-  return `${desired.app}-${desired.component}`.slice(0, 63);
+  return workloadName(desired, SERVICE_ID_LIMIT);
 }
