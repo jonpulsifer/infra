@@ -1,0 +1,53 @@
+# Local development manifest with localhost hostname for WebAuthn passkeys
+installation: dev
+
+controlPlane:
+  hostname: localhost
+
+auth:
+  gateway: null
+
+dns:
+  apexZone: apps.example.test
+  vanityZone: example.test
+
+cloud:
+  artifactsProject: example-artifacts
+  homeVesselProject: example-home
+  federation:
+    audience: //iam.example.test/projects/1/locations/global/workloadIdentityPools/example/providers/cluster
+    tokenUrl: https://sts.example.test/v1/token
+    tokenPath: /var/run/secrets/cloud/token
+    impersonationUrl: https://iamcredentials.example.test/v1/projects/-/serviceAccounts/spindrift@example-home.example.test:generateAccessToken
+
+charts:
+  app: example/spindrift-app
+  installer: example/spindrift
+
+supplyChain:
+  registry: registry.example.test/artifacts
+  verifier: verifier.example.test
+
+github:
+  appId: '1234567'
+  apiBaseUrl: https://api.git.example.test
+  buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
+
+build:
+  routes:
+    - name: hosted
+      adapter: github-actions
+  zeroConfigFrontend: registry.example.test/zero-config:pinned
+
+secretStore:
+  adapter: gcp-secret-manager
+  endpoint: https://secrets.example.test
+  container: example-secrets
+
+targets:
+  - name: cluster
+    adapter: kubernetes
+  - name: cloud
+    adapter: cloudrun
+  - name: hosting
+    adapter: static

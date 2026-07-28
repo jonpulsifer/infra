@@ -16,10 +16,10 @@ import { z } from 'zod';
 /** A non-empty string with no surrounding whitespace. */
 const nonEmptyString = z.string().trim().min(1);
 
-/** A DNS zone apex, e.g. `apps.example.test`. */
+/** A DNS zone apex, e.g. `apps.example.test` or `localhost`. */
 const zone = nonEmptyString.regex(
-  /^(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+$/,
-  'must be a lowercase dotted DNS name',
+  /^(localhost|(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+)$/,
+  'must be a lowercase DNS name or localhost',
 );
 
 /** A trusted HTTP request header configured by the front-door Gateway. */
