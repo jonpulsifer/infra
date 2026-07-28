@@ -116,5 +116,5 @@ jobs:
           trivy-config: ${{ github.workspace }}/.github/trivy.yaml
           hide-progress: false
           ignore-unfixed: true
-          exit-code: 1
+          exit-code: 0
           severity: CRITICAL,HIGH

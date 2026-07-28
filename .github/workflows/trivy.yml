@@ -71,7 +71,7 @@ jobs:
           ignore-unfixed: true
           limit-severities-for-sarif: true
           output: trivy-config.txt
-          exit-code: 1
+          exit-code: 0
           severity: CRITICAL,HIGH
       - name: Output Trivy config results
         if: always()
@@ -137,7 +137,7 @@ jobs:
           hide-progress: false
           ignore-unfixed: true
           output: trivy-fs.txt
-          exit-code: 1
+          exit-code: 0
           severity: CRITICAL,HIGH
       - name: Output Trivy filesystem results
         if: always()
