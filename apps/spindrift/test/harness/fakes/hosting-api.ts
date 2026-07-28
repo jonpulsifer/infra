@@ -1,0 +1,358 @@
+/**
+ * A fake static-hosting API (Task 29, § Seam 2).
+ *
+ * "A fake of the far-side HTTP API behind the real client, with the test
+ * asserting the requests that were made" — so the adapter's real five-step
+ * release, its real hashing, and its real bundle reading all run.
+ *
+ * Three behaviours are modelled because the adapter depends on all three:
+ *
+ * - **`populateFiles` asks for the hashes it does not already hold**, which is
+ *   what makes a redeploy of an unchanged site cheap. A fake that always asked
+ *   for everything would let an adapter that ignored the answer pass.
+ * - **A version has to be finalized before a release will take it**, because
+ *   that ordering is the product's whole contract about immutability and an
+ *   adapter that released a draft would silently serve nothing.
+ * - **The bundle is served from wherever the artifact says it is**, over the
+ *   same injected transport, because the adapter fetching its own artifact is a
+ *   real step that a fake API alone would leave untested.
+ */
+import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
+import { CLOUD_ENDPOINTS } from '../installation.ts';
+
+export interface RecordedHostingRequest {
+  method: string;
+  url: string;
+  path: string;
+  body: unknown;
+}
+
+export interface FakeHostingOptions {
+  readonly project?: string;
+  /** Sites that already exist, by id. */
+  readonly sites?: readonly string[];
+  /** Hashes the product already holds, so it will not ask for them again. */
+  readonly held?: readonly string[];
+  /**
+   * The artifact depot, and the bundle every address under it serves.
+   *
+   * Matched by origin rather than by exact URL because a `files` artifact is
+   * addressed by its own digest: a fake keyed on one URL would have to be
+   * rebuilt for every digest a test uses, which is a fixture detail leaking
+   * into what the test is actually about.
+   */
+  readonly bundle?: {
+    readonly origin: string;
+    readonly bytes: Uint8Array;
+  };
+  /** When set, the list probe `inspect` makes is refused with this. */
+  readonly refuseList?: { status: number; body: unknown };
+  /** When set, creating a version is refused with this. */
+  readonly refuseVersion?: { status: number; body: unknown };
+  /** When set, adding a domain answers with this. */
+  readonly domainAnswer?: { status: number; body: unknown };
+  readonly token?: string;
+}
+
+/** One version the fake is holding, with what has been done to it. */
+interface FakeVersion {
+  name: string;
+  site: string;
+  status: string;
+  labels: Record<string, string>;
+  files: Record<string, string>;
+}
+
+const UPLOAD_BASE = 'https://upload.example.test/files';
+
+export class FakeHosting {
+  readonly endpoint = CLOUD_ENDPOINTS.hosting;
+  readonly requests: RecordedHostingRequest[] = [];
+
+  private readonly sites = new Set<string>();
+  private readonly versions = new Map<string, FakeVersion>();
+  /** Site id → the version name currently released on it. */
+  private readonly released = new Map<string, string>();
+  /** Domains attached, by site — the assertion surface for §9's re-point. */
+  private readonly domains = new Map<string, string[]>();
+  private readonly held: Set<string>;
+  private readonly uploaded = new Set<string>();
+  private nextVersion = 1;
+
+  constructor(private readonly options: FakeHostingOptions = {}) {
+    for (const site of options.sites ?? []) this.sites.add(site);
+    this.held = new Set(options.held ?? []);
+  }
+
+  get project(): string {
+    return this.options.project ?? 'example-vessel';
+  }
+
+  /** Mint the token provider the adapter is constructed with. */
+  token = (): string => this.options.token ?? 'federated-token';
+
+  /** Whether a site exists — the assertion surface for `destroy`. */
+  hasSite(site: string): boolean {
+    return this.sites.has(site);
+  }
+
+  /** The version currently serving on one site, if any. */
+  serving(site: string): FakeVersion | undefined {
+    const name = this.released.get(site);
+    return name === undefined ? undefined : this.versions.get(name);
+  }
+
+  /** The file paths the released version holds, sorted. */
+  servedPaths(site: string): string[] {
+    return Object.keys(this.serving(site)?.files ?? {}).sort();
+  }
+
+  /** Hashes actually uploaded — what proves the adapter honoured the answer. */
+  get uploads(): string[] {
+    return [...this.uploaded].sort();
+  }
+
+  /** Domains attached to one site (§9). */
+  domainsOf(site: string): string[] {
+    return [...(this.domains.get(site) ?? [])];
+  }
+
+  pathsOf(method: string): string[] {
+    return this.requests
+      .filter((request) => request.method === method)
+      .map((request) => request.path);
+  }
+
+  fetch: Fetcher = async (request) => {
+    const url = new URL(request.url);
+
+    // The bundle is not part of the hosting API and carries no bearer token:
+    // it is an artifact address, served here so the adapter's own fetch runs.
+    const bundle = this.options.bundle;
+    if (bundle !== undefined && url.origin === new URL(bundle.origin).origin) {
+      return new Response(bundle.bytes as unknown as BodyInit);
+    }
+
+    if (url.href.startsWith(UPLOAD_BASE)) {
+      const hash = url.pathname.split('/').pop() ?? '';
+      this.uploaded.add(hash);
+      this.held.add(hash);
+      return json(200, {});
+    }
+
+    const contentType = request.headers.get('content-type') ?? '';
+    const body =
+      request.method === 'GET' ||
+      request.method === 'DELETE' ||
+      !contentType.includes('json')
+        ? null
+        : await request.clone().json();
+    this.requests.push({
+      method: request.method,
+      url: `${url.pathname}${url.search}`,
+      path: url.pathname,
+      body,
+    });
+
+    if (request.headers.get('authorization') !== `Bearer ${this.token()}`) {
+      return json(401, { error: { message: 'unauthenticated' } });
+    }
+
+    return this.route(request.method, url, body);
+  };
+
+  private route(method: string, url: URL, body: unknown): Response {
+    const path = url.pathname.replace(/^\/v1beta1\//, '');
+
+    if (path === `projects/${this.project}/sites`) {
+      if (method === 'GET') {
+        if (this.options.refuseList !== undefined) {
+          return json(
+            this.options.refuseList.status,
+            this.options.refuseList.body,
+          );
+        }
+        return json(200, { sites: [...this.sites].map((id) => site(id)) });
+      }
+      if (method === 'POST') {
+        const id = url.searchParams.get('siteId') ?? '';
+        if (id === '') return json(400, error('no siteId'));
+        this.sites.add(id);
+        return json(200, site(id));
+      }
+    }
+
+    const versionMatch = path.match(/^sites\/([^/]+)\/versions\/([^/:]+)$/);
+    if (versionMatch !== null) {
+      return this.finalize(
+        method,
+        url,
+        versionMatch[1] as string,
+        versionMatch[2] as string,
+        body,
+      );
+    }
+
+    const populateMatch = path.match(
+      /^sites\/([^/]+)\/versions\/([^/:]+):populateFiles$/,
+    );
+    if (populateMatch !== null) {
+      return this.populate(
+        `sites/${populateMatch[1]}/versions/${populateMatch[2]}`,
+        body,
+      );
+    }
+
+    const siteMatch = path.match(/^sites\/([^/]+)$/);
+    if (siteMatch !== null) {
+      const id = siteMatch[1] as string;
+      if (method === 'GET') {
+        return this.sites.has(id)
+          ? json(200, site(id))
+          : json(404, error('no site'));
+      }
+      if (method === 'DELETE') {
+        if (!this.sites.has(id)) return json(404, error('no site'));
+        this.sites.delete(id);
+        this.released.delete(id);
+        this.domains.delete(id);
+        return json(200, {});
+      }
+    }
+
+    const versionsMatch = path.match(/^sites\/([^/]+)\/versions$/);
+    if (versionsMatch !== null && method === 'POST') {
+      return this.createVersion(versionsMatch[1] as string, body);
+    }
+
+    const releasesMatch = path.match(/^sites\/([^/]+)\/releases$/);
+    if (releasesMatch !== null) {
+      const id = releasesMatch[1] as string;
+      if (method === 'GET') return this.readReleases(id);
+      if (method === 'POST') return this.release(id, url);
+    }
+
+    const domainsMatch = path.match(/^sites\/([^/]+)\/domains$/);
+    if (domainsMatch !== null && method === 'POST') {
+      if (this.options.domainAnswer !== undefined) {
+        return json(
+          this.options.domainAnswer.status,
+          this.options.domainAnswer.body,
+        );
+      }
+      const id = domainsMatch[1] as string;
+      const name = (body as { domainName?: string })?.domainName ?? '';
+      this.domains.set(id, [...(this.domains.get(id) ?? []), name]);
+      return json(200, { site: id, domainName: name });
+    }
+
+    return json(404, error('no such path'));
+  }
+
+  private createVersion(site: string, body: unknown): Response {
+    if (this.options.refuseVersion !== undefined) {
+      return json(
+        this.options.refuseVersion.status,
+        this.options.refuseVersion.body,
+      );
+    }
+    if (!this.sites.has(site)) return json(404, error('no site'));
+    const name = `sites/${site}/versions/v${this.nextVersion++}`;
+    this.versions.set(name, {
+      name,
+      site,
+      status: 'CREATED',
+      labels: (body as { labels?: Record<string, string> })?.labels ?? {},
+      files: {},
+    });
+    return json(200, { name, status: 'CREATED' });
+  }
+
+  private populate(name: string, body: unknown): Response {
+    const version = this.versions.get(name);
+    if (version === undefined) return json(404, error('no version'));
+    const files = (body as { files?: Record<string, string> })?.files ?? {};
+    version.files = files;
+    // Only the hashes not already held are asked for, which is the behaviour
+    // the adapter's upload loop is written against.
+    const wanted = [...new Set(Object.values(files))].filter(
+      (hash) => !this.held.has(hash),
+    );
+    return json(200, {
+      uploadRequiredHashes: wanted,
+      uploadUrl: UPLOAD_BASE,
+    });
+  }
+
+  private finalize(
+    method: string,
+    url: URL,
+    site: string,
+    id: string,
+    body: unknown,
+  ): Response {
+    const name = `sites/${site}/versions/${id}`;
+    const version = this.versions.get(name);
+    if (version === undefined) return json(404, error('no version'));
+    if (method !== 'PATCH') return json(405, error('not supported'));
+    if (url.searchParams.get('updateMask') !== 'status') {
+      return json(400, error('only status may be patched'));
+    }
+    version.status = (body as { status?: string })?.status ?? version.status;
+    return json(200, { name, status: version.status });
+  }
+
+  private release(site: string, url: URL): Response {
+    const name = url.searchParams.get('versionName') ?? '';
+    const version = this.versions.get(name);
+    if (version === undefined) return json(404, error('no version'));
+    // The product will not serve a draft, so neither will the fake.
+    if (version.status !== 'FINALIZED') {
+      return json(400, error(`version ${name} is ${version.status}`));
+    }
+    this.released.set(site, name);
+    return json(200, {
+      name: `sites/${site}/releases/r1`,
+      version: { name, status: version.status, labels: version.labels },
+    });
+  }
+
+  private readReleases(site: string): Response {
+    if (!this.sites.has(site)) return json(404, error('no site'));
+    const name = this.released.get(site);
+    const version = name === undefined ? undefined : this.versions.get(name);
+    return json(200, {
+      releases:
+        version === undefined
+          ? []
+          : [
+              {
+                name: `sites/${site}/releases/r1`,
+                version: {
+                  name: version.name,
+                  status: version.status,
+                  labels: version.labels,
+                },
+              },
+            ],
+    });
+  }
+}
+
+function site(id: string): unknown {
+  return {
+    name: `sites/${id}`,
+    defaultUrl: `https://${id}.hosted.example.test`,
+  };
+}
+
+function error(message: string): unknown {
+  return { error: { message, status: 'NOT_FOUND' } };
+}
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}

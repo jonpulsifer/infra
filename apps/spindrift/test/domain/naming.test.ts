@@ -26,7 +26,12 @@ import {
   displayUrl,
   hostnameFor,
   isLabel,
+  VANITY_CEILING,
+  VANITY_LEG_LOSSES,
   vanity,
+  vanityCarriesStreams,
+  vanityProxied,
+  vanityRation,
 } from '../../src/domain/naming.ts';
 
 const APEX = 'apps.example.test';
@@ -171,5 +176,73 @@ describe('§9: DNS is a custom resource, not an API call', () => {
       servedBy: 'tunnel.example.test',
     });
     expect(records.every((record) => record.recordType === 'CNAME')).toBe(true);
+  });
+});
+
+describe('§9: the vanity layer, and what it costs', () => {
+  test('the ceiling is a fact about the certificate, reported not enforced', () => {
+    // §9's "hard ceiling: roughly 20 vanity names" is a property of one apex's
+    // free certificate. Nothing here refuses the twenty-first: the UI's job is
+    // to say how many are left, and a limit core imposed would be a policy
+    // somebody chose rather than the one the zone actually has.
+    expect(vanityRation(0)).toEqual({
+      used: 0,
+      ceiling: VANITY_CEILING,
+      remaining: VANITY_CEILING,
+      exhausted: false,
+    });
+    expect(vanityRation(VANITY_CEILING).exhausted).toBe(true);
+    expect(vanityRation(VANITY_CEILING + 5).remaining).toBe(0);
+  });
+
+  test('proxying is per-Target, and follows who mints the canonical name', () => {
+    // §9: "the vanity record is unproxied on that leg, **so** proxying becomes
+    // a per-Target property." The proxy is not a preference — it is the only
+    // way a name reaches a cluster whose load-balancer range is RFC1918.
+    expect(vanityProxied('kubernetes')).toBe(true);
+    for (const adapter of ['cloudrun', 'static'] as const) {
+      expect(vanityProxied(adapter)).toBe(false);
+      // The two are the same question asked twice: a backend that names its
+      // own workloads is a backend the internet already reaches.
+      expect(coreMintsCanonical(adapter)).toBe(false);
+    }
+  });
+
+  test('the losses on the unproxied leg are stated, not worked around', () => {
+    // §9 absorbs these on purpose, and the reason it can is that the app stays
+    // fully capable at its canonical name. Working around them would mean a
+    // second edge, which is the external load balancer §9 declines to have.
+    expect(VANITY_LEG_LOSSES.buffersResponse).toBe(true);
+    expect(VANITY_LEG_LOSSES.streamingProtocols).toBe(false);
+    expect(VANITY_LEG_LOSSES.maxRequestSeconds).toBe(60);
+  });
+
+  test('an App that streams keeps its streams only on the proxied leg', () => {
+    expect(vanityCarriesStreams('kubernetes')).toBe(true);
+    expect(vanityCarriesStreams('cloudrun')).toBe(false);
+    expect(vanityCarriesStreams('static')).toBe(false);
+  });
+
+  test('moving between backends re-points one record and renames nothing', () => {
+    // §9's whole reason for a second layer: "the name a developer shares is
+    // backend-agnostic and moving an App between backends is one record
+    // re-point." So the name is a function of the label and the zone alone —
+    // if the adapter appeared in it, a move would change what people had
+    // bookmarked.
+    const shared = vanity('shop', VANITY_ZONE);
+    for (const adapter of ['kubernetes', 'cloudrun', 'static'] as const) {
+      const hostname = hostnameFor({
+        app: 'shop',
+        component: 'web',
+        adapter,
+        apexZone: APEX,
+        vanityZone: VANITY_ZONE,
+        vanityLabel: 'shop',
+      });
+      expect(hostname.vanity).toBe(shared);
+      // What does change is the canonical underneath it, and on two of the
+      // three that is the platform's own name arriving across the deploy seam.
+      expect(hostname.canonical === '').toBe(!coreMintsCanonical(adapter));
+    }
   });
 });

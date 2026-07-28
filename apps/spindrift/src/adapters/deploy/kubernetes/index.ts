@@ -27,8 +27,9 @@ import type {
 } from '../../../config/manifest.schema.ts';
 import {
   type PolicyEngineState,
-  PREREQUISITES,
+  type Prerequisite,
   type PrerequisiteResult,
+  prerequisitesFor,
   type TargetDiscovery,
   type TargetInspection,
 } from '../../../domain/capabilities.ts';
@@ -40,6 +41,7 @@ import type {
   KubernetesConnection,
   KubernetesDelivery,
 } from '../../../domain/target.ts';
+import { workloadName } from '../../../domain/workload-name.ts';
 import type {
   DeployAdapter,
   DeployEvent,
@@ -371,11 +373,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   ): Promise<readonly PrerequisiteResult[]> {
     const delivery = connection.delivery;
     const results = new Map<string, PrerequisiteResult>();
-    const set = (
-      name: (typeof PREREQUISITES)[number],
-      met: boolean,
-      detail?: string,
-    ): void => {
+    const set = (name: Prerequisite, met: boolean, detail?: string): void => {
       results.set(name, met ? { name, met } : { name, met: false, detail });
     };
 
@@ -425,7 +423,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       `the App chart at this Target declares value contract ${pinned}; this Spindrift renders ${VALUES_CONTRACT}`,
     );
 
-    return PREREQUISITES.map(
+    return prerequisitesFor(this.adapter).map(
       (name) =>
         results.get(name) ?? {
           name,
@@ -726,9 +724,12 @@ function appliedDigest(flavour: Flavour, object: KubernetesObject): string {
   return app?.artifactDigest ?? '';
 }
 
+/** The longest name an object may carry, which every adapter shortens to. */
+const RELEASE_NAME_LIMIT = 63;
+
 /** One release per (Component, Target), so a re-deploy is an upgrade. */
 function releaseName(desired: DesiredState): string {
-  return `${desired.app}-${desired.component}`.slice(0, 63);
+  return workloadName(desired, RELEASE_NAME_LIMIT);
 }
 
 function resourceLabel(object: KubernetesObject): string {

@@ -13,7 +13,10 @@
  * as a portable mechanism: Flux merges `valuesFrom` and then overwrites it
  * inline, and Argo has no equivalent at all.
  */
-import type { DesiredState } from '../../../domain/desired-state.ts';
+import {
+  artifactAddress,
+  type DesiredState,
+} from '../../../domain/desired-state.ts';
 import type { KubernetesConnection } from '../../../domain/target.ts';
 
 /**
@@ -140,8 +143,7 @@ export function configSecretName(desired: DesiredState): string {
  * `INTERNAL` rather than rendering a release that cannot pull.
  */
 export function imageReference(desired: DesiredState): string | null {
-  const [reference] = desired.artifact.refs;
-  return reference ?? null;
+  return artifactAddress(desired.artifact);
 }
 
 /**

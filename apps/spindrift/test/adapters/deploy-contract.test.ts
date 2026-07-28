@@ -17,7 +17,7 @@ import {
   type FailureReason,
   reasonCovers,
 } from '../../src/adapters/deploy/contract.ts';
-import { PREREQUISITES } from '../../src/domain/capabilities.ts';
+import { prerequisitesFor } from '../../src/domain/capabilities.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 import { connectionFor } from '../harness/installation.ts';
@@ -148,7 +148,10 @@ const refuses: DeployAdapter = {
   async destroy() {},
   async inspect() {
     return {
-      prerequisites: PREREQUISITES.map((name) => ({ name, met: true })),
+      prerequisites: prerequisitesFor('kubernetes').map((name) => ({
+        name,
+        met: true,
+      })),
       discovery: CAPABLE_DISCOVERY,
     };
   },

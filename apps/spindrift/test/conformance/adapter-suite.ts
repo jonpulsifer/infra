@@ -26,7 +26,10 @@ import type {
   DeployTarget,
 } from '../../src/adapters/deploy/contract.ts';
 import type { SecretStore } from '../../src/adapters/store/contract.ts';
-import { PREREQUISITES } from '../../src/domain/capabilities.ts';
+import {
+  PREREQUISITES,
+  prerequisitesFor,
+} from '../../src/domain/capabilities.ts';
 import type {
   ArtifactType,
   DesiredState,
@@ -39,6 +42,9 @@ const enrolled = {
   build: new Set<string>(),
   store: new Set<string>(),
 };
+
+/** Where a `files` artifact is fetched from, as a depot addresses one. */
+export const BUNDLE_DEPOT = 'https://artifacts.example.test';
 
 /** A `DesiredState` of the given artifact type — the neutral one, not a mock. */
 export function desiredState(
@@ -53,13 +59,24 @@ export function desiredState(
     kind: artifactType === 'files' ? 'website' : 'service',
     // A real address, because an adapter that has to pull one cannot place
     // anything without it — and "the artifact carries no address" is a core
-    // bug, not a shape the contract's own suite should exercise.
+    // bug, not a shape the contract's own suite should exercise. The two shapes
+    // are addressed differently because they are: an image is pulled from a
+    // registry, and a bundle of files is fetched from the depot that staged it.
     artifact: {
       type: artifactType,
       digest,
-      refs: [`registry.example.test/conformance@${digest}`],
+      refs: [
+        artifactType === 'files'
+          ? `${BUNDLE_DEPOT}/bundles/${digest}`
+          : `registry.example.test/conformance@${digest}`,
+      ],
     },
-    exposure: 'private',
+    // Exposure follows the shape rather than being fixed, because §9 ties the
+    // two: a `files` artifact only ever lands on static hosting, which serves
+    // `Public` only — so a private one is a state no Target accepts, and a
+    // suite that asked for one would be asserting against a placement core
+    // would never make.
+    exposure: artifactType === 'files' ? 'public' : 'private',
     config: [],
     requirements: {
       platform: { os: 'linux', arch: 'amd64' },
@@ -157,13 +174,31 @@ export function deployAdapterSuite(
     });
 
     test('inspect answers the whole checklist, exactly once each', async () => {
-      const inspection = await make().inspect(target);
+      const made = make();
+      const inspection = await made.inspect(target);
       // §13 merges health and capability refresh into one loop, which only
       // works if one pass answers every item — a partial checklist would leave
-      // core deciding what an absent item means.
+      // core deciding what an absent item means, and `deriveHealth` treats an
+      // unanswered row as unmet.
+      //
+      // The checklist compared against is this adapter type's, not the whole
+      // vocabulary: a Cloud Run Target has no delivery operator to assess, and
+      // a suite that demanded one would force every cloud adapter to report a
+      // row that can only ever be a lie in one direction or the other.
       expect(inspection.prerequisites.map((item) => item.name).sort()).toEqual(
-        [...PREREQUISITES].sort(),
+        [...prerequisitesFor(made.adapter)].sort(),
       );
+      // Comparing against the adapter's own list is a weaker pin than comparing
+      // against one global list, so the teeth it gives up are put back here:
+      // an adapter cannot shrink its checklist to nothing and be trivially
+      // healthy, and every row it does answer has to be from the one
+      // vocabulary. `test/domain/capabilities.test.ts` holds the other half —
+      // that no cloud Target is asked a chart question, and that a checklist
+      // answered against the wrong adapter's list reads unhealthy.
+      expect(inspection.prerequisites.length).toBeGreaterThan(0);
+      for (const item of inspection.prerequisites) {
+        expect(PREREQUISITES).toContain(item.name);
+      }
     });
 
     test('inspect reports observations, not judgements', async () => {
@@ -310,7 +345,7 @@ export function storeAdapterSuite(
  * inferred from a directory listing that would silently agree with itself.
  */
 export const ADAPTERS = {
-  deploy: ['fake', 'kubernetes'],
+  deploy: ['fake', 'kubernetes', 'cloudrun', 'static'],
   build: ['fake', 'github-actions', 'cloud-build', 'in-cluster'],
   store: [
     'fake native',

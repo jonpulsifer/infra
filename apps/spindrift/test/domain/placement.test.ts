@@ -329,3 +329,90 @@ describe('the rest of the derived requirements', () => {
     expect(reasons).toContain('NO_GPU');
   });
 });
+
+describe('§9: a Private website takes the server-image rendering', () => {
+  test('the whole resolution routes it away from static hosting', () => {
+    // §9: "a rendering that leaves an unauthenticated alternate origin is
+    // disqualified rather than shipped with a caveat — which is why the static
+    // hosting product serves `Public` only, and why a Private website takes
+    // the server-image rendering."
+    const placement = resolvePlacement(
+      [
+        target({ id: 'cdn', name: 'hosting', adapter: 'static', rank: 0 }),
+        target({ id: 'cluster', name: 'cluster', rank: 1 }),
+      ],
+      requirements({ kind: 'website', exposure: 'private' }),
+    );
+
+    // Static outranks the cluster and is still not what is suggested.
+    expect(placement.suggested?.target.id).toBe('cluster');
+    expect(placement.suggested?.artifactType).toBe('image');
+    expect(placement.candidates.map((one) => one.target.id)).toEqual([
+      'cluster',
+    ]);
+    // And the one that lost says why, rather than simply not appearing (§3).
+    const excluded = placement.nonCandidates.find(
+      (one) => one.target.id === 'cdn',
+    );
+    expect(excluded?.reasons).toContain('EXPOSURE_UNSUPPORTED');
+    expect(excluded?.detail.join(' ')).toContain('only serve public');
+  });
+
+  test('the same website going public reaches static hosting as files', () => {
+    const placement = resolvePlacement(
+      [
+        target({ id: 'cdn', name: 'hosting', adapter: 'static', rank: 0 }),
+        target({ id: 'cluster', name: 'cluster', rank: 1 }),
+      ],
+      requirements({ kind: 'website', exposure: 'public' }),
+    );
+    expect(placement.suggested?.target.id).toBe('cdn');
+    expect(placement.suggested?.artifactType).toBe('files');
+  });
+});
+
+describe('§10: the reach rule does not bind a website', () => {
+  test('a Target that reaches no store still holds a website', () => {
+    // §10's one exception makes a website's configuration build arguments
+    // derived from its kind, so there is nothing at run time for a store to
+    // deliver. Static hosting reaches no store precisely because it has no
+    // runtime — and applying the rule anyway would exclude it from the one
+    // kind it exists to run.
+    const cdn = target({
+      adapter: 'static',
+      discovery: { reachableSecretStores: [] },
+    });
+    expect(
+      exclusionsFor(cdn, requirements({ kind: 'website', exposure: 'public' })),
+    ).toEqual([]);
+  });
+
+  test('a service on the same Target is still bound by it', () => {
+    // The exemption is the kind's, not the Target's: a Component with a
+    // runtime that reads configuration needs somewhere to read it from.
+    const unreachable = target({
+      discovery: { reachableSecretStores: [] },
+    });
+    expect(exclusionsFor(unreachable, requirements())).toContain(
+      'STORE_UNREACHABLE',
+    );
+  });
+});
+
+describe('§3: a kind an adapter does not render is refused at Place', () => {
+  test('a job is a non-candidate on the cloud runtime, with the reason', () => {
+    // `KINDS_BY_ADAPTER` is "a property of the code": the Cloud Run adapter
+    // renders Services, and a job there is Task 33's work. Until it exists the
+    // honest answer is a non-candidate with a stated reason, which fails at
+    // Place rather than at apply.
+    const cloud = target({ adapter: 'cloudrun' });
+    const reasons = exclusionsFor(cloud, requirements({ kind: 'job' }));
+    expect(reasons).toContain('KIND_UNSUPPORTED');
+  });
+
+  test('a service and a website are both rendered there', () => {
+    const cloud = target({ adapter: 'cloudrun' });
+    expect(exclusionsFor(cloud, requirements({ kind: 'service' }))).toEqual([]);
+    expect(exclusionsFor(cloud, requirements({ kind: 'website' }))).toEqual([]);
+  });
+});

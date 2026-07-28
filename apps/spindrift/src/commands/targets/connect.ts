@@ -112,6 +112,24 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       name: targetName,
       project: z.string().trim().min(1),
       region: z.string().trim().min(1),
+      /**
+       * The two control APIs this act registers a Target against — the runtime's
+       * and the hosting product's.
+       *
+       * Two values for one act, which reads like a leak of the split §13 says
+       * the operator should not have to think about. It is the opposite: the
+       * operator connects one project, and the fact that doing so produces two
+       * Targets is precisely why both endpoints are asked for here rather than
+       * in two separate connect flows.
+       */
+      runEndpoint: z.url(),
+      hostingEndpoint: z.url(),
+      /** Where this project's admission policy is read from (§16). */
+      policyEndpoint: z.url().optional(),
+      /** §33's static reachability input, and §3's stated capabilities. */
+      servedHosts: z.array(z.string().trim().min(1)).optional(),
+      reachableRegistries: z.array(z.string().trim().min(1)).optional(),
+      logHistorySeconds: z.number().int().nonnegative().optional(),
     })
     .strict(),
 ]);
@@ -170,9 +188,34 @@ function connectionFor(
   if (input.kind !== 'cloud') {
     throw new Error('a cluster does not register a cloud Target');
   }
-  return adapter === 'cloudrun'
-    ? { adapter, project: input.project, region: input.region }
-    : { adapter, project: input.project };
+  if (adapter === 'cloudrun') {
+    return {
+      adapter,
+      project: input.project,
+      region: input.region,
+      endpoint: input.runEndpoint,
+      ...(input.policyEndpoint === undefined
+        ? {}
+        : { policyEndpoint: input.policyEndpoint }),
+      ...(input.servedHosts === undefined
+        ? {}
+        : { servedHosts: input.servedHosts }),
+      ...(input.reachableRegistries === undefined
+        ? {}
+        : { reachableRegistries: input.reachableRegistries }),
+      ...(input.logHistorySeconds === undefined
+        ? {}
+        : { logHistorySeconds: input.logHistorySeconds }),
+    };
+  }
+  return {
+    adapter,
+    project: input.project,
+    endpoint: input.hostingEndpoint,
+    ...(input.servedHosts === undefined
+      ? {}
+      : { servedHosts: input.servedHosts }),
+  };
 }
 
 export const connectTarget: Command<
@@ -214,7 +257,7 @@ export const connectTarget: Command<
       adapter,
       connection,
     });
-    const health = deriveHealth(prerequisites);
+    const health = deriveHealth(prerequisites, adapter);
 
     if (existing === undefined) {
       // §13: "Rank is one global ordered list." A new Target joins the end of

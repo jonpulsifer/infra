@@ -38,17 +38,61 @@ import type { TargetAdapter } from '../config/manifest.schema.ts';
  */
 export type TargetConnection =
   | KubernetesConnection
-  | {
-      adapter: 'cloudrun';
-      /** The vessel project this Target deploys into (§14). */
-      project: string;
-      region: string;
-    }
-  | {
-      adapter: 'static';
-      /** The vessel project this Target's sites live in (§14). */
-      project: string;
-    };
+  | CloudRunConnection
+  | StaticConnection;
+
+/**
+ * How a Cloud Run Target is reached (§13, §14).
+ *
+ * `endpoint` is the exact analogue of {@link KubernetesConnection.apiServer}:
+ * the control API this Target is driven through. It is connection material
+ * rather than an installation-wide manifest value for the same reason a cluster's
+ * is — two connected projects may sit behind different regional or
+ * perimeter-fronted endpoints, and neither is more correct than the other.
+ *
+ * **No credential here either** (§13). What authorizes a call is minted per
+ * request by whatever federates.
+ */
+export interface CloudRunConnection {
+  adapter: 'cloudrun';
+  /** The vessel project this Target deploys into (§14). */
+  project: string;
+  region: string;
+  /** The runtime's API root, without a trailing slash. */
+  endpoint: string;
+  /**
+   * The binary-authorization API root, where this project's admission policy is
+   * read from (§16: "one signature, two verifiers").
+   *
+   * Optional, and absent means **not known** rather than absent-so-fine: with
+   * nowhere to look, `verifiedDeploy` derives `false`, which is the direction a
+   * claim about verification has to fail in.
+   */
+  policyEndpoint?: string;
+  /** §33's static reachability input, stated by the operator (§3). */
+  servedHosts?: readonly string[];
+  reachableRegistries?: readonly string[];
+  /** §18: how far back a tail can honestly reach, in seconds. */
+  logHistorySeconds?: number;
+}
+
+/**
+ * How a static-hosting Target is reached (§13, §14).
+ *
+ * No region: the hosting product serves one site from its own edge rather than
+ * from a location an operator picks, so there is nothing here for a region to
+ * name. No log history either — §17 gives static hosting an honest empty state
+ * rather than a duration, because there is no runtime to have produced output.
+ */
+export interface StaticConnection {
+  adapter: 'static';
+  /** The vessel project this Target's sites live in (§14). */
+  project: string;
+  /** The hosting product's API root, without a trailing slash. */
+  endpoint: string;
+  /** §33's static reachability input, stated by the operator (§3). */
+  servedHosts?: readonly string[];
+}
 
 /**
  * How a Kubernetes Target is reached, and by which GitOps operator.
