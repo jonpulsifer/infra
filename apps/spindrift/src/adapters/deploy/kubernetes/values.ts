@@ -26,7 +26,7 @@ import type { KubernetesConnection } from '../../../domain/target.ts';
  * the values believes the contract to be — and `packages/charts/spindrift-app`
  * declares the same number in its own `Chart.yaml`.
  */
-export const VALUES_CONTRACT = '1';
+export const VALUES_CONTRACT = '2';
 
 /** The three classes §7 names, as the chart's three top-level keys. */
 export const VALUE_CLASSES = {
@@ -81,10 +81,17 @@ export function operatorValuesIssues(
 
 /** One environment variable, as the chart names a pinned reference (§10). */
 interface SecretEnvValue {
+  /** The variable, and the key inside the materialized Secret. */
   name: string;
   /** The Secret the platform's own machinery materializes the value into. */
   secretName: string;
-  key: string;
+  /**
+   * The pinned item in the store of record — what the chart's ExternalSecret
+   * fetches. Never a value, and never a floating latest: §10's pin is the
+   * reason a config change produces a new Deploy rather than silently not
+   * applying.
+   */
+  remote: { key: string; version: string };
 }
 
 /** Spindrift's class, rendered from what core described. */
@@ -115,9 +122,10 @@ export interface ChartValues {
  *
  * §10 is per-key, not per-blob — one secret *per variable* — which is about how
  * a value is stored and pinned in the store of record, not about how many
- * Kubernetes objects it lands in. What materializes this Secret from the pinned
- * references arrives with §10's config work; the name is derived here so both
- * halves agree on it without either importing the other.
+ * Kubernetes objects it lands in. The chart's ExternalSecret materializes this
+ * Secret from the pinned references; the name is derived on both sides from the
+ * App and the Component so neither has to import the other, and it is the same
+ * composition `spindrift-app.fullname` makes.
  */
 export function configSecretName(desired: DesiredState): string {
   return `${desired.app}-${desired.component}`;
@@ -169,7 +177,7 @@ export function appValues(desired: DesiredState, image: string): AppValues {
     secretEnv: desired.config.map((entry) => ({
       name: entry.name,
       secretName: configSecretName(desired),
-      key: entry.secret.key,
+      remote: { key: entry.secret.key, version: entry.secret.version },
     })),
   };
 }

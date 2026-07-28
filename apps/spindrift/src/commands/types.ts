@@ -24,6 +24,7 @@ import type { DeployAdapter } from '../adapters/deploy/contract.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
 import type {
   InstallationManifest,
+  StoreAdapter,
   TargetAdapter,
 } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
@@ -75,8 +76,18 @@ export interface AdapterRegistry {
    * configuration, not a closed vocabulary.
    */
   build(route: string): BuildAdapter | null;
-  /** §10: one store of record per installation, selected by the manifest. */
-  store(): SecretStore;
+  /**
+   * §10: the store of record a Target's config is written through.
+   *
+   * By adapter rather than one store per installation, because §10 makes the
+   * store a **Target** property — "Kubernetes Targets carry an admin-chosen
+   * store; the cloud Targets take the cloud store in the App's vessel, not a
+   * choice" — and because a re-placement between two stores is a thing core has
+   * to be able to describe even while an installation has configured one.
+   * `null` is the ordinary answer for a store this installation has no access
+   * path to, and a Target that reaches only those cannot hold config.
+   */
+  store(adapter: StoreAdapter): SecretStore | null;
   /**
    * §15's repository host. `null` when this installation has no repository
    * integration configured — which is a legitimate installation, not a fault:

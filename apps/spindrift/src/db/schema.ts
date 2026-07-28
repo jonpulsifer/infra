@@ -47,6 +47,7 @@ import type {
   PrerequisiteResult,
   TargetDiscovery,
 } from '../domain/capabilities.ts';
+import type { ConfigEntry } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
 
 // --- Enums -----------------------------------------------------------------
@@ -447,6 +448,22 @@ export const deploys = pgTable('deploys', {
   url: text('url'),
   /** §10: "a hash over a document of pinned version references." */
   configVersion: text('config_version'),
+  /**
+   * The pinned document itself, captured when this intent was written (§10).
+   *
+   * Stored rather than re-read from `config_items` at apply time, and that is
+   * the whole of what makes a Deploy "exactly Heroku's Release": a rollback is
+   * an ordinary deploy naming an older Build (§6), and it "comes back up with
+   * the configuration it originally had" only because the configuration it had
+   * is on the row. Re-deriving it from current config items would make every
+   * rollback come up with *today's* config, which is the failure §10's pinning
+   * exists to prevent.
+   *
+   * References, never values — the same posture as `sessions.tokenHash`: a
+   * database that cannot produce a credential is a database whose disclosure
+   * does not produce one either.
+   */
+  configDocument: jsonb('config_document').$type<readonly ConfigEntry[]>(),
   exposure: exposureState('exposure'),
   /**
    * §13: "Disconnect always works: live Deploys go `orphaned`, workloads keep
@@ -794,10 +811,20 @@ export const configItems = pgTable(
     key: text('key').notNull(),
     kind: configItemKind('kind').notNull().default('secret_ref'),
     /**
-     * §10: "Values are write-only." Set only when `kind = 'secret_ref'`: a
-     * pointer (path/version) into the connected store, never a value.
+     * §10: "Values are write-only." Set only when `kind = 'secret_ref'`: the
+     * store's own name for the item, exactly as `put` minted it — a pointer
+     * into the connected store, never a value.
      */
     storeRef: text('store_ref'),
+    /**
+     * The version pinned, beside the item it is a version of.
+     *
+     * Two columns rather than one encoded reference because §10's pin is the
+     * half that has to be *compared*: `configVersion` is a hash over these, a
+     * reaper reads them to know what is still delivered, and a delimiter chosen
+     * here would be a delimiter some store's item name is allowed to contain.
+     */
+    storeVersion: text('store_version'),
     /**
      * §10: the narrow website exception — set only when `kind = 'plain'`,
      * because a website's build-time config "becomes public either way."
@@ -826,6 +853,40 @@ export const configItems = pgTable(
     ),
   ],
 );
+
+/**
+ * §10: "auditing is metadata-only" — story 80's "who changed which key when,
+ * so that history is useful without becoming a secret store".
+ *
+ * A second table rather than an `updatedBy` column on the item, because the
+ * question is a history and a column answers only the last edit. **There is no
+ * value column and there is no room for one**: what a row says is that a key
+ * changed, not what it changed to or from — core could not fill a value column
+ * if it wanted to, since it never reads one back (§10).
+ *
+ * `userId` survives the user: an audit trail that deleted itself when an
+ * operator was removed would lose exactly the history somebody is looking for.
+ */
+export const configAction = pgEnum('config_action', ['set', 'removed']);
+
+export const configAuditEvents = pgTable('config_audit_events', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  componentId: uuid('component_id')
+    .notNull()
+    .references(() => components.id, { onDelete: 'cascade' }),
+  targetId: uuid('target_id')
+    .notNull()
+    .references(() => targets.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  action: configAction('action').notNull(),
+  /** Who acted. Null once that user is gone; the fact of the change remains. */
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  /** Kept beside the id so the trail reads as "who, which key, when". */
+  displayName: text('display_name'),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 // --- Attempt log -------------------------------------------------------
 
@@ -1035,5 +1096,7 @@ export type WebauthnChallenge = typeof webauthnChallenges.$inferSelect;
 export type NewWebauthnChallenge = typeof webauthnChallenges.$inferInsert;
 export type ConfigItem = typeof configItems.$inferSelect;
 export type NewConfigItem = typeof configItems.$inferInsert;
+export type ConfigAuditEvent = typeof configAuditEvents.$inferSelect;
+export type NewConfigAuditEvent = typeof configAuditEvents.$inferInsert;
 export type AttemptEvent = typeof attemptEvents.$inferSelect;
 export type NewAttemptEvent = typeof attemptEvents.$inferInsert;

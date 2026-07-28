@@ -43,6 +43,8 @@ import {
   targets,
 } from '../../db/schema.ts';
 import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
+import { demandSentence, migrationFor } from '../config/migration.ts';
+import { type PinnedConfig, readPinnedConfig } from '../config/pinned.ts';
 import {
   type Command,
   type CommandContext,
@@ -79,6 +81,8 @@ export interface CreateDeployResult {
    * same lock this write took, so it is the one answer that cannot be stale.
    */
   readonly supersededBuildId: number | null;
+  /** §10's hash over what this attempt delivers. Never the config itself. */
+  readonly configVersion: string;
 }
 
 /**
@@ -94,6 +98,14 @@ export interface DeployPreconditions {
   readonly targetId: string;
   readonly buildId: number;
   readonly exposure: 'internal' | 'private' | 'public';
+  /**
+   * The pinned config document this attempt delivers (§10).
+   *
+   * Captured here rather than read at apply time, which is what makes a Deploy
+   * "exactly Heroku's Release": what a rollback comes back up with is what its
+   * Deploy recorded, not what the config items say today.
+   */
+  readonly config: PinnedConfig;
 }
 
 /**
@@ -201,6 +213,11 @@ export async function placeIntent(
         // later change to the Component does not retroactively describe what
         // this attempt asked for.
         exposure: checked.exposure,
+        // §10, for the same reason and with more at stake: the document is what
+        // this Deploy delivers, so a rollback to it delivers that document
+        // again rather than whatever config was set in the meantime.
+        configVersion: checked.config.version,
+        configDocument: checked.config.document,
         createdAt: now,
         updatedAt: now,
       })
@@ -229,6 +246,7 @@ export async function placeIntent(
     buildId: checked.buildId,
     phase: 'PENDING' as const,
     supersededBuildId: placed.supersededBuildId,
+    configVersion: checked.config.version,
   });
 }
 
@@ -318,6 +336,24 @@ export async function checkDeployable(
     );
   }
 
+  // §10: "Place names the keys that will not follow and demands them before the
+  // move commits." Checked here as well as in `placeComponent`, because a
+  // developer who deploys straight at a Target they have not placed on would
+  // otherwise get the release §10 exists to prevent: green, running, and
+  // missing the variables it was configured with everywhere else.
+  const migration = await migrationFor(
+    context.db,
+    context,
+    component.id,
+    target.id,
+  );
+  if (migration.demanded.length > 0) {
+    return refuse(
+      'NOT_DEPLOYABLE',
+      demandSentence(migration.demanded, target.name),
+    );
+  }
+
   return {
     ok: true,
     value: {
@@ -325,6 +361,7 @@ export async function checkDeployable(
       targetId: target.id,
       buildId: build.id,
       exposure: component.exposure,
+      config: await readPinnedConfig(context.db, component.id, target.id),
     },
   };
 }

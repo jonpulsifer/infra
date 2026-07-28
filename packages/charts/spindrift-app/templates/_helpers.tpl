@@ -126,7 +126,10 @@ absent for a job, which has no port to probe.
       valueFrom:
         secretKeyRef:
           name: {{ .secretName }}
-          key: {{ .key }}
+          # The variable's own name, which is what `externalsecret.yaml` fetches
+          # each pinned reference into. The store's name for the item is not a
+          # legal Secret key in every store, so it is never used as one.
+          key: {{ .name }}
     {{- end }}
   volumeMounts:
     - name: tmp

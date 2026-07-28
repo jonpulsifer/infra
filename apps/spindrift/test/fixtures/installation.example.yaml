@@ -41,6 +41,8 @@ github:
 
 secretStore:
   adapter: gcp-secret-manager
+  endpoint: https://secrets.example.test
+  container: example-secrets
 
 # Rank order: placement considers these top to bottom.
 targets:
