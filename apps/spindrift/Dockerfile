@@ -14,11 +14,12 @@
 # `src/web/dev.ts` is the other entry and does the opposite — Bun's HTML import,
 # compiled on demand, so `bun run dev` needs no build step. That convenience is
 # the thing production is not paying for.
-FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:5ca3303bfbcd7eeec7e71466d56a334c8f40323b59a92e174131bf038bdd81ca AS base
 ARG BUN_VERSION=1.3.14
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
-RUN apk add --no-cache bash curl libc6-compat \
+USER root
+RUN apk add --no-cache bash curl unzip \
   && curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
 
 FROM base AS pruner
@@ -44,9 +45,9 @@ COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
 # First-party artifact verifier (§35). Replaces upstream release binaries (cosign & slsa-verifier).
-FROM ghcr.io/jonpulsifer/spindrift-verifier:v0.1.0@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 AS supply-chain-tools
+FROM ghcr.io/jonpulsifer/spindrift-verifier:latest@sha256:063b0aca76d6e750d347b74b9f38304a4cb2000faa0d1e3880b1ef6ef10ce392 AS supply-chain-tools
 
-FROM base AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:2b9627fec21321fad828adf6c5ceb91c6f377b772b48a738533a1225c0145a90 AS runner
 ENV NODE_ENV=production \
   PORT=3000
 WORKDIR /app
@@ -55,8 +56,10 @@ WORKDIR /app
 COPY --from=deps --chmod=755 /app ./
 COPY --from=builder --chmod=755 /app/apps/spindrift/src ./apps/spindrift/src
 COPY --from=builder --chmod=755 /app/apps/spindrift/dist ./apps/spindrift/dist
+COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=supply-chain-tools /spindrift-verifier /usr/local/bin/spindrift-verifier
 WORKDIR /app/apps/spindrift
 USER 65532:65532
 EXPOSE 3000
-CMD ["bun", "run", "src/web/server.ts"]
+ENTRYPOINT []
+CMD ["/usr/local/bin/bun", "run", "src/web/server.ts"]
