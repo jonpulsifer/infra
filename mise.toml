@@ -23,7 +23,7 @@ shfmt = "latest"
 sops = "latest"
 # tofu is the apply-path binary (Atlantis runs ATLANTIS_DEFAULT_TF_DISTRIBUTION=opentofu);
 # terraform stays installed for anything not yet migrated.
-opentofu = "latest"
+opentofu = "1.12.5"
 terraform = "latest"
 terraform-docs = "latest"
 vim = "latest"
