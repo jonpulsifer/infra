@@ -32,6 +32,11 @@ export interface GateProps {
   readonly onSignedIn: (principal: Principal) => void;
 }
 
+const DEV_OPERATOR: Principal = {
+  id: 'usr_dev_operator',
+  displayName: 'Dev Operator',
+};
+
 export function Gate({
   claimed,
   gatewayUnlinked = false,
@@ -49,6 +54,19 @@ export function Gate({
       ) : (
         <Enrol onSignedIn={onSignedIn} />
       )}
+      <div className="rounded-lg border border-border bg-card p-3 text-center">
+        <p className="mb-2 text-xs text-muted-foreground">
+          Local Development Mode
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full font-mono text-xs"
+          onClick={() => onSignedIn(DEV_OPERATOR)}
+        >
+          Bypass Auth (Sign in as Dev Operator)
+        </Button>
+      </div>
     </main>
   );
 }
