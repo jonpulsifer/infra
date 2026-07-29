@@ -6,8 +6,6 @@
  * keeps `tailwindcss`, `bun-plugin-tailwind`, and the rest of the compile-time
  * toolchain out of the runtime: an HTML import anywhere in this module's graph
  * would pull them back in whether or not a request ever reached one.
- *
- * `reconciler`, the second Deployment off the same image, does not exist yet.
  */
 import { join } from 'node:path';
 import { bundleRoutes } from './bundle.ts';

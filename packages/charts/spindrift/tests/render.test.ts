@@ -1,6 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { one, render } from './render.ts';
 
+describe('process topology', () => {
+  test('renders the reconciler as an opt-in second process from the same image', async () => {
+    const defaultDeployments = (await render())
+      .filter((object) => object.kind === 'Deployment')
+      .map((object) => object.metadata.name);
+    expect(defaultDeployments).toEqual(['spindrift-web']);
+
+    const objects = await render({ reconciler: { enabled: true } });
+    const web = one(objects, 'Deployment', 'spindrift-web').spec.template.spec
+      .containers[0];
+    const reconciler = one(objects, 'Deployment', 'spindrift-reconciler').spec
+      .template.spec.containers[0];
+
+    expect(reconciler.image).toBe(web.image);
+    expect(web.command).toEqual(['sh', '-c', 'bun run src/web/server.ts']);
+    expect(reconciler.command).toEqual([
+      'sh',
+      '-c',
+      'bun run src/reconciler/main.ts',
+    ]);
+  });
+});
+
 describe('workload identity', () => {
   test('only the reconciler receives audience-scoped cluster and GCP tokens', async () => {
     const objects = await render({
