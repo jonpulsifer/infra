@@ -19,7 +19,11 @@
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
-import { connectTarget, disconnectTarget } from '../../src/commands/index.ts';
+import {
+  connectTarget,
+  disconnectTarget,
+  listTargets,
+} from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   Clock,
@@ -362,5 +366,37 @@ describe('reconnect re-adopts via observe', () => {
       .from(deploys)
       .where(eq(deploys.targetId, target.id));
     expect(row?.orphanedAt).toEqual(FROZEN);
+  });
+});
+
+describe('listTargets', () => {
+  test('returns empty lists on an empty database', async () => {
+    const { registry } = fakes();
+    const result = await listTargets({}, context(registry));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.targets).toHaveLength(0);
+      expect(result.value.options).toHaveLength(0);
+    }
+  });
+
+  test('lists connected targets with rank, health, and candidate placement options', async () => {
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
+    await connectTarget(
+      cloudInput({ name: 'cloudrun-app' }),
+      context(registry),
+    );
+
+    const result = await listTargets({}, context(registry));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.targets).toHaveLength(3); // 1 k8s + 2 cloud (cloudrun, static)
+      expect(result.value.targets[0]?.name).toBe('folly-k8s');
+      expect(result.value.targets[0]?.health).toBe('healthy');
+      expect(result.value.options.length).toBeGreaterThan(0);
+      const option = result.value.options.find((o) => o.name === 'folly-k8s');
+      expect(option?.candidate).toBe(true);
+    }
   });
 });

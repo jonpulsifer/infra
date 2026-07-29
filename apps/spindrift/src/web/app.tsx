@@ -9,14 +9,16 @@ import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
 import { command } from './client.ts';
-import {
-  INITIAL_DRAFT,
-  LINKED_REPOS,
-  REPOSITORY_OPTIONS,
-  TARGET_LIST,
-  TARGET_OPTIONS,
-} from './demo/scenarios.ts';
-import type { AppListItem, DeployView, WorkspaceView } from './model.ts';
+import { INITIAL_DRAFT } from './demo/scenarios.ts';
+import type {
+  AppListItem,
+  DeployView,
+  LinkedRepoView,
+  RepositoryOptionView,
+  TargetListItem,
+  TargetOptionView,
+  WorkspaceView,
+} from './model.ts';
 import { useRoute } from './router.ts';
 import { type Theme, useTheme } from './theme.ts';
 import { Button } from './ui/button.tsx';
@@ -121,24 +123,15 @@ function Screen({
   onNavigate: (path: string) => void;
 }) {
   if (path.startsWith('/settings')) return <Settings />;
-  if (path.startsWith('/apps/new')) {
-    return (
-      <NewApp
-        initialDraft={INITIAL_DRAFT}
-        targets={TARGET_OPTIONS}
-        repos={REPOSITORY_OPTIONS}
-      />
-    );
-  }
-  if (path.startsWith('/targets')) return <TargetList targets={TARGET_LIST} />;
-  if (path.startsWith('/repos')) return <RepositoryList repos={LINKED_REPOS} />;
+  if (path.startsWith('/apps/new')) return <NewAppScreen />;
+  if (path.startsWith('/targets')) return <TargetsScreen />;
+  if (path.startsWith('/repos')) return <RepositoriesScreen />;
   if (path.startsWith('/deploys')) {
     const deployId = path.replace(/^\/deploys\/?/, '');
     return <DeployScreen deployId={deployId} onNavigate={onNavigate} />;
   }
-  if (path === '/apps' || path === '') {
+  if (path === '/apps' || path === '')
     return <AppsScreen onNavigate={onNavigate} />;
-  }
   if (path.startsWith('/apps/')) {
     const appName = path.replace(/^\/apps\//, '');
     return <WorkspaceScreen appName={appName} onNavigate={onNavigate} />;
@@ -382,6 +375,184 @@ function DeployScreen({
   }
 
   return <DeployDetail view={state.deploy} />;
+}
+
+function TargetsScreen() {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | { type: 'success'; targets: readonly TargetListItem[] }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    command('listTargets', {})
+      .then((result) => {
+        if (!live) return;
+        if (result.ok) {
+          setState({ type: 'success', targets: result.value.targets });
+        } else {
+          setState({ type: 'error', message: result.failure.message });
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading targets...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load targets</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <TargetList targets={state.targets} />;
+}
+
+function RepositoriesScreen() {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | { type: 'success'; repos: readonly LinkedRepoView[] }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    command('listRepositories', {})
+      .then((result) => {
+        if (!live) return;
+        if (result.ok) {
+          setState({ type: 'success', repos: result.value.repos });
+        } else {
+          setState({ type: 'error', message: result.failure.message });
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading repositories...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load repositories</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <RepositoryList repos={state.repos} />;
+}
+
+function NewAppScreen() {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | {
+        type: 'success';
+        targetOptions: readonly TargetOptionView[];
+        repoOptions: readonly RepositoryOptionView[];
+      }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([command('listTargets', {}), command('listRepositories', {})])
+      .then(([targetRes, repoRes]) => {
+        if (!live) return;
+        if (!targetRes.ok) {
+          setState({ type: 'error', message: targetRes.failure.message });
+        } else if (!repoRes.ok) {
+          setState({ type: 'error', message: repoRes.failure.message });
+        } else {
+          setState({
+            type: 'success',
+            targetOptions: targetRes.value.options,
+            repoOptions: repoRes.value.options,
+          });
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading creation options...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load creation options</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <NewApp
+      initialDraft={INITIAL_DRAFT}
+      targets={state.targetOptions}
+      repos={state.repoOptions}
+    />
+  );
 }
 
 function TopBar({
