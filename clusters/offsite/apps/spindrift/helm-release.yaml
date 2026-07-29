@@ -84,8 +84,8 @@ spec:
       # arrives that way, not from a Job that would exit 0 having done nothing.
       migration:
         enabled: false
-    # §19's second Deployment. The reconciler entrypoint does not exist yet, so
-    # rendering it would be a crash-looping pod that says nothing true.
+    # The second process stays disabled while this installation has no migration
+    # runner to order schema readiness before the web and reconciler Deployments.
     reconciler:
       enabled: false
     web:

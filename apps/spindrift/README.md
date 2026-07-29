@@ -50,7 +50,8 @@ Two named gaps, both deliberate:
 
 ## Shape
 
-One image, two processes (§19); only `web` exists so far.
+One image, two processes (§19): `web` serves the product surface and
+`reconciler` independently supervises the polling work.
 
 | Path | What it is |
 | --- | --- |
@@ -59,7 +60,7 @@ One image, two processes (§19); only `web` exists so far.
 | `src/commands/` | the application command layer and its registry |
 | `src/domain/` | backend-neutral product rules and value types |
 | `src/adapters/` | the adapter contracts, the three deploy backends, the three build routes, DNS records, and the two stores |
-| `src/reconciler/` | two loops — Target health and capabilities, and deploy convergence |
+| `src/reconciler/` | the independently supervised reconciliation process |
 | `src/supply-chain/` | provenance verification, core signing, and derived posture |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |
@@ -620,6 +621,10 @@ SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
 # What the image runs: serves dist/, so `build` has to have happened.
 SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
   bun run --cwd apps/spindrift start
+
+# The second process in the same image.
+SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
+  bun run --cwd apps/spindrift src/reconciler/main.ts
 ```
 
 `mise run ts:check` typechecks and lints the whole workspace, this package

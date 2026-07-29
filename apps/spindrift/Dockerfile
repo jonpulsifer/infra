@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# One image (§19). Today it starts one process — `web`; `reconciler` is the
-# second entrypoint off this same image and arrives with the deploy loop.
+# One image, two process entrypoints (§19): `web` is the image default and the
+# installer selects `reconciler` with its own command.
 #
 # The client is built here and **served as files at runtime**, which is what
 # keeps the compile-time toolchain out of the running container. The server

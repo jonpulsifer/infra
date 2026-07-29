@@ -34,8 +34,8 @@ serviceAccount:
 hostname: ""
 
 # §19: "One image, two Deployments." The reconciler is the second entrypoint off
-# the same image and does not exist yet, so it is off by default rather than
-# rendered as a Deployment that would crash-loop on a missing module.
+# the same image. It remains opt-in so an installation can validate and roll out
+# the process independently of the web Deployment.
 web:
   replicas: 1
   resources:
