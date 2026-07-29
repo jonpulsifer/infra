@@ -59,6 +59,12 @@ describe('workload identity', () => {
             },
           },
           {
+            configMap: {
+              name: 'kube-root-ca.crt',
+              items: [{ key: 'ca.crt', path: 'ca.crt' }],
+            },
+          },
+          {
             serviceAccountToken: {
               audience:
                 '//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite',
@@ -89,6 +95,15 @@ describe('workload identity', () => {
       name: 'GOOGLE_APPLICATION_CREDENTIALS',
       value: '/var/run/secrets/spindrift/gcp-credentials.json',
     });
+    expect(reconciler.containers[0].env).toContainEqual({
+      name: 'NODE_EXTRA_CA_CERTS',
+      value: '/var/run/secrets/spindrift/ca.crt',
+    });
+    expect(
+      web.containers[0].env.some(
+        (item: { name: string }) => item.name === 'NODE_EXTRA_CA_CERTS',
+      ),
+    ).toBe(false);
   });
 });
 
@@ -108,7 +123,7 @@ describe('Secret-backed authentication configuration', () => {
   });
 });
 
-describe('installation manifest bootstrap', () => {
+describe('declared installation manifest', () => {
   test('mounts ordinary configuration from a ConfigMap in every process', async () => {
     const objects = await render({
       installationManifest: { installation: 'example' },
@@ -130,6 +145,11 @@ describe('installation manifest bootstrap', () => {
     expect(deployments).toHaveLength(2);
     for (const deployment of deployments) {
       const pod = deployment.spec.template.spec;
+      expect(
+        deployment.spec.template.metadata.annotations?.[
+          'checksum/installation-manifest'
+        ],
+      ).toMatch(/^[a-f0-9]{64}$/);
       expect(pod.volumes).toContainEqual({
         name: 'installation-manifest',
         configMap: { name: 'spindrift-installation-manifest' },
@@ -149,6 +169,39 @@ describe('installation manifest bootstrap', () => {
         ),
       ).toBe(false);
     }
+  });
+
+  test('rolls every process when declared configuration changes', async () => {
+    const first = await render({
+      installationManifest: { installation: 'first' },
+      reconciler: { enabled: true },
+    });
+    const second = await render({
+      installationManifest: { installation: 'second' },
+      reconciler: { enabled: true },
+    });
+
+    const checksums = (objects: typeof first) =>
+      objects
+        .filter((object) => object.kind === 'Deployment')
+        .map(
+          (deployment) =>
+            deployment.spec.template.metadata.annotations[
+              'checksum/installation-manifest'
+            ],
+        );
+    expect(new Set(checksums(first))).toHaveLength(1);
+    expect(new Set(checksums(second))).toHaveLength(1);
+    expect(checksums(first)[0]).not.toBe(checksums(second)[0]);
+  });
+
+  test('does not add a manifest checksum without a declaration', async () => {
+    const deployment = one(await render(), 'Deployment', 'spindrift-web');
+    expect(
+      deployment.spec.template.metadata.annotations?.[
+        'checksum/installation-manifest'
+      ],
+    ).toBeUndefined();
   });
 });
 

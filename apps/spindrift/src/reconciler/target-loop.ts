@@ -20,10 +20,11 @@
  * paths that both decided what "healthy" means would be the two loops §13 says
  * this is not.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
+import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
-import { type Target, targets } from '../db/schema.ts';
+import { deploys, type Target, targets } from '../db/schema.ts';
 import {
   deriveHealth,
   type PrerequisiteResult,
@@ -93,6 +94,102 @@ export async function inspectTarget(
       discovery: null,
     };
   }
+}
+
+/**
+ * Restore connections owned by installation desired state before loops start.
+ *
+ * A disconnected row is deliberately left disconnected while the manifest is
+ * stored: adapters do not exist at that point, so reconnecting there would
+ * strand orphaned Deploys permanently. Once adapters exist, this performs the
+ * same inspect-and-readopt transition as an in-product reconnect.
+ */
+export async function restoreDeclaredTargetConnections(
+  context: TargetLoopContext,
+  manifest: InstallationManifest,
+): Promise<readonly string[]> {
+  const declared = new Set(
+    manifest.targets.flatMap((target) =>
+      target.connection === undefined ? [] : [target.name],
+    ),
+  );
+  if (declared.size === 0) return [];
+
+  const disconnected = await context.db
+    .select()
+    .from(targets)
+    .where(eq(targets.status, 'disconnected'));
+  const readopted: string[] = [];
+
+  for (const target of disconnected) {
+    if (!declared.has(target.name) || !hasTargetConnection(target)) continue;
+
+    const now = context.clock.now();
+    const ref = deployTargetOf(target);
+    const { prerequisites, discovery } = await inspectTarget(context, ref);
+    const health = deriveHealth(prerequisites, target.adapter);
+    await context.db
+      .update(targets)
+      .set({
+        status: 'connected',
+        health,
+        prerequisites,
+        discovery,
+        inspectedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(targets.id, target.id));
+    readopted.push(
+      ...(await readoptTargetDeploys(context, target.id, ref, now)),
+    );
+  }
+
+  return readopted;
+}
+
+/**
+ * Re-adopt what a disconnect stranded (§13).
+ *
+ * The adapter's `observe` is authoritative. A workload still present is
+ * adopted; one that disappeared or cannot be observed stays orphaned.
+ */
+export async function readoptTargetDeploys(
+  context: TargetLoopContext,
+  targetId: string,
+  target: DeployTargetRef,
+  now: Date,
+): Promise<string[]> {
+  const deployAdapter = context.adapters.deploy(target.adapter);
+  if (deployAdapter === null) return [];
+
+  const stranded = await context.db
+    .select()
+    .from(deploys)
+    .where(
+      and(
+        eq(deploys.targetId, targetId),
+        isNotNull(deploys.orphanedAt),
+        isNotNull(deploys.ref),
+      ),
+    );
+
+  const adopted: string[] = [];
+  for (const deploy of stranded) {
+    let observed: Awaited<ReturnType<typeof deployAdapter.observe>>;
+    try {
+      observed = await deployAdapter.observe(target, deploy.ref!);
+    } catch {
+      continue;
+    }
+    if (observed === null) continue;
+
+    await context.db
+      .update(deploys)
+      .set({ orphanedAt: null, phase: observed.phase, updatedAt: now })
+      .where(eq(deploys.id, deploy.id));
+    adopted.push(String(deploy.id));
+  }
+  return adopted;
 }
 
 /** What one Target's refresh did. */

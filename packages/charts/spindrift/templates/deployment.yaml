@@ -49,6 +49,10 @@ spec:
       labels:
         {{- include "spindrift.labels" $top | nindent 8 }}
         app.kubernetes.io/component: {{ $process.name }}
+      {{- if not (empty $top.Values.installationManifest) }}
+      annotations:
+        checksum/installation-manifest: {{ toJson $top.Values.installationManifest | sha256sum | quote }}
+      {{- end }}
     spec:
       {{- if $top.Values.sandbox }}
       runtimeClassName: gvisor
@@ -84,6 +88,8 @@ spec:
             {{- if $process.federates }}
             - name: SPINDRIFT_IDENTITY_TOKEN_PATH
               value: {{ printf "%s/token" $top.Values.serviceAccount.token.mountPath | quote }}
+            - name: NODE_EXTRA_CA_CERTS
+              value: {{ printf "%s/ca.crt" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- if $top.Values.serviceAccount.token.gcpAudience }}
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
@@ -166,6 +172,11 @@ spec:
                   audience: {{ $top.Values.serviceAccount.token.audience | quote }}
                   expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
                   path: token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
               {{- if $top.Values.serviceAccount.token.gcpAudience }}
               - serviceAccountToken:
                   audience: {{ $top.Values.serviceAccount.token.gcpAudience | quote }}

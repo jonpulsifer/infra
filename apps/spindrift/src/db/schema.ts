@@ -163,8 +163,9 @@ export const targetStatus = pgEnum('target_status', [
 
 /**
  * §13: "Connect always succeeds; health is a standing prerequisite checklist."
- * Two states rather than three — the connect act runs one pass of the checklist
- * before it returns, so no Target ever exists unassessed.
+ * Two states rather than three — a declared connection starts unhealthy with
+ * an awaiting-inspection reason, and the target loop replaces that provisional
+ * checklist with observations.
  */
 export const targetHealth = pgEnum('target_health', ['healthy', 'unhealthy']);
 
@@ -211,9 +212,9 @@ export const webauthnPurpose = pgEnum('webauthn_purpose', [
  * The one installation this control plane represents.
  *
  * The manifest is ordinary configuration, not a credential, and §12 makes
- * Postgres the durable source for Spindrift-owned state. A bootstrap document
- * may seed this row once; after that, every process reads the same database
- * value instead of treating a mounted file as a second source of truth.
+ * Postgres its durable store. A deployment declaration reconciles into this
+ * row at process start; without one, every process can recover the same last
+ * validated value from the database.
  */
 export const installation = pgTable(
   'installation',
@@ -650,7 +651,7 @@ export const targets = pgTable(
      * "native OIDC federation, nothing stored."
      *
      * Null means the manifest has established the Target's identity and rank,
-     * but an operator has not supplied its connection facts yet.
+     * but neither desired state nor an operator has supplied connection facts.
      */
     connection: jsonb('connection').$type<TargetConnection>(),
     /** §13: the standing checklist's last verdict. */

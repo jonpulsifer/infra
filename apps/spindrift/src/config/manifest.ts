@@ -1,11 +1,13 @@
 /**
  * Loading and validating the installation manifest.
  *
- * The manifest lives in Postgres. An empty installation bootstraps it from a
- * mounted file (the chart renders one from values into a ConfigMap) or, for
- * tests and local runs, from an inline environment document. Validation
- * failures are fatal and name every offending key at once — a half-configured
- * installation must not reach the point where it can place a workload.
+ * The manifest is durable in Postgres. A declared document from a mounted file
+ * (the chart renders one from values into a ConfigMap) or, for tests and local
+ * runs, an inline environment document is reconciled into that row at process
+ * start. Without a declaration, a process can still recover from the durable
+ * row. Validation failures are fatal and name every offending key at once — a
+ * half-configured installation must not reach the point where it can place a
+ * workload.
  */
 
 import {
@@ -85,6 +87,24 @@ export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
 export async function loadManifest(
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
+  const manifest = await loadManifestIfPresent(env);
+  if (manifest !== null) return manifest;
+
+  throw new ManifestError(
+    `no installation manifest: set ${MANIFEST_PATH_VAR} to a manifest file or ${MANIFEST_INLINE_VAR} to its contents`,
+  );
+}
+
+/**
+ * Read a declared manifest when one is available.
+ *
+ * An explicit missing path is still an error: it is a broken declaration, not
+ * the same state as no declaration. `null` means callers may deliberately fall
+ * back to a durable copy.
+ */
+export async function loadManifestIfPresent(
+  env: Env = Bun.env,
+): Promise<InstallationManifest | null> {
   const explicitPath = env[MANIFEST_PATH_VAR]?.trim();
   const path = explicitPath || DEFAULT_MANIFEST_PATH;
 
@@ -103,10 +123,7 @@ export async function loadManifest(
   if (inline?.trim()) {
     return parseManifest(inline, `$${MANIFEST_INLINE_VAR}`);
   }
-
-  throw new ManifestError(
-    `no installation manifest: set ${MANIFEST_PATH_VAR} to a manifest file or ${MANIFEST_INLINE_VAR} to its contents`,
-  );
+  return null;
 }
 
 /**

@@ -31,8 +31,8 @@ spec:
     # from the HTTPRoute and cert-manager issues the certificate, so this line
     # is the whole of what makes the UI reachable with TLS.
     hostname: spindrift.${SECRET_DOMAIN}
-    # Non-secret first-boot configuration. Core stores the validated document
-    # in Postgres; the database row is authoritative after bootstrap.
+    # Non-secret declared configuration. Core validates and reconciles it into
+    # durable Postgres state whenever a process starts.
     installationManifest:
       installation: offsite
       dns:
@@ -45,7 +45,7 @@ spec:
           audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
           tokenUrl: https://sts.googleapis.com/v1/token
           tokenPath: /var/run/secrets/spindrift/gcp-token
-          impersonationUrl: null
+          impersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
       charts:
         app: packages/charts/spindrift-app
         installer: packages/charts/spindrift
@@ -69,10 +69,27 @@ spec:
       targets:
         - name: offsite
           adapter: kubernetes
+          connection:
+            apiServer: https://kubernetes.default.svc
+            namespace: spindrift-apps
+            delivery:
+              flavour: flux-helmrelease
+              namespace: spindrift-apps
+              sourceRef:
+                name: infra
+                namespace: flux-system
+            chartContract: "2"
         - name: bluenose-cloudrun
           adapter: cloudrun
+          connection:
+            project: bluenose
+            region: northamerica-northeast1
+            endpoint: https://run.googleapis.com
         - name: bluenose-static
           adapter: static
+          connection:
+            project: bluenose
+            endpoint: https://firebasehosting.googleapis.com
       controlPlane:
         hostname: spindrift.lolwtf.ca
       auth:

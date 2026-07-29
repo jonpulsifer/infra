@@ -142,19 +142,92 @@ export const buildRouteSchema = z.discriminatedUnion('adapter', [
     .strict(),
 ]);
 
+const kubernetesDeliverySchema = z.discriminatedUnion('flavour', [
+  z
+    .object({
+      flavour: z.literal('flux-helmrelease'),
+      namespace: nonEmptyString,
+      sourceRef: z
+        .object({
+          name: nonEmptyString,
+          namespace: nonEmptyString,
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      flavour: z.literal('argo-application'),
+      namespace: nonEmptyString,
+      project: nonEmptyString,
+      repoUrl: nonEmptyString,
+      revision: nonEmptyString,
+      server: nonEmptyString,
+    })
+    .strict(),
+]);
+
 /**
- * A Target as the manifest seeds it. The connect act (Task 13) owns the rest of
- * the model; this is only what must exist before the first boot can place
- * anything.
+ * A Target declared by installation desired state.
+ *
+ * Connection facts are optional so an operator may still seed an identity and
+ * connect it through the product. When supplied, they are ordinary,
+ * credential-free platform configuration and make the connection reproducible
+ * from Git.
  */
-export const targetSeedSchema = z
-  .object({
-    /** Stable identifier, unique within the installation. */
-    name: targetNameSchema,
-    /** Which delivery adapter drives it. */
-    adapter: targetAdapterSchema,
-  })
-  .strict();
+export const targetSeedSchema = z.discriminatedUnion('adapter', [
+  z
+    .object({
+      /** Stable identifier, unique within the installation. */
+      name: targetNameSchema,
+      adapter: z.literal('kubernetes'),
+      connection: z
+        .object({
+          apiServer: z.url(),
+          namespace: nonEmptyString,
+          delivery: kubernetesDeliverySchema,
+          servedHosts: z.array(nonEmptyString).optional(),
+          reachableRegistries: z.array(nonEmptyString).optional(),
+          logHistorySeconds: z.number().int().nonnegative().optional(),
+          chartContract: nonEmptyString.optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      name: targetNameSchema,
+      adapter: z.literal('cloudrun'),
+      connection: z
+        .object({
+          project: nonEmptyString,
+          region: nonEmptyString,
+          endpoint: z.url(),
+          policyEndpoint: z.url().optional(),
+          servedHosts: z.array(nonEmptyString).optional(),
+          reachableRegistries: z.array(nonEmptyString).optional(),
+          logHistorySeconds: z.number().int().nonnegative().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      name: targetNameSchema,
+      adapter: z.literal('static'),
+      connection: z
+        .object({
+          project: nonEmptyString,
+          endpoint: z.url(),
+          servedHosts: z.array(nonEmptyString).optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+]);
 
 export const installationManifestSchema = z
   .object({
@@ -408,9 +481,9 @@ export const installationManifestSchema = z
       .strict(),
 
     /**
-     * Targets that exist before anyone connects one, in rank order — rank is one
-     * global ordered list (§13), so the order of this array is the order
-     * placement considers them in.
+     * Targets in rank order. A Target with connection facts is reconciled as
+     * connected; one without them exists for an operator to connect in-product.
+     * Rank is one global ordered list (§13), so array order is placement order.
      */
     targets: z
       .array(targetSeedSchema)

@@ -12,6 +12,7 @@ import type { InstallationManifest } from '../config/manifest.schema.ts';
 import { loadStoredManifest } from '../config/manifest-store.ts';
 import { createClient, createDb } from '../db/client.ts';
 import { type ReconcilerProcessEvent, runReconciler } from './process.ts';
+import { restoreDeclaredTargetConnections } from './target-loop.ts';
 
 type Env = Record<string, string | undefined>;
 
@@ -46,13 +47,15 @@ export async function startReconciler(
     const adapters =
       options.createAdapters?.(manifest) ??
       createAdapterRegistry({ manifest, env });
+    const clock = options.clock ?? systemClock;
+    await restoreDeclaredTargetConnections({ db, adapters, clock }, manifest);
     options.onStarted?.(manifest);
 
     await runReconciler(
       {
         db,
         adapters,
-        clock: options.clock ?? systemClock,
+        clock,
         manifest,
       },
       {

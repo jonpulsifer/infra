@@ -17,9 +17,45 @@ const FIXTURE = new URL(
 );
 const fixtureText = await Bun.file(FIXTURE).text();
 const fixtureManifest = Bun.YAML.parse(fixtureText) as InstallationManifest;
+const connectedManifest = {
+  ...fixtureManifest,
+  targets: [
+    {
+      name: 'cluster',
+      adapter: 'kubernetes',
+      connection: {
+        apiServer: 'https://cluster.example.test',
+        namespace: 'apps',
+        delivery: {
+          flavour: 'flux-helmrelease',
+          namespace: 'apps',
+          sourceRef: { name: 'infra', namespace: 'flux-system' },
+        },
+        chartContract: '2',
+      },
+    },
+    {
+      name: 'cloud-cloudrun',
+      adapter: 'cloudrun',
+      connection: {
+        project: 'example-vessel',
+        region: 'example-region',
+        endpoint: 'https://run.example.test',
+      },
+    },
+    {
+      name: 'cloud-static',
+      adapter: 'static',
+      connection: {
+        project: 'example-vessel',
+        endpoint: 'https://hosting.example.test',
+      },
+    },
+  ],
+} satisfies InstallationManifest;
 
 describe('the stored installation manifest', () => {
-  test('bootstraps once, then boots from the database alone', async () => {
+  test('stores declared configuration, then boots from the database alone', async () => {
     const first = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
@@ -74,7 +110,98 @@ describe('the stored installation manifest', () => {
     ]);
   });
 
-  test('the database wins over changed bootstrap configuration', async () => {
+  test('a fresh database reconstructs every declared Target connection', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
+    });
+
+    const rows = await database().db.query.targets.findMany({
+      orderBy: (targets, { asc }) => [asc(targets.rank)],
+    });
+    expect(
+      rows.map(({ name, status, connection }) => ({
+        name,
+        status,
+        connection,
+      })),
+    ).toEqual([
+      {
+        name: 'cluster',
+        status: 'connected',
+        connection: {
+          adapter: 'kubernetes',
+          apiServer: 'https://cluster.example.test',
+          namespace: 'apps',
+          delivery: {
+            flavour: 'flux-helmrelease',
+            namespace: 'apps',
+            sourceRef: { name: 'infra', namespace: 'flux-system' },
+          },
+          chartContract: '2',
+        },
+      },
+      {
+        name: 'cloud-cloudrun',
+        status: 'connected',
+        connection: {
+          adapter: 'cloudrun',
+          project: 'example-vessel',
+          region: 'example-region',
+          endpoint: 'https://run.example.test',
+        },
+      },
+      {
+        name: 'cloud-static',
+        status: 'connected',
+        connection: {
+          adapter: 'static',
+          project: 'example-vessel',
+          endpoint: 'https://hosting.example.test',
+        },
+      },
+    ]);
+  });
+
+  test('a changed declared connection resets its assessment and timestamp', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
+    });
+    const old = new Date('2000-01-01T00:00:00.000Z');
+    await database()
+      .db.update(targets)
+      .set({ health: 'healthy', updatedAt: old })
+      .where(eq(targets.name, 'cluster'));
+    const changed = {
+      ...connectedManifest,
+      targets: connectedManifest.targets.map((target) =>
+        target.adapter === 'kubernetes'
+          ? {
+              ...target,
+              connection: {
+                ...target.connection,
+                apiServer: 'https://replacement.example.test',
+              },
+            }
+          : target,
+      ),
+    } satisfies InstallationManifest;
+
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(changed),
+    });
+
+    const cluster = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(cluster?.connection).toMatchObject({
+      apiServer: 'https://replacement.example.test',
+    });
+    expect(cluster?.health).toBe('unhealthy');
+    expect(cluster?.inspectedAt).toBeNull();
+    expect(cluster?.updatedAt.getTime()).toBeGreaterThan(old.getTime());
+  });
+
+  test('changed declared configuration updates the durable manifest', async () => {
     const first = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
@@ -86,8 +213,107 @@ describe('the stored installation manifest', () => {
     const later = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: changed,
     });
-    expect(later).toEqual(first);
-    expect(later.installation).toBe('example');
+    expect(later).not.toEqual(first);
+    expect(later.installation).toBe('replacement');
+    expect(await loadStoredManifest(database().db, {})).toEqual(later);
+  });
+
+  test('updating declared configuration preserves connected Target state', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    const before = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    await database()
+      .db.update(targets)
+      .set({
+        status: 'connected',
+        connection: {
+          adapter: 'kubernetes',
+          apiServer: 'https://cluster.example.test',
+          namespace: 'apps',
+          delivery: {
+            flavour: 'flux-helmrelease',
+            namespace: 'apps',
+            sourceRef: { name: 'infra', namespace: 'flux-system' },
+          },
+        },
+      })
+      .where(eq(targets.name, 'cluster'));
+
+    const changed = fixtureText.replace(
+      'installation: example',
+      'installation: replacement',
+    );
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: changed,
+    });
+
+    const after = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(after?.id).toBe(before?.id);
+    expect(after?.status).toBe('connected');
+    expect(after?.connection).toEqual({
+      adapter: 'kubernetes',
+      apiServer: 'https://cluster.example.test',
+      namespace: 'apps',
+      delivery: {
+        flavour: 'flux-helmrelease',
+        namespace: 'apps',
+        sourceRef: { name: 'infra', namespace: 'flux-system' },
+      },
+    });
+  });
+
+  test('an invalid declaration does not overwrite durable configuration', async () => {
+    const first = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    const malformed = fixtureText.replace(
+      'installation: example',
+      'installation: ""',
+    );
+
+    await expect(
+      loadStoredManifest(database().db, {
+        [MANIFEST_INLINE_VAR]: malformed,
+      }),
+    ).rejects.toThrow(ManifestError);
+
+    expect(await loadStoredManifest(database().db, {})).toEqual(first);
+  });
+
+  test('an incompatible Target declaration rolls back manifest and rank changes', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    await database()
+      .db.update(targets)
+      .set({ rank: 99 })
+      .where(eq(targets.name, 'cluster'));
+    const incompatible = {
+      ...fixtureManifest,
+      installation: 'incompatible',
+      targets: [
+        { name: 'cluster', adapter: 'kubernetes' },
+        { name: 'cloud-cloudrun', adapter: 'kubernetes' },
+      ],
+    } satisfies InstallationManifest;
+
+    await expect(
+      loadStoredManifest(database().db, {
+        [MANIFEST_INLINE_VAR]: JSON.stringify(incompatible),
+      }),
+    ).rejects.toThrow(/stored Target uses cloudrun/);
+
+    const [stored] = await database().db.select().from(installation);
+    expect(stored?.manifest).toEqual(fixtureManifest);
+    const cluster = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(cluster?.rank).toBe(99);
   });
 
   test('repairs a stored Target rank from manifest order', async () => {
@@ -107,23 +333,18 @@ describe('the stored installation manifest', () => {
     expect(cluster?.rank).toBe(0);
   });
 
-  test('simultaneous processes converge on the one winning bootstrap', async () => {
+  test('simultaneous processes converge on one declaration', async () => {
     const contender = createDb(database().connect());
-    const replacement = fixtureText.replace(
-      'installation: example',
-      'installation: replacement',
-    );
-
     const [first, second] = await Promise.all([
       loadStoredManifest(database().db, {
         [MANIFEST_INLINE_VAR]: fixtureText,
       }),
       loadStoredManifest(contender, {
-        [MANIFEST_INLINE_VAR]: replacement,
+        [MANIFEST_INLINE_VAR]: fixtureText,
       }),
     ]);
     expect(second).toEqual(first);
-    expect(['example', 'replacement']).toContain(first.installation);
+    expect(first.installation).toBe('example');
     expect(await database().db.select().from(targets)).toHaveLength(3);
   });
 

@@ -1,93 +1,154 @@
 /**
- * Postgres ownership of the installation manifest.
+ * Durable storage for the declared installation manifest.
  *
  * Parsing and validation stay in `manifest.ts`; this module owns the singleton
- * row and the one-time transition from its bootstrap configuration — including
- * ordered Target identities — to durable state.
+ * row and reconciles a deployment declaration — including ordered Target
+ * identities — into durable state.
  */
+import { isDeepStrictEqual } from 'node:util';
+import { sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { installation, targets } from '../db/schema.ts';
 import { unreachablePrerequisites } from '../domain/capabilities.ts';
-import type { InstallationManifest } from './manifest.schema.ts';
-import { loadManifest, ManifestError, validateManifest } from './manifest.ts';
+import type { TargetConnection } from '../domain/target.ts';
+import type { InstallationManifest, TargetSeed } from './manifest.schema.ts';
+import {
+  loadManifest,
+  loadManifestIfPresent,
+  ManifestError,
+  validateManifest,
+} from './manifest.ts';
 
 type Env = Record<string, string | undefined>;
 
 /**
- * Load the database-owned manifest, seeding it once from boot configuration.
+ * Reconcile declared configuration into the durable singleton, then load it.
  *
- * The insert is intentionally conflict-tolerant: `web` and `reconciler` may
- * start together against an empty database. One wins the singleton row and
- * both read that same committed value afterward. Once the row exists, mounted
- * bootstrap configuration is ignored rather than becoming a competing source
- * of desired state.
+ * A mounted or inline declaration is the deployment's desired configuration,
+ * so a validated change updates the row before adapters are constructed. The
+ * row remains a recovery source for a process started without a declaration.
+ * `web` and `reconciler` mount the same ConfigMap revision in production, so
+ * concurrent upserts converge on the same document.
  */
 export async function loadStoredManifest(
   db: Database,
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  const stored = await readStoredManifest(db);
-  let manifest = stored;
-  if (manifest === null) {
-    const bootstrap = await loadManifest(env);
-    await db
-      .insert(installation)
-      .values({ manifest: bootstrap })
-      .onConflictDoNothing({ target: installation.id });
-
-    manifest = await readStoredManifest(db);
-    if (manifest === null) {
-      throw new ManifestError(
-        'installation manifest bootstrap completed without a stored manifest',
-      );
-    }
+  const declared = await loadManifestIfPresent(env);
+  if (declared !== null) {
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(installation)
+        .values({ manifest: declared })
+        .onConflictDoUpdate({
+          target: installation.id,
+          set: { manifest: declared },
+        });
+      await reconcileManifestTargets(tx, declared);
+    });
+    return declared;
   }
 
-  await seedManifestTargets(db, manifest);
+  const manifest = await readStoredManifest(db);
+  if (manifest === null) {
+    // Preserve loadManifest's precise absent-source error for an empty store.
+    await loadManifest(env);
+    throw new ManifestError(
+      'installation manifest reconciliation completed without a stored manifest',
+    );
+  }
+
+  await db.transaction(async (tx) => {
+    await reconcileManifestTargets(tx, manifest);
+  });
   return manifest;
 }
 
 /**
- * Materialize the manifest's ordered Target identities without pretending they
- * are connected.
+ * Materialize the manifest's ordered Target identities and declared
+ * connections.
  *
- * A Target seed carries only a name and adapter. Connection facts remain null
- * until the operator supplies them through `connectTarget`; that command
- * updates this durable row in place and preserves the manifest-established
- * rank. Conflict tolerance makes concurrent web/reconciler startup safe and
- * lets later boots repair a partially completed seed.
+ * An omitted connection leaves existing product-owned connection state alone.
+ * A declared connection is desired state: it creates a connected row and
+ * resets changed connection facts to an unhealthy, awaiting-inspection
+ * checklist. A disconnected row stays disconnected until reconciler startup
+ * can inspect and safely re-adopt its Deploys. Keeping this work in the manifest
+ * transaction means an incompatible target cannot poison the durable
+ * declaration.
  */
-async function seedManifestTargets(
-  db: Database,
+async function reconcileManifestTargets(
+  db: Pick<Database, 'insert' | 'query'>,
   manifest: InstallationManifest,
 ): Promise<void> {
   for (const [rank, target] of manifest.targets.entries()) {
+    const { name, adapter } = target;
+    const declaredConnection = connectionFromSeed(target);
     const existing = await db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, target.name),
+      where: (targets, { eq }) => eq(targets.name, name),
     });
-    if (existing !== undefined && existing.adapter !== target.adapter) {
+    if (existing !== undefined && existing.adapter !== adapter) {
       throw new ManifestError(
-        `manifest Target ${target.name} uses ${target.adapter}, but the stored Target uses ${existing.adapter}`,
+        `manifest Target ${name} uses ${adapter}, but the stored Target uses ${existing.adapter}`,
       );
     }
+
+    const awaitingInspection = unreachablePrerequisites(
+      'Declared Target connection is awaiting inspection',
+      adapter,
+    );
+    const hasConnectionChange =
+      declaredConnection !== null &&
+      !isDeepStrictEqual(existing?.connection, declaredConnection);
 
     await db
       .insert(targets)
       .values({
-        ...target,
+        name,
+        adapter,
         rank,
-        status: 'disconnected' as const,
-        connection: null,
+        status:
+          declaredConnection === null
+            ? ('disconnected' as const)
+            : ('connected' as const),
+        connection: declaredConnection,
         health: 'unhealthy' as const,
-        prerequisites: unreachablePrerequisites(
-          'Target connection has not been configured',
-          target.adapter,
-        ),
+        prerequisites:
+          declaredConnection === null
+            ? unreachablePrerequisites(
+                'Target connection has not been configured',
+                adapter,
+              )
+            : awaitingInspection,
       })
       .onConflictDoUpdate({
         target: targets.name,
-        set: { rank },
+        set: hasConnectionChange
+          ? {
+              rank,
+              ...(existing?.status === 'disconnected'
+                ? {}
+                : { status: 'connected' as const }),
+              connection: declaredConnection,
+              health: 'unhealthy' as const,
+              prerequisites: awaitingInspection,
+              discovery: null,
+              inspectedAt: null,
+              updatedAt: sql`now()`,
+            }
+          : { rank },
       });
+  }
+}
+
+function connectionFromSeed(target: TargetSeed): TargetConnection | null {
+  if (target.connection === undefined) return null;
+  switch (target.adapter) {
+    case 'kubernetes':
+      return { adapter: 'kubernetes', ...target.connection };
+    case 'cloudrun':
+      return { adapter: 'cloudrun', ...target.connection };
+    case 'static':
+      return { adapter: 'static', ...target.connection };
   }
 }
 
