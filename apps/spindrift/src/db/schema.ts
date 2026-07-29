@@ -648,8 +648,11 @@ export const targets = pgTable(
      * How the adapter reaches this Target — `TargetConnection` in
      * `src/domain/target.ts`. Never a credential: §13 settles one auth mode,
      * "native OIDC federation, nothing stored."
+     *
+     * Null means the manifest has established the Target's identity and rank,
+     * but an operator has not supplied its connection facts yet.
      */
-    connection: jsonb('connection').$type<TargetConnection>().notNull(),
+    connection: jsonb('connection').$type<TargetConnection>(),
     /** §13: the standing checklist's last verdict. */
     health: targetHealth('health').notNull(),
     /** One `PrerequisiteResult` per item, with the sentence behind each. */

@@ -6,7 +6,8 @@
  * durable state.
  */
 import type { Database } from '../db/client.ts';
-import { installation } from '../db/schema.ts';
+import { installation, targets } from '../db/schema.ts';
+import { unreachablePrerequisites } from '../domain/capabilities.ts';
 import type { InstallationManifest } from './manifest.schema.ts';
 import { loadManifest, ManifestError, validateManifest } from './manifest.ts';
 
@@ -26,21 +27,56 @@ export async function loadStoredManifest(
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
   const stored = await readStoredManifest(db);
-  if (stored !== null) return stored;
+  let manifest = stored;
+  if (manifest === null) {
+    const bootstrap = await loadManifest(env);
+    await db
+      .insert(installation)
+      .values({ manifest: bootstrap })
+      .onConflictDoNothing({ target: installation.id });
 
-  const bootstrap = await loadManifest(env);
-  await db
-    .insert(installation)
-    .values({ manifest: bootstrap })
-    .onConflictDoNothing({ target: installation.id });
-
-  const seeded = await readStoredManifest(db);
-  if (seeded === null) {
-    throw new ManifestError(
-      'installation manifest bootstrap completed without a stored manifest',
-    );
+    manifest = await readStoredManifest(db);
+    if (manifest === null) {
+      throw new ManifestError(
+        'installation manifest bootstrap completed without a stored manifest',
+      );
+    }
   }
-  return seeded;
+
+  await seedManifestTargets(db, manifest);
+  return manifest;
+}
+
+/**
+ * Materialize the manifest's ordered Target identities without pretending they
+ * are connected.
+ *
+ * A Target seed carries only a name and adapter. Connection facts remain null
+ * until the operator supplies them through `connectTarget`; that command
+ * updates this durable row in place and preserves the manifest-established
+ * rank. Conflict tolerance makes concurrent web/reconciler startup safe and
+ * lets later boots repair a partially completed seed.
+ */
+async function seedManifestTargets(
+  db: Database,
+  manifest: InstallationManifest,
+): Promise<void> {
+  await db
+    .insert(targets)
+    .values(
+      manifest.targets.map((target, rank) => ({
+        ...target,
+        rank,
+        status: 'disconnected' as const,
+        connection: null,
+        health: 'unhealthy' as const,
+        prerequisites: unreachablePrerequisites(
+          'Target connection has not been configured',
+          target.adapter,
+        ),
+      })),
+    )
+    .onConflictDoNothing({ target: targets.name });
 }
 
 async function readStoredManifest(

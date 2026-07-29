@@ -248,6 +248,34 @@ describe('the act is credential-shaped though the noun is flat', () => {
     const rows = await database().db.select().from(targets);
     expect(rows).toHaveLength(3);
   });
+
+  test('connect fills a manifest-seeded Target without changing its rank', async () => {
+    const { registry } = fakes();
+    const [seed] = await database()
+      .db.insert(targets)
+      .values({
+        name: 'cluster',
+        adapter: 'kubernetes',
+        rank: 4,
+        status: 'disconnected',
+        connection: null,
+        health: 'unhealthy',
+      })
+      .returning();
+
+    const result = await connectTarget(
+      clusterInput({ name: 'cluster' }),
+      context(registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    const [connected] = result.value.targets;
+    expect(connected?.id).toBe(seed?.id);
+    expect(connected?.rank).toBe(4);
+    expect((await targetRow('cluster'))?.connection).toEqual(
+      connectionFor('kubernetes'),
+    );
+  });
 });
 
 describe('disconnect strands rather than stops', () => {
