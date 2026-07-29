@@ -25,7 +25,7 @@ spec:
   values:
     # Renovate pins the digest on this line. Flux picks up the change
     # and rolls out the new image automatically.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:9cc6bba0d1036fa6ecdf96b05e64be3be9ddb1d88baf51421b9efc76cecd5beb
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:64d5ff029621c2b047e0807342b60ccad1baca64bd9670fd7ae0842978221731
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
