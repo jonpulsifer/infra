@@ -18,6 +18,7 @@ spec:
   chart:
     spec:
       chart: packages/charts/spindrift
+      reconcileStrategy: Revision
       sourceRef:
         kind: GitRepository
         name: infra
