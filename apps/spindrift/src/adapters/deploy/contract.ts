@@ -254,6 +254,41 @@ export interface ObservedState {
   detail?: string;
 }
 
+/** The Component-following runtime pipe (§17), distinct from attempt events. */
+export interface RuntimeLogSubject {
+  readonly app: string;
+  readonly component: string;
+}
+
+/** One line from one replica, with the backend's durable resume position. */
+export interface RuntimeLogEntry {
+  readonly cursor: string;
+  readonly at: Date;
+  readonly line: string;
+  readonly replica: string;
+  readonly deployId?: string;
+}
+
+export interface RuntimeLogTailOptions {
+  /** Opaque backend cursor returned by a prior page. */
+  readonly after?: string;
+  /** Bounded buffering: a page can never grow without limit. */
+  readonly limit?: number;
+}
+
+export type RuntimeLogPage =
+  | {
+      readonly kind: 'stream';
+      readonly entries: readonly RuntimeLogEntry[];
+      readonly cursor: string | null;
+      /** Seconds of history the Target says this tail can reach. */
+      readonly reach: number;
+    }
+  | {
+      readonly kind: 'none';
+      readonly because: string;
+    };
+
 /**
  * One backend, one artifact shape family, three verbs.
  *
@@ -284,6 +319,19 @@ export interface DeployAdapter {
 
   /** Idempotent: destroying what is already gone succeeds. */
   destroy(target: DeployTarget, ref: DeployRef): Promise<void>;
+
+  /**
+   * Read a bounded page of service output from the platform (§17).
+   *
+   * The cursor is platform-owned and survives a web/reconciler restart. Static
+   * hosting returns the explicit `none` arm; it never masquerades as an empty
+   * stream.
+   */
+  tail(
+    target: DeployTarget,
+    subject: RuntimeLogSubject,
+    options?: RuntimeLogTailOptions,
+  ): Promise<RuntimeLogPage>;
 
   /**
    * One pass of §13's prerequisite checklist and §3's capability discovery.

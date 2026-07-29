@@ -24,8 +24,50 @@ describe('process topology', () => {
   });
 });
 
+describe('declarative schema ordering', () => {
+  test('renders the database, migration Job, and both gated healthy processes', async () => {
+    const objects = await render({
+      database: { enabled: true },
+      reconciler: { enabled: true },
+    });
+    one(objects, 'Cluster', 'spindrift-db');
+    const migration = one(objects, 'Job');
+    expect(migration.metadata.labels?.['app.kubernetes.io/component']).toBe(
+      'migration',
+    );
+    expect(migration.spec.backoffLimit).toBe(2147483647);
+    expect(migration.spec.ttlSecondsAfterFinished).toBeUndefined();
+    expect(migration.spec.template.spec.containers[0].command).toEqual([
+      'sh',
+      '-c',
+      expect.stringContaining('applyMigrations'),
+    ]);
+
+    for (const name of ['spindrift-web', 'spindrift-reconciler']) {
+      const deployment = one(objects, 'Deployment', name);
+      const waitCommand =
+        deployment.spec.template.spec.initContainers[0].command;
+      expect(waitCommand.slice(0, 2)).toEqual(['sh', '-c']);
+      expect(waitCommand[2]).toContain('wait-for-schema.ts');
+      expect(waitCommand[2]).toContain('drizzle.__drizzle_migrations');
+      expect(
+        deployment.spec.template.spec.initContainers[0].env,
+      ).toContainEqual({
+        name: 'DATABASE_URL',
+        valueFrom: {
+          secretKeyRef: { name: 'spindrift-db-app', key: 'uri' },
+        },
+      });
+    }
+    const web = one(objects, 'Deployment', 'spindrift-web');
+    expect(
+      web.spec.template.spec.containers[0].readinessProbe.httpGet.path,
+    ).toBe('/healthz');
+  });
+});
+
 describe('workload identity', () => {
-  test('only the reconciler receives audience-scoped cluster and GCP tokens', async () => {
+  test('both processes receive the identities their adapter reads require', async () => {
     const objects = await render({
       reconciler: { enabled: true },
       serviceAccount: {
@@ -43,67 +85,62 @@ describe('workload identity', () => {
       .template.spec;
 
     expect(web.serviceAccountName).toBe('spindrift');
-    expect(web.volumes).toEqual([{ name: 'tmp', emptyDir: {} }]);
-
     expect(reconciler.serviceAccountName).toBe('spindrift');
-    expect(reconciler.automountServiceAccountToken).toBe(false);
-    expect(reconciler.volumes).toContainEqual({
-      name: 'federated-identity',
-      projected: {
-        sources: [
-          {
-            serviceAccountToken: {
-              audience: 'api',
-              expirationSeconds: 3600,
-              path: 'token',
+    for (const process of [web, reconciler]) {
+      expect(process.automountServiceAccountToken).toBe(false);
+      expect(process.volumes).toContainEqual({
+        name: 'federated-identity',
+        projected: {
+          sources: [
+            {
+              serviceAccountToken: {
+                audience: 'api',
+                expirationSeconds: 3600,
+                path: 'token',
+              },
             },
-          },
-          {
-            configMap: {
-              name: 'kube-root-ca.crt',
-              items: [{ key: 'ca.crt', path: 'ca.crt' }],
+            {
+              configMap: {
+                name: 'kube-root-ca.crt',
+                items: [{ key: 'ca.crt', path: 'ca.crt' }],
+              },
             },
-          },
-          {
-            serviceAccountToken: {
-              audience:
-                '//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite',
-              expirationSeconds: 3600,
-              path: 'gcp-token',
+            {
+              serviceAccountToken: {
+                audience:
+                  '//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite',
+                expirationSeconds: 3600,
+                path: 'gcp-token',
+              },
             },
-          },
-          {
-            configMap: {
-              name: 'spindrift-federated-identity',
-              items: [
-                {
-                  key: 'gcp-credentials.json',
-                  path: 'gcp-credentials.json',
-                },
-              ],
+            {
+              configMap: {
+                name: 'spindrift-federated-identity',
+                items: [
+                  {
+                    key: 'gcp-credentials.json',
+                    path: 'gcp-credentials.json',
+                  },
+                ],
+              },
             },
-          },
-        ],
-      },
-    });
-    expect(reconciler.containers[0].volumeMounts).toContainEqual({
-      name: 'federated-identity',
-      mountPath: '/var/run/secrets/spindrift',
-      readOnly: true,
-    });
-    expect(reconciler.containers[0].env).toContainEqual({
-      name: 'GOOGLE_APPLICATION_CREDENTIALS',
-      value: '/var/run/secrets/spindrift/gcp-credentials.json',
-    });
-    expect(reconciler.containers[0].env).toContainEqual({
-      name: 'NODE_EXTRA_CA_CERTS',
-      value: '/var/run/secrets/spindrift/ca.crt',
-    });
-    expect(
-      web.containers[0].env.some(
-        (item: { name: string }) => item.name === 'NODE_EXTRA_CA_CERTS',
-      ),
-    ).toBe(false);
+          ],
+        },
+      });
+      expect(process.containers[0].volumeMounts).toContainEqual({
+        name: 'federated-identity',
+        mountPath: '/var/run/secrets/spindrift',
+        readOnly: true,
+      });
+      expect(process.containers[0].env).toContainEqual({
+        name: 'GOOGLE_APPLICATION_CREDENTIALS',
+        value: '/var/run/secrets/spindrift/gcp-credentials.json',
+      });
+      expect(process.containers[0].env).toContainEqual({
+        name: 'NODE_EXTRA_CA_CERTS',
+        value: '/var/run/secrets/spindrift/ca.crt',
+      });
+    }
   });
 });
 

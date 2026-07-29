@@ -9,7 +9,6 @@ import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
 import { command } from './client.ts';
-import { INITIAL_DRAFT } from './demo/scenarios.ts';
 import type {
   AppListItem,
   DeployView,
@@ -20,6 +19,7 @@ import type {
   WorkspaceView,
 } from './model.ts';
 import { useRoute } from './router.ts';
+import { subscribeAttempt, subscribeRuntime } from './stream-client.ts';
 import { type Theme, useTheme } from './theme.ts';
 import { Button } from './ui/button.tsx';
 import { Eyebrow } from './ui/card.tsx';
@@ -123,7 +123,10 @@ function Screen({
   onNavigate: (path: string) => void;
 }) {
   if (path.startsWith('/settings')) return <Settings />;
-  if (path.startsWith('/apps/new')) return <NewAppScreen />;
+  if (path.startsWith('/apps/new')) {
+    const draftId = path.replace(/^\/apps\/new\/?/, '') || null;
+    return <NewAppScreen draftId={draftId} onNavigate={onNavigate} />;
+  }
   if (path.startsWith('/targets')) return <TargetsScreen />;
   if (path.startsWith('/repos')) return <RepositoriesScreen />;
   if (path.startsWith('/deploys')) {
@@ -238,6 +241,56 @@ function WorkspaceScreen({
     };
   }, [appName]);
 
+  const runtime =
+    state.type === 'success' && state.workspace.runtime.kind === 'stream'
+      ? state.workspace.runtime
+      : null;
+  useEffect(() => {
+    if (runtime === null) return;
+    return subscribeRuntime(
+      {
+        componentId: runtime.componentId,
+        targetId: runtime.targetId,
+      },
+      (page) => {
+        setState((current) => {
+          if (
+            current.type !== 'success' ||
+            current.workspace.runtime.kind !== 'stream'
+          ) {
+            return current;
+          }
+          if (page.kind === 'error') return current;
+          if (page.kind === 'none') {
+            return {
+              type: 'success',
+              workspace: {
+                ...current.workspace,
+                runtime: { kind: 'none', because: page.because },
+              },
+            };
+          }
+          if (page.entries.length === 0) return current;
+          return {
+            type: 'success',
+            workspace: {
+              ...current.workspace,
+              runtime: {
+                ...current.workspace.runtime,
+                lines: [
+                  ...current.workspace.runtime.lines,
+                  ...page.entries.map((entry) => ({
+                    text: `${entry.replica}  ${entry.line}`,
+                  })),
+                ],
+              },
+            },
+          };
+        });
+      },
+    );
+  }, [runtime?.componentId, runtime?.targetId]);
+
   if (state.type === 'loading') {
     return (
       <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
@@ -297,6 +350,7 @@ function DeployScreen({
 
   useEffect(() => {
     let live = true;
+    let stopStream: (() => void) | null = null;
     if (!deployId) {
       setState({ type: 'not-found', message: 'No Deploy ID specified' });
       return;
@@ -314,6 +368,24 @@ function DeployScreen({
         if (!live) return;
         if (result.ok) {
           setState({ type: 'success', deploy: result.value.deploy });
+          stopStream = subscribeAttempt(
+            {
+              buildId: result.value.deploy.buildId,
+              deployId: result.value.deploy.id,
+            },
+            () => {
+              void command('getDeployDetail', { id: parsedId }).then(
+                (fresh) => {
+                  if (live && fresh.ok) {
+                    setState({
+                      type: 'success',
+                      deploy: fresh.value.deploy,
+                    });
+                  }
+                },
+              );
+            },
+          );
         } else {
           if (result.failure.code === 'NOT_FOUND') {
             setState({ type: 'not-found', message: result.failure.message });
@@ -331,6 +403,7 @@ function DeployScreen({
       });
     return () => {
       live = false;
+      stopStream?.();
     };
   }, [deployId]);
 
@@ -485,7 +558,13 @@ function RepositoriesScreen() {
   return <RepositoryList repos={state.repos} />;
 }
 
-function NewAppScreen() {
+function NewAppScreen({
+  draftId,
+  onNavigate,
+}: {
+  draftId: string | null;
+  onNavigate: (path: string) => void;
+}) {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
@@ -493,24 +572,42 @@ function NewAppScreen() {
         type: 'success';
         targetOptions: readonly TargetOptionView[];
         repoOptions: readonly RepositoryOptionView[];
+        draft: import('../domain/creation-draft.ts').CreationDraftView;
       }
   >({ type: 'loading' });
+  // React Strict Mode replays effects in development. Supplying the identity
+  // makes both starts the same authenticated act instead of leaving an orphan.
+  const [startId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     let live = true;
-    Promise.all([command('listTargets', {}), command('listRepositories', {})])
-      .then(([targetRes, repoRes]) => {
+    const draftRequest =
+      draftId === null
+        ? command('startCreationDraft', { id: startId })
+        : command('getCreationDraft', { id: draftId });
+    Promise.all([
+      command('listTargets', {}),
+      command('listRepositories', {}),
+      draftRequest,
+    ])
+      .then(([targetRes, repoRes, draftRes]) => {
         if (!live) return;
         if (!targetRes.ok) {
           setState({ type: 'error', message: targetRes.failure.message });
         } else if (!repoRes.ok) {
           setState({ type: 'error', message: repoRes.failure.message });
+        } else if (!draftRes.ok) {
+          setState({ type: 'error', message: draftRes.failure.message });
         } else {
           setState({
             type: 'success',
             targetOptions: targetRes.value.options,
             repoOptions: repoRes.value.options,
+            draft: draftRes.value,
           });
+          if (draftId === null) {
+            onNavigate(`/apps/new/${draftRes.value.id}`);
+          }
         }
       })
       .catch((e: unknown) => {
@@ -523,7 +620,7 @@ function NewAppScreen() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [draftId, onNavigate, startId]);
 
   if (state.type === 'loading') {
     return (
@@ -548,9 +645,11 @@ function NewAppScreen() {
 
   return (
     <NewApp
-      initialDraft={INITIAL_DRAFT}
+      key={state.draft.id}
+      initial={state.draft}
       targets={state.targetOptions}
       repos={state.repoOptions}
+      onCreated={(app) => onNavigate(`/apps/${app.name}`)}
     />
   );
 }

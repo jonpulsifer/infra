@@ -116,6 +116,24 @@ export const getDeployDetail: Command<
       text: e.line!,
       tone: e.reason ? ('error' as const) : undefined,
     }));
+  const deployLogEvents = await context.db.query.attemptEvents.findMany({
+    where: (events, { eq }) => eq(events.deployId, deploy.id),
+    orderBy: (events, { asc }) => [asc(events.id)],
+  });
+  const deployLogs: LogLine[] = deployLogEvents
+    .filter((event) => event.eventType === 'log' && event.line)
+    .map((event) => ({
+      text: event.line!,
+      tone: event.reason ? ('error' as const) : undefined,
+    }));
+  if (deployLogs.length === 0 && diagnosis?.evidence) {
+    deployLogs.push(
+      ...diagnosis.evidence.split('\n').map((text) => ({
+        text,
+        tone: 'error' as const,
+      })),
+    );
+  }
 
   const buildSteps: ChecklistItem[] = buildLogEvents
     .filter((e) => e.resource)
@@ -172,6 +190,10 @@ export const getDeployDetail: Command<
   }
 
   const view: DeployView = {
+    id: deploy.id,
+    buildId: deploy.build.id,
+    componentId: deploy.component.id,
+    targetId: deploy.target.id,
     app: deploy.component.app.name,
     component: deploy.component.name,
     target: deploy.target.name,
@@ -185,6 +207,7 @@ export const getDeployDetail: Command<
     diagnosis,
     resources,
     build,
+    deployLog: deployLogs.length > 0 ? deployLogs : null,
   };
 
   return ok({ deploy: view });

@@ -25,7 +25,13 @@ export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
 export { replaceConfig } from './config/replace.ts';
 export { setConfig } from './config/set.ts';
-export { createApp } from './create-app.ts';
+export {
+  completeCreationDraft,
+  getCreationDraft,
+  reviewCreationDraft,
+  saveCreationDraft,
+  startCreationDraft,
+} from './creation-drafts/lifecycle.ts';
 export { createDeploy } from './deploys/create.ts';
 export { getDeployDetail } from './deploys/get-detail.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';

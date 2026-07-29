@@ -18,6 +18,9 @@ import type {
   DeployTarget,
   DeployVerdict,
   ObservedState,
+  RuntimeLogPage,
+  RuntimeLogSubject,
+  RuntimeLogTailOptions,
 } from '../../../src/adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../../../src/config/manifest.schema.ts';
 import {
@@ -188,6 +191,19 @@ export class FakeDeployAdapter implements DeployAdapter {
   async destroy(_target: DeployTarget, ref: DeployRef): Promise<void> {
     this.destroyed.push(ref);
     this.placed.delete(ref);
+  }
+
+  async tail(
+    _target: DeployTarget,
+    _subject: RuntimeLogSubject,
+    options: RuntimeLogTailOptions = {},
+  ): Promise<RuntimeLogPage> {
+    return {
+      kind: 'stream',
+      entries: [],
+      cursor: options.after ?? null,
+      reach: CAPABLE_DISCOVERY.logHistorySeconds,
+    };
   }
 
   async inspect(target: DeployTarget): Promise<TargetInspection> {

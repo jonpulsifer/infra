@@ -40,7 +40,13 @@ const clean: Draft = {
 const render = (draft: Draft) =>
   renderToStaticMarkup(
     <NewApp
-      initialDraft={draft}
+      initial={{
+        id: crypto.randomUUID(),
+        revision: 0,
+        draft,
+        blockers: blockersFor(draft, CANDIDATES),
+        ready: blockersFor(draft, CANDIDATES).length === 0,
+      }}
       targets={TARGET_OPTIONS}
       repos={REPOSITORY_OPTIONS}
     />,

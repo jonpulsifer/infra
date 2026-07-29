@@ -14,7 +14,7 @@ report, and inventing an endpoint so it could would be inventing the surface §2
 declined to declare.
 */}}
 {{- $top := . -}}
-{{- $processes := list (dict "name" "web" "command" .Values.command "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" false) -}}
+{{- $processes := list (dict "name" "web" "command" .Values.command "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" true) -}}
 {{- if .Values.reconciler.enabled -}}
 {{- $processes = append $processes (dict "name" "reconciler" "command" .Values.reconciler.command "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false "federates" true) -}}
 {{- end -}}
@@ -63,6 +63,39 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      {{- if and $top.Values.database.enabled $top.Values.database.migration.enabled }}
+      initContainers:
+        - name: wait-for-schema
+          image: {{ $top.Values.image }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - {{ $top.Values.database.migration.waitCommand | quote }}
+          env:
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "spindrift.databaseName" $top }}-app
+                  key: uri
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+      {{- end }}
       containers:
         - name: {{ $process.name }}
           image: {{ $top.Values.image }}

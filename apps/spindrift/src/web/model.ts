@@ -115,6 +115,10 @@ export interface BuildView {
  * of something.
  */
 export interface DeployView {
+  readonly id: number;
+  readonly buildId: number;
+  readonly componentId: string;
+  readonly targetId: string;
   readonly app: string;
   readonly component: string;
   readonly target: string;
@@ -136,6 +140,8 @@ export interface DeployView {
   readonly diagnosis: Diagnosis | null;
   readonly resources: readonly ChecklistItem[];
   readonly build: BuildView;
+  /** Controller and platform output for the deploy leg of this attempt. */
+  readonly deployLog: readonly LogLine[] | null;
 }
 
 /** One activity-timeline entry on the App workspace. */
@@ -178,6 +184,8 @@ export interface Execution {
 export type Runtime =
   | {
       readonly kind: 'stream';
+      readonly componentId: string;
+      readonly targetId: string;
       readonly lines: readonly LogLine[];
       readonly reach: string;
     }

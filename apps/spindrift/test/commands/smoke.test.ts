@@ -16,7 +16,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
-import { createApp } from '../../src/commands/index.ts';
+import { createApp } from '../../src/commands/create-app.ts';
 import { dispatch } from '../../src/commands/registry.ts';
 import type {
   AdapterRegistry,
@@ -158,34 +158,33 @@ describe('createApp: an App sourced from an uploaded archive', () => {
   });
 });
 
-describe('dispatch: the same act, reached by name', () => {
-  test('writes the same row the direct call would have', async () => {
-    const name = `dispatched-${crypto.randomUUID().slice(0, 8)}`;
-    const result = await dispatch(
-      'createApp',
+describe('dispatch: the public command boundary', () => {
+  test('reads a row written through an internal command', async () => {
+    const name = `listed-${crypto.randomUUID().slice(0, 8)}`;
+    const created = await createApp(
       {
         name,
         sourceKind: 'repo',
-        repoUrl: 'https://git.example.test/acme/dispatched.git',
+        repoUrl: 'https://git.example.test/acme/listed.git',
       },
       context(),
     );
+    expect(created.ok).toBe(true);
 
+    const result = await dispatch('listApps', {}, context());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const value = result.value as { appId: string };
-    const row = await appRow(value.appId);
-    expect(row?.name).toBe(name);
-    expect(row?.createdAt.toISOString()).toBe(FROZEN.toISOString());
+    const value = result.value as { apps: { name: string }[] };
+    expect(value.apps.some((app) => app.name === name)).toBe(true);
   });
 
   test('writes nothing when the input does not satisfy the schema', async () => {
     const before = await database().db.select().from(apps);
 
     const result = await dispatch(
-      'createApp',
-      { name: 'Not A Label', sourceKind: 'repo', repoUrl: 'not a url' },
+      'startCreationDraft',
+      { id: 'not a uuid' },
       context(),
     );
 

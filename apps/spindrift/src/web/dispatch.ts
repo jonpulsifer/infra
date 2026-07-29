@@ -110,6 +110,7 @@ const STATUS = {
   // status that means "not in this state".
   NOT_DEPLOYABLE: 409,
   NOT_BUILDABLE: 409,
+  STALE_EDIT: 409,
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
   METHOD_NOT_ALLOWED: 405,

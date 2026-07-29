@@ -48,6 +48,7 @@ import type {
   PrerequisiteResult,
   TargetDiscovery,
 } from '../domain/capabilities.ts';
+import type { Draft } from '../domain/creation-draft.ts';
 import type { ConfigEntry } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import type { CoreSignature } from '../supply-chain/sign.ts';
@@ -710,6 +711,31 @@ export const users = pgTable(
 );
 
 /**
+ * One in-progress Source → Component → Place → Configure → Review flow.
+ *
+ * The JSON document is replaced atomically under `revision`; a stale browser
+ * cannot silently overwrite a newer tab. Ownership is the authenticated User,
+ * not a browser token, so a refreshed session resumes the same identity.
+ */
+export const creationDrafts = pgTable('creation_drafts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  revision: integer('revision').notNull().default(0),
+  draft: jsonb('draft').$type<Draft>().notNull(),
+  completedAppId: uuid('completed_app_id').references(() => apps.id, {
+    onDelete: 'set null',
+  }),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
  * One enrolled passkey (§"First run and identity" story 1).
  *
  * Both stored halves come from the browser's own parse of the attestation
@@ -1087,6 +1113,18 @@ export const configItemsRelations = relations(configItems, ({ one }) => ({
 export const usersRelations = relations(users, ({ many }) => ({
   credentials: many(credentials),
   sessions: many(sessions),
+  creationDrafts: many(creationDrafts),
+}));
+
+export const creationDraftsRelations = relations(creationDrafts, ({ one }) => ({
+  user: one(users, {
+    fields: [creationDrafts.userId],
+    references: [users.id],
+  }),
+  completedApp: one(apps, {
+    fields: [creationDrafts.completedAppId],
+    references: [apps.id],
+  }),
 }));
 
 export const credentialsRelations = relations(credentials, ({ one }) => ({
@@ -1138,6 +1176,8 @@ export type Credential = typeof credentials.$inferSelect;
 export type NewCredential = typeof credentials.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
+export type CreationDraft = typeof creationDrafts.$inferSelect;
+export type NewCreationDraft = typeof creationDrafts.$inferInsert;
 export type Enrolment = typeof enrolments.$inferSelect;
 export type NewEnrolment = typeof enrolments.$inferInsert;
 export type WebauthnChallenge = typeof webauthnChallenges.$inferSelect;

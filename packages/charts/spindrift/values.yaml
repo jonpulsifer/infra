@@ -14,15 +14,15 @@
 image: ""
 
 # One named identity for the control plane. Kubernetes never automounts its
-# default API credential: the reconciler receives one projected token with the
-# peer cluster's explicit audience, while the web process receives no token.
+# default API credential: both processes receive projected, audience-scoped
+# credentials because the reconciler deploys and the web process tails logs.
 serviceAccount:
   create: true
   name: ""
   token:
     audience: api
-    # Optional GCP workload identity provider audience. When set, the
-    # reconciler also receives a second projected token and an ADC-compatible
+    # Optional GCP workload identity provider audience. When set, both
+    # processes receive a second projected token and an ADC-compatible
     # external-account credential file.
     gcpAudience: ""
     expirationSeconds: 3600
@@ -93,11 +93,36 @@ database:
   size: 2Gi
   name: spindrift
   storageClass: local-path
-  # Migrations remain disabled by default. An installation that owns a
-  # migration act supplies a command invoking src/db/migrate.ts.
+  # The Job is part of an installation that owns its database. Its default
+  # command is compatible with images that expose applyMigrations before the
+  # executable entrypoint exists.
   migration:
-    enabled: false
-    command: ""
+    enabled: true
+    command: >-
+      bun -e 'import { createClient } from "./src/db/client.ts";
+      import { applyMigrations } from "./src/db/migrate.ts";
+      const client = createClient();
+      try { await applyMigrations(client); } finally { await client.close(); }'
+    # The fallback lets a chart revision safely precede its matching image
+    # digest. Both paths read the migration journal embedded in that image.
+    waitCommand: >-
+      if [ -f src/db/wait-for-schema.ts ]; then
+      bun run src/db/wait-for-schema.ts;
+      else bun -e 'import journal from "./src/db/migrations/meta/_journal.json";
+      import { createClient } from "./src/db/client.ts";
+      const expected = Math.max(0, ...journal.entries.map((entry) => entry.when));
+      const client = createClient();
+      const deadline = Date.now() + 600000;
+      while (Date.now() < deadline) {
+      try {
+      const rows = await client.unsafe("SELECT max(created_at)::bigint AS latest FROM drizzle.__drizzle_migrations");
+      if (Number(rows[0]?.latest ?? 0) >= expected) { await client.close(); process.exit(0); }
+      } catch {}
+      await Bun.sleep(1000);
+      }
+      await client.close();
+      throw new Error(`database schema did not reach migration ${expected}`);
+      '; fi
 
 ingress:
   enabled: true

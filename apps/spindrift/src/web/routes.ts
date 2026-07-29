@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Four kinds of route exist, and three of the four are generated:
+ * Five kinds of route exist, and four of the five are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -18,7 +18,8 @@
  *    closed tuple of acts. It contains the pre-session acts that *produce* a
  *    principal and passkey-rooted credential administration; neither belongs
  *    in the product command registry.
- * 4. **{@link HEALTH_PATH}**, which is the whole of the rest.
+ * 4. **Streams**, the two authenticated, purpose-specific WebSocket upgrades.
+ * 5. **{@link HEALTH_PATH}**, which is the whole of the rest.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -28,6 +29,7 @@ import type { EnrolmentDeps } from '../auth/enrol.ts';
 import type { GatewayDeps } from '../auth/gateway.ts';
 import { authRoutes } from '../auth/routes.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
+import { streamRoutes } from './streams.ts';
 
 /**
  * The one route that is neither a command nor part of the client bundle.
@@ -66,5 +68,6 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     '/healthz': new Response('ok\n'),
     ...authRoutes(auth),
     ...commandRoutes(deps),
+    ...streamRoutes(deps),
   };
 }

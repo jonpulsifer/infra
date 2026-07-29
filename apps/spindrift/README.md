@@ -31,17 +31,14 @@ cloud runtime through its own API, and static hosting through a release — and
 one conformance suite runs over every one of them, which is what keeps "core
 describes, the adapter renders" a tested claim rather than a stated one.
 
-What has no implementation is datastores, jobs, and runtime log tails.
-**The three screens still render placeholder data**
-from `src/web/demo/`, which is scaffolding meant to be deleted: the views are
-typed against `src/web/model.ts`, so the query commands that replace it have a
-contract to meet rather than a shape to guess.
+What has no implementation is datastores and jobs. The App workspace and Deploy
+screen query command-owned state; authenticated WebSockets carry durable build
+and deploy attempt events separately from adapter-owned runtime output.
+`src/web/demo/` remains as an explicit standalone scenario for developing the
+views without a database.
 
-Two named gaps, both deliberate:
+One named gap is deliberate:
 
-- **The creation draft is client state**, so a refresh mid-flow loses it. It
-  wants a table and a pair of commands, which belong with the App and Component
-  commands rather than in front of them.
 - **The status page is not served yet.** §9 wants a URL that resolves from the
   moment an App exists, on a lowest-precedence wildcard route. Naming is here and
   a deployed Component's names resolve through its route; the wildcard route and
@@ -106,9 +103,10 @@ while building them:
   sections. A website states that it has no runtime instead of showing an empty
   log.
 - **Create** (`views/apps/new/`) — Source → Component → Place → Configure →
-  Review, defaults carrying every step, preflight folded into Review. An unmet
-  prerequisite stops before any Build exists, keeps the draft, and names what
-  clears it.
+  Review, defaults carrying every step, preflight folded into Review. The
+  server-owned draft survives refresh and rejects stale concurrent edits. An
+  unmet prerequisite stops before any App, Component, Build, or Deploy exists,
+  keeps the draft, and names what clears it.
 - **Authentication Settings** (`views/auth/settings.tsx`) — additive passkeys
   and the optional Gateway binding. Every mutation requires a fresh passkey
   assertion, and the final account-root passkey cannot be removed.

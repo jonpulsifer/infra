@@ -181,12 +181,29 @@ export class KubernetesApi {
   async logs(
     namespace: string,
     pod: string,
-    options: { readonly container?: string } = {},
+    options: {
+      readonly container?: string;
+      readonly timestamps?: boolean;
+      readonly sinceTime?: string;
+      readonly tailLines?: number;
+      readonly limitBytes?: number;
+    } = {},
   ): Promise<string | null> {
-    const query =
-      options.container === undefined
-        ? ''
-        : `?container=${encodeURIComponent(options.container)}`;
+    const params = new URLSearchParams();
+    if (options.container !== undefined) {
+      params.set('container', options.container);
+    }
+    if (options.timestamps === true) params.set('timestamps', 'true');
+    if (options.sinceTime !== undefined) {
+      params.set('sinceTime', options.sinceTime);
+    }
+    if (options.tailLines !== undefined) {
+      params.set('tailLines', String(options.tailLines));
+    }
+    if (options.limitBytes !== undefined) {
+      params.set('limitBytes', String(options.limitBytes));
+    }
+    const query = params.size === 0 ? '' : `?${params.toString()}`;
     const response = await this.send(
       'GET',
       `/api/v1/namespaces/${namespace}/pods/${pod}/log${query}`,

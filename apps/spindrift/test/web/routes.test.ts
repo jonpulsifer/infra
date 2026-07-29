@@ -21,6 +21,7 @@ import type { Database } from '../../src/db/client.ts';
 import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
 import { HEALTH_PATH, webRoutes } from '../../src/web/routes.ts';
+import { STREAM_PATHS } from '../../src/web/streams.ts';
 
 const APP = join(import.meta.dir, '../..');
 
@@ -73,6 +74,7 @@ describe('what the web process serves', () => {
         HEALTH_PATH,
         ...AUTH_PATHS,
         ...commandNames.map(pathFor),
+        ...STREAM_PATHS,
       ].sort(),
     );
   });
@@ -87,7 +89,9 @@ describe('what the web process serves', () => {
     const handAuthored = Object.keys(served).filter(
       (path) => !generated.has(path) && !(path in CLIENT),
     );
-    expect(handAuthored.sort()).toEqual([HEALTH_PATH, ...AUTH_PATHS].sort());
+    expect(handAuthored.sort()).toEqual(
+      [HEALTH_PATH, ...AUTH_PATHS, ...STREAM_PATHS].sort(),
+    );
   });
 
   test('pre-session acts remain on the closed auth surface', () => {

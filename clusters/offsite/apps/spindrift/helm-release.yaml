@@ -109,18 +109,8 @@ spec:
       size: 2Gi
       migration:
         enabled: true
-        # Run the committed Drizzle migrations as a separate, run-once Job.
-        # The image contains the migration library and Bun's native SQL client;
-        # keeping this out of the web/reconciler entrypoints preserves the
-        # GitOps ownership boundary while allowing Flux to apply schema drift.
-        command: >-
-          bun -e 'import { createClient } from "./src/db/client.ts";
-          import { applyMigrations } from "./src/db/migrate.ts";
-          const client = createClient();
-          await applyMigrations(client);
-          await client.close();'
-    # The reconciler runs alongside the web process; the migration Job is
-    # independent and retries until the schema is current.
+    # Both processes wait for the image's committed migration journal before
+    # becoming Ready.
     reconciler:
       enabled: true
     web:

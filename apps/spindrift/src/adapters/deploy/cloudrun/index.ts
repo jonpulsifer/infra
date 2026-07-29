@@ -41,6 +41,7 @@ import {
   type Exposure,
 } from '../../../domain/desired-state.ts';
 import type { CloudRunConnection } from '../../../domain/target.ts';
+import { workloadName } from '../../../domain/workload-name.ts';
 import { cloudChecklist } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
 import { cloudWriteFailure, orderedChecklist } from '../cloud/verdict.ts';
@@ -53,6 +54,9 @@ import type {
   DeployVerdict,
   FailureReason,
   ObservedState,
+  RuntimeLogPage,
+  RuntimeLogSubject,
+  RuntimeLogTailOptions,
 } from '../contract.ts';
 import {
   allowsUnauthenticated,
@@ -79,10 +83,14 @@ export interface CloudRunAdapterOptions {
   /** Injected so a test does not spend the cadence it is asserting about. */
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
+  /** Cloud Logging API root; injectable for perimeter endpoints and tests. */
+  readonly logsEndpoint?: string;
 }
 
 const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
+const DEFAULT_LOGS_ENDPOINT = 'https://logging.googleapis.com';
+const SERVICE_ID_LIMIT = 63;
 
 /** How the operator would name the service in the sentence about enabling it. */
 const SERVICE_NAME = 'Cloud Run';
@@ -263,6 +271,67 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         ? `deleting service ${id} failed with ${deleted.status}: ${deleted.message}`
         : `deleting service ${id} failed: ${deleted.message}`,
     );
+  }
+
+  async tail(
+    target: DeployTarget,
+    subject: RuntimeLogSubject,
+    options: RuntimeLogTailOptions = {},
+  ): Promise<RuntimeLogPage> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return { kind: 'stream', entries: [], cursor: null, reach: 0 };
+    }
+    const after = cloudLogCursor(options.after);
+    const service = workloadName(subject, SERVICE_ID_LIMIT);
+    const response = await new CloudHttp({
+      baseUrl: this.options.logsEndpoint ?? DEFAULT_LOGS_ENDPOINT,
+      token: this.options.token,
+      ...(this.options.fetch ? { fetch: this.options.fetch } : {}),
+    }).json<CloudLogPage>({
+      method: 'POST',
+      path: '/v2/entries:list',
+      body: {
+        resourceNames: [`projects/${connection.project}`],
+        filter: [
+          'resource.type="cloud_run_revision"',
+          `resource.labels.service_name="${service}"`,
+          `resource.labels.location="${connection.region}"`,
+          ...(after === null ? [] : [`timestamp>="${after.at}"`]),
+        ].join(' AND '),
+        orderBy: 'timestamp asc',
+        pageSize: options.limit ?? 200,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Cloud Logging read failed: ${response.message}`);
+    }
+    const records = (response.value.entries ?? [])
+      .map(cloudLogRecord)
+      .filter((record) => record !== null)
+      .sort((left, right) =>
+        left.at === right.at
+          ? left.insertId.localeCompare(right.insertId)
+          : left.at.localeCompare(right.at),
+      )
+      .filter(
+        (record) =>
+          after === null ||
+          record.at > after.at ||
+          (record.at === after.at && record.insertId > after.insertId),
+      );
+    const entries = records.map((record) => ({
+      cursor: encodeCloudLogCursor(record),
+      at: new Date(record.at),
+      line: record.line,
+      replica: record.replica,
+    }));
+    return {
+      kind: 'stream',
+      entries,
+      cursor: entries.at(-1)?.cursor ?? options.after ?? null,
+      reach: connection.logHistorySeconds ?? 0,
+    };
   }
 
   /**
@@ -542,6 +611,66 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     }
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
+}
+
+interface CloudLogPage {
+  readonly entries?: readonly CloudLogEntry[];
+}
+
+interface CloudLogEntry {
+  readonly timestamp?: string;
+  readonly receiveTimestamp?: string;
+  readonly insertId?: string;
+  readonly textPayload?: string;
+  readonly jsonPayload?: unknown;
+  readonly resource?: { readonly labels?: Record<string, string> };
+}
+
+interface CloudLogRecord {
+  readonly at: string;
+  readonly insertId: string;
+  readonly line: string;
+  readonly replica: string;
+}
+
+function cloudLogRecord(entry: CloudLogEntry): CloudLogRecord | null {
+  const at = entry.timestamp ?? entry.receiveTimestamp;
+  if (!at || !entry.insertId) return null;
+  const line =
+    entry.textPayload ??
+    (entry.jsonPayload === undefined
+      ? null
+      : JSON.stringify(entry.jsonPayload));
+  if (line === null || line.trim() === '') return null;
+  return {
+    at,
+    insertId: entry.insertId,
+    line,
+    replica: entry.resource?.labels?.revision_name ?? 'unknown',
+  };
+}
+
+function cloudLogCursor(cursor: string | undefined): CloudLogRecord | null {
+  if (cursor === undefined) return null;
+  try {
+    const value = JSON.parse(
+      Buffer.from(cursor, 'base64').toString('utf8'),
+    ) as {
+      at?: unknown;
+      insertId?: unknown;
+    };
+    return typeof value.at === 'string' && typeof value.insertId === 'string'
+      ? { at: value.at, insertId: value.insertId, line: '', replica: '' }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function encodeCloudLogCursor(record: CloudLogRecord): string {
+  return Buffer.from(
+    JSON.stringify({ at: record.at, insertId: record.insertId }),
+  ).toString('base64');
 }
 
 /** `projects/<p>/locations/<r>` — the parent every call hangs off. */
