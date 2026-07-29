@@ -782,6 +782,124 @@ describe('discovery reports observations, never judgements', () => {
   });
 });
 
+describe('runtime log tail', () => {
+  test('replays after an opaque cursor without duplicate lines across adapter restart', async () => {
+    const podObject: FakeObject = {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: {
+        name: 'blog-web-abc',
+        namespace: 'apps',
+        labels: {
+          'app.kubernetes.io/name': 'web',
+          'app.kubernetes.io/part-of': 'blog',
+          'spindrift.dev/deploy': '41',
+        },
+      },
+    };
+    const cluster = new FakeKubernetes({
+      lists: { pods: [podObject] },
+      logs: (_pod, reads) =>
+        reads === 1
+          ? '2026-07-29T12:00:00Z first\n2026-07-29T12:00:01Z second\n'
+          : '2026-07-29T12:00:00Z first\n2026-07-29T12:00:01Z second\n2026-07-29T12:00:02Z third\n',
+    });
+    const firstAdapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: cluster.token,
+      fetch: cluster.fetch,
+    });
+    const first = await firstAdapter.tail(target({ logHistorySeconds: 3600 }), {
+      app: 'blog',
+      component: 'web',
+    });
+    expect(first.kind).toBe('stream');
+    if (first.kind !== 'stream') return;
+    expect(first.entries.map((entry) => entry.line)).toEqual([
+      'first',
+      'second',
+    ]);
+    expect(first.reach).toBe(3600);
+    const initialLogRead = cluster.requests.find((request) =>
+      request.path.endsWith('/log'),
+    );
+    expect(initialLogRead?.query).toContain('tailLines=200');
+    expect(initialLogRead?.query).toContain('limitBytes=262144');
+
+    const restartedAdapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: cluster.token,
+      fetch: cluster.fetch,
+    });
+    const resumed = await restartedAdapter.tail(
+      target({ logHistorySeconds: 3600 }),
+      { app: 'blog', component: 'web' },
+      { after: first.cursor ?? undefined },
+    );
+    expect(resumed.kind).toBe('stream');
+    if (resumed.kind !== 'stream') return;
+    expect(resumed.entries.map((entry) => entry.line)).toEqual(['third']);
+    expect(resumed.entries[0]?.replica).toBe('blog-web-abc');
+    expect(resumed.entries[0]?.deployId).toBe('41');
+    const resumedLogRead = cluster.requests
+      .filter((request) => request.path.endsWith('/log'))
+      .at(-1);
+    expect(resumedLogRead?.query).toContain(
+      'sinceTime=2026-07-29T12%3A00%3A01.000Z',
+    );
+  });
+
+  test('a same-pod container restart starts a new cursor generation', async () => {
+    const podObject: FakeObject = {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: {
+        name: 'blog-web-abc',
+        namespace: 'apps',
+        uid: 'pod-uid',
+        labels: {
+          'app.kubernetes.io/name': 'web',
+          'app.kubernetes.io/part-of': 'blog',
+        },
+      },
+      status: {
+        containerStatuses: [{ name: 'app', restartCount: 0 }],
+      },
+    };
+    const cluster = new FakeKubernetes({
+      lists: { pods: [podObject] },
+      logs: (_pod, reads) =>
+        reads === 1
+          ? '2026-07-29T12:00:00Z old one\n2026-07-29T12:00:01Z old two\n'
+          : '2026-07-29T12:01:00Z new one\n2026-07-29T12:01:01Z new two\n',
+    });
+    const adapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: cluster.token,
+      fetch: cluster.fetch,
+    });
+    const first = await adapter.tail(target(), {
+      app: 'blog',
+      component: 'web',
+    });
+    if (first.kind !== 'stream') return;
+    (podObject.status as { containerStatuses: { restartCount: number }[] })
+      .containerStatuses[0]!.restartCount = 1;
+
+    const resumed = await adapter.tail(
+      target(),
+      { app: 'blog', component: 'web' },
+      { after: first.cursor ?? undefined },
+    );
+    expect(resumed.kind).toBe('stream');
+    if (resumed.kind !== 'stream') return;
+    expect(resumed.entries.map((entry) => entry.line)).toEqual([
+      'new one',
+      'new two',
+    ]);
+  });
+});
+
 function node(arch: string, allocatable: Record<string, string>): FakeObject {
   return {
     apiVersion: 'v1',

@@ -41,7 +41,18 @@ import { createComponent, createComponentInput } from './components/create.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
-import { createApp, createAppInput } from './create-app.ts';
+import {
+  completeCreationDraft,
+  completeCreationDraftInput,
+  getCreationDraft,
+  getCreationDraftInput,
+  reviewCreationDraft,
+  reviewCreationDraftInput,
+  saveCreationDraft,
+  saveCreationDraftInput,
+  startCreationDraft,
+  startCreationDraftInput,
+} from './creation-drafts/lifecycle.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
@@ -88,7 +99,26 @@ export const commandRegistry = {
     input: listRepositoriesInput,
     handler: listRepositories,
   },
-  createApp: { input: createAppInput, handler: createApp },
+  startCreationDraft: {
+    input: startCreationDraftInput,
+    handler: startCreationDraft,
+  },
+  getCreationDraft: {
+    input: getCreationDraftInput,
+    handler: getCreationDraft,
+  },
+  saveCreationDraft: {
+    input: saveCreationDraftInput,
+    handler: saveCreationDraft,
+  },
+  reviewCreationDraft: {
+    input: reviewCreationDraftInput,
+    handler: reviewCreationDraft,
+  },
+  completeCreationDraft: {
+    input: completeCreationDraftInput,
+    handler: completeCreationDraft,
+  },
   createComponent: { input: createComponentInput, handler: createComponent },
   placeComponent: { input: placeComponentInput, handler: placeComponent },
   setConfig: { input: setConfigInput, handler: setConfig },

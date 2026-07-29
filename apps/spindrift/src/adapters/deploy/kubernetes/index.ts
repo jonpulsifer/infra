@@ -51,6 +51,10 @@ import type {
   DeployVerdict,
   FailureReason,
   ObservedState,
+  RuntimeLogEntry,
+  RuntimeLogPage,
+  RuntimeLogSubject,
+  RuntimeLogTailOptions,
 } from '../contract.ts';
 import {
   type Fetcher,
@@ -101,6 +105,7 @@ export interface KubernetesAdapterOptions {
 
 const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
+const RUNTIME_LOG_LIMIT_BYTES = 256 * 1024;
 
 /** Which store a `ClusterSecretStore`'s provider key names (§10). */
 const STORE_PROVIDERS: Record<string, StoreAdapter> = {
@@ -222,6 +227,85 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       namespace: parsed.namespace,
       name: parsed.name,
     });
+  }
+
+  async tail(
+    target: DeployTarget,
+    subject: RuntimeLogSubject,
+    options: RuntimeLogTailOptions = {},
+  ): Promise<RuntimeLogPage> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return { kind: 'stream', entries: [], cursor: null, reach: 0 };
+    }
+    const api = this.api(connection);
+    const selector = `app.kubernetes.io/name=${subject.component},app.kubernetes.io/part-of=${subject.app}`;
+    const pods =
+      (await api.list(
+        { apiVersion: 'v1', plural: 'pods', namespace: connection.namespace },
+        { labelSelector: selector },
+      )) ?? [];
+    const consumed = runtimeCursor(options.after);
+    const identities = new Set(pods.map(runtimePodIdentity));
+    const next = Object.fromEntries(
+      Object.entries(consumed).filter(([identity]) => identities.has(identity)),
+    );
+    const entries: RuntimeLogEntry[] = [];
+    const limit = Math.max(1, options.limit ?? 200);
+
+    for (const pod of [...pods].sort((a, b) =>
+      a.metadata.name.localeCompare(b.metadata.name),
+    )) {
+      if (entries.length >= limit) break;
+      const identity = runtimePodIdentity(pod);
+      const prior = consumed[identity];
+      const text = await api.logs(connection.namespace, pod.metadata.name, {
+        container: 'app',
+        timestamps: true,
+        ...(prior === undefined
+          ? { tailLines: limit }
+          : { sinceTime: prior.at }),
+        limitBytes: RUNTIME_LOG_LIMIT_BYTES,
+      });
+      if (text === null) continue;
+      const lines = text.split('\n').filter((line) => line.length > 0);
+      const occurrences = new Map<string, number>();
+      for (const raw of lines) {
+        if (entries.length >= limit) break;
+        const parsed = runtimeLine(raw);
+        const occurrence = (occurrences.get(parsed.cursorAt) ?? 0) + 1;
+        occurrences.set(parsed.cursorAt, occurrence);
+        if (
+          prior !== undefined &&
+          (parsed.cursorAt < prior.at ||
+            (parsed.cursorAt === prior.at && occurrence <= prior.seen))
+        ) {
+          continue;
+        }
+        next[identity] = { at: parsed.cursorAt, seen: occurrence };
+        entries.push({
+          cursor: encodeRuntimeCursor(next),
+          at: parsed.at,
+          line: parsed.line,
+          replica: pod.metadata.name,
+          ...(pod.metadata.labels?.['spindrift.dev/deploy']
+            ? {
+                deployId: pod.metadata.labels['spindrift.dev/deploy'] as string,
+              }
+            : {}),
+        });
+      }
+    }
+
+    return {
+      kind: 'stream',
+      entries,
+      // Always return the normalized per-pod offsets. A pod can retain its
+      // name while its log is truncated after restart; preserving the older
+      // cursor in that case would skip the beginning of the new log.
+      cursor: entries.at(-1)?.cursor ?? encodeRuntimeCursor(next),
+      reach: connection.logHistorySeconds ?? 0,
+    };
   }
 
   /**
@@ -683,6 +767,82 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     }
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
+}
+
+interface RuntimePosition {
+  readonly at: string;
+  readonly seen: number;
+}
+
+function runtimeCursor(
+  cursor: string | undefined,
+): Record<string, RuntimePosition> {
+  if (cursor === undefined) return {};
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(cursor, 'base64').toString('utf8'),
+    ) as unknown;
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, RuntimePosition] => {
+          const value = entry[1];
+          return (
+            typeof value === 'object' &&
+            value !== null &&
+            !Array.isArray(value) &&
+            typeof (value as { at?: unknown }).at === 'string' &&
+            typeof (value as { seen?: unknown }).seen === 'number' &&
+            Number.isInteger((value as { seen: number }).seen) &&
+            (value as { seen: number }).seen >= 0
+          );
+        },
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function encodeRuntimeCursor(cursor: Record<string, RuntimePosition>): string {
+  return Buffer.from(JSON.stringify(cursor)).toString('base64');
+}
+
+function runtimePodIdentity(pod: KubernetesObject): string {
+  const uid =
+    typeof pod.metadata.uid === 'string' ? pod.metadata.uid : pod.metadata.name;
+  const statuses = (
+    pod.status as {
+      containerStatuses?: { name?: string; restartCount?: number }[];
+    } | null
+  )?.containerStatuses;
+  const app = statuses?.find((status) => status.name === 'app');
+  return `${pod.metadata.name}:${uid}:${app?.restartCount ?? 0}`;
+}
+
+function runtimeLine(raw: string): {
+  at: Date;
+  cursorAt: string;
+  line: string;
+} {
+  const separator = raw.indexOf(' ');
+  if (separator > 0) {
+    const timestamp = new Date(raw.slice(0, separator));
+    if (!Number.isNaN(timestamp.getTime())) {
+      return {
+        at: timestamp,
+        cursorAt: timestamp.toISOString(),
+        line: raw.slice(separator + 1),
+      };
+    }
+  }
+  return { at: new Date(0), cursorAt: new Date(0).toISOString(), line: raw };
 }
 
 // --- flavour-shaped helpers ------------------------------------------------

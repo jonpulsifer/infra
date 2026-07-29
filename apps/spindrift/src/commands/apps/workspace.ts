@@ -4,7 +4,6 @@ import type {
   ComponentView,
   DatastoreView,
   DeployPhase,
-  LogLine,
   Runtime,
   WorkspaceView,
 } from '../../web/model.ts';
@@ -148,7 +147,10 @@ export const getAppWorkspace: Command<
   }
 
   let runtime: Runtime;
-  if (primaryComponent?.kind === 'website') {
+  if (
+    primaryComponent?.kind === 'website' &&
+    latestTarget?.adapter === 'static'
+  ) {
     runtime = {
       kind: 'none',
       because: 'Static files are served by the Target.',
@@ -159,16 +161,18 @@ export const getAppWorkspace: Command<
       executions: [],
       retained: 10,
     };
-  } else {
-    const logEvents = events.filter((e) => e.eventType === 'log' && e.line);
-    const lines: LogLine[] = logEvents.map((e) => ({
-      text: e.line!,
-      tone: e.reason ? ('error' as const) : undefined,
-    }));
+  } else if (primaryComponent && latestTarget) {
     runtime = {
       kind: 'stream',
-      lines,
-      reach: '7 days',
+      componentId: primaryComponent.id,
+      targetId: latestTarget.id,
+      lines: [],
+      reach: reachOf(latestTarget.discovery?.logHistorySeconds ?? 0),
+    };
+  } else {
+    runtime = {
+      kind: 'none',
+      because: 'No runtime has been deployed yet.',
     };
   }
 
@@ -189,3 +193,16 @@ export const getAppWorkspace: Command<
 
   return ok({ workspace });
 };
+
+function reachOf(seconds: number): string {
+  if (seconds <= 0) return 'live only';
+  if (seconds % 86_400 === 0) {
+    const days = seconds / 86_400;
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+  if (seconds % 3_600 === 0) {
+    const hours = seconds / 3_600;
+    return `${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  return `${seconds} seconds`;
+}

@@ -12,19 +12,17 @@
  * click past it, and the one time it says otherwise is the one time that
  * matters.
  */
-import { type Dispatch, useReducer, useState } from 'react';
+import { type Dispatch, useRef, useState } from 'react';
+import type {
+  CreationDraftView,
+  DraftAction,
+} from '../../../../domain/creation-draft.ts';
 import { command, type TransportFailure } from '../../../client.ts';
 import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { cn } from '../../../ui/utils.ts';
-import {
-  blockersFor,
-  createAppInputFor,
-  type Draft,
-  draftReducer,
-  STEPS,
-} from './draft.ts';
+import { blockersFor, type Draft, draftReducer, STEPS } from './draft.ts';
 import {
   Ledger,
   StepComponent,
@@ -35,40 +33,106 @@ import {
 } from './steps.tsx';
 
 export function NewApp({
-  initialDraft,
+  initial,
   targets,
   repos,
+  onCreated,
 }: {
-  initialDraft: Draft;
+  initial: CreationDraftView;
   targets: readonly TargetOptionView[];
   repos: readonly RepositoryOptionView[];
+  onCreated?: (app: { readonly id: string; readonly name: string }) => void;
 }) {
-  const [draft, dispatch] = useReducer(draftReducer, initialDraft);
+  const [draft, setDraft] = useState(initial.draft);
+  const [serverBlockers, setServerBlockers] = useState(initial.blockers);
   const [refusal, setRefusal] = useState<TransportFailure | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const draftRef = useRef(initial.draft);
+  const revisionRef = useRef(initial.revision);
+  const saves = useRef(Promise.resolve());
+  const pendingSaves = useRef(0);
+  const saveFailed = useRef(false);
 
   const candidateIds = targets
     .filter((target) => target.candidate)
     .map((target) => target.targetId);
-  const blockers = blockersFor(draft, candidateIds);
+  const localBlockers = blockersFor(draft, candidateIds);
+  const blockers = [
+    ...localBlockers,
+    ...serverBlockers.filter(
+      (server) =>
+        !localBlockers.some((local) => local.code === server.code) &&
+        (server.code === 'REPOSITORY_UNAVAILABLE' ||
+          server.code === 'TARGET_UNAVAILABLE'),
+    ),
+  ];
   const last = draft.step === STEPS.length - 1;
 
-  /**
-   * Review's terminal act: create the App (§21's `createApp`), which locks its
-   * vessel and — once Task 19 lands the Component and Build commands — starts
-   * the first Build.
-   *
-   * Today this reaches a real endpoint and comes back `UNAUTHENTICATED`,
-   * because nobody can sign in until Task 37. That is deliberately not hidden
-   * behind a disabled button: a refusal the developer can read is the honest
-   * state of the system, and wiring the call now is what proves the typed
-   * client and the generated dispatch surface actually join up.
-   */
+  const dispatch: Dispatch<DraftAction> = (action) => {
+    const next = draftReducer(draftRef.current, action);
+    draftRef.current = next;
+    setDraft(next);
+    pendingSaves.current += 1;
+    setSaving(true);
+    saves.current = saves.current
+      .then(async () => {
+        const result = await command('saveCreationDraft', {
+          id: initial.id,
+          revision: revisionRef.current,
+          draft: next,
+        });
+        if (!result.ok) {
+          saveFailed.current = true;
+          setRefusal(result.failure);
+          return;
+        }
+        revisionRef.current = result.value.revision;
+        saveFailed.current = false;
+        setServerBlockers(result.value.blockers);
+        setRefusal(null);
+      })
+      .catch((cause: unknown) => {
+        saveFailed.current = true;
+        setRefusal({
+          code: 'MALFORMED_REQUEST',
+          message:
+            cause instanceof Error ? cause.message : 'the draft could not save',
+        });
+      })
+      .finally(() => {
+        pendingSaves.current -= 1;
+        setSaving(pendingSaves.current > 0);
+      });
+  };
+
+  /** Review's terminal act revalidates and creates under one database lock. */
   async function start() {
     setSubmitting(true);
     setRefusal(null);
-    const result = await command('createApp', createAppInputFor(draft));
-    if (!result.ok) setRefusal(result.failure);
+    await saves.current;
+    if (saveFailed.current) {
+      setSubmitting(false);
+      return;
+    }
+    const result = await command('completeCreationDraft', {
+      id: initial.id,
+      revision: revisionRef.current,
+    });
+    if (!result.ok) {
+      setRefusal(result.failure);
+      setSubmitting(false);
+      return;
+    }
+    setServerBlockers(result.value.draft.blockers);
+    if (result.value.app === null) {
+      setSubmitting(false);
+      return;
+    }
+    onCreated?.({
+      id: result.value.app.appId,
+      name: result.value.app.name,
+    });
     setSubmitting(false);
   }
 
@@ -132,10 +196,14 @@ export function NewApp({
             <div className="ml-auto">
               {last ? (
                 <Button
-                  disabled={blockers.length > 0 || submitting}
+                  disabled={blockers.length > 0 || submitting || saving}
                   onClick={start}
                 >
-                  {submitting ? 'Creating…' : 'Start first Build'}
+                  {submitting
+                    ? 'Creating…'
+                    : saving
+                      ? 'Saving…'
+                      : 'Start first Build'}
                 </Button>
               ) : (
                 <Button

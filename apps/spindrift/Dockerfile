@@ -61,7 +61,10 @@ COPY --from=supply-chain-tools /spindrift-verifier /usr/local/bin/spindrift-veri
 # Fail the image build at the packaging seam rather than shipping a chart
 # command whose module the runtime image does not contain.
 RUN test -f /app/apps/spindrift/src/web/server.ts \
-  && test -f /app/apps/spindrift/src/reconciler/main.ts
+  && test -f /app/apps/spindrift/src/reconciler/main.ts \
+  && test -f /app/apps/spindrift/src/db/migrate.ts \
+  && test -f /app/apps/spindrift/src/db/wait-for-schema.ts \
+  && test -f /app/apps/spindrift/src/db/migrations/meta/_journal.json
 WORKDIR /app/apps/spindrift
 USER 65532:65532
 EXPOSE 3000

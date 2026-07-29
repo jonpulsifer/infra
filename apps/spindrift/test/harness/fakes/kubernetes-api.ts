@@ -23,6 +23,7 @@ import type { Fetcher } from '../../../src/adapters/deploy/kubernetes/api.ts';
 export interface RecordedRequest {
   method: string;
   path: string;
+  query: string;
   contentType: string | null;
   body: unknown;
 }
@@ -128,6 +129,7 @@ export class FakeKubernetes {
     this.requests.push({
       method: request.method,
       path: url.pathname,
+      query: url.search,
       contentType: request.headers.get('content-type'),
       body,
     });

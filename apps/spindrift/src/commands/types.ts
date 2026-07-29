@@ -157,7 +157,9 @@ export type CommandFailureCode =
    * A Build exists but no route can be handed it — §16's bundle digest is
    * missing, so a provenance document would have nothing to join against.
    */
-  | 'NOT_BUILDABLE';
+  | 'NOT_BUILDABLE'
+  /** The caller saved an older revision than the server currently owns. */
+  | 'STALE_EDIT';
 
 /** The assertable identity of a failure, plus the sentence a user reads. */
 export interface CommandFailure {

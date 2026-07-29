@@ -482,3 +482,79 @@ describe('the exposure a Target rejects is a state, not a crash', () => {
     }
   });
 });
+
+describe('runtime log tail', () => {
+  test('resumes Cloud Logging entries from its opaque cursor', async () => {
+    const api = new FakeCloudRun();
+    let reads = 0;
+    const requests: Record<string, unknown>[] = [];
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      logsEndpoint: api.endpoint,
+      fetch: async (request) => {
+        if (new URL(request.url).pathname !== '/v2/entries:list') {
+          return api.fetch(request);
+        }
+        reads += 1;
+        requests.push(
+          (await request.clone().json()) as Record<string, unknown>,
+        );
+        const entries = [
+          {
+            timestamp: '2026-07-29T12:00:00.000Z',
+            receiveTimestamp: '2026-07-29T12:10:00.000Z',
+            insertId: 'a',
+            textPayload: 'first',
+            resource: { labels: { revision_name: 'shop-web-00001' } },
+          },
+          {
+            timestamp: '2026-07-29T12:00:01.000Z',
+            receiveTimestamp: '2026-07-29T12:10:01.000Z',
+            insertId: 'b',
+            textPayload: 'second',
+            resource: { labels: { revision_name: 'shop-web-00001' } },
+          },
+          ...(reads === 1
+            ? []
+            : [
+                {
+                  timestamp: '2026-07-29T12:00:02.000Z',
+                  receiveTimestamp: '2026-07-29T12:10:02.000Z',
+                  insertId: 'c',
+                  textPayload: 'third',
+                  resource: { labels: { revision_name: 'shop-web-00002' } },
+                },
+              ]),
+        ];
+        return Response.json({ entries });
+      },
+    });
+
+    const first = await adapter.tail(target({ logHistorySeconds: 7200 }), {
+      app: 'shop',
+      component: 'web',
+    });
+    expect(first.kind).toBe('stream');
+    if (first.kind !== 'stream') return;
+    expect(first.entries.map((entry) => entry.line)).toEqual([
+      'first',
+      'second',
+    ]);
+    expect(first.entries[0]?.at.toISOString()).toBe('2026-07-29T12:00:00.000Z');
+    expect(first.reach).toBe(7200);
+
+    const resumed = await adapter.tail(
+      target({ logHistorySeconds: 7200 }),
+      { app: 'shop', component: 'web' },
+      { after: first.cursor ?? undefined },
+    );
+    expect(resumed.kind).toBe('stream');
+    if (resumed.kind !== 'stream') return;
+    expect(resumed.entries.map((entry) => entry.line)).toEqual(['third']);
+    expect(resumed.entries[0]?.replica).toBe('shop-web-00002');
+    expect(requests[0]?.orderBy).toBe('timestamp asc');
+    expect(requests[1]?.filter).toContain(
+      'timestamp>="2026-07-29T12:00:01.000Z"',
+    );
+  });
+});

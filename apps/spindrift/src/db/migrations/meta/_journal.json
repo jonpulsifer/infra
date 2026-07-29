@@ -78,6 +78,20 @@
       "when": 1785288376240,
       "tag": "0010_manifest_target_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785327731021,
+      "tag": "0011_creation_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785329573674,
+      "tag": "0012_creation_draft_completion",
+      "breakpoints": true
     }
   ]
 }

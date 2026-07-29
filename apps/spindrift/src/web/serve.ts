@@ -26,6 +26,7 @@ import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
 import { loadStoredManifest } from '../config/manifest-store.ts';
 import { createDb } from '../db/client.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
+import { type StreamSocketData, streamWebSocket } from './streams.ts';
 
 /**
  * Where the enrolment token arrives.
@@ -59,7 +60,7 @@ export async function start(
     gateway: manifest.auth.gateway,
   };
 
-  const server = Bun.serve({
+  const server = Bun.serve<StreamSocketData>({
     port: Number(Bun.env.PORT ?? 3000),
     development,
     routes: webRoutes(
@@ -76,6 +77,7 @@ export async function start(
       },
       auth,
     ),
+    websocket: streamWebSocket,
   });
 
   console.log(`spindrift web → ${server.url} (${manifest.installation})`);

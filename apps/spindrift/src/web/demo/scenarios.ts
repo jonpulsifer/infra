@@ -1,11 +1,7 @@
 /**
- * Placeholder data, so the screens can be looked at before the queries exist.
- *
- * **This module is scaffolding and is meant to be deleted.** The views it feeds
- * are typed against `../model.ts`, which is built from the domain's own closed
- * vocabularies, so when the query commands land they replace this file and the
- * compiler says whether the shapes agree. Nothing here is imported by anything
- * outside `src/web/`.
+ * Standalone scenarios for looking at every settled screen state without a
+ * database. Product routes use command-owned state. Nothing here is imported
+ * by anything outside `src/web/`.
  *
  * Every name in it is invented. §20 puts every value that names an installation
  * in the manifest, and a fixture is not an exemption — a demo hostname that
@@ -74,11 +70,19 @@ function resourcesFailingWith(detail: string): readonly ChecklistItem[] {
 }
 
 const BASE = {
+  id: 42,
+  buildId: 41,
+  componentId: '00000000-0000-4000-8000-000000000041',
+  targetId: '00000000-0000-4000-8000-000000000042',
   app: 'almanac',
   component: 'web',
   target: 'Metal',
   commit: 'dd9b103',
   url: `almanac.${APEX}`,
+  deployLog: [
+    { text: 'controller accepted the deploy', tone: 'muted' },
+    { text: 'platform reconciliation reached a terminal state' },
+  ],
 } as const;
 
 const BUILT = {
@@ -328,6 +332,8 @@ export const WORKSPACE_SCENARIOS = {
     ],
     runtime: {
       kind: 'stream',
+      componentId: '00000000-0000-4000-8000-000000000041',
+      targetId: '00000000-0000-4000-8000-000000000042',
       // The Deploy marker is in the stream rather than filtering it — §17's
       // "Deploys are markers on the timeline, never a filter".
       lines: [

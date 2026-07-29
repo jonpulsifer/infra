@@ -339,6 +339,16 @@ describe('§13 and §17: what this Target is honest about', () => {
     expect(discovery.logHistorySeconds).toBe(0);
   });
 
+  test('returns a no-runtime result instead of opening an empty tail', async () => {
+    const { adapter } = adapterFor();
+    expect(
+      await adapter.tail(TARGET, { app: 'shop', component: 'site' }),
+    ).toEqual({
+      kind: 'none',
+      because: 'Static files are served by the Target.',
+    });
+  });
+
   test('a site reaches no store, which is why §10 exempts a website', async () => {
     const { adapter } = adapterFor();
     const { discovery } = await adapter.inspect(TARGET);

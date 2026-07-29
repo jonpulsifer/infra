@@ -92,22 +92,22 @@ describe('dispatch refuses what the registry does not back', () => {
 
   test('invalid input is refused with the field that was wrong', async () => {
     const result = await dispatch(
-      'createApp',
-      { name: 'UPPERCASE', sourceKind: 'repo', repoUrl: 'nonsense' },
+      'completeCreationDraft',
+      { id: 'not-a-uuid', revision: -1 },
       context,
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('INVALID_INPUT');
     const paths = (result.failure.issues ?? []).map((issue) => issue.path);
-    expect(paths).toContain('name');
-    expect(paths).toContain('repoUrl');
+    expect(paths).toContain('id');
+    expect(paths).toContain('revision');
   });
 
-  test('an input naming no known source kind is refused', async () => {
+  test('an input carrying an unknown field is refused', async () => {
     const result = await dispatch(
-      'createApp',
-      { name: 'thing', sourceKind: 'ftp' },
+      'startCreationDraft',
+      { mystery: true },
       context,
     );
     expect(result.ok).toBe(false);

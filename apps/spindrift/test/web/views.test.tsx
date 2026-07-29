@@ -140,6 +140,8 @@ describe('the deploy screen, on red', () => {
     expect(markup).toContain('ARTIFACT_UNAVAILABLE');
     expect(markup).toContain('platform');
     expect(markup).not.toContain('compiled successfully');
+    expect(markup).toContain('Deploy log · failed');
+    expect(markup).toContain('controller accepted the deploy');
   });
 
   test('but not when nothing is serving', () => {

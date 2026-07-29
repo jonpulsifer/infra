@@ -55,6 +55,8 @@ import type {
   DeployVerdict,
   FailureReason,
   ObservedState,
+  RuntimeLogPage,
+  RuntimeLogSubject,
 } from '../contract.ts';
 import { BundleError, type BundleFile, readBundle } from './bundle.ts';
 
@@ -256,6 +258,16 @@ export class StaticDeployAdapter implements DeployAdapter {
         ? `deleting site ${site} failed with ${deleted.status}: ${deleted.message}`
         : `deleting site ${site} failed: ${deleted.message}`,
     );
+  }
+
+  async tail(
+    _target: DeployTarget,
+    _subject: RuntimeLogSubject,
+  ): Promise<RuntimeLogPage> {
+    return {
+      kind: 'none',
+      because: 'Static files are served by the Target.',
+    };
   }
 
   /** One pass of §13's checklist and §3's discovery, in one call. */

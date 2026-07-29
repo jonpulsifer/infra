@@ -146,6 +146,9 @@ const refuses: DeployAdapter = {
     return null;
   },
   async destroy() {},
+  async tail() {
+    return { kind: 'stream', entries: [], cursor: null, reach: 0 };
+  },
   async inspect() {
     return {
       prerequisites: prerequisitesFor('kubernetes').map((name) => ({

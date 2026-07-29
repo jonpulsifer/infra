@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { createApp } from '../../src/commands/create-app.ts';
 import {
-  createApp,
   createComponent,
   getAppWorkspace,
   getDeployDetail,
@@ -12,7 +12,7 @@ import type {
 } from '../../src/commands/types.ts';
 import { builds, deploys, targets } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const manifest = await fixtureManifest();
 const database = withIsolatedDatabase();
@@ -79,6 +79,27 @@ describe('getAppWorkspace command', () => {
       ctx,
     );
     expect(createdComp.ok).toBe(true);
+    if (!createdComp.ok) return;
+    const [target] = await database()
+      .db.insert(targets)
+      .values(targetValues({ adapter: 'kubernetes' }))
+      .returning();
+    const [build] = await database()
+      .db.insert(builds)
+      .values({
+        componentId: createdComp.value.componentId,
+        commit: 'abc123',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'SUCCEEDED',
+      })
+      .returning();
+    await database().db.insert(deploys).values({
+      componentId: createdComp.value.componentId,
+      targetId: target!.id,
+      buildId: build!.id,
+      phase: 'LIVE',
+    });
 
     const result = await getAppWorkspace({ name: appName }, ctx);
     expect(result.ok).toBe(true);
@@ -117,6 +138,27 @@ describe('getAppWorkspace command', () => {
       ctx,
     );
     expect(createdComp.ok).toBe(true);
+    if (!createdComp.ok) return;
+    const [target] = await database()
+      .db.insert(targets)
+      .values(targetValues({ adapter: 'static' }))
+      .returning();
+    const [build] = await database()
+      .db.insert(builds)
+      .values({
+        componentId: createdComp.value.componentId,
+        commit: 'def456',
+        targetShape: 'files',
+        artifactType: 'files',
+        status: 'SUCCEEDED',
+      })
+      .returning();
+    await database().db.insert(deploys).values({
+      componentId: createdComp.value.componentId,
+      targetId: target!.id,
+      buildId: build!.id,
+      phase: 'LIVE',
+    });
 
     const result = await getAppWorkspace({ name: appName }, ctx);
     expect(result.ok).toBe(true);

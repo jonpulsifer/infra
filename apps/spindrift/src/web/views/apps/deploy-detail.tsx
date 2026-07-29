@@ -17,12 +17,11 @@
  * - **`blame` earns its chip**, in the diagnosis block.
  * - **The red screen says the previous release is still serving.**
  *
- * This screen was built first among the three (plan Risk 5) because it is the
- * one with live state, and no framework means owning navigation and streaming
- * by hand. Everything below is still static props — the WebSocket that fills
- * them is Task 34.
+ * No framework means owning navigation and streaming by hand. The screen still
+ * takes one immutable view; its controller replaces that view as authenticated
+ * attempt events arrive.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
@@ -62,6 +61,7 @@ export function DeployDetail({ view }: { view: DeployView }) {
       ) : null}
 
       <BuildDrawer view={view} />
+      {view.build.status === 'done' ? <DeployDrawer view={view} /> : null}
     </div>
   );
 }
@@ -177,6 +177,13 @@ function BuildDrawer({ view }: { view: DeployView }) {
   const autoOpen =
     view.build.status === 'failed' || view.build.status === 'running';
   const [open, setOpen] = useState(autoOpen);
+  const priorStatus = useRef(view.build.status);
+
+  useEffect(() => {
+    if (priorStatus.current === view.build.status) return;
+    priorStatus.current = view.build.status;
+    setOpen(view.build.status !== 'done');
+  }, [view.build.status]);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} asChild>
@@ -221,5 +228,49 @@ function BuildOutput({ view }: { view: DeployView }) {
     <Notice label={view.build.fidelity}>
       {view.build.runner} releases its log when the build finishes.
     </Notice>
+  );
+}
+
+/** The deploy leg is separate from build output and opens on deploy red. */
+function DeployDrawer({ view }: { view: DeployView }) {
+  const autoOpen = view.phase !== 'LIVE';
+  const [open, setOpen] = useState(autoOpen);
+  const priorPhase = useRef(view.phase);
+
+  useEffect(() => {
+    if (priorPhase.current === view.phase) return;
+    priorPhase.current = view.phase;
+    setOpen(view.phase !== 'LIVE');
+  }, [view.phase]);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} asChild>
+      <Card>
+        <CollapsibleTrigger className="flex w-full items-center gap-2.5 px-3.5 py-3 text-left text-xs font-semibold uppercase tracking-[0.07em] text-subtle hover:text-foreground">
+          <StepGlyph
+            status={
+              view.phase === 'LIVE'
+                ? 'done'
+                : view.phase === 'FAILED'
+                  ? 'failed'
+                  : 'running'
+            }
+          />
+          Deploy log · {view.phase.toLowerCase()}
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-3.5 pb-3.5">
+            {view.deployLog === null ? (
+              <Notice label="LIVE_STATUS">
+                The controller reports deploy status live; no text line has
+                arrived yet.
+              </Notice>
+            ) : (
+              <LogPane lines={view.deployLog} />
+            )}
+          </div>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }
