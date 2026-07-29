@@ -39,11 +39,12 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{/*
-The migration Job's name carries the image digest, so a new image is a new Job
-rather than an immutable-field conflict on the old one.
+The migration Job's name carries a digest of every operator-controlled input to
+its immutable pod template. A changed migration becomes a new Job; an unrelated
+chart revision leaves the completed Job alone.
 */}}
 {{- define "spindrift.migrationName" -}}
-{{- $tag := last (splitList ":" .Values.image) -}}
-{{- $safe := $tag | lower | replace "." "-" | replace "@" "-" | replace "_" "-" | replace "+" "-" | trunc 20 | trimSuffix "-" -}}
-{{ include "spindrift.fullname" . }}-migrate-{{ $safe }}
+{{- $inputs := dict "image" .Values.image "command" .Values.database.migration.command "sandbox" .Values.sandbox "envFromSecret" .Values.envFromSecret -}}
+{{- $digest := toJson $inputs | sha256sum | trunc 20 -}}
+{{ include "spindrift.fullname" . }}-migrate-{{ $digest }}
 {{- end }}

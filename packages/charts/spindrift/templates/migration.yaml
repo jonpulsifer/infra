@@ -6,12 +6,13 @@ Migrations as a Job, for an installation that wants them applied that way.
 migrations as an out-of-band operator act — so a release that turns this on has
 to supply a command that invokes the library.
 
-The Job's name carries the image digest, so a redeploy of the same image is the
-same Job (already complete, nothing rerun) and a new image is a new Job — rather
-than an attempted mutation of a completed Job's immutable pod template. That is
-`packages/charts/app`'s pattern, kept rather than replaced with a Helm hook:
-a hook would make Flux block on the Job, and the digest-named Job already gives
-run-once-per-image without the coupling.
+The Job's name carries a digest of its execution inputs, so an unchanged
+migration is the same completed Job and changed inputs create a new one. The pod
+template deliberately excludes revision-varying chart labels: Kubernetes makes
+that template immutable, and a Git chart revision must not turn an unrelated
+label change into a failed upgrade. This keeps `packages/charts/app`'s Job
+pattern rather than replacing it with a Helm hook that would couple Flux to the
+Job.
 */}}
 {{- if and .Values.database.enabled .Values.database.migration.enabled }}
 apiVersion: batch/v1
@@ -28,8 +29,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "spindrift.labels" . | nindent 8 }}
-        app.kubernetes.io/component: migration
+        {{- include "spindrift.selectorLabels" (dict "Release" .Release "Values" .Values "Chart" .Chart "component" "migration") | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       {{- if .Values.sandbox }}

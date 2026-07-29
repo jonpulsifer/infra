@@ -123,6 +123,46 @@ describe('Secret-backed authentication configuration', () => {
   });
 });
 
+describe('migration Job identity', () => {
+  const database = {
+    enabled: true,
+    migration: {
+      enabled: true,
+      command: 'bun run migrate',
+    },
+  };
+
+  test('is stable for the same execution inputs and excludes chart revision labels', async () => {
+    const first = one(await render({ database }), 'Job');
+    const second = one(await render({ database }), 'Job');
+
+    expect(first.metadata.name).toBe(second.metadata.name);
+    expect(first.metadata.name).toMatch(/^spindrift-migrate-[a-f0-9]{20}$/);
+    expect(first.spec.template.metadata.labels).toEqual({
+      'app.kubernetes.io/name': 'spindrift',
+      'app.kubernetes.io/component': 'migration',
+    });
+  });
+
+  test('changes when an immutable execution input changes', async () => {
+    const first = one(await render({ database }), 'Job');
+    const changed = one(
+      await render({
+        database: {
+          ...database,
+          migration: {
+            enabled: true,
+            command: 'bun run migrate --strict',
+          },
+        },
+      }),
+      'Job',
+    );
+
+    expect(changed.metadata.name).not.toBe(first.metadata.name);
+  });
+});
+
 describe('declared installation manifest', () => {
   test('mounts ordinary configuration from a ConfigMap in every process', async () => {
     const objects = await render({
