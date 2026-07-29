@@ -179,7 +179,8 @@ describe('enrolling over the route table', () => {
     const cookie = cookieFrom(await enrolOverHttp(routes));
     expect(cookie).not.toBeNull();
 
-    const name = commandNames[0]!;
+    const name =
+      commandNames.find((n) => n === 'createApp') ?? commandNames[0]!;
     const response = await call(routes, pathFor(name), {}, cookie!);
 
     // 422, not 401: an empty object satisfies no command's schema, so the

@@ -35,6 +35,7 @@ import {
   resolveComponentPlacementInput,
 } from './apps/resolve-placement.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
+import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
@@ -42,6 +43,7 @@ import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
 import { createApp, createAppInput } from './create-app.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
+import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import type * as commands from './index.ts';
 import {
@@ -73,6 +75,8 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 
 /** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
+  getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
+  getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
   listApps: { input: listAppsInput, handler: listApps },
   createApp: { input: createAppInput, handler: createApp },
   createComponent: { input: createComponentInput, handler: createComponent },

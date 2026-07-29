@@ -2,10 +2,7 @@
  * The shell, and the client's whole route table.
  *
  * §18's surfaces are the three screens below; everything else here is chrome
- * that exists to reach them. The scenario switcher at the foot of each screen
- * is **demo scaffolding** — it drives the placeholder data in `demo/` and comes
- * out with it, which is why it is one component in one place rather than a prop
- * threaded through the views.
+ * that exists to reach them.
  */
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -13,19 +10,13 @@ import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
 import { command } from './client.ts';
 import {
-  DEPLOY_SCENARIO_NAMES,
-  DEPLOY_SCENARIOS,
-  type DeployScenarioName,
   INITIAL_DRAFT,
   LINKED_REPOS,
   REPOSITORY_OPTIONS,
   TARGET_LIST,
   TARGET_OPTIONS,
-  WORKSPACE_SCENARIO_NAMES,
-  WORKSPACE_SCENARIOS,
-  type WorkspaceScenarioName,
 } from './demo/scenarios.ts';
-import type { AppListItem } from './model.ts';
+import type { AppListItem, DeployView, WorkspaceView } from './model.ts';
 import { useRoute } from './router.ts';
 import { type Theme, useTheme } from './theme.ts';
 import { Button } from './ui/button.tsx';
@@ -50,11 +41,6 @@ const NAV = [
 
 /**
  * Nobody, somebody, or not asked yet.
- *
- * Three states rather than a nullable principal, because the third is real and
- * short: between mount and the first answer the shell knows nothing, and
- * rendering the front door during it would flash a sign-in screen at an
- * operator who is already signed in.
  */
 type Gatekeeping =
   | { readonly state: 'asking' }
@@ -146,10 +132,18 @@ function Screen({
   }
   if (path.startsWith('/targets')) return <TargetList targets={TARGET_LIST} />;
   if (path.startsWith('/repos')) return <RepositoryList repos={LINKED_REPOS} />;
-  if (path.startsWith('/deploys')) return <DeployScreen />;
-  if (path === '/apps' || path === '')
+  if (path.startsWith('/deploys')) {
+    const deployId = path.replace(/^\/deploys\/?/, '');
+    return <DeployScreen deployId={deployId} onNavigate={onNavigate} />;
+  }
+  if (path === '/apps' || path === '') {
     return <AppsScreen onNavigate={onNavigate} />;
-  return <WorkspaceScreen />;
+  }
+  if (path.startsWith('/apps/')) {
+    const appName = path.replace(/^\/apps\//, '');
+    return <WorkspaceScreen appName={appName} onNavigate={onNavigate} />;
+  }
+  return <WorkspaceScreen appName={path.slice(1)} onNavigate={onNavigate} />;
 }
 
 function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
@@ -204,6 +198,190 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   }
 
   return <AppList apps={state.apps} onNavigate={onNavigate} />;
+}
+
+function WorkspaceScreen({
+  appName,
+  onNavigate,
+}: {
+  appName: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'not-found'; message: string }
+    | { type: 'error'; message: string }
+    | { type: 'success'; workspace: WorkspaceView }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    if (!appName) {
+      setState({ type: 'not-found', message: 'No App name provided' });
+      return;
+    }
+    command('getAppWorkspace', { name: appName })
+      .then((result) => {
+        if (!live) return;
+        if (result.ok) {
+          setState({ type: 'success', workspace: result.value.workspace });
+        } else {
+          if (result.failure.code === 'NOT_FOUND') {
+            setState({ type: 'not-found', message: result.failure.message });
+          } else {
+            setState({ type: 'error', message: result.failure.message });
+          }
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [appName]);
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading workspace...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'not-found') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-border bg-card p-6 text-center">
+          <Eyebrow>App Not Found</Eyebrow>
+          <h1 className="mt-2 text-xl font-semibold">
+            No App named "{appName}"
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{state.message}</p>
+          <div className="mt-4 flex justify-center">
+            <Button variant="outline" onClick={() => onNavigate('/apps')}>
+              Back to Apps
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load workspace</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <Workspace view={state.workspace} />;
+}
+
+function DeployScreen({
+  deployId,
+  onNavigate,
+}: {
+  deployId: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'not-found'; message: string }
+    | { type: 'error'; message: string }
+    | { type: 'success'; deploy: DeployView }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    if (!deployId) {
+      setState({ type: 'not-found', message: 'No Deploy ID specified' });
+      return;
+    }
+    const parsedId = Number.parseInt(deployId, 10);
+    if (Number.isNaN(parsedId)) {
+      setState({
+        type: 'not-found',
+        message: `Invalid Deploy ID '${deployId}'`,
+      });
+      return;
+    }
+    command('getDeployDetail', { id: parsedId })
+      .then((result) => {
+        if (!live) return;
+        if (result.ok) {
+          setState({ type: 'success', deploy: result.value.deploy });
+        } else {
+          if (result.failure.code === 'NOT_FOUND') {
+            setState({ type: 'not-found', message: result.failure.message });
+          } else {
+            setState({ type: 'error', message: result.failure.message });
+          }
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [deployId]);
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading deploy details...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'not-found') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-border bg-card p-6 text-center">
+          <Eyebrow>Deploy Not Found</Eyebrow>
+          <h1 className="mt-2 text-xl font-semibold">
+            Deploy #{deployId} not found
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{state.message}</p>
+          <div className="mt-4 flex justify-center">
+            <Button variant="outline" onClick={() => onNavigate('/apps')}>
+              Back to Apps
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load deploy detail</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <DeployDetail view={state.deploy} />;
 }
 
 function TopBar({
@@ -287,88 +465,5 @@ function ThemeToggle() {
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * The switcher under a demo screen.
- *
- * It names each state in words rather than numbering them: the six deploy
- * scenarios are six things §6 says can happen, and "imageUnpullable" teaches
- * something that "4" does not.
- */
-function ScenarioBar<Name extends string>({
-  names,
-  active,
-  onSelect,
-}: {
-  names: readonly Name[];
-  active: Name;
-  onSelect: (name: Name) => void;
-}) {
-  return (
-    <div className="mx-auto flex w-full max-w-[1040px] flex-wrap items-center gap-2 px-5 pb-8">
-      <Eyebrow className="mr-1">Placeholder state</Eyebrow>
-      {names.map((name) => (
-        <Button
-          key={name}
-          size="sm"
-          variant={name === active ? 'default' : 'outline'}
-          onClick={() => onSelect(name)}
-        >
-          {name}
-        </Button>
-      ))}
-    </div>
-  );
-}
-
-/**
- * Scenario selection lives in the hash so a link to a state is shareable — the
- * thing a demo is actually for.
- */
-function useScenario<Name extends string>(
-  names: readonly Name[],
-  fallback: Name,
-): [Name, (name: Name) => void] {
-  const route = useRoute();
-  const [, base = '', chosen] = route.path.split('/');
-  const active = names.includes(chosen as Name) ? (chosen as Name) : fallback;
-  return [active, (name: Name) => route.navigate(`/${base}/${name}`)];
-}
-
-function DeployScreen() {
-  const [scenario, setScenario] = useScenario(
-    DEPLOY_SCENARIO_NAMES,
-    'live' satisfies DeployScenarioName,
-  );
-
-  return (
-    <>
-      <DeployDetail view={DEPLOY_SCENARIOS[scenario]} />
-      <ScenarioBar
-        names={DEPLOY_SCENARIO_NAMES}
-        active={scenario}
-        onSelect={setScenario}
-      />
-    </>
-  );
-}
-
-function WorkspaceScreen() {
-  const [scenario, setScenario] = useScenario(
-    WORKSPACE_SCENARIO_NAMES,
-    'service' satisfies WorkspaceScenarioName,
-  );
-
-  return (
-    <>
-      <Workspace view={WORKSPACE_SCENARIOS[scenario]} />
-      <ScenarioBar
-        names={WORKSPACE_SCENARIO_NAMES}
-        active={scenario}
-        onSelect={setScenario}
-      />
-    </>
   );
 }

@@ -15,9 +15,11 @@
  * Building, deploying, rollback, and desired-state changes are §21's other
  * named commands and arrive with the milestones that implement them.
  */
+
 export { listApps } from './apps/list.ts';
 export { resolveComponentPlacement } from './apps/resolve-placement.ts';
 export { uploadArchive } from './apps/upload-archive.ts';
+export { getAppWorkspace } from './apps/workspace.ts';
 export { dispatchBuild } from './builds/dispatch.ts';
 export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
@@ -25,6 +27,7 @@ export { replaceConfig } from './config/replace.ts';
 export { setConfig } from './config/set.ts';
 export { createApp } from './create-app.ts';
 export { createDeploy } from './deploys/create.ts';
+export { getDeployDetail } from './deploys/get-detail.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';
 export { connectRepository } from './repositories/connect.ts';
 export { connectTarget } from './targets/connect.ts';
