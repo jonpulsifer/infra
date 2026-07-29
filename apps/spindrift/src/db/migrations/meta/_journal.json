@@ -71,6 +71,13 @@
       "when": 1785273764040,
       "tag": "0009_installation_manifest",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785288376240,
+      "tag": "0010_manifest_target_seeds",
+      "breakpoints": true
     }
   ]
 }

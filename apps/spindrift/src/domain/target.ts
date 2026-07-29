@@ -41,6 +41,18 @@ export type TargetConnection =
   | CloudRunConnection
   | StaticConnection;
 
+/** A stored Target after its operator has supplied adapter connection facts. */
+export type TargetWithConnection<
+  T extends { connection: TargetConnection | null },
+> = T & { readonly connection: TargetConnection };
+
+/** Refine a manifest seed away from Targets an adapter can actually address. */
+export function hasTargetConnection<
+  T extends { connection: TargetConnection | null },
+>(target: T): target is TargetWithConnection<T> {
+  return target.connection !== null;
+}
+
 /**
  * How a Cloud Run Target is reached (§13, §14).
  *
@@ -211,10 +223,10 @@ export function deployTargetOf(target: {
 /**
  * Whether the Target passes §13's standing checklist.
  *
- * Two states, not three. A Target is only ever created by the connect act, and
- * that act runs one pass of the checklist before it returns — so there is no
- * moment at which a Target exists and has never been assessed, and no
- * `unknown` for the UI to render as a shrug.
+ * Two states, not three. A manifest-seeded Target starts unhealthy with every
+ * prerequisite carrying the reason that it has not been connected. The connect
+ * act replaces that checklist with one real inspection before it returns, so
+ * there is no `unknown` for the UI to render as a shrug.
  */
 export type TargetHealth = 'healthy' | 'unhealthy';
 

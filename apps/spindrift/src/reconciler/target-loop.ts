@@ -33,6 +33,7 @@ import {
 import {
   type DeployTargetRef,
   deployTargetOf,
+  hasTargetConnection,
   type TargetHealth,
 } from '../domain/target.ts';
 
@@ -115,6 +116,9 @@ export async function refreshTarget(
   context: TargetLoopContext,
   target: Pick<Target, 'id' | 'name' | 'adapter' | 'health' | 'connection'>,
 ): Promise<TargetRefresh> {
+  if (!hasTargetConnection(target)) {
+    throw new Error(`Target ${target.name} has no connection to refresh`);
+  }
   const now = context.clock.now();
   const { prerequisites, discovery } = await inspectTarget(
     context,
@@ -159,6 +163,9 @@ export async function refreshAllTargets(
 
   const refreshed: TargetRefresh[] = [];
   for (const target of connected) {
+    // A manifest seed is disconnected, so this is defensive against a
+    // malformed row rather than part of the ordinary bootstrap path.
+    if (!hasTargetConnection(target)) continue;
     // Sequential rather than concurrent: the far sides are other people's
     // control planes, and a fleet of Targets refreshing in lockstep is a
     // thundering herd against every one of them at once.

@@ -27,7 +27,10 @@
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { operatorValuesIssues } from '../../adapters/deploy/kubernetes/values.ts';
-import type { TargetAdapter } from '../../config/manifest.schema.ts';
+import {
+  type TargetAdapter,
+  targetNameSchema,
+} from '../../config/manifest.schema.ts';
 import { deploys, targets } from '../../db/schema.ts';
 import {
   deriveHealth,
@@ -41,17 +44,6 @@ import {
 } from '../../domain/target.ts';
 import { inspectTarget } from '../../reconciler/target-loop.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
-
-/** A stable identifier, unique within the installation (§13). */
-const targetName = z
-  .string()
-  .trim()
-  .min(1)
-  .max(63)
-  .regex(
-    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
-    'must be lowercase letters, digits and hyphens',
-  );
 
 /**
  * The delivery flavour a Kubernetes Target declares (§6).
@@ -90,7 +82,7 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('kubernetes'),
-      name: targetName,
+      name: targetNameSchema,
       /** §13's prerequisite is OIDC against this, not a credential for it. */
       apiServer: z.url(),
       /** Where an App's workloads land. Never created by Spindrift (§7). */
@@ -109,7 +101,7 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('cloud'),
       /** One name; both of the project's Targets are derived from it. */
-      name: targetName,
+      name: targetNameSchema,
       project: z.string().trim().min(1),
       region: z.string().trim().min(1),
       /**

@@ -16,6 +16,14 @@ import { z } from 'zod';
 /** A non-empty string with no surrounding whitespace. */
 const nonEmptyString = z.string().trim().min(1);
 
+/** A Target identifier accepted by both the manifest and the connect act. */
+export const targetNameSchema = nonEmptyString
+  .max(63)
+  .regex(
+    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
+    'must be lowercase letters, digits and hyphens',
+  );
+
 /** A DNS zone apex, e.g. `apps.example.test` or `localhost`. */
 const zone = nonEmptyString.regex(
   /^(localhost|(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+)$/,
@@ -142,7 +150,7 @@ export const buildRouteSchema = z.discriminatedUnion('adapter', [
 export const targetSeedSchema = z
   .object({
     /** Stable identifier, unique within the installation. */
-    name: nonEmptyString,
+    name: targetNameSchema,
     /** Which delivery adapter drives it. */
     adapter: targetAdapterSchema,
   })
@@ -411,7 +419,33 @@ export const installationManifestSchema = z
         (targets) =>
           new Set(targets.map((t) => t.name)).size === targets.length,
         'target names must be unique',
-      ),
+      )
+      .superRefine((targets, context) => {
+        const seeds = new Map(targets.map((target) => [target.name, target]));
+        targets.forEach((target, index) => {
+          if (target.adapter === 'kubernetes') return;
+
+          const suffix = `-${target.adapter}`;
+          const base = target.name.endsWith(suffix)
+            ? target.name.slice(0, -suffix.length)
+            : '';
+          const counterpart =
+            target.adapter === 'cloudrun' ? 'static' : 'cloudrun';
+          const counterpartName = `${base}-${counterpart}`;
+          if (
+            base.length === 0 ||
+            seeds.get(counterpartName)?.adapter !== counterpart
+          ) {
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'name'],
+              message:
+                'cloud Targets must be a matched <name>-cloudrun and ' +
+                '<name>-static pair',
+            });
+          }
+        });
+      }),
   })
   .strict();
 

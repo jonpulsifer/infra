@@ -248,6 +248,70 @@ describe('the act is credential-shaped though the noun is flat', () => {
     const rows = await database().db.select().from(targets);
     expect(rows).toHaveLength(3);
   });
+
+  test('connect fills a manifest-seeded Target without changing its rank', async () => {
+    const { registry } = fakes();
+    const [seed] = await database()
+      .db.insert(targets)
+      .values({
+        name: 'cluster',
+        adapter: 'kubernetes',
+        rank: 4,
+        status: 'disconnected',
+        connection: null,
+        health: 'unhealthy',
+      })
+      .returning();
+
+    const result = await connectTarget(
+      clusterInput({ name: 'cluster' }),
+      context(registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    const [connected] = result.value.targets;
+    expect(connected?.id).toBe(seed?.id);
+    expect(connected?.rank).toBe(4);
+    expect((await targetRow('cluster'))?.connection).toEqual(
+      connectionFor('kubernetes'),
+    );
+  });
+
+  test('one cloud connect fills its matched manifest-seeded pair', async () => {
+    const { registry } = fakes();
+    const seeds = await database()
+      .db.insert(targets)
+      .values([
+        {
+          name: 'vessel-cloudrun',
+          adapter: 'cloudrun',
+          rank: 2,
+          status: 'disconnected',
+          connection: null,
+          health: 'unhealthy',
+        },
+        {
+          name: 'vessel-static',
+          adapter: 'static',
+          rank: 3,
+          status: 'disconnected',
+          connection: null,
+          health: 'unhealthy',
+        },
+      ])
+      .returning();
+
+    const result = await connectTarget(
+      cloudInput({ name: 'vessel' }),
+      context(registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    expect(result.value.targets.map(({ id, rank }) => ({ id, rank }))).toEqual(
+      seeds.map(({ id, rank }) => ({ id, rank })),
+    );
+    expect(await database().db.select().from(targets)).toHaveLength(2);
+  });
 });
 
 describe('disconnect strands rather than stops', () => {

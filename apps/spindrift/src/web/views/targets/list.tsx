@@ -3,8 +3,8 @@
  *
  * Shows every deployment Target the control plane knows about, its adapter
  * type, rank, health, supported kinds, and canonical hostname pattern. This
- * is an admin view — Targets are created through the manifest (§7) and
- * connected through `connectTarget` (§14), not through this UI.
+ * is an admin view — Target identities and rank come from the manifest (§7),
+ * while connection facts come from `connectTarget` (§14), not from this UI.
  *
  * The view exists because §18 names **Apps / Datastores / Targets** as the
  * global navigation, and a Target's health, rank, and canonical pattern are
@@ -41,9 +41,9 @@ export function TargetList({
           Deployment targets
         </h1>
         <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-          Where Spindrift can deploy apps. Targets are created through the
-          manifest and connected by the reconciler — this surface shows their
-          current health and capabilities.
+          Where Spindrift can deploy apps. Targets are declared in the manifest
+          and connected by an operator — this surface shows their current health
+          and capabilities.
         </p>
       </header>
 
@@ -51,8 +51,7 @@ export function TargetList({
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-sm text-muted-foreground">
-              No targets connected. The reconciler will connect Targets from the
-              manifest when it starts.
+              No Targets are configured for this installation.
             </p>
           </CardContent>
         </Card>
