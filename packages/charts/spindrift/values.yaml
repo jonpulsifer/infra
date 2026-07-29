@@ -6,10 +6,10 @@
 # release supplies the manifest document plus `hostname`, which is where this
 # control plane is served; both are empty here.
 #
-# The installation manifest is ordinary configuration. On the first boot it is
-# mounted from a ConfigMap and atomically seeds Spindrift's database; the stored
-# row is authoritative afterward. Public identifiers such as a GitHub App id do
-# not make the document a credential.
+# The installation manifest is ordinary configuration. It is mounted from a
+# ConfigMap and reconciled into Spindrift's durable database when each process
+# starts. Public identifiers such as a GitHub App id do not make the document a
+# credential.
 
 image: ""
 
@@ -65,8 +65,8 @@ command: "bun run src/web/server.ts"
 # so rather than the chart assuming a runtime class exists.
 sandbox: false
 
-# First-boot configuration only. Once the database has an installation row,
-# changing this value does not overwrite it.
+# Declared installation configuration. The chart hashes it into both pod
+# templates so a change rolls the processes that reconcile it into Postgres.
 installationManifest: {}
 
 # The Secret carrying `SPINDRIFT_ENROLMENT_TOKEN` and repository credentials

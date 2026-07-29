@@ -1,10 +1,10 @@
 /**
  * The `reconciler` process (§19) — production entrypoint.
  *
- * Postgres owns the installation manifest after bootstrap. The process reads
- * that stored document, constructs exactly that installation's adapters, and
- * gives all four polling loops one lifecycle without giving any loop the power
- * to stop its siblings.
+ * The deployment declaration reconciles into Postgres before this process
+ * constructs exactly that installation's adapters. It then gives all four
+ * polling loops one lifecycle without giving any loop the power to stop its
+ * siblings.
  */
 import type { ReconcilerProcessEvent } from './process.ts';
 import { startReconciler } from './start.ts';

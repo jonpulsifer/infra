@@ -29,7 +29,12 @@ import type {
   Clock,
   CommandContext,
 } from '../../src/commands/types.ts';
-import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
+import type {
+  InstallationManifest,
+  TargetAdapter,
+} from '../../src/config/manifest.schema.ts';
+import { MANIFEST_INLINE_VAR } from '../../src/config/manifest.ts';
+import { loadStoredManifest } from '../../src/config/manifest-store.ts';
 import {
   apps,
   builds,
@@ -38,6 +43,7 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { deployState } from '../../src/domain/target.ts';
+import { restoreDeclaredTargetConnections } from '../../src/reconciler/target-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
   FakeDeployAdapter,
@@ -430,6 +436,52 @@ describe('reconnect re-adopts via observe', () => {
       .from(deploys)
       .where(eq(deploys.targetId, target.id));
     expect(row?.orphanedAt).toEqual(FROZEN);
+  });
+
+  test('a declarative reconnect waits for adapters, then re-adopts', async () => {
+    const { registry, of } = fakes();
+    const input = clusterInput({ name: 'cluster' });
+    await connectTarget(input, context(registry));
+    const target = (await targetRow('cluster'))!;
+    await seedLiveDeploy(target.id, 'ref-1');
+    await disconnectTarget({ name: 'cluster' }, context(registry));
+    of('kubernetes').place('ref-1', {
+      ref: 'ref-1',
+      phase: 'LIVE',
+      artifactDigest: 'sha256:beef',
+    });
+    const declared = {
+      ...manifest,
+      targets: [
+        {
+          name: input.name,
+          adapter: 'kubernetes',
+          connection: {
+            apiServer: input.apiServer,
+            namespace: input.namespace,
+            delivery: input.delivery,
+            chartContract: input.chartContract,
+          },
+        },
+      ],
+    } satisfies InstallationManifest;
+
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
+    });
+    expect((await targetRow('cluster'))?.status).toBe('disconnected');
+
+    const readopted = await restoreDeclaredTargetConnections(
+      context(registry),
+      declared,
+    );
+    expect(readopted).toHaveLength(1);
+    expect((await targetRow('cluster'))?.status).toBe('connected');
+    const [row] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.targetId, target.id));
+    expect(row?.orphanedAt).toBeNull();
   });
 });
 

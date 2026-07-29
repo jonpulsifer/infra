@@ -24,26 +24,28 @@
  * stranded, by asking the adapter to `observe` each orphaned Deploy (§13:
  * "reconnect re-adopts via `observe`").
  */
-import { and, eq, isNotNull, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { operatorValuesIssues } from '../../adapters/deploy/kubernetes/values.ts';
 import {
   type TargetAdapter,
   targetNameSchema,
 } from '../../config/manifest.schema.ts';
-import { deploys, targets } from '../../db/schema.ts';
+import { targets } from '../../db/schema.ts';
 import {
   deriveHealth,
   type PrerequisiteResult,
 } from '../../domain/capabilities.ts';
 import {
-  type DeployTargetRef,
   type TargetConnection,
   type TargetHealth,
   targetNames,
 } from '../../domain/target.ts';
-import { inspectTarget } from '../../reconciler/target-loop.ts';
-import { type Command, type CommandContext, failed, ok } from '../types.ts';
+import {
+  inspectTarget,
+  readoptTargetDeploys,
+} from '../../reconciler/target-loop.ts';
+import { type Command, failed, ok } from '../types.ts';
 
 /**
  * The delivery flavour a Kubernetes Target declares (§6).
@@ -300,7 +302,7 @@ export const connectTarget: Command<
 
     if (existing.status === 'disconnected') {
       readopted.push(
-        ...(await readopt(
+        ...(await readoptTargetDeploys(
           context,
           existing.id,
           { name, adapter, connection },
@@ -321,52 +323,3 @@ export const connectTarget: Command<
 
   return ok({ targets: registered, readopted });
 };
-
-/**
- * Re-adopt what a disconnect stranded (§13).
- *
- * The adapter's `observe` is the authority, not core's memory: a workload that
- * kept running while the Target was disconnected is adopted back, and one that
- * is gone stays orphaned rather than being resurrected as live. A Deploy with no
- * `ref` was never placed, so there is nothing to ask about.
- */
-async function readopt(
-  context: CommandContext,
-  targetId: string,
-  target: DeployTargetRef,
-  now: Date,
-): Promise<string[]> {
-  const deployAdapter = context.adapters.deploy(target.adapter);
-  if (deployAdapter === null) return [];
-
-  const stranded = await context.db
-    .select()
-    .from(deploys)
-    .where(
-      and(
-        eq(deploys.targetId, targetId),
-        isNotNull(deploys.orphanedAt),
-        isNotNull(deploys.ref),
-      ),
-    );
-
-  const adopted: string[] = [];
-  for (const deploy of stranded) {
-    let observed: Awaited<ReturnType<typeof deployAdapter.observe>>;
-    try {
-      observed = await deployAdapter.observe(target, deploy.ref!);
-    } catch {
-      // Connect still succeeds. An adapter that cannot answer leaves the
-      // Deploy stranded, which is the honest state — not an error to raise.
-      continue;
-    }
-    if (observed === null) continue;
-
-    await context.db
-      .update(deploys)
-      .set({ orphanedAt: null, phase: observed.phase, updatedAt: now })
-      .where(eq(deploys.id, deploy.id));
-    adopted.push(String(deploy.id));
-  }
-  return adopted;
-}
