@@ -40,8 +40,12 @@ spec:
         vanityZone: lolwtf.dev
       cloud:
         artifactsProject: trusted-builds
-        homeVesselProject: homelab-ng
-        federation: null
+        homeVesselProject: bluenose
+        federation:
+          audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+          tokenUrl: https://sts.googleapis.com/v1/token
+          tokenPath: /var/run/secrets/spindrift/gcp-token
+          impersonationUrl: null
       charts:
         app: packages/charts/spindrift-app
         installer: packages/charts/spindrift
@@ -52,9 +56,11 @@ spec:
       github:
         appId: "334190"
         apiBaseUrl: https://api.github.com
-        buildWorkflow: null
+        buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
       build:
-        routes: []
+        routes:
+          - name: hosted
+            adapter: github-actions
         zeroConfigFrontend: ghcr.io/railwayapp/railpack:railpack-frontend
       secretStore:
         adapter: onepassword
@@ -63,6 +69,10 @@ spec:
       targets:
         - name: offsite
           adapter: kubernetes
+        - name: bluenose-cloudrun
+          adapter: cloudrun
+        - name: bluenose-static
+          adapter: static
       controlPlane:
         hostname: spindrift.lolwtf.ca
       auth:
