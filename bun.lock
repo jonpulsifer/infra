@@ -133,6 +133,9 @@
         "typescript": "5.9.3",
       },
     },
+    "apps/spindrift-demo": {
+      "name": "spindrift-demo",
+    },
     "apps/wiki": {
       "name": "wiki",
       "dependencies": {
@@ -1414,6 +1417,8 @@
     "space-separated-tokens": ["space-separated-tokens@2.0.2", "", {}, "sha512-PEGlAwrG8yXGXRjW32fGbg66JAlOAwbObuqVoJpv/mRgoWDQfgH1wDPvtzWyUSNAXBGSk8h755YDbbcEy3SH2Q=="],
 
     "spindrift": ["spindrift@workspace:apps/spindrift"],
+
+    "spindrift-demo": ["spindrift-demo@workspace:apps/spindrift-demo"],
 
     "statuses": ["statuses@2.0.2", "", {}, "sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw=="],
 

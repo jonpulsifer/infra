@@ -99,11 +99,11 @@ describe('each command answers on its own route', () => {
   for (const name of commandNames) {
     test(`${name} reaches the command layer`, async () => {
       const handler = routes[pathFor(name)]!;
-      const response = await handler(post(pathFor(name)));
-
-      // An empty object satisfies no command's schema, so the refusal proves
+      // An array satisfies no command's schema (all expect objects), so the refusal proves
       // the route found *this* command and handed it to `dispatch`: a route
       // wired to a name the registry lacks would answer UNKNOWN_COMMAND.
+      const response = await handler(post(pathFor(name), []));
+
       expect(response.status).toBe(422);
       const body = (await response.json()) as {
         ok: boolean;

@@ -11,8 +11,8 @@ import { LogOut, Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
+import { command } from './client.ts';
 import {
-  APP_LIST,
   DEPLOY_SCENARIO_NAMES,
   DEPLOY_SCENARIOS,
   type DeployScenarioName,
@@ -25,6 +25,7 @@ import {
   WORKSPACE_SCENARIOS,
   type WorkspaceScenarioName,
 } from './demo/scenarios.ts';
+import type { AppListItem } from './model.ts';
 import { useRoute } from './router.ts';
 import { type Theme, useTheme } from './theme.ts';
 import { Button } from './ui/button.tsx';
@@ -147,8 +148,62 @@ function Screen({
   if (path.startsWith('/repos')) return <RepositoryList repos={LINKED_REPOS} />;
   if (path.startsWith('/deploys')) return <DeployScreen />;
   if (path === '/apps' || path === '')
-    return <AppList apps={APP_LIST} onNavigate={onNavigate} />;
+    return <AppsScreen onNavigate={onNavigate} />;
   return <WorkspaceScreen />;
+}
+
+function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | { type: 'success'; apps: readonly AppListItem[] }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    command('listApps', {})
+      .then((result) => {
+        if (!live) return;
+        if (result.ok) {
+          setState({ type: 'success', apps: result.value.apps });
+        } else {
+          setState({ type: 'error', message: result.failure.message });
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading apps...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load apps</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <AppList apps={state.apps} onNavigate={onNavigate} />;
 }
 
 function TopBar({

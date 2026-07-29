@@ -29,6 +29,7 @@
  * nothing left for a route to decide.
  */
 import type { z } from 'zod';
+import { listApps, listAppsInput } from './apps/list.ts';
 import {
   resolveComponentPlacement,
   resolveComponentPlacementInput,
@@ -72,6 +73,7 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 
 /** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
+  listApps: { input: listAppsInput, handler: listApps },
   createApp: { input: createAppInput, handler: createApp },
   createComponent: { input: createComponentInput, handler: createComponent },
   placeComponent: { input: placeComponentInput, handler: placeComponent },
