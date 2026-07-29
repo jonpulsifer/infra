@@ -371,6 +371,17 @@
       automerge: true,
     },
     {
+      // A first-party :latest digest can be built from main immediately before
+      // another merge. Automatic merging can then deploy that older revision
+      // after newer code lands. Keep these pins reviewed so the image revision
+      // can be checked against the desired rollout.
+      description: 'Require review for first-party moving-tag digest pins',
+      matchDatasources: ['docker'],
+      matchPackageNames: ['/^ghcr\\.io\\/jonpulsifer\\//'],
+      matchUpdateTypes: ['digest', 'pinDigest'],
+      automerge: false,
+    },
+    {
       // Digest lookups carry no release timestamp, so the global 3-day age
       // gate would hold them as pending forever (timestamp-required). Digests
       // track moving tags we already chose (first-party :latest pins), so no

@@ -95,15 +95,23 @@ jobs:
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
-          push: ${{ github.event_name != 'pull_request' }}
+          # PRs validate images but never publish them. Spell the publishing
+          # authority positively so adding another event cannot make it push.
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           build-args: ${{ matrix.build-args }}
           platforms: ${{ matrix.platforms }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Keep PR cache records away from main publishing builds and keep
+          # unrelated images out of each other's default `buildkit` scope.
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ github.event_name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ github.event_name }}
+          # The Spindrift runner is cheap and is the layer that packages its
+          # two entrypoints. Always rebuild it; dependency/build stages remain
+          # cached.
+          no-cache-filters: ${{ matrix.image == 'spindrift' && 'runner' || '' }}
           secret-files: ${{ matrix.image == 'slingshot' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
           sbom: true
           provenance: true

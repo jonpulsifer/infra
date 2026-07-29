@@ -58,6 +58,10 @@ COPY --from=builder --chmod=755 /app/apps/spindrift/src ./apps/spindrift/src
 COPY --from=builder --chmod=755 /app/apps/spindrift/dist ./apps/spindrift/dist
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=supply-chain-tools /spindrift-verifier /usr/local/bin/spindrift-verifier
+# Fail the image build at the packaging seam rather than shipping a chart
+# command whose module the runtime image does not contain.
+RUN test -f /app/apps/spindrift/src/web/server.ts \
+  && test -f /app/apps/spindrift/src/reconciler/main.ts
 WORKDIR /app/apps/spindrift
 USER 65532:65532
 EXPOSE 3000
