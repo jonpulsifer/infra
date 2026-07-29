@@ -172,7 +172,7 @@ describe('claiming (§6, SKIP LOCKED)', () => {
     expect(claimed?.id).not.toBe(later!.id);
   });
 
-  test('overlapping passes cannot claim two intents for one Component@Target', async () => {
+  test('a contended pair is skipped and its newer intent waits behind the claim', async () => {
     const first = await pendingDeploy();
     const [later] = await database()
       .db.insert(deploys)
@@ -190,13 +190,22 @@ describe('claiming (§6, SKIP LOCKED)', () => {
 
     const adapter = new FakeDeployAdapter();
     const otherDb = createDb(database().connect());
-    const claims = await Promise.all([
-      claimNextDeploy(context(adapter)),
-      claimNextDeploy(context(adapter, { db: otherDb })),
-    ]);
+    let contendedClaim: Awaited<ReturnType<typeof claimNextDeploy>> = null;
+    await database().db.transaction(async (tx) => {
+      // Hold the same durable pair row that a replica's claim transaction
+      // locks. The other replica must skip the pair, including its newer
+      // Deploy, rather than depending on scheduler timing to overlap.
+      await tx
+        .select({ componentId: componentTargetDesired.componentId })
+        .from(componentTargetDesired)
+        .where(eq(componentTargetDesired.componentId, first.component.id))
+        .for('update');
+      contendedClaim = await claimNextDeploy(context(adapter, { db: otherDb }));
+    });
 
-    expect(claims.filter((claim) => claim !== null)).toHaveLength(1);
-    expect(claims.find((claim) => claim !== null)?.id).toBe(first.deploy.id);
+    expect(contendedClaim).toBeNull();
+    expect((await claimNextDeploy(context(adapter)))?.id).toBe(first.deploy.id);
+    expect(await claimNextDeploy(context(adapter, { db: otherDb }))).toBeNull();
     expect(await deployRow(later!.id)).toMatchObject({ phase: 'PENDING' });
   });
 
