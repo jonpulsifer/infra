@@ -1,12 +1,10 @@
 {{/*
 Migrations as a Job, for an installation that wants them applied that way.
 
-**Nothing enables this today, and the default command is empty.**
-`src/db/migrate.ts` is a library with no main on purpose — "production never
-calls this at runtime... migrations are applied as an out-of-band operator
-act" — so a release that turns this on has to supply a command that exists.
-The template is kept rather than deleted because the shape is right; what is
-missing is a runner, not a reason.
+**The default is disabled and the command is empty.**
+`src/db/migrate.ts` is a library with no main on purpose — production applies
+migrations as an out-of-band operator act — so a release that turns this on has
+to supply a command that invokes the library.
 
 The Job's name carries the image digest, so a redeploy of the same image is the
 same Job (already complete, nothing rerun) and a new image is a new Job — rather
