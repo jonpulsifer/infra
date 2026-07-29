@@ -276,6 +276,42 @@ describe('the act is credential-shaped though the noun is flat', () => {
       connectionFor('kubernetes'),
     );
   });
+
+  test('one cloud connect fills its matched manifest-seeded pair', async () => {
+    const { registry } = fakes();
+    const seeds = await database()
+      .db.insert(targets)
+      .values([
+        {
+          name: 'vessel-cloudrun',
+          adapter: 'cloudrun',
+          rank: 2,
+          status: 'disconnected',
+          connection: null,
+          health: 'unhealthy',
+        },
+        {
+          name: 'vessel-static',
+          adapter: 'static',
+          rank: 3,
+          status: 'disconnected',
+          connection: null,
+          health: 'unhealthy',
+        },
+      ])
+      .returning();
+
+    const result = await connectTarget(
+      cloudInput({ name: 'vessel' }),
+      context(registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    expect(result.value.targets.map(({ id, rank }) => ({ id, rank }))).toEqual(
+      seeds.map(({ id, rank }) => ({ id, rank })),
+    );
+    expect(await database().db.select().from(targets)).toHaveLength(2);
+  });
 });
 
 describe('disconnect strands rather than stops', () => {

@@ -1,9 +1,9 @@
 /**
  * Postgres ownership of the installation manifest.
  *
- * Parsing and validation stay in `manifest.ts`; this module owns only the
- * singleton row and the one-time transition from bootstrap configuration to
- * durable state.
+ * Parsing and validation stay in `manifest.ts`; this module owns the singleton
+ * row and the one-time transition from its bootstrap configuration — including
+ * ordered Target identities — to durable state.
  */
 import type { Database } from '../db/client.ts';
 import { installation, targets } from '../db/schema.ts';
@@ -61,10 +61,19 @@ async function seedManifestTargets(
   db: Database,
   manifest: InstallationManifest,
 ): Promise<void> {
-  await db
-    .insert(targets)
-    .values(
-      manifest.targets.map((target, rank) => ({
+  for (const [rank, target] of manifest.targets.entries()) {
+    const existing = await db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, target.name),
+    });
+    if (existing !== undefined && existing.adapter !== target.adapter) {
+      throw new ManifestError(
+        `manifest Target ${target.name} uses ${target.adapter}, but the stored Target uses ${existing.adapter}`,
+      );
+    }
+
+    await db
+      .insert(targets)
+      .values({
         ...target,
         rank,
         status: 'disconnected' as const,
@@ -74,9 +83,12 @@ async function seedManifestTargets(
           'Target connection has not been configured',
           target.adapter,
         ),
-      })),
-    )
-    .onConflictDoNothing({ target: targets.name });
+      })
+      .onConflictDoUpdate({
+        target: targets.name,
+        set: { rank },
+      });
+  }
 }
 
 async function readStoredManifest(

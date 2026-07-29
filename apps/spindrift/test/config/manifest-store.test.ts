@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
 import {
   MANIFEST_INLINE_VAR,
@@ -55,7 +56,7 @@ describe('the stored installation manifest', () => {
         connection: null,
       },
       {
-        name: 'cloud',
+        name: 'cloud-cloudrun',
         adapter: 'cloudrun',
         rank: 1,
         status: 'disconnected',
@@ -63,7 +64,7 @@ describe('the stored installation manifest', () => {
         connection: null,
       },
       {
-        name: 'hosting',
+        name: 'cloud-static',
         adapter: 'static',
         rank: 2,
         status: 'disconnected',
@@ -87,6 +88,23 @@ describe('the stored installation manifest', () => {
     });
     expect(later).toEqual(first);
     expect(later.installation).toBe('example');
+  });
+
+  test('repairs a stored Target rank from manifest order', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    await database()
+      .db.update(targets)
+      .set({ rank: 99 })
+      .where(eq(targets.name, 'cluster'));
+
+    await loadStoredManifest(database().db, {});
+
+    const cluster = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(cluster?.rank).toBe(0);
   });
 
   test('simultaneous processes converge on the one winning bootstrap', async () => {

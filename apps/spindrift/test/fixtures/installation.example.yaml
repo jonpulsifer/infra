@@ -79,7 +79,7 @@ secretStore:
 targets:
   - name: cluster
     adapter: kubernetes
-  - name: cloud
+  - name: cloud-cloudrun
     adapter: cloudrun
-  - name: hosting
+  - name: cloud-static
     adapter: static

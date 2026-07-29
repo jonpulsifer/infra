@@ -63,7 +63,11 @@ import {
 } from '../domain/diagnosis.ts';
 import { displayUrl, hostnameFor } from '../domain/naming.ts';
 import { DEFAULT_PLATFORM } from '../domain/placement.ts';
-import { deployTargetOf, type TargetConnection } from '../domain/target.ts';
+import {
+  deployTargetOf,
+  hasTargetConnection,
+  type TargetWithConnection,
+} from '../domain/target.ts';
 
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface DeployLoopContext {
@@ -219,9 +223,7 @@ interface AttemptSubject {
   readonly app: typeof apps.$inferSelect;
   readonly component: typeof components.$inferSelect;
   readonly build: typeof builds.$inferSelect;
-  readonly target: typeof targets.$inferSelect & {
-    readonly connection: TargetConnection;
-  };
+  readonly target: TargetWithConnection<typeof targets.$inferSelect>;
   readonly adapter: DeployAdapter;
 }
 
@@ -569,16 +571,17 @@ async function subjectOf(
     .innerJoin(targets, eq(deploys.targetId, targets.id))
     .where(eq(deploys.id, deploy.id));
 
-  if (row === undefined || row.target.connection === null) {
-    return null;
-  }
-  const adapter = context.adapters.deploy(row.target.adapter);
+  if (row === undefined) return null;
+  const target = row.target;
+  if (!hasTargetConnection(target)) return null;
+
+  const adapter = context.adapters.deploy(target.adapter);
   if (adapter === null) return null;
 
   return {
     deploy,
     ...row,
-    target: { ...row.target, connection: row.target.connection },
+    target,
     adapter,
   };
 }

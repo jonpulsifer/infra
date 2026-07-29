@@ -126,8 +126,16 @@ describe('boot fails loudly', () => {
   });
 
   test('on duplicate target names', () => {
-    const document = fixtureText.replace('name: cloud\n', 'name: cluster\n');
+    const document = fixtureText.replace(
+      'name: cloud-cloudrun\n',
+      'name: cluster\n',
+    );
     expect(() => parseManifest(document, 'test')).toThrow(/unique/);
+  });
+
+  test('when cloud Targets are not a connectable pair', () => {
+    const document = fixtureText.replace('name: cloud-static', 'name: hosting');
+    expect(() => parseManifest(document, 'test')).toThrow(/matched/);
   });
 
   test('with no targets at all', () => {
