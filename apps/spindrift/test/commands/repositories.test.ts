@@ -12,6 +12,7 @@ import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { dispatch } from '../../src/commands/registry.ts';
 import { connectRepository } from '../../src/commands/repositories/connect.ts';
+import { listRepositories } from '../../src/commands/repositories/list.ts';
 import type {
   AdapterRegistry,
   CommandContext,
@@ -211,5 +212,34 @@ describe('connecting a repository', () => {
 
     const accepted = await dispatch('connectRepository', input(fake), loop);
     expect(accepted.ok).toBe(true);
+  });
+});
+
+describe('listRepositories', () => {
+  test('returns empty lists when no repositories are connected', async () => {
+    const fake = new FakeGitHub();
+    const result = await listRepositories({}, await context(fake));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.repos).toEqual([]);
+      expect(result.value.options).toEqual([]);
+    }
+  });
+
+  test('lists connected repositories with health, authoritative commit, and options', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'unconnected' });
+
+    await connectRepository(input(fake), await context(fake));
+
+    const result = await listRepositories({}, await context(fake));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.repos).toHaveLength(1);
+      expect(result.value.repos[0]?.fullName).toBe(fake.fullName);
+      expect(result.value.repos[0]?.health).toBe('connected');
+      expect(result.value.options).toHaveLength(1);
+      expect(result.value.options[0]?.fullName).toBe(fake.fullName);
+    }
   });
 });

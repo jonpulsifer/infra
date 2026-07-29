@@ -50,11 +50,16 @@ import {
   connectRepository,
   connectRepositoryInput,
 } from './repositories/connect.ts';
+import {
+  listRepositories,
+  listRepositoriesInput,
+} from './repositories/list.ts';
 import { connectTarget, connectTargetInput } from './targets/connect.ts';
 import {
   disconnectTarget,
   disconnectTargetInput,
 } from './targets/disconnect.ts';
+import { listTargets, listTargetsInput } from './targets/list.ts';
 import {
   type Command,
   type CommandContext,
@@ -78,6 +83,11 @@ export const commandRegistry = {
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
   listApps: { input: listAppsInput, handler: listApps },
+  listTargets: { input: listTargetsInput, handler: listTargets },
+  listRepositories: {
+    input: listRepositoriesInput,
+    handler: listRepositories,
+  },
   createApp: { input: createAppInput, handler: createApp },
   createComponent: { input: createComponentInput, handler: createComponent },
   placeComponent: { input: placeComponentInput, handler: placeComponent },

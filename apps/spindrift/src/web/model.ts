@@ -265,8 +265,8 @@ export interface TargetOptionView {
  * (fullName, defaultBranch) are refreshable.
  */
 export interface RepositoryOptionView {
-  /** GitHub's stable numeric repository ID, used as the selection key. */
-  readonly repositoryId: number;
+  /** GitHub's stable numeric or UUID repository ID, used as the selection key. */
+  readonly repositoryId: string | number;
   /** The owner/name a human reads — e.g. `example-org/hub`. */
   readonly fullName: string;
   /** The branch Spindrift watches. */
@@ -285,7 +285,7 @@ export type RepoConnectionHealth = 'connected' | 'connection_lost';
  * data, App subpaths, last-reconciled SHA, connection health, and error.
  */
 export interface LinkedRepoView {
-  readonly repositoryId: number;
+  readonly repositoryId: string | number;
   readonly fullName: string;
   readonly defaultBranch: string;
   readonly health: RepoConnectionHealth;
