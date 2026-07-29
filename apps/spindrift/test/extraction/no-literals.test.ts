@@ -95,6 +95,7 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'sign-blob',
   'slsa-verifier',
   'verify-image',
+  'verify-signature',
   // HTTP header names. `src/web/` is scoped out of this scanner for exactly
   // this reason (see BROWSER_SOURCE), but the auth surface writes headers from
   // outside that directory and must not be scoped out wholesale — it is one of

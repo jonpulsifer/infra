@@ -335,6 +335,22 @@ export async function checkDeployable(
         `Build ${build.id} achieved verified Build Level ${build.verifiedBuildLevel}, and ${target.name} currently requires L${requiredLevel}`,
       );
     }
+    // Cryptographically real admission: the recorded signature is re-verified
+    // against the recorded artifact digest before any intent row is written.
+    // This is the gate both image adapters — Kubernetes and Cloud Run — share,
+    // so the real signature format is consumed on both admission paths. A
+    // signature that does not verify fails closed; nothing is deployed.
+    const admitted = await context.adapters.supplyChain().verifySignature({
+      artifactDigest: build.artifactDigest,
+      signature: build.signature,
+    });
+    if (!admitted.ok) {
+      return refuse(
+        'NOT_DEPLOYABLE',
+        `Build ${build.id} signature did not verify` +
+          (admitted.reason === null ? '' : `: ${admitted.reason}`),
+      );
+    }
   }
 
   // §3: "changing placement across shapes forces a rebuild." The Build's key

@@ -33,6 +33,7 @@ import type { RepositoryHost } from '../domain/repository.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
+import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
 import { CloudBuildRoute } from './build/cloud-build.ts';
 import type { BuildAdapter } from './build/contract.ts';
@@ -148,6 +149,13 @@ export function createAdapterRegistry(
   const supplyChain = new CoreSupplyChain(
     new SlsaVerifier(),
     new CosignSigner({ key: options.manifest.supplyChain.signer }),
+    // §16: admission re-verifies the recorded signature against the recorded
+    // digest, pinned to Spindrift's own signer. The signer and verifier are
+    // the same pinned binary, so this is the process boundary around the
+    // verify half, not a second trust root.
+    new SpindriftSignatureVerifier({
+      signerKey: options.manifest.supplyChain.signer,
+    }),
   );
 
   // §16's ordered list: the manifest's order *is* the admin rank, so the map is

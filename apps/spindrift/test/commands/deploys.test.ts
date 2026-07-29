@@ -70,7 +70,9 @@ function digest(seed: number): string {
 function registryOf(
   deployAdapter: DeployAdapter,
   buildAdapter?: FakeBuildAdapter,
+  supplyChain?: SupplyChainHarness,
 ): AdapterRegistry {
+  const chain = supplyChain ?? new SupplyChainHarness();
   return {
     deploy: (adapter) =>
       adapter === deployAdapter.adapter ? deployAdapter : null,
@@ -86,7 +88,7 @@ function registryOf(
       throw new Error('a deploy command reached the secret store');
     },
     repository: () => null,
-    supplyChain: () => new SupplyChainHarness(),
+    supplyChain: () => chain,
   };
 }
 
@@ -356,6 +358,136 @@ describe('createDeploy writes an intent, and only an intent', () => {
         message: `Build ${build.id} achieved verified Build Level 2, and ${target.name} currently requires L3`,
       },
     });
+  });
+
+  test('a signature that will not verify fails closed before any intent row is written', async () => {
+    const { component, target } = await fixture();
+    const build = await succeededBuild(component.id, 9);
+
+    const supplyChain = new SupplyChainHarness(undefined, async () => ({
+      ok: false,
+      reason: 'tampered bundle',
+    }));
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter(), undefined, supplyChain)),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      failure: {
+        code: 'NOT_DEPLOYABLE',
+        message: `Build ${build.id} signature did not verify: tampered bundle`,
+      },
+    });
+    expect(supplyChain.signatureChecks.admissions).toHaveLength(1);
+    expect(supplyChain.signatureChecks.admissions[0]?.artifactDigest).toBe(
+      build.artifactDigest!,
+    );
+
+    // Fail-closed: no desired row was created and no Deploy row was written.
+    expect(await desiredRow(component.id, target.id)).toBeUndefined();
+    expect(
+      await database()
+        .db.select()
+        .from(deploys)
+        .where(eq(deploys.buildId, build.id)),
+    ).toEqual([]);
+  });
+
+  test('admission re-verifies the recorded signature on every image deploy', async () => {
+    const { component, target } = await fixture();
+    const build = await succeededBuild(component.id, 10);
+
+    const supplyChain = new SupplyChainHarness();
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter(), undefined, supplyChain)),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(supplyChain.signatureChecks.admissions).toHaveLength(1);
+    expect(supplyChain.signatureChecks.admissions[0]?.signature).toEqual(
+      build.signature!,
+    );
+  });
+
+  test('a files artifact skips signature admission', async () => {
+    const { component, target } = await fixture({
+      kind: 'website',
+      adapter: 'static',
+    });
+    const deployAdapter = new FakeDeployAdapter({
+      adapter: 'static',
+      artifactTypes: ['files'],
+    });
+    const supplyChain = new SupplyChainHarness();
+    const ctx = context(registryOf(deployAdapter, undefined, supplyChain));
+    const uploaded = await uploadArchive(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        bundleDigest: digest(11),
+        location: 'bundles/shop/site.zip',
+        contents: 'artifact',
+        subpath: '.',
+      },
+      ctx,
+    );
+    expect(uploaded.ok).toBe(true);
+    if (!uploaded.ok) return;
+
+    const placed = await createDeploy(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        buildId: uploaded.value.buildId,
+      },
+      ctx,
+    );
+    expect(placed.ok).toBe(true);
+    // A files artifact has no image signature, so admission never consulted the
+    // signature verifier.
+    expect(supplyChain.signatureChecks.admissions).toHaveLength(0);
+  });
+
+  test('Cloud Run image deploys share the same admission gate (§16)', async () => {
+    const { component } = await fixture({ adapter: 'cloudrun' });
+    const [cloudTarget] = await database()
+      .db.insert(targets)
+      .values(
+        targetValues({
+          name: `cloud-${crypto.randomUUID()}`,
+          adapter: 'cloudrun',
+          discovery: null,
+        }),
+      )
+      .returning();
+    const build = await succeededBuild(component.id, 12);
+
+    const refusing = new SupplyChainHarness(undefined, async () => ({
+      ok: false,
+      reason: 'cloud admission rejects',
+    }));
+    const deployAdapter = new FakeDeployAdapter({ adapter: 'cloudrun' });
+
+    const refused = await createDeploy(
+      {
+        componentId: component.id,
+        targetId: cloudTarget!.id,
+        buildId: build.id,
+      },
+      context(registryOf(deployAdapter, undefined, refusing)),
+    );
+
+    expect(refused).toEqual({
+      ok: false,
+      failure: {
+        code: 'NOT_DEPLOYABLE',
+        message: `Build ${build.id} signature did not verify: cloud admission rejects`,
+      },
+    });
+    expect(refusing.signatureChecks.admissions).toHaveLength(1);
   });
 });
 
@@ -924,5 +1056,94 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
     expect(row?.status).toBe('SUCCEEDED');
     expect(row?.artifactDigest).toBe(digest(65));
     expect(row?.artifactRefs).toEqual(['bundles/shop-web/65.zip']);
+  });
+});
+
+describe('§16: verify → sign → record is fail-closed', () => {
+  test('a provenance refusal stores no artifact, signature, or success', async () => {
+    const { component } = await fixture();
+    const builder = new FakeBuildAdapter({
+      script: [{ result: { status: 'SUCCEEDED', digest: digest(70) } }],
+    });
+    // Provenance verification refuses — no signature is ever produced.
+    const supplyChain = new SupplyChainHarness(async () => ({
+      ok: false,
+      code: 'PROVENANCE_INVALID' as const,
+      message: 'tampered provenance',
+    }));
+    const registry = registryOf(capableAdapter(), builder, supplyChain);
+
+    const [build] = await database()
+      .db.insert(builds)
+      .values({
+        componentId: component.id,
+        commit: digest(70),
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest: digest(70),
+        bundleLocation: 'bundles/70.zip',
+        status: 'PENDING',
+      })
+      .returning();
+
+    const result = await dispatchBuild(
+      { buildId: build!.id, route: builder.name },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.status).toBe('FAILED');
+
+    const [row] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, build!.id));
+    expect(row?.status).toBe('FAILED');
+    expect(row?.artifactDigest).toBeNull();
+    expect(row?.signature).toBeNull();
+    expect(row?.verifiedBuildLevel).toBeNull();
+    expect(supplyChain.signed).toHaveLength(0);
+  });
+
+  test('a signing failure stores no signature and no success', async () => {
+    const { component } = await fixture();
+    const builder = new FakeBuildAdapter({
+      script: [{ result: { status: 'SUCCEEDED', digest: digest(71) } }],
+    });
+    // Provenance verifies, but the signer throws. Core must not record a
+    // successful posture or a signature it never produced.
+    const supplyChain = new SupplyChainHarness();
+    supplyChain.signing.failure = new Error('KMS denied the signature');
+    const registry = registryOf(capableAdapter(), builder, supplyChain);
+
+    const [build] = await database()
+      .db.insert(builds)
+      .values({
+        componentId: component.id,
+        commit: digest(71),
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest: digest(71),
+        bundleLocation: 'bundles/71.zip',
+        status: 'PENDING',
+      })
+      .returning();
+
+    const result = await dispatchBuild(
+      { buildId: build!.id, route: builder.name },
+      context(registry),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.status).toBe('FAILED');
+
+    const [row] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, build!.id));
+    expect(row?.status).toBe('FAILED');
+    expect(row?.signature).toBeNull();
+    expect(row?.artifactDigest).toBeNull();
   });
 });

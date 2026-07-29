@@ -6,7 +6,9 @@ import {
   type CoreSignature,
   CoreSupplyChain,
   CosignSigner,
+  type SignatureVerifier,
 } from '../../src/supply-chain/sign.ts';
+import { SpindriftSignatureVerifier } from '../../src/supply-chain/signature.ts';
 import type {
   BackendProvenanceAssessment,
   ProcessExecutor,
@@ -75,6 +77,13 @@ function input(minimumLevel: 1 | 2 | 3 = 2) {
   };
 }
 
+/** A signature verifier that accepts every recorded signature. */
+const acceptingVerifier: SignatureVerifier = {
+  async verify() {
+    return { ok: true, reason: null };
+  },
+};
+
 describe('core admission is verify → sign', () => {
   test('signs only after provenance verifies at the required level', async () => {
     const order: string[] = [];
@@ -91,9 +100,11 @@ describe('core admission is verify → sign', () => {
       },
     };
 
-    const result = await new CoreSupplyChain(verifier, signer).finalize(
-      input(),
-    );
+    const result = await new CoreSupplyChain(
+      verifier,
+      signer,
+      acceptingVerifier,
+    ).finalize(input());
 
     expect(result).toEqual({
       ok: true,
@@ -121,9 +132,11 @@ describe('core admission is verify → sign', () => {
       },
     };
 
-    const result = await new CoreSupplyChain(verifier, signer).finalize(
-      input(),
-    );
+    const result = await new CoreSupplyChain(
+      verifier,
+      signer,
+      acceptingVerifier,
+    ).finalize(input());
 
     expect(result).toEqual({
       ok: false,
@@ -147,9 +160,11 @@ describe('core admission is verify → sign', () => {
       },
     };
 
-    const result = await new CoreSupplyChain(verifier, signer).finalize(
-      input(3),
-    );
+    const result = await new CoreSupplyChain(
+      verifier,
+      signer,
+      acceptingVerifier,
+    ).finalize(input(3));
 
     expect(result).toEqual({
       ok: false,
@@ -172,9 +187,11 @@ describe('core admission is verify → sign', () => {
       },
     };
 
-    const result = await new CoreSupplyChain(verifier, signer).finalize(
-      input(),
-    );
+    const result = await new CoreSupplyChain(
+      verifier,
+      signer,
+      acceptingVerifier,
+    ).finalize(input());
 
     expect(result).toEqual({
       ok: false,
@@ -250,5 +267,144 @@ describe('the pinned process boundaries', () => {
     expect(commands[0]).toContain('--tlog-upload=false');
     expect(commands[0]?.at(-1)).toBe(ARTIFACT.refs[0]);
     expect(result).toEqual(SIGNATURE);
+  });
+});
+
+describe('admission re-verifies the recorded signature', () => {
+  const okVerifier: ProvenanceVerifier = {
+    async verify() {
+      return { ok: true, assessment: VERIFIED };
+    },
+  };
+  const okSigner: ArtifactSigner = {
+    async sign() {
+      return SIGNATURE;
+    },
+  };
+
+  test('an admitting verifier proceeds', async () => {
+    const checked = await new CoreSupplyChain(
+      okVerifier,
+      okSigner,
+      acceptingVerifier,
+    ).verifySignature({ artifactDigest: DIGEST, signature: SIGNATURE });
+
+    expect(checked).toEqual({ ok: true, reason: null });
+  });
+
+  test('a recorded signature covering a different digest refuses', async () => {
+    const checked = await new CoreSupplyChain(
+      okVerifier,
+      okSigner,
+      acceptingVerifier,
+    ).verifySignature({
+      artifactDigest: `sha256:${'c'.repeat(64)}`,
+      signature: SIGNATURE,
+    });
+
+    expect(checked.ok).toBe(false);
+    if (checked.ok) return;
+    expect(checked.reason).toContain('not the admitted artifact');
+  });
+
+  test('a verifier that refuses blocks admission fail-closed', async () => {
+    const refusing: SignatureVerifier = {
+      async verify() {
+        return {
+          ok: false,
+          reason: 'signature does not verify against the recorded digest',
+        };
+      },
+    };
+    const checked = await new CoreSupplyChain(
+      okVerifier,
+      okSigner,
+      refusing,
+    ).verifySignature({ artifactDigest: DIGEST, signature: SIGNATURE });
+
+    expect(checked).toEqual({
+      ok: false,
+      reason: 'signature does not verify against the recorded digest',
+    });
+  });
+});
+
+describe('the pinned verify-signature process boundary', () => {
+  const SIGNED_BUNDLE = {
+    mediaType: 'application/vnd.spindrift.signature.v1+json',
+    algorithm: 'ed25519',
+    publicKey: 'MCowBQYDK2VwAyEAfIbVW0Es9rCDaS7ZNZnYDvwEkxknflmNjZ2kfYdBhx8=',
+    artifactDigest: DIGEST,
+    signature:
+      'X0brov0uDq2EXscKpR12YKVVNPmuwEindNqE0blDITLQbGgcQbkBrEOR45qbTK4lZqdS1iZqfMZtZ8/zyKE8DA==',
+  };
+  const signed: CoreSignature = {
+    artifactDigest: DIGEST,
+    signer: 'fake://core',
+    format: 'cosign',
+    bundle: SIGNED_BUNDLE,
+    signedAt: '2024-06-01T00:00:01.000Z',
+  };
+
+  test('exit 0 admits; the binary is invoked with verify-signature', async () => {
+    const recorded: string[][] = [];
+    const processes: ProcessExecutor = {
+      async run(command) {
+        recorded.push([...command]);
+        return { exitCode: 0, stdout: '', stderr: '' };
+      },
+    };
+
+    const checked = await new SpindriftSignatureVerifier({
+      executable: '/usr/local/bin/spindrift-verifier',
+      processes,
+      signerKey: '/etc/spindrift/signer.pem',
+    }).verify({
+      artifactDigest: DIGEST,
+      signature: signed,
+    });
+
+    expect(checked).toEqual({ ok: true, reason: null });
+    expect(recorded[0]?.slice(0, 2)).toEqual([
+      '/usr/local/bin/spindrift-verifier',
+      'verify-signature',
+    ]);
+    expect(recorded[0]).toContain('--artifact-digest');
+    expect(recorded[0]?.at(recorded[0].indexOf('--artifact-digest') + 1)).toBe(
+      DIGEST,
+    );
+    expect(recorded[0]).toContain('--bundle-path');
+    // The signer key pins admission — verify-signature refuses any bundle
+    // whose embedded public key does not match the one derived from this.
+    expect(recorded[0]).toContain('--signer-key');
+    expect(recorded[0]?.at(recorded[0].indexOf('--signer-key') + 1)).toBe(
+      '/etc/spindrift/signer.pem',
+    );
+  });
+
+  test('non-zero exit refuses with stderr, never a silent admit', async () => {
+    const processes: ProcessExecutor = {
+      async run() {
+        return {
+          exitCode: 1,
+          stdout: '',
+          stderr: 'signature does not verify against the artifact digest',
+        };
+      },
+    };
+
+    const checked = await new SpindriftSignatureVerifier({
+      processes,
+      signerKey: '/etc/spindrift/signer.pem',
+    }).verify({
+      artifactDigest: DIGEST,
+      signature: signed,
+    });
+
+    expect(checked.ok).toBe(false);
+    if (checked.ok) return;
+    expect(checked.reason).toBe(
+      'signature does not verify against the artifact digest',
+    );
   });
 });

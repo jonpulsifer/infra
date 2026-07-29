@@ -61,14 +61,51 @@ export type ArtifactFinalization =
       readonly message: string;
     };
 
+/**
+ * The outcome of re-checking a recorded {@link CoreSignature} at admission.
+ *
+ * "Cryptographically real" means the signature core recorded is verified again
+ * before a Deploy is written — fail-closed, on both the Kubernetes and Cloud
+ * Run image paths, which share this one admission gate. A `false` here refuses
+ * the deploy with the sentence the operator reads.
+ */
+export interface SignatureVerification {
+  readonly ok: boolean;
+  readonly reason: string | null;
+}
+
+export interface VerifySignatureInput {
+  readonly artifactDigest: string;
+  readonly signature: CoreSignature;
+}
+
+/**
+ * The far side behind signature re-verification: the pinned
+ * `spindrift-verifier` binary's `verify-signature` subcommand. Faked at this
+ * seam in tests; never mocked inside core.
+ */
+export interface SignatureVerifier {
+  verify(input: VerifySignatureInput): Promise<SignatureVerification>;
+}
+
 export interface SupplyChain {
   finalize(input: FinalizeArtifactInput): Promise<ArtifactFinalization>;
+  /**
+   * Re-verify a recorded artifact signature at admission (§16).
+   *
+   * Consumed by the deploy intent path before any row is written: a Build that
+   * passed finalization can still be refused here if its stored signature does
+   * not verify against its stored digest, which is what "deployment policy
+   * consumes the real signature format" means at core's admission gate.
+   */
+  verifySignature(input: VerifySignatureInput): Promise<SignatureVerification>;
 }
 
 export class CoreSupplyChain implements SupplyChain {
   constructor(
     private readonly verifier: ProvenanceVerifier,
     private readonly signer: ArtifactSigner,
+    private readonly signatureVerifier: SignatureVerifier,
   ) {}
 
   async finalize(input: FinalizeArtifactInput): Promise<ArtifactFinalization> {
@@ -97,6 +134,18 @@ export class CoreSupplyChain implements SupplyChain {
         message: `core could not sign the admitted artifact: ${detail}`,
       };
     }
+  }
+
+  async verifySignature(
+    input: VerifySignatureInput,
+  ): Promise<SignatureVerification> {
+    if (input.signature.artifactDigest !== input.artifactDigest) {
+      return {
+        ok: false,
+        reason: `recorded signature covers ${input.signature.artifactDigest}, not the admitted artifact ${input.artifactDigest}`,
+      };
+    }
+    return this.signatureVerifier.verify(input);
   }
 }
 

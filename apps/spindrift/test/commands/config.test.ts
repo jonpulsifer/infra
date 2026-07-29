@@ -50,6 +50,7 @@ import {
   FakeDeployAdapter,
 } from '../harness/fakes/deploy-adapter.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
+import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -98,9 +99,10 @@ function registryOf(
     // §15's repository host plays no part in config: a value reaches the store,
     // never a repository.
     repository: () => null,
-    supplyChain: () => {
-      throw new Error('config reached the supply chain');
-    },
+    // Config commands never reach the supply chain; `createDeploy` admission
+    // does, for an image Build. The harness records every finalization, so a
+    // config pass that ever called `finalize` would leave an entry here.
+    supplyChain: () => new SupplyChainHarness(),
   };
 }
 
