@@ -25,6 +25,8 @@ func main() {
 		runSignCommand(os.Args[2:])
 	case "verify-image":
 		runVerifyImageLegacyCommand(os.Args[2:])
+	case "verify-signature":
+		runVerifySignatureCommand(os.Args[2:])
 	case "sign-legacy":
 		runSignLegacyCommand(os.Args[2:])
 	default:
@@ -64,7 +66,7 @@ func runVerifyCommand(args []string) {
 func runSignCommand(args []string) {
 	fs := flag.NewFlagSet("sign", flag.ExitOnError)
 	requestPath := fs.String("request-path", "", "Path to sign request JSON file (stdin if empty)")
-	
+
 	// Check if this is legacy cosign invocation: e.g. "sign --yes --key ..."
 	if len(args) > 0 && args[0] != "-request-path" && args[0] != "--request-path" {
 		runSignLegacyCommand(args)
@@ -200,6 +202,33 @@ func runSignLegacyCommand(args []string) {
 	}
 	os.Stdout.Write(bundleJSON)
 	fmt.Println()
+}
+
+// runVerifySignatureCommand independently re-checks a recorded CoreSignature
+// bundle against the digest it is supposed to cover, pinned to Spindrift's
+// trusted signer key. Core admission calls this at every image deploy, on both
+// Kubernetes and Cloud Run paths: fail-closed admission consumes the real
+// signature format, not a stored placeholder.
+func runVerifySignatureCommand(args []string) {
+	fs := flag.NewFlagSet("verify-signature", flag.ExitOnError)
+	artifactDigest := fs.String("artifact-digest", "", "The digest the bundle must cover")
+	bundlePath := fs.String("bundle-path", "", "Path to the signature bundle JSON file")
+	signerKey := fs.String("signer-key", "", "Path to the trusted Spindrift signer key (the same key Sign used)")
+	_ = fs.Parse(args)
+
+	if *artifactDigest == "" || *bundlePath == "" || *signerKey == "" {
+		fmt.Fprintln(os.Stderr, "error: --artifact-digest, --bundle-path, and --signer-key are required")
+		os.Exit(1)
+	}
+	bundleData, err := os.ReadFile(*bundlePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading bundle path: %v\n", err)
+		os.Exit(1)
+	}
+	if err := verifier.VerifySignature(bundleData, *artifactDigest, *signerKey); err != nil {
+		fmt.Fprintf(os.Stderr, "signature did not verify: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func readInputData(path string) ([]byte, error) {

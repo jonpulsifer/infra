@@ -10,6 +10,8 @@ import {
   type ArtifactSigner,
   CoreSupplyChain,
   type FinalizeArtifactInput,
+  type SignatureVerification,
+  type VerifySignatureInput,
 } from '../../../src/supply-chain/sign.ts';
 import type {
   ProvenanceVerification,
@@ -47,8 +49,10 @@ class RecordingVerifier implements ProvenanceVerifier {
 
 class RecordingSigner implements ArtifactSigner {
   readonly signed: Artifact[] = [];
+  failure: Error | null = null;
 
   async sign(artifact: Artifact) {
+    if (this.failure !== null) throw this.failure;
     this.signed.push(artifact);
     return {
       artifactDigest: artifact.digest,
@@ -60,19 +64,47 @@ class RecordingSigner implements ArtifactSigner {
   }
 }
 
+/**
+ * A signature verifier that records each admission check and answers what a
+ * test scripted. Accepts by default, so the common "admission proceeds" path
+ * needs no setup; a refusal is one scripted answer away.
+ */
+export class RecordingSignatureVerifier {
+  readonly admissions: VerifySignatureInput[] = [];
+  constructor(
+    private readonly answer?: (
+      input: VerifySignatureInput,
+    ) => SignatureVerification | Promise<SignatureVerification>,
+  ) {}
+
+  async verify(input: VerifySignatureInput): Promise<SignatureVerification> {
+    this.admissions.push(input);
+    if (this.answer) return this.answer(input);
+    return { ok: true, reason: null };
+  }
+}
+
 export class SupplyChainHarness extends CoreSupplyChain {
   readonly finalized: FinalizeArtifactInput[] = [];
   readonly signed: Artifact[];
+  readonly signatureChecks: RecordingSignatureVerifier;
+  readonly signing: RecordingSigner;
 
   constructor(
     answer?: (
       input: VerifyProvenanceInput,
     ) => ProvenanceVerification | Promise<ProvenanceVerification>,
+    signatureAnswer?: (
+      input: VerifySignatureInput,
+    ) => SignatureVerification | Promise<SignatureVerification>,
   ) {
     const verifier = new RecordingVerifier(answer);
     const signer = new RecordingSigner();
-    super(verifier, signer);
+    const signatureVerifier = new RecordingSignatureVerifier(signatureAnswer);
+    super(verifier, signer, signatureVerifier);
     this.signed = signer.signed;
+    this.signing = signer;
+    this.signatureChecks = signatureVerifier;
   }
 
   override async finalize(input: FinalizeArtifactInput) {

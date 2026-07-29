@@ -16,9 +16,17 @@ type Artifact struct {
 	Refs   []string `json:"refs,omitempty"`
 }
 
-// Provenance holds the raw in-toto statement and claimed build level.
+// Provenance holds the raw in-toto statement, the backend's signature over
+// that statement, and the claimed build level.
+//
+// Statement is the isolation claim being verified; Signature is the backend's
+// Ed25519 signature over the exact statement bytes, proving the statement is
+// authentic and untampered. A statement with no signature is accepted only by
+// routes that configured no BuilderPublicKey — nobody claimed cryptographic
+// authenticity, so none is checked.
 type Provenance struct {
 	Statement    json.RawMessage `json:"statement"`
+	Signature    string          `json:"signature,omitempty"`
 	ClaimedLevel int             `json:"claimedLevel"`
 }
 
@@ -26,18 +34,23 @@ type Provenance struct {
 type Expectations struct {
 	Backend           string `json:"backend"`
 	ExpectedBuilderID string `json:"expectedBuilderId"`
-	MinimumLevel      int    `json:"minimumLevel"`
-	MaximumLevel      int    `json:"maximumLevel"`
-	SourceURI         string `json:"sourceUri"`
-	BundleDigest      string `json:"bundleDigest"`
+	// BuilderPublicKey, when set, is the base64 SPKI public key the backend's
+	// provenance signature must verify against. A route that sets this rejects
+	// any statement whose signature is absent or does not verify — the
+	// cryptographic authenticity half of admission.
+	BuilderPublicKey string `json:"builderPublicKey,omitempty"`
+	MinimumLevel     int    `json:"minimumLevel"`
+	MaximumLevel     int    `json:"maximumLevel"`
+	SourceURI        string `json:"sourceUri"`
+	BundleDigest     string `json:"bundleDigest"`
 }
 
 // VerificationResponse is the versioned JSON result returned by verification.
 type VerificationResponse struct {
-	Version    string                        `json:"version"`
-	OK         bool                          `json:"ok"`
-	Code       string                        `json:"code,omitempty"`
-	Message    string                        `json:"message,omitempty"`
+	Version    string                       `json:"version"`
+	OK         bool                         `json:"ok"`
+	Code       string                       `json:"code,omitempty"`
+	Message    string                       `json:"message,omitempty"`
 	Assessment *BackendProvenanceAssessment `json:"assessment,omitempty"`
 }
 

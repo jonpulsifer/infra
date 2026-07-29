@@ -180,12 +180,13 @@ func TestVerify_LevelBelowPolicy(t *testing.T) {
 }
 
 func TestSign_Valid(t *testing.T) {
+	keyPath := writeEd25519Key(t)
 	req := SignRequest{
 		Version: "v1",
 		Artifact: Artifact{
 			Digest: testDigest,
 		},
-		Key: "gcpkms://projects/example/locations/global/keyRings/keys/cryptoKeys/signer",
+		Key: keyPath,
 	}
 
 	resp := Sign(req, mockNow)
