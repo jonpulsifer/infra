@@ -59,6 +59,8 @@ import { OnePasswordStore } from './store/onepassword.ts';
  */
 export const SERVICE_ACCOUNT_TOKEN_PATH =
   '/var/run/secrets/kubernetes.io/serviceaccount/token';
+/** Installer-declared path for the reconciler's audience-scoped token. */
+export const IDENTITY_TOKEN_PATH_VAR = 'SPINDRIFT_IDENTITY_TOKEN_PATH';
 
 /** Raised when something reaches for an adapter this installation cannot build. */
 export class AdapterUnavailableError extends Error {
@@ -79,6 +81,20 @@ export function projectedServiceAccountToken(
     }
     return (await file.text()).trim();
   };
+}
+
+/**
+ * The Kubernetes credential projected for this process.
+ *
+ * The installer uses an explicit audience and mount rather than automounting a
+ * default credential. Falling back keeps non-chart development environments
+ * compatible with Kubernetes' conventional service-account path.
+ */
+export function installationServiceAccountToken(
+  env: Record<string, string | undefined> = Bun.env,
+): TokenProvider {
+  const configured = env[IDENTITY_TOKEN_PATH_VAR]?.trim();
+  return projectedServiceAccountToken(configured || SERVICE_ACCOUNT_TOKEN_PATH);
 }
 
 /**
@@ -122,7 +138,8 @@ export function createAdapterRegistry(
 ): AdapterRegistry {
   const kubernetes = new KubernetesDeployAdapter({
     chart: options.manifest.charts.app,
-    token: options.token ?? projectedServiceAccountToken(),
+    token:
+      options.token ?? installationServiceAccountToken(options.env ?? Bun.env),
   });
 
   // §15's repository host, when this installation was given the App key. Built
@@ -324,7 +341,9 @@ function createBuildRoute(
         name: route.name,
         api: new KubernetesApi({
           apiServer: route.endpoint,
-          token: options.token ?? projectedServiceAccountToken(),
+          token:
+            options.token ??
+            installationServiceAccountToken(options.env ?? Bun.env),
           ...(options.fetch ? { fetch: options.fetch } : {}),
         }),
         namespace: route.namespace,

@@ -60,7 +60,7 @@ One image, two processes (§19): `web` serves the product surface and
 | `src/commands/` | the application command layer and its registry |
 | `src/domain/` | backend-neutral product rules and value types |
 | `src/adapters/` | the adapter contracts, the three deploy backends, the three build routes, DNS records, and the two stores |
-| `src/reconciler/` | the reconciler process and its Target, repository, config, and Deploy loops |
+| `src/reconciler/` | the independently supervised reconciliation process |
 | `src/supply-chain/` | provenance verification, core signing, and derived posture |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |

@@ -23,16 +23,19 @@ import {
   FAILURE_REASONS,
 } from '../../src/adapters/deploy/contract.ts';
 import type { AdapterRegistry, Clock } from '../../src/commands/types.ts';
+import { createDb } from '../../src/db/client.ts';
 import {
   apps,
   attemptEvents,
   builds,
   components,
+  componentTargetDesired,
   deploys,
   targets,
 } from '../../src/db/schema.ts';
 import {
   claimNextDeploy,
+  DEFAULT_CLAIM_TIMEOUT_MS,
   DEFAULT_INTERVALS,
   type DeployLoopContext,
   intervalFor,
@@ -53,11 +56,14 @@ const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 
-function context(adapter: FakeDeployAdapter): DeployLoopContext {
+function context(
+  adapter: FakeDeployAdapter,
+  overrides: Partial<DeployLoopContext> = {},
+): DeployLoopContext {
   const adapters: Pick<AdapterRegistry, 'deploy'> = {
     deploy: (name) => (name === adapter.adapter ? adapter : null),
   };
-  return { db: database().db, adapters, clock, manifest };
+  return { db: database().db, adapters, clock, manifest, ...overrides };
 }
 
 /** An App, Component, Target, Build, and one PENDING Deploy intent. */
@@ -109,6 +115,12 @@ async function pendingDeploy(
       exposure: options.exposure ?? 'private',
     })
     .returning();
+  await db.insert(componentTargetDesired).values({
+    componentId: component!.id,
+    targetId: target!.id,
+    desiredBuildId: build!.id,
+    desiredDeployId: deploy!.id,
+  });
 
   return {
     app: app!,
@@ -158,6 +170,50 @@ describe('claiming (§6, SKIP LOCKED)', () => {
     const claimed = await claimNextDeploy(context(adapter));
     expect(claimed?.id).toBe(first.deploy.id);
     expect(claimed?.id).not.toBe(later!.id);
+  });
+
+  test('overlapping passes cannot claim two intents for one Component@Target', async () => {
+    const first = await pendingDeploy();
+    const [later] = await database()
+      .db.insert(deploys)
+      .values({
+        componentId: first.component.id,
+        targetId: first.target.id,
+        buildId: first.build.id,
+        phase: 'PENDING',
+      })
+      .returning();
+    await database()
+      .db.update(componentTargetDesired)
+      .set({ desiredDeployId: later!.id })
+      .where(eq(componentTargetDesired.componentId, first.component.id));
+
+    const adapter = new FakeDeployAdapter();
+    const otherDb = createDb(database().connect());
+    const claims = await Promise.all([
+      claimNextDeploy(context(adapter)),
+      claimNextDeploy(context(adapter, { db: otherDb })),
+    ]);
+
+    expect(claims.filter((claim) => claim !== null)).toHaveLength(1);
+    expect(claims.find((claim) => claim !== null)?.id).toBe(first.deploy.id);
+    expect(await deployRow(later!.id)).toMatchObject({ phase: 'PENDING' });
+  });
+
+  test('an abandoned in-flight phase becomes claimable after its timeout', async () => {
+    const { deploy } = await pendingDeploy();
+    await database()
+      .db.update(deploys)
+      .set({
+        phase: 'WAITING',
+        updatedAt: new Date(FROZEN.getTime() - DEFAULT_CLAIM_TIMEOUT_MS - 1),
+      })
+      .where(eq(deploys.id, deploy.id));
+
+    const claimed = await claimNextDeploy(context(new FakeDeployAdapter()));
+
+    expect(claimed?.id).toBe(deploy.id);
+    expect(claimed?.phase).toBe('APPLYING');
   });
 });
 

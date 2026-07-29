@@ -9,18 +9,14 @@ import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
 import { DEFAULT_REAP_INTERVAL_MS, runConfigLoop } from './config-loop.ts';
-import {
-  DEFAULT_INTERVALS,
-  type LoopIntervals,
-  runDeployLoop,
-} from './deploy-loop.ts';
+import { DEFAULT_INTERVALS, runDeployLoop } from './deploy-loop.ts';
 import { runRepoLoop } from './repo-loop.ts';
 import { runTargetLoop } from './target-loop.ts';
 
 export type ReconcilerLoopName = 'target' | 'repository' | 'config' | 'deploy';
 
 /** One independently supervised process loop. */
-export interface SupervisedLoop {
+interface SupervisedLoop {
   readonly name: ReconcilerLoopName;
   run(signal: AbortSignal): Promise<void>;
 }
@@ -32,19 +28,19 @@ export interface RetryBackoff {
   readonly multiplier: number;
 }
 
-export const DEFAULT_RETRY_BACKOFF: RetryBackoff = {
+const DEFAULT_RETRY_BACKOFF: RetryBackoff = {
   initialMs: 1_000,
   maximumMs: 60_000,
   multiplier: 2,
 };
 
-export interface LoopFailure {
+interface LoopFailure {
   readonly loop: ReconcilerLoopName;
   readonly cause: unknown;
   readonly retryInMs: number;
 }
 
-export interface SupervisorOptions {
+interface SupervisorOptions {
   readonly signal: AbortSignal;
   readonly retry?: RetryBackoff;
   readonly onFailure?: (failure: LoopFailure) => void;
@@ -58,15 +54,8 @@ export interface ReconcilerContext {
   readonly manifest: InstallationManifest;
 }
 
-export interface ReconcilerIntervals {
-  readonly targetMs?: number;
-  readonly repositoryMs?: number;
-  readonly configMs?: number;
-  readonly deploy?: Partial<LoopIntervals>;
-}
-
-export const DEFAULT_TARGET_INTERVAL_MS = 5 * 60_000;
-export const DEFAULT_REPOSITORY_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_TARGET_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_REPOSITORY_INTERVAL_MS = 5 * 60_000;
 
 /** Observable process events for production logging and lifecycle tests. */
 export type ReconcilerProcessEvent =
@@ -83,7 +72,6 @@ export type ReconcilerProcessEvent =
 
 export interface ReconcilerOptions {
   readonly signal: AbortSignal;
-  readonly intervals?: ReconcilerIntervals;
   readonly retry?: RetryBackoff;
   readonly onEvent?: (event: ReconcilerProcessEvent) => void;
 }
@@ -95,7 +83,7 @@ export interface ReconcilerOptions {
  * chains absorb and report their own failures; one failed loop therefore
  * cannot reject the aggregate and silently stop its siblings.
  */
-export async function superviseLoops(
+async function superviseLoops(
   loops: readonly SupervisedLoop[],
   options: SupervisorOptions,
 ): Promise<void> {
@@ -123,16 +111,6 @@ export async function runReconciler(
     );
   }
 
-  const targetInterval =
-    options.intervals?.targetMs ?? DEFAULT_TARGET_INTERVAL_MS;
-  const repositoryInterval =
-    options.intervals?.repositoryMs ?? DEFAULT_REPOSITORY_INTERVAL_MS;
-  const configInterval =
-    options.intervals?.configMs ?? DEFAULT_REAP_INTERVAL_MS;
-  const deployIntervals: LoopIntervals = {
-    ...DEFAULT_INTERVALS,
-    ...options.intervals?.deploy,
-  };
   const passed = (loop: ReconcilerLoopName): void =>
     options.onEvent?.({ type: 'pass', loop });
 
@@ -141,7 +119,7 @@ export async function runReconciler(
       name: 'target',
       run: (signal) =>
         runTargetLoop(context, {
-          intervalMs: targetInterval,
+          intervalMs: DEFAULT_TARGET_INTERVAL_MS,
           signal,
           onPass: () => passed('target'),
         }),
@@ -152,7 +130,7 @@ export async function runReconciler(
         runConfigLoop(
           { db: context.db, store },
           {
-            intervalMs: configInterval,
+            intervalMs: DEFAULT_REAP_INTERVAL_MS,
             signal,
             onPass: () => passed('config'),
           },
@@ -162,7 +140,7 @@ export async function runReconciler(
       name: 'deploy',
       run: (signal) =>
         runDeployLoop(context, {
-          intervals: deployIntervals,
+          intervals: DEFAULT_INTERVALS,
           signal,
           onPass: () => passed('deploy'),
         }),
@@ -183,7 +161,7 @@ export async function runReconciler(
         runRepoLoop(
           { db: context.db, clock: context.clock, host: repository },
           {
-            intervalMs: repositoryInterval,
+            intervalMs: DEFAULT_REPOSITORY_INTERVAL_MS,
             signal,
             onPass: () => passed('repository'),
           },

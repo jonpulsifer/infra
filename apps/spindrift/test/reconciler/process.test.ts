@@ -13,10 +13,12 @@ import {
   type Clock,
   systemClock,
 } from '../../src/commands/types.ts';
+import { MANIFEST_INLINE_VAR } from '../../src/config/manifest.ts';
 import {
   apps,
   builds,
   components,
+  componentTargetDesired,
   deploys,
   targets,
 } from '../../src/db/schema.ts';
@@ -24,9 +26,8 @@ import type { RepositoryHost } from '../../src/domain/repository.ts';
 import {
   type ReconcilerProcessEvent,
   runReconciler,
-  type SupervisedLoop,
-  superviseLoops,
 } from '../../src/reconciler/process.ts';
+import { startReconciler } from '../../src/reconciler/start.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
@@ -39,70 +40,65 @@ const DIGEST = `sha256:${'a'.repeat(64)}`;
 
 describe('reconciler process lifecycle', () => {
   test('one failed loop retries without stopping its siblings', async () => {
+    const adapters = configuredAdapters();
     const shutdown = new AbortController();
-    const failures: string[] = [];
-    let healthyStarts = 0;
-    let flakyStarts = 0;
+    const passes = new Map<string, number>();
+    const failures: Extract<ReconcilerProcessEvent, { type: 'failure' }>[] = [];
 
-    const loops: readonly SupervisedLoop[] = [
+    await runReconciler(
+      { db: database().db, adapters, clock, manifest },
       {
-        name: 'target',
-        async run(signal) {
-          healthyStarts += 1;
-          await aborted(signal);
+        signal: shutdown.signal,
+        retry: { initialMs: 0, maximumMs: 0, multiplier: 2 },
+        onEvent(event) {
+          if (event.type === 'failure') failures.push(event);
+          if (event.type !== 'pass') return;
+
+          const count = (passes.get(event.loop) ?? 0) + 1;
+          passes.set(event.loop, count);
+          if (event.loop === 'target' && count === 1) {
+            throw new Error('metrics sink disconnected');
+          }
+          if (
+            (passes.get('target') ?? 0) === 2 &&
+            passes.has('config') &&
+            passes.has('deploy')
+          ) {
+            shutdown.abort();
+          }
         },
       },
-      {
-        name: 'deploy',
-        async run(signal) {
-          flakyStarts += 1;
-          if (flakyStarts === 1) throw new Error('database disconnected');
-          shutdown.abort();
-          await aborted(signal);
-        },
-      },
-    ];
+    );
 
-    await superviseLoops(loops, {
-      signal: shutdown.signal,
-      retry: { initialMs: 0, maximumMs: 0, multiplier: 2 },
-      onFailure: ({ loop, cause }) => {
-        failures.push(`${loop}: ${String(cause)}`);
-      },
-    });
-
-    expect(healthyStarts).toBe(1);
-    expect(flakyStarts).toBe(2);
-    expect(failures).toEqual(['deploy: Error: database disconnected']);
+    expect(passes.get('target')).toBe(2);
+    expect(passes.get('config')).toBe(1);
+    expect(passes.get('deploy')).toBe(1);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ type: 'failure', loop: 'target' });
+    expect(String(failures[0]?.cause)).toBe('Error: metrics sink disconnected');
   });
 
   test('an already-aborted process starts no loops', async () => {
-    let starts = 0;
-    await superviseLoops(
-      [
-        {
-          name: 'config',
-          async run() {
-            starts += 1;
-          },
-        },
-      ],
-      { signal: AbortSignal.abort() },
+    const events: ReconcilerProcessEvent[] = [];
+    await runReconciler(
+      {
+        db: database().db,
+        adapters: configuredAdapters(),
+        clock,
+        manifest,
+      },
+      {
+        signal: AbortSignal.abort(),
+        onEvent: (event) => events.push(event),
+      },
     );
-    expect(starts).toBe(0);
+    expect(events).toEqual([]);
   });
 });
 
 describe('reconciler loop composition', () => {
   test('starts every configured polling loop and reports an absent repository integration', async () => {
-    const adapters = createAdapterRegistry({
-      manifest,
-      env: {},
-      token: async () => 'cluster-token',
-      storeToken: () => 'store-token',
-      buildToken: () => 'build-token',
-      cloudToken: async () => 'cloud-token',
-    });
+    const adapters = configuredAdapters();
     const shutdown = new AbortController();
     const events: ReconcilerProcessEvent[] = [];
 
@@ -185,38 +181,15 @@ describe('reconciler loop composition', () => {
 
 describe('Deploy convergence through process startup', () => {
   test('polling takes a pending Deploy to the platform’s successful verdict', async () => {
-    const deploy = await pendingDeploy();
     const platform = new FakeDeployAdapter();
-    const shutdown = new AbortController();
-
-    await runReconciler(
-      {
-        db: database().db,
-        adapters: adaptersFor(platform),
-        clock,
-        manifest,
-      },
-      {
-        signal: shutdown.signal,
-        onEvent(event) {
-          if (event.type === 'pass' && event.loop === 'deploy') {
-            shutdown.abort();
-          }
-        },
-      },
-    );
-
-    const [stored] = await database()
-      .db.select()
-      .from(deploys)
-      .where(eq(deploys.id, deploy.id));
+    const { stored, bootManifest } = await reconcilePendingDeploy(platform);
     expect(stored?.phase).toBe('LIVE');
     expect(stored?.ref).toBe('fake-deploy-1');
     expect(platform.applied).toHaveLength(1);
+    expect(bootManifest).toEqual(manifest);
   });
 
   test('polling persists the platform’s failed verdict', async () => {
-    const deploy = await pendingDeploy();
     const platform = new FakeDeployAdapter({
       script: [
         {
@@ -228,39 +201,27 @@ describe('Deploy convergence through process startup', () => {
         },
       ],
     });
-    const shutdown = new AbortController();
-
-    await runReconciler(
-      {
-        db: database().db,
-        adapters: adaptersFor(platform),
-        clock,
-        manifest,
-      },
-      {
-        signal: shutdown.signal,
-        onEvent(event) {
-          if (event.type === 'pass' && event.loop === 'deploy') {
-            shutdown.abort();
-          }
-        },
-      },
-    );
-
-    const [stored] = await database()
-      .db.select()
-      .from(deploys)
-      .where(eq(deploys.id, deploy.id));
+    const { stored, bootManifest } = await reconcilePendingDeploy(platform);
     expect(stored?.phase).toBe('FAILED');
     expect(stored?.reason).toBe('STARTUP_FAILED');
     expect(stored?.detail).toBe('container exited before readiness');
     expect(stored?.blame).toBe('developer');
     expect(platform.applied).toHaveLength(1);
+    expect(bootManifest).toEqual(manifest);
   });
 });
 
 function adaptersFor(platform: FakeDeployAdapter): AdapterRegistry {
-  const configured = createAdapterRegistry({
+  const configured = configuredAdapters();
+  return {
+    ...configured,
+    deploy: (adapter) =>
+      adapter === platform.adapter ? platform : configured.deploy(adapter),
+  };
+}
+
+function configuredAdapters(): AdapterRegistry {
+  return createAdapterRegistry({
     manifest,
     env: {},
     token: async () => 'cluster-token',
@@ -268,11 +229,30 @@ function adaptersFor(platform: FakeDeployAdapter): AdapterRegistry {
     buildToken: () => 'build-token',
     cloudToken: async () => 'cloud-token',
   });
-  return {
-    ...configured,
-    deploy: (adapter) =>
-      adapter === platform.adapter ? platform : configured.deploy(adapter),
-  };
+}
+
+async function reconcilePendingDeploy(platform: FakeDeployAdapter) {
+  const deploy = await pendingDeploy();
+  const shutdown = new AbortController();
+  let bootManifest: unknown;
+  await startReconciler({
+    signal: shutdown.signal,
+    client: database().connect(),
+    clock,
+    env: { [MANIFEST_INLINE_VAR]: JSON.stringify(manifest) },
+    createAdapters(storedManifest) {
+      bootManifest = storedManifest;
+      return adaptersFor(platform);
+    },
+    onEvent(event) {
+      if (event.type === 'pass' && event.loop === 'deploy') shutdown.abort();
+    },
+  });
+  const [stored] = await database()
+    .db.select()
+    .from(deploys)
+    .where(eq(deploys.id, deploy.id));
+  return { stored, bootManifest };
 }
 
 /** An App, Component, Target, Build, and one PENDING Deploy intent. */
@@ -322,6 +302,12 @@ async function pendingDeploy() {
       exposure: 'private',
     })
     .returning();
+  await db.insert(componentTargetDesired).values({
+    componentId: component!.id,
+    targetId: target!.id,
+    desiredBuildId: build!.id,
+    desiredDeployId: deploy!.id,
+  });
   return deploy!;
 }
 
@@ -341,11 +327,4 @@ function unusedRepositoryHost(): RepositoryHost {
     setBranch: unused,
     openPullRequest: unused,
   };
-}
-
-function aborted(signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) =>
-    signal.addEventListener('abort', () => resolve(), { once: true }),
-  );
 }

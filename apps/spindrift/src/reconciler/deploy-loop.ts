@@ -17,12 +17,13 @@
  * an attempt is in flight — a bounded window, not a standing watch — and slow
  * once converged, where the slow cadence *is* the drift detection §6 asks for.
  *
- * **Claiming is `FOR UPDATE SKIP LOCKED`, and the claim is a phase, not a lock.**
- * The lock is held only long enough to move a row `PENDING -> APPLYING`; it is not
- * held across the apply. Holding a database transaction open for the length of a
- * call to somebody else's control plane would put a rollout's duration inside a
- * lock, and a `reconciler` that died mid-apply would leave the row locked until
- * the connection timed out. A phase survives the process; a lock does not.
+ * **Claiming is `FOR UPDATE SKIP LOCKED`, and the claim is a leased phase.**
+ * The lock on the Component@Target desired-state row is held only long enough
+ * to move a Deploy to `APPLYING`; it is not held across the apply. Holding a
+ * database transaction open for the length of a call to somebody else's
+ * control plane would put a rollout's duration inside a lock. The phase and its
+ * timestamp survive the process, and an abandoned claim becomes eligible after
+ * the adapter convergence budget.
  *
  * **`LISTEN`/`NOTIFY` is an optimization and never the delivery path.** It is
  * free with the Postgres already required and it cuts intent-to-pickup latency
@@ -33,7 +34,8 @@
  * `test/reconciler/deploy-loop.test.ts` runs the whole convergence with
  * notifications disabled to keep that true.
  */
-import { asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, lte, notExists, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type {
   DeployAdapter,
   DeployEvent,
@@ -47,6 +49,7 @@ import {
   apps,
   builds,
   components,
+  componentTargetDesired,
   type Deploy,
   deploys,
   targets,
@@ -81,6 +84,10 @@ export interface DeployLoopContext {
  * converged interval.
  */
 const UNSETTLED: readonly DeployPhase[] = ['PENDING', 'APPLYING', 'WAITING'];
+const IN_FLIGHT: readonly DeployPhase[] = ['APPLYING', 'WAITING'];
+
+/** A crashed worker's phase remains durable, then becomes safely reclaimable. */
+export const DEFAULT_CLAIM_TIMEOUT_MS = 15 * 60_000;
 
 /** How often to look, given what the Deploy is doing (§6, plan Transport). */
 export interface LoopIntervals {
@@ -136,36 +143,73 @@ export async function unsettledPhases(
 }
 
 /**
- * Take one `PENDING` Deploy and mark it `APPLYING`, or return `null`.
+ * Take one eligible Deploy and mark it `APPLYING`, or return `null`.
  *
- * `SKIP LOCKED` is what lets more than one `reconciler` run without either
- * waiting on the other or both picking up the same row: a contended row is
- * skipped rather than queued behind, so a second worker moves on to the next
- * intent instead of stalling on the first.
+ * `SKIP LOCKED` on the durable Component@Target row lets more than one
+ * `reconciler` run without either waiting on the other or picking a newer intent
+ * for the same workload. In-flight phases are leases: a recent one blocks the
+ * pair, while an old one is safe to retry through the idempotent adapter seam.
  */
 export async function claimNextDeploy(
   context: DeployLoopContext,
 ): Promise<Deploy | null> {
   const now = context.clock.now();
+  const staleBefore = new Date(now.getTime() - DEFAULT_CLAIM_TIMEOUT_MS);
   return context.db.transaction(async (tx) => {
+    const activeDeploys = alias(deploys, 'active_deploys');
     const [row] = await tx
-      .select()
+      .select({ deploy: deploys })
       .from(deploys)
-      .where(eq(deploys.phase, 'PENDING'))
+      .innerJoin(
+        componentTargetDesired,
+        and(
+          eq(componentTargetDesired.componentId, deploys.componentId),
+          eq(componentTargetDesired.targetId, deploys.targetId),
+        ),
+      )
+      .where(
+        and(
+          or(
+            eq(deploys.phase, 'PENDING'),
+            and(
+              inArray(deploys.phase, [...IN_FLIGHT]),
+              lte(deploys.updatedAt, staleBefore),
+            ),
+          ),
+          // A recent in-flight Deploy owns this Component@Target. Newer intents
+          // wait rather than racing it, and a stale phase can be retried.
+          notExists(
+            tx
+              .select({ id: activeDeploys.id })
+              .from(activeDeploys)
+              .where(
+                and(
+                  eq(activeDeploys.componentId, deploys.componentId),
+                  eq(activeDeploys.targetId, deploys.targetId),
+                  inArray(activeDeploys.phase, [...IN_FLIGHT]),
+                  gt(activeDeploys.updatedAt, staleBefore),
+                ),
+              ),
+          ),
+        ),
+      )
       // Oldest intent first: a queue that reordered itself would make two
       // deploys of one Component@Target land in an order nobody asked for.
       .orderBy(asc(deploys.id))
       .limit(1)
-      .for('update', { skipLocked: true });
+      // Lock the pair's durable desired row rather than only one Deploy row.
+      // Concurrent replicas then skip the whole pair, not merely its oldest
+      // intent and move on to a newer one for the same workload.
+      .for('update', { of: componentTargetDesired, skipLocked: true });
 
     if (row === undefined) return null;
 
     await tx
       .update(deploys)
       .set({ phase: 'APPLYING', updatedAt: now })
-      .where(eq(deploys.id, row.id));
+      .where(eq(deploys.id, row.deploy.id));
 
-    return { ...row, phase: 'APPLYING' as const };
+    return { ...row.deploy, phase: 'APPLYING' as const, updatedAt: now };
   });
 }
 

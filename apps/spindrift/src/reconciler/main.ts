@@ -6,33 +6,25 @@
  * gives all four polling loops one lifecycle without giving any loop the power
  * to stop its siblings.
  */
-import { createAdapterRegistry } from '../adapters/registry.ts';
-import { systemClock } from '../commands/types.ts';
-import { loadStoredManifest } from '../config/manifest-store.ts';
-import { createClient, createDb } from '../db/client.ts';
-import { type ReconcilerProcessEvent, runReconciler } from './process.ts';
+import type { ReconcilerProcessEvent } from './process.ts';
+import { startReconciler } from './start.ts';
 
 const shutdown = new AbortController();
 const stop = (): void => shutdown.abort();
 process.once('SIGINT', stop);
 process.once('SIGTERM', stop);
 
-const client = createClient();
 try {
-  const db = createDb(client);
-  const manifest = await loadStoredManifest(db);
-  const adapters = createAdapterRegistry({ manifest });
-
-  console.log(`spindrift reconciler → running (${manifest.installation})`);
-  await runReconciler(
-    { db, adapters, clock: systemClock, manifest },
-    { signal: shutdown.signal, onEvent: report },
-  );
+  await startReconciler({
+    signal: shutdown.signal,
+    onStarted: (manifest) =>
+      console.log(`spindrift reconciler → running (${manifest.installation})`),
+    onEvent: report,
+  });
 } finally {
   shutdown.abort();
   process.off('SIGINT', stop);
   process.off('SIGTERM', stop);
-  await client.close();
 }
 
 function report(event: ReconcilerProcessEvent): void {
