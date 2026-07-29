@@ -93,17 +93,8 @@ database:
   size: 2Gi
   name: spindrift
   storageClass: local-path
-  # There is no migration runner to point this at.
-  #
-  # `src/db/migrate.ts` exports `applyMigrations` and has no main, deliberately:
-  # "production never calls this at runtime... a running process mutating its
-  # own schema on boot is the same shape of mistake as a process mutating live
-  # infrastructure. Migrations are applied as an out-of-band operator act."
-  #
-  # The Job template is kept because that decision is about *this* installation
-  # applying its own schema on boot, not about the shape being wrong forever —
-  # but enabling it today would render a Job that exits 0 having done nothing,
-  # which is worse than not having one.
+  # Migrations remain disabled by default. An installation that owns a
+  # migration act supplies a command invoking src/db/migrate.ts.
   migration:
     enabled: false
     command: ""

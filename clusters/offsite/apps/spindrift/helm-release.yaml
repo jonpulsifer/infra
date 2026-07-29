@@ -79,13 +79,20 @@ spec:
     database:
       enabled: true
       size: 2Gi
-      # No runner exists: src/db/migrate.ts is a library by design, because
-      # "migrations are applied as an out-of-band operator act". The schema
-      # arrives that way, not from a Job that would exit 0 having done nothing.
       migration:
-        enabled: false
-    # The second process stays disabled while this installation has no migration
-    # runner to order schema readiness before the web and reconciler Deployments.
+        enabled: true
+        # Run the committed Drizzle migrations as a separate, run-once Job.
+        # The image contains the migration library and Bun's native SQL client;
+        # keeping this out of the web/reconciler entrypoints preserves the
+        # GitOps ownership boundary while allowing Flux to apply schema drift.
+        command: >-
+          bun -e 'import { createClient } from "./src/db/client.ts";
+          import { applyMigrations } from "./src/db/migrate.ts";
+          const client = createClient();
+          await applyMigrations(client);
+          await client.close();'
+    # The reconciler runs alongside the web process; the migration Job is
+    # independent and retries until the schema is current.
     reconciler:
       enabled: true
     web:
