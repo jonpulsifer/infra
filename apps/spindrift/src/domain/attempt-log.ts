@@ -41,6 +41,7 @@ import {
   type FailureReason,
 } from '../adapters/deploy/contract.ts';
 import type { Database } from '../db/client.ts';
+import { notifyAttemptEvent } from '../db/notify.ts';
 import { attemptEvents } from '../db/schema.ts';
 
 /** The cursor a resumed read starts after — an `attemptEvents.id` value. */
@@ -205,6 +206,10 @@ async function insertEvent(
     reason: reason ?? null,
     blame: reason ? blameFor(reason) : null,
   });
+
+  // Wake any WebSocket pump loops watching this component (Transport shape).
+  // Fire-and-forget: a lost notification only delays the next poll.
+  notifyAttemptEvent(args.componentId);
 }
 
 /**

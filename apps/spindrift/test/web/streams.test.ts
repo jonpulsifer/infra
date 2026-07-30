@@ -291,4 +291,160 @@ describe('authenticated attempt stream', () => {
       reason: 'STARTUP_FAILED',
     });
   });
+
+  test('events written by the reconciler while no pump is connected are picked up on resume without gaps', async () => {
+    // Simulates a controller restart: the web process was down (or the
+    // WebSocket was disconnected), the reconciler kept writing events, and
+    // then a new web process or a new WebSocket connection picks up from
+    // the last cursor. This proves the durable cursor survives the gap.
+    const seeded = await seedAttempt();
+    const principal = {
+      id: seeded.user.id,
+      displayName: seeded.user.displayName,
+    };
+
+    // Phase 1: A pump reads the first event and records a cursor.
+    await recordBuildEvent(
+      database().db,
+      {
+        appId: seeded.app.id,
+        componentId: seeded.component.id,
+        buildId: seeded.build.id,
+      },
+      { type: 'log', line: 'step 1' },
+    );
+
+    let firstData: StreamSocketData | null = null;
+    const firstServer = {
+      upgrade: (_request: Request, options: { data: StreamSocketData }) => {
+        firstData = options.data;
+        return true;
+      },
+    } as unknown as Bun.Server<StreamSocketData>;
+    const firstCtx = await context(principal);
+    await streamRoutes({
+      authenticate: async () => ({ kind: 'authenticated', principal }),
+      context: () => firstCtx,
+    })[ATTEMPT_STREAM_PATH]!(
+      request(`buildId=${seeded.build.id}`),
+      firstServer,
+    );
+    const firstPage = await readStreamPage(firstData!);
+    expect(firstPage.kind).toBe('attempt');
+    if (firstPage.kind !== 'attempt') return;
+    expect(firstPage.entries).toHaveLength(1);
+    const savedCursor = firstPage.cursor;
+
+    // Phase 2: While no WebSocket is connected (simulating web downtime),
+    // the reconciler writes multiple events. No pump is running.
+    await recordBuildEvent(
+      database().db,
+      {
+        appId: seeded.app.id,
+        componentId: seeded.component.id,
+        buildId: seeded.build.id,
+      },
+      { type: 'log', line: 'step 2' },
+    );
+    await recordBuildEvent(
+      database().db,
+      {
+        appId: seeded.app.id,
+        componentId: seeded.component.id,
+        buildId: seeded.build.id,
+      },
+      { type: 'log', line: 'step 3' },
+    );
+    await recordDeployEvent(
+      database().db,
+      {
+        appId: seeded.app.id,
+        componentId: seeded.component.id,
+        deployId: seeded.deploy.id,
+      },
+      { type: 'status', phase: 'APPLYING' },
+    );
+
+    // Phase 3: A completely new context (simulating a restarted web
+    // process) resumes from the saved cursor. All events written during
+    // the gap must appear, in order, with no duplicates.
+    let resumedData: StreamSocketData | null = null;
+    const newServer = {
+      upgrade: (_request: Request, options: { data: StreamSocketData }) => {
+        resumedData = options.data;
+        return true;
+      },
+    } as unknown as Bun.Server<StreamSocketData>;
+    const newCtx = await context(principal);
+    await streamRoutes({
+      authenticate: async () => ({ kind: 'authenticated', principal }),
+      context: () => newCtx,
+    })[ATTEMPT_STREAM_PATH]!(
+      request(
+        `buildId=${seeded.build.id}&deployId=${seeded.deploy.id}&after=${encodeURIComponent(String(savedCursor))}`,
+      ),
+      newServer,
+    );
+    const resumed = await readStreamPage(resumedData!);
+    expect(resumed.kind).toBe('attempt');
+    if (resumed.kind !== 'attempt') return;
+    // Exactly the 3 events written during the gap, nothing from before
+    expect(resumed.entries).toHaveLength(3);
+    expect(resumed.entries.map((e) => e.type)).toEqual([
+      'log',
+      'log',
+      'status',
+    ]);
+    if (resumed.entries[0]?.type === 'log') {
+      expect(resumed.entries[0].line).toBe('step 2');
+    }
+    if (resumed.entries[1]?.type === 'log') {
+      expect(resumed.entries[1].line).toBe('step 3');
+    }
+    if (resumed.entries[2]?.type === 'status') {
+      expect(resumed.entries[2].phase).toBe('APPLYING');
+    }
+  });
+});
+
+describe('in-process attempt event notifications', () => {
+  test('notifyAttemptEvent wakes a subscribed listener', async () => {
+    const { notifyAttemptEvent, onAttemptEvent } = await import(
+      '../../src/db/notify.ts'
+    );
+    const wakes: string[] = [];
+    const unsub = onAttemptEvent('comp-1', () => wakes.push('woke'));
+
+    notifyAttemptEvent('comp-1');
+    expect(wakes).toEqual(['woke']);
+
+    // A second component's events do not wake this listener.
+    notifyAttemptEvent('comp-2');
+    expect(wakes).toEqual(['woke']);
+
+    // After unsubscribing, no more wakes.
+    unsub();
+    notifyAttemptEvent('comp-1');
+    expect(wakes).toEqual(['woke']);
+  });
+
+  test('recordBuildEvent fires the in-process notification', async () => {
+    const { onAttemptEvent } = await import('../../src/db/notify.ts');
+    const seeded = await seedAttempt();
+    const wakes: string[] = [];
+    const unsub = onAttemptEvent(seeded.component.id, () => wakes.push('woke'));
+
+    await recordBuildEvent(
+      database().db,
+      {
+        appId: seeded.app.id,
+        componentId: seeded.component.id,
+        buildId: seeded.build.id,
+      },
+      { type: 'log', line: 'triggers notification' },
+    );
+
+    expect(wakes).toEqual(['woke']);
+    unsub();
+  });
 });
