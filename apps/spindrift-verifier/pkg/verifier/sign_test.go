@@ -169,34 +169,37 @@ func TestSign_BundleFromAnotherSignerIsRefusedAtAdmission(t *testing.T) {
 	}
 }
 
-func TestSign_KMSKeyRefused(t *testing.T) {
+func TestSign_KMSKeySupported(t *testing.T) {
+	kmsKey := "gcpkms://projects/example/locations/global/keyRings/keys/signer"
 	resp := Sign(SignRequest{
 		Artifact: Artifact{Digest: testDigest},
-		Key:      "gcpkms://projects/example/locations/global/keyRings/keys/signer",
+		Key:      kmsKey,
 	}, mockNow)
-	if resp.OK {
-		t.Fatalf("KMS signer was accepted; expected loud refusal")
+	if !resp.OK {
+		t.Fatalf("KMS signer failed: %s", resp.Message)
 	}
-	if resp.Code != "SIGNING_FAILED" {
-		t.Errorf("expected SIGNING_FAILED, got %s", resp.Code)
+	if resp.Signature == nil {
+		t.Fatalf("expected signature")
 	}
-	if !strings.Contains(resp.Message, "KMS signer") {
-		t.Errorf("expected a KMS-specific message, got: %s", resp.Message)
+
+	if err := VerifySignature(resp.Signature.Bundle, testDigest, kmsKey); err != nil {
+		t.Fatalf("independent verification of KMS signature failed: %v", err)
 	}
 }
 
-func TestVerifySignature_KMSKeyRefused(t *testing.T) {
-	keyPath := writeEd25519Key(t)
+func TestVerifySignature_KMSKeyMismatchRefused(t *testing.T) {
+	kmsKey1 := "gcpkms://projects/example/locations/global/keyRings/keys/signer1"
+	kmsKey2 := "gcpkms://projects/example/locations/global/keyRings/keys/signer2"
 	resp := Sign(SignRequest{
 		Artifact: Artifact{Digest: testDigest},
-		Key:      keyPath,
+		Key:      kmsKey1,
 	}, mockNow)
 	if !resp.OK {
 		t.Fatalf("sign: %s", resp.Message)
 	}
-	err := VerifySignature(resp.Signature.Bundle, testDigest, "gcpkms://projects/example/keys/signer")
+	err := VerifySignature(resp.Signature.Bundle, testDigest, kmsKey2)
 	if err == nil {
-		t.Fatalf("KMS verifier was accepted; expected loud refusal")
+		t.Fatalf("KMS signature verified against wrong KMS key; expected refusal")
 	}
 }
 

@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import { connectRepository } from '../../src/commands/repositories/connect.ts';
 import { connectTarget } from '../../src/commands/targets/connect.ts';
 import type {
   AdapterRegistry,
   CommandContext,
 } from '../../src/commands/types.ts';
+import * as schema from '../../src/db/schema.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
 import { commandRoutes, pathFor } from '../../src/web/dispatch.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -113,6 +115,41 @@ describe('listTargets and listRepositories over route boundary', () => {
     expect(body.value.options[0].name).toBe('folly-cluster');
   });
 
+  test('listTargets reports prerequisite failure details for unhealthy targets over HTTP', async () => {
+    const ctx = await makeContext(null);
+    await connectTarget(clusterInput({ name: 'unhealthy-cluster' }), ctx);
+
+    await ctx.db
+      .update(schema.targets)
+      .set({
+        health: 'unhealthy',
+        prerequisites: [
+          {
+            name: 'DELIVERY_OPERATOR',
+            met: false,
+            detail: 'API server unreachable at https://10.0.0.1:6443',
+          },
+        ],
+      })
+      .where(eq(schema.targets.name, 'unhealthy-cluster'));
+
+    const routes = serve(ctx, true);
+    const res = await routes[pathFor('listTargets')]!(
+      post(pathFor('listTargets'), {}),
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      ok: boolean;
+      value: { targets: any[]; options: any[] };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.value.targets[0].health).toBe('unhealthy');
+    expect(body.value.targets[0].prerequisiteFailures).toEqual([
+      'API server unreachable at https://10.0.0.1:6443',
+    ]);
+  });
+
   test('listRepositories returns connected repos and options for authenticated user', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', { 'README.md': 'unconnected' });
@@ -157,6 +194,60 @@ describe('listTargets and listRepositories over route boundary', () => {
     expect(body.value.repos[0].fullName).toBe(fake.fullName);
     expect(body.value.options).toHaveLength(1);
     expect(body.value.options[0].fullName).toBe(fake.fullName);
+  });
+
+  test('listRepositories reports connection_lost and error message for frozen repositories over HTTP', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'unconnected' });
+    const ctx = await makeContext(fake);
+
+    await connectRepository(
+      {
+        fullName: fake.fullName,
+        installationId: fake.installationId,
+        scopes: [
+          {
+            scope: 'app',
+            proposal: {
+              source: 'railpack',
+              kind: 'service',
+              kinds: [{ kind: 'service', available: true }],
+              build: {
+                frontend: 'railpack',
+                buildCommand: 'bun run build',
+                outputDirectory: null,
+              },
+              watchPaths: [],
+            },
+          },
+        ],
+      },
+      ctx,
+    );
+
+    await ctx.db
+      .update(schema.repositories)
+      .set({
+        access: 'frozen',
+        frozenReason: 'GitHub App installation was suspended or uninstalled',
+      })
+      .where(eq(schema.repositories.fullName, fake.fullName));
+
+    const routes = serve(ctx, true);
+    const res = await routes[pathFor('listRepositories')]!(
+      post(pathFor('listRepositories'), {}),
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      ok: boolean;
+      value: { repos: any[]; options: any[] };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.value.repos[0].health).toBe('connection_lost');
+    expect(body.value.repos[0].error).toBe(
+      'GitHub App installation was suspended or uninstalled',
+    );
   });
 
   test('empty installation returns empty lists without falling back to sample data', async () => {

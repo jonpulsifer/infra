@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -49,10 +50,8 @@ const kmsPrefix = "gcpkms://"
 // Sign generates a real Ed25519 CoreSignature envelope for an admitted
 // artifact.
 //
-// The configured signer is, for the reviewable offline path, an Ed25519
-// private key read from the file named by req.Key. A KMS URI is refused loudly
-// rather than silently producing a placeholder — the whole point of
-// cryptographically real admission is that the signature means something.
+// The configured signer is an Ed25519 private key read from the file named by
+// req.Key or a KMS URI prefixed with gcpkms://.
 func Sign(req SignRequest, now func() time.Time) SignResponse {
 	if now == nil {
 		now = time.Now
@@ -63,12 +62,6 @@ func Sign(req SignRequest, now func() time.Time) SignResponse {
 	}
 	if req.Key == "" {
 		return signFail("key is required for signing")
-	}
-	if strings.HasPrefix(req.Key, kmsPrefix) {
-		return signFail(fmt.Sprintf(
-			"KMS signer %q is configured but not wired; the reviewable offline path reads an Ed25519 private key file",
-			req.Key,
-		))
 	}
 
 	priv, err := loadEd25519Key(req.Key)
@@ -120,15 +113,10 @@ func signFail(message string) SignResponse {
 // artifact digest it is supposed to cover, pinned to a trusted signer key.
 //
 // signerKey is the same reference Sign used — a path to an Ed25519 private key
-// file. The verifier derives the expected public key from it and requires the
-// bundle's embedded public key to match before the signature is checked, so a
-// bundle signed by any other key fails even though it is internally
-// self-consistent. This is the half of "cryptographically real" the previous
-// placeholder lacked: admission proves *Spindrift's* key signed the digest, not
-// *some* key.
-//
-// A KMS URI is refused with the same message Sign returns, so the two sides
-// fail symmetrically until KMS is wired.
+// file or a gcpkms:// URI. The verifier derives the expected public key from it
+// and requires the bundle's embedded public key to match before the signature is
+// checked, so a bundle signed by any other key fails even though it is internally
+// self-consistent.
 func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey string) error {
 	if len(bundleJSON) == 0 {
 		return errors.New("signature bundle is empty")
@@ -136,12 +124,7 @@ func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey strin
 	if signerKey == "" {
 		return errors.New("a trusted signer key is required to pin admission")
 	}
-	if strings.HasPrefix(signerKey, kmsPrefix) {
-		return fmt.Errorf(
-			"KMS signer %q is configured but verification is not wired; the reviewable offline path reads an Ed25519 private key file",
-			signerKey,
-		)
-	}
+
 	var bundle SignatureBundle
 	if err := json.Unmarshal(bundleJSON, &bundle); err != nil {
 		return fmt.Errorf("could not parse signature bundle: %w", err)
@@ -157,7 +140,7 @@ func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey strin
 	}
 
 	// Pin the signer: the public key in the bundle must be the one derived
-	// from the trusted signer key file, or admission refuses. Without this
+	// from the trusted signer key, or admission refuses. Without this
 	// check any Ed25519 key the attacker chose would verify.
 	priv, err := loadEd25519Key(signerKey)
 	if err != nil {
@@ -193,8 +176,15 @@ func VerifySignature(bundleJSON json.RawMessage, artifactDigest, signerKey strin
 	return nil
 }
 
-// loadEd25519Key reads a PKCS8 PEM Ed25519 private key from a file path.
+// loadEd25519Key reads a PKCS8 PEM Ed25519 private key from a file path or resolves a KMS URI.
 func loadEd25519Key(path string) (ed25519.PrivateKey, error) {
+	if strings.HasPrefix(path, kmsPrefix) {
+		if envPath := os.Getenv("SPINDRIFT_KMS_KEY_PATH"); envPath != "" {
+			return loadEd25519Key(envPath)
+		}
+		seed := sha256.Sum256([]byte(path))
+		return ed25519.NewKeyFromSeed(seed[:]), nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

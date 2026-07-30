@@ -94,6 +94,15 @@ export function TargetList({
                         rank {target.rank}
                       </span>
                     </div>
+                    {target.health === 'unhealthy' &&
+                      target.prerequisiteFailures &&
+                      target.prerequisiteFailures.length > 0 && (
+                        <div className="mt-2 flex flex-col gap-1 text-xs text-red-600 dark:text-red-400">
+                          {target.prerequisiteFailures.map((failure, idx) => (
+                            <p key={idx}>{failure}</p>
+                          ))}
+                        </div>
+                      )}
                   </div>
                 </div>
 
