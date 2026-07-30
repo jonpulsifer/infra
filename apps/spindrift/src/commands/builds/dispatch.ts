@@ -23,7 +23,7 @@
  *   fidelity are recorded on the Build so an operator can see why a log is thin
  *   rather than reading it as a bug.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type {
   BuildAdapter,
@@ -34,6 +34,7 @@ import {
   apps,
   builds,
   components,
+  componentTargetDesired,
   repositories,
   targets,
 } from '../../db/schema.ts';
@@ -63,6 +64,9 @@ import {
  */
 export const CONCURRENT_BUILDS_PER_APP = 3;
 
+/** Duration after which a RUNNING build's dispatch lease is considered expired. */
+export const DISPATCH_LEASE_TIMEOUT_MS = 10 * 60 * 1000;
+
 export const dispatchBuildInput = z
   .object({
     /** The Build row to run. It already carries the source and the shape. */
@@ -89,6 +93,11 @@ export const dispatchBuildInput = z
      * unique key rather than silently serving the first one's values.
      */
     placementTargetId: z.uuid().optional(),
+    /**
+     * Optional durable identity for this dispatch attempt/lease.
+     * When omitted, a unique ID is generated for the claim.
+     */
+    dispatchId: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -101,6 +110,8 @@ export interface DispatchBuildResult {
   readonly artifactDigest: string | null;
   /** The route that ran, as recorded on the Build (§4). */
   readonly runner: string;
+  /** The durable dispatch identity for this run. */
+  readonly dispatchId: string;
 }
 
 export type BuildDispatchContext = Pick<
@@ -214,6 +225,7 @@ export const dispatchBuild = async (
       status: 'SUCCEEDED' as const,
       artifactDigest: build.artifactDigest,
       runner: build.runner ?? 'supplied',
+      dispatchId: build.dispatchId ?? input.dispatchId ?? 'supplied',
     });
   }
 
@@ -235,30 +247,40 @@ export const dispatchBuild = async (
     );
   }
 
-  // §4: "concurrent builds up to a per-App limit". Counted rather than queued,
-  // because §4 also removes the ordinal — a build records an artifact rather
-  // than deploying one, so nothing is waiting on a slot and refusing is a more
-  // honest answer than a queue whose position means nothing.
-  const running = await context.db
-    .select({ id: builds.id })
-    .from(builds)
-    .innerJoin(components, eq(builds.componentId, components.id))
-    .where(and(eq(components.appId, app.id), eq(builds.status, 'RUNNING')));
-  if (running.length >= CONCURRENT_BUILDS_PER_APP) {
-    return failed(
-      'NOT_BUILDABLE',
-      `${app.name} already has ${running.length} builds running, which is this installation's limit`,
-    );
+  // Target binding: if a Component has multiple placements, dispatch must name an explicit placementTargetId.
+  // If there is only one placement, default to it.
+  const placements = await context.db
+    .select({ targetId: componentTargetDesired.targetId })
+    .from(componentTargetDesired)
+    .where(eq(componentTargetDesired.componentId, component.id));
+
+  let effectiveTargetId = input.placementTargetId;
+  if (effectiveTargetId !== undefined) {
+    if (
+      placements.length > 0 &&
+      !placements.some((p) => p.targetId === effectiveTargetId)
+    ) {
+      return failed(
+        'NOT_BUILDABLE',
+        `Target ${effectiveTargetId} is not a placement target for Component ${component.id}`,
+      );
+    }
+  } else {
+    if (placements.length === 1) {
+      effectiveTargetId = placements[0]!.targetId;
+    } else if (placements.length > 1) {
+      return failed(
+        'NOT_BUILDABLE',
+        `Component ${component.id} has multiple target placements, so dispatch must name an explicit placementTargetId`,
+      );
+    }
   }
 
   // §16: "the level is a threshold, then admin rank wins." The threshold half
   // is the Target's, so it is only checkable where a placement is named — and
   // where one is, a route below it is refused here rather than producing an
   // artifact the Target would refuse to admit anyway.
-  const targetPolicy = await targetBuildPolicy(
-    context,
-    input.placementTargetId,
-  );
+  const targetPolicy = await targetBuildPolicy(context, effectiveTargetId);
   const refusal = routeRefusedByTarget(targetPolicy, adapter);
   if (refusal !== null) return failed('NOT_BUILDABLE', refusal);
 
@@ -319,14 +341,9 @@ export const dispatchBuild = async (
      * reaches a builder is the one place the contract says it may.
      */
     buildArgs:
-      input.placementTargetId === undefined ||
-      !isBuildTimeConfig(component.kind)
+      effectiveTargetId === undefined || !isBuildTimeConfig(component.kind)
         ? {}
-        : await readBuildArgs(
-            context.db,
-            component.id,
-            input.placementTargetId,
-          ),
+        : await readBuildArgs(context.db, component.id, effectiveTargetId),
   };
 
   const attempt = {
@@ -335,21 +352,83 @@ export const dispatchBuild = async (
     buildId: build.id,
   };
 
-  const [claimed] = await context.db
-    .update(builds)
-    .set({
-      status: 'RUNNING',
-      runner: adapter.name,
-      logFidelity: adapter.logFidelity,
-    })
-    .where(and(eq(builds.id, build.id), eq(builds.status, 'PENDING')))
-    .returning({ id: builds.id });
-  if (claimed === undefined) {
+  const dispatchId = input.dispatchId ?? crypto.randomUUID();
+  const now = context.clock?.now() ?? new Date();
+  const leaseCutoff = new Date(now.getTime() - DISPATCH_LEASE_TIMEOUT_MS);
+
+  const claimResult = await context.db.transaction(async (tx) => {
+    // Lock app row so per-App concurrency check and claim are atomic across reconciler replicas
+    await tx
+      .select({ id: apps.id })
+      .from(apps)
+      .where(eq(apps.id, app.id))
+      .for('update');
+
+    const running = await tx
+      .select({ id: builds.id })
+      .from(builds)
+      .innerJoin(components, eq(builds.componentId, components.id))
+      .where(
+        and(
+          eq(components.appId, app.id),
+          eq(builds.status, 'RUNNING'),
+          or(isNull(builds.leasedAt), gte(builds.leasedAt, leaseCutoff)),
+        ),
+      );
+
+    if (running.length >= CONCURRENT_BUILDS_PER_APP) {
+      return { type: 'CONCURRENCY_EXCEEDED' as const, count: running.length };
+    }
+
+    const [claimedRow] = await tx
+      .update(builds)
+      .set({
+        status: 'RUNNING',
+        runner: adapter.name,
+        logFidelity: adapter.logFidelity,
+        dispatchId,
+        leasedAt: now,
+      })
+      .where(
+        and(
+          eq(builds.id, build.id),
+          or(
+            eq(builds.status, 'PENDING'),
+            eq(builds.dispatchId, dispatchId),
+            and(
+              eq(builds.status, 'RUNNING'),
+              isNotNull(builds.leasedAt),
+              lt(builds.leasedAt, leaseCutoff),
+            ),
+          ),
+        ),
+      )
+      .returning({ id: builds.id, dispatchId: builds.dispatchId });
+
+    if (claimedRow !== undefined) {
+      return {
+        type: 'CLAIMED' as const,
+        dispatchId: claimedRow.dispatchId ?? dispatchId,
+      };
+    }
+
+    return { type: 'NOT_CLAIMED' as const };
+  });
+
+  if (claimResult.type === 'CONCURRENCY_EXCEEDED') {
+    return failed(
+      'NOT_BUILDABLE',
+      `${app.name} already has ${claimResult.count} builds running, which is this installation's limit`,
+    );
+  }
+
+  if (claimResult.type === 'NOT_CLAIMED') {
     const [current] = await context.db
       .select({
         status: builds.status,
         artifactDigest: builds.artifactDigest,
         runner: builds.runner,
+        dispatchId: builds.dispatchId,
       })
       .from(builds)
       .where(eq(builds.id, build.id));
@@ -359,6 +438,7 @@ export const dispatchBuild = async (
         status: 'SUCCEEDED',
         artifactDigest: current.artifactDigest,
         runner: current.runner ?? 'supplied',
+        dispatchId: current.dispatchId ?? dispatchId,
       });
     }
     if (current?.status === 'FAILED') {
@@ -367,6 +447,7 @@ export const dispatchBuild = async (
         status: 'FAILED',
         artifactDigest: null,
         runner: current.runner ?? adapter.name,
+        dispatchId: current.dispatchId ?? dispatchId,
       });
     }
     return failed(
@@ -374,6 +455,8 @@ export const dispatchBuild = async (
       `Build ${build.id} is already running on ${current?.runner ?? adapter.name}`,
     );
   }
+
+  const activeDispatchId = claimResult.dispatchId;
 
   try {
     const stream = adapter.build(buildSource, spec);
@@ -412,6 +495,7 @@ export const dispatchBuild = async (
         status: 'FAILED' as const,
         artifactDigest: null,
         runner: adapter.name,
+        dispatchId: activeDispatchId,
       });
     }
 
@@ -447,6 +531,7 @@ export const dispatchBuild = async (
         status: 'FAILED' as const,
         artifactDigest: null,
         runner: adapter.name,
+        dispatchId: activeDispatchId,
       });
     }
 
@@ -475,6 +560,7 @@ export const dispatchBuild = async (
       status: 'SUCCEEDED' as const,
       artifactDigest: result.artifact.digest,
       runner: adapter.name,
+      dispatchId: activeDispatchId,
     });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
@@ -496,6 +582,7 @@ export const dispatchBuild = async (
       status: 'FAILED' as const,
       artifactDigest: null,
       runner: adapter.name,
+      dispatchId: activeDispatchId,
     });
   }
 };

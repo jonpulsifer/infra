@@ -130,7 +130,7 @@ export interface BuildRouteSelection {
 }
 
 /**
- * The route a build for this Target runs on: the first eligible one by rank.
+ * The route a build for this Target runs on: the first eligible and available one by rank.
  *
  * `null` with reasons rather than a throw, because "no route can build for this
  * Target" is a state an installation can genuinely be in — an L2 Target and only
@@ -140,10 +140,14 @@ export interface BuildRouteSelection {
 export function selectBuildRoute(
   routes: readonly BuildRouteProfile[],
   demand: BuildRouteDemand = {},
+  isAvailable: (routeName: string) => boolean = () => true,
 ): BuildRouteSelection {
   const candidates = buildRouteCandidates(routes, demand);
   return {
-    route: candidates.find((candidate) => candidate.eligible)?.route ?? null,
+    route:
+      candidates.find(
+        (candidate) => candidate.eligible && isAvailable(candidate.route),
+      )?.route ?? null,
     candidates,
   };
 }

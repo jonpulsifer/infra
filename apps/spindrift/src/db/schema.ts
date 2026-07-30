@@ -464,6 +464,10 @@ export const builds = pgTable(
     /** §4: "The build backend and its fidelity are visible on the Build." */
     runner: text('runner'),
     logFidelity: logFidelity('log_fidelity'),
+    /** §4: durable identity for the dispatch attempt running or that ran this build. */
+    dispatchId: text('dispatch_id'),
+    /** Timestamp when the current runner claimed the dispatch lease. */
+    leasedAt: timestamp('leased_at', { withTimezone: true }),
     /** §16: the backend envelope plus the facts core verified from it. */
     provenance: jsonb('provenance').$type<BackendProvenanceAssessment>(),
     /**

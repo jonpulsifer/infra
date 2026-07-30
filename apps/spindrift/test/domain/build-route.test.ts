@@ -108,4 +108,14 @@ describe('build route selection', () => {
       expect(candidate.reason === '').toBe(candidate.eligible);
     }
   });
+
+  test('selects the first available eligible route rather than stopping at an unavailable top-ranked route', () => {
+    const isAvailable = (name: string) => name === 'cloud';
+    const { route } = selectBuildRoute(
+      ROUTES,
+      { minimumLevel: 2 },
+      isAvailable,
+    );
+    expect(route).toBe('cloud');
+  });
 });
