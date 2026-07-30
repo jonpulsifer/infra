@@ -37,6 +37,7 @@ export { getDeployDetail } from './deploys/get-detail.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';
 export { connectRepository } from './repositories/connect.ts';
 export { listRepositories } from './repositories/list.ts';
+export { testBucketPermissions } from './storage/test-bucket.ts';
 export { connectTarget } from './targets/connect.ts';
 export { disconnectTarget } from './targets/disconnect.ts';
 export { listTargets } from './targets/list.ts';

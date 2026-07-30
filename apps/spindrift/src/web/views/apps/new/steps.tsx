@@ -111,6 +111,36 @@ export function StepSource({
 }: StepProps & { repos: readonly RepositoryOptionView[] }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [bucketName, setBucketName] = useState('');
+  const [testingWif, setTestingWif] = useState(false);
+  const [wifStatus, setWifStatus] = useState<string | null>(null);
+
+  async function handleTestWif() {
+    if (!bucketName.trim()) return;
+    setTestingWif(true);
+    setWifStatus(null);
+    try {
+      const response = await fetch('/internal/commands/testBucketPermissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bucketName: bucketName.trim() }),
+      });
+      const res = await response.json();
+      if (res.ok) {
+        setWifStatus(
+          `✓ WIF permissions verified for gs://${bucketName.trim()}`,
+        );
+      } else {
+        setWifStatus(
+          `✗ WIF check failed: ${res.failure?.message || 'Access denied'}`,
+        );
+      }
+    } catch {
+      setWifStatus('Network error testing bucket permissions');
+    } finally {
+      setTestingWif(false);
+    }
+  }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -123,8 +153,14 @@ export function StepSource({
       const formData = new FormData();
       formData.append('file', file);
 
+      const headers: Record<string, string> = {};
+      if (bucketName.trim()) {
+        headers['x-bucket'] = bucketName.trim();
+      }
+
       const response = await fetch('/internal/upload', {
         method: 'POST',
+        headers,
         body: formData,
       });
 
@@ -222,6 +258,38 @@ export function StepSource({
               {uploadError ? (
                 <p className="text-xs text-destructive">{uploadError}</p>
               ) : null}
+            </div>
+            <div className="mt-2 flex flex-col gap-2 rounded border bg-muted/40 p-3">
+              <span className="text-xs font-semibold text-foreground">
+                Cloud Storage Bucket (Optional GCS Bucket)
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. trusted-builds-artifacts"
+                  value={bucketName}
+                  onChange={(e) => setBucketName(e.target.value)}
+                  className="flex-1 rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground"
+                />
+                <button
+                  type="button"
+                  disabled={!bucketName.trim() || testingWif}
+                  onClick={handleTestWif}
+                  className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {testingWif ? 'Testing WIF…' : 'Test WIF'}
+                </button>
+              </div>
+              {wifStatus ? (
+                <p className="text-xs font-medium text-muted-foreground">
+                  {wifStatus}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Uses credential-less Workload Identity Federation (WIF) token
+                  exchange.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>

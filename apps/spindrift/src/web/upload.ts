@@ -9,6 +9,7 @@
  * returns the digest and location.
  */
 import { type StagedArchive, stageArchiveBytes } from '../storage/archives.ts';
+import { uploadToGcsBucket } from '../storage/cloud.ts';
 import type { DispatchDeps } from './dispatch.ts';
 
 export const UPLOAD_PATH = '/internal/upload';
@@ -104,12 +105,39 @@ export async function handleUpload(
 
     const staged: StagedArchive = await stageArchiveBytes(filename, bytes);
 
+    let location = staged.location;
+    const bucket =
+      request.headers.get('x-bucket')?.trim() ||
+      process.env.SPINDRIFT_ARTIFACTS_BUCKET?.trim();
+
+    if (bucket) {
+      const context = deps.context(authentication.principal);
+      const federation = context.manifest.cloud.federation;
+      if (federation) {
+        try {
+          const hex = staged.digest.replace('sha256:', '');
+          const ext = filename.includes('.')
+            ? filename.split('.').pop()
+            : 'zip';
+          const gcs = await uploadToGcsBucket({
+            bucketName: bucket,
+            objectName: `${hex}.${ext}`,
+            bytes,
+            federation,
+          });
+          location = gcs.location;
+        } catch {
+          // Fall back to staged location if cloud upload fails
+        }
+      }
+    }
+
     return Response.json(
       {
         ok: true,
         value: {
           digest: staged.digest,
-          location: staged.location,
+          location,
           filename: staged.filename,
           size: staged.size,
         },

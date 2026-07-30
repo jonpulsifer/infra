@@ -65,6 +65,10 @@ import {
   listRepositories,
   listRepositoriesInput,
 } from './repositories/list.ts';
+import {
+  testBucketPermissions,
+  testBucketPermissionsInput,
+} from './storage/test-bucket.ts';
 import { connectTarget, connectTargetInput } from './targets/connect.ts';
 import {
   disconnectTarget,
@@ -139,6 +143,10 @@ export const commandRegistry = {
   resolveComponentPlacement: {
     input: resolveComponentPlacementInput,
     handler: resolveComponentPlacement,
+  },
+  testBucketPermissions: {
+    input: testBucketPermissionsInput,
+    handler: testBucketPermissions,
   },
 } as const satisfies Readonly<Record<string, AnyCommandDescriptor>>;
 
