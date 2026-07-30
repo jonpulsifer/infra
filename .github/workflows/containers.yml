@@ -3,23 +3,9 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'apps/**'
-      - 'packages/**'
-      - 'images/**'
-      - '.github/workflows/containers.yml'
-      - '.github/scripts/detect-containers.sh'
-      - '.github/containers.json'
   pull_request:
     branches:
       - main
-    paths:
-      - 'apps/**'
-      - 'packages/**'
-      - 'images/**'
-      - '.github/workflows/containers.yml'
-      - '.github/scripts/detect-containers.sh'
-      - '.github/containers.json'
 
 # Cancel superseded runs on the same ref instead of letting them pile up.
 concurrency:

@@ -3,32 +3,8 @@ name: TypeScript
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "apps/hub/**"
-      - "apps/slingshot/**"
-      - "apps/spindrift/**"
-      - "packages/charts/**"
-      - "packages/k6/**"
-      - "packages/typescript-config/**"
-      - "package.json"
-      - "bun.lock"
-      - "turbo.json"
-      - "biome.json"
-      - ".github/workflows/typescript.yml"
   push:
     branches: [main]
-    paths:
-      - "apps/hub/**"
-      - "apps/slingshot/**"
-      - "apps/spindrift/**"
-      - "packages/charts/**"
-      - "packages/k6/**"
-      - "packages/typescript-config/**"
-      - "package.json"
-      - "bun.lock"
-      - "turbo.json"
-      - "biome.json"
-      - ".github/workflows/typescript.yml"
 
 permissions:
   contents: read
@@ -39,7 +15,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.changed-paths.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: changed-paths
+        uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
+        with:
+          files: |
+            apps/hub/**
+            apps/slingshot/**
+            apps/spindrift/**
+            packages/charts/**
+            packages/k6/**
+            packages/typescript-config/**
+            package.json
+            bun.lock
+            turbo.json
+            biome.json
+            .github/workflows/typescript.yml
+
   validate:
+    needs: detect
+    if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

@@ -19,6 +19,7 @@ spec:
     orgAllowlist: github.com/jonpulsifer/*
     environment:
       ATLANTIS_AUTOMERGE: "true"
+      ATLANTIS_ALLOW_COMMANDS: "version,plan,apply,unlock,approve_policies,cancel,import"
       ATLANTIS_EMOJI_REACTION: "eyes"
       ATLANTIS_ENABLE_DIFF_MARKDOWN_FORMAT: "true"
       ATLANTIS_ENABLE_POLICY_CHECKS: "true"
@@ -48,6 +49,8 @@ spec:
       # ArgoCD Provider https://github.com/grpc/grpc-go/issues/434
       ARGOCD_SERVER: "argo.${SECRET_DOMAIN}:443"
       GRPC_ENFORCE_ALPN_ENABLED: "false"
+      # GitHub Provider
+      GITHUB_OWNER: jonpulsifer
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID
         secretKeyRef:
