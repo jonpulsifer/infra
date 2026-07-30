@@ -18,12 +18,14 @@ export async function routeForTarget(
     .where(eq(targets.id, targetId))
     .limit(1);
   if (!target) return null;
-  const selected = selectBuildRoute(buildRouteProfiles(context.manifest), {
-    minimumLevel:
-      (target.minimumLevel as 1 | 2 | 3 | null) ?? DEFAULT_MINIMUM_BUILD_LEVEL,
-  });
-  return selected.route !== null &&
-    context.adapters.build(selected.route) !== null
-    ? selected.route
-    : null;
+  const selected = selectBuildRoute(
+    buildRouteProfiles(context.manifest),
+    {
+      minimumLevel:
+        (target.minimumLevel as 1 | 2 | 3 | null) ??
+        DEFAULT_MINIMUM_BUILD_LEVEL,
+    },
+    (routeName) => context.adapters.build(routeName) !== null,
+  );
+  return selected.route;
 }
