@@ -26,7 +26,7 @@ import {
   serializeSpindriftFile,
   WORKFLOW_PATH,
 } from '../../../src/integrations/github/config-pr.ts';
-import { FakeGitHub, testAppKey } from '../../harness/fakes/github-api.ts';
+import { FakeGitHub } from '../../harness/fakes/github-api.ts';
 
 const BUILD_WORKFLOW =
   'example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809';
@@ -51,12 +51,10 @@ const dockerfile: DetectionProposal = {
   watchPaths: ['services/api'],
 };
 
-async function app(fake: FakeGitHub): Promise<GitHubApp> {
-  const { pem } = await testAppKey();
+function app(fake: FakeGitHub): GitHubApp {
   return new GitHubApp({
-    appId: '1234567',
-    privateKeyPem: pem,
     baseUrl: fake.baseUrl,
+    authorization: () => 'Bearer test-user-token',
     fetch: fake.fetch,
   });
 }
@@ -160,7 +158,7 @@ describe('opening it against the repository API', () => {
       buildWorkflow: BUILD_WORKFLOW,
     });
     const opened = await openConfigurationPullRequest(
-      await app(fake),
+      app(fake),
       { installationId: fake.installationId },
       {
         fullName: fake.fullName,
@@ -247,20 +245,12 @@ describe('opening it against the repository API', () => {
     ).toHaveLength(1);
   });
 
-  test('presents an installation token, never the App JWT', async () => {
+  test('presents the user authorization without exposing it to callers', async () => {
     const fake = new FakeGitHub();
     await open(fake);
 
-    const minting = fake.requests.filter((request) =>
-      request.path.includes('/access_tokens'),
-    );
-    expect(minting).toHaveLength(1);
-    // Every other call carries the minted token. A JWT is three base64 segments
-    // and would show up here as one; a token is the opaque value the far side
-    // handed back.
     for (const request of fake.requests) {
-      if (request.path.includes('/access_tokens')) continue;
-      expect(request.authorization).toBe('Bearer installation-token-1');
+      expect(request.authorization).toBe('Bearer test-user-token');
     }
   });
 });

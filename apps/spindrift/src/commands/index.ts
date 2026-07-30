@@ -35,6 +35,10 @@ export {
 export { createDeploy } from './deploys/create.ts';
 export { getDeployDetail } from './deploys/get-detail.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';
+export {
+  beginRepositoryAuthorization,
+  pollRepositoryAuthorization,
+} from './repositories/authorize.ts';
 export { connectRepository } from './repositories/connect.ts';
 export { listRepositories } from './repositories/list.ts';
 export { testBucketPermissions } from './storage/test-bucket.ts';

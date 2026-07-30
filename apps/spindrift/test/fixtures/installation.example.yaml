@@ -43,7 +43,8 @@ supplyChain:
   signer: gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer
 
 github:
-  appId: '1234567'
+  clientId: Iv1.example
+  oauthBaseUrl: https://git.example.test
   apiBaseUrl: https://api.git.example.test
   # Pinned to a commit, never a branch: the caller this ref lands in runs with
   # the connected repository's own permissions.

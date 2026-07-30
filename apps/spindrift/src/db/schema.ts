@@ -240,10 +240,10 @@ export const installation = pgTable(
  * to be repeated on, and kept consistent across, every App that names it. A
  * monorepo with four Apps in four subpaths is one row here and four there.
  *
- * **No credential column.** §15: Spindrift "stages an immutable source bundle
- * for either builder, storing no token." What is stored is the installation's
- * identity; the token is minted per request from the App's own key and never
- * survives the call it was minted for.
+ * **No per-repository credential column.** What is stored here is the
+ * installation identity GitHub reported. The installation-level OAuth
+ * credential lives in the encrypted singleton below, so connecting a second
+ * repository never copies or specializes a bearer token.
  */
 export const repositories = pgTable(
   'repositories',
@@ -294,6 +294,69 @@ export const repositories = pgTable(
       sql`(${table.access} = 'frozen') = (${table.frozenReason} is not null)`,
     ),
   ],
+);
+
+/**
+ * The installation's GitHub user authorization.
+ *
+ * One row because a Spindrift installation has one repository connector, just
+ * as it has one installation manifest. The credential is recoverable by
+ * design—background reconciliation and hosted builds need it after the browser
+ * ceremony ends—so unlike a session token it cannot be hashed. It is instead an
+ * AES-GCM envelope whose key lives in the installation Secret. The key id in
+ * that envelope supports additive rotation; `github/oauth.ts` rewrites a value
+ * encrypted by a legacy key when it next reads it.
+ *
+ * Access and refresh tokens remain inside `encryptedCredential`. Keeping them
+ * in one envelope makes GitHub's refresh-token rotation atomic: nobody can
+ * observe a new access token paired with the refresh token it invalidated.
+ */
+export const githubOAuthCredentials = pgTable(
+  'github_oauth_credentials',
+  {
+    id: integer('id').primaryKey().default(1),
+    githubUserId: text('github_user_id').notNull(),
+    githubLogin: text('github_login').notNull(),
+    encryptedCredential: text('encrypted_credential').notNull(),
+    accessExpiresAt: timestamp('access_expires_at', { withTimezone: true }),
+    refreshExpiresAt: timestamp('refresh_expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check('github_oauth_credentials_singleton', sql`${table.id} = 1`),
+  ],
+);
+
+/**
+ * One in-progress GitHub Device Flow ceremony.
+ *
+ * The device code can be exchanged for the operator's credential after they
+ * approve the user code, so it is encrypted with a distinct purpose from the
+ * durable credential. The browser receives only the user code and this row's
+ * opaque id. Binding the row to a Spindrift user prevents another authenticated
+ * browser from polling or consuming somebody else's ceremony.
+ */
+export const githubDeviceAuthorizations = pgTable(
+  'github_device_authorizations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    encryptedDeviceCode: text('encrypted_device_code').notNull(),
+    verificationUri: text('verification_uri').notNull(),
+    intervalSeconds: integer('interval_seconds').notNull(),
+    nextPollAt: timestamp('next_poll_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
 );
 
 // --- App and Component -------------------------------------------------

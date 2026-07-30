@@ -4,10 +4,8 @@
  * Two claims §15 makes are properties of this file rather than of anybody's
  * discipline, and both are asserted here:
  *
- * - **"Storing no token."** The only long-lived credential is the App key; the
- *   App JWT and the installation token are minted per use. The tests check that
- *   what leaves this module — a `FetchedCommit` staged by
- *   `src/domain/source-bundle.ts` — carries neither.
+ * - **"Storing no token."** What leaves this module — a `FetchedCommit`
+ *   staged by `src/domain/source-bundle.ts` — carries no bearer credential.
  * - **Lost access is a state, not a fault.** A selected-repository App can be
  *   un-selected at any time, and the response is a `404` indistinguishable from
  *   a repository that never existed. So `ACCESS_LOST` has to cover `401`, `403`
@@ -17,122 +15,19 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { stageSourceBundle } from '../../../src/domain/source-bundle.ts';
-import {
-  GitHubApp,
-  GitHubAppKeyError,
-} from '../../../src/integrations/github/app.ts';
+import { GitHubApp } from '../../../src/integrations/github/app.ts';
 import { GitHubAccessError } from '../../../src/integrations/github/http.ts';
-import { FakeGitHub, testAppKey } from '../../harness/fakes/github-api.ts';
+import { FakeGitHub } from '../../harness/fakes/github-api.ts';
 
-const APP_ID = '1234567';
-
-async function app(
-  fake: FakeGitHub,
-  now: () => Date = () => new Date('2026-07-28T12:00:00.000Z'),
-) {
-  const { pem, publicKey } = await testAppKey();
+async function app(fake: FakeGitHub) {
   return {
-    publicKey,
-    app: new GitHubApp(
-      {
-        appId: APP_ID,
-        privateKeyPem: pem,
-        baseUrl: fake.baseUrl,
-        fetch: fake.fetch,
-      },
-      now,
-    ),
+    app: new GitHubApp({
+      baseUrl: fake.baseUrl,
+      authorization: () => 'Bearer test-user-token',
+      fetch: fake.fetch,
+    }),
   };
 }
-
-function decodeSegment(segment: string): Record<string, unknown> {
-  const padded = segment.replaceAll('-', '+').replaceAll('_', '/');
-  return JSON.parse(atob(padded));
-}
-
-describe('the App’s own JWT', () => {
-  test('is signed by the App key and claims the App id', async () => {
-    const fake = new FakeGitHub();
-    const { app: github, publicKey } = await app(fake);
-    const jwt = await github.appJwt();
-
-    const [header, claims, signature] = jwt.split('.');
-    expect(decodeSegment(header ?? '')).toEqual({ alg: 'RS256', typ: 'JWT' });
-
-    const payload = decodeSegment(claims ?? '');
-    const issuedAt = Math.floor(
-      new Date('2026-07-28T12:00:00.000Z').getTime() / 1000,
-    );
-    expect(payload.iss).toBe(APP_ID);
-    // Backdated by a minute: the documented remedy for a far side whose clock
-    // runs behind this one, which it otherwise rejects outright.
-    expect(payload.iat).toBe(issuedAt - 60);
-    expect(payload.exp).toBeLessThanOrEqual(issuedAt + 600);
-
-    const verified = await crypto.subtle.verify(
-      'RSASSA-PKCS1-v1_5',
-      publicKey,
-      Uint8Array.from(
-        atob((signature ?? '').replaceAll('-', '+').replaceAll('_', '/')),
-        (character) => character.charCodeAt(0),
-      ),
-      new TextEncoder().encode(`${header}.${claims}`),
-    );
-    expect(verified).toBe(true);
-  });
-
-  test('refuses the PKCS#1 key the App UI hands out, and says how to convert it', async () => {
-    const github = new GitHubApp({
-      appId: APP_ID,
-      privateKeyPem:
-        '-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----',
-      baseUrl: 'https://api.git.invalid',
-    });
-    const signed = github.appJwt();
-    await expect(signed).rejects.toBeInstanceOf(GitHubAppKeyError);
-    await expect(signed).rejects.toThrow(/openssl pkcs8 -topk8/);
-  });
-});
-
-describe('installation tokens', () => {
-  test('are minted once and reused until they are close to expiring', async () => {
-    const fake = new FakeGitHub({
-      now: () => new Date('2026-07-28T12:00:00.000Z'),
-    });
-    const { app: github } = await app(fake);
-    const ref = { installationId: fake.installationId };
-
-    await github.repository(ref, fake.fullName);
-    await github.repository(ref, fake.fullName);
-    await github.branchHead(ref, fake.fullName, 'main').catch(() => null);
-
-    expect(
-      fake.requests.filter((request) =>
-        request.path.includes('/access_tokens'),
-      ),
-    ).toHaveLength(1);
-  });
-
-  test('are re-minted once the cached one is inside the refresh margin', async () => {
-    let clock = new Date('2026-07-28T12:00:00.000Z');
-    const fake = new FakeGitHub({ now: () => clock });
-    const { app: github } = await app(fake, () => clock);
-    const ref = { installationId: fake.installationId };
-
-    await github.repository(ref, fake.fullName);
-    // The fake's tokens live an hour. A token that expires mid-request is a
-    // `401` that reads exactly like lost access, which is the one
-    // misclassification this integration must not make.
-    clock = new Date(clock.getTime() + 60 * 60 * 1000);
-    await github.repository(ref, fake.fullName);
-
-    expect(
-      fake.requests.filter((request) =>
-        request.path.includes('/access_tokens'),
-      ),
-    ).toHaveLength(2);
-  });
-});
 
 describe('reading a repository', () => {
   test('reports the default branch rather than assuming one', async () => {

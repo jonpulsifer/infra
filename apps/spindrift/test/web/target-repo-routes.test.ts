@@ -11,7 +11,7 @@ import { GitHubApp } from '../../src/integrations/github/app.ts';
 import { commandRoutes, pathFor } from '../../src/web/dispatch.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
+import { FakeGitHub } from '../harness/fakes/github-api.ts';
 import { clusterInput, fixtureManifest } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -20,19 +20,14 @@ const NOW = new Date('2026-07-28T12:00:00.000Z');
 async function makeContext(
   fakeGithub: FakeGitHub | null,
 ): Promise<CommandContext> {
-  const { pem } = await testAppKey();
   const host =
     fakeGithub === null
       ? null
-      : new GitHubApp(
-          {
-            appId: '1234567',
-            privateKeyPem: pem,
-            baseUrl: fakeGithub.baseUrl,
-            fetch: fakeGithub.fetch,
-          },
-          () => NOW,
-        );
+      : new GitHubApp({
+          baseUrl: fakeGithub.baseUrl,
+          authorization: () => 'Bearer test-user-token',
+          fetch: fakeGithub.fetch,
+        });
 
   const fakeDeploy = new FakeDeployAdapter({ adapter: 'kubernetes' });
   const adapters: AdapterRegistry = {
@@ -158,21 +153,16 @@ describe('listTargets and listRepositories over route boundary', () => {
     await connectRepository(
       {
         fullName: fake.fullName,
-        installationId: fake.installationId,
         scopes: [
           {
             scope: 'app',
-            proposal: {
-              source: 'railpack',
-              kind: 'service',
-              kinds: [{ kind: 'service', available: true }],
-              build: {
-                frontend: 'railpack',
-                buildCommand: 'bun run build',
-                outputDirectory: null,
-              },
-              watchPaths: [],
+            kind: 'service',
+            build: {
+              frontend: 'railpack',
+              buildCommand: 'bun run build',
+              outputDirectory: null,
             },
+            watchPaths: ['app'],
           },
         ],
       },
@@ -204,21 +194,16 @@ describe('listTargets and listRepositories over route boundary', () => {
     await connectRepository(
       {
         fullName: fake.fullName,
-        installationId: fake.installationId,
         scopes: [
           {
             scope: 'app',
-            proposal: {
-              source: 'railpack',
-              kind: 'service',
-              kinds: [{ kind: 'service', available: true }],
-              build: {
-                frontend: 'railpack',
-                buildCommand: 'bun run build',
-                outputDirectory: null,
-              },
-              watchPaths: [],
+            kind: 'service',
+            build: {
+              frontend: 'railpack',
+              buildCommand: 'bun run build',
+              outputDirectory: null,
             },
+            watchPaths: ['app'],
           },
         ],
       },

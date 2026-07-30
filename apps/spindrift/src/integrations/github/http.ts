@@ -36,6 +36,12 @@ export interface GitHubEndpoint {
   /** Base URL of the REST API, without a trailing slash. */
   readonly baseUrl: string;
   readonly authorization: AuthorizationProvider;
+  /**
+   * User OAuth can distinguish a rejected bearer from lost repository access.
+   * App-installation authentication omits this and keeps the ordinary
+   * ACCESS_LOST classification.
+   */
+  readonly onUnauthorized?: (authorization: string) => Error | Promise<Error>;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
@@ -144,9 +150,10 @@ export class GitHubHttp {
   /** Send one request. `null` when the status was tolerated by the caller. */
   async send(options: RequestOptions): Promise<Response | null> {
     const url = `${this.endpoint.baseUrl}${options.path}`;
+    const authorization = await this.endpoint.authorization();
     const headers: Record<string, string> = {
       Accept: options.accept ?? 'application/vnd.github+json',
-      Authorization: await this.endpoint.authorization(),
+      Authorization: authorization,
       // Pinning the API version is what keeps a far-side default from changing
       // the shape of a response this client parses.
       'X-GitHub-Api-Version': API_VERSION,
@@ -167,6 +174,9 @@ export class GitHubHttp {
 
     if (response.ok) return response;
     if (options.tolerate?.includes(response.status)) return null;
+    if (response.status === 401 && this.endpoint.onUnauthorized !== undefined) {
+      throw await this.endpoint.onUnauthorized(authorization);
+    }
     throw new GitHubAccessError(
       classify(response),
       options.method,

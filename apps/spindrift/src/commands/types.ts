@@ -28,7 +28,10 @@ import type {
   TargetAdapter,
 } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
-import type { RepositoryHost } from '../domain/repository.ts';
+import type {
+  RepositoryAuthorization,
+  RepositoryHost,
+} from '../domain/repository.ts';
 import type { RepositorySourceStager } from '../domain/source-bundle.ts';
 import type { SupplyChain } from '../supply-chain/sign.ts';
 
@@ -104,6 +107,14 @@ export interface AdapterRegistry {
   repository(): RepositoryHost | null;
   /** Immutable repository staging, absent until a source depot is configured. */
   source?(): RepositorySourceStager | null;
+  /**
+   * The user-mediated connector, where this repository integration has one.
+   *
+   * Optional on the registry itself so existing non-interactive adapters and
+   * test fakes remain honest: repository operations do not imply an OAuth
+   * ceremony.
+   */
+  repositoryAuthorization?(): RepositoryAuthorization | null;
   /**
    * Core's verifier and signer (§16).
    *

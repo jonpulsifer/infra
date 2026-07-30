@@ -86,8 +86,9 @@ export const buildRouteAdapterSchema = z.enum([
  * is not a state this model has a name for.
  *
  * **No credential appears in any variant** (§13). Each route's access path is
- * minted per request — the App key for hosted CI, a federated token for the
- * cloud builder, the projected service account token in-cluster.
+ * resolved per request — the encrypted OAuth credential for hosted CI, a
+ * federated token for the cloud builder, the projected service account token
+ * in-cluster.
  */
 export const buildRouteSchema = z.discriminatedUnion('adapter', [
   z
@@ -379,11 +380,23 @@ export const installationManifestSchema = z
 
     github: z
       .object({
-        /** Numeric id of the GitHub App used for repository integration (§15). */
-        appId: nonEmptyString.regex(
-          /^[0-9]+$/,
-          'must be a numeric GitHub App id',
-        ),
+        /**
+         * Public OAuth client id of that App.
+         *
+         * Device Flow needs no client secret or App signing key. This value is
+         * safe to render into the installation ConfigMap and is what binds the
+         * browser-mediated authorization to the selected-repository App.
+         */
+        clientId: nonEmptyString,
+        /**
+         * Web host carrying GitHub's Device Flow and token endpoints.
+         *
+         * Separate from `apiBaseUrl` for GitHub Enterprise installations,
+         * whose web and REST origins differ.
+         */
+        oauthBaseUrl: z
+          .url()
+          .refine((value) => !value.endsWith('/'), 'must not end with a slash'),
         /**
          * Base URL of the repository host's REST API, without a trailing
          * slash.

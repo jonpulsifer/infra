@@ -28,11 +28,17 @@ import type {
   TargetAdapter,
 } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
+import type { Database } from '../db/client.ts';
 import type { BuildRouteProfile } from '../domain/build-route.ts';
-import type { RepositoryHost } from '../domain/repository.ts';
+import type {
+  RepositoryAuthorization,
+  RepositoryHost,
+} from '../domain/repository.ts';
 import type { RepositorySourceStager } from '../domain/source-bundle.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
+import { CredentialKeyring } from '../integrations/github/credential-crypto.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
+import { GitHubDeviceOAuth } from '../integrations/github/oauth.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
@@ -98,21 +104,12 @@ export function installationServiceAccountToken(
   return projectedServiceAccountToken(configured || SERVICE_ACCOUNT_TOKEN_PATH);
 }
 
-/**
- * Where the GitHub App's private key is read from (§15: "bootstrapped from a
- * SOPS Secret").
- *
- * An environment variable rather than a manifest key, and the split is the one
- * §20 already draws: the manifest is non-secret installation configuration and
- * is rendered into a ConfigMap, while this is the one long-lived credential
- * this integration has. An installation without it simply has no repository
- * integration — which is a supported installation, because §2's other source is
- * an uploaded archive.
- */
-export const GITHUB_APP_KEY_VAR = 'SPINDRIFT_GITHUB_APP_KEY';
-
 export interface RegistryOptions {
   readonly manifest: InstallationManifest;
+  /** Required for the durable OAuth credential and Device Flow attempts. */
+  readonly db?: Database;
+  /** Shared with commands so token expiry and rows agree on one time source. */
+  readonly clock?: import('../commands/types.ts').Clock;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly token?: TokenProvider;
   /** Injected for the same reason, for the repository host's transport. */
@@ -145,23 +142,47 @@ export function createAdapterRegistry(
       options.token ?? installationServiceAccountToken(options.env ?? Bun.env),
   });
 
-  // §15's repository host, when this installation was given the App key. Built
-  // once: it caches the imported signing key and one installation token per
-  // installation, and a per-request instance would mint a JWT per call.
-  const appKey = (options.env ?? Bun.env)[GITHUB_APP_KEY_VAR]?.trim();
-  // Held as its concrete type, not as `RepositoryHost`, because the hosted
-  // build route needs the Actions calls the repository interfaces do not
-  // declare — and one object serves both so a build and a configuration PR
-  // share the App's token cache rather than each minting their own.
-  const app = appKey
-    ? new GitHubApp({
-        appId: options.manifest.github.appId,
-        privateKeyPem: appKey,
-        baseUrl: options.manifest.github.apiBaseUrl,
-        ...(options.fetch ? { fetch: options.fetch } : {}),
-      })
-    : null;
+  // The connector exists only where both halves of its durable boundary exist:
+  // Postgres for ciphertext and an installation-Secret keyring to open it.
+  // The GitHub App's public client id stays in the manifest; no App private key
+  // or client secret is present in this process.
+  const keyring = CredentialKeyring.fromEnvironment(options.env ?? Bun.env);
+  const oauth =
+    keyring !== null && options.db !== undefined
+      ? new GitHubDeviceOAuth({
+          db: options.db,
+          clock: options.clock ?? { now: () => new Date() },
+          keyring,
+          clientId: options.manifest.github.clientId,
+          oauthBaseUrl: options.manifest.github.oauthBaseUrl,
+          apiBaseUrl: options.manifest.github.apiBaseUrl,
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+        })
+      : null;
+  // Held as its concrete type because the hosted build route needs Actions
+  // calls beyond `RepositoryHost`; all calls share the same refresh provider.
+  const app =
+    oauth === null
+      ? null
+      : new GitHubApp({
+          baseUrl: options.manifest.github.apiBaseUrl,
+          authorization: () => oauth.authorization(),
+          onUnauthorized: (authorization) =>
+            oauth.rejectedAuthorization(authorization),
+          principalSubject: (ref) => oauth.principalSubject(ref.installationId),
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+        });
   const repositoryHost: RepositoryHost | null = app;
+  const repositoryAuthorization: RepositoryAuthorization | null =
+    oauth === null || app === null
+      ? null
+      : {
+          status: () => oauth.status(),
+          begin: (userId) => oauth.begin(userId),
+          poll: (userId, attemptId) => oauth.poll(userId, attemptId),
+          repositories: () => app.availableRepositories(),
+          installationFor: (fullName) => app.installationFor(fullName),
+        };
   const store = createSecretStore(
     options.manifest,
     options.storeToken ?? storeToken(options.env ?? Bun.env),
@@ -221,7 +242,7 @@ export function createAdapterRegistry(
      * closed vocabulary, so an unknown name is answered with `null` and
      * `dispatchBuild` prints "this installation has no build route named X".
      * The same `null` covers a route this installation configured but cannot
-     * construct — a hosted-CI route with no App key — because the two are one
+     * construct — a hosted-CI route with no OAuth store — because the two are one
      * fact to whoever is trying to build: the route is not available here.
      */
     build(route: string): BuildAdapter | null {
@@ -245,7 +266,7 @@ export function createAdapterRegistry(
     },
 
     /**
-     * §15's repository host, or `null` when no App key was supplied.
+     * §15's repository host, or `null` when durable OAuth is not configured.
      *
      * `null` rather than a throw, following the same rule the other lookups
      * do: an installation with no repository integration is a configuration
@@ -260,6 +281,10 @@ export function createAdapterRegistry(
       return options.source ?? null;
     },
 
+    repositoryAuthorization(): RepositoryAuthorization | null {
+      return repositoryAuthorization;
+    },
+
     supplyChain() {
       return supplyChain;
     },
@@ -271,8 +296,8 @@ export function createAdapterRegistry(
  *
  * Derived from the manifest rather than from the registry map, so a route the
  * installation configured but cannot construct still appears — placement should
- * be able to say "the hosted route is configured and this process has no App
- * key" rather than silently pretending the route was never named.
+ * be able to say "the hosted route is configured and this process has no OAuth
+ * store" rather than silently pretending the route was never named.
  */
 export function buildRouteProfiles(
   manifest: InstallationManifest,
@@ -304,7 +329,7 @@ const BUILD_ROUTE_LEVELS = {
  * One configured route, or `null` where this process cannot construct it.
  *
  * The hosted route is the only one that can come back `null`: it runs through
- * the repository host, and an installation with no App key has no repository
+ * the repository host, and an installation with no OAuth store has no repository
  * integration at all (§15). The other two authorize with tokens read at the
  * moment of use, so they construct even where those tokens are absent — and
  * fail loudly on the first build rather than silently at boot.
@@ -320,9 +345,9 @@ function createBuildRoute(
   switch (route.adapter) {
     case 'github-actions': {
       const workflow = manifest.github.buildWorkflow;
-      // Both halves are §15's: no App key means no repository integration, and
-      // no pinned workflow means there is nothing to dispatch. Either way this
-      // installation has not finished wiring hosted CI.
+      // Both halves are §15's: no OAuth-backed host means no repository
+      // integration, and no pinned workflow means there is nothing to dispatch.
+      // Either way this installation has not finished wiring hosted CI.
       if (app === null || workflow === null) return null;
       return new GitHubActionsBuildRoute({
         name: route.name,

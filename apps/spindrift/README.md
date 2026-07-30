@@ -253,6 +253,26 @@ carries a correlation input it stamps into `run-name` and the route finds its
 run by that name; the correlation stays out of the spec because no part of the
 build depends on it.
 
+Repository authorization begins in `/repos` with the GitHub App Device Flow.
+The installation manifest names the public client and API origins; it carries
+neither a connected repository nor a GitHub credential. The resulting user
+access and refresh token are one encrypted Postgres row, shared by the web and
+reconciler processes. Repository rows retain only the installation identity
+GitHub reports when the authorized operator selects a repository.
+
+`SPINDRIFT_CREDENTIAL_KEYRING` is a JSON document in the installation Secret:
+
+```json
+{"active":"2026-07","keys":{"2026-07":"<32 bytes, base64url>"}}
+```
+
+Rotation is two PRs. First add a new key, make it `active`, and retain every
+old key in `keys`; credential reads and refreshes rewrite legacy envelopes
+under the active key while holding the singleton row lock. After the rollout
+has exercised the connector, a later PR removes the legacy entries. Removing a
+legacy key in the first PR makes ciphertext that has not yet been read
+undecryptable, so the parser fails loudly instead of guessing.
+
 A **Deploy** is an intent, written under `SELECT ... FOR UPDATE` on the one
 `(Component, Target)` desired row. That locking read is the whole of the
 concurrency design: two intents for one pair serialize, and the second reads what
@@ -354,9 +374,10 @@ that sentence when it is missing.
 
 The cloud build route reads a second variable, `SPINDRIFT_BUILD_TOKEN`, for the
 same reason and with the same posture: two access paths to two services, each
-read per call so a rotated Secret takes effect without a restart. The other two
-routes need neither — hosted CI goes through the App key, and the in-cluster
-Job authorizes with the projected service account token.
+read per call so a rotated Secret takes effect without a restart. Hosted CI
+uses the GitHub authorization created in the Repositories UI and encrypted in
+Postgres by `SPINDRIFT_CREDENTIAL_KEYRING`; the in-cluster Job authorizes with
+the projected service account token.
 
 **A cloud Target needs no variable at all**, and that is §13's one auth mode
 arriving where the spec wanted it: "native OIDC federation, nothing stored".

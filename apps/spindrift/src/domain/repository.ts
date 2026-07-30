@@ -9,11 +9,11 @@
  * what a GitHub App is. `src/integrations/github/` implements these interfaces;
  * nothing in `src/commands/` or `src/reconciler/` imports it.
  *
- * **The reference grants nothing.** §15 says Spindrift stores no token, so what
- * core holds and passes around is {@link RepositoryRef} — an installation
- * identity, which is a string in a database column. Every credential is minted
- * inside the host at the moment of use, which is what makes "storing no token"
- * a fact about the types rather than a rule somebody has to remember.
+ * **The reference grants nothing.** Core holds and passes around
+ * {@link RepositoryRef}—an installation identity, which is a string in a
+ * database column. The encrypted installation-level credential stays inside
+ * the host and is resolved at the moment of use; no repository command can
+ * receive or return it.
  */
 
 /**
@@ -27,6 +27,69 @@
 export interface RepositoryRef {
   /** Opaque to core; meaningful only to the host that issued it. */
   readonly installationId: string;
+}
+
+/** One repository the authorized account can reach through an installation. */
+export interface AvailableRepository {
+  /** Stable far-side repository identity, useful as a UI selection key. */
+  readonly repositoryId: string;
+  readonly fullName: string;
+  readonly defaultBranch: string;
+  /** Opaque installation identity; never accepted back from the browser. */
+  readonly installationId: string;
+}
+
+/** The browser-safe state of the installation's repository authorization. */
+export type RepositoryAuthorizationStatus =
+  | { readonly state: 'unauthorized' }
+  | {
+      readonly state: 'authorized';
+      readonly login: string;
+      readonly githubUserId: string;
+    };
+
+/** The durable repository connector needs the operator to authorize again. */
+export class RepositoryAuthorizationRequiredError extends Error {
+  override readonly name = 'RepositoryAuthorizationRequiredError';
+}
+
+/** What beginning a user-mediated repository authorization returns. */
+export interface RepositoryAuthorizationChallenge {
+  readonly attemptId: string;
+  readonly userCode: string;
+  readonly verificationUri: string;
+  readonly expiresAt: Date;
+  readonly intervalSeconds: number;
+}
+
+/** What polling that challenge may conclude. */
+export type RepositoryAuthorizationPoll =
+  | {
+      readonly state: 'pending';
+      readonly retryAfterSeconds: number;
+      readonly expiresAt: Date;
+    }
+  | {
+      readonly state: 'authorized';
+      readonly login: string;
+    }
+  | {
+      readonly state: 'expired' | 'denied';
+    };
+
+/**
+ * The optional user-authorization half of a repository integration.
+ *
+ * Kept beside, not inside, {@link RepositoryHost}: reconciliation only needs
+ * repository operations and should not gain browser ceremony methods merely
+ * because the concrete GitHub adapter implements both.
+ */
+export interface RepositoryAuthorization {
+  status(): Promise<RepositoryAuthorizationStatus>;
+  begin(userId: string): Promise<RepositoryAuthorizationChallenge>;
+  poll(userId: string, attemptId: string): Promise<RepositoryAuthorizationPoll>;
+  repositories(): Promise<readonly AvailableRepository[]>;
+  installationFor(fullName: string): Promise<RepositoryRef>;
 }
 
 /** What reconciliation reads (§15). */
@@ -111,7 +174,15 @@ export interface RepositoryWriter {
 }
 
 /** Everything one repository host does. */
-export interface RepositoryHost extends RepositoryReader, RepositoryWriter {}
+export interface RepositoryHost extends RepositoryReader, RepositoryWriter {
+  /**
+   * Resolve the opaque installation covering a repository.
+   *
+   * Optional because non-GitHub/fake repository hosts can operate from an
+   * already persisted reference. Connecting a new repository requires it.
+   */
+  installationFor?(fullName: string): Promise<RepositoryRef>;
+}
 
 /** The reference for a stored repository row. */
 export function repositoryRefOf(row: {

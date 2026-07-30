@@ -22,6 +22,7 @@ import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { Workspace } from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
+import { RepositoryList } from '../../src/web/views/repos/list.tsx';
 
 const deploy = (view: DeployView) =>
   renderToStaticMarkup(<DeployDetail view={view} />);
@@ -88,6 +89,86 @@ describe('authentication Settings', () => {
     expect(markup).toContain('At least one always remains');
     expect(markup).toContain('disabled=""');
     expect(markup).toContain('Link this Gateway identity');
+  });
+});
+
+describe('the GitHub repository connector', () => {
+  const actions = {
+    onAuthorize: () => undefined,
+    onConnect: () => undefined,
+    onRefresh: () => undefined,
+  };
+
+  test('starts with user authorization and names no private key', () => {
+    const markup = renderToStaticMarkup(
+      <RepositoryList
+        repos={[]}
+        options={[]}
+        connector={{ state: 'unauthorized' }}
+        authorization={null}
+        connecting={false}
+        error={null}
+        openedPullRequest={null}
+        {...actions}
+      />,
+    );
+    expect(markup).toContain('Authorize GitHub');
+    expect(markup).toContain('never asks for an installation ID');
+    expect(markup).not.toContain('App private key');
+  });
+
+  test('shows the device code while GitHub authorization is pending', () => {
+    const markup = renderToStaticMarkup(
+      <RepositoryList
+        repos={[]}
+        options={[]}
+        connector={{ state: 'unauthorized' }}
+        authorization={{
+          userCode: 'ABCD-EFGH',
+          verificationUri: 'https://github.example.test/login/device',
+          state: 'waiting',
+        }}
+        connecting={false}
+        error={null}
+        openedPullRequest={null}
+        {...actions}
+      />,
+    );
+    expect(markup).toContain('ABCD-EFGH');
+    expect(markup).toContain('Continue in GitHub');
+    expect(markup).not.toContain('device-code-secret');
+  });
+
+  test('collects reviewed scope configuration after authorization', () => {
+    const markup = renderToStaticMarkup(
+      <RepositoryList
+        repos={[]}
+        options={[
+          {
+            repositoryId: '99',
+            fullName: 'example/app',
+            defaultBranch: 'main',
+            connected: false,
+          },
+        ]}
+        connector={{
+          state: 'authorized',
+          login: 'operator',
+          githubUserId: '42',
+        }}
+        authorization={null}
+        connecting={false}
+        error={null}
+        openedPullRequest={null}
+        {...actions}
+      />,
+    );
+    expect(markup).toContain('Authorized as @operator');
+    expect(markup).toContain('example/app');
+    expect(markup).toContain('Component kind');
+    expect(markup).toContain('Build frontend');
+    expect(markup).toContain('Watch paths');
+    expect(markup).toContain('Open configuration PR');
   });
 });
 
