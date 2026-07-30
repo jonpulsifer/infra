@@ -12,6 +12,7 @@ import type {
 } from '../adapters/deploy/contract.ts';
 import type { RequestAuthentication } from '../auth/types.ts';
 import type { CommandContext, Principal } from '../commands/types.ts';
+import { onAttemptEvent } from '../db/notify.ts';
 import { components, deploys, targets } from '../db/schema.ts';
 import {
   type AttemptLogCursor,
@@ -36,6 +37,8 @@ interface AttemptSocketData {
   readonly deployId?: number;
   cursor: AttemptLogCursor | null;
   closed: boolean;
+  /** Tear down the in-process event subscription (Transport shape). */
+  unsubscribe: (() => void) | null;
 }
 
 interface RuntimeSocketData {
@@ -146,6 +149,7 @@ async function upgradeAttempt(
       ...(deployId === null ? {} : { deployId }),
       cursor: after === null ? null : after,
       closed: false,
+      unsubscribe: null,
     },
   });
   return upgraded
@@ -288,6 +292,14 @@ export async function readStreamPage(
 
 export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
   open(socket) {
+    // Subscribe to in-process wake-ups so the pump fires immediately when
+    // the web process itself writes an event (Transport shape).
+    if (socket.data.kind === 'attempt') {
+      socket.data.unsubscribe = onAttemptEvent(
+        socket.data.componentId,
+        () => void pump(socket),
+      );
+    }
     void pump(socket);
   },
   message() {
@@ -295,6 +307,10 @@ export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
   },
   close(socket) {
     socket.data.closed = true;
+    if (socket.data.kind === 'attempt') {
+      socket.data.unsubscribe?.();
+      socket.data.unsubscribe = null;
+    }
   },
 };
 
