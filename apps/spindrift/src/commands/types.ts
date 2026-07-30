@@ -29,6 +29,7 @@ import type {
 } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
 import type { RepositoryHost } from '../domain/repository.ts';
+import type { RepositorySourceStager } from '../domain/source-bundle.ts';
 import type { SupplyChain } from '../supply-chain/sign.ts';
 
 /**
@@ -101,6 +102,8 @@ export interface AdapterRegistry {
    * beside the context, which is the shape the context exists to prevent.
    */
   repository(): RepositoryHost | null;
+  /** Immutable repository staging, absent until a source depot is configured. */
+  source?(): RepositorySourceStager | null;
   /**
    * Core's verifier and signer (§16).
    *

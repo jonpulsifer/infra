@@ -30,7 +30,13 @@ import type {
   BuildSource,
   BuildSpec,
 } from '../../adapters/build/contract.ts';
-import { apps, builds, components, targets } from '../../db/schema.ts';
+import {
+  apps,
+  builds,
+  components,
+  repositories,
+  targets,
+} from '../../db/schema.ts';
 import { recordBuildEvent } from '../../domain/attempt-log.ts';
 import {
   buildRouteCandidates,
@@ -39,7 +45,12 @@ import {
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
-import { type Command, type CommandContext, failed, ok } from '../types.ts';
+import {
+  type CommandContext,
+  type CommandResult,
+  failed,
+  ok,
+} from '../types.ts';
 
 /**
  * §4's per-App build limit.
@@ -92,6 +103,11 @@ export interface DispatchBuildResult {
   readonly runner: string;
 }
 
+export type BuildDispatchContext = Pick<
+  CommandContext,
+  'db' | 'adapters' | 'clock' | 'manifest'
+>;
+
 /**
  * Why this Target will not take a build from this route, or `null`.
  *
@@ -115,7 +131,7 @@ interface TargetBuildPolicy {
 }
 
 async function targetBuildPolicy(
-  context: CommandContext,
+  context: Pick<CommandContext, 'db'>,
   targetId: string | undefined,
 ): Promise<TargetBuildPolicy | null> {
   if (targetId === undefined) return null;
@@ -147,10 +163,10 @@ function routeRefusedByTarget(
     : `${policy.name} will not take a build from ${adapter.name}: ${candidate.reason}`;
 }
 
-export const dispatchBuild: Command<
-  DispatchBuildInput,
-  DispatchBuildResult
-> = async (input, context) => {
+export const dispatchBuild = async (
+  input: DispatchBuildInput,
+  context: BuildDispatchContext,
+): Promise<CommandResult<DispatchBuildResult>> => {
   const [build] = await context.db
     .select()
     .from(builds)
@@ -180,6 +196,14 @@ export const dispatchBuild: Command<
       `Component ${component.id} names an App that no longer exists`,
     );
   }
+  const [repository] =
+    app.repositoryId === null
+      ? []
+      : await context.db
+          .select({ fullName: repositories.fullName })
+          .from(repositories)
+          .where(eq(repositories.id, app.repositoryId))
+          .limit(1);
 
   // §4's supplied artifact: an archive of finished output already *is* the
   // artifact, digested over the bundle core staged. There is no route to run and
@@ -253,7 +277,7 @@ export const dispatchBuild: Command<
     app.sourceKind === 'repo'
       ? {
           kind: 'repo',
-          url: app.sourceRepoUrl ?? '',
+          url: repository?.fullName ?? app.sourceRepoUrl ?? '',
           commit: build.commit,
           // §5: an App is repo plus subpath, and the developer named it there.
           subpath: app.sourceRepoSubpath ?? '.',
@@ -311,76 +335,157 @@ export const dispatchBuild: Command<
     buildId: build.id,
   };
 
-  await context.db
+  const [claimed] = await context.db
     .update(builds)
     .set({
       status: 'RUNNING',
       runner: adapter.name,
       logFidelity: adapter.logFidelity,
     })
-    .where(eq(builds.id, build.id));
-
-  const stream = adapter.build(buildSource, spec);
-  let next = await stream.next();
-  while (!next.done) {
-    const event = next.value;
-    // §6's one attempt-scoped log: build events and deploy events land on the
-    // same stream for the same attempt, so the UI subscribes once.
-    await recordBuildEvent(
-      context.db,
-      attempt,
-      event.type === 'log'
-        ? {
-            type: 'log',
-            line: event.line,
-            ...(event.step ? { resource: event.step } : {}),
-          }
-        : { type: 'status', phase: event.state, resource: event.step },
+    .where(and(eq(builds.id, build.id), eq(builds.status, 'PENDING')))
+    .returning({ id: builds.id });
+  if (claimed === undefined) {
+    const [current] = await context.db
+      .select({
+        status: builds.status,
+        artifactDigest: builds.artifactDigest,
+        runner: builds.runner,
+      })
+      .from(builds)
+      .where(eq(builds.id, build.id));
+    if (current?.status === 'SUCCEEDED') {
+      return ok({
+        buildId: build.id,
+        status: 'SUCCEEDED',
+        artifactDigest: current.artifactDigest,
+        runner: current.runner ?? 'supplied',
+      });
+    }
+    if (current?.status === 'FAILED') {
+      return ok({
+        buildId: build.id,
+        status: 'FAILED',
+        artifactDigest: null,
+        runner: current.runner ?? adapter.name,
+      });
+    }
+    return failed(
+      'NOT_BUILDABLE',
+      `Build ${build.id} is already running on ${current?.runner ?? adapter.name}`,
     );
-    next = await stream.next();
   }
-  const result = next.value;
 
-  if (result.status === 'FAILED') {
+  try {
+    const stream = adapter.build(buildSource, spec);
+    let next = await stream.next();
+    while (!next.done) {
+      const event = next.value;
+      // §6's one attempt-scoped log: build events and deploy events land on the
+      // same stream for the same attempt, so the UI subscribes once.
+      await recordBuildEvent(
+        context.db,
+        attempt,
+        event.type === 'log'
+          ? {
+              type: 'log',
+              line: event.line,
+              ...(event.step ? { resource: event.step } : {}),
+            }
+          : { type: 'status', phase: event.state, resource: event.step },
+      );
+      next = await stream.next();
+    }
+    const result = next.value;
+
+    if (result.status === 'FAILED') {
+      await recordBuildEvent(context.db, attempt, {
+        type: 'status',
+        phase: 'FAILED',
+        reason: result.reason,
+      });
+      await context.db
+        .update(builds)
+        .set({ status: 'FAILED' })
+        .where(eq(builds.id, build.id));
+      return ok({
+        buildId: build.id,
+        status: 'FAILED' as const,
+        artifactDigest: null,
+        runner: adapter.name,
+      });
+    }
+
+    const finalized = await context.adapters.supplyChain().finalize({
+      artifact: result.artifact,
+      provenance: result.provenance,
+      backend: adapter.name,
+      expectedBuilderId: adapter.provenanceBuilderId,
+      maximumLevel: adapter.buildLevel,
+      // A shape-only Build has no Target policy yet. It is assessed at the
+      // route's achieved level and every actual Deploy checks the Target's current
+      // threshold again, which is what makes a later policy raise prospective.
+      minimumLevel: targetPolicy?.minimumLevel ?? 1,
+      source: buildSource,
+    });
+    if (!finalized.ok) {
+      await recordBuildEvent(context.db, attempt, {
+        type: 'log',
+        line: `supply-chain admission failed: ${finalized.message}`,
+        resource: 'provenance',
+      });
+      await recordBuildEvent(context.db, attempt, {
+        type: 'status',
+        phase: 'FAILED',
+        reason: 'BUILD_FAILED',
+      });
+      await context.db
+        .update(builds)
+        .set({ status: 'FAILED' })
+        .where(eq(builds.id, build.id));
+      return ok({
+        buildId: build.id,
+        status: 'FAILED' as const,
+        artifactDigest: null,
+        runner: adapter.name,
+      });
+    }
+
     await recordBuildEvent(context.db, attempt, {
       type: 'status',
-      phase: 'FAILED',
-      reason: result.reason,
+      phase: 'SUCCEEDED',
     });
+
     await context.db
       .update(builds)
-      .set({ status: 'FAILED' })
+      .set({
+        status: 'SUCCEEDED',
+        artifactDigest: result.artifact.digest,
+        artifactRefs: [...result.artifact.refs],
+        baseDigest: result.baseDigest,
+        provenance: finalized.assessment,
+        verifiedBuildLevel: finalized.assessment.achievedLevel,
+        signature: finalized.signature,
+        buildkitProvenanceRef: result.buildkitProvenanceRef,
+        sbomRef: result.sbomRef,
+      })
       .where(eq(builds.id, build.id));
+
     return ok({
       buildId: build.id,
-      status: 'FAILED' as const,
-      artifactDigest: null,
+      status: 'SUCCEEDED' as const,
+      artifactDigest: result.artifact.digest,
       runner: adapter.name,
     });
-  }
-
-  const finalized = await context.adapters.supplyChain().finalize({
-    artifact: result.artifact,
-    provenance: result.provenance,
-    backend: adapter.name,
-    expectedBuilderId: adapter.provenanceBuilderId,
-    maximumLevel: adapter.buildLevel,
-    // A shape-only Build has no Target policy yet. It is assessed at the
-    // route's achieved level and every actual Deploy checks the Target's current
-    // threshold again, which is what makes a later policy raise prospective.
-    minimumLevel: targetPolicy?.minimumLevel ?? 1,
-    source: buildSource,
-  });
-  if (!finalized.ok) {
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
     await recordBuildEvent(context.db, attempt, {
       type: 'log',
-      line: `supply-chain admission failed: ${finalized.message}`,
-      resource: 'provenance',
+      line: `build dispatch failed: ${detail}`,
     });
     await recordBuildEvent(context.db, attempt, {
       type: 'status',
       phase: 'FAILED',
-      reason: 'BUILD_FAILED',
+      reason: 'INTERNAL',
     });
     await context.db
       .update(builds)
@@ -393,31 +498,4 @@ export const dispatchBuild: Command<
       runner: adapter.name,
     });
   }
-
-  await recordBuildEvent(context.db, attempt, {
-    type: 'status',
-    phase: 'SUCCEEDED',
-  });
-
-  await context.db
-    .update(builds)
-    .set({
-      status: 'SUCCEEDED',
-      artifactDigest: result.artifact.digest,
-      artifactRefs: [...result.artifact.refs],
-      baseDigest: result.baseDigest,
-      provenance: finalized.assessment,
-      verifiedBuildLevel: finalized.assessment.achievedLevel,
-      signature: finalized.signature,
-      buildkitProvenanceRef: result.buildkitProvenanceRef,
-      sbomRef: result.sbomRef,
-    })
-    .where(eq(builds.id, build.id));
-
-  return ok({
-    buildId: build.id,
-    status: 'SUCCEEDED' as const,
-    artifactDigest: result.artifact.digest,
-    runner: adapter.name,
-  });
 };

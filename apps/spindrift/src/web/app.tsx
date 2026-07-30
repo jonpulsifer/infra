@@ -649,7 +649,7 @@ function NewAppScreen({
       initial={state.draft}
       targets={state.targetOptions}
       repos={state.repoOptions}
-      onCreated={(app) => onNavigate(`/apps/${app.name}`)}
+      onCreated={(app) => onNavigate(`/apps/${app.id}`)}
     />
   );
 }

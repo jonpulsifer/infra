@@ -1,7 +1,7 @@
 /**
  * The reconciler process (§19, ticket 06).
  *
- * This is the lifecycle seam above the four individual loop suites. It proves
+ * This is the lifecycle seam above the five individual loop suites. It proves
  * that a systemic failure escaping one loop is retried without taking its
  * siblings down, and that one shutdown signal releases every supervisor.
  */
@@ -62,6 +62,7 @@ describe('reconciler process lifecycle', () => {
           if (
             (passes.get('target') ?? 0) === 2 &&
             passes.has('config') &&
+            passes.has('build') &&
             passes.has('deploy')
           ) {
             shutdown.abort();
@@ -121,6 +122,7 @@ describe('reconciler loop composition', () => {
           if (
             passed.has('target') &&
             passed.has('config') &&
+            passed.has('build') &&
             passed.has('deploy') &&
             events.some((candidate) => candidate.type === 'disabled')
           ) {
@@ -135,7 +137,7 @@ describe('reconciler loop composition', () => {
         .filter((event) => event.type === 'pass')
         .map((event) => event.loop)
         .sort(),
-    ).toEqual(['config', 'deploy', 'target']);
+    ).toEqual(['build', 'config', 'deploy', 'target']);
     expect(events.find((event) => event.type === 'disabled')).toEqual({
       type: 'disabled',
       loop: 'repository',
@@ -162,6 +164,7 @@ describe('reconciler loop composition', () => {
             passed.has('target') &&
             passed.has('repository') &&
             passed.has('config') &&
+            passed.has('build') &&
             passed.has('deploy')
           ) {
             shutdown.abort();
@@ -171,6 +174,7 @@ describe('reconciler loop composition', () => {
     );
 
     expect([...passed].sort()).toEqual([
+      'build',
       'config',
       'deploy',
       'repository',

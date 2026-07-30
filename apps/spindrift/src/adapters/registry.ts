@@ -30,6 +30,7 @@ import type {
 import type { InstallationManifest } from '../config/manifest.ts';
 import type { BuildRouteProfile } from '../domain/build-route.ts';
 import type { RepositoryHost } from '../domain/repository.ts';
+import type { RepositorySourceStager } from '../domain/source-bundle.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
@@ -124,6 +125,8 @@ export interface RegistryOptions {
   readonly buildToken?: () => string | Promise<string>;
   /** And for the cloud runtimes a Target is deployed to. */
   readonly cloudToken?: () => string | Promise<string>;
+  /** Source depot wiring, supplied by the live source-ingestion installation. */
+  readonly source?: RepositorySourceStager;
 }
 
 /**
@@ -251,6 +254,10 @@ export function createAdapterRegistry(
      */
     repository(): RepositoryHost | null {
       return repositoryHost;
+    },
+
+    source() {
+      return options.source ?? null;
     },
 
     supplyChain() {

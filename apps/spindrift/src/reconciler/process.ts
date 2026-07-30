@@ -8,12 +8,18 @@
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
+import { DEFAULT_BUILD_INTERVALS, runBuildLoop } from './build-loop.ts';
 import { DEFAULT_REAP_INTERVAL_MS, runConfigLoop } from './config-loop.ts';
 import { DEFAULT_INTERVALS, runDeployLoop } from './deploy-loop.ts';
 import { runRepoLoop } from './repo-loop.ts';
 import { runTargetLoop } from './target-loop.ts';
 
-export type ReconcilerLoopName = 'target' | 'repository' | 'config' | 'deploy';
+export type ReconcilerLoopName =
+  | 'target'
+  | 'repository'
+  | 'config'
+  | 'build'
+  | 'deploy';
 
 /** One independently supervised process loop. */
 interface SupervisedLoop {
@@ -143,6 +149,15 @@ export async function runReconciler(
           intervals: DEFAULT_INTERVALS,
           signal,
           onPass: () => passed('deploy'),
+        }),
+    },
+    {
+      name: 'build',
+      run: (signal) =>
+        runBuildLoop(context, {
+          intervals: DEFAULT_BUILD_INTERVALS,
+          signal,
+          onPass: () => passed('build'),
         }),
     },
   ];

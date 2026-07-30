@@ -40,6 +40,12 @@ export const getAppWorkspace: Command<
             orderBy: (builds, { desc }) => [desc(builds.createdAt)],
             limit: 1,
           },
+          desiredTargets: {
+            limit: 1,
+            with: {
+              target: true,
+            },
+          },
         },
       },
       datastores: {
@@ -64,21 +70,23 @@ export const getAppWorkspace: Command<
   const primaryComponent = app.components[0];
   const latestDeploy = primaryComponent?.deploys[0];
   const latestTarget = latestDeploy?.target;
+  const desiredTarget = primaryComponent?.desiredTargets[0]?.target;
+  const workspaceTarget = latestTarget ?? desiredTarget;
 
   const components: ComponentView[] = app.components.map((comp) => {
     const deploy = comp.deploys[0];
     const build = deploy?.build ?? comp.builds[0];
     let artifact = 'none';
     if (build?.artifactDigest) {
-      artifact = `image · ${build.artifactDigest.slice(0, 12)}`;
+      artifact = `${build.artifactType} · ${build.artifactDigest.slice(0, 12)}`;
     } else if (build?.commit) {
-      artifact = `commit · ${build.commit.slice(0, 7)}`;
+      artifact = `${build.artifactType} from ${build.commit.slice(0, 7)}`;
     }
 
     return {
       name: comp.name,
       kind: comp.kind,
-      phase: (deploy?.phase ?? 'PENDING') as DeployPhase,
+      phase: phaseFor(deploy?.phase, build?.status),
       artifact,
       exposure: comp.exposure,
     };
@@ -178,13 +186,19 @@ export const getAppWorkspace: Command<
 
   const workspace: WorkspaceView = {
     app: app.name,
-    target: latestTarget?.name ?? 'none',
+    target: workspaceTarget?.name ?? 'none',
     vessel: app.vesselRef ?? 'none',
-    prerequisitesMet: latestTarget ? latestTarget.health === 'healthy' : false,
-    phase: (latestDeploy?.phase ?? 'PENDING') as DeployPhase,
+    prerequisitesMet: workspaceTarget
+      ? workspaceTarget.health === 'healthy'
+      : false,
+    phase: phaseFor(latestDeploy?.phase, primaryComponent?.builds[0]?.status),
     url: latestDeploy?.url ?? app.vanityDomain ?? '',
     urlLive: latestDeploy?.phase === 'LIVE',
-    release: latestDeploy ? `Deploy ${latestDeploy.id}` : 'latest',
+    release: latestDeploy
+      ? `Deploy ${latestDeploy.id}`
+      : primaryComponent?.builds[0]
+        ? `Build ${primaryComponent.builds[0].id}`
+        : 'none',
     components,
     datastores: Array.from(datastoresMap.values()),
     activity,
@@ -193,6 +207,23 @@ export const getAppWorkspace: Command<
 
   return ok({ workspace });
 };
+
+function phaseFor(
+  deploy: DeployPhase | undefined,
+  build: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | undefined,
+): DeployPhase {
+  if (deploy !== undefined) return deploy;
+  switch (build) {
+    case 'RUNNING':
+      return 'APPLYING';
+    case 'SUCCEEDED':
+      return 'WAITING';
+    case 'FAILED':
+      return 'FAILED';
+    default:
+      return 'PENDING';
+  }
+}
 
 function reachOf(seconds: number): string {
   if (seconds <= 0) return 'live only';

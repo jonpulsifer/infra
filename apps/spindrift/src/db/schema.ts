@@ -1042,6 +1042,7 @@ export const componentsRelations = relations(components, ({ one, many }) => ({
   builds: many(builds),
   deploys: many(deploys),
   configItems: many(configItems),
+  desiredTargets: many(componentTargetDesired),
 }));
 
 export const buildsRelations = relations(builds, ({ one, many }) => ({
