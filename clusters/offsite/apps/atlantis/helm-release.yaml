@@ -49,6 +49,8 @@ spec:
       # ArgoCD Provider https://github.com/grpc/grpc-go/issues/434
       ARGOCD_SERVER: "argo.${SECRET_DOMAIN}:443"
       GRPC_ENFORCE_ALPN_ENABLED: "false"
+      # GitHub Provider
+      GITHUB_OWNER: jonpulsifer
     environmentSecrets:
       - name: ATLANTIS_GH_APP_ID
         secretKeyRef:
