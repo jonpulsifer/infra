@@ -61,10 +61,7 @@ export function NewApp({
   const blockers = [
     ...localBlockers,
     ...serverBlockers.filter(
-      (server) =>
-        !localBlockers.some((local) => local.code === server.code) &&
-        (server.code === 'REPOSITORY_UNAVAILABLE' ||
-          server.code === 'TARGET_UNAVAILABLE'),
+      (server) => !localBlockers.some((local) => local.code === server.code),
     ),
   ];
   const last = draft.step === STEPS.length - 1;

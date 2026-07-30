@@ -62,6 +62,12 @@ const source = z.discriminatedUnion('kind', [
       kind: z.literal('archive'),
       filename: z.string().min(1),
       digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+      /** Durable location written by the upload/staging boundary. */
+      location: z.string().min(1).nullable().optional(),
+      /** Finished output bypasses a builder; source follows the ordinary path. */
+      contents: z.enum(['artifact', 'source']).optional(),
+      /** Scope after a lone top-level directory is unwrapped. */
+      subpath: z.string().min(1).optional(),
     })
     .strict(),
 ]);
@@ -132,6 +138,8 @@ export const CREATION_BLOCKER_CODES = [
   'TARGET_UNAVAILABLE',
   'CONFIG_INCOMPLETE',
   'REPOSITORY_UNAVAILABLE',
+  'SOURCE_UNAVAILABLE',
+  'BUILD_ROUTE_UNAVAILABLE',
 ] as const;
 
 export type CreationBlockerCode = (typeof CREATION_BLOCKER_CODES)[number];
@@ -175,6 +183,9 @@ export function initialCreationDraft(input: {
           kind: 'archive',
           filename: 'upload.zip',
           digest: `sha256:${'0'.repeat(64)}`,
+          location: null,
+          contents: 'source',
+          subpath: '.',
         },
     appName: name,
     componentName: 'web',
@@ -274,6 +285,15 @@ export function blockersFor(
       code: 'CONFIG_INCOMPLETE',
       title: `${missing.length} configuration key${missing.length === 1 ? '' : 's'} still needs a value.`,
       remediation: `Supply ${missing.map((key) => key.name).join(', ')} on Configure. Values are write-only once stored, so they cannot be filled in later from here.`,
+    });
+  }
+
+  if (draft.source.kind === 'archive' && !draft.source.location) {
+    blockers.push({
+      code: 'SOURCE_UNAVAILABLE',
+      title: `${draft.source.filename} has not been staged.`,
+      remediation:
+        'Upload the archive on Source before Review. The draft is kept while the upload is incomplete.',
     });
   }
 

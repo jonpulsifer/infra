@@ -10,7 +10,12 @@ import type {
   Clock,
   CommandContext,
 } from '../../src/commands/types.ts';
-import { builds, deploys, targets } from '../../src/db/schema.ts';
+import {
+  builds,
+  componentTargetDesired,
+  deploys,
+  targets,
+} from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
@@ -169,6 +174,67 @@ describe('getAppWorkspace command', () => {
     if (workspace.runtime.kind === 'none') {
       expect(workspace.runtime.because).toContain('Static files are served');
     }
+  });
+
+  test('projects the locked Target and first Build before a Deploy exists', async () => {
+    const ctx = context();
+    const createdApp = await createApp(
+      {
+        name: `queued-${crypto.randomUUID().slice(0, 8)}`,
+        sourceKind: 'archive',
+        archiveDigest: `sha256:${'c'.repeat(64)}`,
+        vesselRef: 'driftwood',
+      },
+      ctx,
+    );
+    if (!createdApp.ok) throw new Error(createdApp.failure.message);
+    const createdComp = await createComponent(
+      {
+        appId: createdApp.value.appId,
+        name: 'site',
+        kind: 'website',
+        exposure: 'public',
+      },
+      ctx,
+    );
+    if (!createdComp.ok) throw new Error(createdComp.failure.message);
+    const [target] = await database()
+      .db.insert(targets)
+      .values(targetValues({ adapter: 'static', name: 'cdn' }))
+      .returning();
+    await database().db.insert(componentTargetDesired).values({
+      componentId: createdComp.value.componentId,
+      targetId: target!.id,
+    });
+    await database()
+      .db.insert(builds)
+      .values({
+        componentId: createdComp.value.componentId,
+        commit: `sha256:${'c'.repeat(64)}`,
+        targetShape: 'files',
+        artifactType: 'files',
+        artifactDigest: `sha256:${'d'.repeat(64)}`,
+        status: 'SUCCEEDED',
+      });
+
+    const result = await getAppWorkspace({ name: createdApp.value.appId }, ctx);
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        workspace: {
+          target: 'cdn',
+          phase: 'WAITING',
+          release: expect.stringMatching(/^Build /),
+          components: [
+            {
+              phase: 'WAITING',
+              artifact: expect.stringMatching(/^files · /),
+            },
+          ],
+        },
+      },
+    });
   });
 });
 

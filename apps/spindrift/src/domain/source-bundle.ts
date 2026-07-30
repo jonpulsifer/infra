@@ -21,6 +21,7 @@ import {
   signSourceReceipt,
   sourceReceiptStatement,
 } from '../supply-chain/receipt.ts';
+import type { RepositoryRef } from './repository.ts';
 
 export type BundleRetention = 'ephemeral' | 'durable';
 
@@ -37,6 +38,20 @@ export interface StagedSource {
   readonly receipt: SignedSourceReceipt;
   /** Durable address of the signed evidence, keyed by the bundle digest. */
   readonly receiptLocation: string;
+}
+
+/**
+ * Fetch, store, and attest one exact repository commit as a single far-side
+ * capability. The command receives only the immutable bundle; credentials and
+ * receipt mechanics cannot leak into its transaction.
+ */
+export interface RepositorySourceStager {
+  stageRepository(input: {
+    readonly ref: RepositoryRef;
+    readonly repository: string;
+    readonly commit: string;
+    readonly stagedAt: Date;
+  }): Promise<StagedSourceBundle>;
 }
 
 /**

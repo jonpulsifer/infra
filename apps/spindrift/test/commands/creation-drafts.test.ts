@@ -7,6 +7,7 @@ import {
   saveCreationDraft,
   startCreationDraft,
 } from '../../src/commands/creation-drafts/lifecycle.ts';
+import { dispatch } from '../../src/commands/registry.ts';
 import type {
   AdapterRegistry,
   CommandContext,
@@ -15,22 +16,29 @@ import {
   apps,
   builds,
   components,
+  componentTargetDesired,
   creationDrafts,
   deploys,
   repositories,
   targets,
   users,
 } from '../../src/db/schema.ts';
+import { runBuildPass } from '../../src/reconciler/build-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
+import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
+import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
+const builder = new FakeBuildAdapter({ name: 'hosted' });
+const stagedRepositories: string[] = [];
+const supplyChain = new SupplyChainHarness();
 
 const adapters: AdapterRegistry = {
-  deploy: () => ({
-    adapter: 'kubernetes',
-    artifactTypes: ['image'],
+  deploy: (adapter) => ({
+    adapter,
+    artifactTypes: adapter === 'static' ? ['files'] : ['image'],
     apply: async function* () {
       yield {
         type: 'status',
@@ -46,15 +54,25 @@ const adapters: AdapterRegistry = {
     },
     tail: async () => ({ kind: 'stream', entries: [], cursor: null, reach: 0 }),
   }),
-  build: () => null,
+  build: (name) => (name === builder.name ? builder : null),
   store: () => null,
   repository: () => null,
-  supplyChain: () => {
-    throw new Error('creation drafts do not reach the supply chain');
-  },
+  source: () => ({
+    async stageRepository(input) {
+      stagedRepositories.push(`${input.repository}@${input.commit}`);
+      return {
+        digest: `sha256:${'b'.repeat(64)}`,
+        location: `https://bundles.example.test/${input.commit}.tar.gz`,
+        retention: 'ephemeral',
+      };
+    },
+  }),
+  supplyChain: () => supplyChain,
 };
 
-async function context(): Promise<CommandContext> {
+async function context(
+  registry: AdapterRegistry = adapters,
+): Promise<CommandContext> {
   const [principal] = await database()
     .db.insert(users)
     .values({ displayName: 'Operator' })
@@ -63,18 +81,21 @@ async function context(): Promise<CommandContext> {
     principal: { id: principal!.id, displayName: principal!.displayName },
     clock: { now: () => new Date('2026-07-29T12:00:00.000Z') },
     db: database().db,
-    adapters,
+    adapters: registry,
     manifest: await fixtureManifest(),
   };
 }
 
-async function seedCapabilities() {
+async function seedCapabilities(
+  targetOverrides: Parameters<typeof targetValues>[0] = {},
+) {
   const [repository] = await database()
     .db.insert(repositories)
     .values({
       fullName: 'example/app',
       installationId: '123',
       defaultBranch: 'main',
+      authoritativeCommit: '1111111111111111111111111111111111111111',
       access: 'active',
     })
     .returning();
@@ -86,6 +107,7 @@ async function seedCapabilities() {
         rank: 1,
         publicExposure: true,
         discovery: CAPABLE_DISCOVERY,
+        ...targetOverrides,
       }),
     )
     .returning();
@@ -218,7 +240,7 @@ describe('creation drafts', () => {
     expect(recovered.ok).toBe(true);
   });
 
-  test('a clean draft creates one App and retries return that same App', async () => {
+  test('a clean repository draft creates and dispatches one complete first-Build intent', async () => {
     const { repository, target } = await seedCapabilities();
     const ctx = await context();
     const started = await startCreationDraft({}, ctx);
@@ -249,6 +271,20 @@ describe('creation drafts', () => {
     );
     expect(completed.ok).toBe(true);
     if (!completed.ok || completed.value.app === null) return;
+    expect(completed.value.app).toMatchObject({
+      componentName: 'web',
+      targetId: target.id,
+      buildStatus: 'PENDING',
+    });
+    expect(completed.value.app.buildId).toBeGreaterThan(0);
+    expect(stagedRepositories).toEqual([
+      'example/app@1111111111111111111111111111111111111111',
+    ]);
+    expect(builder.built).toHaveLength(0);
+    expect(await productCounts()).toEqual([1, 1, 1, 0]);
+    expect(
+      await database().db.select().from(componentTargetDesired),
+    ).toHaveLength(1);
     await database()
       .db.update(repositories)
       .set({
@@ -265,21 +301,395 @@ describe('creation drafts', () => {
       ctx,
     );
     expect(retried).toEqual(completed);
+    expect(await runBuildPass(ctx)).toBe(1);
+    expect(builder.built).toHaveLength(1);
+    expect(builder.built[0]?.source).toMatchObject({
+      bundleDigest: `sha256:${'b'.repeat(64)}`,
+      origin: {
+        type: 'repo',
+        repository: 'example/app',
+        commit: '1111111111111111111111111111111111111111',
+        subpath: '.',
+        location:
+          'https://bundles.example.test/1111111111111111111111111111111111111111.tar.gz',
+      },
+    });
+    const [finished] = await database().db.select().from(builds);
+    expect(finished?.status).toBe('SUCCEEDED');
     expect(await productCounts()).toEqual([1, 1, 1, 0]);
+  });
 
-    const [createdComponent] = await database()
-      .db.select()
-      .from(components)
-      .where(eq(components.appId, completed.value.app.appId));
-    expect(createdComponent).toBeDefined();
-    expect(createdComponent?.name).toBe('web');
+  test('completion is reachable through the validated command boundary', async () => {
+    await seedCapabilities();
+    const ctx = await context();
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
 
-    const [createdBuild] = await database()
-      .db.select()
-      .from(builds)
-      .where(eq(builds.componentId, createdComponent!.id));
-    expect(createdBuild).toBeDefined();
-    expect(createdBuild?.status).toBe('PENDING');
+    const completed = await dispatch(
+      'completeCreationDraft',
+      { id: started.value.id, revision: started.value.revision },
+      ctx,
+    );
+
+    expect(completed).toMatchObject({
+      ok: true,
+      value: {
+        app: {
+          name: started.value.draft.appName,
+          buildStatus: 'PENDING',
+        },
+      },
+    });
+    expect(await productCounts()).toEqual([1, 1, 1, 0]);
+  });
+
+  test('concurrent Review retries hand one durable Build to the runner once', async () => {
+    await seedCapabilities();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+    let calls = 0;
+    let stageCalls = 0;
+    const base = new FakeBuildAdapter({ name: 'hosted' });
+    const delayed = {
+      name: base.name,
+      logFidelity: base.logFidelity,
+      buildLevel: base.buildLevel,
+      provenanceBuilderId: base.provenanceBuilderId,
+      async *build(
+        source: Parameters<typeof base.build>[0],
+        spec: Parameters<typeof base.build>[1],
+      ) {
+        calls += 1;
+        markEntered();
+        await gate;
+        return yield* base.build(source, spec);
+      },
+    };
+    const registry: AdapterRegistry = {
+      ...adapters,
+      build: (name) => (name === delayed.name ? delayed : null),
+      source: () => ({
+        async stageRepository(input) {
+          stageCalls += 1;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          return {
+            digest: `sha256:${'b'.repeat(64)}`,
+            location: `https://bundles.example.test/${input.commit}.tar.gz`,
+            retention: 'ephemeral',
+          };
+        },
+      }),
+    };
+    const ctx = await context(registry);
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+    const saved = await saveCreationDraft(
+      {
+        id: started.value.id,
+        revision: started.value.revision,
+        draft: { ...started.value.draft, step: 4 },
+      },
+      ctx,
+    );
+    if (!saved.ok) throw new Error(saved.failure.message);
+
+    const input = { id: saved.value.id, revision: saved.value.revision };
+    const [first, second] = await Promise.all([
+      completeCreationDraft(input, ctx),
+      completeCreationDraft(input, ctx),
+    ]);
+    expect(stageCalls).toBe(1);
+    expect(calls).toBe(0);
+
+    const left = runBuildPass(ctx);
+    const right = runBuildPass(ctx);
+    await entered;
+    expect(calls).toBe(1);
+    release();
+    await Promise.all([left, right]);
+
+    expect(first.ok && first.value.app?.appId).toBe(
+      second.ok && second.value.app?.appId,
+    );
+    expect(first.ok && first.value.app?.buildId).toBe(
+      second.ok && second.value.app?.buildId,
+    );
+    expect(calls).toBe(1);
+    expect(await productCounts()).toEqual([1, 1, 1, 0]);
+  });
+
+  test('a staged source archive follows the same builder path', async () => {
+    await seedCapabilities();
+    const ctx = await context();
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+    const beforeBuilds = builder.built.length;
+    const digest = `sha256:${'c'.repeat(64)}`;
+    const saved = await saveCreationDraft(
+      {
+        id: started.value.id,
+        revision: started.value.revision,
+        draft: {
+          ...started.value.draft,
+          entry: 'upload',
+          source: {
+            kind: 'archive',
+            filename: 'source.zip',
+            digest,
+            location: 'https://bundles.example.test/source.zip',
+            contents: 'source',
+            subpath: 'service',
+          },
+          step: 4,
+        },
+      },
+      ctx,
+    );
+    if (!saved.ok) throw new Error(saved.failure.message);
+
+    const completed = await completeCreationDraft(
+      { id: saved.value.id, revision: saved.value.revision },
+      ctx,
+    );
+
+    expect(completed.ok && completed.value.app?.buildStatus).toBe('PENDING');
+    expect(await runBuildPass(ctx)).toBe(1);
+    expect(builder.built).toHaveLength(beforeBuilds + 1);
+    expect(builder.built.at(-1)?.source).toEqual({
+      bundleDigest: digest,
+      origin: {
+        type: 'archive',
+        location: 'https://bundles.example.test/source.zip',
+        subpath: 'service',
+      },
+    });
+  });
+
+  test('a supplied finished archive creates a files Build without invoking a builder', async () => {
+    const { target } = await seedCapabilities({
+      adapter: 'static',
+      name: 'cdn',
+    });
+    const ctx = await context();
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+    const beforeBuilds = builder.built.length;
+    const digest = `sha256:${'d'.repeat(64)}`;
+    const saved = await saveCreationDraft(
+      {
+        id: started.value.id,
+        revision: started.value.revision,
+        draft: {
+          ...started.value.draft,
+          entry: 'upload',
+          source: {
+            kind: 'archive',
+            filename: 'dist.zip',
+            digest,
+            location: 'https://bundles.example.test/dist.zip',
+            contents: 'artifact',
+            subpath: '.',
+          },
+          detection: {
+            ...started.value.draft.detection,
+            kind: 'website',
+          },
+          kind: 'website',
+          exposure: 'public',
+          targetId: target.id,
+          step: 4,
+        },
+      },
+      ctx,
+    );
+    if (!saved.ok) throw new Error(saved.failure.message);
+
+    const completed = await completeCreationDraft(
+      { id: saved.value.id, revision: saved.value.revision },
+      ctx,
+    );
+
+    expect(completed.ok && completed.value.app?.buildStatus).toBe('SUCCEEDED');
+    expect(builder.built).toHaveLength(beforeBuilds);
+    const [build] = await database().db.select().from(builds);
+    expect(build).toMatchObject({
+      artifactType: 'files',
+      artifactDigest: digest,
+      artifactRefs: ['https://bundles.example.test/dist.zip'],
+      runner: null,
+    });
+  });
+
+  test('a supplied finished archive requires a files-capable target', async () => {
+    const { target } = await seedCapabilities();
+    const ctx = await context();
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+    const saved = await saveCreationDraft(
+      {
+        id: started.value.id,
+        revision: started.value.revision,
+        draft: {
+          ...started.value.draft,
+          entry: 'upload',
+          source: {
+            kind: 'archive',
+            filename: 'dist.zip',
+            digest: `sha256:${'f'.repeat(64)}`,
+            location: 'https://bundles.example.test/dist.zip',
+            contents: 'artifact',
+            subpath: '.',
+          },
+          detection: {
+            ...started.value.draft.detection,
+            kind: 'website',
+          },
+          kind: 'website',
+          exposure: 'public',
+          targetId: target.id,
+          step: 4,
+        },
+      },
+      ctx,
+    );
+    if (!saved.ok) throw new Error(saved.failure.message);
+
+    const completed = await completeCreationDraft(
+      { id: saved.value.id, revision: saved.value.revision },
+      ctx,
+    );
+
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    expect(completed.value.app).toBeNull();
+    expect(completed.value.draft.blockers).toContainEqual(
+      expect.objectContaining({ code: 'TARGET_UNAVAILABLE' }),
+    );
+    expect(await productCounts()).toEqual([0, 0, 0, 0]);
+  });
+
+  test('an unstaged archive leaves the resumable draft and no product intent', async () => {
+    await seedCapabilities();
+    const ctx = await context();
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+    const saved = await saveCreationDraft(
+      {
+        id: started.value.id,
+        revision: started.value.revision,
+        draft: {
+          ...started.value.draft,
+          source: {
+            kind: 'archive',
+            filename: 'missing.zip',
+            digest: `sha256:${'e'.repeat(64)}`,
+            location: null,
+            contents: 'source',
+            subpath: '.',
+          },
+          step: 4,
+        },
+      },
+      ctx,
+    );
+    if (!saved.ok) throw new Error(saved.failure.message);
+
+    const completed = await completeCreationDraft(
+      { id: saved.value.id, revision: saved.value.revision },
+      ctx,
+    );
+
+    expect(completed).toMatchObject({
+      ok: true,
+      value: {
+        app: null,
+        draft: {
+          ready: false,
+          blockers: [{ code: 'SOURCE_UNAVAILABLE' }],
+        },
+      },
+    });
+    expect(await productCounts()).toEqual([0, 0, 0, 0]);
+    expect(await getCreationDraft({ id: saved.value.id }, ctx)).toMatchObject({
+      ok: true,
+    });
+  });
+
+  test('repository staging failure is a refusal before durable intent', async () => {
+    await seedCapabilities();
+    const registry: AdapterRegistry = {
+      ...adapters,
+      source: () => ({
+        async stageRepository() {
+          throw new Error('bundle depot is unavailable');
+        },
+      }),
+    };
+    const ctx = await context(registry);
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+
+    const completed = await completeCreationDraft(
+      { id: started.value.id, revision: started.value.revision },
+      ctx,
+    );
+
+    expect(completed).toMatchObject({
+      ok: false,
+      failure: {
+        code: 'NOT_BUILDABLE',
+        message: expect.stringContaining('bundle depot is unavailable'),
+      },
+    });
+    expect(await productCounts()).toEqual([0, 0, 0, 0]);
+    expect(await getCreationDraft({ id: started.value.id }, ctx)).toMatchObject(
+      { ok: true },
+    );
+  });
+
+  test('a runner crash after durable intent is visible as a failed Build', async () => {
+    await seedCapabilities();
+    const crashing = {
+      name: 'hosted',
+      logFidelity: 'LIVE_TEXT' as const,
+      buildLevel: 2 as const,
+      provenanceBuilderId: 'https://builders.example.test/crashing',
+      async *build(): AsyncGenerator<never, never, void> {
+        yield* [];
+        throw new Error('runner connection vanished');
+      },
+    };
+    const registry: AdapterRegistry = {
+      ...adapters,
+      build: (name) => (name === crashing.name ? crashing : null),
+    };
+    const ctx = await context(registry);
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+
+    const completed = await completeCreationDraft(
+      { id: started.value.id, revision: started.value.revision },
+      ctx,
+    );
+
+    expect(completed).toMatchObject({
+      ok: true,
+      value: {
+        app: {
+          buildStatus: 'PENDING',
+        },
+      },
+    });
+    expect(await runBuildPass(ctx)).toBe(1);
+    expect(await productCounts()).toEqual([1, 1, 1, 0]);
+    const [build] = await database().db.select().from(builds);
+    expect(build?.status).toBe('FAILED');
   });
 
   test('another operator cannot read or edit the draft', async () => {
