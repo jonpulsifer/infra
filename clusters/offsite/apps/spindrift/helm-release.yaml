@@ -55,7 +55,8 @@ spec:
         verifier: ghcr.io/jonpulsifer/spindrift-verifier
         signer: gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer
       github:
-        appId: "334190"
+        clientId: Iv1.918d699f36ee7afc
+        oauthBaseUrl: https://github.com
         apiBaseUrl: https://api.github.com
         buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
       build:

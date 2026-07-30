@@ -23,9 +23,6 @@ import type { Fetcher } from '../../../src/integrations/github/http.ts';
 
 const BASE = 'https://api.git.invalid';
 
-/** How long a minted installation token lives, as the real host defines it. */
-const TOKEN_LIFETIME_MS = 60 * 60 * 1000;
-
 /** Every request the client made, for a test to assert against. */
 export interface RecordedRequest {
   method: string;
@@ -92,15 +89,6 @@ export interface FakeGitHubOptions {
   /** The installation the App must present a token for. */
   installationId?: string;
   actions?: FakeActionsOptions;
-  /**
-   * The clock token expiry is measured from.
-   *
-   * Shared with the client under test on purpose: a token's lifetime is the one
-   * thing the two sides have to agree about, and a fake using the wall clock
-   * against a client using an injected one would re-mint on every call for
-   * reasons that have nothing to do with the code being tested.
-   */
-  now?: () => Date;
 }
 
 /**
@@ -141,18 +129,15 @@ export class FakeGitHub {
   private readonly branches = new Map<string, string>();
   private counter = 0;
   private pullNumber = 0;
-  private tokenCounter = 0;
   private runNumber = 0;
   private listCalls = 0;
   private readonly runs: FakeRun[] = [];
   private readonly actions: Required<FakeActionsOptions>;
-  private readonly now: () => Date;
 
   constructor(options: FakeGitHubOptions = {}) {
     this.fullName = options.fullName ?? 'example/app';
     this.defaultBranch = options.defaultBranch ?? 'main';
     this.installationId = options.installationId ?? '4242';
-    this.now = options.now ?? (() => new Date());
     this.actions = {
       discoveryDelay: options.actions?.discoveryDelay ?? 1,
       duration: options.actions?.duration ?? 1,
@@ -239,28 +224,29 @@ export class FakeGitHub {
       });
     }
 
-    // Minting an installation token is the one call that presents the App JWT
-    // rather than a token, so it is answered before the access check: an App
-    // whose installation was deleted still gets to ask.
-    const minting = url.pathname.match(
-      /^\/app\/installations\/([^/]+)\/access_tokens$/,
-    );
-    if (minting && request.method === 'POST') {
-      if (minting[1] !== this.installationId) return this.notFound();
-      this.tokenCounter += 1;
-      const value = `installation-token-${this.tokenCounter}`;
-      return this.json(
-        {
-          token: value,
-          expires_at: new Date(
-            this.now().getTime() + TOKEN_LIFETIME_MS,
-          ).toISOString(),
-        },
-        201,
-      );
+    if (this.accessLost) return this.notFound();
+
+    if (url.pathname === '/user/installations' && request.method === 'GET') {
+      return this.json({
+        installations: [{ id: Number(this.installationId) }],
+      });
     }
 
-    if (this.accessLost) return this.notFound();
+    if (
+      url.pathname ===
+        `/user/installations/${this.installationId}/repositories` &&
+      request.method === 'GET'
+    ) {
+      return this.json({
+        repositories: [
+          {
+            id: 1,
+            full_name: this.fullName,
+            default_branch: this.defaultBranch,
+          },
+        ],
+      });
+    }
 
     const prefix = `/repos/${this.fullName}`;
     if (!url.pathname.startsWith(`${prefix}/`) && url.pathname !== prefix) {
@@ -515,36 +501,4 @@ function defaultBuildLog(spec: Record<string, unknown>): string {
       baseDigest: null,
     }),
   ].join('\n');
-}
-
-/**
- * A throwaway RSA key in the one format {@link GitHubApp} accepts.
- *
- * Generated per call rather than checked in: a private key in a repository is a
- * private key in a repository, even a test one, and generating it here also
- * gives the test the matching public key to verify a signed JWT against.
- */
-export async function testAppKey(): Promise<{
-  pem: string;
-  publicKey: CryptoKey;
-}> {
-  const pair = await crypto.subtle.generateKey(
-    {
-      name: 'RSASSA-PKCS1-v1_5',
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: 'SHA-256',
-    },
-    true,
-    ['sign', 'verify'],
-  );
-  const pkcs8 = new Uint8Array(
-    await crypto.subtle.exportKey('pkcs8', pair.privateKey),
-  );
-  const base64 = btoa(String.fromCharCode(...pkcs8));
-  const lines = base64.match(/.{1,64}/g) ?? [];
-  return {
-    pem: `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`,
-    publicKey: pair.publicKey,
-  };
 }

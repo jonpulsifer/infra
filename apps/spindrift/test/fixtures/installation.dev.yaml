@@ -29,7 +29,8 @@ supplyChain:
   verifier: verifier.example.test
 
 github:
-  appId: '1234567'
+  clientId: Iv1.example
+  oauthBaseUrl: https://git.example.test
   apiBaseUrl: https://api.git.example.test
   buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
 

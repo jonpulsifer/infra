@@ -26,7 +26,7 @@ import {
   WORKFLOW_PATH,
 } from '../../src/integrations/github/config-pr.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
+import { FakeGitHub } from '../harness/fakes/github-api.ts';
 import { fixtureManifest } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -46,19 +46,14 @@ const proposal: DetectionProposal = {
 };
 
 async function context(fake: FakeGitHub | null): Promise<CommandContext> {
-  const { pem } = await testAppKey();
   const host =
     fake === null
       ? null
-      : new GitHubApp(
-          {
-            appId: '1234567',
-            privateKeyPem: pem,
-            baseUrl: fake.baseUrl,
-            fetch: fake.fetch,
-          },
-          () => NOW,
-        );
+      : new GitHubApp({
+          baseUrl: fake.baseUrl,
+          authorization: () => 'Bearer test-user-token',
+          fetch: fake.fetch,
+        });
 
   const adapters: AdapterRegistry = {
     deploy: () => null,
@@ -83,8 +78,14 @@ async function context(fake: FakeGitHub | null): Promise<CommandContext> {
 
 const input = (fake: FakeGitHub) => ({
   fullName: fake.fullName,
-  installationId: fake.installationId,
-  scopes: [{ scope: 'services/api', proposal }],
+  scopes: [
+    {
+      scope: 'services/api',
+      kind: proposal.kind,
+      build: proposal.build,
+      watchPaths: [...proposal.watchPaths],
+    },
+  ],
 });
 
 describe('connecting a repository', () => {
@@ -147,7 +148,7 @@ describe('connecting a repository', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_FOUND');
-    expect(result.failure.message).toContain('still selects it');
+    expect(result.failure.message).toContain('installation selects it');
     // Nothing was written on the way to refusing.
     expect(await database().db.select().from(repositories)).toEqual([]);
   });
@@ -179,8 +180,14 @@ describe('connecting a repository', () => {
     const result = await connectRepository(
       {
         fullName: 'example/app',
-        installationId: '4242',
-        scopes: [{ scope: 'services/api', proposal }],
+        scopes: [
+          {
+            scope: 'services/api',
+            kind: proposal.kind,
+            build: proposal.build,
+            watchPaths: [...proposal.watchPaths],
+          },
+        ],
       },
       await context(null),
     );
@@ -199,7 +206,7 @@ describe('connecting a repository', () => {
     // other command takes, which is why the handler holds no schema of its own.
     const refused = await dispatch(
       'connectRepository',
-      { fullName: 'not-a-full-name', installationId: '', scopes: [] },
+      { fullName: 'not-a-full-name', scopes: [] },
       loop,
     );
     expect(refused.ok).toBe(false);
@@ -241,5 +248,52 @@ describe('listRepositories', () => {
       expect(result.value.options).toHaveLength(1);
       expect(result.value.options[0]?.fullName).toBe(fake.fullName);
     }
+  });
+
+  test('keeps GitHub-granted repositories separate from durable connections', async () => {
+    const base = await context(null);
+    const result = await listRepositories(
+      {},
+      {
+        ...base,
+        adapters: {
+          ...base.adapters,
+          repositoryAuthorization: () => ({
+            status: async () => ({
+              state: 'authorized' as const,
+              login: 'operator',
+              githubUserId: '42',
+            }),
+            begin: async () => {
+              throw new Error('not reached');
+            },
+            poll: async () => ({ state: 'expired' as const }),
+            repositories: async () => [
+              {
+                repositoryId: '99',
+                fullName: 'example/available',
+                defaultBranch: 'trunk',
+                installationId: '37547020',
+              },
+            ],
+            installationFor: async () => ({
+              installationId: '37547020',
+            }),
+          }),
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.options).toEqual([]);
+    expect(result.value.available).toEqual([
+      {
+        repositoryId: '99',
+        fullName: 'example/available',
+        defaultBranch: 'trunk',
+        connected: false,
+      },
+    ]);
   });
 });

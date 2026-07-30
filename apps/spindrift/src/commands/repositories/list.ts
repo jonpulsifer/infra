@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import type { LinkedRepoView, RepositoryOptionView } from '../../web/model.ts';
+import { RepositoryAuthorizationRequiredError } from '../../domain/repository.ts';
+import type {
+  LinkedRepoView,
+  RepositoryConnectorView,
+  RepositoryOptionView,
+} from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
 
 export const listRepositoriesInput = z.object({});
@@ -7,7 +12,11 @@ export type ListRepositoriesInput = z.infer<typeof listRepositoriesInput>;
 
 export interface ListRepositoriesResult {
   readonly repos: readonly LinkedRepoView[];
+  /** Durable connections consumed by the App creation flow. */
   readonly options: readonly RepositoryOptionView[];
+  /** Repositories GitHub currently grants, consumed by the connector form. */
+  readonly available: readonly RepositoryOptionView[];
+  readonly connector: RepositoryConnectorView;
 }
 
 export const listRepositories: Command<
@@ -48,7 +57,6 @@ export const listRepositories: Command<
   }
 
   const reposList: LinkedRepoView[] = [];
-  const optionsList: RepositoryOptionView[] = [];
 
   for (const repo of allRepos) {
     const subpathsSet = subpathsByRepoId.get(repo.id);
@@ -64,17 +72,59 @@ export const listRepositories: Command<
       lastReconciledSha: repo.authoritativeCommit ?? null,
       appSubpaths,
     });
-
-    optionsList.push({
-      repositoryId: repo.id,
-      fullName: repo.fullName,
-      defaultBranch: repo.defaultBranch,
-      connected: appSubpaths.length > 0,
-    });
   }
+
+  const authorization = context.adapters.repositoryAuthorization?.() ?? null;
+  let connector: RepositoryConnectorView = { state: 'unavailable' };
+  let available: readonly {
+    readonly repositoryId: string;
+    readonly fullName: string;
+    readonly defaultBranch: string;
+  }[] = allRepos.map((repo) => ({
+    repositoryId: repo.id,
+    fullName: repo.fullName,
+    defaultBranch: repo.defaultBranch,
+  }));
+  if (authorization !== null) {
+    const status = await authorization.status();
+    connector = status;
+    if (status.state === 'authorized') {
+      try {
+        available = await authorization.repositories();
+      } catch (cause) {
+        if (cause instanceof RepositoryAuthorizationRequiredError) {
+          connector = { state: 'unauthorized' };
+          available = allRepos.map((repo) => ({
+            repositoryId: repo.id,
+            fullName: repo.fullName,
+            defaultBranch: repo.defaultBranch,
+          }));
+        } else {
+          throw cause;
+        }
+      }
+    }
+  }
+  const connectedByName = new Map(
+    reposList.map((repo) => [repo.fullName, repo] as const),
+  );
+  const availableList: RepositoryOptionView[] = available.map((repo) => ({
+    repositoryId: repo.repositoryId,
+    fullName: repo.fullName,
+    defaultBranch: repo.defaultBranch,
+    connected: connectedByName.has(repo.fullName),
+  }));
+  const optionsList: RepositoryOptionView[] = allRepos.map((repo) => ({
+    repositoryId: repo.id,
+    fullName: repo.fullName,
+    defaultBranch: repo.defaultBranch,
+    connected: subpathsByRepoId.has(repo.id),
+  }));
 
   return ok({
     repos: reposList,
     options: optionsList,
+    available: availableList,
+    connector,
   });
 };

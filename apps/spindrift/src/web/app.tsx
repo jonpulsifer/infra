@@ -8,11 +8,12 @@ import { LogOut, Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
-import { command } from './client.ts';
+import { command, type InputOf } from './client.ts';
 import type {
   AppListItem,
   DeployView,
   LinkedRepoView,
+  RepositoryConnectorView,
   RepositoryOptionView,
   TargetListItem,
   TargetOptionView,
@@ -30,7 +31,10 @@ import { NewApp } from './views/apps/new/index.tsx';
 import { Workspace } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
 import { Settings } from './views/auth/settings.tsx';
-import { RepositoryList } from './views/repos/list.tsx';
+import {
+  type RepositoryAuthorizationView,
+  RepositoryList,
+} from './views/repos/list.tsx';
 import { TargetList } from './views/targets/list.tsx';
 
 const NAV = [
@@ -508,8 +512,28 @@ function RepositoriesScreen() {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
-    | { type: 'success'; repos: readonly LinkedRepoView[] }
+    | {
+        type: 'success';
+        repos: readonly LinkedRepoView[];
+        options: readonly RepositoryOptionView[];
+        available: readonly RepositoryOptionView[];
+        connector: RepositoryConnectorView;
+      }
   >({ type: 'loading' });
+  const [refresh, setRefresh] = useState(0);
+  const [authorization, setAuthorization] = useState<
+    | (RepositoryAuthorizationView & {
+        readonly attemptId: string;
+        readonly intervalSeconds: number;
+      })
+    | null
+  >(null);
+  const [connecting, setConnecting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [openedPullRequest, setOpenedPullRequest] = useState<{
+    fullName: string;
+    number: number;
+  } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -517,7 +541,7 @@ function RepositoriesScreen() {
       .then((result) => {
         if (!live) return;
         if (result.ok) {
-          setState({ type: 'success', repos: result.value.repos });
+          setState({ type: 'success', ...result.value });
         } else {
           setState({ type: 'error', message: result.failure.message });
         }
@@ -532,7 +556,61 @@ function RepositoriesScreen() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (authorization?.state !== 'waiting') return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = (seconds: number) => {
+      timer = setTimeout(async () => {
+        const result = await command('pollRepositoryAuthorization', {
+          attemptId: authorization.attemptId,
+        }).catch((cause: unknown) => ({
+          ok: false as const,
+          failure: {
+            code: 'MALFORMED_REQUEST' as const,
+            message:
+              cause instanceof Error ? cause.message : 'GitHub poll failed',
+          },
+        }));
+        if (!live) return;
+        if (!result.ok) {
+          setAuthorization((current) =>
+            current === null
+              ? null
+              : {
+                  ...current,
+                  state: 'error',
+                  message: result.failure.message,
+                },
+          );
+          return;
+        }
+        if (result.value.state === 'pending') {
+          poll(result.value.retryAfterSeconds);
+        } else if (result.value.state === 'authorized') {
+          setAuthorization(null);
+          setRefresh((value) => value + 1);
+        } else {
+          const terminalState =
+            result.value.state === 'denied' ? 'denied' : 'expired';
+          setAuthorization((current) =>
+            current === null ? null : { ...current, state: terminalState },
+          );
+        }
+      }, seconds * 1000);
+    };
+    poll(authorization.intervalSeconds);
+    return () => {
+      live = false;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [
+    authorization?.attemptId,
+    authorization?.intervalSeconds,
+    authorization?.state,
+  ]);
 
   if (state.type === 'loading') {
     return (
@@ -555,7 +633,63 @@ function RepositoriesScreen() {
     );
   }
 
-  return <RepositoryList repos={state.repos} />;
+  const authorize = async () => {
+    setActionError(null);
+    try {
+      const result = await command('beginRepositoryAuthorization', {});
+      if (!result.ok) {
+        setActionError(result.failure.message);
+        return;
+      }
+      setAuthorization({
+        ...result.value,
+        state: 'waiting',
+      });
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'GitHub authorization failed',
+      );
+    }
+  };
+
+  const connect = async (input: InputOf<'connectRepository'>) => {
+    setConnecting(true);
+    setActionError(null);
+    setOpenedPullRequest(null);
+    try {
+      const result = await command('connectRepository', input);
+      if (!result.ok) {
+        setActionError(result.failure.message);
+        return;
+      }
+      setOpenedPullRequest({
+        fullName: result.value.fullName,
+        number: result.value.pullRequest,
+      });
+      setRefresh((value) => value + 1);
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Repository connection failed',
+      );
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  return (
+    <RepositoryList
+      repos={state.repos}
+      options={state.available}
+      connector={state.connector}
+      authorization={authorization}
+      connecting={connecting}
+      error={actionError}
+      openedPullRequest={openedPullRequest}
+      onAuthorize={authorize}
+      onConnect={connect}
+      onRefresh={() => setRefresh((value) => value + 1)}
+    />
+  );
 }
 
 function NewAppScreen({

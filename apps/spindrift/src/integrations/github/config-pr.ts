@@ -201,7 +201,7 @@ function pullRequestBody(scopes: readonly ConfigurationScope[]): string {
 
   return `Spindrift wrote this. Merging it into the default branch is what connects this repository — nothing here takes effect until then, and an unmerged or closed pull request changes nothing.
 
-| scope | kind | build | detected by |
+| scope | kind | build | proposed by |
 | --- | --- | --- | --- |
 ${rows}
 

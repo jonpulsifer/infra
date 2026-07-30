@@ -58,6 +58,12 @@ import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import type * as commands from './index.ts';
 import {
+  beginRepositoryAuthorization,
+  beginRepositoryAuthorizationInput,
+  pollRepositoryAuthorization,
+  pollRepositoryAuthorizationInput,
+} from './repositories/authorize.ts';
+import {
   connectRepository,
   connectRepositoryInput,
 } from './repositories/connect.ts';
@@ -98,6 +104,14 @@ export const commandRegistry = {
   listRepositories: {
     input: listRepositoriesInput,
     handler: listRepositories,
+  },
+  beginRepositoryAuthorization: {
+    input: beginRepositoryAuthorizationInput,
+    handler: beginRepositoryAuthorization,
+  },
+  pollRepositoryAuthorization: {
+    input: pollRepositoryAuthorizationInput,
+    handler: pollRepositoryAuthorization,
   },
   startCreationDraft: {
     input: startCreationDraftInput,

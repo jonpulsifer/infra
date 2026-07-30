@@ -1,17 +1,16 @@
 /**
- * The GitHub App this installation already has (§15).
+ * Repository, Git data, source archive, and Actions operations for GitHub.
  *
- * §15: "Reuse the existing selected-repository GitHub App and bot identity,
- * bootstrapped from a SOPS Secret." Two consequences run through this whole
- * file:
+ * The Device OAuth lifecycle supplies the authorization value. The thing core
+ * passes around is an {@link InstallationRef}, which is a number in a database
+ * column and grants nothing on its own. The bearer value remains behind the
+ * per-request authorization provider.
  *
- * - **The App's key is the only long-lived credential, and it never leaves.**
- *   Everything else is minted from it per call — an App JWT good for minutes,
- *   an installation token good for an hour — so the thing core passes around as
- *   a "credential" is an {@link InstallationRef}, which is a number in a
- *   database column and grants nothing on its own. That is what lets §15's
- *   "storing no token" be structural: there is no type in this module's public
- *   surface that a token fits into.
+ * Two consequences run through this whole file:
+ *
+ * - **Authorization never enters the public operation surface.** Callers name
+ *   an installation and repository; the provider resolves a bearer value at
+ *   request time.
  * - **A selected-repository App can be un-selected at any time**, and the
  *   response when that happens is a `404` indistinguishable from a repository
  *   that never existed. So access is a *state* this module reports
@@ -24,11 +23,18 @@
  * is minted inside {@link GitHubApp.fetchExactCommit} and is unreachable from
  * the staged result.
  */
+
+import type { AvailableRepository } from '../../domain/repository.ts';
 import type {
   ExactCommitFetcher,
   FetchedCommit,
 } from '../../domain/source-bundle.ts';
-import { type Fetcher, GitHubAccessError, GitHubHttp } from './http.ts';
+import {
+  type AuthorizationProvider,
+  type Fetcher,
+  GitHubAccessError,
+  GitHubHttp,
+} from './http.ts';
 
 /** How core names one installation of the App. Grants nothing by itself. */
 export interface InstallationRef {
@@ -36,122 +42,49 @@ export interface InstallationRef {
   readonly installationId: string;
 }
 
-/** The App's own identity and signing key, from the installation Secret. */
+/** A GitHub App user token supplied by the Device OAuth lifecycle. */
 export interface GitHubAppConfig {
-  /** Numeric App id, as the manifest carries it. */
-  readonly appId: string;
-  /**
-   * The App's private key, PEM, **PKCS#8**.
-   *
-   * WebCrypto imports PKCS#8 and nothing else, and this integration has no
-   * ASN.1 code — so a PKCS#1 key (`BEGIN RSA PRIVATE KEY`, which is what the
-   * GitHub UI hands you) is refused at construction with the conversion
-   * command in the message. Refusing loudly beats a silent mis-parse that
-   * surfaces as an unexplained `401` an hour later.
-   */
-  readonly privateKeyPem: string;
   readonly baseUrl: string;
+  readonly authorization: AuthorizationProvider;
+  readonly onUnauthorized?: (authorization: string) => Error | Promise<Error>;
+  /** Combined App/user identity recorded on source receipts. */
+  readonly principalSubject?: (
+    ref: InstallationRef,
+  ) => string | Promise<string>;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
 
-/** Raised when the configured App key cannot be used to sign a JWT. */
-export class GitHubAppKeyError extends Error {
-  override readonly name = 'GitHubAppKeyError';
-}
+const PAGE_SIZE = 100;
 
-/** A minted installation access token and the moment it stops working. */
-interface InstallationToken {
-  readonly token: string;
-  readonly expiresAt: Date;
-}
-
-const PKCS8_HEADER = '-----BEGIN PRIVATE KEY-----';
-const PKCS1_HEADER = '-----BEGIN RSA PRIVATE KEY-----';
-
-/**
- * An App JWT is valid for ten minutes at most; nine leaves room for the clock
- * skew the far side tolerates without landing on its own limit.
- */
-const APP_JWT_LIFETIME_SECONDS = 9 * 60;
-
-/**
- * How long before an installation token expires it stops being reused.
- *
- * A token that expires mid-request is a `401` that reads exactly like lost
- * access, which is the one misclassification this integration must not make —
- * so the margin is generous rather than tight.
- */
-const TOKEN_REFRESH_MARGIN_MS = 60_000;
-
-function base64url(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replaceAll('=', '');
-}
-
-function encodeJson(value: unknown): string {
-  return base64url(new TextEncoder().encode(JSON.stringify(value)));
-}
-
-/** Decode a PEM body to DER, refusing the key format WebCrypto cannot import. */
-function pkcs8Der(pem: string): Uint8Array {
-  const trimmed = pem.trim();
-  if (trimmed.startsWith(PKCS1_HEADER)) {
-    throw new GitHubAppKeyError(
-      'the GitHub App key is PKCS#1; convert it with `openssl pkcs8 -topk8 -nocrypt -in key.pem -out key.pkcs8.pem` and store that',
-    );
+async function paged<Value>(
+  http: GitHubHttp,
+  pageRequest: (page: number) => {
+    readonly path: string;
+    readonly values: (body: unknown) => readonly Value[];
+  },
+): Promise<Value[]> {
+  const all: Value[] = [];
+  for (let page = 1; ; page += 1) {
+    const request = pageRequest(page);
+    const body = await http.json<unknown>({
+      method: 'GET',
+      path: request.path,
+    });
+    if (body === null) {
+      throw new TypeError('the paginated endpoint tolerates no status');
+    }
+    const values = request.values(body);
+    all.push(...values);
+    if (values.length < PAGE_SIZE) return all;
   }
-  if (!trimmed.startsWith(PKCS8_HEADER)) {
-    throw new GitHubAppKeyError(
-      'the GitHub App key is not a PKCS#8 PEM private key',
-    );
-  }
-  const body = trimmed
-    .replaceAll(/-----(BEGIN|END) PRIVATE KEY-----/g, '')
-    .replaceAll(/\s+/g, '');
-  return Uint8Array.from(atob(body), (character) => character.charCodeAt(0));
 }
 
 /**
  * The App, and everything reached through one of its installations.
- *
- * One object rather than a function per call because the two caches — the
- * imported signing key and the per-installation token — are what keep a loop
- * over a dozen repositories from minting a dozen JWTs a minute, and a cache
- * that is not owned by something is a module-level global.
  */
 export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
-  private readonly tokens = new Map<string, InstallationToken>();
-  private signingKey: Promise<CryptoKey> | null = null;
-
-  constructor(
-    private readonly config: GitHubAppConfig,
-    private readonly now: () => Date = () => new Date(),
-  ) {}
-
-  /**
-   * The App's own JWT: proves *which App is asking*, and nothing about a
-   * repository. It is only ever presented to the token endpoint.
-   */
-  async appJwt(): Promise<string> {
-    const issuedAt = Math.floor(this.now().getTime() / 1000);
-    // Backdating by a minute is the documented remedy for the far side's clock
-    // running slightly behind this one, which it rejects outright.
-    const claims = {
-      iat: issuedAt - 60,
-      exp: issuedAt + APP_JWT_LIFETIME_SECONDS,
-      iss: this.config.appId,
-    };
-    const signingInput = `${encodeJson({ alg: 'RS256', typ: 'JWT' })}.${encodeJson(claims)}`;
-    const signature = await crypto.subtle.sign(
-      'RSASSA-PKCS1-v1_5',
-      await this.key(),
-      new TextEncoder().encode(signingInput),
-    );
-    return `${signingInput}.${base64url(new Uint8Array(signature))}`;
-  }
+  constructor(private readonly config: GitHubAppConfig) {}
 
   /**
    * A bearer value for one installation, minted or reused.
@@ -160,58 +93,19 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
    * no caller has to know the scheme — and so that grepping this package for a
    * token-shaped string finds this method rather than a dozen call sites.
    */
-  private authorizationFor(ref: InstallationRef): () => Promise<string> {
-    return async () => `Bearer ${await this.installationToken(ref)}`;
+  private authorizationFor(): () => Promise<string> {
+    const { authorization } = this.config;
+    return async () => await authorization();
   }
 
-  private async installationToken(ref: InstallationRef): Promise<string> {
-    const cached = this.tokens.get(ref.installationId);
-    if (
-      cached !== undefined &&
-      cached.expiresAt.getTime() - this.now().getTime() >
-        TOKEN_REFRESH_MARGIN_MS
-    ) {
-      return cached.token;
-    }
-
-    const jwt = await this.appJwt();
-    const http = new GitHubHttp({
-      baseUrl: this.config.baseUrl,
-      authorization: () => `Bearer ${jwt}`,
-      ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
-    });
-    const minted = await http.json<{ token: string; expires_at: string }>({
-      method: 'POST',
-      path: `/app/installations/${encodeURIComponent(ref.installationId)}/access_tokens`,
-    });
-    if (minted === null) {
-      throw new TypeError('the token endpoint tolerates no status');
-    }
-
-    const token = {
-      token: minted.token,
-      expiresAt: new Date(minted.expires_at),
-    };
-    this.tokens.set(ref.installationId, token);
-    return token.token;
-  }
-
-  private key(): Promise<CryptoKey> {
-    this.signingKey ??= crypto.subtle.importKey(
-      'pkcs8',
-      pkcs8Der(this.config.privateKeyPem).buffer as ArrayBuffer,
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['sign'],
-    );
-    return this.signingKey;
-  }
-
-  /** A client scoped to one installation. */
-  private http(ref: InstallationRef): GitHubHttp {
+  /** A client authorized for repository operations. */
+  private http(_ref: InstallationRef): GitHubHttp {
     return new GitHubHttp({
       baseUrl: this.config.baseUrl,
-      authorization: this.authorizationFor(ref),
+      authorization: this.authorizationFor(),
+      ...(this.config.onUnauthorized
+        ? { onUnauthorized: this.config.onUnauthorized }
+        : {}),
       ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
     });
   }
@@ -438,26 +332,81 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   /**
    * Which installation covers a repository.
    *
-   * Authorized by the App's own JWT rather than an installation token, because
-   * the answer is what an installation token would have to be minted *from* —
-   * and it is why a build route can start from a repository name alone, without
-   * core threading an installation id through the build contract.
+   * Derived from the repositories GitHub grants the authorized user through
+   * this App. This is why neither the browser nor the manifest supplies an
+   * installation id.
    */
   async installationFor(fullName: string): Promise<InstallationRef> {
-    const jwt = await this.appJwt();
+    const repository = (await this.availableRepositories()).find(
+      (candidate) => candidate.fullName === fullName,
+    );
+    if (repository === undefined) {
+      throw new GitHubAccessError(
+        'ACCESS_LOST',
+        'GET',
+        `${this.config.baseUrl}/user/installations`,
+        404,
+        `the authorized GitHub user has no installation selecting ${fullName}`,
+      );
+    }
+    return { installationId: repository.installationId };
+  }
+
+  /**
+   * Repositories granted to the authorized user through this GitHub App.
+   *
+   * GitHub paginates installations and each installation's repositories
+   * independently. Walk both dimensions so the UI never silently hides the
+   * 101st repository.
+   */
+  async availableRepositories(): Promise<readonly AvailableRepository[]> {
     const http = new GitHubHttp({
       baseUrl: this.config.baseUrl,
-      authorization: () => `Bearer ${jwt}`,
+      authorization: this.config.authorization,
+      ...(this.config.onUnauthorized
+        ? { onUnauthorized: this.config.onUnauthorized }
+        : {}),
       ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
     });
-    const installation = await http.json<{ id: number }>({
-      method: 'GET',
-      path: `/repos/${fullName}/installation`,
-    });
-    if (installation === null) {
-      throw new TypeError('the installation endpoint tolerates no status');
+    const installations = await paged<{ id: number }>(http, (page) => ({
+      path: `/user/installations?per_page=100&page=${page}`,
+      values: (body) =>
+        (body as { installations?: { id: number }[] }).installations ?? [],
+    }));
+
+    const repositories: AvailableRepository[] = [];
+    for (const installation of installations) {
+      const selected = await paged<{
+        id: number;
+        full_name: string;
+        default_branch: string;
+      }>(http, (page) => ({
+        path:
+          `/user/installations/${installation.id}/repositories` +
+          `?per_page=100&page=${page}`,
+        values: (body) =>
+          (
+            body as {
+              repositories?: {
+                id: number;
+                full_name: string;
+                default_branch: string;
+              }[];
+            }
+          ).repositories ?? [],
+      }));
+      for (const repository of selected) {
+        repositories.push({
+          repositoryId: String(repository.id),
+          fullName: repository.full_name,
+          defaultBranch: repository.default_branch,
+          installationId: String(installation.id),
+        });
+      }
     }
-    return { installationId: String(installation.id) };
+    return repositories.sort((left, right) =>
+      left.fullName.localeCompare(right.fullName),
+    );
   }
 
   /**
@@ -657,6 +606,9 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       this.readFile(credential, repository, resolved.sha, '.gitattributes'),
     ]);
 
+    const principalSubject = this.config.principalSubject
+      ? await this.config.principalSubject(credential)
+      : `installation:${credential.installationId}`;
     return {
       bytes,
       resolvedCommit: resolved.sha,
@@ -667,7 +619,7 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
         gitattributes !== null && /filter\s*=\s*lfs/.test(gitattributes),
       principal: {
         kind: 'githubApp',
-        subject: `installation:${credential.installationId}`,
+        subject: principalSubject,
       },
     };
   }
