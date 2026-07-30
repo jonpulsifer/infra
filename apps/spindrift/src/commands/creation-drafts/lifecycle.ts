@@ -2,6 +2,9 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   apps,
+  builds,
+  components,
+  componentTargetDesired,
   creationDrafts,
   repositories,
   targets,
@@ -14,6 +17,7 @@ import {
   initialCreationDraft,
 } from '../../domain/creation-draft.ts';
 import {
+  artifactTypeFor,
   DEFAULT_PLATFORM,
   placementTargetOf,
   resolvePlacement,
@@ -234,6 +238,80 @@ export const completeCreationDraft: Command<
       name: created!.name,
       createdAt: created!.createdAt,
     };
+
+    const [component] = await transaction
+      .insert(components)
+      .values({
+        appId: created!.id,
+        name: row.draft.componentName,
+        kind: row.draft.kind,
+        expose:
+          row.draft.kind === 'website'
+            ? true
+            : row.draft.kind === 'service'
+              ? true
+              : null,
+        schedule: null,
+        exposure: row.draft.exposure,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    const [target] = await transaction
+      .select()
+      .from(targets)
+      .where(eq(targets.id, row.draft.targetId))
+      .limit(1);
+
+    if (target) {
+      const placementTarget = placementTargetOf(target, {
+        artifactTypes:
+          context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+        manifest: context.manifest,
+      });
+      const shape = artifactTypeFor(row.draft.kind, placementTarget);
+
+      const commit =
+        row.draft.source.kind === 'repo' ? 'HEAD' : row.draft.source.digest;
+      const bundleDigest =
+        row.draft.source.kind === 'archive'
+          ? row.draft.source.digest
+          : `sha256:${'0'.repeat(64)}`;
+      const bundleLocation =
+        row.draft.source.kind === 'archive'
+          ? `upload://${row.draft.source.filename}`
+          : `repo://${row.draft.source.repo}`;
+      const bundleSubpath =
+        row.draft.source.kind === 'repo' ? row.draft.source.subpath : '.';
+
+      const [build] = await transaction
+        .insert(builds)
+        .values({
+          componentId: component!.id,
+          commit,
+          targetShape: shape,
+          artifactType: shape,
+          bundleDigest,
+          bundleLocation,
+          bundleSubpath,
+          status: 'PENDING',
+          createdAt: now,
+        })
+        .returning();
+
+      await transaction
+        .insert(componentTargetDesired)
+        .values({
+          componentId: component!.id,
+          targetId: target.id,
+          desiredBuildId: build!.id,
+          desiredDeployId: null,
+          updatedAt: now,
+        })
+        .onConflictDoNothing();
+    }
+
     await transaction
       .update(creationDrafts)
       .set({

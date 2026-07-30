@@ -265,7 +265,21 @@ describe('creation drafts', () => {
       ctx,
     );
     expect(retried).toEqual(completed);
-    expect(await productCounts()).toEqual([1, 0, 0, 0]);
+    expect(await productCounts()).toEqual([1, 1, 1, 0]);
+
+    const [createdComponent] = await database()
+      .db.select()
+      .from(components)
+      .where(eq(components.appId, completed.value.app.appId));
+    expect(createdComponent).toBeDefined();
+    expect(createdComponent?.name).toBe('web');
+
+    const [createdBuild] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.componentId, createdComponent!.id));
+    expect(createdBuild).toBeDefined();
+    expect(createdBuild?.status).toBe('PENDING');
   });
 
   test('another operator cannot read or edit the draft', async () => {
