@@ -37,11 +37,19 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
       ? `*.${(target.connection as { canonicalSuffix?: string }).canonicalSuffix}`
       : `*.${target.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.apps.internal`;
 
+    const prereqFailures = target.prerequisites
+      ?.filter((p) => !p.met && p.detail)
+      .map((p) => p.detail!);
+
     targetsList.push({
       name: target.name,
       adapter: target.adapter,
       rank: target.rank,
       health: target.health,
+      prerequisiteFailures:
+        prereqFailures && prereqFailures.length > 0
+          ? prereqFailures
+          : undefined,
       kinds,
       canonical,
     });

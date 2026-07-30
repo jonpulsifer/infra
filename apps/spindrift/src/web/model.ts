@@ -331,6 +331,8 @@ export interface TargetListItem {
   readonly adapter: string;
   readonly rank: number;
   readonly health: 'healthy' | 'unhealthy';
+  /** Prerequisite failure details when target is unhealthy. */
+  readonly prerequisiteFailures?: readonly string[];
   /** Supported component kinds on this target. */
   readonly kinds: readonly ComponentKind[];
   /** The canonical hostname prefix for apps on this target. */
