@@ -8,7 +8,7 @@
  * is a readable answer here rather than an empty list.
  */
 import { AlertTriangle, Lock } from 'lucide-react';
-import type { Dispatch, ReactNode } from 'react';
+import { type Dispatch, type ReactNode, useState } from 'react';
 import type {
   ComponentKind,
   Exposure,
@@ -109,6 +109,44 @@ export function StepSource({
   dispatch,
   repos,
 }: StepProps & { repos: readonly RepositoryOptionView[] }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/internal/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const res = await response.json();
+      if (res.ok) {
+        dispatch({
+          type: 'archive',
+          filename: res.value.filename,
+          digest: res.value.digest,
+        });
+      } else {
+        setUploadError(res.failure?.message || 'Archive upload failed');
+      }
+    } catch (err: unknown) {
+      setUploadError(
+        err instanceof Error ? err.message : 'Network error during upload',
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <>
       <StepHeading index={1} label="Source">
@@ -153,13 +191,37 @@ export function StepSource({
         </div>
       ) : (
         <Card className="mt-5">
-          <CardContent className="flex items-center gap-3">
-            <Badge tone="accent">archive</Badge>
-            <div>
-              <p className="font-mono text-sm">{draft.source.filename}</p>
-              <p className="text-xs text-muted-foreground">
-                Archives are durable; a repo bundle is fetched once and staged.
-              </p>
+          <CardContent className="flex flex-col gap-3 p-4">
+            <div className="flex items-center gap-3">
+              <Badge tone="accent">archive</Badge>
+              <div className="flex-1">
+                <p className="font-mono text-sm">{draft.source.filename}</p>
+                <p className="font-mono text-xs text-muted-foreground">
+                  {draft.source.digest}
+                </p>
+              </div>
+            </div>
+            <div className="mt-1 flex flex-col gap-2">
+              <label className="flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border p-4 transition-colors hover:border-primary">
+                <span className="text-sm font-medium text-foreground">
+                  {uploading
+                    ? 'Uploading archive…'
+                    : 'Choose or drop a zip/tar archive'}
+                </span>
+                <span className="mt-0.5 text-xs text-muted-foreground">
+                  Accepts .zip, .tar.gz, .tgz
+                </span>
+                <input
+                  type="file"
+                  accept=".zip,.tar.gz,.tgz,.tar"
+                  disabled={uploading}
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </label>
+              {uploadError ? (
+                <p className="text-xs text-destructive">{uploadError}</p>
+              ) : null}
             </div>
           </CardContent>
         </Card>

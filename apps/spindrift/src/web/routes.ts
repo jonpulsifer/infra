@@ -30,6 +30,7 @@ import type { GatewayDeps } from '../auth/gateway.ts';
 import { authRoutes } from '../auth/routes.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
 import { streamRoutes } from './streams.ts';
+import { uploadRoutes } from './upload.ts';
 
 /**
  * The one route that is neither a command nor part of the client bundle.
@@ -69,5 +70,6 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...authRoutes(auth),
     ...commandRoutes(deps),
     ...streamRoutes(deps),
+    ...uploadRoutes(deps),
   };
 }
