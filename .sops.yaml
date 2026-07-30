@@ -1,5 +1,13 @@
 ---
 creation_rules:
+  # GitHub provider inputs are operator-managed. Atlantis receives the GitHub
+  # token through its runtime environment; this file is reserved for
+  # intentionally managed Actions secret values.
+  - path_regex: terraform/github/secrets\.sops\.ya?ml
+    encrypted_regex: "^(secrets)$"
+    key_groups:
+      - age:
+          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
   - path_regex: clusters/.*\.sops\.ya?ml
     encrypted_regex: "^(data|stringData)$"
     key_groups:
