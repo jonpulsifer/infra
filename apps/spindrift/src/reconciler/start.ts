@@ -44,10 +44,10 @@ export async function startReconciler(
   try {
     const db = createDb(client);
     const manifest = await loadStoredManifest(db, env);
+    const clock = options.clock ?? systemClock;
     const adapters =
       options.createAdapters?.(manifest) ??
-      createAdapterRegistry({ manifest, env });
-    const clock = options.clock ?? systemClock;
+      createAdapterRegistry({ manifest, env, db, clock });
     await restoreDeclaredTargetConnections({ db, adapters, clock }, manifest);
     options.onStarted?.(manifest);
 

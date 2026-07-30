@@ -58,6 +58,12 @@ import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import type * as commands from './index.ts';
 import {
+  beginRepositoryAuthorization,
+  beginRepositoryAuthorizationInput,
+  pollRepositoryAuthorization,
+  pollRepositoryAuthorizationInput,
+} from './repositories/authorize.ts';
+import {
   connectRepository,
   connectRepositoryInput,
 } from './repositories/connect.ts';
@@ -65,6 +71,10 @@ import {
   listRepositories,
   listRepositoriesInput,
 } from './repositories/list.ts';
+import {
+  testBucketPermissions,
+  testBucketPermissionsInput,
+} from './storage/test-bucket.ts';
 import { connectTarget, connectTargetInput } from './targets/connect.ts';
 import {
   disconnectTarget,
@@ -98,6 +108,14 @@ export const commandRegistry = {
   listRepositories: {
     input: listRepositoriesInput,
     handler: listRepositories,
+  },
+  beginRepositoryAuthorization: {
+    input: beginRepositoryAuthorizationInput,
+    handler: beginRepositoryAuthorization,
+  },
+  pollRepositoryAuthorization: {
+    input: pollRepositoryAuthorizationInput,
+    handler: pollRepositoryAuthorization,
   },
   startCreationDraft: {
     input: startCreationDraftInput,
@@ -139,6 +157,10 @@ export const commandRegistry = {
   resolveComponentPlacement: {
     input: resolveComponentPlacementInput,
     handler: resolveComponentPlacement,
+  },
+  testBucketPermissions: {
+    input: testBucketPermissionsInput,
+    handler: testBucketPermissions,
   },
 } as const satisfies Readonly<Record<string, AnyCommandDescriptor>>;
 

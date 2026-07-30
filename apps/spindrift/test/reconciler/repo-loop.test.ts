@@ -41,7 +41,7 @@ import {
   reconcileRepository,
 } from '../../src/reconciler/repo-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
+import { FakeGitHub } from '../harness/fakes/github-api.ts';
 import { targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -77,21 +77,16 @@ const SPINDRIFT_YAML = [
   '',
 ].join('\n');
 
-async function host(fake: FakeGitHub): Promise<GitHubApp> {
-  const { pem } = await testAppKey();
-  return new GitHubApp(
-    {
-      appId: '1234567',
-      privateKeyPem: pem,
-      baseUrl: fake.baseUrl,
-      fetch: fake.fetch,
-    },
-    () => NOW,
-  );
+function host(fake: FakeGitHub): GitHubApp {
+  return new GitHubApp({
+    baseUrl: fake.baseUrl,
+    authorization: () => 'Bearer test-user-token',
+    fetch: fake.fetch,
+  });
 }
 
 async function context(fake: FakeGitHub): Promise<RepoLoopContext> {
-  return { db: database().db, clock, host: await host(fake) };
+  return { db: database().db, clock, host: host(fake) };
 }
 
 /** One connected repository with one App scoped into it. */

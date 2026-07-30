@@ -22,6 +22,7 @@ import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
 import { HEALTH_PATH, webRoutes } from '../../src/web/routes.ts';
 import { STREAM_PATHS } from '../../src/web/streams.ts';
+import { UPLOAD_PATH } from '../../src/web/upload.ts';
 
 const APP = join(import.meta.dir, '../..');
 
@@ -75,6 +76,7 @@ describe('what the web process serves', () => {
         ...AUTH_PATHS,
         ...commandNames.map(pathFor),
         ...STREAM_PATHS,
+        UPLOAD_PATH,
       ].sort(),
     );
   });
@@ -90,7 +92,7 @@ describe('what the web process serves', () => {
       (path) => !generated.has(path) && !(path in CLIENT),
     );
     expect(handAuthored.sort()).toEqual(
-      [HEALTH_PATH, ...AUTH_PATHS, ...STREAM_PATHS].sort(),
+      [HEALTH_PATH, ...AUTH_PATHS, ...STREAM_PATHS, UPLOAD_PATH].sort(),
     );
   });
 

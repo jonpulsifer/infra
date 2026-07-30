@@ -28,7 +28,7 @@ import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeCloudBuild } from '../harness/fakes/cloud-build-api.ts';
 import { FakeCloudRun } from '../harness/fakes/cloudrun-api.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
+import { FakeGitHub } from '../harness/fakes/github-api.ts';
 import { FakeHosting } from '../harness/fakes/hosting-api.ts';
 import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 import { FakeOnePasswordConnect } from '../harness/fakes/onepassword-connect.ts';
@@ -50,7 +50,6 @@ import {
  * a fresh adapter for each assertion, and an RSA keypair per test is seconds of
  * wall clock spent proving nothing about the contract.
  */
-const appKey = await testAppKey();
 
 /** What the in-cluster Job prints, ending with the one line core reads. */
 function inClusterBuildLog(): string {
@@ -161,9 +160,8 @@ buildAdapterSuite('github-actions', () => {
   return new GitHubActionsBuildRoute({
     name: 'github-actions',
     host: new GitHubApp({
-      appId: '1',
-      privateKeyPem: appKey.pem,
       baseUrl: host.baseUrl,
+      authorization: () => 'Bearer test-user-token',
       fetch: host.fetch,
     }),
     buildWorkflow: `${host.fullName}/.github/workflows/spindrift-build.yml@${'f'.repeat(40)}`,

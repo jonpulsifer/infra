@@ -1,11 +1,11 @@
 /**
  * The repository picker for the creation flow's Source step (§20, Task 24).
  *
- * Lists repositories currently granted to the GitHub App installation. A
- * developer selects one, and the selection populates the draft's source with
- * the repo's fullName and a composed clone URL. The picker does not create
- * connections — a missing repository sends the developer to GitHub's
- * installation settings (§20: installation is bootstrap, not user OAuth).
+ * Lists repositories currently granted to the authorized GitHub App
+ * installation. A developer selects one, and the selection populates the
+ * draft's source with the repo's fullName and a composed clone URL. The picker
+ * does not create connections—a missing repository is authorized and connected
+ * from the Repositories screen first.
  *
  * The filter is a client-side substring match against fullName. It is fast
  * enough for the single-operator scale v1 targets, and the picker never
@@ -104,16 +104,7 @@ export function RepoPicker({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Missing a repository?{' '}
-        <a
-          href="https://github.com/settings/installations"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-foreground underline underline-offset-2"
-        >
-          Add it to the GitHub App installation settings
-        </a>
-        , then refresh.
+        Missing a repository? Authorize or connect it from Repositories first.
       </p>
     </div>
   );

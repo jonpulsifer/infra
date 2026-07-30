@@ -46,7 +46,11 @@ export async function start(
   const db = createDb();
   const manifest = await loadStoredManifest(db);
   assertTrustedGatewayBoundary(manifest);
-  const adapters = createAdapterRegistry({ manifest });
+  const adapters = createAdapterRegistry({
+    manifest,
+    db,
+    clock: systemClock,
+  });
 
   const auth: EnrolmentDeps & GatewayDeps = {
     db,

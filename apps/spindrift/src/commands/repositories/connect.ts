@@ -19,7 +19,7 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { repositories } from '../../db/schema.ts';
-import { repositoryRefOf } from '../../domain/repository.ts';
+import type { repositoryRefOf } from '../../domain/repository.ts';
 import {
   type ConfigurationScope,
   configurationTransaction,
@@ -47,21 +47,11 @@ const scopePath = z
 /** §2: "kind = service | website | job". */
 const componentKind = z.enum(['service', 'website', 'job']);
 
-const kindOption = z.object({
-  kind: componentKind,
-  available: z.boolean(),
-  reason: z.string().optional(),
-});
-
 /**
- * The build half of a detection proposal, mirrored for untrusted input.
- *
- * §5's `DetectionProposal` is the authority on this shape; this is the gate that
- * lets a browser hand one over. The two are kept in step by
- * `configurationTransaction` taking the *domain* type — a drift between them is
- * a compile error at the call below, not a runtime surprise.
+ * The operator's build selection. The command turns it into §5's canonical
+ * proposal; the browser never constructs domain state.
  */
-const proposalBuild = z.discriminatedUnion('frontend', [
+const operatorBuild = z.discriminatedUnion('frontend', [
   z.object({
     frontend: z.literal('dockerfile'),
     dockerfile: scopePath,
@@ -73,39 +63,24 @@ const proposalBuild = z.discriminatedUnion('frontend', [
   }),
 ]);
 
-const proposal = z.object({
-  source: z.enum(['railpack', 'spindrift-file']),
-  kind: componentKind,
-  kinds: z.array(kindOption),
-  build: proposalBuild,
-  watchPaths: z.array(scopePath).min(1),
-});
-
 export const connectRepositoryInput = z
   .object({
     fullName,
-    /** The App installation this repository is reached through. */
-    installationId: z.string().trim().min(1),
     /** One entry per App subpath the transaction will carry (§5, §15). */
     scopes: z
-      .array(z.object({ scope: scopePath, proposal }))
+      .array(
+        z.object({
+          scope: scopePath,
+          kind: componentKind,
+          build: operatorBuild,
+          watchPaths: z.array(scopePath).min(1),
+        }),
+      )
       .min(1, 'a configuration pull request needs at least one scope'),
   })
   .strict();
 
-/**
- * The domain shape, not `z.infer` of the schema above.
- *
- * The schema is the gate untrusted input passes through; the *type* is what the
- * command layer works in, and it is `ConfigurationScope` — §5's own
- * `DetectionProposal` — so that composing the transaction is a plain call
- * rather than a cast. A drift between the two is a compile error at that call.
- */
-export type ConnectRepositoryInput = {
-  readonly fullName: string;
-  readonly installationId: string;
-  readonly scopes: readonly ConfigurationScope[];
-};
+export type ConnectRepositoryInput = z.infer<typeof connectRepositoryInput>;
 
 export interface ConnectRepositoryResult {
   readonly repositoryId: string;
@@ -128,6 +103,12 @@ export const connectRepository: Command<
       'this installation has no repository integration, so nothing can be connected to one',
     );
   }
+  if (host.installationFor === undefined) {
+    return failed(
+      'NOT_DEPLOYABLE',
+      'this repository integration cannot discover installations, so nothing new can be connected',
+    );
+  }
 
   // §15's transaction carries one CI caller, and the caller has to name a
   // pinned reusable workflow. An installation that has not published one has no
@@ -142,7 +123,18 @@ export const connectRepository: Command<
     );
   }
 
-  const ref = repositoryRefOf({ installationId: input.installationId });
+  let ref: ReturnType<typeof repositoryRefOf>;
+  try {
+    ref = await host.installationFor(input.fullName);
+  } catch (cause) {
+    if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
+      return failed(
+        'NOT_FOUND',
+        `Spindrift cannot reach ${input.fullName}: authorize GitHub and check that the App installation selects it`,
+      );
+    }
+    throw cause;
+  }
 
   let defaultBranch: string;
   try {
@@ -165,7 +157,7 @@ export const connectRepository: Command<
     .insert(repositories)
     .values({
       fullName: input.fullName,
-      installationId: input.installationId,
+      installationId: ref.installationId,
       defaultBranch,
       createdAt: now,
       updatedAt: now,
@@ -173,15 +165,35 @@ export const connectRepository: Command<
     .onConflictDoUpdate({
       target: repositories.fullName,
       set: {
-        installationId: input.installationId,
+        installationId: ref.installationId,
         defaultBranch,
         updatedAt: now,
       },
     })
     .returning();
 
+  const scopes: ConfigurationScope[] = input.scopes.map(
+    ({ scope, kind, build, watchPaths }) => ({
+      scope,
+      proposal: {
+        source: 'operator',
+        kind,
+        kinds: (['service', 'website', 'job'] as const).map((candidate) =>
+          candidate === kind
+            ? { kind: candidate, available: true }
+            : {
+                kind: candidate,
+                available: false,
+                reason: 'the operator selected another kind',
+              },
+        ),
+        build,
+        watchPaths,
+      },
+    }),
+  );
   const transaction = configurationTransaction({
-    scopes: input.scopes,
+    scopes,
     buildWorkflow,
   });
   const opened = await openConfigurationPullRequest(host, ref, {

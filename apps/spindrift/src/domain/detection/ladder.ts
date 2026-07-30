@@ -52,7 +52,7 @@ export interface ZeroConfigPlanner {
 }
 
 export interface DetectionProposal {
-  readonly source: 'railpack' | 'spindrift-file';
+  readonly source: 'railpack' | 'spindrift-file' | 'operator';
   readonly kind: ComponentKind;
   readonly kinds: readonly KindOption[];
   readonly build:

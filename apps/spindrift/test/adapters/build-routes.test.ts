@@ -48,14 +48,11 @@ import {
 import {
   FakeGitHub,
   type FakeGitHubOptions,
-  testAppKey,
 } from '../harness/fakes/github-api.ts';
 import {
   FakeKubernetes,
   type FakeKubernetesOptions,
 } from '../harness/fakes/kubernetes-api.ts';
-
-const appKey = await testAppKey();
 
 const PLATFORM_REPO = 'example/platform';
 const WORKFLOW_REF = `${PLATFORM_REPO}/.github/workflows/spindrift-build.yml@${'f'.repeat(40)}`;
@@ -150,9 +147,8 @@ function hostedRoute(
     route: new GitHubActionsBuildRoute({
       name: 'hosted',
       host: new GitHubApp({
-        appId: '1',
-        privateKeyPem: appKey.pem,
         baseUrl: host.baseUrl,
+        authorization: () => 'Bearer test-user-token',
         fetch: host.fetch,
       }),
       buildWorkflow: WORKFLOW_REF,

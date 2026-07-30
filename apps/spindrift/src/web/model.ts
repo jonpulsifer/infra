@@ -283,6 +283,16 @@ export interface RepositoryOptionView {
   readonly connected: boolean;
 }
 
+/** Whether the repository connector can currently call GitHub for this user. */
+export type RepositoryConnectorView =
+  | { readonly state: 'unavailable' }
+  | { readonly state: 'unauthorized' }
+  | {
+      readonly state: 'authorized';
+      readonly login: string;
+      readonly githubUserId: string;
+    };
+
 /** The connection health of a linked repository (§20). */
 export type RepoConnectionHealth = 'connected' | 'connection_lost';
 
