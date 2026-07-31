@@ -116,7 +116,9 @@ export function StepSource({
   const [buckets, setBuckets] = useState<readonly string[]>([
     'bluenose-spindrift-source',
   ]);
-  const [defaultBucket, setDefaultBucket] = useState('bluenose-spindrift-source');
+  const [defaultBucket, setDefaultBucket] = useState(
+    'bluenose-spindrift-source',
+  );
   const [customBucket, setCustomBucket] = useState('');
   const [useCustom, setUseCustom] = useState(false);
   const [testingWif, setTestingWif] = useState(false);
@@ -295,14 +297,19 @@ export function StepSource({
           <Badge tone="accent">first-party</Badge>
         </div>
         <p className="text-[11.5px] text-muted-foreground">
-          Select from configured first-party Cloud Storage buckets or enter a custom bucket name.
+          Select from configured first-party Cloud Storage buckets or enter a
+          custom bucket name.
         </p>
 
         <div className="flex flex-col gap-2">
-          <label className="text-xs font-medium text-muted-foreground">
+          <label
+            htmlFor="source-bucket-select"
+            className="text-xs font-medium text-muted-foreground"
+          >
             Bucket
           </label>
           <select
+            id="source-bucket-select"
             value={useCustom ? 'custom' : bucketName}
             onChange={(e) => {
               if (e.target.value === 'custom') {
@@ -337,7 +344,7 @@ export function StepSource({
           ) : null}
         </div>
 
-        <div className="flex items-center gap-2 mt-1">
+        <div className="mt-1 flex items-center gap-2">
           <button
             type="button"
             disabled={!bucketName.trim() || testingWif}
@@ -353,7 +360,8 @@ export function StepSource({
           </p>
         ) : (
           <p className="text-[11px] text-muted-foreground">
-            Uses credential-less Workload Identity Federation (WIF) token exchange with spindrift-controller service account impersonation.
+            Uses credential-less Workload Identity Federation (WIF) token
+            exchange with spindrift-controller service account impersonation.
           </p>
         )}
       </div>
