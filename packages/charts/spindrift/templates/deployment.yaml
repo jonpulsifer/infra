@@ -136,6 +136,10 @@ spec:
                   name: {{ include "spindrift.databaseName" $top }}-app
                   key: uri
             {{- end }}
+            {{- if not (empty $top.Values.installationManifest) }}
+            - name: SPINDRIFT_MANIFEST
+              value: {{ toJson $top.Values.installationManifest | quote }}
+            {{- end }}
             {{- range $top.Values.env }}
             - name: {{ .name }}
               value: {{ .value | quote }}
