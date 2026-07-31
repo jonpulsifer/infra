@@ -65,10 +65,6 @@ command: "bun run src/web/server.ts"
 # so rather than the chart assuming a runtime class exists.
 sandbox: false
 
-# Declared installation configuration. The chart hashes it into both pod
-# templates so a change rolls the processes that reconcile it into Postgres.
-installationManifest: {}
-
 # The Secret carrying `SPINDRIFT_ENROLMENT_TOKEN` and repository credentials
 # when those integrations are configured. It contains credentials only.
 envFromSecret: ""

@@ -43,25 +43,35 @@ export function Gate({
   onSignedIn,
 }: GateProps) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-[440px] flex-col justify-center gap-5 px-5 py-10">
-      <div className="flex items-center gap-2.5">
-        <span className="font-mono text-sm font-bold tracking-[0.18em]">
+    <main className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col justify-center gap-6 px-5 py-12">
+      <div className="flex flex-col items-center gap-2 text-center">
+        <div className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent shadow-sm">
+          <span className="relative flex size-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+            <span className="relative inline-flex size-2 rounded-full bg-accent" />
+          </span>
+          Passkey-First Platform
+        </div>
+        <span className="font-mono text-xl font-bold tracking-[0.25em] text-foreground">
           SPINDRIFT
         </span>
+        <p className="text-xs text-muted-foreground">
+          Passkey Authentication &amp; UI-Driven Manifest Operations
+        </p>
       </div>
       {claimed ? (
         <SignIn gatewayUnlinked={gatewayUnlinked} onSignedIn={onSignedIn} />
       ) : (
         <Enrol onSignedIn={onSignedIn} />
       )}
-      <div className="rounded-lg border border-border bg-card p-3 text-center">
-        <p className="mb-2 text-xs text-muted-foreground">
-          Local Development Mode
+      <div className="rounded-xl border border-border/80 bg-card/60 p-4 text-center backdrop-blur-sm shadow-sm transition-all hover:border-accent/40">
+        <p className="mb-2.5 font-mono text-xs font-semibold text-muted-foreground tracking-wide uppercase">
+          Local Development Seam
         </p>
         <Button
           type="button"
           variant="outline"
-          className="w-full font-mono text-xs"
+          className="w-full font-mono text-xs hover:border-accent hover:text-accent"
           onClick={() => onSignedIn(DEV_OPERATOR)}
         >
           Bypass Auth (Sign in as Dev Operator)

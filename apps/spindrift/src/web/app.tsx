@@ -662,10 +662,12 @@ function RepositoriesScreen() {
         setActionError(result.failure.message);
         return;
       }
-      setOpenedPullRequest({
-        fullName: result.value.fullName,
-        number: result.value.pullRequest,
-      });
+      if (result.value.pullRequest !== null) {
+        setOpenedPullRequest({
+          fullName: result.value.fullName,
+          number: result.value.pullRequest,
+        });
+      }
       setRefresh((value) => value + 1);
     } catch (cause) {
       setActionError(

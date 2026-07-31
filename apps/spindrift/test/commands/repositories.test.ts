@@ -45,14 +45,17 @@ const proposal: DetectionProposal = {
   watchPaths: ['services/api'],
 };
 
-async function context(fake: FakeGitHub | null): Promise<CommandContext> {
+async function context(
+  fake: FakeGitHub | null,
+  customFetch?: typeof fetch,
+): Promise<CommandContext> {
   const host =
     fake === null
       ? null
       : new GitHubApp({
           baseUrl: fake.baseUrl,
           authorization: () => 'Bearer test-user-token',
-          fetch: fake.fetch,
+          fetch: customFetch ?? fake.fetch,
         });
 
   const adapters: AdapterRegistry = {
@@ -153,13 +156,11 @@ describe('connecting a repository', () => {
     expect(await database().db.select().from(repositories)).toEqual([]);
   });
 
-  test('refuses when this installation has published no build workflow', async () => {
+  test('connects without configuration PR when this installation has published no build workflow', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', { 'README.md': 'unconnected' });
     const base = await context(fake);
 
-    // A repository connected without a build route is connected to nothing, so
-    // the transaction is refused rather than opened without its one caller.
     const result = await connectRepository(input(fake), {
       ...base,
       manifest: {
@@ -168,12 +169,50 @@ describe('connecting a repository', () => {
       },
     });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
-    expect(result.failure.message).toContain('reusable build workflow');
-    expect(await database().db.select().from(repositories)).toEqual([]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.pullRequest).toBeNull();
+
+    const [row] = await database()
+      .db.select()
+      .from(repositories)
+      .where(eq(repositories.id, result.value.repositoryId));
+    expect(row).toMatchObject({
+      fullName: fake.fullName,
+      access: 'active',
+      configPullRequest: null,
+    });
     expect(fake.pulls).toEqual([]);
+  });
+
+  test('fails open and leaves repository connected when configuration PR creation fails', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'unconnected' });
+    const failingFetch = (async (input: any) => {
+      const urlStr =
+        typeof input === 'string' ? input : (input?.url ?? String(input));
+      if (urlStr.includes('/git/') || urlStr.includes('/pulls')) {
+        throw new Error('GitHub API pull request error');
+      }
+      return fake.fetch(input);
+    }) as any;
+    const ctx = await context(fake, failingFetch);
+
+    const result = await connectRepository(input(fake), ctx);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.pullRequest).toBeNull();
+
+    const [row] = await database()
+      .db.select()
+      .from(repositories)
+      .where(eq(repositories.id, result.value.repositoryId));
+    expect(row).toMatchObject({
+      fullName: fake.fullName,
+      access: 'active',
+      configPullRequest: null,
+    });
   });
 
   test('refuses when this installation has no repository integration', async () => {

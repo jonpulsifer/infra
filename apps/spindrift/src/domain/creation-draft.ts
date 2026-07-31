@@ -132,7 +132,13 @@ export type DraftAction =
   | { type: 'step'; step: number }
   | { type: 'repo'; fullName: string; url: string }
   | { type: 'subpath'; subpath: string }
-  | { type: 'archive'; filename: string; digest: string };
+  | {
+      type: 'archive';
+      filename: string;
+      digest: string;
+      location?: string | null;
+      contents?: 'artifact' | 'source';
+    };
 
 export const CREATION_BLOCKER_CODES = [
   'VESSEL_UNAVAILABLE',
@@ -260,6 +266,15 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
           kind: 'archive',
           filename: action.filename,
           digest: action.digest,
+          location:
+            action.location ??
+            (draft.source.kind === 'archive' ? draft.source.location : null),
+          contents:
+            action.contents ??
+            (draft.source.kind === 'archive'
+              ? draft.source.contents
+              : 'source'),
+          subpath: draft.source.kind === 'archive' ? draft.source.subpath : '.',
         },
       };
   }
