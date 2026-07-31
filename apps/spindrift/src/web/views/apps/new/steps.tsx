@@ -13,6 +13,7 @@ import type {
   ComponentKind,
   Exposure,
 } from '../../../../domain/desired-state.ts';
+import { command } from '../../../client.ts';
 import { RepoPicker } from '../../../components/repo-picker.tsx';
 import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
 import { Badge } from '../../../ui/badge.tsx';
@@ -120,20 +121,13 @@ export function StepSource({
     setTestingWif(true);
     setWifStatus(null);
     try {
-      const response = await fetch('/internal/commands/testBucketPermissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bucketName: bucketName.trim() }),
+      const res = await command('testBucketPermissions', {
+        bucketName: bucketName.trim(),
       });
-      const res = await response.json();
       if (res.ok) {
-        setWifStatus(
-          `✓ WIF permissions verified for gs://${bucketName.trim()}`,
-        );
+        setWifStatus(`✓ WIF permissions verified for ${res.value.location}`);
       } else {
-        setWifStatus(
-          `✗ WIF check failed: ${res.failure?.message || 'Access denied'}`,
-        );
+        setWifStatus(`✗ WIF check failed: ${res.failure.message}`);
       }
     } catch {
       setWifStatus('Network error testing bucket permissions');

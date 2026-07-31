@@ -106,13 +106,14 @@ export async function handleUpload(
     const staged: StagedArchive = await stageArchiveBytes(filename, bytes);
 
     let location = staged.location;
+    const context = deps.context(authentication.principal);
     const bucket =
       request.headers.get('x-bucket')?.trim() ||
-      process.env.SPINDRIFT_ARTIFACTS_BUCKET?.trim();
+      process.env.SPINDRIFT_ARTIFACTS_BUCKET?.trim() ||
+      context.manifest?.cloud?.artifactsBucket?.trim();
 
     if (bucket) {
-      const context = deps.context(authentication.principal);
-      const federation = context.manifest.cloud.federation;
+      const federation = context.manifest?.cloud?.federation;
       if (federation) {
         try {
           const hex = staged.digest.replace('sha256:', '');
@@ -126,8 +127,18 @@ export async function handleUpload(
             federation,
           });
           location = gcs.location;
-        } catch {
-          // Fall back to staged location if cloud upload fails
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : `Cloud storage upload to gs://${bucket} failed`;
+          return Response.json(
+            {
+              ok: false,
+              failure: { code: 'STORAGE_FAILURE', message },
+            },
+            { status: 500 },
+          );
         }
       }
     }
