@@ -298,6 +298,10 @@ export const installationManifestSchema = z
          */
         homeVesselProject: nonEmptyString,
         /**
+         * Optional GCS bucket for staging archive sources and artifacts (§4, §13).
+         */
+        artifactsBucket: nonEmptyString.optional(),
+        /**
          * How this installation reaches a cloud Target, with nothing stored
          * (§13's one auth mode).
          *
