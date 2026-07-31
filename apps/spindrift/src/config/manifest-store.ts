@@ -13,7 +13,6 @@ import { unreachablePrerequisites } from '../domain/capabilities.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import type { InstallationManifest, TargetSeed } from './manifest.schema.ts';
 import {
-  loadManifest,
   loadManifestIfPresent,
   ManifestError,
   validateManifest,
@@ -33,7 +32,10 @@ export async function loadStoredManifest(
   db: Database,
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  const declared = (await loadManifestIfPresent(env)) ?? (await readStoredManifest(db)) ?? DEFAULT_PLACEHOLDER_MANIFEST;
+  const declared =
+    (await loadManifestIfPresent(env)) ??
+    (await readStoredManifest(db)) ??
+    DEFAULT_PLACEHOLDER_MANIFEST;
 
   await db.transaction(async (tx) => {
     await tx
