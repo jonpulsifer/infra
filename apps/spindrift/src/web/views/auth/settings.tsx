@@ -144,7 +144,7 @@ export function CredentialSettingsView({
           </span>
         </div>
         <p className="text-sm text-muted-foreground">
-          Manage Passkey root identity, Gateway assertions, and UI-driven manifest configurations.
+          Manage Passkey root identity, Gateway assertions, and UI-driven manifest configurations. Every change requires a fresh assertion from an enrolled passkey.
         </p>
       </div>
 
