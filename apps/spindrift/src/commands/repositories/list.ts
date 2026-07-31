@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { RepositoryAuthorizationRequiredError } from '../../domain/repository.ts';
+import { reconcileRepository } from '../../reconciler/repo-loop.ts';
 import type {
   LinkedRepoView,
   RepositoryConnectorView,
@@ -23,6 +24,23 @@ export const listRepositories: Command<
   ListRepositoriesInput,
   ListRepositoriesResult
 > = async (_input, context) => {
+  const host = context.adapters.repository?.() ?? null;
+  if (host !== null) {
+    const existing = await context.db.query.repositories.findMany();
+    for (const repo of existing) {
+      if (repo.access === 'active') {
+        try {
+          await reconcileRepository(
+            { db: context.db, clock: context.clock, host },
+            repo,
+          );
+        } catch {
+          // ignore individual repo reconciliation error during list
+        }
+      }
+    }
+  }
+
   const allRepos = await context.db.query.repositories.findMany({
     orderBy: (repositories, { asc }) => [asc(repositories.fullName)],
   });

@@ -46,6 +46,7 @@ export function RepositoryList({
   connector,
   authorization,
   connecting,
+  refreshing,
   error,
   openedPullRequest,
   onAuthorize,
@@ -57,6 +58,7 @@ export function RepositoryList({
   connector: RepositoryConnectorView;
   authorization: RepositoryAuthorizationView | null;
   connecting: boolean;
+  refreshing?: boolean;
   error: string | null;
   openedPullRequest: OpenedRepositoryPullRequest | null;
   onAuthorize: () => void;
@@ -77,8 +79,12 @@ export function RepositoryList({
           </p>
         </div>
         <div className="ml-auto flex gap-2">
-          <Button variant="outline" onClick={onRefresh}>
-            <RefreshCw aria-hidden="true" className="size-4" /> Refresh
+          <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
+            <RefreshCw
+              aria-hidden="true"
+              className={cn('size-4', refreshing && 'animate-spin')}
+            />{' '}
+            {refreshing ? 'Refreshing...' : 'Refresh'}
           </Button>
           <Button variant="outline" asChild>
             <a
