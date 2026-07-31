@@ -49,10 +49,6 @@ spec:
       labels:
         {{- include "spindrift.labels" $top | nindent 8 }}
         app.kubernetes.io/component: {{ $process.name }}
-      {{- if not (empty $top.Values.installationManifest) }}
-      annotations:
-        checksum/installation-manifest: {{ toJson $top.Values.installationManifest | sha256sum | quote }}
-      {{- end }}
     spec:
       {{- if $top.Values.sandbox }}
       runtimeClassName: gvisor
