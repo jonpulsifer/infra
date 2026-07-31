@@ -121,6 +121,7 @@ export function StepSource({
   );
   const [customBucket, setCustomBucket] = useState('');
   const [useCustom, setUseCustom] = useState(false);
+  const [bucketLoadError, setBucketLoadError] = useState(false);
   const [testingWif, setTestingWif] = useState(false);
   const [wifStatus, setWifStatus] = useState<string | null>(null);
 
@@ -135,10 +136,12 @@ export function StepSource({
           } else if (res.value.buckets.length > 0) {
             setBucketName(res.value.buckets[0]);
           }
+        } else {
+          setBucketLoadError(true);
         }
       })
       .catch(() => {
-        // Fallback to default infra repo bucket
+        setBucketLoadError(true);
       });
   }, []);
 
@@ -300,6 +303,12 @@ export function StepSource({
           Select from configured first-party Cloud Storage buckets or enter a
           custom bucket name.
         </p>
+        {bucketLoadError ? (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400">
+            Could not load configured buckets — showing default. Enter a bucket
+            name manually if needed.
+          </p>
+        ) : null}
 
         <div className="flex flex-col gap-2">
           <label

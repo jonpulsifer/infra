@@ -28,6 +28,11 @@ data "google_project" "bluenose" {
   project_id = "bluenose"
 }
 
+data "google_service_account" "spindrift_controller" {
+  account_id = "spindrift-controller"
+  project    = "spindrift-vessel"
+}
+
 resource "google_artifact_registry_repository_iam_member" "reader_spindrift" {
   for_each = toset([
     local.bluenose_binary_authorization_service_agent,

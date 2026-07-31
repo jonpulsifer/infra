@@ -22,8 +22,8 @@ dns:
 
 sources:
   buckets:
-    - bluenose-spindrift-source
-  defaultBucket: bluenose-spindrift-source
+    - example-source-bucket
+  defaultBucket: example-source-bucket
 
 cloud:
   artifactsProject: example-artifacts
