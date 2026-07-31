@@ -125,13 +125,9 @@ export function StepSource({
         bucketName: bucketName.trim(),
       });
       if (res.ok) {
-        setWifStatus(
-          `✓ WIF permissions verified for ${res.value.location}`,
-        );
+        setWifStatus(`✓ WIF permissions verified for ${res.value.location}`);
       } else {
-        setWifStatus(
-          `✗ WIF check failed: ${res.failure.message}`,
-        );
+        setWifStatus(`✗ WIF check failed: ${res.failure.message}`);
       }
     } catch {
       setWifStatus('Network error testing bucket permissions');
