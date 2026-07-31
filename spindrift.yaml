@@ -1,0 +1,14 @@
+# Managed by Spindrift, and yours to edit.
+#
+# This file is what Spindrift knows about this directory. Once it is on the
+# default branch it is authoritative: what is written here wins over what
+# detection would otherwise guess.
+version: 1
+component:
+  kind: service
+build:
+  frontend: dockerfile
+  file: apps/spindrift/Dockerfile
+watchPaths:
+  - apps/spindrift
+  - packages
