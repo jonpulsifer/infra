@@ -3,12 +3,9 @@ import {
   KeyRound,
   Link,
   Link2Off,
-  Server,
-  ShieldCheck,
   Sliders,
   Sparkles,
   Trash2,
-  Workflow,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { CredentialSettings } from '../../../auth/credential-admin.ts';
@@ -114,16 +111,26 @@ export function CredentialSettingsView({
 }) {
   const [manifestSaved, setManifestSaved] = useState(false);
   const [installationName, setInstallationName] = useState('spindrift-default');
-  const [controlPlaneHost, setControlPlaneHost] = useState('spindrift.example.test');
+  const [controlPlaneHost, setControlPlaneHost] = useState(
+    'spindrift.example.test',
+  );
   const [apexZone, setApexZone] = useState('apps.example.test');
   const [vanityZone, setVanityZone] = useState('example.test');
-  const [secretStore, setSecretStore] = useState<'onepassword' | 'gcp-secret-manager'>('onepassword');
-  const [targetAdapter, setTargetAdapter] = useState<'kubernetes' | 'cloudrun' | 'static'>('kubernetes');
-  const [buildAdapter, setBuildAdapter] = useState<'github-actions' | 'cloud-build' | 'in-cluster'>('github-actions');
+  const [secretStore, setSecretStore] = useState<
+    'onepassword' | 'gcp-secret-manager'
+  >('onepassword');
+  const [targetAdapter, setTargetAdapter] = useState<
+    'kubernetes' | 'cloudrun' | 'static'
+  >('kubernetes');
+  const [buildAdapter, setBuildAdapter] = useState<
+    'github-actions' | 'cloud-build' | 'in-cluster'
+  >('github-actions');
   const [githubClientId, setGithubClientId] = useState('Iv1.spindrift-default');
-  const [artifactRegistry, setArtifactRegistry] = useState('registry.example.test/artifacts');
+  const [artifactRegistry, setArtifactRegistry] = useState(
+    'registry.example.test/artifacts',
+  );
   const [kmsSigner, setKmsSigner] = useState(
-    'gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer'
+    'gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer',
   );
 
   const handleSaveManifest = (e: React.FormEvent) => {
@@ -144,7 +151,9 @@ export function CredentialSettingsView({
           </span>
         </div>
         <p className="text-sm text-muted-foreground">
-          Manage Passkey root identity, Gateway assertions, and UI-driven manifest configurations. Every change requires a fresh assertion from an enrolled passkey.
+          Manage Passkey root identity, Gateway assertions, and UI-driven
+          manifest configurations. Every change requires a fresh assertion from
+          an enrolled passkey.
         </p>
       </div>
 
@@ -163,7 +172,8 @@ export function CredentialSettingsView({
               Installation Manifest &amp; Control Panel
             </CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
-              Drive platform manifest declarations directly from the UI. Pre-filled with Helm chart placeholders.
+              Drive platform manifest declarations directly from the UI.
+              Pre-filled with Helm chart placeholders.
             </p>
           </div>
         </CardHeader>
@@ -209,7 +219,10 @@ export function CredentialSettingsView({
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="secretStoreSelect" className="text-xs font-medium text-foreground">
+                <label
+                  htmlFor="secretStoreSelect"
+                  className="text-xs font-medium text-foreground"
+                >
                   Secret Store Adapter
                 </label>
                 <select
@@ -224,7 +237,10 @@ export function CredentialSettingsView({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="targetAdapterSelect" className="text-xs font-medium text-foreground">
+                <label
+                  htmlFor="targetAdapterSelect"
+                  className="text-xs font-medium text-foreground"
+                >
                   Default Target Adapter
                 </label>
                 <select
@@ -240,7 +256,10 @@ export function CredentialSettingsView({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="buildAdapterSelect" className="text-xs font-medium text-foreground">
+                <label
+                  htmlFor="buildAdapterSelect"
+                  className="text-xs font-medium text-foreground"
+                >
                   Build Route Adapter
                 </label>
                 <select
@@ -249,7 +268,9 @@ export function CredentialSettingsView({
                   onChange={(e) => setBuildAdapter(e.target.value as any)}
                   className="h-9 w-full rounded-md border border-border bg-card px-3 text-xs font-mono text-foreground focus:border-accent focus:outline-none"
                 >
-                  <option value="github-actions">GitHub Actions (Hosted)</option>
+                  <option value="github-actions">
+                    GitHub Actions (Hosted)
+                  </option>
                   <option value="cloud-build">Cloud Build (Managed)</option>
                   <option value="in-cluster">In-Cluster BuildKit</option>
                 </select>
@@ -285,7 +306,10 @@ export function CredentialSettingsView({
             />
 
             <div className="flex items-center justify-between pt-2">
-              <Button type="submit" className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90">
+              <Button
+                type="submit"
+                className="gap-2 bg-accent text-accent-foreground hover:bg-accent/90"
+              >
                 <Sparkles aria-hidden="true" className="size-4" />
                 Save &amp; Reconcile Manifest
               </Button>
@@ -417,4 +441,3 @@ function shortCredential(credentialId: string): string {
     ? credentialId
     : `${credentialId.slice(0, 7)}…${credentialId.slice(-6)}`;
 }
-

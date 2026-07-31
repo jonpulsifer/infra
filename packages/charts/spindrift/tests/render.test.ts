@@ -200,22 +200,12 @@ describe('migration Job identity', () => {
   });
 });
 
-describe('declared installation manifest', () => {
-  test('mounts ordinary configuration from a ConfigMap in every process', async () => {
+describe('ui-driven installation configuration', () => {
+  test('renders deployments without requiring a file-based installation manifest', async () => {
     const objects = await render({
-      installationManifest: { installation: 'example' },
       reconciler: { enabled: true },
       envFromSecret: 'spindrift-env',
     });
-    const manifest = one(
-      objects,
-      'ConfigMap',
-      'spindrift-installation-manifest',
-    );
-    expect(Bun.YAML.parse(manifest.data?.['manifest.yaml'] ?? '')).toEqual({
-      installation: 'example',
-    });
-
     const deployments = objects.filter(
       (object) => object.kind === 'Deployment',
     );
@@ -223,62 +213,16 @@ describe('declared installation manifest', () => {
     for (const deployment of deployments) {
       const pod = deployment.spec.template.spec;
       expect(
-        deployment.spec.template.metadata.annotations?.[
-          'checksum/installation-manifest'
-        ],
-      ).toMatch(/^[a-f0-9]{64}$/);
-      expect(pod.volumes).toContainEqual({
-        name: 'installation-manifest',
-        configMap: { name: 'spindrift-installation-manifest' },
-      });
-      expect(pod.containers[0].volumeMounts).toContainEqual({
-        name: 'installation-manifest',
-        mountPath: '/etc/spindrift',
-        readOnly: true,
-      });
-      expect(pod.containers[0].env).toContainEqual({
-        name: 'SPINDRIFT_MANIFEST_PATH',
-        value: '/etc/spindrift/manifest.yaml',
-      });
+        pod.containers[0].env.some(
+          (item: { name: string }) => item.name === 'SPINDRIFT_MANIFEST_PATH',
+        ),
+      ).toBe(false);
       expect(
         pod.containers[0].env.some(
           (item: { name: string }) => item.name === 'SPINDRIFT_MANIFEST',
         ),
       ).toBe(false);
     }
-  });
-
-  test('rolls every process when declared configuration changes', async () => {
-    const first = await render({
-      installationManifest: { installation: 'first' },
-      reconciler: { enabled: true },
-    });
-    const second = await render({
-      installationManifest: { installation: 'second' },
-      reconciler: { enabled: true },
-    });
-
-    const checksums = (objects: typeof first) =>
-      objects
-        .filter((object) => object.kind === 'Deployment')
-        .map(
-          (deployment) =>
-            deployment.spec.template.metadata.annotations[
-              'checksum/installation-manifest'
-            ],
-        );
-    expect(new Set(checksums(first))).toHaveLength(1);
-    expect(new Set(checksums(second))).toHaveLength(1);
-    expect(checksums(first)[0]).not.toBe(checksums(second)[0]);
-  });
-
-  test('does not add a manifest checksum without a declaration', async () => {
-    const deployment = one(await render(), 'Deployment', 'spindrift-web');
-    expect(
-      deployment.spec.template.metadata.annotations?.[
-        'checksum/installation-manifest'
-      ],
-    ).toBeUndefined();
   });
 });
 
