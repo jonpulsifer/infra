@@ -20,6 +20,11 @@ dns:
   apexZone: apps.example.test
   vanityZone: example.test
 
+sources:
+  buckets:
+    - bluenose-spindrift-source
+  defaultBucket: bluenose-spindrift-source
+
 cloud:
   artifactsProject: example-artifacts
   homeVesselProject: example-home

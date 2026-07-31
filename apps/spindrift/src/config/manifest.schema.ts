@@ -285,6 +285,19 @@ export const installationManifestSchema = z
       })
       .strict(),
 
+    sources: z
+      .object({
+        /**
+         * First-party GCS buckets for staging archive sources and artifacts (§4, §13).
+         */
+        buckets: z.array(nonEmptyString).min(1),
+        /**
+         * Default GCS bucket for staging archive sources and artifacts.
+         */
+        defaultBucket: nonEmptyString.optional(),
+      })
+      .strict(),
+
     cloud: z
       .object({
         /**
@@ -297,10 +310,6 @@ export const installationManifestSchema = z
          * do not choose one (§14).
          */
         homeVesselProject: nonEmptyString,
-        /**
-         * Optional GCS bucket for staging archive sources and artifacts (§4, §13).
-         */
-        artifactsBucket: nonEmptyString.optional(),
         /**
          * How this installation reaches a cloud Target, with nothing stored
          * (§13's one auth mode).

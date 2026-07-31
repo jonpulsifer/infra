@@ -72,6 +72,10 @@ import {
   listRepositoriesInput,
 } from './repositories/list.ts';
 import {
+  listSourceBuckets,
+  listSourceBucketsInput,
+} from './storage/list-buckets.ts';
+import {
   testBucketPermissions,
   testBucketPermissionsInput,
 } from './storage/test-bucket.ts';
@@ -157,6 +161,10 @@ export const commandRegistry = {
   resolveComponentPlacement: {
     input: resolveComponentPlacementInput,
     handler: resolveComponentPlacement,
+  },
+  listSourceBuckets: {
+    input: listSourceBucketsInput,
+    handler: listSourceBuckets,
   },
   testBucketPermissions: {
     input: testBucketPermissionsInput,

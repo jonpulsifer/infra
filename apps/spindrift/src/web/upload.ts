@@ -110,7 +110,8 @@ export async function handleUpload(
     const bucket =
       request.headers.get('x-bucket')?.trim() ||
       process.env.SPINDRIFT_ARTIFACTS_BUCKET?.trim() ||
-      context.manifest?.cloud?.artifactsBucket?.trim();
+      context.manifest?.sources?.defaultBucket?.trim() ||
+      context.manifest?.sources?.buckets?.[0]?.trim();
 
     if (bucket) {
       const federation = context.manifest?.cloud?.federation;
