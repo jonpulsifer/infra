@@ -112,18 +112,17 @@ export function StepSource({
 }: StepProps & { repos: readonly RepositoryOptionView[] }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [bucketName, setBucketName] = useState('bluenose-spindrift-source');
-  const [buckets, setBuckets] = useState<readonly string[]>([
-    'bluenose-spindrift-source',
-  ]);
-  const [defaultBucket, setDefaultBucket] = useState(
-    'bluenose-spindrift-source',
-  );
+  const [bucketName, setBucketName] = useState<string | null>(null);
+  const [buckets, setBuckets] = useState<readonly string[] | null>(null);
+  const [defaultBucket, setDefaultBucket] = useState<string | null>(null);
   const [customBucket, setCustomBucket] = useState('');
   const [useCustom, setUseCustom] = useState(false);
   const [bucketLoadError, setBucketLoadError] = useState(false);
   const [testingWif, setTestingWif] = useState(false);
   const [wifStatus, setWifStatus] = useState<string | null>(null);
+
+  const bucketsLoading = buckets === null && !bucketLoadError;
+  const activeBucketName = bucketName ?? '';
 
   useEffect(() => {
     command('listSourceBuckets', {})
@@ -131,27 +130,27 @@ export function StepSource({
         if (res.ok) {
           setBuckets(res.value.buckets);
           setDefaultBucket(res.value.defaultBucket);
-          if (res.value.defaultBucket) {
-            setBucketName(res.value.defaultBucket);
-          } else if (res.value.buckets.length > 0) {
-            setBucketName(res.value.buckets[0]);
-          }
+          const selected =
+            res.value.defaultBucket ?? res.value.buckets[0] ?? null;
+          setBucketName(selected);
         } else {
           setBucketLoadError(true);
+          setBuckets([]);
         }
       })
       .catch(() => {
         setBucketLoadError(true);
+        setBuckets([]);
       });
   }, []);
 
   async function handleTestWif() {
-    if (!bucketName.trim()) return;
+    if (!activeBucketName.trim()) return;
     setTestingWif(true);
     setWifStatus(null);
     try {
       const res = await command('testBucketPermissions', {
-        bucketName: bucketName.trim(),
+        bucketName: activeBucketName.trim(),
       });
       if (res.ok) {
         setWifStatus(`✓ WIF permissions verified for ${res.value.location}`);
@@ -177,8 +176,8 @@ export function StepSource({
       formData.append('file', file);
 
       const headers: Record<string, string> = {};
-      if (bucketName.trim()) {
-        headers['x-bucket'] = bucketName.trim();
+      if (activeBucketName.trim()) {
+        headers['x-bucket'] = activeBucketName.trim();
       }
 
       const response = await fetch('/internal/upload', {
@@ -319,7 +318,8 @@ export function StepSource({
           </label>
           <select
             id="source-bucket-select"
-            value={useCustom ? 'custom' : bucketName}
+            disabled={bucketsLoading}
+            value={useCustom ? 'custom' : activeBucketName}
             onChange={(e) => {
               if (e.target.value === 'custom') {
                 setUseCustom(true);
@@ -329,14 +329,20 @@ export function StepSource({
                 setBucketName(e.target.value);
               }
             }}
-            className="rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground"
+            className="rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground disabled:opacity-50"
           >
-            {buckets.map((b) => (
-              <option key={b} value={b}>
-                {b} {b === defaultBucket ? '(default · infra repo)' : ''}
-              </option>
-            ))}
-            <option value="custom">Custom bucket...</option>
+            {bucketsLoading ? (
+              <option value="">Loading…</option>
+            ) : (
+              <>
+                {(buckets ?? []).map((b) => (
+                  <option key={b} value={b}>
+                    {b} {b === defaultBucket ? '(default · infra repo)' : ''}
+                  </option>
+                ))}
+                <option value="custom">Custom bucket...</option>
+              </>
+            )}
           </select>
 
           {useCustom ? (
@@ -356,7 +362,7 @@ export function StepSource({
         <div className="mt-1 flex items-center gap-2">
           <button
             type="button"
-            disabled={!bucketName.trim() || testingWif}
+            disabled={!activeBucketName.trim() || testingWif}
             onClick={handleTestWif}
             className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
