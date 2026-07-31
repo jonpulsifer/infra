@@ -182,15 +182,23 @@
   }
 }
 
+
 /*
- * Reduced motion is handled at the one place that moves — the pulsing status
- * dot, which declares `motion-safe:animate-pulse` — rather than by a blanket
- * `!important` reset here.
- *
- * The reset is the usual pattern and it is the wrong one for this app. It
- * cancels animation by overriding every rule that could declare it, which means
- * a future component cannot opt back in for something a reader genuinely needs
- * to see move. Tailwind's `motion-safe` variant compiles the media query into
- * the utility itself, so the preference is respected at the declaration and
- * nothing has to be beaten into submission.
+ * Cyber Glassmorphism & Micro-animations
  */
+.glass-card {
+  background: rgba(20, 31, 35, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(95, 184, 201, 0.2);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glow-accent {
+  box-shadow: 0 0 20px -3px rgba(95, 184, 201, 0.3);
+}
+
+.glow-good {
+  box-shadow: 0 0 20px -3px rgba(94, 176, 131, 0.3);
+}
+
