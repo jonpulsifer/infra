@@ -110,12 +110,12 @@ export function CredentialSettingsView({
   readonly onUnlink: () => void;
 }) {
   const [manifestSaved, setManifestSaved] = useState(false);
-  const [installationName, setInstallationName] = useState('spindrift-default');
+  const [installationName, setInstallationName] = useState('offsite');
   const [controlPlaneHost, setControlPlaneHost] = useState(
-    'spindrift.example.test',
+    'spindrift.lolwtf.ca',
   );
-  const [apexZone, setApexZone] = useState('apps.example.test');
-  const [vanityZone, setVanityZone] = useState('example.test');
+  const [apexZone, setApexZone] = useState('lolwtf.dev');
+  const [vanityZone, setVanityZone] = useState('lolwtf.dev');
   const [secretStore, setSecretStore] = useState<
     'onepassword' | 'gcp-secret-manager'
   >('onepassword');
@@ -125,12 +125,12 @@ export function CredentialSettingsView({
   const [buildAdapter, setBuildAdapter] = useState<
     'github-actions' | 'cloud-build' | 'in-cluster'
   >('github-actions');
-  const [githubClientId, setGithubClientId] = useState('Iv1.spindrift-default');
+  const [githubClientId, setGithubClientId] = useState('Iv1.918d699f36ee7afc');
   const [artifactRegistry, setArtifactRegistry] = useState(
-    'registry.example.test/artifacts',
+    'ghcr.io/jonpulsifer',
   );
   const [kmsSigner, setKmsSigner] = useState(
-    'gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer',
+    'gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer',
   );
 
   const handleSaveManifest = (e: React.FormEvent) => {
@@ -185,7 +185,7 @@ export function CredentialSettingsView({
                 label="Installation Identifier"
                 type="text"
                 value={installationName}
-                placeholder="e.g. spindrift-default"
+                placeholder="e.g. offsite"
                 onChange={(e) => setInstallationName(e.currentTarget.value)}
               />
               <Field
@@ -193,7 +193,7 @@ export function CredentialSettingsView({
                 label="Control Plane Hostname"
                 type="text"
                 value={controlPlaneHost}
-                placeholder="e.g. spindrift.example.test"
+                placeholder="e.g. spindrift.lolwtf.ca"
                 onChange={(e) => setControlPlaneHost(e.currentTarget.value)}
               />
             </div>
@@ -204,7 +204,7 @@ export function CredentialSettingsView({
                 label="DNS Apex Zone"
                 type="text"
                 value={apexZone}
-                placeholder="e.g. apps.example.test"
+                placeholder="e.g. lolwtf.dev"
                 onChange={(e) => setApexZone(e.currentTarget.value)}
               />
               <Field
@@ -212,7 +212,7 @@ export function CredentialSettingsView({
                 label="DNS Vanity Zone"
                 type="text"
                 value={vanityZone}
-                placeholder="e.g. example.test"
+                placeholder="e.g. lolwtf.dev"
                 onChange={(e) => setVanityZone(e.currentTarget.value)}
               />
             </div>
@@ -283,7 +283,7 @@ export function CredentialSettingsView({
                 label="GitHub App Client ID"
                 type="text"
                 value={githubClientId}
-                placeholder="e.g. Iv1.spindrift-default"
+                placeholder="e.g. Iv1.918d699f36ee7afc"
                 onChange={(e) => setGithubClientId(e.currentTarget.value)}
               />
               <Field
@@ -291,7 +291,7 @@ export function CredentialSettingsView({
                 label="Supply Chain Registry"
                 type="text"
                 value={artifactRegistry}
-                placeholder="e.g. registry.example.test/artifacts"
+                placeholder="e.g. ghcr.io/jonpulsifer"
                 onChange={(e) => setArtifactRegistry(e.currentTarget.value)}
               />
             </div>
@@ -301,7 +301,7 @@ export function CredentialSettingsView({
               label="Supply Chain KMS Signer URI"
               type="text"
               value={kmsSigner}
-              placeholder="e.g. gcpkms://projects/..."
+              placeholder="e.g. gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer"
               onChange={(e) => setKmsSigner(e.currentTarget.value)}
             />
 

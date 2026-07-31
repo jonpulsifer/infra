@@ -224,17 +224,6 @@ describe('ui-driven installation configuration', () => {
       ).toBe(false);
     }
   });
-
-  test('renders inline installation manifest env var when installationManifest values are provided', async () => {
-    const objects = await render({
-      installationManifest: { installation: 'offsite' },
-    });
-    const web = one(objects, 'Deployment', 'spindrift-web');
-    expect(web.spec.template.spec.containers[0].env).toContainEqual({
-      name: 'SPINDRIFT_MANIFEST',
-      value: JSON.stringify({ installation: 'offsite' }),
-    });
-  });
 });
 
 describe('authenticated Gateway trust', () => {

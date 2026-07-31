@@ -24,44 +24,28 @@ type Env = Record<string, string | undefined>;
 /**
  * Reconcile declared configuration into the durable singleton, then load it.
  *
- * A mounted or inline declaration is the deployment's desired configuration,
- * so a validated change updates the row before adapters are constructed. The
- * row remains a recovery source for a process started without a declaration.
- * `web` and `reconciler` mount the same ConfigMap revision in production, so
- * concurrent upserts converge on the same document.
+ * A mounted file or inline env declaration is reconciled first. Without a
+ * file/env declaration, Spindrift reads the stored manifest from Postgres.
+ * If the Postgres store is unseeded, Spindrift seeds the high-trust default
+ * placeholder manifest so the UI can drive all configuration dynamically.
  */
 export async function loadStoredManifest(
   db: Database,
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  const declared = await loadManifestIfPresent(env);
-  if (declared !== null) {
-    await db.transaction(async (tx) => {
-      await tx
-        .insert(installation)
-        .values({ manifest: declared })
-        .onConflictDoUpdate({
-          target: installation.id,
-          set: { manifest: declared },
-        });
-      await reconcileManifestTargets(tx, declared);
-    });
-    return declared;
-  }
-
-  const manifest = await readStoredManifest(db);
-  if (manifest === null) {
-    // Preserve loadManifest's precise absent-source error for an empty store.
-    await loadManifest(env);
-    throw new ManifestError(
-      'installation manifest reconciliation completed without a stored manifest',
-    );
-  }
+  const declared = (await loadManifestIfPresent(env)) ?? (await readStoredManifest(db)) ?? DEFAULT_PLACEHOLDER_MANIFEST;
 
   await db.transaction(async (tx) => {
-    await reconcileManifestTargets(tx, manifest);
+    await tx
+      .insert(installation)
+      .values({ manifest: declared })
+      .onConflictDoUpdate({
+        target: installation.id,
+        set: { manifest: declared },
+      });
+    await reconcileManifestTargets(tx, declared);
   });
-  return manifest;
+  return declared;
 }
 
 /**
