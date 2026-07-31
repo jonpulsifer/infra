@@ -415,6 +415,18 @@ export class FakeGitHub {
       return new Response(new TextEncoder().encode(`tarball:${at}`));
     }
 
+    if (rest.startsWith('/pulls')) {
+      return this.json(
+        this.pulls.map((p) => ({
+          number: p.number,
+          title: p.title,
+          body: p.body,
+          head: { ref: p.head },
+          base: { ref: p.base },
+        })),
+      );
+    }
+
     return null;
   }
 

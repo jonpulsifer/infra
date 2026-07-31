@@ -521,6 +521,7 @@ function RepositoriesScreen() {
       }
   >({ type: 'loading' });
   const [refresh, setRefresh] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [authorization, setAuthorization] = useState<
     | (RepositoryAuthorizationView & {
         readonly attemptId: string;
@@ -534,6 +535,11 @@ function RepositoriesScreen() {
     fullName: string;
     number: number;
   } | null>(null);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setRefresh((value) => value + 1);
+  };
 
   useEffect(() => {
     let live = true;
@@ -552,6 +558,9 @@ function RepositoriesScreen() {
           type: 'error',
           message: e instanceof Error ? e.message : 'Server failure',
         });
+      })
+      .finally(() => {
+        if (live) setRefreshing(false);
       });
     return () => {
       live = false;
@@ -685,11 +694,12 @@ function RepositoriesScreen() {
       connector={state.connector}
       authorization={authorization}
       connecting={connecting}
+      refreshing={refreshing}
       error={actionError}
       openedPullRequest={openedPullRequest}
       onAuthorize={authorize}
       onConnect={connect}
-      onRefresh={() => setRefresh((value) => value + 1)}
+      onRefresh={handleRefresh}
     />
   );
 }

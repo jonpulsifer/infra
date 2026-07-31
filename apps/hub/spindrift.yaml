@@ -1,0 +1,9 @@
+# Managed by Spindrift, and yours to edit.
+version: 1
+component:
+  kind: service
+build:
+  frontend: dockerfile
+  file: Dockerfile
+watchPaths:
+  - apps/hub

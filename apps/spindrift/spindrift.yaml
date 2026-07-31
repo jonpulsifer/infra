@@ -8,7 +8,6 @@ component:
   kind: service
 build:
   frontend: dockerfile
-  file: apps/spindrift/Dockerfile
+  file: Dockerfile
 watchPaths:
   - apps/spindrift
-  - packages
