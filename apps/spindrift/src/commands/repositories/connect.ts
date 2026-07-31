@@ -86,8 +86,8 @@ export interface ConnectRepositoryResult {
   readonly repositoryId: string;
   readonly fullName: string;
   readonly defaultBranch: string;
-  /** The configuration pull request an operator now has to merge. */
-  readonly pullRequest: number;
+  /** The configuration pull request an operator now has to merge, or null if PR creation failed. */
+  readonly pullRequest: number | null;
   /** Always null: nothing is authoritative before that merge (§15). */
   readonly authoritativeCommit: null;
 }
@@ -196,22 +196,29 @@ export const connectRepository: Command<
     scopes,
     buildWorkflow,
   });
-  const opened = await openConfigurationPullRequest(host, ref, {
-    fullName: input.fullName,
-    defaultBranch,
-    transaction,
-  });
 
-  await context.db
-    .update(repositories)
-    .set({ configPullRequest: opened.number, updatedAt: now })
-    .where(eq(repositories.id, row!.id));
+  let pullRequest: number | null = null;
+  try {
+    const opened = await openConfigurationPullRequest(host, ref, {
+      fullName: input.fullName,
+      defaultBranch,
+      transaction,
+    });
+    pullRequest = opened.number;
+    await context.db
+      .update(repositories)
+      .set({ configPullRequest: opened.number, updatedAt: now })
+      .where(eq(repositories.id, row!.id));
+  } catch {
+    // Fail open: opening the configuration PR failed (e.g. GitHub permission or API error),
+    // but the repository remains connected.
+  }
 
   return ok({
     repositoryId: row!.id,
     fullName: row!.fullName,
     defaultBranch,
-    pullRequest: opened.number,
+    pullRequest,
     authoritativeCommit: null,
   });
 };

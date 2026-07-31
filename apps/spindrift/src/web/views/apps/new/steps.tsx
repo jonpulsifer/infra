@@ -164,6 +164,7 @@ export function StepSource({
           type: 'archive',
           filename: res.value.filename,
           digest: res.value.digest,
+          location: res.value.location,
         });
       } else {
         setUploadError(res.failure?.message || 'Archive upload failed');
@@ -229,6 +230,11 @@ export function StepSource({
                 <p className="font-mono text-xs text-muted-foreground">
                   {draft.source.digest}
                 </p>
+                {draft.source.location ? (
+                  <p className="font-mono text-[11px] text-success">
+                    staged: {draft.source.location}
+                  </p>
+                ) : null}
               </div>
             </div>
             <div className="mt-1 flex flex-col gap-2">
@@ -253,41 +259,42 @@ export function StepSource({
                 <p className="text-xs text-destructive">{uploadError}</p>
               ) : null}
             </div>
-            <div className="mt-2 flex flex-col gap-2 rounded border bg-muted/40 p-3">
-              <span className="text-xs font-semibold text-foreground">
-                Cloud Storage Bucket (Optional GCS Bucket)
-              </span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder="e.g. trusted-builds-artifacts"
-                  value={bucketName}
-                  onChange={(e) => setBucketName(e.target.value)}
-                  className="flex-1 rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground"
-                />
-                <button
-                  type="button"
-                  disabled={!bucketName.trim() || testingWif}
-                  onClick={handleTestWif}
-                  className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                  {testingWif ? 'Testing WIF…' : 'Test WIF'}
-                </button>
-              </div>
-              {wifStatus ? (
-                <p className="text-xs font-medium text-muted-foreground">
-                  {wifStatus}
-                </p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Uses credential-less Workload Identity Federation (WIF) token
-                  exchange.
-                </p>
-              )}
-            </div>
           </CardContent>
         </Card>
       )}
+
+      <div className="mt-4 flex flex-col gap-2 rounded border bg-muted/40 p-3">
+        <span className="text-xs font-semibold text-foreground">
+          Cloud Storage Bucket (Optional GCS Bucket for Source & Artifacts)
+        </span>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="e.g. trusted-builds-artifacts"
+            value={bucketName}
+            onChange={(e) => setBucketName(e.target.value)}
+            className="flex-1 rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground"
+          />
+          <button
+            type="button"
+            disabled={!bucketName.trim() || testingWif}
+            onClick={handleTestWif}
+            className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {testingWif ? 'Testing WIF…' : 'Test WIF'}
+          </button>
+        </div>
+        {wifStatus ? (
+          <p className="text-xs font-medium text-muted-foreground">
+            {wifStatus}
+          </p>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">
+            Uses credential-less Workload Identity Federation (WIF) token
+            exchange.
+          </p>
+        )}
+      </div>
     </>
   );
 }
