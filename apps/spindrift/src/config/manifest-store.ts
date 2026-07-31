@@ -13,6 +13,7 @@ import { unreachablePrerequisites } from '../domain/capabilities.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import type { InstallationManifest, TargetSeed } from './manifest.schema.ts';
 import {
+  DEFAULT_PLACEHOLDER_MANIFEST,
   loadManifestIfPresent,
   ManifestError,
   validateManifest,
