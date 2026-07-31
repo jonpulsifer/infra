@@ -132,6 +132,20 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
   },
   targets: [
     {
+      name: 'primary',
+      adapter: 'kubernetes',
+      connection: {
+        apiServer: 'https://kubernetes.default.svc',
+        namespace: 'spindrift-apps',
+        delivery: {
+          flavour: 'flux-helmrelease',
+          namespace: 'spindrift-apps',
+          sourceRef: { name: 'infra', namespace: 'flux-system' },
+        },
+        chartContract: '2',
+      },
+    },
+    {
       name: 'spindrift-cloudrun',
       adapter: 'cloudrun',
       connection: {

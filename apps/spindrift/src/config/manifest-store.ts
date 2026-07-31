@@ -13,7 +13,6 @@ import { unreachablePrerequisites } from '../domain/capabilities.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import type { InstallationManifest, TargetSeed } from './manifest.schema.ts';
 import {
-  DEFAULT_PLACEHOLDER_MANIFEST,
   loadManifestIfPresent,
   ManifestError,
   validateManifest,
@@ -34,9 +33,12 @@ export async function loadStoredManifest(
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
   const declared =
-    (await loadManifestIfPresent(env)) ??
-    (await readStoredManifest(db)) ??
-    DEFAULT_PLACEHOLDER_MANIFEST;
+    (await loadManifestIfPresent(env)) ?? (await readStoredManifest(db));
+  if (declared === null) {
+    throw new ManifestError(
+      'no installation manifest: set SPINDRIFT_MANIFEST_PATH or SPINDRIFT_MANIFEST, or seed the database',
+    );
+  }
 
   await db.transaction(async (tx) => {
     await tx
