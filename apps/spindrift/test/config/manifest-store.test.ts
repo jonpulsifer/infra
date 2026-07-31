@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
 import {
+  DEFAULT_PLACEHOLDER_MANIFEST,
   MANIFEST_INLINE_VAR,
   ManifestError,
 } from '../../src/config/manifest.ts';
@@ -374,9 +375,8 @@ describe('the stored installation manifest', () => {
     );
   });
 
-  test('fails loudly when the database is empty and no bootstrap exists', async () => {
-    await expect(loadStoredManifest(database().db, {})).rejects.toThrow(
-      ManifestError,
-    );
+  test('seeds default placeholder manifest when the database is empty and no bootstrap exists', async () => {
+    const loaded = await loadStoredManifest(database().db, {});
+    expect(loaded).toEqual(DEFAULT_PLACEHOLDER_MANIFEST);
   });
 });
