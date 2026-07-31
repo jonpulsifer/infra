@@ -17,16 +17,9 @@ export const listSourceBuckets: Command<
   ListSourceBucketsInput,
   ListSourceBucketsResult
 > = async (_input, context) => {
-  const buckets = context.manifest.sources?.buckets ?? [
-    'bluenose-spindrift-source',
-  ];
-  const defaultBucket =
-    context.manifest.sources?.defaultBucket ??
-    buckets[0] ??
-    'bluenose-spindrift-source';
-
+  const { buckets, defaultBucket } = context.manifest.sources;
   return ok({
     buckets,
-    defaultBucket,
+    defaultBucket: defaultBucket ?? buckets[0],
   });
 };

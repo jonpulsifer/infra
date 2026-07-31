@@ -37,11 +37,6 @@ export async function loadStoredManifest(
     (await loadManifestIfPresent(env)) ??
     (await readStoredManifest(db)) ??
     DEFAULT_PLACEHOLDER_MANIFEST;
-  if (declared === null) {
-    throw new ManifestError(
-      'no installation manifest: set SPINDRIFT_MANIFEST_PATH or SPINDRIFT_MANIFEST, or seed the database',
-    );
-  }
 
   await db.transaction(async (tx) => {
     await tx

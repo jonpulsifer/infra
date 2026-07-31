@@ -96,8 +96,14 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'slsa-verifier',
   'verify-image',
   'verify-signature',
-  // Default infra storage bucket.
+  // Default infra storage bucket — the first-party source bucket declared in
+  // DEFAULT_PLACEHOLDER_MANIFEST and the manifest schema fixture.
   'bluenose-spindrift-source',
+  // HTTP header names. `src/web/` is scoped out of this scanner for exactly
+  // this reason (see BROWSER_SOURCE), but the auth surface writes headers from
+  // outside that directory and must not be scoped out wholesale — it is one of
+  // the places a real installation literal could hide. Naming the specific
+  // header keeps the scanner at full strength over the rest of the file.
   'set-cookie',
 ]);
 
