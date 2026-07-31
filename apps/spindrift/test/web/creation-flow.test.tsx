@@ -15,17 +15,17 @@
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  INITIAL_DRAFT,
-  REPOSITORY_OPTIONS,
-  TARGET_OPTIONS,
-} from '../../src/web/demo/scenarios.ts';
-import {
   blockersFor,
   type Draft,
   draftReducer,
   STEPS,
 } from '../../src/web/views/apps/new/draft.ts';
 import { NewApp } from '../../src/web/views/apps/new/index.tsx';
+import {
+  INITIAL_DRAFT,
+  REPOSITORY_OPTIONS,
+  TARGET_OPTIONS,
+} from '../fixtures/scenarios.ts';
 
 const CANDIDATES = TARGET_OPTIONS.filter((target) => target.candidate).map(
   (target) => target.targetId,
