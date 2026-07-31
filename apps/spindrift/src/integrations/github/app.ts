@@ -300,7 +300,7 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
     });
   }
 
-  /** Open the pull request and return its number. */
+  /** Open the pull request and return its number. If a PR already exists for the head branch, find and return it. */
   async openPullRequest(
     ref: InstallationRef,
     fullName: string,
@@ -311,15 +311,50 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       readonly base: string;
     },
   ): Promise<number> {
-    const pull = await this.http(ref).json<{ number: number }>({
-      method: 'POST',
-      path: `/repos/${fullName}/pulls`,
-      body: input,
-    });
-    if (pull === null) {
-      throw new TypeError('the pulls endpoint tolerates no status');
+    try {
+      const pull = await this.http(ref).json<{ number: number }>({
+        method: 'POST',
+        path: `/repos/${fullName}/pulls`,
+        body: input,
+      });
+      if (pull === null) {
+        throw new TypeError('the pulls endpoint tolerates no status');
+      }
+      return pull.number;
+    } catch (cause) {
+      const existing = await this.findOpenPullRequest(
+        ref,
+        fullName,
+        input.head,
+      );
+      if (existing !== null) {
+        return existing;
+      }
+      throw cause;
     }
-    return pull.number;
+  }
+
+  /** Find an open pull request for a given head branch. */
+  async findOpenPullRequest(
+    ref: InstallationRef,
+    fullName: string,
+    headBranch: string,
+  ): Promise<number | null> {
+    try {
+      const pulls = await this.http(ref).json<
+        Array<{ number: number; head: { ref?: string } }>
+      >({
+        method: 'GET',
+        path: `/repos/${fullName}/pulls?state=open`,
+      });
+      if (Array.isArray(pulls)) {
+        const match = pulls.find((p) => p.head?.ref === headBranch);
+        if (match) return match.number;
+      }
+    } catch {
+      // Return null on failure to fall through to original error
+    }
+    return null;
   }
 
   // --- Actions, which the hosted build route runs on --------------------

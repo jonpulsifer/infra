@@ -51,11 +51,11 @@ const dockerfile: DetectionProposal = {
   watchPaths: ['services/api'],
 };
 
-function app(fake: FakeGitHub): GitHubApp {
+function app(fake: FakeGitHub, customFetch?: typeof fetch): GitHubApp {
   return new GitHubApp({
     baseUrl: fake.baseUrl,
     authorization: () => 'Bearer test-user-token',
-    fetch: fake.fetch,
+    fetch: customFetch ?? fake.fetch,
   });
 }
 
@@ -145,7 +145,7 @@ describe('the transaction', () => {
 });
 
 describe('opening it against the repository API', () => {
-  async function open(fake: FakeGitHub) {
+  async function open(fake: FakeGitHub, customFetch?: typeof fetch) {
     const base = fake.commitFiles('main', {
       'README.md': 'the repository as it was',
       'apps/site/package.json': '{}',
@@ -158,7 +158,7 @@ describe('opening it against the repository API', () => {
       buildWorkflow: BUILD_WORKFLOW,
     });
     const opened = await openConfigurationPullRequest(
-      app(fake),
+      app(fake, customFetch),
       { installationId: fake.installationId },
       {
         fullName: fake.fullName,
@@ -243,6 +243,29 @@ describe('opening it against the repository API', () => {
           request.method === 'POST' && request.path.endsWith('/git/refs'),
       ),
     ).toHaveLength(1);
+  });
+
+  test('recovers existing open pull request number when POST /pulls fails', async () => {
+    const fake = new FakeGitHub();
+    const first = await open(fake);
+
+    // Simulate GitHub returning 422 when PR already exists
+    const failingFetch = (async (request: any) => {
+      const url = new URL(typeof request === 'string' ? request : request.url);
+      if (request.method === 'POST' && url.pathname.endsWith('/pulls')) {
+        return new Response(
+          JSON.stringify({
+            message: 'Validation Failed',
+            errors: [{ message: 'A pull request already exists' }],
+          }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return fake.fetch(request);
+    }) as any;
+
+    const second = await open(fake, failingFetch);
+    expect(second.opened.number).toBe(first.opened.number);
   });
 
   test('presents the user authorization without exposing it to callers', async () => {
