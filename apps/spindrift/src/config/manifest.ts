@@ -80,27 +80,27 @@ export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
 
 /** High-trust default placeholder manifest used when initializing an unseeded installation. */
 export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
-  installation: 'offsite',
+  installation: 'primary',
   controlPlane: {
-    hostname: 'spindrift.lolwtf.ca',
+    hostname: 'spindrift.example.internal',
   },
   auth: {
     gateway: null,
   },
   dns: {
-    apexZone: 'lolwtf.dev',
-    vanityZone: 'lolwtf.dev',
+    apexZone: 'example.internal',
+    vanityZone: 'example.internal',
   },
   cloud: {
-    artifactsProject: 'trusted-builds',
-    homeVesselProject: 'bluenose',
+    artifactsProject: 'artifacts',
+    homeVesselProject: 'vessel',
     federation: {
       audience:
-        '//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite',
+        '//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/spindrift/providers/spindrift',
       tokenUrl: 'https://sts.googleapis.com/v1/token',
       tokenPath: '/var/run/secrets/spindrift/gcp-token',
       impersonationUrl:
-        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken',
+        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@vessel.iam.gserviceaccount.com:generateAccessToken',
     },
   },
   charts: {
@@ -108,17 +108,17 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
     installer: 'packages/charts/spindrift',
   },
   supplyChain: {
-    registry: 'ghcr.io/jonpulsifer',
-    verifier: 'ghcr.io/jonpulsifer/spindrift-verifier',
+    registry: 'ghcr.io/spindrift',
+    verifier: 'ghcr.io/spindrift/spindrift-verifier',
     signer:
-      'gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer',
+      'gcpkms://projects/artifacts/locations/global/keyRings/keys/cryptoKeys/signer',
   },
   github: {
     clientId: 'Iv1.918d699f36ee7afc',
     oauthBaseUrl: 'https://github.com',
     apiBaseUrl: 'https://api.github.com',
     buildWorkflow:
-      'jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6',
+      'spindrift/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6',
   },
   build: {
     routes: [{ name: 'hosted', adapter: 'github-actions' }],
@@ -128,11 +128,11 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
     adapter: 'onepassword',
     endpoint:
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
-    container: 'homelab',
+    container: 'vault',
   },
   targets: [
     {
-      name: 'offsite',
+      name: 'primary',
       adapter: 'kubernetes',
       connection: {
         apiServer: 'https://kubernetes.default.svc',
@@ -146,19 +146,19 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
       },
     },
     {
-      name: 'bluenose-cloudrun',
+      name: 'vesselcloudrun',
       adapter: 'cloudrun',
       connection: {
-        project: 'bluenose',
-        region: 'northamerica-northeast1',
+        project: 'vessel',
+        region: 'global',
         endpoint: 'https://run.googleapis.com',
       },
     },
     {
-      name: 'bluenose-static',
+      name: 'vesselstatic',
       adapter: 'static',
       connection: {
-        project: 'bluenose',
+        project: 'vessel',
         endpoint: 'https://firebasehosting.googleapis.com',
       },
     },
