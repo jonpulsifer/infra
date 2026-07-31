@@ -13,16 +13,16 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import {
-  DEPLOY_SCENARIOS,
-  WORKSPACE_SCENARIOS,
-} from '../../src/web/demo/scenarios.ts';
 import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { Workspace } from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
+import {
+  DEPLOY_SCENARIOS,
+  WORKSPACE_SCENARIOS,
+} from '../fixtures/scenarios.ts';
 
 const deploy = (view: DeployView) =>
   renderToStaticMarkup(<DeployDetail view={view} />);
