@@ -90,7 +90,8 @@ export type TransportFailureCode =
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
   | 'METHOD_NOT_ALLOWED'
-  | 'MALFORMED_REQUEST';
+  | 'MALFORMED_REQUEST'
+  | 'INTERNAL';
 
 /**
  * The HTTP status a refusal reads as.
@@ -115,6 +116,7 @@ const STATUS = {
   FORBIDDEN: 403,
   METHOD_NOT_ALLOWED: 405,
   MALFORMED_REQUEST: 400,
+  INTERNAL: 500,
 } as const satisfies Record<TransportFailureCode, number>;
 
 /**
@@ -182,8 +184,13 @@ async function handle(
     return refuse('MALFORMED_REQUEST', 'the request body is not JSON');
   }
 
-  const result = await dispatch(name, input, deps.context(principal));
-  return result.ok
-    ? Response.json(result, { status: 200 })
-    : Response.json(result, { status: STATUS[result.failure.code] });
+  try {
+    const result = await dispatch(name, input, deps.context(principal));
+    return result.ok
+      ? Response.json(result, { status: 200 })
+      : Response.json(result, { status: STATUS[result.failure.code] });
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return refuse('INTERNAL', message);
+  }
 }
