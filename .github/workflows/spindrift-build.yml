@@ -122,6 +122,10 @@ jobs:
           build-args: ${{ steps.request.outputs.buildArgs }}
           push: true
           tags: ${{ steps.request.outputs.destination }}
+          cache-from: |
+            type=gha,scope=spindrift-build
+            type=gha,scope=spindrift-push
+          cache-to: type=gha,mode=max,scope=spindrift-build
           # BuildKit's own provenance, with materials. §16 calls this the second
           # document — unsigned, not the isolation claim, and where the base
           # digest comes from.

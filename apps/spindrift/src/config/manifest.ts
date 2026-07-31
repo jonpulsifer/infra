@@ -80,27 +80,27 @@ export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
 
 /** High-trust default placeholder manifest used when initializing an unseeded installation. */
 export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
-  installation: 'primary',
+  installation: 'default',
   controlPlane: {
-    hostname: 'spindrift.example.internal',
+    hostname: 'spindrift.example.com',
   },
   auth: {
     gateway: null,
   },
   dns: {
-    apexZone: 'example.internal',
-    vanityZone: 'example.internal',
+    apexZone: 'example.com',
+    vanityZone: 'example.com',
   },
   cloud: {
-    artifactsProject: 'artifacts',
-    homeVesselProject: 'vessel',
+    artifactsProject: 'spindrift-artifacts',
+    homeVesselProject: 'spindrift-vessel',
     federation: {
       audience:
-        '//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/spindrift/providers/spindrift',
+        '//iam.googleapis.com/projects/1234567890/locations/global/workloadIdentityPools/spindrift-pool/providers/spindrift-provider',
       tokenUrl: 'https://sts.googleapis.com/v1/token',
       tokenPath: '/var/run/secrets/spindrift/gcp-token',
       impersonationUrl:
-        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@vessel.iam.gserviceaccount.com:generateAccessToken',
+        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@spindrift-vessel.iam.gserviceaccount.com:generateAccessToken',
     },
   },
   charts: {
@@ -111,7 +111,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
     registry: 'ghcr.io/spindrift',
     verifier: 'ghcr.io/spindrift/spindrift-verifier',
     signer:
-      'gcpkms://projects/artifacts/locations/global/keyRings/keys/cryptoKeys/signer',
+      'gcpkms://projects/spindrift-artifacts/locations/us-central1/keyRings/keys/cryptoKeys/signer',
   },
   github: {
     clientId: 'Iv1.918d699f36ee7afc',
@@ -128,7 +128,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
     adapter: 'onepassword',
     endpoint:
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
-    container: 'vault',
+    container: 'spindrift-vault',
   },
   targets: [
     {
@@ -146,19 +146,19 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
       },
     },
     {
-      name: 'vesselcloudrun',
+      name: 'spindrift-cloudrun',
       adapter: 'cloudrun',
       connection: {
-        project: 'vessel',
-        region: 'global',
+        project: 'spindrift-vessel',
+        region: 'spindrift-region',
         endpoint: 'https://run.googleapis.com',
       },
     },
     {
-      name: 'vesselstatic',
+      name: 'spindrift-static',
       adapter: 'static',
       connection: {
-        project: 'vessel',
+        project: 'spindrift-vessel',
         endpoint: 'https://firebasehosting.googleapis.com',
       },
     },

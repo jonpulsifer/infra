@@ -110,12 +110,12 @@ export function CredentialSettingsView({
   readonly onUnlink: () => void;
 }) {
   const [manifestSaved, setManifestSaved] = useState(false);
-  const [installationName, setInstallationName] = useState('primary');
+  const [installationName, setInstallationName] = useState('default');
   const [controlPlaneHost, setControlPlaneHost] = useState(
-    'spindrift.example.internal',
+    'spindrift.example.com',
   );
-  const [apexZone, setApexZone] = useState('example.internal');
-  const [vanityZone, setVanityZone] = useState('example.internal');
+  const [apexZone, setApexZone] = useState('example.com');
+  const [vanityZone, setVanityZone] = useState('example.com');
   const [secretStore, setSecretStore] = useState<
     'onepassword' | 'gcp-secret-manager'
   >('onepassword');
@@ -128,7 +128,7 @@ export function CredentialSettingsView({
   const [githubClientId, setGithubClientId] = useState('Iv1.918d699f36ee7afc');
   const [artifactRegistry, setArtifactRegistry] = useState('ghcr.io/spindrift');
   const [kmsSigner, setKmsSigner] = useState(
-    'gcpkms://projects/artifacts/locations/global/keyRings/keys/cryptoKeys/signer',
+    'gcpkms://projects/spindrift-artifacts/locations/us-central1/keyRings/keys/cryptoKeys/signer',
   );
 
   const handleSaveManifest = (e: React.FormEvent) => {
@@ -183,7 +183,7 @@ export function CredentialSettingsView({
                 label="Installation Identifier"
                 type="text"
                 value={installationName}
-                placeholder="e.g. primary-cluster"
+                placeholder="e.g. default"
                 onChange={(e) => setInstallationName(e.currentTarget.value)}
               />
               <Field
@@ -191,7 +191,7 @@ export function CredentialSettingsView({
                 label="Control Plane Hostname"
                 type="text"
                 value={controlPlaneHost}
-                placeholder="e.g. spindrift.example.internal"
+                placeholder="e.g. spindrift.example.com"
                 onChange={(e) => setControlPlaneHost(e.currentTarget.value)}
               />
             </div>
@@ -202,7 +202,7 @@ export function CredentialSettingsView({
                 label="DNS Apex Zone"
                 type="text"
                 value={apexZone}
-                placeholder="e.g. example.internal"
+                placeholder="e.g. example.com"
                 onChange={(e) => setApexZone(e.currentTarget.value)}
               />
               <Field
@@ -210,7 +210,7 @@ export function CredentialSettingsView({
                 label="DNS Vanity Zone"
                 type="text"
                 value={vanityZone}
-                placeholder="e.g. example.internal"
+                placeholder="e.g. example.com"
                 onChange={(e) => setVanityZone(e.currentTarget.value)}
               />
             </div>
@@ -289,7 +289,7 @@ export function CredentialSettingsView({
                 label="Supply Chain Registry"
                 type="text"
                 value={artifactRegistry}
-                placeholder="e.g. ghcr.io/spindrift-org"
+                placeholder="e.g. ghcr.io/spindrift"
                 onChange={(e) => setArtifactRegistry(e.currentTarget.value)}
               />
             </div>
