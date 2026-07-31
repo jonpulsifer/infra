@@ -91,6 +91,10 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
     apexZone: 'example.com',
     vanityZone: 'example.com',
   },
+  sources: {
+    buckets: ['bluenose-spindrift-source'],
+    defaultBucket: 'bluenose-spindrift-source',
+  },
   cloud: {
     artifactsProject: 'spindrift-artifacts',
     homeVesselProject: 'spindrift-vessel',

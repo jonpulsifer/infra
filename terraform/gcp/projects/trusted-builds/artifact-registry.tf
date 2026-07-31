@@ -31,7 +31,7 @@ data "google_project" "bluenose" {
 resource "google_artifact_registry_repository_iam_member" "reader_spindrift" {
   for_each = toset([
     local.bluenose_binary_authorization_service_agent,
-    local.spindrift_principal,
+    local.spindrift_controller_member,
     "serviceAccount:service-${data.google_project.bluenose.number}@serverless-robot-prod.iam.gserviceaccount.com",
   ])
 

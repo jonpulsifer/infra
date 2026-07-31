@@ -8,7 +8,7 @@
  * is a readable answer here rather than an empty list.
  */
 import { AlertTriangle, Lock } from 'lucide-react';
-import { type Dispatch, type ReactNode, useState } from 'react';
+import { type Dispatch, type ReactNode, useEffect, useState } from 'react';
 import type {
   ComponentKind,
   Exposure,
@@ -112,17 +112,45 @@ export function StepSource({
 }: StepProps & { repos: readonly RepositoryOptionView[] }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [bucketName, setBucketName] = useState('');
+  const [bucketName, setBucketName] = useState<string | null>(null);
+  const [buckets, setBuckets] = useState<readonly string[] | null>(null);
+  const [defaultBucket, setDefaultBucket] = useState<string | null>(null);
+  const [customBucket, setCustomBucket] = useState('');
+  const [useCustom, setUseCustom] = useState(false);
+  const [bucketLoadError, setBucketLoadError] = useState(false);
   const [testingWif, setTestingWif] = useState(false);
   const [wifStatus, setWifStatus] = useState<string | null>(null);
 
+  const bucketsLoading = buckets === null && !bucketLoadError;
+  const activeBucketName = bucketName ?? '';
+
+  useEffect(() => {
+    command('listSourceBuckets', {})
+      .then((res) => {
+        if (res.ok) {
+          setBuckets(res.value.buckets);
+          setDefaultBucket(res.value.defaultBucket ?? null);
+          const selected =
+            res.value.defaultBucket || res.value.buckets[0] || null;
+          setBucketName(selected);
+        } else {
+          setBucketLoadError(true);
+          setBuckets([]);
+        }
+      })
+      .catch(() => {
+        setBucketLoadError(true);
+        setBuckets([]);
+      });
+  }, []);
+
   async function handleTestWif() {
-    if (!bucketName.trim()) return;
+    if (!activeBucketName.trim()) return;
     setTestingWif(true);
     setWifStatus(null);
     try {
       const res = await command('testBucketPermissions', {
-        bucketName: bucketName.trim(),
+        bucketName: activeBucketName.trim(),
       });
       if (res.ok) {
         setWifStatus(`✓ WIF permissions verified for ${res.value.location}`);
@@ -148,8 +176,8 @@ export function StepSource({
       formData.append('file', file);
 
       const headers: Record<string, string> = {};
-      if (bucketName.trim()) {
-        headers['x-bucket'] = bucketName.trim();
+      if (activeBucketName.trim()) {
+        headers['x-bucket'] = activeBucketName.trim();
       }
 
       const response = await fetch('/internal/upload', {
@@ -263,25 +291,82 @@ export function StepSource({
         </Card>
       )}
 
-      <div className="mt-4 flex flex-col gap-2 rounded border bg-muted/40 p-3">
-        <span className="text-xs font-semibold text-foreground">
-          Cloud Storage Bucket (Optional GCS Bucket for Source & Artifacts)
-        </span>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="e.g. trusted-builds-artifacts"
-            value={bucketName}
-            onChange={(e) => setBucketName(e.target.value)}
-            className="flex-1 rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground"
-          />
+      <div className="mt-4 flex flex-col gap-3 rounded border bg-muted/40 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-foreground">
+            First-Party Storage Bucket (Source & Artifact Staging)
+          </span>
+          <Badge tone="accent">first-party</Badge>
+        </div>
+        <p className="text-[11.5px] text-muted-foreground">
+          Select from configured first-party Cloud Storage buckets or enter a
+          custom bucket name.
+        </p>
+        {bucketLoadError ? (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400">
+            Could not load configured buckets — showing default. Enter a bucket
+            name manually if needed.
+          </p>
+        ) : null}
+
+        <div className="flex flex-col gap-2">
+          <label
+            htmlFor="source-bucket-select"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Bucket
+          </label>
+          <select
+            id="source-bucket-select"
+            disabled={bucketsLoading}
+            value={useCustom ? 'custom' : activeBucketName}
+            onChange={(e) => {
+              if (e.target.value === 'custom') {
+                setUseCustom(true);
+                setBucketName(customBucket);
+              } else {
+                setUseCustom(false);
+                setBucketName(e.target.value);
+              }
+            }}
+            className="rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground disabled:opacity-50"
+          >
+            {bucketsLoading ? (
+              <option value="">Loading…</option>
+            ) : (
+              <>
+                {(buckets ?? []).map((b) => (
+                  <option key={b} value={b}>
+                    {b} {b === defaultBucket ? '(default · infra repo)' : ''}
+                  </option>
+                ))}
+                <option value="custom">Custom bucket...</option>
+              </>
+            )}
+          </select>
+
+          {useCustom ? (
+            <input
+              type="text"
+              placeholder="e.g. custom-spindrift-bucket"
+              value={customBucket}
+              onChange={(e) => {
+                setCustomBucket(e.target.value);
+                setBucketName(e.target.value);
+              }}
+              className="rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground"
+            />
+          ) : null}
+        </div>
+
+        <div className="mt-1 flex items-center gap-2">
           <button
             type="button"
-            disabled={!bucketName.trim() || testingWif}
+            disabled={!activeBucketName.trim() || testingWif}
             onClick={handleTestWif}
             className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {testingWif ? 'Testing WIF…' : 'Test WIF'}
+            {testingWif ? 'Testing WIF…' : 'Test WIF Permissions'}
           </button>
         </div>
         {wifStatus ? (
@@ -291,7 +376,7 @@ export function StepSource({
         ) : (
           <p className="text-[11px] text-muted-foreground">
             Uses credential-less Workload Identity Federation (WIF) token
-            exchange.
+            exchange with spindrift-controller service account impersonation.
           </p>
         )}
       </div>
