@@ -182,13 +182,13 @@ describe('connecting a repository', () => {
   test('fails open and leaves repository connected when configuration PR creation fails', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', { 'README.md': 'unconnected' });
-    const failingFetch = (async (input: any, init?: any) => {
+    const failingFetch = (async (input: any) => {
       const urlStr =
         typeof input === 'string' ? input : (input?.url ?? String(input));
       if (urlStr.includes('/git/') || urlStr.includes('/pulls')) {
         throw new Error('GitHub API pull request error');
       }
-      return fake.fetch(input, init);
+      return fake.fetch(input);
     }) as any;
     const ctx = await context(fake, failingFetch);
 
