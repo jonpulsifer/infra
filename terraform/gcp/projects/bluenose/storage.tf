@@ -25,7 +25,7 @@ resource "google_storage_bucket" "spindrift_source" {
 resource "google_storage_bucket_iam_member" "spindrift_source" {
   bucket = google_storage_bucket.spindrift_source.name
   role   = "roles/storage.objectAdmin"
-  member = local.spindrift_principal
+  member = google_service_account.spindrift_controller.member
 }
 
 resource "google_storage_bucket_iam_member" "trusted_builder_source" {

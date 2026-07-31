@@ -16,12 +16,12 @@ resource "google_project_iam_member" "base_updater_builds" {
 
 resource "google_project_iam_member" "spindrift_builds" {
   project = local.project
-  member  = local.spindrift_principal
+  member  = local.spindrift_controller_member
   role    = "roles/cloudbuild.builds.editor"
 }
 
 resource "google_project_iam_member" "spindrift_occurrences" {
   project = local.project
-  member  = local.spindrift_principal
+  member  = local.spindrift_controller_member
   role    = "roles/containeranalysis.occurrences.editor"
 }
