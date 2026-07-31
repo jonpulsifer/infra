@@ -115,13 +115,7 @@ export const connectRepository: Command<
   // configuration PR to open — refused here rather than opened without the
   // caller, because a repository connected without a build route is connected
   // to nothing.
-  const buildWorkflow = context.manifest.github.buildWorkflow;
-  if (buildWorkflow === null) {
-    return failed(
-      'NOT_DEPLOYABLE',
-      'this installation has published no reusable build workflow, so there is no configuration pull request to open',
-    );
-  }
+  const buildWorkflow = context.manifest.github?.buildWorkflow ?? null;
 
   let ref: ReturnType<typeof repositoryRefOf>;
   try {
@@ -133,7 +127,10 @@ export const connectRepository: Command<
         `Spindrift cannot reach ${input.fullName}: authorize GitHub and check that the App installation selects it`,
       );
     }
-    throw cause;
+    return failed(
+      'NOT_FOUND',
+      `Spindrift cannot reach ${input.fullName}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
   }
 
   let defaultBranch: string;
@@ -149,7 +146,10 @@ export const connectRepository: Command<
         `Spindrift cannot reach ${input.fullName}: check that the App installation still selects it`,
       );
     }
-    throw cause;
+    return failed(
+      'NOT_FOUND',
+      `Spindrift cannot reach ${input.fullName}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
   }
 
   const now = context.clock.now();
@@ -172,46 +172,48 @@ export const connectRepository: Command<
     })
     .returning();
 
-  const scopes: ConfigurationScope[] = input.scopes.map(
-    ({ scope, kind, build, watchPaths }) => ({
-      scope,
-      proposal: {
-        source: 'operator',
-        kind,
-        kinds: (['service', 'website', 'job'] as const).map((candidate) =>
-          candidate === kind
-            ? { kind: candidate, available: true }
-            : {
-                kind: candidate,
-                available: false,
-                reason: 'the operator selected another kind',
-              },
-        ),
-        build,
-        watchPaths,
-      },
-    }),
-  );
-  const transaction = configurationTransaction({
-    scopes,
-    buildWorkflow,
-  });
-
   let pullRequest: number | null = null;
-  try {
-    const opened = await openConfigurationPullRequest(host, ref, {
-      fullName: input.fullName,
-      defaultBranch,
-      transaction,
+  if (buildWorkflow !== null) {
+    const scopes: ConfigurationScope[] = input.scopes.map(
+      ({ scope, kind, build, watchPaths }) => ({
+        scope,
+        proposal: {
+          source: 'operator',
+          kind,
+          kinds: (['service', 'website', 'job'] as const).map((candidate) =>
+            candidate === kind
+              ? { kind: candidate, available: true }
+              : {
+                  kind: candidate,
+                  available: false,
+                  reason: 'the operator selected another kind',
+                },
+          ),
+          build,
+          watchPaths,
+        },
+      }),
+    );
+    const transaction = configurationTransaction({
+      scopes,
+      buildWorkflow,
     });
-    pullRequest = opened.number;
-    await context.db
-      .update(repositories)
-      .set({ configPullRequest: opened.number, updatedAt: now })
-      .where(eq(repositories.id, row!.id));
-  } catch {
-    // Fail open: opening the configuration PR failed (e.g. GitHub permission or API error),
-    // but the repository remains connected.
+
+    try {
+      const opened = await openConfigurationPullRequest(host, ref, {
+        fullName: input.fullName,
+        defaultBranch,
+        transaction,
+      });
+      pullRequest = opened.number;
+      await context.db
+        .update(repositories)
+        .set({ configPullRequest: opened.number, updatedAt: now })
+        .where(eq(repositories.id, row!.id));
+    } catch {
+      // Fail open: opening the configuration PR failed (e.g. GitHub permission or API error),
+      // but the repository remains connected.
+    }
   }
 
   return ok({
