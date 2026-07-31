@@ -20,6 +20,6 @@ export const listSourceBuckets: Command<
   const { buckets, defaultBucket } = context.manifest.sources;
   return ok({
     buckets,
-    defaultBucket: defaultBucket ?? buckets[0],
+    defaultBucket: defaultBucket ?? buckets[0] ?? '',
   });
 };

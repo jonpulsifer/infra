@@ -129,9 +129,9 @@ export function StepSource({
       .then((res) => {
         if (res.ok) {
           setBuckets(res.value.buckets);
-          setDefaultBucket(res.value.defaultBucket);
+          setDefaultBucket(res.value.defaultBucket ?? null);
           const selected =
-            res.value.defaultBucket ?? res.value.buckets[0] ?? null;
+            res.value.defaultBucket || res.value.buckets[0] || null;
           setBucketName(selected);
         } else {
           setBucketLoadError(true);
