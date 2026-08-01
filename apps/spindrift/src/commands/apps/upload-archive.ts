@@ -29,6 +29,7 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { builds, components, targets } from '../../db/schema.ts';
 import type { ArtifactType } from '../../domain/desired-state.ts';
+import { digestSchema } from '../../domain/digest.ts';
 import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
 import {
   type ArchiveSource,
@@ -39,10 +40,7 @@ import {
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
 /** A content digest over the staged bundle (§16). */
-const bundleDigest = z
-  .string()
-  .trim()
-  .regex(/^sha256:[0-9a-f]{64}$/, 'must be a sha256 digest');
+const bundleDigest = digestSchema;
 
 export const uploadArchiveInput = z
   .object({

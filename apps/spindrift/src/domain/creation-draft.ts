@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import type { ComponentKind, Exposure } from './desired-state.ts';
+import { digestSchema } from './digest.ts';
 
 export const ENTRIES = [
   {
@@ -61,7 +62,7 @@ const source = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('archive'),
       filename: z.string().min(1),
-      digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+      digest: digestSchema,
       /** Durable location written by the upload/staging boundary. */
       location: z.string().min(1).nullable().optional(),
       /** Finished output bypasses a builder; source follows the ordinary path. */

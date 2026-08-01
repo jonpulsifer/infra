@@ -18,6 +18,9 @@ import type {
   BuildSpec,
   LogFidelity,
 } from '../../src/adapters/build/contract.ts';
+import { digestSchema } from '../../src/domain/digest.ts';
+import { digestPinnedRef } from '../../src/supply-chain/verify.ts';
+import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 
 /** A type-level claim that fails to compile if `T` is not exactly `true`. */
 type Assert<T extends true> = T;
@@ -144,5 +147,60 @@ describe('log fidelity', () => {
       'ON_COMPLETION',
     ];
     expect(fidelities).toContain(route.logFidelity);
+  });
+});
+
+/**
+ * The same term, applied to the fake route (Task 18).
+ *
+ * A fake that reports something the product would refuse is a fake that lets
+ * every downstream assertion pass against an artifact the real system cannot
+ * produce. `sha256:fake-0` and `<destination>@fake` were exactly that: the
+ * digest fails the product's own definition in `src/domain/digest.ts`, and the
+ * ref fails `digestPinnedRef` — the gate the real verifier applies before it
+ * spawns anything.
+ */
+describe('the fake route reports what the product would accept', () => {
+  async function built(adapter: FakeBuildAdapter) {
+    const stream = adapter.build(source, spec);
+    let step = await stream.next();
+    while (!step.done) step = await stream.next();
+    return step.value;
+  }
+
+  test('its digest is a digest, and its ref pins that digest', async () => {
+    const result = await built(new FakeBuildAdapter());
+
+    expect(result.status).toBe('SUCCEEDED');
+    if (result.status !== 'SUCCEEDED' || result.artifact === null) return;
+    expect(digestSchema.safeParse(result.artifact.digest).success).toBe(true);
+    expect(digestPinnedRef(result.artifact)).toBe(
+      result.artifact.refs[0] ?? null,
+    );
+  });
+
+  test('a scripted digest is pinned by the ref too', async () => {
+    const digest = `sha256:${'7'.repeat(64)}`;
+    const result = await built(
+      new FakeBuildAdapter({
+        script: [{ result: { status: 'SUCCEEDED', digest } }],
+      }),
+    );
+
+    if (result.status !== 'SUCCEEDED' || result.artifact === null) return;
+    expect(result.artifact.digest).toBe(digest);
+    expect(digestPinnedRef(result.artifact)).toBe(
+      `${spec.destination}@${digest}`,
+    );
+  });
+
+  test('successive builds report different digests', async () => {
+    // One digest for every build would make "the deploy moved to the new
+    // artifact" unfalsifiable.
+    const adapter = new FakeBuildAdapter();
+    const first = await built(adapter);
+    const second = await built(adapter);
+    if (first.status !== 'SUCCEEDED' || second.status !== 'SUCCEEDED') return;
+    expect(first.artifact?.digest).not.toBe(second.artifact?.digest);
   });
 });
