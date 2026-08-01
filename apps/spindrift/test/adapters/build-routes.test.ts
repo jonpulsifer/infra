@@ -485,6 +485,96 @@ describe('the cloud build route', () => {
     expect(result.status).toBe('FAILED');
     if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
   });
+
+  test('a report ingested only after the build concludes is still read', async () => {
+    // The report region is written in the build's last seconds and the log
+    // service ingests behind the writer, so the read that finds it is the one
+    // *after* the status turned `SUCCESS`. A loop that stopped at the status
+    // read records this green build as `succeeded but reported no artifact`.
+    const { result } = await run(
+      cloudRoute().route.build(archiveSource(), spec),
+    );
+
+    expect(result.status).toBe('SUCCEEDED');
+    if (result.status === 'SUCCEEDED') {
+      expect(result.artifact?.digest).toBe(`sha256:${'b'.repeat(64)}`);
+    }
+  });
+
+  test('the whole log is read, including the lines written after the last poll', async () => {
+    const { events } = await run(
+      cloudRoute().route.build(archiveSource(), spec),
+    );
+
+    // `Finished Step #0` is written after the report, so it is the line a route
+    // that read one page too few would be missing.
+    expect(text(events)).toContain('Finished Step #0');
+  });
+
+  test('every poll starts a fresh search rather than resuming an old cursor', async () => {
+    // `nextPageToken` continues one search; it is not a watermark on a live
+    // log. A route that carried one across polls would be paginating a snapshot
+    // of the past, so a token may only be presented within the poll that minted
+    // it.
+    const { api, route } = cloudRoute({ duration: 3 });
+    await run(route.build(archiveSource(), spec));
+
+    let fresh = true;
+    for (const request of api.requests) {
+      if (request.url.endsWith('entries:list')) {
+        if (fresh) {
+          expect((request.body as { pageToken?: string }).pageToken).toBe(
+            undefined,
+          );
+        }
+        fresh = false;
+        continue;
+      }
+      // A status read (or the submit) ends the poll the token belonged to.
+      fresh = true;
+    }
+  });
+
+  test('a search cut short is not mistaken for a caught-up log', async () => {
+    // The vendor documents an empty page carrying a token as "the search found
+    // no log entries so far but it did not have time to search all the possible
+    // log entries" — a route that read it as an end would report no artifact.
+    const { result, events } = await run(
+      cloudRoute({ cutShort: true }).route.build(archiveSource(), spec),
+    );
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(text(events)).toContain('exporting to image');
+  });
+
+  test('the log service refuses a search that names no parent resource', async () => {
+    // `entries.list` documents `resourceNames` as required. The fake refuses a
+    // search without it, so the route sending it is not a matter of trust.
+    const { api, route } = cloudRoute();
+    await run(route.build(archiveSource(), spec));
+
+    const searches = api.requests.filter((request) =>
+      request.url.endsWith('entries:list'),
+    );
+    expect(searches.length).toBeGreaterThan(0);
+    for (const search of searches) {
+      expect(
+        (search.body as { resourceNames?: string[] }).resourceNames,
+      ).toEqual(['projects/example-builds']);
+    }
+
+    const refused = await api.fetch(
+      new Request(`${api.logsEndpoint}/v2/entries:list`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${api.token()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ filter: 'resource.labels.build_id="build-1"' }),
+      }),
+    );
+    expect(refused.status).toBe(400);
+  });
 });
 
 // --- The in-cluster route ----------------------------------------------
