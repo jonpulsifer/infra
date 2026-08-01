@@ -23,6 +23,7 @@ export { resolveComponentPlacement } from './apps/resolve-placement.ts';
 export { uploadArchive } from './apps/upload-archive.ts';
 export { getAppWorkspace } from './apps/workspace.ts';
 export { dispatchBuild } from './builds/dispatch.ts';
+export { getBuildDetail } from './builds/get-detail.ts';
 export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
 export { replaceConfig } from './config/replace.ts';
@@ -36,6 +37,7 @@ export {
 } from './creation-drafts/lifecycle.ts';
 export { createDeploy } from './deploys/create.ts';
 export { getDeployDetail } from './deploys/get-detail.ts';
+export { listDeploys } from './deploys/list.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';
 export {
   beginRepositoryAuthorization,

@@ -27,12 +27,14 @@ import type {
   ActivityEntry,
   ComponentView,
   DatastoreView,
+  DeployListItem,
   WorkspaceView,
 } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { cn } from '../../ui/utils.ts';
+import { Releases } from './releases.tsx';
 
 export function Workspace({
   view,
@@ -40,6 +42,8 @@ export function Workspace({
   deploying = false,
   onNavigate,
   deletion,
+  onRollback,
+  rollingBack = null,
 }: {
   view: WorkspaceView;
   onDeploy?: () => void;
@@ -51,6 +55,8 @@ export function Workspace({
    * question does not offer the act.
    */
   deletion?: AppDeletionControls;
+  onRollback?: (release: DeployListItem) => void;
+  rollingBack?: number | null;
 }) {
   const primary = view.components[0];
 
@@ -82,15 +88,22 @@ export function Workspace({
         </div>
       </header>
 
-      <Hero view={view} />
+      <Hero view={view} onNavigate={onNavigate} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Components components={view.components} />
         <Datastores datastores={view.datastores} />
       </div>
 
+      <ReleaseHistory
+        deploys={view.deploys}
+        onNavigate={onNavigate}
+        onRollback={onRollback}
+        rollingBack={rollingBack}
+      />
+
       <div className="grid gap-4 md:grid-cols-2">
-        <Activity entries={view.activity} />
+        <Activity entries={view.activity} onNavigate={onNavigate} />
         <Runtime view={view} onNavigate={onNavigate} />
       </div>
     </div>
@@ -98,7 +111,13 @@ export function Workspace({
 }
 
 /** Live state and URL on the left; placement on the right. */
-function Hero({ view }: { view: WorkspaceView }) {
+function Hero({
+  view,
+  onNavigate,
+}: {
+  view: WorkspaceView;
+  onNavigate?: (path: string) => void;
+}) {
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
       <div className="flex flex-col gap-2">
@@ -119,6 +138,22 @@ function Hero({ view }: { view: WorkspaceView }) {
         >
           {view.url}
         </a>
+        {/*
+          The release is a link because it is a thing, not a label: §2's Deploy
+          is Heroku's Release, and the attempt that produced what is running is
+          one press away from the screen that says how it went.
+        */}
+        {view.latestDeployId !== undefined && onNavigate ? (
+          <button
+            type="button"
+            onClick={() => onNavigate(`/deploys/${view.latestDeployId}`)}
+            className="self-start text-xs text-subtle hover:text-foreground"
+          >
+            {view.release} →
+          </button>
+        ) : (
+          <Eyebrow>{view.release}</Eyebrow>
+        )}
       </div>
 
       <div className="ml-auto flex flex-col gap-1 text-right">
@@ -137,6 +172,13 @@ function Hero({ view }: { view: WorkspaceView }) {
   );
 }
 
+/**
+ * A section's label, and its one action where it has one.
+ *
+ * `action` is optional because not every section does something: the timeline
+ * is read by clicking its own entries, and a "View all" beside it would be a
+ * button whose absence of a destination the reader discovers by pressing it.
+ */
 function SectionHeader({
   eyebrow,
   title,
@@ -145,7 +187,7 @@ function SectionHeader({
 }: {
   eyebrow: string;
   title: string;
-  action: string;
+  action?: string;
   onAction?: () => void;
 }) {
   return (
@@ -154,14 +196,16 @@ function SectionHeader({
         <Eyebrow>{eyebrow}</Eyebrow>
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="ml-auto"
-        onClick={onAction}
-      >
-        {action}
-      </Button>
+      {action ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={onAction}
+        >
+          {action}
+        </Button>
+      ) : null}
     </CardHeader>
   );
 }
@@ -266,37 +310,136 @@ function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
   );
 }
 
+/**
+ * Every release of this App, newest first (§2).
+ *
+ * A full-width section rather than a card in the two-column grid: it is the
+ * history of the thing the whole screen is about, and §2's "one Build → many
+ * Deploys" is only legible when the many are listed.
+ */
+function ReleaseHistory({
+  deploys,
+  onNavigate,
+  onRollback,
+  rollingBack,
+}: {
+  deploys: readonly DeployListItem[];
+  onNavigate?: (path: string) => void;
+  onRollback?: (release: DeployListItem) => void;
+  rollingBack: number | null;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div>
+          <Eyebrow>Deploy history</Eyebrow>
+          <h2 className="text-base font-semibold tracking-tight">Releases</h2>
+        </div>
+        <p className="ml-auto max-w-[46ch] text-right text-xs text-muted-foreground">
+          Each release is immutable — its Build, its commit, and the
+          configuration it pinned. Rolling back deploys an older one; it never
+          rebuilds.
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <Releases
+          deploys={deploys}
+          onNavigate={onNavigate}
+          onRollback={onRollback}
+          rollingBack={rollingBack}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 const ACTIVITY_TONE = {
   ok: 'border-l-success',
   failed: 'border-l-destructive',
   info: 'border-l-border',
 } as const satisfies Record<ActivityEntry['status'], string>;
 
-function Activity({ entries }: { entries: readonly ActivityEntry[] }) {
+/**
+ * The timeline, and a way in from every line of it.
+ *
+ * `attempt_events` constrains every row to exactly one attempt, so every entry
+ * has somewhere to go — `/deploys/:id` or `/builds/:id`. An entry that led
+ * nowhere would be the one thing on this screen a reader could not act on.
+ */
+function Activity({
+  entries,
+  onNavigate,
+}: {
+  entries: readonly ActivityEntry[];
+  onNavigate?: (path: string) => void;
+}) {
   return (
     <Card>
-      <SectionHeader
-        eyebrow="Recent activity"
-        title="What happened"
-        action="View all"
-      />
+      <SectionHeader eyebrow="Recent activity" title="What happened" />
       <CardContent className="flex flex-col gap-2.5 pt-0">
-        {entries.map((entry) => (
-          <div
-            key={`${entry.title}-${entry.when}`}
-            className={cn('border-l-2 pl-3', ACTIVITY_TONE[entry.status])}
-          >
-            <div className="flex items-baseline gap-2">
-              <p className="text-sm font-medium">{entry.title}</p>
-              <span className="ml-auto font-mono text-xs text-muted-foreground">
-                {entry.when}
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">{entry.detail}</p>
-          </div>
-        ))}
+        {entries.length === 0 ? (
+          <EmptyState title="Nothing has happened yet.">
+            Build and deploy events land here as they arrive.
+          </EmptyState>
+        ) : (
+          entries.map((entry) => (
+            <ActivityRow
+              key={`${entry.title}-${entry.when}-${entry.deployId ?? entry.buildId}`}
+              entry={entry}
+              onNavigate={onNavigate}
+            />
+          ))
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+function ActivityRow({
+  entry,
+  onNavigate,
+}: {
+  entry: ActivityEntry;
+  onNavigate?: (path: string) => void;
+}) {
+  const path =
+    entry.deployId !== null
+      ? `/deploys/${entry.deployId}`
+      : entry.buildId !== null
+        ? `/builds/${entry.buildId}`
+        : null;
+
+  const body = (
+    <>
+      <div className="flex items-baseline gap-2">
+        <p className="text-sm font-medium">{entry.title}</p>
+        <span className="ml-auto font-mono text-xs text-muted-foreground">
+          {entry.when}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">{entry.detail}</p>
+    </>
+  );
+
+  if (path === null || !onNavigate) {
+    return (
+      <div className={cn('border-l-2 pl-3', ACTIVITY_TONE[entry.status])}>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate(path)}
+      className={cn(
+        'border-l-2 pl-3 text-left hover:bg-secondary/50',
+        ACTIVITY_TONE[entry.status],
+      )}
+    >
+      {body}
+    </button>
   );
 }
 

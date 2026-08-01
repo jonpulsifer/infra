@@ -5,7 +5,10 @@ import {
   createComponent,
   deployApp,
   getAppWorkspace,
+  getBuildDetail,
   getDeployDetail,
+  listDeploys,
+  uploadArchive,
 } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
@@ -13,6 +16,7 @@ import type {
   CommandContext,
 } from '../../src/commands/types.ts';
 import {
+  attemptEvents,
   builds,
   componentTargetDesired,
   deploys,
@@ -52,6 +56,330 @@ function context(clock: Clock = frozenClock): CommandContext {
     manifest,
   };
 }
+
+/**
+ * One App, one Component, one placed Target — the shape every screen below
+ * reads. Written once because none of these tests is about authoring.
+ */
+async function scaffold(
+  ctx: CommandContext,
+  options: {
+    readonly prefix: string;
+    readonly kind?: 'service' | 'website';
+    readonly adapter?: 'kubernetes' | 'static';
+    readonly sourceKind?: 'repo' | 'archive';
+  },
+) {
+  const name = `${options.prefix}-${crypto.randomUUID().slice(0, 8)}`;
+  const app = await createApp(
+    options.sourceKind === 'archive'
+      ? {
+          name,
+          sourceKind: 'archive',
+          archiveDigest: `sha256:${'e'.repeat(64)}`,
+          vesselRef: 'driftwood',
+        }
+      : {
+          name,
+          sourceKind: 'repo',
+          repoUrl: 'https://vcs.example/acme/thing.git',
+          vesselRef: 'driftwood',
+        },
+    ctx,
+  );
+  if (!app.ok) throw new Error(app.failure.message);
+
+  const component = await createComponent(
+    options.kind === 'website'
+      ? {
+          appId: app.value.appId,
+          name: 'web',
+          kind: 'website',
+          exposure: 'public',
+        }
+      : {
+          appId: app.value.appId,
+          name: 'web',
+          kind: 'service',
+          expose: true,
+          exposure: 'private',
+        },
+    ctx,
+  );
+  if (!component.ok) throw new Error(component.failure.message);
+
+  const [target] = await ctx.db
+    .insert(targets)
+    .values(targetValues({ adapter: options.adapter ?? 'kubernetes' }))
+    .returning();
+
+  await ctx.db.insert(componentTargetDesired).values({
+    componentId: component.value.componentId,
+    targetId: target!.id,
+  });
+
+  return {
+    appName: name,
+    appId: app.value.appId,
+    componentId: component.value.componentId,
+    target: target!,
+  };
+}
+
+describe('getBuildDetail command', () => {
+  test('projects a Build with no Deploy as an attempt with a null id', async () => {
+    // §4: pressing Deploy with nothing deployable "writes a PENDING Build for
+    // the build loop to dispatch, and that is the whole act". The press still
+    // has to land somewhere, and this is what it lands on.
+    const ctx = context();
+    const { componentId, target, appName } = await scaffold(ctx, {
+      prefix: 'queued',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'aaa1111',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'RUNNING',
+        runner: 'hosted runner',
+      })
+      .returning();
+
+    const result = await getBuildDetail({ id: build!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { attempt, deployId } = result.value;
+    expect(attempt.id).toBeNull();
+    expect(deployId).toBeNull();
+    expect(attempt.buildId).toBe(build!.id);
+    expect(attempt.app).toBe(appName);
+    // The desired row is what says where a Component belongs before any intent
+    // has named a Target.
+    expect(attempt.target).toBe(target.name);
+    expect(attempt.headline).toContain('Building on hosted runner');
+    // No intent means nothing was placed and nothing can be rolled back to.
+    expect(attempt.resources).toEqual([]);
+    expect(attempt.rollbackable).toBe(false);
+  });
+
+  test('hands over to the Deploy once an intent names this Build', async () => {
+    // A Build that reached an intent has a better screen than the build page,
+    // and the client follows this id rather than rendering half the story.
+    const ctx = context();
+    const { componentId, target } = await scaffold(ctx, { prefix: 'handover' });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'bbb2222',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'a'.repeat(64)}`,
+        status: 'SUCCEEDED',
+        runner: 'hosted runner',
+      })
+      .returning();
+
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'LIVE',
+      })
+      .returning();
+
+    const result = await getBuildDetail({ id: build!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.deployId).toBe(deploy!.id);
+  });
+
+  test('an uploaded artifact has a source and no build', async () => {
+    // §4: "An archive of *finished output* is a supplied artifact, digested
+    // over the uploaded bundle" — recorded, never built. `uploadArchive` writes
+    // that row with a null runner because "saying so is more useful than naming
+    // a runner that never ran", and the projection has to carry that through.
+    const ctx = context();
+    const { componentId, target } = await scaffold(ctx, {
+      prefix: 'extracted',
+      kind: 'website',
+      adapter: 'static',
+      sourceKind: 'archive',
+    });
+
+    const digest = `sha256:${'b'.repeat(64)}`;
+    const uploaded = await uploadArchive(
+      {
+        componentId,
+        targetId: target.id,
+        bundleDigest: digest,
+        location: 'gs://bundles.example/site.tar.zst',
+        contents: 'artifact',
+        subpath: '.',
+      },
+      ctx,
+    );
+    expect(uploaded.ok).toBe(true);
+    if (!uploaded.ok) return;
+    expect(uploaded.value.status).toBe('SUCCEEDED');
+
+    const result = await getBuildDetail({ id: uploaded.value.buildId }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { attempt } = result.value;
+    expect(attempt.build).toBeNull();
+    expect(attempt.source.kind).toBe('archive');
+    if (attempt.source.kind === 'archive') {
+      expect(attempt.source.extracted).toBe(true);
+      expect(attempt.source.digest).toBe(digest);
+      expect(attempt.source.location).toBe('gs://bundles.example/site.tar.zst');
+    }
+    expect(attempt.headline).toContain('Uploaded output recorded as-is');
+  });
+
+  test('returns NOT_FOUND for an unknown build id', async () => {
+    const result = await getBuildDetail({ id: 999999 }, context());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('listDeploys command', () => {
+  test('lists releases newest first and marks the current one', async () => {
+    // §2: "one Build → many Deploys — this is what makes rollback-without-
+    // rebuild possible." `current` is the desired row's answer, not the phase's:
+    // a LIVE Deploy a newer intent superseded is still LIVE.
+    const ctx = context();
+    const { appName, componentId, target } = await scaffold(ctx, {
+      prefix: 'releases',
+    });
+
+    const written = [];
+    for (const commit of ['c111', 'c222', 'c333']) {
+      const [build] = await ctx.db
+        .insert(builds)
+        .values({
+          componentId,
+          commit,
+          targetShape: 'image',
+          artifactType: 'image',
+          artifactDigest: `sha256:${commit.repeat(16)}`,
+          status: 'SUCCEEDED',
+          runner: 'hosted runner',
+        })
+        .returning();
+      const [deploy] = await ctx.db
+        .insert(deploys)
+        .values({
+          componentId,
+          targetId: target.id,
+          buildId: build!.id,
+          phase: 'LIVE',
+          configVersion: `sha256:${'f'.repeat(64)}`,
+        })
+        .returning();
+      written.push({ build: build!, deploy: deploy! });
+    }
+
+    // The middle release is what is desired — a rollback, which is exactly the
+    // state that makes `current` disagree with `phase` on the newest row.
+    const desired = written[1]!;
+    await ctx.db
+      .update(componentTargetDesired)
+      .set({
+        desiredBuildId: desired.build.id,
+        desiredDeployId: desired.deploy.id,
+      })
+      .where(eq(componentTargetDesired.componentId, componentId));
+
+    const result = await listDeploys({ app: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { deploys: releases } = result.value;
+    expect(releases.map((release) => release.id)).toEqual([
+      written[2]!.deploy.id,
+      written[1]!.deploy.id,
+      written[0]!.deploy.id,
+    ]);
+    expect(releases.filter((release) => release.current)).toHaveLength(1);
+    expect(releases.find((release) => release.current)?.id).toBe(
+      desired.deploy.id,
+    );
+    expect(releases[0]?.configVersion).toBeTruthy();
+    expect(releases[0]?.commit).toBe('c333');
+  });
+
+  test('offers rollback only for a release older than what is desired', async () => {
+    // §6 refuses a "rollback" to a Build that is not older — a roll-forward
+    // somebody typed the wrong word for. The list makes the same comparison so
+    // the affordance appears only where the act would be accepted.
+    const ctx = context();
+    const { appName, componentId, target } = await scaffold(ctx, {
+      prefix: 'rollbackable',
+    });
+
+    const written = [];
+    for (const commit of ['d111', 'd222']) {
+      const [build] = await ctx.db
+        .insert(builds)
+        .values({
+          componentId,
+          commit,
+          targetShape: 'image',
+          artifactType: 'image',
+          artifactDigest: `sha256:${commit.repeat(16)}`,
+          status: 'SUCCEEDED',
+        })
+        .returning();
+      const [deploy] = await ctx.db
+        .insert(deploys)
+        .values({
+          componentId,
+          targetId: target.id,
+          buildId: build!.id,
+          phase: 'LIVE',
+        })
+        .returning();
+      written.push({ build: build!, deploy: deploy! });
+    }
+
+    const newest = written[1]!;
+    await ctx.db
+      .update(componentTargetDesired)
+      .set({
+        desiredBuildId: newest.build.id,
+        desiredDeployId: newest.deploy.id,
+      })
+      .where(eq(componentTargetDesired.componentId, componentId));
+
+    const result = await listDeploys({ app: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const byId = new Map(
+      result.value.deploys.map((release) => [release.id, release]),
+    );
+    expect(byId.get(newest.deploy.id)?.rollbackable).toBe(false);
+    expect(byId.get(written[0]!.deploy.id)?.rollbackable).toBe(true);
+  });
+
+  test('returns NOT_FOUND for an unknown app', async () => {
+    const result = await listDeploys({ app: 'no-such-app' }, context());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_FOUND');
+  });
+});
 
 describe('getAppWorkspace command', () => {
   test('returns NOT_FOUND for an unknown app name', async () => {
@@ -244,7 +572,132 @@ describe('getAppWorkspace command', () => {
   });
 });
 
+describe('the workspace as a way into the system', () => {
+  test('lists releases and gives every activity entry an attempt to open', async () => {
+    // `attempt_events` constrains every row to exactly one attempt, so every
+    // entry has somewhere to go. An entry that led nowhere would be the one
+    // thing on the screen a reader could not act on.
+    const ctx = context();
+    const { appName, appId, componentId, target } = await scaffold(ctx, {
+      prefix: 'navigable',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'e111222',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'c'.repeat(64)}`,
+        status: 'SUCCEEDED',
+        runner: 'hosted runner',
+      })
+      .returning();
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'LIVE',
+      })
+      .returning();
+
+    await ctx.db.insert(attemptEvents).values([
+      {
+        appId,
+        componentId,
+        attemptKind: 'build',
+        buildId: build!.id,
+        eventType: 'log',
+        line: 'exporting to image',
+      },
+      {
+        appId,
+        componentId,
+        attemptKind: 'deploy',
+        deployId: deploy!.id,
+        eventType: 'status',
+        phase: 'LIVE',
+      },
+    ]);
+
+    const result = await getAppWorkspace({ name: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { workspace } = result.value;
+    expect(workspace.activity.length).toBe(2);
+    for (const entry of workspace.activity) {
+      expect(entry.deployId ?? entry.buildId).not.toBeNull();
+      // The clock is frozen at the same instant the rows were written, so the
+      // relative time is a real one rather than the "recently" it used to be.
+      expect(entry.when).not.toBe('recently');
+    }
+    expect(workspace.deploys.map((release) => release.id)).toEqual([
+      deploy!.id,
+    ]);
+  });
+});
+
 describe('getDeployDetail command', () => {
+  test('carries the source, the pinned config, and whether it is current', async () => {
+    // A Deploy row is written once and never edited into a different release:
+    // its Build, its source, and the config document it pinned (§10) are what
+    // it delivered, which is what makes "roll back to this" reproducible.
+    const ctx = context();
+    const { componentId, target } = await scaffold(ctx, { prefix: 'atomic' });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'f7a9b2c',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'d'.repeat(64)}`,
+        bundleDigest: `sha256:${'9'.repeat(64)}`,
+        status: 'SUCCEEDED',
+        runner: 'hosted runner',
+      })
+      .returning();
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'LIVE',
+        configVersion: `sha256:${'7'.repeat(64)}`,
+      })
+      .returning();
+    await ctx.db
+      .update(componentTargetDesired)
+      .set({ desiredBuildId: build!.id, desiredDeployId: deploy!.id })
+      .where(eq(componentTargetDesired.componentId, componentId));
+
+    const result = await getDeployDetail({ id: deploy!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { deploy: view } = result.value;
+    expect(view.source.kind).toBe('repo');
+    if (view.source.kind === 'repo') {
+      expect(view.source.commit).toBe('f7a9b2c');
+      expect(view.source.repo).toContain('acme/thing');
+    }
+    // A repo App builds, so there is a build to show — the other half of §4.
+    expect(view.build).not.toBeNull();
+    expect(view.build?.runner).toBe('hosted runner');
+    expect(view.configVersion).toBe(`sha256:${'7'.repeat(64)}`);
+    expect(view.artifactDigest).toBe(`sha256:${'d'.repeat(64)}`);
+    expect(view.current).toBe(true);
+    // Nothing to roll back to: this release is what is desired.
+    expect(view.rollbackable).toBe(false);
+    expect(view.previousDeployId).toBeNull();
+  });
+
   test('returns NOT_FOUND for an unknown deploy id', async () => {
     const ctx = context();
     const result = await getDeployDetail({ id: 999999 }, ctx);

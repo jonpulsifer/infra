@@ -90,7 +90,7 @@ export interface Diagnosis {
   readonly evidence: string;
 }
 
-/** The build half of an attempt. */
+/** The build half of an attempt, present only when a builder actually ran. */
 export interface BuildView {
   readonly status: StepStatus;
   readonly duration?: string;
@@ -106,6 +106,45 @@ export interface BuildView {
 }
 
 /**
+ * Where a release's bytes came from (§4, §5).
+ *
+ * Every attempt has one of these; not every attempt has a {@link BuildView}.
+ * §4: "Repo and archive share **one pipeline** — unpack, detect, build. An
+ * archive of *finished output* is a supplied artifact, digested over the
+ * uploaded bundle; an archive of *source* builds normally." So the origin is
+ * the constant and the build is the variable, and a screen that led with the
+ * build would have nothing to say about the release that was only ever
+ * extracted.
+ *
+ * `subpath` is on both arms because §5's scope "is named, never searched" — the
+ * bytes that were staged are the bytes under that path, and a reader comparing
+ * two releases of a monorepo needs it as much as the commit.
+ */
+export type SourceView =
+  | {
+      readonly kind: 'repo';
+      /** The repository, as the App names it. */
+      readonly repo: string;
+      /** The exact commit staged (§15). */
+      readonly commit: string;
+      readonly subpath: string;
+    }
+  | {
+      readonly kind: 'archive';
+      /** §16's join: the digest over the staged bundle, on both arms. */
+      readonly digest: string;
+      /** Where the staged bundle is fetched from, when it is recorded. */
+      readonly location: string | null;
+      readonly subpath: string;
+      /**
+       * Whether this upload was finished output rather than code — recorded and
+       * extracted, never built (§4). It is the case that makes a release with no
+       * Build a normal state instead of a missing one.
+       */
+      readonly extracted: boolean;
+    };
+
+/**
  * The deploy screen's whole state (Task 39).
  *
  * `previousReleaseUrl` is the field §18 singles out: **the red screen says the
@@ -115,7 +154,17 @@ export interface BuildView {
  * of something.
  */
 export interface DeployView {
-  readonly id: number;
+  /**
+   * The Deploy this attempt is, or `null` while it is still only a Build.
+   *
+   * §4: "a build records an artifact rather than deploying one", so a Build in
+   * flight has no intent row and therefore no id — and §6 will not let one be
+   * invented, because an intent naming a Build that has not succeeded could not
+   * pass `checkDeployable`. The screen is addressable either way: `/builds/:id`
+   * renders the same view with this null, and swaps itself for `/deploys/:id`
+   * the moment an intent exists.
+   */
+  readonly id: number | null;
   readonly buildId: number;
   readonly componentId: string;
   readonly targetId: string;
@@ -145,17 +194,97 @@ export interface DeployView {
   readonly previousReleaseServing: boolean;
   readonly diagnosis: Diagnosis | null;
   readonly resources: readonly ChecklistItem[];
-  readonly build: BuildView;
+  /** Where this release's bytes came from. Always present (§4). */
+  readonly source: SourceView;
+  /**
+   * The build that produced the artifact, or `null` when none ran.
+   *
+   * §4's supplied-artifact arm ends at a Build row that was born `SUCCEEDED`
+   * with "no build adapter looked up, let alone invoked" — `runner` and
+   * `logFidelity` are null on that row precisely because "saying so is more
+   * useful than naming a runner that never ran". This field carries that
+   * sentence into the UI rather than letting a screen invent a builder.
+   */
+  readonly build: BuildView | null;
   /** Controller and platform output for the deploy leg of this attempt. */
   readonly deployLog: readonly LogLine[] | null;
+  /** How long ago this attempt was written — "8m ago". */
+  readonly when: string;
+  /** The instant behind {@link when}, for the title a reader hovers. */
+  readonly at: string;
+  /**
+   * Whether this release is the one currently desired at its Component@Target.
+   *
+   * Read from the desired row rather than from the phase: a LIVE Deploy that a
+   * newer intent has superseded is still LIVE — it is just no longer what
+   * should be running — and only the desired row knows the difference.
+   */
+  readonly current: boolean;
+  /** §10's hash over what this release pinned. Never the config itself. */
+  readonly configVersion: string | null;
+  /** The artifact this release delivers, as the Build recorded it. */
+  readonly artifactDigest: string | null;
+  /** The release immediately before this one here, for stepping back. */
+  readonly previousDeployId: number | null;
+  /**
+   * Whether `rollbackDeploy` would take this release's Build (§6).
+   *
+   * Computed rather than inferred from `current`: §6 refuses a "rollback" to a
+   * Build that is not older than what is desired, so the affordance appears
+   * only where the act would be accepted.
+   */
+  readonly rollbackable: boolean;
 }
 
-/** One activity-timeline entry on the App workspace. */
+/**
+ * One Deploy as a releases list presents it (§2, §6).
+ *
+ * A list rather than a rolled-up "current release" because §2's "one Build →
+ * many Deploys" only pays for itself if the many are visible: a rollback is an
+ * ordinary deploy naming an older Build, and choosing which older Build means
+ * reading the releases that named them.
+ */
+export interface DeployListItem {
+  readonly id: number;
+  readonly buildId: number;
+  readonly componentId: string;
+  readonly targetId: string;
+  readonly component: string;
+  readonly target: string;
+  readonly commit: string;
+  readonly phase: DeployPhase;
+  readonly when: string;
+  readonly at: string;
+  /** Whether this release is what the desired row currently names. */
+  readonly current: boolean;
+  /** §10's pinned-config hash, which is what makes rollback reproducible. */
+  readonly configVersion: string | null;
+  /**
+   * Whether `rollbackDeploy` would take this release's Build.
+   *
+   * §6 refuses a "rollback" to a Build that is not older than what is desired —
+   * a roll-forward somebody typed the wrong word for. The list computes the
+   * same comparison so it can offer the act only where it would be accepted,
+   * rather than offering it everywhere and refusing half the presses.
+   */
+  readonly rollbackable: boolean;
+}
+
+/**
+ * One activity-timeline entry on the App workspace.
+ *
+ * The two ids are what make the timeline a way *into* the system rather than a
+ * wall of past tense: every event belongs to exactly one attempt (the
+ * `attempt_events` check constraint enforces it), so every entry has somewhere
+ * to go — `/deploys/:id` or `/builds/:id`.
+ */
 export interface ActivityEntry {
   readonly title: string;
   readonly detail: string;
   readonly when: string;
   readonly status: 'ok' | 'failed' | 'info';
+  readonly deployId: number | null;
+  readonly buildId: number | null;
 }
 
 /**
@@ -246,6 +375,14 @@ export interface WorkspaceView {
   readonly components: readonly ComponentView[];
   readonly datastores: readonly DatastoreView[];
   readonly activity: readonly ActivityEntry[];
+  /**
+   * The releases of this App, newest first (§2).
+   *
+   * On the workspace rather than behind a link because "what is live" and "what
+   * was live before it" are the same question asked twice, and a workspace that
+   * showed only the first makes the second an archaeology exercise.
+   */
+  readonly deploys: readonly DeployListItem[];
   /**
    * The Component's output surface (§17) — one of three, never a nullable log.
    * A `website` on a static Target is the case that forced the union: §17 gives

@@ -87,6 +87,19 @@ const BASE = {
     { text: 'controller accepted the deploy', tone: 'muted' },
     { text: 'platform reconciliation reached a terminal state' },
   ],
+  source: {
+    kind: 'repo',
+    repo: 'https://vcs.example/example/almanac',
+    commit: 'dd9b103',
+    subpath: 'apps/web',
+  },
+  when: '40s ago',
+  at: '2026-07-29T10:00:00.000Z',
+  current: true,
+  configVersion: 'sha256:5c1f9e2a44b7',
+  artifactDigest: 'sha256:9f2c1a7e30b4',
+  previousDeployId: 40,
+  rollbackable: false,
 } as const;
 
 const BUILT = {
@@ -240,6 +253,35 @@ export const DEPLOY_SCENARIOS = {
     build: BUILT,
   },
 
+  /**
+   * §4's other arm: an archive of *finished output* is "a supplied artifact,
+   * digested over the uploaded bundle", recorded with no build adapter looked
+   * up. `uploadArchive` writes that row with a null runner precisely because
+   * "saying so is more useful than naming a runner that never ran" — so the
+   * screen has no build to show, and says which fact that is.
+   */
+  extracted: {
+    ...BASE,
+    source: {
+      kind: 'archive',
+      digest: `sha256:${'b1'.repeat(32)}`,
+      location: 'gs://bundles.example/almanac/b119.tar.zst',
+      subpath: '.',
+      extracted: true,
+    },
+    commit: `sha256:${'b1'.repeat(32)}`,
+    phase: 'LIVE',
+    phaseWord: 'Live',
+    headline: 'Uploaded output released to Static hosting',
+    target: 'Static hosting',
+    urlLive: true,
+    previousReleaseServing: false,
+    diagnosis: null,
+    resources: RESOURCES_OK.slice(2),
+    build: null,
+    artifactDigest: `sha256:${'b1'.repeat(32)}`,
+  },
+
   neverReady: {
     ...BASE,
     phase: 'FAILED',
@@ -264,6 +306,33 @@ export const DEPLOY_SCENARIOS = {
     build: BUILT,
   },
 } as const satisfies Record<string, DeployView>;
+
+/**
+ * The state `/builds/:id` renders: an attempt with no release.
+ *
+ * §4 makes this a normal outcome of pressing Deploy — "there is nothing
+ * deployable yet, so a PENDING Build is written and that is the whole act" —
+ * and §6 will not let an intent be invented for it, because one naming a Build
+ * that has not succeeded could not pass `checkDeployable`. So `id` is null, the
+ * deploy drawer is absent, and the action is to place what the Build produces.
+ */
+export const BUILD_ATTEMPT: DeployView = {
+  ...BASE,
+  id: null,
+  phase: 'WAITING',
+  phaseWord: 'Built',
+  headline: 'Built — ready to deploy to Metal',
+  urlLive: false,
+  previousReleaseServing: true,
+  diagnosis: null,
+  resources: [],
+  deployLog: null,
+  current: false,
+  configVersion: null,
+  previousDeployId: null,
+  rollbackable: false,
+  build: BUILT,
+};
 
 export type DeployScenarioName = keyof typeof DEPLOY_SCENARIOS;
 
@@ -320,18 +389,58 @@ export const WORKSPACE_SCENARIOS = {
         detail: 'Artifact reconciled on Metal; all resources healthy.',
         when: '8m ago',
         status: 'ok',
+        deployId: 42,
+        buildId: null,
       },
       {
         title: 'Build passed',
         detail: 'main · 7f3d2c1 · hosted runner',
         when: '9m ago',
         status: 'ok',
+        deployId: null,
+        buildId: 41,
       },
       {
         title: 'Deploy 40 failed',
         detail: 'STARTUP_FAILED · developer · DATABASE_URL missing',
         when: '1d ago',
         status: 'failed',
+        deployId: 40,
+        buildId: null,
+      },
+    ],
+    deploys: [
+      {
+        id: 42,
+        buildId: 41,
+        componentId: '00000000-0000-4000-8000-000000000041',
+        targetId: '00000000-0000-4000-8000-000000000042',
+        component: 'web',
+        target: 'Metal',
+        commit: '7f3d2c1',
+        phase: 'LIVE',
+        when: '8m ago',
+        at: '2026-07-29T09:52:00.000Z',
+        current: true,
+        configVersion: 'sha256:5c1f9e2a44b7',
+        rollbackable: false,
+      },
+      {
+        id: 40,
+        buildId: 39,
+        componentId: '00000000-0000-4000-8000-000000000041',
+        targetId: '00000000-0000-4000-8000-000000000042',
+        component: 'web',
+        target: 'Metal',
+        commit: '91dc4ab',
+        phase: 'FAILED',
+        when: '1d ago',
+        at: '2026-07-28T10:00:00.000Z',
+        current: false,
+        configVersion: 'sha256:5c1f9e2a44b7',
+        // Older than what is desired and carrying an artifact — §6 would take
+        // it, so the affordance is offered.
+        rollbackable: true,
       },
     ],
     runtime: {
@@ -376,12 +485,33 @@ export const WORKSPACE_SCENARIOS = {
         detail: 'Files released to static hosting.',
         when: '2h ago',
         status: 'ok',
+        deployId: 17,
+        buildId: null,
       },
       {
         title: 'Build passed',
         detail: 'main · 91dc4ab · hosted runner',
         when: '2h ago',
         status: 'ok',
+        deployId: null,
+        buildId: 16,
+      },
+    ],
+    deploys: [
+      {
+        id: 17,
+        buildId: 16,
+        componentId: '00000000-0000-4000-8000-000000000051',
+        targetId: '00000000-0000-4000-8000-000000000052',
+        component: 'web',
+        target: 'Static hosting',
+        commit: '91dc4ab',
+        phase: 'LIVE',
+        when: '2h ago',
+        at: '2026-07-29T08:00:00.000Z',
+        current: true,
+        configVersion: null,
+        rollbackable: false,
       },
     ],
     runtime: {
@@ -424,12 +554,33 @@ export const WORKSPACE_SCENARIOS = {
         detail: '02:14 · 1,284 objects copied',
         when: '8m ago',
         status: 'ok',
+        deployId: 118,
+        buildId: null,
       },
       {
         title: 'Execution 116 failed',
         detail: 'exit 1 · bucket unavailable',
         when: '1d ago',
         status: 'failed',
+        deployId: 116,
+        buildId: null,
+      },
+    ],
+    deploys: [
+      {
+        id: 118,
+        buildId: 90,
+        componentId: '00000000-0000-4000-8000-000000000061',
+        targetId: '00000000-0000-4000-8000-000000000062',
+        component: 'nightly',
+        target: 'Cloud Run',
+        commit: '7cc2198',
+        phase: 'LIVE',
+        when: '8m ago',
+        at: '2026-07-29T09:52:00.000Z',
+        current: true,
+        configVersion: 'sha256:aa41c0d29e15',
+        rollbackable: false,
       },
     ],
     // §17: a job is a list of executions, not a stream. The depth is achieved
