@@ -6,6 +6,7 @@
  * handed — so a test can assert that the bundle digest reached the route, which
  * is §16's whole join — and replays a scripted result.
  */
+import { createHash } from 'node:crypto';
 import type {
   BuildAdapter,
   BuildEvent,

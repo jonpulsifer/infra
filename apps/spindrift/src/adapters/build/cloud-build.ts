@@ -55,8 +55,53 @@ interface CloudBuild {
 
 /** One log entry, as much of it as this route reads. */
 interface LogEntry {
+  /**
+   * The log service's own identity for this entry. It is what makes re-reading
+   * a window cheap: the same entry seen twice is recognised rather than
+   * re-emitted, so the route never needs a cursor it cannot trust.
+   */
+  readonly insertId?: string;
   readonly textPayload?: string;
   readonly timestamp?: string;
+}
+
+/**
+ * How far behind the newest entry already read a fresh search reaches.
+ *
+ * Entries are ingested out of order, so a window that started exactly at the
+ * newest timestamp would step over anything that arrived late. A minute is
+ * generous against the log service's own ingestion latency, and re-reading a
+ * minute costs nothing because {@link keyOf} recognises what was already
+ * emitted.
+ */
+const LOG_LATENESS_MS = 60_000;
+
+/**
+ * Pages one search follows before leaving the rest to the next poll.
+ *
+ * A bound rather than a limit anyone should hit: the next poll re-reads the
+ * window anyway, so stopping early loses nothing but a few seconds of latency.
+ */
+const MAX_LOG_PAGES = 50;
+
+/**
+ * How long a concluded build's log is drained for before the route gives up on
+ * the report.
+ *
+ * The build being over does not mean its log is: ingestion runs behind the
+ * writer, and the report line is written in the final seconds of the run. This
+ * is the only budget spent waiting for something that has already happened.
+ */
+const LOG_TAIL_TIMEOUT_MS = 60_000;
+
+/** What the route carries between reads of one build's log. */
+interface LogTail {
+  /** Entries already emitted, by {@link keyOf}. */
+  readonly seen: Set<string>;
+  /** The newest entry timestamp seen, which anchors the next search's window. */
+  newest: Date | null;
+  /** Everything emitted, joined — what {@link parseBuildReport} reads. */
+  log: string;
 }
 
 export interface CloudBuildRouteOptions extends PollingOptions {
@@ -152,24 +197,12 @@ export class CloudBuildRoute implements BuildAdapter {
     yield { type: 'log', at: now(), line: `build ${build.id} submitted` };
 
     const budget = deadlineFrom(this.options);
-    let cursor: string | undefined;
-    let log = '';
+    const tail: LogTail = { seen: new Set(), newest: null, log: '' };
     let status = build.status ?? 'QUEUED';
     let statusDetail = build.statusDetail;
 
     for (;;) {
-      const page = await this.logPage(build.id, cursor);
-      cursor = page.cursor;
-      for (const entry of page.entries) {
-        const line = entry.textPayload;
-        if (line === undefined || line.trim() === '') continue;
-        log += `${line}\n`;
-        yield {
-          type: 'log',
-          at: entry.timestamp === undefined ? now() : new Date(entry.timestamp),
-          line,
-        };
-      }
+      yield* this.readLog(build.id, tail, now);
 
       const current = await this.read(build.id);
       if (current !== null) {
@@ -188,6 +221,28 @@ export class CloudBuildRoute implements BuildAdapter {
       }
       await budget.tick();
     }
+
+    // The log read above happened *before* the status read that ended the loop,
+    // so everything the build wrote in its last seconds is still unread — and
+    // that is precisely the region that carries the report (`report.ts`: the
+    // result travels the same way the logs do). A loop that stopped here would
+    // record a green build as `succeeded but reported no artifact`, so the read
+    // after the conclusion is the load-bearing one, not a courtesy.
+    const drain = deadlineFrom({
+      ...this.options,
+      timeoutMs: LOG_TAIL_TIMEOUT_MS,
+    });
+    for (;;) {
+      yield* this.readLog(build.id, tail, now);
+      // A red build's report is not coming; one final read for the operator's
+      // sake is the whole of what it is owed.
+      if (status !== 'SUCCESS') break;
+      if (parseBuildReport(tail.log) !== null) break;
+      if (drain.expired()) break;
+      await drain.tick();
+    }
+
+    const log = tail.log;
 
     if (status !== 'SUCCESS') {
       // The service's own `TIMEOUT` is core's `TIMEOUT` — a build that ran out
@@ -265,38 +320,82 @@ export class CloudBuildRoute implements BuildAdapter {
   }
 
   /**
-   * One page of the build's log, and where to resume.
+   * Everything the build's log has gained since the last read, as events.
    *
-   * A page cursor rather than a timestamp window: entries arrive out of order
-   * often enough that a window either repeats lines or drops them, and the log
-   * service's own cursor is the only thing that knows which it already served.
+   * **One poll is one search.** `entries.list`'s `nextPageToken` is a
+   * continuation of *this* search — "retrieve the next batch of results from
+   * the preceding call to this method" — and not a watermark on a live log. A
+   * route that saved one and presented it seconds later would be paginating a
+   * snapshot of the past, so the token is followed to the end of the search it
+   * belongs to and then dropped.
+   *
+   * What replaces it is a timestamp window plus per-entry identity: each poll
+   * re-searches the last {@link LOG_LATENESS_MS} and {@link keyOf} drops what
+   * was already emitted. That is what tolerates out-of-order ingestion, which a
+   * cursor never did.
+   *
+   * **An empty page carrying a token is not a caught-up log.** The vendor is
+   * explicit that it means "the search found no log entries so far but it did
+   * not have time to search all the possible log entries", so the token is
+   * followed rather than read as an end.
    */
-  private async logPage(
+  private async *readLog(
     id: string,
-    cursor: string | undefined,
-  ): Promise<{ entries: readonly LogEntry[]; cursor: string | undefined }> {
-    let page: { entries?: LogEntry[]; nextPageToken?: string } | null = null;
-    try {
-      page = await this.json(`${this.options.logsEndpoint}/v2/entries:list`, {
-        method: 'POST',
-        body: {
-          resourceNames: [`projects/${this.options.project}`],
-          filter: `resource.labels.build_id="${id}"`,
-          orderBy: 'timestamp asc',
-          pageSize: 200,
-          ...(cursor === undefined ? {} : { pageToken: cursor }),
-        },
-      });
-    } catch {
-      // A log service having a bad moment must not fail a build that is
-      // otherwise going fine — the status read below is the authority on
-      // whether it is going fine, and the next pass asks for the page again.
-      return { entries: [], cursor };
+    tail: LogTail,
+    now: () => Date,
+  ): AsyncGenerator<BuildEvent, void, void> {
+    const filter = [
+      `resource.labels.build_id="${id}"`,
+      ...(tail.newest === null
+        ? []
+        : [
+            `timestamp>="${new Date(tail.newest.getTime() - LOG_LATENESS_MS).toISOString()}"`,
+          ]),
+    ].join(' AND ');
+
+    let token: string | undefined;
+    for (let page = 0; page < MAX_LOG_PAGES; page += 1) {
+      let answer: { entries?: LogEntry[]; nextPageToken?: string } | null;
+      try {
+        answer = await this.json(
+          `${this.options.logsEndpoint}/v2/entries:list`,
+          {
+            method: 'POST',
+            body: {
+              resourceNames: [`projects/${this.options.project}`],
+              filter,
+              orderBy: 'timestamp asc',
+              pageSize: 200,
+              ...(token === undefined ? {} : { pageToken: token }),
+            },
+          },
+        );
+      } catch {
+        // A log service having a bad moment must not fail a build that is
+        // otherwise going fine — the status read is the authority on whether it
+        // is going fine, and the next pass searches the same window again.
+        return;
+      }
+
+      for (const entry of answer?.entries ?? []) {
+        const key = keyOf(entry);
+        if (tail.seen.has(key)) continue;
+        tail.seen.add(key);
+
+        const at = timestampOf(entry);
+        if (at !== null && (tail.newest === null || at > tail.newest)) {
+          tail.newest = at;
+        }
+
+        const line = entry.textPayload;
+        if (line === undefined || line.trim() === '') continue;
+        tail.log += `${line}\n`;
+        yield { type: 'log', at: at ?? now(), line };
+      }
+
+      token = answer?.nextPageToken;
+      if (token === undefined || token === '') return;
     }
-    return {
-      entries: page?.entries ?? [],
-      cursor: page?.nextPageToken ?? cursor,
-    };
   }
 
   private async json<Result>(
@@ -326,4 +425,26 @@ export class CloudBuildRoute implements BuildAdapter {
     }
     return (await response.json()) as Result;
   }
+}
+
+/**
+ * What makes two reads of the same entry the same entry.
+ *
+ * `insertId` is the log service's own identity and is what this relies on. The
+ * fallback exists because an entry without one still has to be deduplicated
+ * somehow, and it deliberately collapses two identical lines written in the
+ * same second — losing a duplicated line is a smaller wrong than emitting the
+ * whole window again on every poll.
+ */
+function keyOf(entry: LogEntry): string {
+  if (entry.insertId !== undefined && entry.insertId !== '') {
+    return entry.insertId;
+  }
+  return `${entry.timestamp ?? ''} ${entry.textPayload ?? ''}`;
+}
+
+function timestampOf(entry: LogEntry): Date | null {
+  if (entry.timestamp === undefined) return null;
+  const at = new Date(entry.timestamp);
+  return Number.isNaN(at.getTime()) ? null : at;
 }

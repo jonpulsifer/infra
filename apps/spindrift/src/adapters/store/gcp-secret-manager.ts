@@ -22,6 +22,7 @@
  * - It never reuses a version. `addVersion` is the only write, so a put is
  *   always a new version rather than an edit of one.
  */
+import { createHash } from 'node:crypto';
 import type { StoreAdapter } from '../../config/manifest.schema.ts';
 import type {
   ConfigScope,
@@ -73,6 +74,12 @@ const ANNOTATION = {
   key: 'spindrift-key',
 } as const;
 
+/** The ceiling `projects.secrets.create` puts on a secret id. */
+const MAX_ID_LENGTH = 255;
+
+/** Hex characters of scope digest a truncated id ends with. */
+const DIGEST_LENGTH = 16;
+
 /**
  * A Secret Manager secret id: `[A-Za-z0-9_-]{1,255}`.
  *
@@ -81,12 +88,36 @@ const ANNOTATION = {
  * exact scope. `--` separates the four parts because a sanitized part can
  * contain a single `-` (App and Component names are DNS labels) but the pair is
  * only ever what this function put there.
+ *
+ * **The ceiling is the alphabet's other half and is enforced here.** App,
+ * Component and Target names are DNS labels of up to 63 characters each and a
+ * variable name has no ceiling at all, so four parts and three separators clear
+ * 255 without anything unreasonable happening — and the API refuses the create,
+ * not the character that pushed it over.
+ *
+ * Truncating alone would widen the one hazard this scheme already carries: two
+ * distinct scopes landing on one id, which is what {@link assertScopeMatches}
+ * exists to catch. So an id over the ceiling gives up the last
+ * {@link DIGEST_LENGTH} characters of legibility to a digest of the **exact,
+ * unsanitized** scope. Two long scopes now need both a shared prefix and a
+ * 64-bit digest collision to meet, where sanitizing alone needed only a flatten
+ * — so the truncated form separates strictly more pairs than the sanitized one,
+ * which is what keeps this from trading a length bug for a collision bug.
+ * `assertScopeMatches` still stands behind it: a digest is a legibility aid,
+ * not a proof.
  */
 function secretId(scope: ConfigScope, key: string): string {
   const sanitize = (part: string) => part.replace(/[^A-Za-z0-9_-]/g, '_');
-  return [scope.app, scope.component, scope.target, key]
-    .map(sanitize)
-    .join('--');
+  const parts = [scope.app, scope.component, scope.target, key];
+  const legible = parts.map(sanitize).join('--');
+  if (legible.length <= MAX_ID_LENGTH) return legible;
+
+  const digest = createHash('sha256')
+    .update(JSON.stringify(parts))
+    .digest('hex')
+    .slice(0, DIGEST_LENGTH);
+  const head = legible.slice(0, MAX_ID_LENGTH - DIGEST_LENGTH - 2);
+  return `${head}--${digest}`;
 }
 
 /** The version number out of a version resource name. */

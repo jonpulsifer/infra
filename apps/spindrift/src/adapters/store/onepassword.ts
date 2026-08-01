@@ -28,8 +28,9 @@
  * - Items are addressed by a title Spindrift owns, `app/component/target/KEY`,
  *   which exists so an operator reading the vault can see what a value is for.
  *   It is **not** what the adapter reads back: the variable a version fills
- *   comes from the concealed field's label, the same rule the cloud store
- *   follows with an annotation. A name is for humans; metadata is the authority.
+ *   comes from the label of the concealed field in {@link SECTION}, the same
+ *   rule the cloud store follows with an annotation. A name is for humans;
+ *   metadata is the authority.
  */
 import type { StoreAdapter } from '../../config/manifest.schema.ts';
 import type {
@@ -54,10 +55,30 @@ interface ConnectItemOverview {
   createdAt: string;
 }
 
+/** The subset of one field of a Connect item this adapter reads. */
+interface ConnectField {
+  type?: string;
+  label?: string;
+  section?: { id?: string };
+}
+
 /** The subset of a full Connect item this adapter reads. */
 interface ConnectItem extends ConnectItemOverview {
-  fields?: { label?: string; value?: string }[];
+  fields?: ConnectField[];
 }
+
+/**
+ * The section every field this adapter writes lives in, and the marker
+ * {@link keyOf} reads an item back by.
+ *
+ * Connect populates a created item with its **category's default fields** —
+ * `username`, `credential`, `notesPlain` on an `API_CREDENTIAL` — that the
+ * caller never sent. Several of them carry a label and one of them is
+ * `CONCEALED`, so neither position nor type alone distinguishes the field
+ * Spindrift wrote from one Connect invented. A section does: a category default
+ * belongs to no section, and this id is Spindrift's own.
+ */
+const SECTION = 'spindrift';
 
 /**
  * The item title for one scoped variable. Spindrift's naming, not the store's —
@@ -71,13 +92,17 @@ function itemTitle(scope: ConfigScope, key: string): string {
 /**
  * The variable an item fills, as `put` was given it.
  *
- * The concealed field's label is where `put` wrote it, so an item without one is
- * an item this adapter did not write — reported as absent rather than guessed at
- * from the title.
+ * The label of the concealed field in {@link SECTION} is where `put` wrote it,
+ * so an item without one is an item this adapter did not write — reported as
+ * absent rather than guessed at from the title, and never mistaken for a field
+ * the category brought with it.
  */
 function keyOf(item: ConnectItem): string | null {
   for (const field of item.fields ?? []) {
-    if (field.label !== undefined) return field.label;
+    if (field.section?.id !== SECTION) continue;
+    if (field.type !== 'CONCEALED') continue;
+    if (field.label === undefined || field.label === '') continue;
+    return field.label;
   }
   return null;
 }
@@ -107,7 +132,10 @@ export class OnePasswordStore implements SecretStore {
         vault: { id: this.vault },
         title,
         category: 'API_CREDENTIAL',
-        fields: [{ type: 'CONCEALED', label: key, value }],
+        sections: [{ id: SECTION, label: 'Spindrift' }],
+        fields: [
+          { type: 'CONCEALED', label: key, value, section: { id: SECTION } },
+        ],
       },
     });
 
@@ -154,6 +182,11 @@ export class OnePasswordStore implements SecretStore {
     // The filter is sent because Connect supports it and a vault can be large;
     // the same predicate is applied here because a Connect that ignored it
     // would otherwise return the whole vault as versions of one key.
+    //
+    // The `key` attached is the caller's rather than one read back, because a
+    // list answers with overviews and no fields. That cannot disagree with what
+    // `describe` reads: `put` derives the title from the key, so an item that
+    // matches this title is an item whose section field is labelled `key`.
     return overviews
       .filter((item) => item.title === title)
       .map((item) => ({
@@ -180,3 +213,5 @@ export class OnePasswordStore implements SecretStore {
     );
   }
 }
+
+export { itemTitle as itemTitleFor, SECTION as SPINDRIFT_SECTION };
