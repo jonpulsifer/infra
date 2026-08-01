@@ -90,9 +90,10 @@ jobs:
             apps/*/.turbo
             packages/*/.turbo
             apps/*/.next/cache
-          key: turbo-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
           restore-keys: |
-            turbo-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+            turbo-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('bun.lock') }}-
+            turbo-${{ runner.os }}-${{ github.ref_name }}-
             turbo-${{ runner.os }}-main-
             turbo-${{ runner.os }}-
       # The App chart's goldens run `helm template` under `bun test`, where the
