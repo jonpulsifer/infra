@@ -6,6 +6,7 @@
  * linked Gateway session cannot accidentally become an account root.
  */
 import { describe, expect, test } from 'bun:test';
+import { base64urlDecode, base64urlEncode } from '../../src/auth/bytes.ts';
 import {
   beginAddPasskey,
   beginCredentialChange,
@@ -76,6 +77,28 @@ async function enrolled(): Promise<{
 async function fresh(principal: Principal, root: Authenticator) {
   const begun = await beginCredentialChange(deps(), principal);
   return root.assert(begun.challenge);
+}
+
+/**
+ * Flip a byte inside the DER-encoded signature payload so the assertion
+ * decodes to different bytes and fails cryptographic verification.
+ *
+ * The signature is `base64urlEncode(derEncode(r || s))`
+ * (`test/harness/authenticator.ts`), and a DER-encoded ECDSA signature is
+ * usually not a multiple of three bytes — so editing the *encoded string*
+ * (e.g. overwriting its last character) can land in slack bits that decode
+ * back to the original bytes about one run in eight. Decoding, XOR-ing the
+ * final byte of the DER blob — which is always the low byte of the `s`
+ * integer, never the tag/length framing `derToRawEcdsa` reads structurally —
+ * and re-encoding guarantees both a different decoded value on every run and
+ * a signature that genuinely fails `crypto.subtle.verify`.
+ */
+function forgeSignature(signature: string): string {
+  const bytes = base64urlDecode(signature);
+  if (!bytes) throw new Error('signature did not decode');
+  const mutated = new Uint8Array(bytes);
+  mutated[mutated.length - 1] = mutated[mutated.length - 1]! ^ 0xff;
+  return base64urlEncode(mutated);
 }
 
 describe('adding a passkey', () => {
@@ -194,7 +217,7 @@ describe('the Gateway binding', () => {
     const assertion = await fresh(principal, root);
     const forged = {
       ...assertion,
-      signature: `${assertion.signature.slice(0, -1)}x`,
+      signature: forgeSignature(assertion.signature),
     };
 
     const result = await linkGatewayIdentity(
