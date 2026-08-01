@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rackstat
-          image: docker.io/jonpulsifer/rackstat:latest@sha256:4ac63d527c247fbdbb3e238fa78942200a79d03ad068b2afd7625b83e5fbc5c0
+          image: docker.io/jonpulsifer/rackstat:latest@sha256:c9e2af5bd5cdbc0a995d775dd13a0be1263d2287df646ee9d2322b3f6c06266a
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
