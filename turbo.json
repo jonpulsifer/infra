@@ -37,7 +37,7 @@
     },
     "test": {
       "dependsOn": ["build"],
-      "inputs": ["src/**", "test/**", "package.json"],
+      "inputs": ["$TURBO_DEFAULT$"],
       "env": ["DATABASE_URL"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
