@@ -27,6 +27,7 @@ import type {
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
 import { blameFor } from '../../src/adapters/deploy/contract.ts';
+import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
@@ -167,12 +168,25 @@ async function drain(
   return { events, verdict: step.value };
 }
 
+/**
+ * The labels the chart puts on a pod of this Component.
+ *
+ * `spindrift-app.selectorLabels` in `packages/charts/spindrift-app`, which is
+ * what the adapter's `labelSelector` names. A fixture without them is a pod
+ * the cluster would not return for that selector, so they belong on every pod
+ * a test expects the read-on-red or the tail to find.
+ */
+const POD_LABELS = {
+  'app.kubernetes.io/name': 'web',
+  'app.kubernetes.io/part-of': 'blog',
+};
+
 /** A pod in one waiting state, as the API reports it. */
 function pod(reason: string, message: string): FakeObject {
   return {
     apiVersion: 'v1',
     kind: 'Pod',
-    metadata: { name: 'blog-web-abc', namespace: 'apps' },
+    metadata: { name: 'blog-web-abc', namespace: 'apps', labels: POD_LABELS },
     status: {
       containerStatuses: [
         { name: 'app', ready: false, state: { waiting: { reason, message } } },
@@ -897,6 +911,136 @@ describe('runtime log tail', () => {
       'new one',
       'new two',
     ]);
+  });
+});
+
+/**
+ * What the API says about a *kind*, as against what it holds of one.
+ *
+ * These go through `KubernetesApi` rather than through the adapter because the
+ * distinction is the client's to preserve — `list` returns `null` for a kind
+ * the cluster does not serve and `[]` for a served kind holding nothing, and
+ * every call site's `?? []` is written against one of those two answers.
+ */
+describe('what the API answers about a kind', () => {
+  const apiFor = (options: FakeKubernetesOptions = {}) => {
+    const cluster = new FakeKubernetes({ servedKinds: SERVED, ...options });
+    return {
+      cluster,
+      api: new KubernetesApi({
+        apiServer: cluster.apiServer,
+        token: cluster.token,
+        fetch: cluster.fetch,
+      }),
+    };
+  };
+
+  test('a served kind holding nothing is an empty list, not an absent kind', async () => {
+    const { api } = apiFor();
+    // Flux is installed here — `SERVED` says so — and this namespace holds no
+    // HelmRelease. That is `[]`, and it is a different answer from the one
+    // below.
+    expect(
+      await api.list({
+        apiVersion: 'helm.toolkit.fluxcd.io/v2',
+        plural: 'helmreleases',
+        namespace: 'delivery',
+      }),
+    ).toEqual([]);
+  });
+
+  test('a kind the cluster does not serve is null, which §13 turns on', async () => {
+    const { api } = apiFor({ servedKinds: {} });
+    expect(
+      await api.list({
+        apiVersion: 'helm.toolkit.fluxcd.io/v2',
+        plural: 'helmreleases',
+        namespace: 'delivery',
+      }),
+    ).toBeNull();
+  });
+
+  test('the cluster filters by the selector, so a wrong one finds nothing', async () => {
+    const { api } = apiFor({
+      lists: { pods: [pod('CrashLoopBackOff', 'back-off')] },
+    });
+    const listWith = (labelSelector: string) =>
+      api.list(
+        { apiVersion: 'v1', plural: 'pods', namespace: 'apps' },
+        {
+          labelSelector,
+        },
+      );
+
+    expect(
+      await listWith(
+        'app.kubernetes.io/name=web,app.kubernetes.io/part-of=blog',
+      ),
+    ).toHaveLength(1);
+    // The two keys the chart's `selectorLabels` defines are the contract. A
+    // selector naming anything else matches a pod the chart never labelled.
+    expect(await listWith('app.kubernetes.io/instance=blog-web')).toEqual([]);
+  });
+
+  test('deleting what is already gone succeeds, on a cluster that says 404', async () => {
+    const { api, cluster } = apiFor();
+    // §6's idempotence, proven rather than assumed: the fake refuses the
+    // delete outright, and the client still returns normally.
+    await api.delete({
+      apiVersion: 'helm.toolkit.fluxcd.io/v2',
+      plural: 'helmreleases',
+      namespace: 'delivery',
+      name: 'never-existed',
+    });
+    expect(cluster.pathsOf('DELETE')).toHaveLength(1);
+  });
+});
+
+describe('a write is an apply only if it says so', () => {
+  const patch = async (
+    headers: Record<string, string>,
+    query: string,
+  ): Promise<number> => {
+    const cluster = new FakeKubernetes({ servedKinds: SERVED });
+    const response = await cluster.fetch(
+      new Request(
+        `${cluster.apiServer}/apis/helm.toolkit.fluxcd.io/v2/namespaces/delivery/helmreleases/blog-web${query}`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer federated-token', ...headers },
+          body: JSON.stringify({
+            apiVersion: 'helm.toolkit.fluxcd.io/v2',
+            kind: 'HelmRelease',
+            metadata: { name: 'blog-web', namespace: 'delivery' },
+          }),
+        },
+      ),
+    );
+    return response.status;
+  };
+
+  test('a merge patch is refused: the media type is what makes it an apply', async () => {
+    expect(
+      await patch(
+        { 'Content-Type': 'application/json' },
+        '?fieldManager=spindrift',
+      ),
+    ).toBe(415);
+  });
+
+  test('an apply with no field manager is refused: the fields must belong to someone', async () => {
+    expect(
+      await patch({ 'Content-Type': 'application/apply-patch+yaml' }, ''),
+    ).toBe(400);
+  });
+
+  test('both together are what the adapter sends, and are accepted', async () => {
+    expect(
+      await patch(
+        { 'Content-Type': 'application/apply-patch+yaml' },
+        '?fieldManager=spindrift&force=true',
+      ),
+    ).toBe(200);
   });
 });
 

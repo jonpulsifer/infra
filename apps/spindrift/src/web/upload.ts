@@ -8,8 +8,11 @@
  * computes the SHA-256 digest, stages the archive to durable storage, and
  * returns the digest and location.
  */
-import { type StagedArchive, stageArchiveBytes } from '../storage/archives.ts';
-import { uploadToGcsBucket } from '../storage/cloud.ts';
+import {
+  type StagedArchive,
+  sourceDepotFor,
+  stageArchiveBytes,
+} from '../storage/archives.ts';
 import type { DispatchDeps } from './dispatch.ts';
 
 export const UPLOAD_PATH = '/internal/upload';
@@ -103,45 +106,30 @@ export async function handleUpload(
       bytes = new Uint8Array(buffer);
     }
 
-    const staged: StagedArchive = await stageArchiveBytes(filename, bytes);
-
-    let location = staged.location;
+    // One staging call, to one place. It used to be two — local disk first,
+    // then the bucket on top — which meant the bytes were written twice and the
+    // location came back describing whichever step happened to run, so a depot
+    // that was configured but unreachable still answered with a pod-local
+    // handle no builder could fetch. A depot failure is now a `500` that says
+    // so, because a staged bundle nobody can retrieve is not a staged bundle.
     const context = deps.context(authentication.principal);
-    const bucket =
-      request.headers.get('x-bucket')?.trim() ||
-      process.env.SPINDRIFT_ARTIFACTS_BUCKET?.trim() ||
-      context.manifest?.sources?.defaultBucket?.trim() ||
-      context.manifest?.sources?.buckets?.[0]?.trim();
+    const depot = sourceDepotFor(
+      context.manifest,
+      request.headers.get('x-bucket'),
+    );
 
-    if (bucket) {
-      const federation = context.manifest?.cloud?.federation;
-      if (federation) {
-        try {
-          const hex = staged.digest.replace('sha256:', '');
-          const ext = filename.includes('.')
-            ? filename.split('.').pop()
-            : 'zip';
-          const gcs = await uploadToGcsBucket({
-            bucketName: bucket,
-            objectName: `${hex}.${ext}`,
-            bytes,
-            federation,
-          });
-          location = gcs.location;
-        } catch (error: unknown) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : `Cloud storage upload to gs://${bucket} failed`;
-          return Response.json(
-            {
-              ok: false,
-              failure: { code: 'STORAGE_FAILURE', message },
-            },
-            { status: 500 },
-          );
-        }
-      }
+    let staged: StagedArchive;
+    try {
+      staged = await stageArchiveBytes(filename, bytes, depot);
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : `Staging ${filename} to gs://${depot?.bucket} failed`;
+      return Response.json(
+        { ok: false, failure: { code: 'STORAGE_FAILURE', message } },
+        { status: 500 },
+      );
     }
 
     return Response.json(
@@ -149,7 +137,7 @@ export async function handleUpload(
         ok: true,
         value: {
           digest: staged.digest,
-          location,
+          location: staged.location,
           filename: staged.filename,
           size: staged.size,
         },

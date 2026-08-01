@@ -171,6 +171,38 @@ describe('the release is five steps, in the product’s order', () => {
     expect(second.api.servedPaths('shop-site')).toHaveLength(2);
   });
 
+  test('a site of more than a thousand files is offered in chunks the API takes', async () => {
+    // The API takes at most 1000 file hashes per `populateFiles` call and
+    // refuses the rest. A `next export` or any bundle with a hashed asset
+    // directory clears that on its first deploy, so this is the ordinary case
+    // rather than an extreme one.
+    const many = tarball(
+      Array.from({ length: 1_001 }, (_, at) => ({
+        name: `assets/${at}.txt`,
+        bytes: bytes(`file ${at}`),
+      })),
+    );
+    const api = new FakeHosting({ bundle: { origin: DEPOT, bytes: many } });
+    const adapter = new StaticDeployAdapter({
+      token: api.token,
+      fetch: api.fetch,
+    });
+
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('LIVE');
+    // Two calls, and the version holds every file from both of them — not
+    // just the ones the last chunk named.
+    expect(
+      api.pathsOf('POST').filter((path) => path.endsWith(':populateFiles')),
+    ).toHaveLength(2);
+    expect(api.servedPaths('shop-site')).toHaveLength(1_001);
+    // Every hash the API asked for across both answers was uploaded: an
+    // adapter that kept only the last chunk's answer would finalize a version
+    // whose bytes are not all there.
+    expect(api.uploads).toHaveLength(1_001);
+  });
+
   test('a redeploy releases onto the site that exists rather than a second one', async () => {
     const { api, adapter } = adapterFor({ sites: ['shop-site'] });
     await drain(adapter.apply(TARGET, desired()));

@@ -15,7 +15,10 @@
  */
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import { GitHubActionsBuildRoute } from '../../src/adapters/build/github-actions.ts';
-import { InClusterBuildRoute } from '../../src/adapters/build/in-cluster.ts';
+import {
+  InClusterBuildRoute,
+  JOB_LABEL,
+} from '../../src/adapters/build/in-cluster.ts';
 import { encodeBuildReport } from '../../src/adapters/build/report.ts';
 import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
@@ -197,7 +200,13 @@ buildAdapterSuite('in-cluster', () => {
         {
           apiVersion: 'v1',
           kind: 'Pod',
-          metadata: { name: 'build-pod', namespace: 'builds' },
+          metadata: {
+            name: 'build-pod',
+            namespace: 'builds',
+            // The label the route selects the build's own pod by; the cluster
+            // filters on it, so a fixture without it is never found.
+            labels: { [JOB_LABEL]: 'spindrift-build-conformance' },
+          },
         },
       ],
     },

@@ -81,6 +81,19 @@ const DEPLOY_LABEL = 'spindrift-deploy';
 /** A site id is capped well below a DNS label. See `domain/workload-name.ts`. */
 const SITE_ID_LIMIT = 30;
 
+/**
+ * The most file hashes one `populateFiles` call may carry.
+ *
+ * The API's own ceiling, not a tuning knob: "You can send a maximum of 1000
+ * file hashes in each API request. To list all the files for the version, you
+ * can call this endpoint multiple times; the files in each call will be added
+ * to the version." A built site clears that without trying — one hashed asset
+ * directory is enough — so the offer is made in chunks and every chunk's
+ * answer is kept. Anything less deploys a version whose bytes are not all
+ * there, which finalizes happily and serves a broken site.
+ */
+const POPULATE_LIMIT = 1000;
+
 /** What a version looks like coming back, as much as this adapter reads. */
 interface HostingVersion {
   readonly name?: string;
@@ -381,19 +394,27 @@ export class StaticDeployAdapter implements DeployAdapter {
       return { ok: false, failure: missing('the API created no version') };
     }
 
-    const populated = await http.json<PopulateResult>({
-      method: 'POST',
-      path: `${API_VERSION}/${name}:populateFiles`,
-      body: {
-        files: Object.fromEntries(
-          [...compressed].map(([path, file]) => [path, file.hash]),
-        ),
-      },
-    });
-    if (!populated.ok) return { ok: false, failure: populated };
-
-    const wanted = new Set(populated.value?.uploadRequiredHashes ?? []);
-    const uploadUrl = populated.value?.uploadUrl;
+    // Every chunk answers with the hashes *it* named that are missing, and
+    // with somewhere to put them, so both are accumulated across the whole
+    // offer rather than read off the last call.
+    const wanted = new Set<string>();
+    let uploadUrl: string | undefined;
+    for (const chunk of chunksOf([...compressed], POPULATE_LIMIT)) {
+      const populated = await http.json<PopulateResult>({
+        method: 'POST',
+        path: `${API_VERSION}/${name}:populateFiles`,
+        body: {
+          files: Object.fromEntries(
+            chunk.map(([path, file]) => [path, file.hash]),
+          ),
+        },
+      });
+      if (!populated.ok) return { ok: false, failure: populated };
+      for (const hash of populated.value?.uploadRequiredHashes ?? []) {
+        wanted.add(hash);
+      }
+      uploadUrl = populated.value?.uploadUrl ?? uploadUrl;
+    }
     for (const file of compressed.values()) {
       if (!wanted.has(file.hash)) continue;
       if (uploadUrl === undefined) {
@@ -558,6 +579,22 @@ function parseRef(connection: StaticConnection, ref: DeployRef): string | null {
   if (!ref.startsWith(prefix)) return null;
   const site = ref.slice(prefix.length);
   return site.length === 0 || site.includes('/') ? null : site;
+}
+
+/**
+ * One list as chunks of at most `size`, always at least one chunk.
+ *
+ * The empty case yields one empty chunk rather than none, because a version
+ * with no files is still a version that has to be *told* it has no files —
+ * skipping the call entirely would leave a site whose emptiness the API never
+ * heard about, which is a different thing from an empty site.
+ */
+function chunksOf<Item>(items: readonly Item[], size: number): Item[][] {
+  const chunks: Item[][] = [];
+  for (let at = 0; at < items.length; at += size) {
+    chunks.push(items.slice(at, at + size));
+  }
+  return chunks.length === 0 ? [[]] : chunks;
 }
 
 /** The sha256 of some bytes, hex — what the product deduplicates files on. */

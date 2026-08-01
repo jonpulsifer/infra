@@ -4,20 +4,70 @@
  * §4: "Archive upload accepts real bytes, stages them durably, and follows the
  * supplied-artifact or source-build path selected during creation."
  *
- * Compute SHA-256 digest over exact uploaded bytes (§16) and stage to disk
- * under the storage directory so builders and reconcilers can fetch them.
+ * Compute SHA-256 digest over exact uploaded bytes (§16) and stage the bundle
+ * to the installation's **source depot** — the GCS bucket the manifest names —
+ * so that both builders §15 stages for can fetch it.
+ *
+ * **The pod's own disk is not a depot.** It used to be one, and it could not
+ * work: a bundle written to `tmpdir()` is not shared with the reconciler, not
+ * shared with a second replica, and gone on the next restart, so no builder
+ * anywhere could fetch it under any scheme. The local directory survives here
+ * only as the fallback for an installation with no depot configured — a
+ * developer running the process on a laptop — and it announces itself as such
+ * by keeping the `upload://` handle, which is deliberately not a URL. A
+ * location that cannot be fetched should not be spelled like one that can.
  */
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { FederationOptions } from '../adapters/deploy/cloud/federation.ts';
+import type { InstallationManifest } from '../config/manifest.ts';
+import { uploadToGcsBucket } from './cloud.ts';
 
 export interface StagedArchive {
   readonly digest: string;
   readonly location: string;
-  readonly filepath: string;
+  /** Where the bytes landed on local disk, or `null` when they went to a depot. */
+  readonly filepath: string | null;
   readonly filename: string;
   readonly size: number;
+}
+
+/**
+ * The durable destination bundles are staged to.
+ *
+ * A bucket plus the federation that reaches it, because §13 allows no third
+ * thing: there is no credential to carry alongside them.
+ */
+export interface SourceDepot {
+  readonly bucket: string;
+  readonly federation: FederationOptions;
+}
+
+/** Bucket override for an operator running the process outside its chart. */
+export const ARTIFACTS_BUCKET_VAR = 'SPINDRIFT_ARTIFACTS_BUCKET';
+
+/**
+ * The depot this installation stages to, or `null` when it has none.
+ *
+ * `null` rather than a throw, the same way every adapter lookup answers: an
+ * installation with no bucket or no federation is a configuration fact callers
+ * report — as a refusal, or by falling back to local disk — rather than an
+ * exception thrown from inside staging.
+ */
+export function sourceDepotFor(
+  manifest: Pick<InstallationManifest, 'sources' | 'cloud'> | null | undefined,
+  bucketOverride?: string | null,
+): SourceDepot | null {
+  const bucket =
+    bucketOverride?.trim() ||
+    process.env[ARTIFACTS_BUCKET_VAR]?.trim() ||
+    manifest?.sources?.defaultBucket?.trim() ||
+    manifest?.sources?.buckets?.[0]?.trim();
+  const federation = manifest?.cloud?.federation ?? null;
+  if (!bucket || federation === null) return null;
+  return { bucket, federation };
 }
 
 export function storageDir(): string {
@@ -32,31 +82,73 @@ export function digestOfBytes(bytes: Uint8Array): string {
   return `sha256:${hash}`;
 }
 
-/** Stage archive bytes durably and return the digest and location. */
+/**
+ * The object one bundle occupies, in the depot or on disk.
+ *
+ * Content-addressed, which is what makes the depot immutable in the sense §15
+ * requires: the same bytes always name the same object, so staging them twice
+ * writes the same object rather than replacing anything.
+ */
+export function depotObjectName(filename: string, digest: string): string {
+  const hex = digest.replace('sha256:', '');
+  const ext = filename.includes('.') ? filename.split('.').pop() : 'zip';
+  return `${hex}.${ext}`;
+}
+
+/**
+ * Stage archive bytes durably and return the digest and location.
+ *
+ * With a depot, the location is the `gs://` object address — durable, shared
+ * between replicas, and the thing a signed URL is minted from at dispatch.
+ * Without one, the bytes go to local disk under an `upload://` handle that no
+ * builder can fetch, which is the honest answer for an installation that
+ * configured no depot.
+ */
 export async function stageArchiveBytes(
   filename: string,
   bytes: Uint8Array,
+  depot?: SourceDepot | null,
 ): Promise<StagedArchive> {
+  const digest = digestOfBytes(bytes);
+  const objectName = depotObjectName(filename, digest);
+
+  if (depot !== undefined && depot !== null) {
+    const stored = await uploadToGcsBucket({
+      bucketName: depot.bucket,
+      objectName,
+      bytes,
+      federation: depot.federation,
+    });
+    return {
+      digest,
+      location: stored.location,
+      filepath: null,
+      filename,
+      size: stored.size,
+    };
+  }
+
   const dir = storageDir();
   await mkdir(dir, { recursive: true });
-
-  const digest = digestOfBytes(bytes);
-  const hex = digest.replace('sha256:', '');
-  const ext = filename.includes('.') ? filename.split('.').pop() : 'zip';
-  const filepath = join(dir, `${hex}.${ext}`);
-
+  const filepath = join(dir, objectName);
   await writeFile(filepath, bytes);
 
   return {
     digest,
-    location: `upload://${hex}`,
+    location: `upload://${digest.replace('sha256:', '')}`,
     filepath,
     filename,
     size: bytes.byteLength,
   };
 }
 
-/** Read a staged archive by its sha256 digest or hex handle. */
+/**
+ * Read a locally staged archive by its sha256 digest or hex handle.
+ *
+ * Local only, and only meaningful for the no-depot fallback above: a depot
+ * bundle is addressed by its `gs://` location and fetched by whoever holds a
+ * signed URL for it, never read back through this process.
+ */
 export async function readStagedArchive(
   digestOrHex: string,
 ): Promise<Uint8Array | null> {
