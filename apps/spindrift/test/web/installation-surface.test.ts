@@ -22,7 +22,11 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { CommandContext, Principal } from '../../src/commands/types.ts';
-import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
+import type {
+  AuthoredManifest,
+  InstallationManifest,
+} from '../../src/config/manifest.schema.ts';
+import { resolveManifest } from '../../src/config/manifest.ts';
 import {
   currentStoredManifest,
   loadStoredManifest,
@@ -102,7 +106,7 @@ async function seed(): Promise<void> {
   });
 }
 
-async function storedManifest(): Promise<InstallationManifest | undefined> {
+async function storedManifest(): Promise<AuthoredManifest | undefined> {
   const [row] = await database().db.select().from(installation);
   return row?.manifest;
 }
@@ -122,7 +126,13 @@ describe('reading this installation from the browser', () => {
     // ask for.
     const stored = await storedManifest();
     expect(stored).toBeDefined();
-    expect(body.value.manifest).toEqual(stored as InstallationManifest);
+    // The row holds the *authored* document; the read answers that document
+    // with the deployment facts attached, which is the one place the two halves
+    // meet. Comparing against the row itself would assert the read had never
+    // resolved anything.
+    expect(body.value.manifest).toEqual(
+      await resolveManifest(stored as AuthoredManifest),
+    );
   });
 
   test('is refused without a session', async () => {
