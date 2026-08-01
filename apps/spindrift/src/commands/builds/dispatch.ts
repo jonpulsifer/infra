@@ -45,6 +45,7 @@ import {
 } from '../../domain/build-route.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
+import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
 import {
   type CommandContext,
@@ -174,6 +175,52 @@ function routeRefusedByTarget(
     : `${policy.name} will not take a build from ${adapter.name}: ${candidate.reason}`;
 }
 
+/**
+ * The stored bundle address, turned into one a builder can actually fetch.
+ *
+ * A depot address is `gs://bucket/object`: durable, shared between replicas,
+ * and unresolvable by anything without a Google credential — which every
+ * builder §15 stages for is, because the hosted route's runner is a machine on
+ * the public internet. So it is exchanged here for a short-TTL V4 signed URL.
+ *
+ * **A failure to mint one is a refusal, not a warning.** Dispatching anyway is
+ * what produced this function: a route handed an address it could not resolve
+ * ran a workflow that failed at its first step, and the developer was sent to
+ * debug a Dockerfile over a location Spindrift itself had made unusable. A
+ * refusal costs one dispatch and says the true thing.
+ *
+ * Any other scheme passes through untouched. An `https://` location is already
+ * fetchable, and an `upload://` handle names this process's own disk — the
+ * no-depot fallback — which is honest about being unfetchable and is left to
+ * fail where it fails rather than being dressed up here.
+ */
+async function fetchableBundleLocation(
+  context: Pick<BuildDispatchContext, 'manifest'>,
+  location: string,
+): Promise<CommandResult<string>> {
+  if (parseGcsLocation(location) === null) return ok(location);
+
+  const federation = context.manifest?.cloud?.federation ?? null;
+  if (federation === null) {
+    return failed(
+      'NOT_BUILDABLE',
+      `the staged bundle is in cloud storage and this installation configures no federation to reach it, so no route could fetch ${location}`,
+    );
+  }
+
+  try {
+    return ok(await signedObjectUrl({ location, federation }));
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    // The object path, never the URL: a signed URL is a bearer capability and
+    // this sentence lands on the operator-visible attempt log.
+    return failed(
+      'NOT_BUILDABLE',
+      `could not mint a signed URL for the staged bundle at ${location}, so no route could fetch it: ${detail}`,
+    );
+  }
+}
+
 export const dispatchBuild = async (
   input: DispatchBuildInput,
   context: BuildDispatchContext,
@@ -295,6 +342,17 @@ export const dispatchBuild = async (
     );
   }
 
+  // The durable address becomes a fetchable one here and nowhere earlier. A
+  // signed URL is a bearer capability with a TTL in minutes, so minting it at
+  // dispatch is what keeps it out of the Build row, out of the attempt log, and
+  // out of any window between staging and running. What is persisted is the
+  // `gs://` object; what a route is handed is a URL that resolves.
+  const fetchable = await fetchableBundleLocation(
+    context,
+    build.bundleLocation,
+  );
+  if (!fetchable.ok) return fetchable;
+
   const source: Source =
     app.sourceKind === 'repo'
       ? {
@@ -303,12 +361,12 @@ export const dispatchBuild = async (
           commit: build.commit,
           // §5: an App is repo plus subpath, and the developer named it there.
           subpath: app.sourceRepoSubpath ?? '.',
-          location: build.bundleLocation,
+          location: fetchable.value,
         }
       : {
           kind: 'archive',
           digest: build.bundleDigest,
-          location: build.bundleLocation,
+          location: fetchable.value,
           contents: 'source',
           // Per Build: the unwrap is a fact about the bytes that were uploaded.
           subpath: build.bundleSubpath ?? '.',

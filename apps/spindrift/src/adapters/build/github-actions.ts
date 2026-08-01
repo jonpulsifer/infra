@@ -366,6 +366,19 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     }
 
     if (conclusion !== 'success') {
+      const scaffolding = failedScaffoldingStep(jobs);
+      if (scaffolding !== null) {
+        return buildFailed(
+          logs,
+          // §6 blames the **platform** for an object that could not be
+          // fetched, which is what this is: the workflow never reached the
+          // developer's code because the platform's own preamble did not
+          // finish.
+          'ARTIFACT_UNAVAILABLE',
+          `run ${run.id} in ${repository} failed in “${scaffolding}”, a step of Spindrift's own build workflow rather than of the App's build`,
+          { runId: run.id, conclusion, step: scaffolding },
+        );
+      }
       return buildFailed(
         logs,
         'BUILD_FAILED',
@@ -395,6 +408,48 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       report,
     });
   }
+}
+
+/**
+ * The one step of the reusable workflow the developer owns.
+ *
+ * Everything else in that file is Spindrift's: reading the request, fetching
+ * the staged bundle, choosing a frontend, logging in to the registry, printing
+ * the report. The App's own code is compiled in exactly one step, and naming it
+ * is what lets this route tell "your build failed" apart from "our scaffolding
+ * failed" — a distinction §6 spends its whole blame column on.
+ *
+ * Coupled to the workflow by name, which is sound only because the manifest
+ * pins that workflow by SHA (`github.buildWorkflow`): the file this route
+ * dispatches cannot change under it without the pin rolling too.
+ */
+export const DEVELOPER_BUILD_STEP = 'Build and push';
+
+/**
+ * The Spindrift-owned step a red run failed in, or `null` when the App's own
+ * build is what failed.
+ *
+ * This is the fix for a build that reported `blame = developer` for a failure
+ * that was entirely the platform's: the workflow was handed a bundle location
+ * it could not resolve, died in the fetch step, and the developer was sent to
+ * read a Dockerfile that was never compiled. A run that never reached
+ * {@link DEVELOPER_BUILD_STEP} cannot have failed because of anything the
+ * developer wrote.
+ *
+ * A run whose jobs report no steps at all answers `null` — the conservative
+ * direction, because claiming platform blame without evidence would mask real
+ * build failures behind a chip that says "not your fault".
+ */
+function failedScaffoldingStep(jobs: readonly ActionsJob[]): string | null {
+  let scaffolding: string | null = null;
+  for (const job of jobs) {
+    for (const step of job.steps ?? []) {
+      if (stepState(step.status, step.conclusion) !== 'FAILED') continue;
+      if (step.name === DEVELOPER_BUILD_STEP) return null;
+      scaffolding ??= step.name;
+    }
+  }
+  return scaffolding;
 }
 
 /**
