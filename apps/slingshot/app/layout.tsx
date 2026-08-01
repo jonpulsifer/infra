@@ -36,29 +36,29 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <SidebarProvider defaultOpen={true}>
-          <SidebarInset>
-            <div
-              className="flex min-h-svh flex-col bg-background max-w-screen-2xl mx-auto"
-              suppressHydrationWarning
-            >
-              <div className="md:hidden sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border/60 bg-background/90 px-4 py-3 backdrop-blur">
-                <SidebarTrigger />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-sm font-semibold text-foreground truncate">
-                    Slingshot
-                  </span>
-                  <span className="text-xs text-muted-foreground truncate">
-                    Webhook testing platform
-                  </span>
-                </div>
+          {/*
+            AppSidebar must precede SidebarInset. SidebarInset offsets itself
+            with peer-data-* selectors, and Tailwind's `peer` only matches a
+            preceding sibling - with the order reversed the inset got no offset
+            and the fixed sidebar rendered on top of the page.
+          */}
+          <AppSidebar />
+          <SidebarInset className="min-w-0 overflow-x-hidden">
+            <div className="md:hidden sticky top-0 z-30 flex items-center gap-3 border-b border-border/60 bg-background/90 px-4 py-3 backdrop-blur">
+              <SidebarTrigger />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="text-sm font-semibold text-foreground truncate">
+                  Slingshot
+                </span>
+                <span className="text-xs text-muted-foreground truncate">
+                  Webhook testing platform
+                </span>
               </div>
-              <main className="flex-1 overflow-hidden px-4 pb-6 pt-4 md:px-6 md:pt-6 max-w-full">
-                {/* Keep the previous route visible during client transitions to avoid flashes */}
-                {children}
-              </main>
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col px-4 pb-6 pt-4 md:px-6 md:pt-6">
+              {children}
             </div>
           </SidebarInset>
-          <AppSidebar />
         </SidebarProvider>
         <Toaster position="top-right" richColors theme="dark" />
       </body>
