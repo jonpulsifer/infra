@@ -104,7 +104,7 @@
     kind = "image";
     baseline = "fleet";
     module = ../images/netboot.nix;
-    # Assembled from three build outputs; see the symlinkJoin in flake.nix.
+    artifact = "netbootBundle";
   };
   wsl = {
     kind = "image";
