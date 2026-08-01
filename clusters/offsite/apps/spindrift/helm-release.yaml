@@ -58,3 +58,87 @@ spec:
         limits:
           memory: 768Mi
           cpu: 1000m
+    # §20's installation manifest, declared rather than seeded.
+    #
+    # The durable row is written from this document at process start and
+    # otherwise from itself, so an undeclared installation can only ever be
+    # seeded — and a value seeded wrong stays wrong. `zeroConfigFrontend` was
+    # exactly that: `ghcr.io/railwayapp/railpack:railpack-frontend` came in with
+    # the row, GHCR does not serve that repository at all, and two later
+    # corrections to the code default could not reach an installation that
+    # already had one. Declaring the document is what puts a manifest change
+    # back under ordinary review.
+    #
+    # Both zones are substituted by the apps Kustomization — `SPINDRIFT_DOMAIN`
+    # from cluster-settings, `SECRET_DOMAIN` from cluster-secrets — so the zone
+    # is read rather than restated, the same way `hostname` above reads it.
+    manifest:
+      installation: offsite
+      controlPlane:
+        hostname: spindrift.${SECRET_DOMAIN}
+      dns:
+        apexZone: ${SPINDRIFT_DOMAIN}
+        vanityZone: ${SPINDRIFT_DOMAIN}
+      auth:
+        gateway: null
+      build:
+        routes:
+          - name: hosted
+            adapter: github-actions
+        # Railpack publishes the frontend as its own repository. The tag is a
+        # version because rebuilding one bundle digest should not silently
+        # change what built it, and this is the only input to a zero-config
+        # build that no digest covers.
+        zeroConfigFrontend: ghcr.io/railwayapp/railpack-frontend:v0.35.0
+      cloud:
+        federation:
+          audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+          tokenUrl: https://sts.googleapis.com/v1/token
+          tokenPath: /var/run/secrets/spindrift/gcp-token
+          impersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
+        artifactsProject: trusted-builds
+        homeVesselProject: bluenose
+      charts:
+        app: packages/charts/spindrift-app
+        installer: packages/charts/spindrift
+      github:
+        clientId: Iv1.918d699f36ee7afc
+        apiBaseUrl: https://api.github.com
+        oauthBaseUrl: https://github.com
+        buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
+      sources:
+        buckets:
+          - bluenose-spindrift-source
+        defaultBucket: bluenose-spindrift-source
+      targets:
+        - name: offsite
+          adapter: kubernetes
+          connection:
+            delivery:
+              flavour: flux-helmrelease
+              namespace: spindrift-apps
+              sourceRef:
+                name: infra
+                namespace: flux-system
+            apiServer: https://kubernetes.default.svc
+            namespace: spindrift-apps
+            chartContract: "2"
+        - name: bluenose-cloudrun
+          adapter: cloudrun
+          connection:
+            region: northamerica-northeast1
+            project: bluenose
+            endpoint: https://run.googleapis.com
+        - name: bluenose-static
+          adapter: static
+          connection:
+            project: bluenose
+            endpoint: https://firebasehosting.googleapis.com
+      secretStore:
+        adapter: onepassword
+        endpoint: http://onepassword-connect.external-secrets.svc.cluster.local:8080
+        container: homelab
+      supplyChain:
+        signer: gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer
+        registry: ghcr.io/jonpulsifer
+        verifier: ghcr.io/jonpulsifer/spindrift-verifier
