@@ -17,7 +17,10 @@
  * - **`in-cluster` is L1**, which is what makes an L2 Target refuse it.
  */
 import { describe, expect, test } from 'bun:test';
-import { buildKitProgram } from '../../src/adapters/build/buildkit.ts';
+import {
+  buildKitProgram,
+  railpackVersion,
+} from '../../src/adapters/build/buildkit.ts';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import type {
   BuildEvent,
@@ -771,6 +774,66 @@ describe('the BuildKit program', () => {
     expect(program).toContain('if [ -f Dockerfile ]');
     expect(program).toContain('--frontend dockerfile.v0');
     expect(program).toContain(`--opt source='${FRONTEND}'`);
+  });
+
+  test('hands the zero-config frontend a plan, never a `#syntax=` stub', () => {
+    // The railpack frontend reads its input as a build plan: a stub comes back
+    // as `invalid character '#' looking for beginning of value`, at every
+    // version — which is why correcting the pin alone never made this work.
+    expect(program).not.toContain('#syntax=');
+    expect(program).toContain('railpack prepare . --plan-out');
+    // `dockerfile` is the local the frontend reads and `railpack-plan.json` the
+    // filename it defaults to, so the plan has to be named that and mounted
+    // there. The context stays the source.
+    expect(program).toContain('"$plan/railpack-plan.json"');
+    expect(program).toContain('--local dockerfile="$plan"');
+    expect(program).toContain('--local context=.');
+  });
+
+  test('generates the plan with the release that reads it', () => {
+    // The plan is railpack's own serialisation format, versioned with railpack,
+    // so generator and frontend must be one release. The tag is the only thing
+    // that says which, and pinning it twice is how the two drift apart.
+    expect(railpackVersion(FRONTEND)).toBe('pinned');
+    expect(program).toContain(
+      'https://github.com/railwayapp/railpack/releases/download/pinned/',
+    );
+    // The architecture is the runner's to report, so it expands where the
+    // version — a manifest value reaching a shell — stays quoted.
+    expect(program).toContain(`asset='railpack-pinned-'"$arch"'`);
+    // The generator reads the developer's source, so the download is checked
+    // against the release's own checksums rather than trusted.
+    expect(program).toContain('checksums.txt');
+    expect(program).toContain('sha256sum -c -');
+  });
+
+  test('reads a version only where the reference actually carries a tag', () => {
+    expect(
+      railpackVersion('ghcr.io/railwayapp/railpack-frontend:v0.0.33'),
+    ).toBe('v0.0.33');
+    // A digest names bytes, and bytes carry no release number.
+    expect(railpackVersion('ghcr.io/railwayapp/x@sha256:0864b2ee')).toBeNull();
+    expect(railpackVersion('ghcr.io/railwayapp/railpack-frontend')).toBeNull();
+    // A colon in the registry is a port, not a tag.
+    expect(railpackVersion('localhost:5000/railpack-frontend')).toBeNull();
+  });
+
+  test('fails inside the arm that needs the version, not at compose time', () => {
+    // A refusal to compose would take the Dockerfile arm down with it and be
+    // recorded nowhere an operator looks; failing in the arm puts the reason in
+    // the attempt log and leaves every Dockerfile build working.
+    const untagged = buildKitProgram({
+      bundleUrl: 'staged://bundle',
+      bundleDigest: 'sha256:bundle',
+      subpath: '.',
+      destination: 'registry.example.test/app',
+      tags: ['latest'],
+      zeroConfigFrontend: 'registry.example.test/zero-config',
+      buildArgs: {},
+    });
+    expect(untagged).toContain('--frontend dockerfile.v0');
+    expect(untagged).toContain('carries no version tag');
+    expect(untagged).not.toContain('railpack prepare');
   });
 
   test('applies §5’s unwrap before it applies the subpath', () => {

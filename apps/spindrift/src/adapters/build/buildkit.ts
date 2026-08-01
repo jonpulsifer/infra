@@ -20,9 +20,10 @@
  *
  * **What the image must provide.** Declared, not discovered, so an installation
  * that pins an image knows what it is promising: a POSIX `sh`, `wget`, `tar`,
- * `sed`, `base64`, and `buildctl-daemonless.sh` on the path. Every one of those
- * is in the stock BuildKit image; a hardened replacement that drops one will
- * fail loudly on the first build rather than subtly on the hundredth.
+ * `sed`, `grep`, `base64`, `sha256sum`, `mktemp`, `uname`, and
+ * `buildctl-daemonless.sh` on the path. Every one of those is in the stock
+ * BuildKit image; a hardened replacement that drops one will fail loudly on the
+ * first build rather than subtly on the hundredth.
  */
 import type { BuildSource, BuildSpec } from './contract.ts';
 import { BUILD_REPORT_MARKER } from './report.ts';
@@ -91,6 +92,38 @@ function quote(value: string): string {
 }
 
 /**
+ * The railpack release whose plan generator matches the pinned frontend.
+ *
+ * The zero-config arm does not hand the frontend a `#syntax=` stub — the
+ * railpack frontend reads its input as a **build plan** and answers a stub with
+ * `invalid character '#' looking for beginning of value`. So the plan has to be
+ * generated, and the generator is `railpack prepare`, whose output is
+ * railpack's own serialisation format and is versioned with railpack.
+ *
+ * Generator and consumer must therefore be the same release, and the tag of the
+ * pinned reference is what says which. Deriving it here keeps the installation
+ * pinning **one** value: a second field naming the CLI version could drift from
+ * the frontend it feeds, and — as ticket 29 found for this very field — a
+ * manifest key with no authoring path is a value that can only ever be wrong
+ * once. It does mean the arm assumes the pinned image *is* railpack, which is
+ * the assumption §5's ladder already makes.
+ *
+ * `null` when the reference carries no tag to read: pinned by digest, or bare.
+ * The caller turns that into a failure inside the zero-config arm rather than a
+ * refusal to compose, so a scope **with** a Dockerfile still builds and the
+ * message lands in the attempt log where an operator can see it.
+ */
+export function railpackVersion(zeroConfigFrontend: string): string | null {
+  // A digest pin names bytes, and bytes do not carry a release number.
+  if (zeroConfigFrontend.includes('@')) return null;
+  const tag = zeroConfigFrontend.slice(zeroConfigFrontend.lastIndexOf(':') + 1);
+  // No colon at all leaves the whole reference; a colon in the *registry* —
+  // `localhost:5000/frontend` — leaves a path. Neither is a tag.
+  if (tag === zeroConfigFrontend || tag.includes('/')) return null;
+  return tag === '' ? null : tag;
+}
+
+/**
  * The `name=` field of the image exporter, carrying every tag (§12).
  *
  * The exporter takes one comma-separated list of full references, and its
@@ -102,6 +135,57 @@ function quote(value: string): string {
 function imageNames(input: BuildKitProgramInput): string {
   const refs = input.tags.map((tag) => `${input.destination}:${tag}`).join(',');
   return `"name=${refs}"`;
+}
+
+/**
+ * The `else` of §5's ladder: fetch the plan generator, generate, hand it over.
+ *
+ * The generator is fetched rather than baked in so the stock BuildKit image
+ * keeps working — the tools this needs (`wget`, `tar`, `uname`) are ones the
+ * module already declares, and requiring a custom builder image to reach the
+ * fallthrough arm would make "one engine, two frontends" cost an image build.
+ * The binary and the plan land in separate directories because the second one
+ * is mounted into the build, and a mount is a smaller promise when it holds
+ * only what the frontend reads.
+ *
+ * A reference with no readable tag fails **here**, in the arm that needs it,
+ * with the reason on stderr — not at compose time, which would take the
+ * Dockerfile arm down with it and say so nowhere an operator looks.
+ */
+function zeroConfigArm(input: BuildKitProgramInput): string {
+  const version = railpackVersion(input.zeroConfigFrontend);
+  if (version === null) {
+    const reason = `the zero-config frontend ${input.zeroConfigFrontend} carries no version tag, so the matching railpack plan generator cannot be resolved; pin it by tag`;
+    return `  echo ${quote(reason)} >&2
+  exit 1`;
+  }
+
+  // The architecture is the runner's to report, so the asset name is single
+  // quoted either side of it: the version reaches a shell and quoting is what
+  // keeps a manifest value from becoming an extra command, while `$arch` still
+  // has to expand. Adjacent quoting concatenates, so each of these is one word.
+  const release = `https://github.com/railwayapp/railpack/releases/download/${version}`;
+  const prefix = `railpack-${version}-`;
+  const suffix = '-unknown-linux-musl.tar.gz';
+
+  return `  bin="$workspace/railpack-bin"
+  plan="$workspace/railpack-plan"
+  mkdir -p "$bin" "$plan"
+  case $(uname -m) in
+    x86_64) arch=x86_64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "railpack publishes no build for $(uname -m)" >&2; exit 1 ;;
+  esac
+  asset=${quote(prefix)}"$arch"${quote(suffix)}
+  # The release publishes checksums, so the download is checked rather than
+  # trusted: this binary reads the developer's source.
+  wget -qO "$bin/$asset" ${quote(`${release}/`)}"$asset"
+  wget -qO "$bin/checksums.txt" ${quote(`${release}/checksums.txt`)}
+  (cd "$bin" && grep " $asset\\$" checksums.txt | sha256sum -c -)
+  tar -xzf "$bin/$asset" -C "$bin" railpack
+  "$bin"/railpack prepare . --plan-out "$plan/railpack-plan.json"
+  set -- --frontend gateway.v0 --opt source=${quote(input.zeroConfigFrontend)} \\
+    --local dockerfile="$plan"`;
 }
 
 /**
@@ -139,10 +223,15 @@ cd "$root"/${quote(input.subpath)}
 
 # §5's ladder, and the only decision this script makes: a Dockerfile settles
 # how to build. What the thing *is* was decided before the build was dispatched.
+#
+# The zero-config arm generates a plan and hands it over on the \`dockerfile\`
+# local — that is the mount name the frontend reads, and \`railpack-plan.json\`
+# is the filename it defaults to. It is not a Dockerfile and it carries no
+# syntax directive: the frontend parses this file as JSON.
 if [ -f Dockerfile ]; then
   set -- --frontend dockerfile.v0 --local dockerfile=.
 else
-  set -- --frontend gateway.v0 --opt source=${quote(input.zeroConfigFrontend)}
+${zeroConfigArm(input)}
 fi
 
 buildctl-daemonless.sh build "$@" \\
