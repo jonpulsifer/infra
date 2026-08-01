@@ -12,7 +12,7 @@ import {
   IDENTITY_TOKEN_PATH_VAR,
   installationServiceAccountToken,
 } from '../../src/adapters/registry.ts';
-import { parseManifest } from '../../src/config/manifest.ts';
+import { parseManifest, resolveManifest } from '../../src/config/manifest.ts';
 
 test('the installation token provider follows the projected path', async () => {
   const path = join('/tmp', `spindrift-identity-token-${crypto.randomUUID()}`);
@@ -35,7 +35,7 @@ test('source adapter returns null when no GitHub App or custom stager is configu
   const yaml = await Bun.file(
     join(import.meta.dir, '../fixtures/installation.example.yaml'),
   ).text();
-  const manifest = parseManifest(yaml, 'test');
+  const manifest = await resolveManifest(parseManifest(yaml, 'test'), {});
   const registry = createAdapterRegistry({ manifest, env: {} });
 
   expect(registry.source?.()).toBeNull();
@@ -45,7 +45,7 @@ test('source adapter returns explicitly passed source stager when provided', asy
   const yaml = await Bun.file(
     join(import.meta.dir, '../fixtures/installation.example.yaml'),
   ).text();
-  const manifest = parseManifest(yaml, 'test');
+  const manifest = await resolveManifest(parseManifest(yaml, 'test'), {});
   const customStager = {
     async stageRepository() {
       return {

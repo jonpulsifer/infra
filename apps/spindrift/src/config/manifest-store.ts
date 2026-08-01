@@ -10,11 +10,16 @@ import type { Database } from '../db/client.ts';
 import { installation, targets } from '../db/schema.ts';
 import { unreachablePrerequisites } from '../domain/capabilities.ts';
 import type { TargetConnection } from '../domain/target.ts';
-import type { InstallationManifest, TargetSeed } from './manifest.schema.ts';
+import type {
+  AuthoredManifest,
+  InstallationManifest,
+  TargetSeed,
+} from './manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
   loadManifestIfPresent,
   ManifestError,
+  resolveManifest,
   validateManifest,
 } from './manifest.ts';
 
@@ -33,6 +38,11 @@ type Env = Record<string, string | undefined>;
  * The cost is that editing a declaration does nothing to an installation that
  * already has a row, so an ignored declaration says so at startup rather than
  * being quietly skipped. Re-seeding is deliberate: discard the row.
+ *
+ * What is written is the authored document; what is returned has the
+ * deployment's own facts resolved onto it. The row therefore never holds a
+ * second copy of something the deployment declares — which is the whole of why
+ * the two types are different.
  */
 export async function loadStoredManifest(
   db: Database,
@@ -47,7 +57,7 @@ export async function loadStoredManifest(
   }
   const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
   await writeStoredManifest(db, declared);
-  return declared;
+  return resolveManifest(declared, env);
 }
 
 /**
@@ -65,7 +75,7 @@ export async function loadStoredManifest(
  */
 export async function writeStoredManifest(
   db: Database,
-  manifest: InstallationManifest,
+  manifest: AuthoredManifest,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.insert(installation).values({ manifest }).onConflictDoUpdate({
@@ -86,8 +96,10 @@ export async function writeStoredManifest(
  */
 export async function currentStoredManifest(
   db: Database,
+  env: Env = Bun.env,
 ): Promise<InstallationManifest | null> {
-  return readStoredManifest(db);
+  const stored = await readStoredManifest(db);
+  return stored === null ? null : resolveManifest(stored, env);
 }
 
 /**
@@ -104,7 +116,7 @@ export async function currentStoredManifest(
  */
 async function reconcileManifestTargets(
   db: Pick<Database, 'insert' | 'query'>,
-  manifest: InstallationManifest,
+  manifest: AuthoredManifest,
 ): Promise<void> {
   for (const [rank, target] of manifest.targets.entries()) {
     const { name, adapter } = target;
@@ -180,7 +192,7 @@ function connectionFromSeed(target: TargetSeed): TargetConnection | null {
 
 async function readStoredManifest(
   db: Database,
-): Promise<InstallationManifest | null> {
+): Promise<AuthoredManifest | null> {
   const [stored] = await db
     .select({ manifest: installation.manifest })
     .from(installation)

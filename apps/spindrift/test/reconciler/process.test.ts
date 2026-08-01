@@ -30,7 +30,11 @@ import {
 import { startReconciler } from '../../src/reconciler/start.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  FIXTURE_DEPLOYMENT_ENV,
+  fixtureManifest,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -243,7 +247,13 @@ async function reconcilePendingDeploy(platform: FakeDeployAdapter) {
     signal: shutdown.signal,
     client: database().connect(),
     clock,
-    env: { [MANIFEST_INLINE_VAR]: JSON.stringify(manifest) },
+    // The declaration and the deployment's own credential, which is how a pod
+    // starts: the manifest names the installation, the mounted external_account
+    // document names the federation, and the boot manifest is the two joined.
+    env: {
+      ...FIXTURE_DEPLOYMENT_ENV,
+      [MANIFEST_INLINE_VAR]: JSON.stringify(manifest),
+    },
     createAdapters(storedManifest) {
       bootManifest = storedManifest;
       return adaptersFor(platform);

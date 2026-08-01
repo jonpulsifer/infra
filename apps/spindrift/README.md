@@ -421,18 +421,27 @@ the projected service account token.
 **A cloud Target needs no variable at all**, and that is §13's one auth mode
 arriving where the spec wanted it: "native OIDC federation, nothing stored".
 `src/adapters/deploy/cloud/federation.ts` reads a projected token, exchanges it
-at the pool's STS endpoint, and optionally impersonates a service account —
-`cloud.federation` in the manifest is that `external_account` credential
-document, field for field, so an operator who has one copies it.
+at the pool's STS endpoint, and optionally impersonates a service account.
+
+**Nobody configures any of that.** The installer chart already renders an
+`external_account` credential document from the workload-identity audience and
+mount path a release names, and points `GOOGLE_APPLICATION_CREDENTIALS` at it.
+`src/config/federation-credential.ts` reads the four facts back out of that
+document, and `resolveManifest` joins them onto the manifest every reader gets —
+so there is no `cloud.federation` key to author, and nothing that could disagree
+with the pod it is running in. An installation whose deployment mounts no
+credential resolves `null`, which is exactly what an installation with no cloud
+Targets honestly has.
 
 The mistake it exists to prevent is worth naming, because it is the convenient
 one: **the default service account token is the wrong token.** It is minted for
 this cluster's own API server, and a cloud API refuses it — the symptom would be
-a `401` on every cloud deploy, blamed on the Target. So `tokenPath` is required
-configuration naming the *separately* projected volume whose audience is the
-pool, with no default that could quietly be the wrong one. An installation that
-configured no federation gets a provider that refuses with that sentence, rather
-than a Target that silently cannot be assessed.
+a `401` on every cloud deploy, blamed on the Target. So the token path is read
+from the credential's `credential_source.file`, which the chart renders from the
+*separately* projected volume whose audience is the pool, with no default that
+could quietly be the wrong one. An installation with no federation gets a
+provider that refuses with that sentence, rather than a Target that silently
+cannot be assessed.
 
 ## The three deploy backends
 

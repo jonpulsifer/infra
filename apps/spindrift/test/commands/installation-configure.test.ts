@@ -14,7 +14,10 @@
 import { describe, expect, test } from 'bun:test';
 import { configureInstallation } from '../../src/commands/index.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
-import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
+import type {
+  AuthoredManifest,
+  InstallationManifest,
+} from '../../src/config/manifest.schema.ts';
 import { loadStoredManifest } from '../../src/config/manifest-store.ts';
 import { installation } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -46,7 +49,7 @@ function context(): CommandContext {
   };
 }
 
-async function storedManifest(): Promise<InstallationManifest | undefined> {
+async function storedManifest(): Promise<AuthoredManifest | undefined> {
   const [row] = await database().db.select().from(installation);
   return row?.manifest;
 }

@@ -26,7 +26,7 @@
  */
 import { z } from 'zod';
 import {
-  type InstallationManifest,
+  type AuthoredManifest,
   installationManifestSchema,
 } from '../../config/manifest.schema.ts';
 import { ManifestError, validateManifest } from '../../config/manifest.ts';
@@ -67,7 +67,7 @@ export const configureInstallation: Command<
   ConfigureInstallationInput,
   ConfigureInstallationResult
 > = async (input, context) => {
-  let manifest: InstallationManifest;
+  let manifest: AuthoredManifest;
   try {
     manifest = validateManifest(input.manifest, 'the submitted manifest');
   } catch (cause) {

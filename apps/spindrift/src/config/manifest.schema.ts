@@ -10,8 +10,17 @@
  *
  * There are no defaults. A missing key fails the boot rather than falling back
  * to whatever the first operator happened to use.
+ *
+ * **What names the installation and what names its deployment are not the same
+ * set.** A value the installer chart already renders is read from the
+ * deployment, never asked for here as well: a fact carried in both places
+ * satisfies §20's grep and can still disagree with itself, and a disagreement
+ * surfaces somewhere else entirely — once as an `iam.serviceAccounts.signBlob`
+ * refusal that read as a code defect. Every removal is recorded at the block it
+ * left, so the reason survives the key.
  */
 import { z } from 'zod';
+import type { FederationConfig } from '../adapters/deploy/cloud/federation.ts';
 
 /** A non-empty string with no surrounding whitespace. */
 const nonEmptyString = z.string().trim().min(1);
@@ -253,6 +262,27 @@ export const installationManifestSchema = z
          * It is not derived from `dns.apexZone`: the control plane is a
          * platform workload (§19) and never one of its own Apps, so it does not
          * live in the zone Apps are named in.
+         *
+         * **Kept when `cloud.federation` and `charts.installer` were derived
+         * away, and here is the justification.** The installer chart has a
+         * `hostname` value that renders the Gateway and the HTTPRoute, which
+         * looks like the same fact restated — and it is not, for two reasons.
+         *
+         * The chart's `hostname` may be empty, and the chart says so: an
+         * installation that renders no Gateway and no HTTPRoute, reachable only
+         * in-cluster, is supported. That installation still needs a relying
+         * party id, so the chart is not a total source for this and deriving it
+         * would make a supported installation unconfigurable.
+         *
+         * And the relying party is bound once, at boot, on purpose — a passkey
+         * ceremony is scoped to the origin it began at, so re-resolving this
+         * mid-session invalidates credentials rather than updating them.
+         * Moving where it resolves from changes which origin ceremonies are
+         * accepted, and the only honest proof of that change is a real
+         * enrolment, not an argument. So the chart refuses instead: a release
+         * that declares a manifest whose `controlPlane.hostname` disagrees with
+         * its own `hostname` fails to render, which is the earliest moment the
+         * two can be compared and the only one where being wrong costs nothing.
          */
         hostname: zone,
       })
@@ -311,46 +341,22 @@ export const installationManifestSchema = z
          */
         homeVesselProject: nonEmptyString,
         /**
-         * How this installation reaches a cloud Target, with nothing stored
-         * (§13's one auth mode).
+         * **No `federation` key, and that is the point.**
          *
-         * The shape is an `external_account` credential document's, field for
-         * field, because an operator configuring this has one already and
-         * copying it should be the whole of the work.
+         * §13's one auth mode — "native OIDC federation, nothing stored" — is
+         * an `external_account` credential document, and the installer chart
+         * already writes one from the workload-identity audience and mount path
+         * a release names. Asking for the same four facts here made a second
+         * copy, by hand, in a document the chart does not render; the two could
+         * disagree, they did, and the failure arrived as a `signBlob` refusal
+         * that read as a code defect.
          *
-         * Nullable, stated the way `auth.gateway` and `github.buildWorkflow`
-         * are: an installation with no cloud Targets has no honest value to put
-         * here, and a placeholder would be a configuration that looks complete
-         * and fails on the first deploy. Null means cloud Targets cannot be
-         * reached, and nothing else changes.
+         * It is now resolved from the mounted credential —
+         * `federation-credential.ts` — and appears on {@link
+         * InstallationManifest} without ever being authored. Nullable exactly
+         * as before, and for the same reason: an installation with no cloud
+         * Targets mounts no credential and has no honest value here.
          */
-        federation: z
-          .object({
-            /** The workload-identity pool provider this cluster is trusted by. */
-            audience: nonEmptyString,
-            /** Where a projected token is exchanged for a federated one. */
-            tokenUrl: z.url(),
-            /**
-             * Where the projected token is read from.
-             *
-             * No default, and deliberately so: the convenient path — the
-             * default service account token — is minted for this cluster's own
-             * API server and a cloud API refuses it. Requiring the operator to
-             * name the volume they projected keeps the wrong token from being
-             * the easy one.
-             */
-            tokenPath: nonEmptyString.regex(
-              /^\//,
-              'must be an absolute path inside the pod',
-            ),
-            /**
-             * The service account to impersonate, as a `generateAccessToken`
-             * url, or null to use the federated identity's own grants.
-             */
-            impersonationUrl: z.url().nullable(),
-          })
-          .strict()
-          .nullable(),
       })
       .strict(),
 
@@ -359,13 +365,21 @@ export const installationManifestSchema = z
         /**
          * Reference to the App chart (§7) — the chart every deployed Component
          * renders through.
+         *
+         * Authored, unlike the two keys derived away around it, because no
+         * deployment renders it: the installer chart names itself and its own
+         * release, never the chart an App is deployed through, so there is no
+         * second copy for this one to disagree with. It is also a real
+         * installation choice — §7 wants the App chart pinned per Target, and
+         * an OCI reference is where that ends up.
          */
         app: nonEmptyString,
         /**
-         * Reference to the installer chart (§19) — the chart this installation
-         * itself was installed from.
+         * **No `installer` key.** It named the chart this installation was
+         * installed from — the release restating itself into a document the
+         * release does not render — and nothing in the process ever read it.
+         * A value that can only be wrong is not configuration.
          */
-        installer: nonEmptyString,
       })
       .strict(),
 
@@ -554,4 +568,27 @@ export type BuildRouteAdapter = z.infer<typeof buildRouteAdapterSchema>;
 export type BuildRouteConfig = z.infer<typeof buildRouteSchema>;
 export type TargetSeed = z.infer<typeof targetSeedSchema>;
 export type GatewayAuthConfig = z.infer<typeof gatewayAuthSchema>;
-export type InstallationManifest = z.infer<typeof installationManifestSchema>;
+
+/**
+ * The manifest as it is authored, stored and edited — exactly the schema above.
+ *
+ * This is what a declaration carries, what the durable row holds, and what
+ * `configureInstallation` accepts. It carries no derived key, so a write can
+ * never persist a copy of something the deployment already declares.
+ */
+export type AuthoredManifest = z.infer<typeof installationManifestSchema>;
+
+/**
+ * The authored document plus the deployment facts resolved around it.
+ *
+ * What every reader in the process is given. The split exists so that "what an
+ * operator may write" and "what the software may read" are different types: a
+ * derived value is present for readers and unreachable from any write path,
+ * which is what makes disagreement impossible rather than merely discouraged.
+ */
+export type InstallationManifest = Omit<AuthoredManifest, 'cloud'> & {
+  readonly cloud: AuthoredManifest['cloud'] & {
+    /** Resolved from the credential the deployment mounts, never authored. */
+    readonly federation: FederationConfig | null;
+  };
+};

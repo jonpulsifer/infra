@@ -16,22 +16,43 @@
 import { join } from 'node:path';
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
 import type { ConnectTargetInput } from '../../src/commands/targets/connect.ts';
+import { GCP_CREDENTIALS_VAR } from '../../src/config/federation-credential.ts';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
   type InstallationManifest,
   parseManifest,
+  resolveManifest,
 } from '../../src/config/manifest.ts';
 import type { NewTarget } from '../../src/db/schema.ts';
 import type { TargetConnection } from '../../src/domain/target.ts';
 
 const FIXTURE = join(import.meta.dir, '../fixtures/installation.example.yaml');
 
+/**
+ * The fixture deployment's own credential.
+ *
+ * §13's federation is not in the manifest — it is read from the
+ * `external_account` document the installer chart renders — so a test
+ * installation needs a deployment as well as a document. This is that
+ * deployment, and pointing the real resolver at it is what makes every test
+ * context carry federation the same way a pod does.
+ */
+export const FIXTURE_DEPLOYMENT_ENV: Record<string, string> = {
+  [GCP_CREDENTIALS_VAR]: join(
+    import.meta.dir,
+    '../fixtures/gcp-credentials.json',
+  ),
+};
+
 let cached: InstallationManifest | null = null;
 
-/** The fixture installation, parsed through the real loader. */
+/** The fixture installation, parsed and resolved through the real loader. */
 export async function fixtureManifest(): Promise<InstallationManifest> {
   if (cached === null) {
-    cached = parseManifest(await Bun.file(FIXTURE).text(), FIXTURE);
+    cached = await resolveManifest(
+      parseManifest(await Bun.file(FIXTURE).text(), FIXTURE),
+      FIXTURE_DEPLOYMENT_ENV,
+    );
   }
   return cached;
 }
