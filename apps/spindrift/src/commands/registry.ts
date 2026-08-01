@@ -66,6 +66,10 @@ import {
   configureInstallationInput,
 } from './installation/configure.ts';
 import {
+  getInstallationManifest,
+  getInstallationManifestInput,
+} from './installation/get.ts';
+import {
   beginRepositoryAuthorization,
   beginRepositoryAuthorizationInput,
   pollRepositoryAuthorization,
@@ -159,6 +163,10 @@ export const commandRegistry = {
   configureInstallation: {
     input: configureInstallationInput,
     handler: configureInstallation,
+  },
+  getInstallationManifest: {
+    input: getInstallationManifestInput,
+    handler: getInstallationManifest,
   },
   replaceConfig: { input: replaceConfigInput, handler: replaceConfig },
   uploadArchive: { input: uploadArchiveInput, handler: uploadArchive },
