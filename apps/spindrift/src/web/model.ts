@@ -103,6 +103,15 @@ export interface BuildView {
   readonly log: readonly LogLine[] | null;
   /** The runner that produced it, for the header. */
   readonly runner: string;
+  /**
+   * Where this build can be watched on the runner's own surface, or `null`
+   * where the runner has none.
+   *
+   * It exists for the fidelity gap: a `LIVE_STATUS` route withholds its text
+   * until the run ends, and the honest thing to do with a reader who wants it
+   * now is send them where it is rather than ask them to wait at an empty pane.
+   */
+  readonly runUrl: string | null;
 }
 
 /**

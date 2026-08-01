@@ -109,6 +109,7 @@ const BUILT = {
   steps: BUILD_STEPS_OK,
   log: LOG_OK,
   runner: 'hosted runner',
+  runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
 } as const;
 
 /**
@@ -153,6 +154,7 @@ export const DEPLOY_SCENARIOS = {
       ],
       log: null,
       runner: 'hosted runner',
+      runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
     },
   },
 
@@ -199,6 +201,7 @@ export const DEPLOY_SCENARIOS = {
         { text: '#9 ERROR: exited with code 1', tone: 'error' },
       ],
       runner: 'hosted runner',
+      runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
     },
   },
 

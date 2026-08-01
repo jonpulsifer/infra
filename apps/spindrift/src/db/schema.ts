@@ -464,6 +464,20 @@ export const builds = pgTable(
     /** §4: "The build backend and its fidelity are visible on the Build." */
     runner: text('runner'),
     logFidelity: logFidelity('log_fidelity'),
+    /**
+     * Where this build can be watched on the backend that is running it.
+     *
+     * A column rather than a log line because of *when* it is needed. §4's
+     * `LIVE_STATUS` means the text does not arrive until the run is over, so
+     * the log is empty during the exact window a developer wants to go look —
+     * a link inside it would land with the thing it was meant to substitute
+     * for. Written when the run is discovered, it is readable for the whole of
+     * the run.
+     *
+     * Null for a route that has no such place, which is the honest answer for
+     * an in-cluster build and not a missing value to paper over.
+     */
+    runUrl: text('run_url'),
     /** §4: durable identity for the dispatch attempt running or that ran this build. */
     dispatchId: text('dispatch_id'),
     /** Timestamp when the current runner claimed the dispatch lease. */

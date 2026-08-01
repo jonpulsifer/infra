@@ -34,7 +34,13 @@
  * takes one immutable view; its controller replaces that view as authenticated
  * attempt events arrive.
  */
-import { ArrowLeft, RefreshCw, Rocket, Undo2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ExternalLink,
+  RefreshCw,
+  Rocket,
+  Undo2,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel } from '../../components/diagnosis.tsx';
@@ -499,17 +505,38 @@ function BuildDrawer({ view }: { view: DeployView }) {
  * leaves the checklist above as the only live view. §18 makes saying so
  * mandatory — the alternative renders an empty pane and a spinner, which reads
  * as a broken stream rather than a known limit of that runner.
+ *
+ * **Stating the limit is necessary but not sufficient**: the text exists, it is
+ * live, and it is simply somewhere Spindrift cannot read from yet. So where the
+ * runner reports a page of its own, the sentence carries a way to go read it
+ * instead of only apologising for not having it.
  */
 function BuildOutput({ view }: { view: DeployView }) {
   const build = view.build;
   if (build === null) return null;
-  if (build.log !== null) return <LogPane lines={build.log} />;
+  if (build.log !== null) {
+    return (
+      <div className="flex flex-col gap-2">
+        <LogPane lines={build.log} />
+        <RunLink url={build.runUrl} />
+      </div>
+    );
+  }
 
   if (build.fidelity === 'LIVE_STATUS') {
     return (
       <Notice label="LIVE_STATUS">
         {build.runner} reports step status live, but its log text only arrives
-        when the build finishes. The checklist above is the live view.
+        when the build finishes. The checklist above is the live view
+        {build.runUrl === null ? (
+          '.'
+        ) : (
+          <>
+            {' — '}
+            <RunLink url={build.runUrl} inline />
+            {' for the text as it is written.'}
+          </>
+        )}
       </Notice>
     );
   }
@@ -517,7 +544,40 @@ function BuildOutput({ view }: { view: DeployView }) {
   return (
     <Notice label={build.fidelity}>
       {build.runner} releases its log when the build finishes.
+      {build.runUrl === null ? null : (
+        <>
+          {' '}
+          <RunLink url={build.runUrl} inline />
+          {' to watch it there.'}
+        </>
+      )}
     </Notice>
+  );
+}
+
+/**
+ * A way out to the runner's own view of this run.
+ *
+ * Rendered only from a URL the backend reported. Nothing here composes one out
+ * of a run id and a host name: a guessed link that 404s is worse than no link,
+ * because it is offered at the moment the reader has already been told the log
+ * is elsewhere.
+ */
+function RunLink({ url, inline }: { url: string | null; inline?: boolean }) {
+  if (url === null) return null;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={cn(
+        'inline-flex items-center gap-1 font-medium text-accent-foreground hover:underline',
+        inline ? '' : 'self-start text-[12.5px]',
+      )}
+    >
+      Open the run
+      <ExternalLink aria-hidden className="size-3" />
+    </a>
   );
 }
 
