@@ -31,12 +31,16 @@ export interface StartReconcilerOptions {
   readonly onEvent?: (event: ReconcilerProcessEvent) => void;
 }
 
+import { initTelemetry } from '../telemetry/index.ts';
+
 /**
  * Load durable installation state, construct adapters, and run until shutdown.
  */
 export async function startReconciler(
   options: StartReconcilerOptions,
 ): Promise<void> {
+  initTelemetry('reconciler');
+
   const env = options.env ?? Bun.env;
   const ownedClient = options.client === undefined;
   const client = options.client ?? createClient(env);

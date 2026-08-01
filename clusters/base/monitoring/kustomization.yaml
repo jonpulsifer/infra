@@ -7,3 +7,5 @@ resources:
   - metrics-server.yaml
   - helm-repository-vector.yaml
   - vector.yaml
+  - helm-repository-open-telemetry.yaml
+  - opentelemetry-collector.yaml

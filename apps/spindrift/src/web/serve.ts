@@ -39,10 +39,74 @@ import { type StreamSocketData, streamWebSocket } from './streams.ts';
  */
 export const ENROLMENT_TOKEN_VAR = 'SPINDRIFT_ENROLMENT_TOKEN';
 
+import {
+  httpRequestCounter,
+  httpRequestDuration,
+  initTelemetry,
+  logInfo,
+  tracer,
+} from '../telemetry/index.ts';
+
+function instrumentRoutes<T extends Record<string, any>>(routes: T): T {
+  const instrumented: Record<string, any> = {};
+  for (const [path, handler] of Object.entries(routes)) {
+    if (typeof handler === 'function') {
+      instrumented[path] = async (req: Request) => {
+        const startTime = Date.now();
+        return tracer.startActiveSpan(
+          `HTTP ${req.method} ${path}`,
+          async (span) => {
+            span.setAttribute('http.method', req.method);
+            span.setAttribute('http.target', path);
+
+            try {
+              const res = await (
+                handler as (r: Request) => Promise<Response> | Response
+              )(req);
+              const durationSec = (Date.now() - startTime) / 1000;
+              const status = res.status ?? 200;
+
+              httpRequestCounter.add(1, { path, status: String(status) });
+              httpRequestDuration.record(durationSec, {
+                path,
+                status: String(status),
+              });
+
+              span.setAttribute('http.status_code', status);
+              span.setStatus({ code: status < 400 ? 1 : 2 });
+              span.end();
+              return res;
+            } catch (err) {
+              const durationSec = (Date.now() - startTime) / 1000;
+              httpRequestCounter.add(1, { path, status: '500' });
+              httpRequestDuration.record(durationSec, {
+                path,
+                status: '500',
+              });
+
+              span.setStatus({ code: 2, message: String(err) });
+              span.recordException(
+                err instanceof Error ? err : new Error(String(err)),
+              );
+              span.end();
+              throw err;
+            }
+          },
+        );
+      };
+    } else {
+      instrumented[path] = handler;
+    }
+  }
+  return instrumented as T;
+}
+
 export async function start(
   client: Record<string, ClientRoute>,
   { development }: { development: boolean },
 ): Promise<void> {
+  initTelemetry('web');
+
   const db = createDb();
   const manifest = await loadStoredManifest(db);
   assertTrustedGatewayBoundary(manifest);
@@ -64,25 +128,30 @@ export async function start(
     gateway: manifest.auth.gateway,
   };
 
+  const rawRoutes = webRoutes(
+    client,
+    {
+      authenticate: (request) => authenticateRequest(request, auth),
+      context: (principal) => ({
+        principal,
+        clock: systemClock,
+        db,
+        adapters,
+        manifest,
+      }),
+    },
+    auth,
+  );
+
   const server = Bun.serve<StreamSocketData>({
     port: Number(Bun.env.PORT ?? 3000),
     development,
-    routes: webRoutes(
-      client,
-      {
-        authenticate: (request) => authenticateRequest(request, auth),
-        context: (principal) => ({
-          principal,
-          clock: systemClock,
-          db,
-          adapters,
-          manifest,
-        }),
-      },
-      auth,
-    ),
+    routes: instrumentRoutes(rawRoutes),
     websocket: streamWebSocket,
   });
 
-  console.log(`spindrift web → ${server.url} (${manifest.installation})`);
+  logInfo(`spindrift web → ${server.url} (${manifest.installation})`, {
+    url: String(server.url),
+    installation: manifest.installation,
+  });
 }
