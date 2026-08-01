@@ -27,6 +27,11 @@ tags:: runbook, validation
 	  kubectl kustomize clusters/folly/<category>
 	  kubectl kustomize clusters/offsite/<category>
 	  ```
+	- Run what CI runs, which renders both app overlays and then templates every in-repo chart their HelmReleases name, with that release's `.spec.values`:
+	- ```bash
+	  mise run k8s:render-apps
+	  ```
+	- A chart guard or template error is a failed task here rather than a failed Flux reconcile, so run it for a `packages/charts/` edit as well as a manifest edit. Charts served from a HelmRepository or OCIRepository are named and skipped.
 	- See [[Runbooks/Kubernetes GitOps Change]] and [[Runbooks/Add Shared Kubernetes Resource]].
 - # Terraform
 	- The binary is **OpenTofu** (`tofu`), not `terraform`. Validate every root the same way CI does:
