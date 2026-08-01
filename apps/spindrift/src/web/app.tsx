@@ -685,10 +685,10 @@ function DeployScreen({
 /**
  * The attempt screen for a Build that has no Deploy (§4).
  *
- * It exists because the Deploy button has two outcomes and only one of them
- * used to have a screen: "nothing was deployable, so a Build started" is a real
- * act with a durable id and a live event stream, and leaving the operator on
- * the workspace made it look like the press did nothing.
+ * The Deploy button has two outcomes and this is the screen for the second one:
+ * "nothing was deployable, so a Build started" is a real act with a durable id
+ * and a live event stream. Leaving the operator on the workspace would make the
+ * press look like it did nothing.
  *
  * The screen resolves itself. A Build that reaches an intent has a better page
  * than this one, so when `getBuildDetail` reports a Deploy naming this Build

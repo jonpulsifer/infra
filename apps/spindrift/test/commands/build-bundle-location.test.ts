@@ -4,8 +4,8 @@
  * §15 stages one immutable bundle "for either builder", and the durable address
  * of that bundle is a `gs://` object nothing without a Google credential can
  * resolve. Turning it into something the builder can fetch is `dispatchBuild`'s
- * job, and getting it wrong is what produced a build that died at `curl` and
- * blamed the developer for it.
+ * job; getting it wrong is a build that dies at `curl` and blames the developer
+ * for it.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -149,10 +149,9 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('a depot address reaches the route as a URL curl can follow', async () => {
-    // The defect verbatim: the route used to receive the stored location, and
-    // the stored location was not a URL. `curl` answered
-    // "Protocol upload not supported or disabled in libcurl" and the build died
-    // before it read a line of the App's code.
+    // Handing the route the stored location verbatim is what this rules out: it
+    // is not always a URL, and `curl` answers "Protocol upload not supported or
+    // disabled in libcurl" before the build reads a line of the App's code.
     const context = withFederation(signable);
     const build = await seedBuild(DEPOT_LOCATION);
 

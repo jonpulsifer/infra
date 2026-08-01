@@ -64,11 +64,10 @@ export async function runBuildPass(
     visited.add(row.buildId);
     const route = await routeForTarget(row.targetId, context);
     if (route === null) {
-      // A Target whose policy no configured route satisfies. Skipping silently
-      // is what `dispatchBuild`'s own refusals used to do, with the same result:
-      // a Build PENDING forever and nothing anywhere saying why. Configuring a
+      // A Target whose policy no configured route satisfies. Configuring a
       // route is an operator act that makes the next tick work, so the Build
-      // stays PENDING — and now says so, once.
+      // stays PENDING — and says so once, because a Build PENDING forever with
+      // nothing anywhere saying why is the failure worth spending a row on.
       await recordDispatchWait(
         context,
         {

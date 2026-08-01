@@ -86,13 +86,11 @@ interface RerunSource {
 /**
  * Stage the bundle the new Build will be dispatched from (§15).
  *
- * **A Build inherits a bundle only while that bundle is still fetchable.** The
- * rule sounds like a detail and is the whole ticket: this command used to copy
- * the previous Build's `bundleLocation` forward unconditionally, so a handle
- * staged before there was a depot to stage into outlived the release that
- * retired it. Build 10 was Build 9's `upload://` handle, one row later and
- * three weeks of fixes down the line, and it died at `curl` for exactly the
- * reason Build 9 had.
+ * **A Build inherits a bundle only while that bundle is still fetchable.**
+ * Copying the previous Build's `bundleLocation` forward unconditionally would
+ * carry an unfetchable handle — an `upload://` from an installation with no
+ * depot — into a Build that then dies at `curl` naming a download rather than
+ * the staging that never happened.
  *
  * **Why here and not at dispatch.** §15 has Spindrift "fetch the exact commit
  * *once* and stage an immutable source bundle for either builder", and the

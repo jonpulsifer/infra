@@ -632,7 +632,7 @@ describe('the workspace as a way into the system', () => {
     for (const entry of workspace.activity) {
       expect(entry.deployId ?? entry.buildId).not.toBeNull();
       // The clock is frozen at the same instant the rows were written, so the
-      // relative time is a real one rather than the "recently" it used to be.
+      // relative time is a real one rather than a "recently" placeholder.
       expect(entry.when).not.toBe('recently');
     }
     expect(workspace.deploys.map((release) => release.id)).toEqual([

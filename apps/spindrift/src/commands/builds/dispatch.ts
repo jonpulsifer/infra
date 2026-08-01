@@ -193,21 +193,17 @@ function routeRefusedByTarget(
  * builder §15 stages for is, because the hosted route's runner is a machine on
  * the public internet. So it is exchanged here for a short-TTL V4 signed URL.
  *
- * **A failure to mint one is a refusal, not a warning.** Dispatching anyway is
- * what produced this function: a route handed an address it could not resolve
- * ran a workflow that failed at its first step, and the developer was sent to
- * debug a Dockerfile over a location Spindrift itself had made unusable. A
- * refusal costs one dispatch and says the true thing.
+ * **A failure to mint one is a refusal, not a warning.** Dispatching anyway
+ * hands a route an address it cannot resolve, so the workflow fails at its first
+ * step and sends the developer to debug a Dockerfile over a location Spindrift
+ * itself made unusable. A refusal costs one dispatch and says the true thing.
  *
  * An `https://` location is already fetchable and passes through untouched.
- * **Anything else is refused here rather than forwarded.** It used to be
- * forwarded, on the reasoning that an `upload://` handle is honest about being
- * unfetchable and could be left to fail where it fails. Where it failed was
- * `curl: (1) Protocol "upload" not supported or disabled in libcurl`, on a
- * hosted runner, after a workflow had been dispatched — a failure the operator
- * reads out of a CI log for a refusal this function could have made for free.
- * A location no route can resolve is exactly what this function exists to
- * catch, so it catches it.
+ * **Anything else is refused here rather than forwarded.** An `upload://` handle
+ * is honest about being unfetchable, but forwarding it means the honesty arrives
+ * as `curl: (1) Protocol "upload" not supported or disabled in libcurl` on a
+ * hosted runner, after a dispatch — a CI log the operator has to read for a
+ * refusal this function makes for free.
  */
 async function fetchableBundleLocation(
   context: Pick<BuildDispatchContext, 'manifest'>,

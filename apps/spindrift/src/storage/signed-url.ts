@@ -52,8 +52,7 @@ const SCOPE_SUFFIX = 'auto/storage/goog4_request';
  *
  * Fifteen minutes is ample for a runner to pull a source bundle and short
  * enough that a URL leaked through a workflow run's outputs is a capability
- * that has already expired by the time anyone reads it. The ticket that settled
- * the signed-URL design named this number; it is not a tuning knob.
+ * that has already expired by the time anyone reads it. Not a tuning knob.
  */
 export const SIGNED_URL_TTL_SECONDS = 900;
 

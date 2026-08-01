@@ -1,5 +1,5 @@
 /**
- * Tests for PR #1364 build dispatch follow-ups:
+ * Build dispatch:
  * 1. Durable dispatch identity and lease timeout
  * 2. Explicit Target binding when a Component has multiple placements
  * 3. Atomic per-App concurrency limit across reconciler replicas

@@ -1,13 +1,11 @@
 ---
-# Spindrift is a **platform workload, never one of its own Apps** (§19). The
-# bootstrap circularity — a deploy layer that would otherwise have to deploy
-# itself — resolves by classification, not machinery: Flux owns this namespace
-# exactly as it owns Atlantis's and hub's.
+# Spindrift is a **platform workload, never one of its own Apps**: Flux owns
+# this namespace exactly as it owns Atlantis's and hub's, which is what resolves
+# a deploy layer that would otherwise have to deploy itself.
 #
-# The chart is sourced from GitRepository/infra rather than OCI, which is the
-# plan's stated deferral. It costs the per-Target chart pinning §7 wants and
-# leaves the extraction path unexercised; reversing it is one workflow plus a
-# source swap, and it must happen before extraction is claimed.
+# The chart is sourced from GitRepository/infra rather than OCI. That costs the
+# per-Target chart pinning and leaves the extraction path unexercised; reversing
+# it is one workflow plus a source swap, and must happen before extraction.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -24,15 +22,9 @@ spec:
         name: infra
         namespace: flux-system
   values:
-    # Renovate pins the digest on this line. Flux picks up the change
-    # and rolls out the new image automatically.
-    #
-    # It must be an image whose schema agrees with the chart about which keys a
-    # declaration may carry. `be1a951` was pinned two minutes before #1500
-    # derived `cloud.federation` and `charts.installer` away, so it required the
-    # two keys the chart had begun refusing — the declaration could satisfy the
-    # chart or the process, never both, and the pods crashlooped on a manifest
-    # the chart would not have rendered had it carried them.
+    # Renovate pins the digest on this line and Flux rolls it out. The image's
+    # manifest schema and the chart must agree on which keys a declaration may
+    # carry — the manifest below has to satisfy both.
     image: ghcr.io/jonpulsifer/spindrift:latest@sha256:07ff8fa911dd199ef8399979793ee129963a6374ca927a5e75c5531673424131
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
@@ -42,15 +34,15 @@ spec:
     # The Secret carries only the one-time enrolment token and optional
     # integration credentials.
     envFromSecret: spindrift-env
-    # The whole of §13's federation. These two values render the pod's
-    # `external_account` credential, and the process reads its federation out of
-    # that file — so this is the only place the facts are stated.
+    # The whole of the federation. These two values render the pod's
+    # `external_account` credential and the process reads its federation out of
+    # that file, so this is the only place the facts are stated.
     #
     # The pool principal holds `roles/iam.workloadIdentityUser` and
     # `roles/iam.serviceAccountTokenCreator` on this one service account and
-    # nothing else; every project role, the source bucket and the signer hang
-    # off the account. Impersonating it is therefore the only thing the
-    # federated identity can do, which is why the url is not optional here.
+    # nothing else; every project role, the source bucket, and the signer hang
+    # off the account. Impersonating it is the only thing the federated identity
+    # can do, so the url is not optional here.
     # Declared in terraform/gcp/projects/bluenose/iam.tf.
     serviceAccount:
       token:
@@ -58,14 +50,14 @@ spec:
         gcpImpersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
     ingress:
       enabled: true
-    # §19's own database, including the installation manifest singleton.
+    # The control plane's own database, including the installation manifest
+    # singleton. Both processes wait for the image's committed migration journal
+    # before becoming Ready.
     database:
       enabled: true
       size: 2Gi
       migration:
         enabled: true
-    # Both processes wait for the image's committed migration journal before
-    # becoming Ready.
     reconciler:
       enabled: true
     web:
@@ -76,16 +68,9 @@ spec:
         limits:
           memory: 768Mi
           cpu: 1000m
-    # §20's installation manifest, declared rather than seeded.
-    #
-    # The durable row is written from this document at process start and
-    # otherwise from itself, so an undeclared installation can only ever be
-    # seeded — and a value seeded wrong stays wrong. `zeroConfigFrontend` was
-    # exactly that: `ghcr.io/railwayapp/railpack:railpack-frontend` came in with
-    # the row, GHCR does not serve that repository at all, and two later
-    # corrections to the code default could not reach an installation that
-    # already had one. Declaring the document is what puts a manifest change
-    # back under ordinary review.
+    # The installation manifest, declared rather than seeded: the durable row is
+    # written from this document at process start, which is what puts a manifest
+    # change under ordinary review.
     #
     # Both zones are substituted by the apps Kustomization — `SPINDRIFT_DOMAIN`
     # from cluster-settings, `SECRET_DOMAIN` from cluster-secrets — so the zone
@@ -103,15 +88,14 @@ spec:
         routes:
           - name: hosted
             adapter: github-actions
-        # Railpack publishes the frontend as its own repository. The tag is a
-        # version because rebuilding one bundle digest should not silently
-        # change what built it, and this is the only input to a zero-config
-        # build that no digest covers.
+        # Railpack publishes the frontend as its own repository. Pinned to a
+        # version rather than a moving tag: it is the only input to a
+        # zero-config build that no digest covers.
         zeroConfigFrontend: ghcr.io/railwayapp/railpack-frontend:v0.35.0
       cloud:
-        # No `federation` here. It is read from the `external_account`
-        # credential this chart renders, from the two serviceAccount.token
-        # values above — declaring it a second time is what the chart refuses.
+        # Federation is not a manifest key: it is read from the
+        # `external_account` credential the chart renders from the two
+        # serviceAccount.token values above.
         artifactsProject: trusted-builds
         homeVesselProject: bluenose
       charts:

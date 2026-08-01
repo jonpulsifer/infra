@@ -119,13 +119,8 @@ function imageNames(input: BuildKitProgramInput): string {
  * railpack-frontend` is the whole railpack binary at `/railpack` with
  * `ENTRYPOINT ["/railpack", "frontend"]` — `frontend` is one subcommand of the
  * CLI that also carries `prepare`. So the release that reads the plan is
- * extracted from the image already pinned to read it, and "same release" stops
- * being a thing to arrange: there is one artifact, and it cannot disagree with
- * itself. What used to be here — deriving a version from the image tag to fetch
- * a second copy of that binary from GitHub releases — could disagree, and did:
- * a tag that was not a version (`railpack:railpack-frontend`) resolved to a
- * release URL that 404'd, in a step whose error named a download rather than the
- * misconfigured field.
+ * extracted from the image already pinned to read it, so "same release" is not a
+ * thing to arrange: there is one artifact, and it cannot disagree with itself.
  *
  * A named context is how a file leaves an image without a registry client: the
  * dockerfile frontend resolves `docker-image://` itself, so this needs nothing

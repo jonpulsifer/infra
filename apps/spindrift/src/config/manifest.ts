@@ -58,11 +58,10 @@ export function parseManifest(
 }
 
 /**
- * Keys the schema no longer has, and where the fact went instead.
+ * Keys the schema does not have, and where the fact lives instead.
  *
- * Read as `[block, key, why]`. Every one of them was a copy of something the
- * deployment already declares, so a document still carrying one is describing
- * a fact it does not own.
+ * Read as `[block, key, why]`. Each is a copy of something the deployment
+ * declares, so a document carrying one is describing a fact it does not own.
  */
 const DERIVED_AWAY: readonly (readonly [string, string, string])[] = [
   [
@@ -74,17 +73,15 @@ const DERIVED_AWAY: readonly (readonly [string, string, string])[] = [
 ];
 
 /**
- * Drop the keys that were derived away, before the strict schema sees them.
+ * Drop the derived-away keys before the strict schema sees them.
  *
- * Dropped rather than refused, and the difference matters: an installation
- * seeded before the removal has one of these in its durable row, and a
- * refusal would be a control plane that will not boot until someone edits
- * Postgres by hand. The row is rewritten from what this returns, so it
- * self-heals on the first start and the warning fires once.
+ * Dropped rather than refused: a durable row holding one of these would
+ * otherwise be a control plane that will not boot until someone edits Postgres
+ * by hand. The row is rewritten from what this returns, so it self-heals on the
+ * first start and the warning fires once.
  *
- * This is also what makes the removal complete. A key that is merely absent
- * from the schema can be written back by any caller holding an older document;
- * a key that is stripped on the way in cannot reach storage from any path.
+ * Stripping on the way in is also what keeps a key out of storage from every
+ * path, which mere absence from the schema does not.
  */
 function withoutDerivedKeys(manifest: unknown, source: string): unknown {
   if (

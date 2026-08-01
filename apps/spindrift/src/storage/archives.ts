@@ -8,12 +8,11 @@
  * to the installation's **source depot** — the GCS bucket the manifest names —
  * so that both builders §15 stages for can fetch it.
  *
- * **The pod's own disk is not a depot.** It used to be one, and it could not
- * work: a bundle written to `tmpdir()` is not shared with the reconciler, not
- * shared with a second replica, and gone on the next restart, so no builder
- * anywhere could fetch it under any scheme. The local directory survives here
- * only as the fallback for an installation with no depot configured — a
- * developer running the process on a laptop — and it announces itself as such
+ * **The pod's own disk is not a depot.** A bundle written to `tmpdir()` is not
+ * shared with the reconciler, not shared with a second replica, and gone on the
+ * next restart, so no builder could fetch it under any scheme. The local
+ * directory is only the fallback for an installation with no depot configured —
+ * a developer running the process on a laptop — and it announces itself as such
  * by keeping the `upload://` handle, which is deliberately not a URL. A
  * location that cannot be fetched should not be spelled like one that can.
  */

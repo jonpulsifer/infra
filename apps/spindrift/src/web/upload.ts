@@ -106,12 +106,9 @@ export async function handleUpload(
       bytes = new Uint8Array(buffer);
     }
 
-    // One staging call, to one place. It used to be two — local disk first,
-    // then the bucket on top — which meant the bytes were written twice and the
-    // location came back describing whichever step happened to run, so a depot
-    // that was configured but unreachable still answered with a pod-local
-    // handle no builder could fetch. A depot failure is now a `500` that says
-    // so, because a staged bundle nobody can retrieve is not a staged bundle.
+    // One staging call, to one place, so the returned location describes where
+    // the bytes actually are. A depot failure is a `500` that says so, because
+    // a staged bundle nobody can retrieve is not a staged bundle.
     const context = await deps.context(authentication.principal);
     const depot = sourceDepotFor(
       context.manifest,
