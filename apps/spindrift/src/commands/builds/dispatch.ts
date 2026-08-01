@@ -38,6 +38,10 @@ import {
   repositories,
   targets,
 } from '../../db/schema.ts';
+import {
+  artifactTags,
+  componentRepository,
+} from '../../domain/artifact-name.ts';
 import { recordBuildEvent } from '../../domain/attempt-log.ts';
 import {
   buildRouteCandidates,
@@ -373,6 +377,55 @@ export const dispatchBuild = async (
     buildId: build.id,
   };
 
+  /**
+   * §16 names one registry per installation — "every artifact is pushed to and
+   * pulled from" it — and a Build is keyed on a *shape*, not on a Target (§2),
+   * so there is no Target here to read a reachable registry off. That is the
+   * right way round: whether a Target can reach the registry is a placement
+   * filter (§3's `reachableRegistries`), applied before the build, not a choice
+   * the build makes. An adapter never picks its own destination (§4).
+   *
+   * What §16 names is a **namespace**, so a repository is composed under it
+   * here. Refused rather than projected when a name cannot be a path segment:
+   * the registry would answer `NAME_INVALID` at the last step of the build, and
+   * projecting instead would push two Components to one repository. Recorded
+   * and closed out like an unfetchable location, because a name is a column on
+   * these rows and no later tick makes it legal — an operator renaming the App
+   * or the Component is what clears it.
+   *
+   * Ahead of the signed URL deliberately: a bearer capability minted for a
+   * Build that cannot be dispatched is one that exists for no reason.
+   */
+  const destination = componentRepository({
+    registry: context.manifest.supplyChain.registry,
+    app: app.name,
+    component: component.name,
+  });
+  if (destination === null) {
+    const sentence =
+      `App "${app.name}" / Component "${component.name}" cannot name a ` +
+      `repository under ${context.manifest.supplyChain.registry}: a registry ` +
+      `path segment is lowercase alphanumerics separated by "-", "_" or "."`;
+    await recordBuildEvent(context.db, attempt, {
+      type: 'log',
+      line: sentence,
+      resource: 'bundle',
+    });
+    await recordBuildEvent(context.db, attempt, {
+      // §6's table covers "invalid spec" here, which is what a name no registry
+      // will accept is — and it blames the developer, who is the one who can
+      // rename the thing.
+      type: 'status',
+      phase: 'FAILED',
+      reason: 'REJECTED',
+    });
+    await context.db
+      .update(builds)
+      .set({ status: 'FAILED' })
+      .where(eq(builds.id, build.id));
+    return failed('NOT_BUILDABLE', sentence);
+  }
+
   const fetchable = await fetchableBundleLocation(
     context,
     app,
@@ -437,15 +490,12 @@ export const dispatchBuild = async (
     artifactType: build.artifactType,
     kind: component.kind,
     platform: DEFAULT_PLATFORM,
+    destination,
     /**
-     * §16 names one registry per installation — "every artifact is pushed to and
-     * pulled from" it — and a Build is keyed on a *shape*, not on a Target (§2),
-     * so there is no Target here to read a reachable registry off. That is the
-     * right way round: whether a Target can reach the registry is a placement
-     * filter (§3's `reachableRegistries`), applied before the build, not a
-     * choice the build makes. An adapter never picks its own destination (§4).
+     * §12 counts tags, so a push that carried only the implicit `:latest` would
+     * leave retention nothing to act on and a rollback depth of one.
      */
-    destination: context.manifest.supplyChain.registry,
+    tags: artifactTags(build.bundleDigest),
     /**
      * §4: "a website's build-time config is passed as build arguments as
      * ordinary rows, not fetched from a store — whatever a website bakes

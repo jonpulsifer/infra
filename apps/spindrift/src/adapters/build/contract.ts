@@ -101,10 +101,30 @@ export interface BuildSpec {
   /** What the artifact must run on (§3). */
   platform: Platform;
   /**
-   * Where the artifact is published. Core picks it from the Target's
-   * `reachableRegistries` (§3); an adapter never chooses its own destination.
+   * The **repository** the artifact is published to, without a tag. Core picks
+   * it from the Target's `reachableRegistries` (§3); an adapter never chooses
+   * its own destination.
+   *
+   * A repository and not the installation's registry namespace: the namespace
+   * is a prefix, and a registry answers `NAME_INVALID` to a single-segment
+   * path. `componentRepository` composes it.
    */
   destination: string;
+  /**
+   * The tags to push it under, most specific first (§12).
+   *
+   * Separate from {@link destination} rather than folded into it because the
+   * two are read by different things: the destination alone is what an
+   * immutable `repository@digest` reference is built from — which is what the
+   * build report carries and what a Deploy pins — while the tags exist for
+   * §12's retention to count and for a person to type. A destination that
+   * already carried a tag would put one in every digest reference derived from
+   * it.
+   *
+   * Never empty: a build that pushed under no tag would be collected by the
+   * first retention pass that ran.
+   */
+  tags: readonly string[];
   /**
    * Build arguments as ordinary rows, never fetched from a store: whatever a
    * website bakes becomes public anyway, so no builder ever holds a store

@@ -35,8 +35,13 @@ export interface BuildKitProgramInput {
   readonly bundleDigest: string;
   /** The scope inside the bundle, after §5's unwrap. */
   readonly subpath: string;
-  /** Where the artifact is pushed. Core chose it; the route never does (§4). */
+  /**
+   * The repository the artifact is pushed to, without a tag. Core chose it; the
+   * route never does (§4).
+   */
   readonly destination: string;
+  /** The tags to push it under (§12). Core chose these too. */
+  readonly tags: readonly string[];
   /** The zero-config frontend the installation pinned. */
   readonly zeroConfigFrontend: string;
   /** §4: ordinary rows, never fetched from a store. */
@@ -68,6 +73,7 @@ export function buildKitProgramFor(
     bundleDigest: source.bundleDigest,
     subpath: source.origin.subpath,
     destination: spec.destination,
+    tags: spec.tags,
     zeroConfigFrontend,
     buildArgs: spec.buildArgs,
   });
@@ -82,6 +88,20 @@ export function buildKitProgramFor(
  */
 function quote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * The `name=` field of the image exporter, carrying every tag (§12).
+ *
+ * The exporter takes one comma-separated list of full references, and its
+ * options are themselves comma-separated — so the field is wrapped in the
+ * double quotes buildctl's CSV parser reads, which is a different layer from
+ * the single quotes {@link quote} puts around the whole option for `sh`. Both
+ * are needed and neither substitutes for the other.
+ */
+function imageNames(input: BuildKitProgramInput): string {
+  const refs = input.tags.map((tag) => `${input.destination}:${tag}`).join(',');
+  return `"name=${refs}"`;
 }
 
 /**
@@ -130,7 +150,7 @@ buildctl-daemonless.sh build "$@" \\
 ${args}
   --attest=type=provenance,mode=max \\
   --attest=type=sbom \\
-  --output ${quote(`type=image,name=${input.destination},push=true`)} \\
+  --output ${quote(`type=image,${imageNames(input)},push=true`)} \\
   --metadata-file "$workspace/metadata.json"
 
 digest=$(sed -n 's/.*"containerimage.digest"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$workspace/metadata.json")

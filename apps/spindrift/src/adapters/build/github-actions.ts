@@ -185,7 +185,10 @@ export interface BuildRequestSpec {
   readonly artifactType: BuildSpec['artifactType'];
   readonly kind: BuildSpec['kind'];
   readonly platform: BuildSpec['platform'];
+  /** The repository, without a tag. */
   readonly destination: string;
+  /** What to push it as (§12); the workflow tags with these and no others. */
+  readonly tags: readonly string[];
   readonly buildArgs: Readonly<Record<string, string>>;
   /** Pinned by the installation, never chosen by the runner. */
   readonly zeroConfigFrontend: string;
@@ -245,6 +248,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       kind: spec.kind,
       platform: spec.platform,
       destination: spec.destination,
+      tags: spec.tags,
       buildArgs: spec.buildArgs,
       zeroConfigFrontend: this.options.zeroConfigFrontend,
     };
