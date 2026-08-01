@@ -1,0 +1,17 @@
+---
+# Offsite has no Loki — folly is the log hub. Point the Vector Loki sinks at the
+# folly Loki ingress (substituted to https://loki.${SECRET_DOMAIN}) instead of
+# the in-cluster service that only exists on folly.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: vector
+  namespace: monitoring
+spec:
+  values:
+    customConfig:
+      sinks:
+        loki_kubernetes:
+          endpoint: https://loki.${SECRET_DOMAIN}
+        loki_journald:
+          endpoint: https://loki.${SECRET_DOMAIN}

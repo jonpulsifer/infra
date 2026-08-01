@@ -18,3 +18,10 @@ patches:
       - op: replace
         path: /spec/maxHistory
         value: 2
+  - path: vector-loki-endpoint.yaml
+    target:
+      group: helm.toolkit.fluxcd.io
+      version: v2
+      kind: HelmRelease
+      name: vector
+      namespace: monitoring

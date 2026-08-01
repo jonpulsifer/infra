@@ -56,8 +56,6 @@ spec:
       exporters:
         debug:
           verbosity: detailed
-        loki:
-          endpoint: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
       service:
         pipelines:
           traces:
@@ -71,7 +69,7 @@ spec:
           logs:
             receivers: [otlp]
             processors: [memory_limiter, batch]
-            exporters: [debug, loki]
+            exporters: [debug]
     ports:
       otlp:
         enabled: true
