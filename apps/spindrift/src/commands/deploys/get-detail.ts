@@ -194,6 +194,7 @@ export const getDeployDetail: Command<
     buildId: deploy.build.id,
     componentId: deploy.component.id,
     targetId: deploy.target.id,
+    appId: deploy.component.app.id,
     app: deploy.component.app.name,
     component: deploy.component.name,
     target: deploy.target.name,

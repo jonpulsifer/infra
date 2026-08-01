@@ -62,7 +62,7 @@ async function seedAttempt() {
     .values({
       componentId: component!.id,
       commit: 'deadbeef',
-      targetShape: 'kubernetes:image',
+      targetShape: 'image',
       artifactType: 'image',
     })
     .returning();

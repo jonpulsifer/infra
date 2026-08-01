@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import { createApp } from '../../src/commands/create-app.ts';
 import {
   createComponent,
@@ -303,7 +304,7 @@ describe('getDeployDetail command', () => {
       .values({
         componentId: createdComp.value.componentId,
         commit: '7f3d2c1',
-        targetShape: 'kubernetes',
+        targetShape: 'image',
         artifactType: 'image',
         artifactDigest: 'sha256:1234567890abcdef',
         status: 'SUCCEEDED',
@@ -392,7 +393,7 @@ describe('getDeployDetail command', () => {
       .values({
         componentId: createdComp.value.componentId,
         commit: '1111111',
-        targetShape: 'kubernetes',
+        targetShape: 'image',
         artifactType: 'image',
         status: 'SUCCEEDED',
       })
@@ -414,7 +415,7 @@ describe('getDeployDetail command', () => {
       .values({
         componentId: createdComp.value.componentId,
         commit: '2222222',
-        targetShape: 'kubernetes',
+        targetShape: 'image',
         artifactType: 'image',
         status: 'FAILED',
       })
@@ -501,7 +502,7 @@ describe('deployApp command', () => {
       .values({
         componentId: createdComp.value.componentId,
         commit: '1234567',
-        targetShape: 'kubernetes',
+        targetShape: 'image',
         artifactType: 'image',
         artifactDigest:
           'sha256:1111222233334444555566667777888899990000111122223333444455556666',
@@ -525,10 +526,145 @@ describe('deployApp command', () => {
     if (!result.ok) return;
 
     expect(result.value.deployId).toBeGreaterThan(0);
+    expect(result.value.phase).toBe('PENDING');
+    // The existing artifact is what gets deployed. A second Build here would
+    // mean the intent path refused and something built instead of saying so.
     expect(result.value.buildId).toBe(buildRow!.id);
+    const buildRows = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.componentId, createdComp.value.componentId));
+    expect(buildRows).toHaveLength(1);
   });
 
-  test('kicks off a new pending build and deploy when build failed', async () => {
+  test('surfaces the refusal and writes nothing when the Target is disconnected', async () => {
+    // The whole point of the button going through `createDeploy`: a refusal is
+    // a sentence the operator has to read, not a cue to build something else.
+    const ctx = context();
+    const appName = `refused-${crypto.randomUUID().slice(0, 8)}`;
+    const createdApp = await createApp(
+      {
+        name: appName,
+        sourceKind: 'repo',
+        repoUrl: 'https://github.com/acme/refused.git',
+      },
+      ctx,
+    );
+    expect(createdApp.ok).toBe(true);
+    if (!createdApp.ok) return;
+
+    const createdComp = await createComponent(
+      {
+        appId: createdApp.value.appId,
+        name: 'web',
+        kind: 'service',
+        expose: true,
+        exposure: 'private',
+      },
+      ctx,
+    );
+    expect(createdComp.ok).toBe(true);
+    if (!createdComp.ok) return;
+
+    const [targetRow] = await ctx.db
+      .insert(targets)
+      .values(targetValues({ adapter: 'kubernetes', status: 'disconnected' }))
+      .returning();
+
+    await ctx.db.insert(componentTargetDesired).values({
+      componentId: createdComp.value.componentId,
+      targetId: targetRow!.id,
+    });
+
+    const [buildRow] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId: createdComp.value.componentId,
+        commit: 'refused-commit',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest:
+          'sha256:1111222233334444555566667777888899990000111122223333444455556666',
+        status: 'SUCCEEDED',
+        verifiedBuildLevel: 2,
+        signature: {
+          artifactDigest:
+            'sha256:1111222233334444555566667777888899990000111122223333444455556666',
+          signer: 'gcpkms://test/signer',
+          format: 'cosign',
+          bundle: {
+            mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+          },
+          signedAt: FROZEN.toISOString(),
+        },
+      })
+      .returning();
+
+    const result = await deployApp({ name: appName }, ctx);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain(targetRow!.name);
+    expect(result.failure.message).toContain('disconnected');
+
+    // Nothing was written behind the refusal: no second Build, no intent.
+    const buildRows = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.componentId, createdComp.value.componentId));
+    expect(buildRows).toHaveLength(1);
+    expect(buildRows[0]!.id).toBe(buildRow!.id);
+
+    const deployRows = await ctx.db
+      .select()
+      .from(deploys)
+      .where(eq(deploys.componentId, createdComp.value.componentId));
+    expect(deployRows).toHaveLength(0);
+  });
+
+  test('refuses a name two Apps answer to rather than deploying an arbitrary one', async () => {
+    // `apps` has no unique constraint on `name`, so this is a live shape:
+    // offsite currently holds two Apps called `infra`.
+    const ctx = context();
+    const appName = `twinned-${crypto.randomUUID().slice(0, 8)}`;
+    const first = await createApp(
+      {
+        name: appName,
+        sourceKind: 'repo',
+        repoUrl: 'https://github.com/acme/first.git',
+      },
+      ctx,
+    );
+    const second = await createApp(
+      {
+        name: appName,
+        sourceKind: 'repo',
+        repoUrl: 'https://github.com/acme/second.git',
+      },
+      ctx,
+    );
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!(first.ok && second.ok)) return;
+
+    const result = await deployApp({ name: appName }, ctx);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    expect(result.failure.code).toBe('INVALID_INPUT');
+    expect(result.failure.message).toContain(first.value.appId);
+    expect(result.failure.message).toContain(second.value.appId);
+
+    // The id resolves the ambiguity the name cannot.
+    const byId = await deployApp({ name: first.value.appId }, ctx);
+    expect(byId.ok).toBe(false);
+    if (byId.ok) return;
+    expect(byId.failure.code).toBe('NOT_FOUND');
+    expect(byId.failure.message).toContain('no components');
+  });
+
+  test('starts a Build and writes no intent when the last build failed', async () => {
     const ctx = context();
     const appName = `rebuild-${crypto.randomUUID().slice(0, 8)}`;
     const createdApp = await createApp(
@@ -568,7 +704,7 @@ describe('deployApp command', () => {
     await ctx.db.insert(builds).values({
       componentId: createdComp.value.componentId,
       commit: 'failed-commit',
-      targetShape: 'kubernetes',
+      targetShape: 'image',
       artifactType: 'image',
       status: 'FAILED',
     });
@@ -577,7 +713,22 @@ describe('deployApp command', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.deployId).toBeGreaterThan(0);
-    expect(result.value.phase).toBe('PENDING');
+    // A Build, and only a Build. An intent naming a PENDING Build would name an
+    // artifact that does not exist, and could not pass `checkDeployable`.
+    expect(result.value.deployId).toBeNull();
+    expect(result.value.phase).toBe('BUILDING');
+    expect(result.value.buildId).toBeGreaterThan(0);
+
+    const pending = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, result.value.buildId));
+    expect(pending[0]!.status).toBe('PENDING');
+
+    const deployRows = await ctx.db
+      .select()
+      .from(deploys)
+      .where(eq(deploys.componentId, createdComp.value.componentId));
+    expect(deployRows).toHaveLength(0);
   });
 });

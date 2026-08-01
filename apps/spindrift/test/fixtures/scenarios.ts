@@ -77,6 +77,7 @@ const BASE = {
   buildId: 41,
   componentId: '00000000-0000-4000-8000-000000000041',
   targetId: '00000000-0000-4000-8000-000000000042',
+  appId: '00000000-0000-4000-8000-000000000040',
   app: 'almanac',
   component: 'web',
   target: 'Metal',
