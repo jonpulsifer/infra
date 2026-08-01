@@ -80,6 +80,10 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // system's vocabulary in every installation.
   'base64',
   'sha256',
+  // The POSIX utility that checks the plan generator's download, named in the
+  // builder program and in the tools that program declares it needs. Same kind
+  // of thing as the two above: a lowercase word carrying a digit.
+  'sha256sum',
   'run-name',
   // Supply-chain posture keys and pinned tool vocabulary. These are product
   // terms identical in every installation, not cloud project identifiers.
