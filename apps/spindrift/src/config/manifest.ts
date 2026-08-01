@@ -132,11 +132,14 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
      * §5's ladder pulls it whenever a scope has no Dockerfile, so a
      * stand-in here is a build that cannot fall through.
      *
-     * Railpack publishes the frontend as its own repository with version tags —
-     * `railwayapp/railpack` is not a repository that serves, and there is no
-     * `latest` here to track, so the pin names a version.
+     * Railpack publishes the frontend as its own repository,
+     * `railwayapp/railpack-frontend` — `railwayapp/railpack` is one GHCR
+     * refuses to serve at all. The frontend repository does carry a `latest`,
+     * and the pin names a version anyway: rebuilding one bundle digest should
+     * not silently change what built it, and this is the only input to a
+     * zero-config build that no digest covers.
      */
-    zeroConfigFrontend: 'ghcr.io/railwayapp/railpack-frontend:v0.0.33',
+    zeroConfigFrontend: 'ghcr.io/railwayapp/railpack-frontend:v0.35.0',
   },
   secretStore: {
     adapter: 'onepassword',

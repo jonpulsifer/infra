@@ -13,6 +13,16 @@
 
 image: ""
 
+# The installation manifest document. Empty declares nothing and leaves the
+# durable row in charge, which is what every installation did before this key
+# existed and remains a valid way to run.
+#
+# Declaring it is how a manifest value gets corrected. The row is written from a
+# declaration when one is present and otherwise from itself, and no product
+# command writes it — so an installation whose row is already seeded has no
+# other hand to change it with.
+manifest: {}
+
 # One named identity for the control plane. Kubernetes never automounts its
 # default API credential: both processes receive projected, audience-scoped
 # credentials because the reconciler deploys and the web process tails logs.
