@@ -5,7 +5,7 @@
  * Component and placement Target, this command creates a Deploy intent.
  * If the latest build failed, has no artifact, or a rebuild is needed, it
  * creates a new PENDING Build and Deploy intent, which the reconciler's
- * `build-loop` and `deploy-loop` pick up and run.
+ * build loop and deploy loop pick up and run.
  */
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';

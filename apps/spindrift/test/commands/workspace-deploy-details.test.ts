@@ -18,6 +18,7 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
+import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const manifest = await fixtureManifest();
@@ -26,6 +27,8 @@ const database = withIsolatedDatabase();
 const FROZEN = new Date('2026-07-29T10:00:00.000Z');
 const frozenClock: Clock = { now: () => FROZEN };
 
+const supplyChainHarness = new SupplyChainHarness();
+
 const noAdapters: AdapterRegistry = {
   deploy: () => null,
   build: () => null,
@@ -33,9 +36,7 @@ const noAdapters: AdapterRegistry = {
     throw new Error('no store adapter is configured for this test');
   },
   repository: () => null,
-  supplyChain: () => {
-    throw new Error('command reached supply chain');
-  },
+  supplyChain: () => supplyChainHarness,
 };
 
 function context(clock: Clock = frozenClock): CommandContext {
@@ -505,6 +506,17 @@ describe('deployApp command', () => {
         artifactDigest:
           'sha256:1111222233334444555566667777888899990000111122223333444455556666',
         status: 'SUCCEEDED',
+        verifiedBuildLevel: 2,
+        signature: {
+          artifactDigest:
+            'sha256:1111222233334444555566667777888899990000111122223333444455556666',
+          signer: 'gcpkms://test/signer',
+          format: 'cosign',
+          bundle: {
+            mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+          },
+          signedAt: FROZEN.toISOString(),
+        },
       })
       .returning();
 
