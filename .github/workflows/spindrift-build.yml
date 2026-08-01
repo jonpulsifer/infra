@@ -72,6 +72,7 @@ jobs:
       # stages one immutable bundle for either builder — cloning again here
       # would build a second tree the source receipt does not describe.
       - name: Fetch the staged bundle
+        id: bundle
         env:
           LOCATION: ${{ steps.request.outputs.location }}
         run: |
@@ -79,6 +80,20 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/bundle"
           curl --fail --silent --show-error --location "$LOCATION" \
             | tar -xz -C "${RUNNER_TEMP}/bundle"
+          # §5's unwrap, which is what makes the subpath below resolve. Core
+          # records a scope relative to the source root, and a bundle's root is
+          # not always that: a repository tarball wraps the whole tree in one
+          # `{owner}-{repo}-{sha}` directory. The rule is the shape rather than
+          # the source — exactly one entry and it a directory — because an
+          # uploaded archive may arrive either way, and it is the same rule
+          # `archiveScope` applies to the copy core detects against.
+          root="${RUNNER_TEMP}/bundle"
+          shopt -s dotglob nullglob
+          entries=("$root"/*)
+          if [ "${#entries[@]}" -eq 1 ] && [ -d "${entries[0]}" ]; then
+            root="${entries[0]}"
+          fi
+          printf 'root=%s\n' "$root" >> "$GITHUB_OUTPUT"
 
       # §5's ladder, and the only decision made here: a Dockerfile settles how
       # to build and never what the thing is. Where there is none, a one-line
@@ -88,11 +103,12 @@ jobs:
       - name: Choose the frontend
         id: frontend
         env:
+          ROOT: ${{ steps.bundle.outputs.root }}
           SUBPATH: ${{ steps.request.outputs.subpath }}
           FRONTEND: ${{ steps.request.outputs.frontend }}
         run: |
           set -euo pipefail
-          scope="${RUNNER_TEMP}/bundle/${SUBPATH}"
+          scope="${ROOT}/${SUBPATH}"
           if [ -f "${scope}/Dockerfile" ]; then
             printf 'context=%s\nfile=%s\n' "$scope" "${scope}/Dockerfile"
           else

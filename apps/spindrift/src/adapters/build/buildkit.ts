@@ -101,7 +101,21 @@ export function buildKitProgram(input: BuildKitProgramInput): string {
   return `set -eu
 workspace=$(mktemp -d)
 wget -qO- ${quote(input.bundleUrl)} | tar -xz -C "$workspace"
-cd "$workspace"/${quote(input.subpath)}
+
+# §5's unwrap. The subpath is relative to the source root, and a bundle's root
+# is not always that — a repository tarball wraps the tree in one directory.
+# The rule is the shape rather than the source: exactly one entry and it a
+# directory, which is what \`archiveScope\` applies to the copy core detects
+# against. \`ls -A\` counts dotfiles, because a lone directory beside a stray
+# \`.gitignore\` is two entries and unwrapping it would lose the file.
+root="$workspace"
+if [ "$(ls -A "$workspace" | wc -l)" -eq 1 ]; then
+  only="$workspace/$(ls -A "$workspace")"
+  if [ -d "$only" ]; then
+    root="$only"
+  fi
+fi
+cd "$root"/${quote(input.subpath)}
 
 # §5's ladder, and the only decision this script makes: a Dockerfile settles
 # how to build. What the thing *is* was decided before the build was dispatched.
