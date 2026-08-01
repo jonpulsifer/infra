@@ -17,12 +17,20 @@
  * **There is no private key here, and that is the whole point of §13.** V4
  * signing normally means a service-account key file; instead the string-to-sign
  * goes to IAM's `signBlob`, authorized by the *federated* token — the one from
- * before impersonation. That is deliberate: the workload-identity principal
- * already holds `roles/iam.serviceAccountTokenCreator` on the impersonated
- * service account, or `impersonationUrl` could not work at all, and that role
- * is precisely what `signBlob` checks. Signing as the impersonated token would
- * instead require the service account to hold that role on *itself*, which is a
+ * before impersonation. Signing as the impersonated token would instead require
+ * the service account to hold a token-creator role on *itself*, which is a
  * separate grant nothing else in this installation needs.
+ *
+ * **That costs a grant, and it is not the one impersonation needs.** `signBlob`
+ * checks `iam.serviceAccounts.signBlob`, which lives in
+ * `roles/iam.serviceAccountTokenCreator`. Impersonation checks
+ * `iam.serviceAccounts.getAccessToken`, which `roles/iam.workloadIdentityUser`
+ * also carries. So an installation whose federated principal holds only
+ * `workloadIdentityUser` reaches every other cloud API and is refused here
+ * alone — deploys work, and builds from a `gs://` bundle never dispatch. The
+ * principal needs `roles/iam.serviceAccountTokenCreator` on the impersonated
+ * service account; `terraform/gcp/projects/bluenose/iam.tf` is where this
+ * installation grants it.
  */
 import {
   FederationError,

@@ -18,6 +18,20 @@ resource "google_service_account_iam_member" "spindrift_controller_workload_iden
   member             = local.spindrift_principal
 }
 
+# Signing a V4 storage URL is a separate permission from impersonating.
+# Spindrift mints one for every `gs://` source bundle it hands a hosted build
+# route, and signs it through IAM's `signBlob` as the federated principal —
+# before impersonation — so the string-to-sign never needs a private key.
+# `roles/iam.workloadIdentityUser` carries `iam.serviceAccounts.getAccessToken`
+# but not `iam.serviceAccounts.signBlob`, so impersonation succeeds while every
+# signature is refused. `roles/iam.serviceAccountTokenCreator` is the role that
+# carries both.
+resource "google_service_account_iam_member" "spindrift_controller_token_creator" {
+  service_account_id = google_service_account.spindrift_controller.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = local.spindrift_principal
+}
+
 resource "google_service_account_iam_member" "spindrift_act_as_runtime" {
   service_account_id = google_service_account.spindrift_runtime.name
   role               = "roles/iam.serviceAccountUser"
