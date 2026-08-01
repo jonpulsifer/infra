@@ -65,6 +65,14 @@ interface FakeVersion {
 
 const UPLOAD_BASE = 'https://upload.example.test/files';
 
+/**
+ * The most file hashes one `populateFiles` call may carry.
+ *
+ * The API's documented ceiling, modelled because it is the boundary every
+ * real static site crosses and the one nothing here could previously reach.
+ */
+const POPULATE_LIMIT = 1000;
+
 export class FakeHosting {
   readonly endpoint = CLOUD_ENDPOINTS.hosting;
   readonly requests: RecordedHostingRequest[] = [];
@@ -135,6 +143,24 @@ export class FakeHosting {
 
     if (url.href.startsWith(UPLOAD_BASE)) {
       const hash = url.pathname.split('/').pop() ?? '';
+      const bytes = new Uint8Array(await request.clone().arrayBuffer());
+      // The address a file is uploaded to *is* its hash, and the product
+      // stores the compressed file: "The hash is calculated by Gzipping the
+      // file then taking the SHA256 hash of the newly compressed file." An
+      // adapter that hashed the file's own bytes, or that offered a gzip hash
+      // and then uploaded the plain file, would be storing content under an
+      // address that is not its content — so both halves are checked rather
+      // than assumed correct because they happen to be today.
+      if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) {
+        return json(400, invalid('the uploaded file is not gzipped'));
+      }
+      const digest = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+      if (digest !== hash) {
+        return json(
+          400,
+          invalid(`the uploaded bytes hash to ${digest}, not to ${hash}`),
+        );
+      }
       this.uploaded.add(hash);
       this.held.add(hash);
       return json(200, {});
@@ -272,7 +298,21 @@ export class FakeHosting {
     const version = this.versions.get(name);
     if (version === undefined) return json(404, error('no version'));
     const files = (body as { files?: Record<string, string> })?.files ?? {};
-    version.files = files;
+    // "You can send a maximum of 1000 file hashes in each API request." A
+    // built site clears that on its first deploy, so an adapter that offers
+    // the whole map in one call fails here rather than only in production.
+    if (Object.keys(files).length > POPULATE_LIMIT) {
+      return json(
+        400,
+        invalid(
+          `a maximum of ${POPULATE_LIMIT} file hashes may be sent in each request`,
+        ),
+      );
+    }
+    // "The files in each call will be added to the version" — the calls
+    // accumulate. A fake that replaced would make a chunked offer look like it
+    // had populated only its last chunk.
+    version.files = { ...version.files, ...files };
     // Only the hashes not already held are asked for, which is the behaviour
     // the adapter's upload loop is written against.
     const wanted = [...new Set(Object.values(files))].filter(
@@ -348,6 +388,11 @@ function site(id: string): unknown {
 
 function error(message: string): unknown {
   return { error: { message, status: 'NOT_FOUND' } };
+}
+
+/** A refusal because the request itself was malformed, not because of state. */
+function invalid(message: string): unknown {
+  return { error: { message, status: 'INVALID_ARGUMENT' } };
 }
 
 function json(status: number, body: unknown): Response {
