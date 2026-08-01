@@ -39,6 +39,7 @@ import {
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
+import { getBuildDetail, getBuildDetailInput } from './builds/get-detail.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
@@ -57,6 +58,7 @@ import {
 } from './creation-drafts/lifecycle.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
+import { listDeploys, listDeploysInput } from './deploys/list.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import type * as commands from './index.ts';
 import {
@@ -111,7 +113,9 @@ export const commandRegistry = {
   deployApp: { input: deployAppInput, handler: deployApp },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
+  getBuildDetail: { input: getBuildDetailInput, handler: getBuildDetail },
   listApps: { input: listAppsInput, handler: listApps },
+  listDeploys: { input: listDeploysInput, handler: listDeploys },
   listTargets: { input: listTargetsInput, handler: listTargets },
   listRepositories: {
     input: listRepositoriesInput,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { elapsedSince } from '../../domain/elapsed.ts';
 import type {
   ActivityEntry,
   ComponentView,
@@ -7,6 +8,7 @@ import type {
   Runtime,
   WorkspaceView,
 } from '../../web/model.ts';
+import { releasesOf } from '../deploys/list.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const getAppWorkspaceInput = z.object({
@@ -122,6 +124,12 @@ export const getAppWorkspace: Command<
     limit: 20,
   });
 
+  const now = context.clock.now();
+
+  // Every event belongs to exactly one attempt — the `attempt_events` check
+  // constraint is what guarantees it — so every entry carries the id of the
+  // screen it came from and the timeline becomes a way into the system rather
+  // than a wall of past tense.
   const activity: ActivityEntry[] = [];
   if (events.length > 0) {
     for (const ev of events) {
@@ -136,23 +144,32 @@ export const getAppWorkspace: Command<
       activity.push({
         title,
         detail,
-        when: 'recently',
+        when: elapsedSince(ev.createdAt, now),
         status: ev.reason ? 'failed' : ev.phase === 'LIVE' ? 'ok' : 'info',
+        deployId: ev.deployId,
+        buildId: ev.buildId,
       });
     }
   } else if (latestDeploy) {
     activity.push({
       title: `Deploy ${latestDeploy.id} ${latestDeploy.phase.toLowerCase()}`,
       detail: latestDeploy.detail ?? `Target: ${latestTarget?.name ?? 'none'}`,
-      when: 'recently',
+      when: elapsedSince(latestDeploy.createdAt, now),
       status:
         latestDeploy.phase === 'LIVE'
           ? 'ok'
           : latestDeploy.phase === 'FAILED'
             ? 'failed'
             : 'info',
+      deployId: latestDeploy.id,
+      buildId: latestDeploy.buildId,
     });
   }
+
+  const releases = await releasesOf(
+    context,
+    app.components.map((component) => component.id),
+  );
 
   let runtime: Runtime;
   if (
@@ -207,6 +224,7 @@ export const getAppWorkspace: Command<
     components,
     datastores: Array.from(datastoresMap.values()),
     activity,
+    deploys: releases,
     runtime,
   };
 

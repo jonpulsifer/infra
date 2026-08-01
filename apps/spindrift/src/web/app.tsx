@@ -12,6 +12,7 @@ import { command, type InputOf } from './client.ts';
 import { DeleteAppDialog, useAppDeletion } from './components/delete-app.tsx';
 import type {
   AppListItem,
+  DeployListItem,
   DeployView,
   LinkedRepoView,
   RepositoryConnectorView,
@@ -138,6 +139,13 @@ function Screen({
     const deployId = path.replace(/^\/deploys\/?/, '');
     return <DeployScreen deployId={deployId} onNavigate={onNavigate} />;
   }
+  // §4: pressing Deploy with nothing deployable starts a Build and writes no
+  // intent, so the act has a durable id but no release. This is where that
+  // press lands until an intent exists.
+  if (path.startsWith('/builds')) {
+    const buildId = path.replace(/^\/builds\/?/, '');
+    return <BuildScreen buildId={buildId} onNavigate={onNavigate} />;
+  }
   if (path === '/apps' || path === '')
     return <AppsScreen onNavigate={onNavigate} />;
   if (path.startsWith('/apps/')) {
@@ -234,11 +242,8 @@ function WorkspaceScreen({
   >({ type: 'loading' });
   const [deploying, setDeploying] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
-  /**
-   * Bumped when the button started a Build rather than a Deploy. There is no
-   * deploy screen to send the operator to in that case, so the workspace they
-   * are already on re-reads itself and the new Build shows up in its activity.
-   */
+  const [rollingBack, setRollingBack] = useState<number | null>(null);
+  /** Bumped when an act changed state the workspace has already read. */
   const [reloadToken, setReloadToken] = useState(0);
 
   // There is no workspace left to stand on once the App is gone.
@@ -376,13 +381,16 @@ function WorkspaceScreen({
         name: state.workspace.appId ?? appName,
       });
       if (result.ok) {
-        if (result.value.deployId === null) {
-          // A Build was started, so there is no deploy screen yet. Re-read the
-          // workspace rather than navigating somewhere that does not exist.
-          setReloadToken((token) => token + 1);
-        } else {
-          onNavigate(`/deploys/${result.value.deployId}`);
-        }
+        // Both arms navigate. §4 makes "a Build started" a different act from
+        // "an intent was written", not a lesser one — it has a durable id and a
+        // live event stream — so the press lands on the attempt it started
+        // rather than leaving the operator on the screen they pressed from,
+        // wondering whether anything happened.
+        onNavigate(
+          result.value.deployId === null
+            ? `/builds/${result.value.buildId}`
+            : `/deploys/${result.value.deployId}`,
+        );
       } else {
         // The sentence the command refused with, unedited — a disconnected
         // Target, a signature that did not verify. Nothing is retried behind it.
@@ -392,6 +400,26 @@ function WorkspaceScreen({
       setDeployError(e instanceof Error ? e.message : 'Deploy failed');
     } finally {
       setDeploying(false);
+    }
+  };
+
+  const handleRollback = async (release: DeployListItem) => {
+    setRollingBack(release.id);
+    setDeployError(null);
+    try {
+      const result = await rollback({
+        componentId: release.componentId,
+        targetId: release.targetId,
+        buildId: release.buildId,
+      });
+      if (result.ok) {
+        onNavigate(`/deploys/${result.deployId}`);
+      } else {
+        setDeployError(result.message);
+        setReloadToken((token) => token + 1);
+      }
+    } finally {
+      setRollingBack(null);
     }
   };
 
@@ -420,10 +448,36 @@ function WorkspaceScreen({
         deploying={deploying}
         onNavigate={onNavigate}
         deletion={deletion}
+        onRollback={handleRollback}
+        rollingBack={rollingBack}
       />
       <DeleteAppDialog deletion={deletion} />
     </>
   );
+}
+
+/**
+ * Make an older release live again (§6).
+ *
+ * Shared by the workspace and the attempt screen because a rollback is one act
+ * with one refusal: §6 gives it no special path, and two call sites that
+ * phrased its failures differently would be inventing the second admission
+ * policy `rollbackDeploy` exists to avoid.
+ */
+async function rollback(
+  target: InputOf<'rollbackDeploy'>,
+): Promise<{ ok: true; deployId: number } | { ok: false; message: string }> {
+  try {
+    const result = await command('rollbackDeploy', target);
+    return result.ok
+      ? { ok: true, deployId: result.value.deployId }
+      : { ok: false, message: result.failure.message };
+  } catch (cause) {
+    return {
+      ok: false,
+      message: cause instanceof Error ? cause.message : 'Rollback failed',
+    };
+  }
 }
 
 function DeployScreen({
@@ -440,7 +494,7 @@ function DeployScreen({
     | { type: 'success'; deploy: DeployView }
   >({ type: 'loading' });
 
-  const [redeploying, setRedeploying] = useState(false);
+  const [busy, setBusy] = useState<'redeploy' | 'rollback' | null>(null);
   const [redeployError, setRedeployError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -466,7 +520,9 @@ function DeployScreen({
           stopStream = subscribeAttempt(
             {
               buildId: result.value.deploy.buildId,
-              deployId: result.value.deploy.id,
+              // Non-null on this screen by construction: `getDeployDetail`
+              // answers about a Deploy, so its view always carries that id.
+              deployId: result.value.deploy.id ?? parsedId,
             },
             () => {
               void command('getDeployDetail', { id: parsedId }).then(
@@ -504,21 +560,18 @@ function DeployScreen({
 
   const handleRedeploy = async () => {
     if (state.type !== 'success') return;
-    setRedeploying(true);
+    setBusy('redeploy');
     setRedeployError(null);
     try {
       // The App's id, not its name: `apps` has no unique constraint on `name`,
       // so redeploying by name would act on whichever row shares it.
       const result = await command('deployApp', { name: state.deploy.appId });
       if (result.ok) {
-        if (result.value.deployId === null) {
-          // Nothing was deployable, so a Build started instead. The workspace is
-          // where a Build in flight is visible; this screen belongs to a deploy
-          // that does not exist yet.
-          onNavigate(`/apps/${state.deploy.appId}`);
-        } else {
-          onNavigate(`/deploys/${result.value.deployId}`);
-        }
+        onNavigate(
+          result.value.deployId === null
+            ? `/builds/${result.value.buildId}`
+            : `/deploys/${result.value.deployId}`,
+        );
       } else {
         // Surfaced verbatim and acted on no further: a refused redeploy is a
         // fact about this artifact and this Target, not a cue to build another.
@@ -527,7 +580,28 @@ function DeployScreen({
     } catch (e: unknown) {
       setRedeployError(e instanceof Error ? e.message : 'Redeploy failed');
     } finally {
-      setRedeploying(false);
+      setBusy(null);
+    }
+  };
+
+  const handleRollback = async () => {
+    if (state.type !== 'success') return;
+    const view = state.deploy;
+    setBusy('rollback');
+    setRedeployError(null);
+    try {
+      const result = await rollback({
+        componentId: view.componentId,
+        targetId: view.targetId,
+        buildId: view.buildId,
+      });
+      if (result.ok) {
+        onNavigate(`/deploys/${result.deployId}`);
+      } else {
+        setRedeployError(result.message);
+      }
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -577,7 +651,7 @@ function DeployScreen({
         <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium">Redeploy failed</p>
+              <p className="text-sm font-medium">That act was refused</p>
               <p className="text-sm mt-0.5">{redeployError}</p>
             </div>
             <Button
@@ -592,8 +666,187 @@ function DeployScreen({
       ) : null}
       <DeployDetail
         view={state.deploy}
-        onRedeploy={handleRedeploy}
-        redeploying={redeploying}
+        actions={{
+          onRedeploy: handleRedeploy,
+          onRollback: handleRollback,
+          busy,
+        }}
+        onNavigate={onNavigate}
+      />
+    </>
+  );
+}
+
+/**
+ * The attempt screen for a Build that has no Deploy (§4).
+ *
+ * It exists because the Deploy button has two outcomes and only one of them
+ * used to have a screen: "nothing was deployable, so a Build started" is a real
+ * act with a durable id and a live event stream, and leaving the operator on
+ * the workspace made it look like the press did nothing.
+ *
+ * The screen resolves itself. A Build that reaches an intent has a better page
+ * than this one, so when `getBuildDetail` reports a Deploy naming this Build
+ * the screen hands over to `/deploys/:id` rather than continuing to render the
+ * half of the story it can see.
+ */
+function BuildScreen({
+  buildId,
+  onNavigate,
+}: {
+  buildId: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'not-found'; message: string }
+    | { type: 'error'; message: string }
+    | { type: 'success'; attempt: DeployView }
+  >({ type: 'loading' });
+  const [busy, setBusy] = useState<'redeploy' | 'deploy' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    let stopStream: (() => void) | null = null;
+    const parsedId = Number.parseInt(buildId, 10);
+    if (!buildId || Number.isNaN(parsedId)) {
+      setState({ type: 'not-found', message: `Invalid Build ID '${buildId}'` });
+      return;
+    }
+
+    const read = async () => {
+      const result = await command('getBuildDetail', { id: parsedId });
+      if (!live) return;
+      if (!result.ok) {
+        setState({
+          type: result.failure.code === 'NOT_FOUND' ? 'not-found' : 'error',
+          message: result.failure.message,
+        });
+        return;
+      }
+      if (result.value.deployId !== null) {
+        onNavigate(`/deploys/${result.value.deployId}`);
+        return;
+      }
+      setState({ type: 'success', attempt: result.value.attempt });
+    };
+
+    read()
+      .then(() => {
+        if (!live) return;
+        // The same authenticated stream the deploy screen uses, subscribed with
+        // no `deployId` because there is not one yet.
+        stopStream = subscribeAttempt({ buildId: parsedId }, () => {
+          void read();
+        });
+      })
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      });
+
+    return () => {
+      live = false;
+      stopStream?.();
+    };
+  }, [buildId, onNavigate]);
+
+  const act = async (kind: 'redeploy' | 'deploy') => {
+    if (state.type !== 'success') return;
+    setBusy(kind);
+    setActionError(null);
+    try {
+      // One command for both, because §4 gives the workspace button one
+      // meaning: deploy the newest artifact, or start the Build that would
+      // produce one. Pressing "Deploy this build" on a finished Build takes the
+      // first arm; pressing "Build again" on a failed one takes the second.
+      const result = await command('deployApp', { name: state.attempt.appId });
+      if (result.ok) {
+        onNavigate(
+          result.value.deployId === null
+            ? `/builds/${result.value.buildId}`
+            : `/deploys/${result.value.deployId}`,
+        );
+      } else {
+        setActionError(result.failure.message);
+      }
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Deploy failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading build...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'not-found') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-border bg-card p-6 text-center">
+          <Eyebrow>Build Not Found</Eyebrow>
+          <h1 className="mt-2 text-xl font-semibold">
+            Build #{buildId} not found
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{state.message}</p>
+          <div className="mt-4 flex justify-center">
+            <Button variant="outline" onClick={() => onNavigate('/apps')}>
+              Back to Apps
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load build</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {actionError ? (
+        <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">That act was refused</p>
+              <p className="text-sm mt-0.5">{actionError}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setActionError(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <DeployDetail
+        view={state.attempt}
+        actions={{
+          onDeployBuild: () => void act('deploy'),
+          onRedeploy: () => void act('redeploy'),
+          busy,
+        }}
         onNavigate={onNavigate}
       />
     </>

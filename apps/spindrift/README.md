@@ -94,14 +94,19 @@ stamps `data-theme` on the root, and its absence means "follow the OS".
 Four screens, each implementing rules §18 and identity settled rather than choices made
 while building them:
 
-- **Deploy** (`views/apps/deploy-detail.tsx`) — App-first, not attempt-first.
-  State and URL, then diagnosis, then a dense resource list, then the log. No
-  stage rail. `blame` gets a chip, the build log opens only when the *build* is
-  what failed, and **the red screen says the previous release is still serving**.
+- **Attempt** (`views/apps/deploy-detail.tsx`) — App-first, not attempt-first.
+  State and URL, then diagnosis, then what the release is made of, then a dense
+  resource list, then the logs. No stage rail. `blame` gets a chip, the build
+  log opens only when the *build* is what failed, and **the red screen says the
+  previous release is still serving**. It serves two routes, because pressing
+  Deploy has two outcomes: `/deploys/:id` for an intent, and `/builds/:id` for a
+  Build that has not produced one yet — same screen with a null release id,
+  handing over to the deploy the moment an intent names that Build.
 - **Workspace** (`views/apps/workspace.tsx`) — live state and URL lead; Target
   and the immutable vessel are visible; Components and Datastores are peer
-  sections. A website states that it has no runtime instead of showing an empty
-  log.
+  sections; every release is listed and every activity entry opens the attempt
+  it came from. A website states that it has no runtime instead of showing an
+  empty log.
 - **Create** (`views/apps/new/`) — Source → Component → Place → Configure →
   Review, defaults carrying every step, preflight folded into Review. The
   server-owned draft survives refresh and rejects stale concurrent edits. An
@@ -110,6 +115,13 @@ while building them:
 - **Authentication Settings** (`views/auth/settings.tsx`) — additive passkeys
   and the optional Gateway binding. Every mutation requires a fresh passkey
   assertion, and the final account-root passkey cannot be removed.
+
+**A release has a source and only sometimes a build.** §4's supplied-artifact
+arm records an uploaded bundle as-is with no builder, so `DeployView` carries a
+source always and a build that may be null — the screen states that no builder
+was involved rather than naming one that never ran. **Rolling back deploys an
+older release and rebuilds nothing** (§6: an ordinary deploy naming an older
+Build), and the affordance appears only where that comparison would be accepted.
 
 **Deleting an App is review-then-confirm**, from the App list row or the
 workspace header (`components/delete-app.tsx`). `deleteApp` called without

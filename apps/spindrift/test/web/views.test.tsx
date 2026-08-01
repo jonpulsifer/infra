@@ -20,6 +20,7 @@ import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
 import {
+  BUILD_ATTEMPT,
   DEPLOY_SCENARIOS,
   WORKSPACE_SCENARIOS,
 } from '../fixtures/scenarios.ts';
@@ -204,9 +205,14 @@ describe('the deploy screen, on red', () => {
       //
       // Radix leaves closed content unmounted, so the step list appearing at
       // all is what distinguishes the two.
-      const opened = deploy(view).includes(view.build.steps[0]!.name);
+      //
+      // Every red scenario built something — §4's supplied-artifact arm has no
+      // build to open, and no failure mode that would want one opened.
+      expect(view.build).not.toBeNull();
+      const build = view.build!;
+      const opened = deploy(view).includes(build.steps[0]!.name);
       expect(opened).toBe(
-        view.build.status === 'failed' || view.build.status === 'running',
+        build.status === 'failed' || build.status === 'running',
       );
     });
   }
@@ -215,7 +221,7 @@ describe('the deploy screen, on red', () => {
     // The case that makes the rule above worth having: the build succeeded and
     // the cluster could not pull what it produced.
     const view = DEPLOY_SCENARIOS.imageUnpullable;
-    expect(view.build.status).toBe('done');
+    expect(view.build?.status).toBe('done');
 
     const markup = deploy(view);
     expect(markup).toContain('ARTIFACT_UNAVAILABLE');
@@ -274,7 +280,135 @@ describe('a runner that withholds log text', () => {
   });
 });
 
+describe('a release that was extracted rather than built', () => {
+  // §4: "An archive of *finished output* is a supplied artifact, digested over
+  // the uploaded bundle" — recorded with no build adapter looked up.
+  // `uploadArchive` writes that row with a null runner precisely because
+  // "saying so is more useful than naming a runner that never ran", and the
+  // screen has to carry that sentence rather than invent a builder.
+  const view = DEPLOY_SCENARIOS.extracted;
+  const markup = deploy(view);
+
+  test('has no build at all', () => {
+    expect(view.build).toBeNull();
+  });
+
+  test('says no builder was involved instead of showing an empty log', () => {
+    expect(markup).toContain('NO BUILD');
+    expect(markup).toContain('No builder was involved');
+    expect(markup).not.toContain('Build log');
+  });
+
+  test('leads with the source, which every release has', () => {
+    expect(view.source.kind).toBe('archive');
+    expect(markup).toContain('Uploaded archive');
+    expect(markup).toContain('recorded as-is, never built');
+    if (view.source.kind === 'archive') {
+      expect(markup).toContain(view.source.digest);
+    }
+  });
+
+  test('still names the artifact it delivers', () => {
+    // The digest is over the uploaded bundle on both arms (§16), which is what
+    // keeps the supply-chain join intact whether or not a build happened.
+    expect(markup).toContain('Artifact');
+    expect(markup).toContain(view.artifactDigest!);
+  });
+});
+
+describe('an attempt that is only a Build', () => {
+  // §4: pressing Deploy with nothing deployable "writes a PENDING Build for the
+  // build loop to dispatch, and that is the whole act". The press still has to
+  // land somewhere, and this is the screen it lands on.
+  const markup = renderToStaticMarkup(
+    <DeployDetail
+      view={BUILD_ATTEMPT}
+      actions={{ onDeployBuild: () => undefined }}
+    />,
+  );
+
+  test('has no release id, because no intent was written', () => {
+    expect(BUILD_ATTEMPT.id).toBeNull();
+  });
+
+  test('names itself a build rather than a deploy', () => {
+    expect(markup).toContain(`build ${BUILD_ATTEMPT.buildId}`);
+  });
+
+  test('offers to place what the Build produced', () => {
+    expect(markup).toContain('Deploy this build');
+  });
+
+  test('shows no deploy log, because nothing was applied', () => {
+    // §6 gives the deploy leg its own drawer. There is no deploy leg here, and
+    // rendering an empty one would say the platform was asked and said nothing.
+    expect(markup).not.toContain('Deploy log');
+  });
+});
+
+describe('the releases list', () => {
+  const view = WORKSPACE_SCENARIOS.service;
+  const markup = renderToStaticMarkup(
+    <Workspace view={view} onNavigate={() => undefined} />,
+  );
+
+  test('lists every release, not only the one that is live', () => {
+    // §2: "one Build → many Deploys — this is what makes rollback-without-
+    // rebuild possible." The many have to be visible for that to be reachable.
+    expect(view.deploys.length).toBeGreaterThan(1);
+    for (const release of view.deploys) {
+      expect(markup).toContain(`Deploy ${release.id}`);
+    }
+  });
+
+  test('marks which release is current, separately from its phase', () => {
+    // A LIVE Deploy that a newer intent superseded is still LIVE. Only §6's
+    // desired row knows which one should be running.
+    expect(markup).toContain('current');
+    expect(view.deploys.filter((release) => release.current)).toHaveLength(1);
+  });
+
+  test('states that a release is immutable and that rollback rebuilds nothing', () => {
+    expect(markup).toContain('Each release is immutable');
+    expect(markup).toContain('it never');
+  });
+
+  test('offers rollback only where §6 would accept it', () => {
+    const rollbackable = view.deploys.filter((release) => release.rollbackable);
+    expect(rollbackable.length).toBeGreaterThan(0);
+    const withAction = renderToStaticMarkup(
+      <Workspace
+        view={view}
+        onNavigate={() => undefined}
+        onRollback={() => undefined}
+      />,
+    );
+    expect(withAction).toContain('Roll back');
+    // Without a handler there is no button at all, rather than one that refuses.
+    expect(markup).not.toContain('Roll back');
+  });
+});
+
 describe('the App workspace', () => {
+  test('every activity entry leads to the attempt it came from', () => {
+    // `attempt_events` constrains every row to exactly one attempt, so every
+    // entry has somewhere to go. An entry that led nowhere would be the one
+    // thing on this screen a reader could not act on.
+    const view = WORKSPACE_SCENARIOS.service;
+    const markup = renderToStaticMarkup(
+      <Workspace view={view} onNavigate={() => undefined} />,
+    );
+
+    for (const entry of view.activity) {
+      expect(entry.deployId ?? entry.buildId).not.toBeNull();
+      expect(markup).toContain(entry.title);
+    }
+    // Rendered as buttons rather than static rows — one per entry, plus the
+    // release link in the hero and the rows of the releases list.
+    const buttons = markup.split('<button').length - 1;
+    expect(buttons).toBeGreaterThanOrEqual(view.activity.length);
+  });
+
   test('a website states that it has no runtime', () => {
     // §17: the `static` adapter gets an honest empty state, and §18 puts it one
     // level down rather than disabling a tab. `kind: 'none'` carries the reason
