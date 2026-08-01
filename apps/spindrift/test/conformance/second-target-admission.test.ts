@@ -48,7 +48,10 @@ import {
   CAPABLE_DISCOVERY,
   FakeDeployAdapter,
 } from '../harness/fakes/deploy-adapter.ts';
-import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
+import {
+  SupplyChainHarness,
+  testSignature,
+} from '../harness/fakes/supply-chain.ts';
 import {
   clusterInput,
   fixtureManifest,
@@ -222,15 +225,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
         bundleLocation: 'bundles/multi.zip',
         status: 'SUCCEEDED',
         verifiedBuildLevel: 2,
-        signature: {
-          artifactDigest: artifactDig,
-          signer: 'gcpkms://test/signer',
-          format: 'cosign',
-          bundle: {
-            mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
-          },
-          signedAt: FROZEN.toISOString(),
-        },
+        signature: testSignature(artifactDig, FROZEN.toISOString()),
       })
       .returning();
 
@@ -300,15 +295,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
         artifactDigest: digest(200),
         status: 'SUCCEEDED',
         verifiedBuildLevel: 2,
-        signature: {
-          artifactDigest: digest(200),
-          signer: 'gcpkms://test/signer',
-          format: 'cosign',
-          bundle: {
-            mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
-          },
-          signedAt: FROZEN.toISOString(),
-        },
+        signature: testSignature(digest(200), FROZEN.toISOString()),
       })
       .returning();
 
@@ -394,15 +381,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
         bundleLocation: 'bundles/e2e.zip',
         status: 'SUCCEEDED',
         verifiedBuildLevel: 2,
-        signature: {
-          artifactDigest: artifactDig,
-          signer: 'gcpkms://test/signer',
-          format: 'cosign',
-          bundle: {
-            mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
-          },
-          signedAt: FROZEN.toISOString(),
-        },
+        signature: testSignature(artifactDig, FROZEN.toISOString()),
       })
       .returning();
 
