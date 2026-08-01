@@ -22,7 +22,7 @@ terraform {
     }
     argocd = {
       source  = "argoproj-labs/argocd"
-      version = "~> 7.15.0"
+      version = "~> 7.16.0"
     }
   }
   required_version = ">= 1.5.6"
