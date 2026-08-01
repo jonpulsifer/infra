@@ -30,7 +30,17 @@ import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { cn } from '../../ui/utils.ts';
 
-export function Workspace({ view }: { view: WorkspaceView }) {
+export function Workspace({
+  view,
+  onDeploy,
+  deploying = false,
+  onNavigate,
+}: {
+  view: WorkspaceView;
+  onDeploy?: () => void;
+  deploying?: boolean;
+  onNavigate?: (path: string) => void;
+}) {
   const primary = view.components[0];
 
   return (
@@ -48,7 +58,13 @@ export function Workspace({ view }: { view: WorkspaceView }) {
               Open app <ExternalLink aria-hidden="true" />
             </a>
           </Button>
-          <Button>{primary?.kind === 'job' ? 'Run now' : 'Deploy'}</Button>
+          <Button onClick={onDeploy} disabled={deploying}>
+            {deploying
+              ? 'Deploying...'
+              : primary?.kind === 'job'
+                ? 'Run now'
+                : 'Deploy'}
+          </Button>
         </div>
       </header>
 
@@ -61,7 +77,7 @@ export function Workspace({ view }: { view: WorkspaceView }) {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Activity entries={view.activity} />
-        <Runtime view={view} />
+        <Runtime view={view} onNavigate={onNavigate} />
       </div>
     </div>
   );
@@ -111,10 +127,12 @@ function SectionHeader({
   eyebrow,
   title,
   action,
+  onAction,
 }: {
   eyebrow: string;
   title: string;
   action: string;
+  onAction?: () => void;
 }) {
   return (
     <CardHeader>
@@ -122,7 +140,12 @@ function SectionHeader({
         <Eyebrow>{eyebrow}</Eyebrow>
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       </div>
-      <Button variant="outline" size="sm" className="ml-auto">
+      <Button
+        variant="outline"
+        size="sm"
+        className="ml-auto"
+        onClick={onAction}
+      >
         {action}
       </Button>
     </CardHeader>
@@ -278,8 +301,15 @@ function Activity({ entries }: { entries: readonly ActivityEntry[] }) {
  * `logHistory` a duration rather than a capability, so a Target never lacks
  * logs, it only has a shorter memory, and saying how short is the whole point.
  */
-function Runtime({ view }: { view: WorkspaceView }) {
+function Runtime({
+  view,
+  onNavigate,
+}: {
+  view: WorkspaceView;
+  onNavigate?: (path: string) => void;
+}) {
   const runtime = view.runtime;
+  const latestDeployId = view.latestDeployId;
 
   return (
     <Card>
@@ -287,6 +317,11 @@ function Runtime({ view }: { view: WorkspaceView }) {
         eyebrow="Component output"
         title={TITLE[runtime.kind]}
         action={ACTION[runtime.kind]}
+        onAction={
+          latestDeployId && onNavigate
+            ? () => onNavigate(`/deploys/${latestDeployId}`)
+            : undefined
+        }
       />
       <CardContent className="pt-0">
         {runtime.kind === 'none' ? (

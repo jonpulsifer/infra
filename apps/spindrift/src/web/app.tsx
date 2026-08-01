@@ -213,6 +213,8 @@ function WorkspaceScreen({
     | { type: 'error'; message: string }
     | { type: 'success'; workspace: WorkspaceView }
   >({ type: 'loading' });
+  const [deploying, setDeploying] = useState(false);
+  const [deployError, setDeployError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -335,7 +337,51 @@ function WorkspaceScreen({
     );
   }
 
-  return <Workspace view={state.workspace} />;
+  const handleDeploy = async () => {
+    if (state.type !== 'success') return;
+    setDeploying(true);
+    setDeployError(null);
+    try {
+      const result = await command('deployApp', { name: appName });
+      if (result.ok) {
+        onNavigate(`/deploys/${result.value.deployId}`);
+      } else {
+        setDeployError(result.failure.message);
+      }
+    } catch (e: unknown) {
+      setDeployError(e instanceof Error ? e.message : 'Deploy failed');
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  return (
+    <>
+      {deployError ? (
+        <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Deploy failed</p>
+              <p className="text-sm mt-0.5">{deployError}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeployError(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <Workspace
+        view={state.workspace}
+        onDeploy={handleDeploy}
+        deploying={deploying}
+        onNavigate={onNavigate}
+      />
+    </>
+  );
 }
 
 function DeployScreen({

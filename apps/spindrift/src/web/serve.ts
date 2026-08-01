@@ -55,7 +55,7 @@ function instrumentRoutes<T extends Record<string, any>>(routes: T): T {
         const startTime = Date.now();
         return tracer.startActiveSpan(
           `HTTP ${req.method} ${path}`,
-          async (span) => {
+          async (span: any) => {
             span.setAttribute('http.method', req.method);
             span.setAttribute('http.target', path);
 
