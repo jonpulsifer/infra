@@ -24,9 +24,19 @@ in
   # Every configuration in the registry still evaluates. Naming it as a check
   # makes it something you can run on its own, not just a side effect of
   # `nix flake check` walking nixosConfigurations.
+  #
+  # `unsafeDiscardOutputDependency` is what keeps this a *check* and not a
+  # fleet build. A bare `drvPath` carries a string context that means "build
+  # this derivation and its entire closure", so naming every host's toplevel
+  # here would make the check depend on ~15k derivations across both
+  # architectures — an x86 runner then fails on the first aarch64-only build.
+  # Discarding that context keeps the dependency on the `.drv` file, which
+  # still forces each host to instantiate: exactly the evaluation this asserts.
   fleet-hosts-evaluate = pkgs.runCommand "check-fleet-hosts-evaluate" {
     drvPaths = lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (_: c: c.system.build.toplevel.drvPath) configs
+      lib.mapAttrsToList (
+        _: c: builtins.unsafeDiscardOutputDependency c.system.build.toplevel.drvPath
+      ) configs
     );
   } "touch $out";
 
