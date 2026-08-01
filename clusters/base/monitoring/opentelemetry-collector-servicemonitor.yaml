@@ -1,0 +1,18 @@
+---
+# Scrape the OpenTelemetry Collector's own metrics endpoint so both clusters'
+# Prometheus operators collect collector telemetry via a shared ServiceMonitor.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: opentelemetry-collector
+  namespace: monitoring
+  labels:
+    release: prom-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+  endpoints:
+    - port: monitoring
+      path: /metrics
+      interval: 30s

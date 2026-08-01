@@ -2,7 +2,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - helm-repository-prometheus.yaml
   - kube-prometheus.yaml
   - grafana-dashboards
   - local-node-exporters.yaml
@@ -10,6 +9,7 @@ resources:
   - spore.yaml
   - git-repository-loki.yaml
   - loki.yaml
+  - tempo.yaml
  # - picow.yaml
   - ../../base/monitoring
  # - screenpi4.yaml

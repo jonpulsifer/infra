@@ -35,13 +35,6 @@ spec:
               endpoint: 0.0.0.0:4317
             http:
               endpoint: 0.0.0.0:4318
-        prometheus:
-          config:
-            scrape_configs:
-              - job_name: opentelemetry-collector
-                scrape_interval: 15s
-                static_configs:
-                  - targets: [0.0.0.0:8888]
       processors:
         memory_limiter:
           check_interval: 5s
@@ -55,23 +48,34 @@ spec:
           timeout: 2s
       exporters:
         debug:
-          verbosity: detailed
-        loki:
-          endpoint: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+          verbosity: basic
+        # Traces ship to the local Tempo single-binary. Both clusters run
+        # their own Tempo, so the collector never crosses the WAN for traces.
+        otlp/tempo:
+          endpoint: tempo.monitoring.svc.cluster.local:4317
+          tls:
+            insecure: true
+        # Metrics are exposed for Prometheus to scrape via the
+        # opentelemetry-collector ServiceMonitor.
+        prometheus:
+          endpoint: 0.0.0.0:8889
       service:
+        telemetry:
+          metrics:
+            address: 0.0.0.0:8888
         pipelines:
           traces:
             receivers: [otlp]
             processors: [memory_limiter, batch]
-            exporters: [debug]
+            exporters: [debug, otlp/tempo]
           metrics:
-            receivers: [otlp, prometheus]
+            receivers: [otlp]
             processors: [memory_limiter, batch]
-            exporters: [debug]
+            exporters: [debug, prometheus]
           logs:
             receivers: [otlp]
             processors: [memory_limiter, batch]
-            exporters: [debug, loki]
+            exporters: [debug]
     ports:
       otlp:
         enabled: true
@@ -82,4 +86,14 @@ spec:
         enabled: true
         containerPort: 4318
         servicePort: 4318
+        protocol: TCP
+      metrics:
+        enabled: true
+        containerPort: 8888
+        servicePort: 8888
+        protocol: TCP
+      prom-metrics:
+        enabled: true
+        containerPort: 8889
+        servicePort: 8889
         protocol: TCP

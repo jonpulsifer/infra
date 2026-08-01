@@ -1,0 +1,71 @@
+---
+# Offsite's own Loki — logs never leave the satellite link. Vector (in base)
+# ships kubernetes_logs and journald to this local Loki single-binary, which
+# Grafana reads in-cluster. auth_enabled: false matches folly's Loki so no
+# X-Scope-OrgID header is required.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  interval: 1m0s
+  maxHistory: 2
+  chart:
+    spec:
+      chart: loki
+      version: 7.2.0
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+      interval: 5m0s
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    deploymentMode: SingleBinary
+    gateway:
+      enabled: false
+    loki:
+      auth_enabled: false
+      storage:
+        type: filesystem
+      commonConfig:
+        replication_factor: 1
+      schemaConfig:
+        configs:
+          - from: "2024-04-01"
+            store: tsdb
+            object_store: filesystem
+            schema: v13
+            index:
+              prefix: loki_index_
+              period: 24h
+      ingester:
+        chunk_encoding: snappy
+      tracing:
+        enabled: false
+      querier:
+        max_concurrent: 4
+    singleBinary:
+      replicas: 1
+      persistence:
+        enabled: true
+        size: 10Gi
+        storageClassName: local-path
+    minio:
+      enabled: false
+    monitoring:
+      dashboards:
+        enabled: false
+      rules:
+        enabled: false
+      serviceMonitor:
+        enabled: false
+    test:
+      enabled: false
