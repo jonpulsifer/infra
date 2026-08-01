@@ -102,16 +102,13 @@ spec:
         # build that no digest covers.
         zeroConfigFrontend: ghcr.io/railwayapp/railpack-frontend:v0.35.0
       cloud:
-        federation:
-          audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
-          tokenUrl: https://sts.googleapis.com/v1/token
-          tokenPath: /var/run/secrets/spindrift/gcp-token
-          impersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
+        # No `federation` here. It is read from the `external_account`
+        # credential this chart renders, from the two serviceAccount.token
+        # values above — declaring it a second time is what the chart refuses.
         artifactsProject: trusted-builds
         homeVesselProject: bluenose
       charts:
         app: packages/charts/spindrift-app
-        installer: packages/charts/spindrift
       github:
         clientId: Iv1.918d699f36ee7afc
         apiBaseUrl: https://api.github.com
