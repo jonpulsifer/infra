@@ -592,3 +592,24 @@ export type InstallationManifest = Omit<AuthoredManifest, 'cloud'> & {
     readonly federation: FederationConfig | null;
   };
 };
+
+/**
+ * Project a resolved manifest back down to the document an operator may write.
+ *
+ * The inverse of the join `resolveManifest` performs, and it exists because an
+ * editing surface reads before it writes. `getInstallationManifest` answers
+ * what a reader holds and `configureInstallation` accepts only what may be
+ * authored; if those are different documents the round trip refuses itself on
+ * a key the operator can neither see nor correct — the schema is `.strict()`,
+ * so a derived key coming back in is an `Unrecognized key` on a form the
+ * operator never touched.
+ *
+ * Lives here rather than beside the join because it is a fact about the two
+ * types, and because the read command must stay free of server-only imports.
+ */
+export function toAuthoredManifest(
+  manifest: InstallationManifest,
+): AuthoredManifest {
+  const { federation: _derived, ...cloud } = manifest.cloud;
+  return { ...manifest, cloud };
+}

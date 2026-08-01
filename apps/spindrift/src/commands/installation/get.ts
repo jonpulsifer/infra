@@ -7,6 +7,14 @@
  * the read half of that pair, and the two are deliberately symmetric: what this
  * answers is exactly what that accepts.
  *
+ * That symmetry is why the context manifest is projected through
+ * {@link toAuthoredManifest} rather than answered as it is. A reader is given
+ * the resolved document — the authored one plus the deployment facts joined
+ * around it — and the write half takes only what may be authored. Answering the
+ * resolved document made the form refuse its own round trip with
+ * `cloud: Unrecognized key: "federation"` on a field it never rendered, which
+ * is the shape of bug this pair exists to make impossible.
+ *
  * **It reads the context, not the database.** `CommandContext.manifest` is
  * resolved per dispatch — that is the whole reason the context factory is
  * async — so the row is already the source of this answer, and querying it a
@@ -21,7 +29,10 @@
  * platform configuration, and the surface is session-authenticated regardless.
  */
 import { z } from 'zod';
-import type { InstallationManifest } from '../../config/manifest.schema.ts';
+import {
+  type AuthoredManifest,
+  toAuthoredManifest,
+} from '../../config/manifest.schema.ts';
 import { type Command, ok } from '../types.ts';
 
 export const getInstallationManifestInput = z.object({}).strict();
@@ -31,10 +42,11 @@ export type GetInstallationManifestInput = z.infer<
 >;
 
 export interface GetInstallationManifestResult {
-  readonly manifest: InstallationManifest;
+  readonly manifest: AuthoredManifest;
 }
 
 export const getInstallationManifest: Command<
   GetInstallationManifestInput,
   GetInstallationManifestResult
-> = async (_input, context) => ok({ manifest: context.manifest });
+> = async (_input, context) =>
+  ok({ manifest: toAuthoredManifest(context.manifest) });

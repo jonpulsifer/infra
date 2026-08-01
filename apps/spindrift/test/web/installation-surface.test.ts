@@ -118,7 +118,7 @@ describe('reading this installation from the browser', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       ok: boolean;
-      value: { manifest: InstallationManifest };
+      value: { manifest: AuthoredManifest };
     };
     expect(body.ok).toBe(true);
     // Whole, because `configureInstallation` takes the whole document: a read
@@ -126,13 +126,15 @@ describe('reading this installation from the browser', () => {
     // ask for.
     const stored = await storedManifest();
     expect(stored).toBeDefined();
-    // The row holds the *authored* document; the read answers that document
-    // with the deployment facts attached, which is the one place the two halves
-    // meet. Comparing against the row itself would assert the read had never
-    // resolved anything.
-    expect(body.value.manifest).toEqual(
-      await resolveManifest(stored as AuthoredManifest),
-    );
+    // And *authored*, which is the row exactly. This assertion used to compare
+    // against `resolveManifest(stored)`, on the reasoning that anything else
+    // would prove the read had never resolved. That reasoning is what broke
+    // this surface: a reader is handed the resolved document, the schema is
+    // `.strict()`, and the form validates client-side before it dispatches — so
+    // answering the resolved shape made the screen refuse its own round trip
+    // with `cloud: Unrecognized key: "federation"` on a field it never
+    // rendered. The read half answers what the write half accepts.
+    expect(body.value.manifest).toEqual(stored as AuthoredManifest);
   });
 
   test('is refused without a session', async () => {
