@@ -8,6 +8,7 @@ configMapGenerator:
       - dht22.json
       - coredns.json
       - spore.json
+      - spindrift.json
 generatorOptions:
   disableNameSuffixHash: true
   annotations:

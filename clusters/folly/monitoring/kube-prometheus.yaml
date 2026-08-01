@@ -95,6 +95,7 @@ spec:
       additionalDataSources:
         - name: Loki
           type: loki
+          uid: loki
           isDefault: false
           access: proxy
           url: https://loki.${SECRET_DOMAIN}
