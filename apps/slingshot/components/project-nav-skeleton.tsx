@@ -11,8 +11,7 @@ import {
   useSidebar,
 } from './ui/sidebar';
 
-export function NavProjectsSkeleton() {
-  // Get sidebar state to check if collapsed
+export function ProjectNavSkeleton() {
   const { state } = useSidebar();
   const isCollapsed = state === 'collapsed';
 

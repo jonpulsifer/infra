@@ -2,7 +2,7 @@ import { Code, Loader2, Webhook } from 'lucide-react';
 import { Suspense } from 'react';
 
 import { PageHeader } from '@/components/page-header';
-import { ProjectsList } from '@/components/projects-list';
+import { QuickStartExamples } from '@/components/quick-start-examples';
 import {
   Card,
   CardContent,
@@ -13,7 +13,7 @@ import {
 
 export default function Home() {
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6 max-w-7xl mx-auto">
+    <div className="flex min-w-0 flex-1 flex-col gap-6 max-w-7xl w-full mx-auto">
       <PageHeader
         title="Quick Start"
         description="Get started with Slingshot • Capture, inspect, diff, and replay webhooks safely"
@@ -90,7 +90,7 @@ export default function Home() {
           </div>
         }
       >
-        <ProjectsList />
+        <QuickStartExamples />
       </Suspense>
     </div>
   );

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { Toaster } from 'sonner';
 import './globals.css';
-import { SidebarShell } from '@/components/sidebar-shell';
+import { AppSidebar } from '@/components/app-sidebar';
 import {
   SidebarInset,
   SidebarProvider,
@@ -58,7 +58,7 @@ export default function RootLayout({
               </main>
             </div>
           </SidebarInset>
-          <SidebarShell />
+          <AppSidebar />
         </SidebarProvider>
         <Toaster position="top-right" richColors theme="dark" />
       </body>

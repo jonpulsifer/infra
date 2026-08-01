@@ -14,12 +14,13 @@ import { usePathname } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { CreateProjectModal } from './create-project-modal';
-import { NavProjectsSkeleton } from './projects-list-skeleton';
+import { ProjectNavSkeleton } from './project-nav-skeleton';
 import { Button } from './ui/button';
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
+  SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
@@ -29,6 +30,12 @@ import {
   useSidebar,
 } from './ui/sidebar';
 
+/**
+ * The parts of the sidebar that do not depend on data: branding, navigation,
+ * and the tools list. The project list is passed in as children so it can
+ * stream separately.
+ */
+
 const developerTools = [
   { name: 'Environment', url: '/environment', icon: Terminal },
   { name: 'Request Headers', url: '/request-headers', icon: BookOpen },
@@ -37,11 +44,11 @@ const developerTools = [
   { name: 'Cache Management', url: '/cache', icon: Cloud },
 ];
 
-interface SidebarStaticProps {
+interface SidebarChromeProps {
   children: React.ReactNode;
 }
 
-export function SidebarStatic({ children }: SidebarStaticProps) {
+export function SidebarChrome({ children }: SidebarChromeProps) {
   const pathname = usePathname();
   const { state } = useSidebar();
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -75,6 +82,7 @@ export function SidebarStatic({ children }: SidebarStaticProps) {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
+
       <SidebarContent>
         <SidebarGroup>
           <div
@@ -121,8 +129,7 @@ export function SidebarStatic({ children }: SidebarStaticProps) {
           <SidebarMenu>
             {developerTools.map((tool) => {
               const isActive =
-                pathname === tool.url ||
-                (tool.url !== '/' && pathname.startsWith(tool.url));
+                pathname === tool.url || pathname.startsWith(`${tool.url}/`);
               return (
                 <SidebarMenuItem key={tool.name}>
                   <SidebarMenuButton
@@ -149,7 +156,7 @@ export function SidebarStatic({ children }: SidebarStaticProps) {
           <div className="flex items-center justify-between px-2 py-1.5">
             {!isCollapsed && (
               <SidebarGroupLabel className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                WEBHOOK PROJECTS
+                Webhook Projects
               </SidebarGroupLabel>
             )}
             {!isCollapsed && (
@@ -164,7 +171,22 @@ export function SidebarStatic({ children }: SidebarStaticProps) {
               </Button>
             )}
           </div>
-          <Suspense fallback={<NavProjectsSkeleton />}>{children}</Suspense>
+          <SidebarGroupContent>
+            <Suspense fallback={<ProjectNavSkeleton />}>{children}</Suspense>
+          </SidebarGroupContent>
+          {isCollapsed && (
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Create new webhook project"
+                  onClick={() => setCreateModalOpen(true)}
+                  className="transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                >
+                  <Plus className="size-4" />
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          )}
         </SidebarGroup>
       </SidebarContent>
 

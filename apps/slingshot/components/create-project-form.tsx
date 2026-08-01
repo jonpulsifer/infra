@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createProjectAction } from '@/lib/actions';
 import { BASE_URL } from '@/lib/base-url';
-import { slugSchema } from '@/lib/slug-schema';
+import { normalizeSlugInput, slugSchema } from '@/lib/slug';
 
 interface CreateProjectFormProps {
   onSuccess?: (slug: string) => void;
@@ -58,26 +58,7 @@ export function CreateProjectForm({ onSuccess }: CreateProjectFormProps = {}) {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value;
-
-    // Convert to lowercase
-    value = value.toLowerCase();
-
-    // Convert spaces to dashes
-    value = value.replace(/\s+/g, '-');
-
-    // Replace any invalid characters (not a-z, 0-9, or dash) with dashes
-    value = value.replace(/[^a-z0-9-]/g, '-');
-
-    // Collapse multiple consecutive dashes into a single dash
-    value = value.replace(/-+/g, '-');
-
-    // Limit to 32 characters
-    value = value.slice(0, 32);
-
-    // Allow dashes to be typed - don't remove leading/trailing dashes while typing
-    // Validation will happen on submit
-    setSlug(value);
+    setSlug(normalizeSlugInput(e.target.value));
   };
 
   return (

@@ -1,81 +1,78 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { generateProjectId } from '@/lib/nanoid';
-import { projectExists } from '@/lib/projects-storage';
+import { getProjectStore } from '@/lib/project-store-firestore';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { sanitizeHeaders } from '@/lib/sanitize-headers';
-import { incrementWebhookCount } from '@/lib/stats-storage';
-import { appendWebhook } from '@/lib/storage';
+import { isReservedSlug } from '@/lib/slug';
 import type { Webhook } from '@/lib/types';
 
 const MAX_BODY_SIZE = 5 * 1024 * 1024; // 5MB
 
 /**
- * Webhook ingestion endpoint for /api/[slug]
- * Handles incoming webhooks with:
- * - Rate limiting (5 RPS)
- * - Etag-based freshness tracking for polling (see lib/webhook-feed.ts)
- * - Automatic webhook storage
- *
- * Reserved slugs: "health" (handled by /api/health)
+ * Webhook ingestion for `/api/{slug}`. Accepts any method, rate limits per
+ * project at 5 RPS, and records the request through the project store.
  */
+
+function rateLimitHeaders(result: {
+  limit: number;
+  remaining: number;
+  reset: number;
+}): Record<string, string> {
+  return {
+    'X-RateLimit-Limit': result.limit.toString(),
+    'X-RateLimit-Remaining': result.remaining.toString(),
+    'X-RateLimit-Reset': result.reset.toString(),
+  };
+}
+
 async function handleWebhook(request: NextRequest, slug: string) {
-  // Rate limiting
-  const rateLimitResult = checkRateLimit(slug);
-  if (!rateLimitResult.success) {
+  const rateLimit = checkRateLimit(slug);
+  if (!rateLimit.success) {
     return NextResponse.json(
       {
         error: 'Rate limit exceeded',
-        limit: rateLimitResult.limit,
-        reset: rateLimitResult.reset,
+        limit: rateLimit.limit,
+        reset: rateLimit.reset,
       },
       {
         status: 429,
         headers: {
-          'X-RateLimit-Limit': rateLimitResult.limit.toString(),
-          'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
-          'X-RateLimit-Reset': rateLimitResult.reset.toString(),
+          ...rateLimitHeaders(rateLimit),
           'Retry-After': Math.ceil(
-            (rateLimitResult.reset - Date.now()) / 1000,
+            (rateLimit.reset - Date.now()) / 1000,
           ).toString(),
         },
       },
     );
   }
 
-  // Get request metadata
-  const method = request.method;
-  const url = request.url;
   const rawHeaders: Record<string, string> = {};
   request.headers.forEach((value, key) => {
     rawHeaders[key] = value;
   });
-  // Sanitize headers to remove sensitive tokens
-  const headers = sanitizeHeaders(rawHeaders);
 
-  // Read body with size limit
-  let body: string | null = null;
   const contentLength = request.headers.get('content-length');
   if (contentLength && Number.parseInt(contentLength, 10) > MAX_BODY_SIZE) {
     return NextResponse.json({ error: 'Payload too large' }, { status: 413 });
   }
 
+  let body: string | null = null;
   try {
-    const bodyText = await request.text();
-    if (bodyText.length > MAX_BODY_SIZE) {
+    const text = await request.text();
+    if (text.length > MAX_BODY_SIZE) {
       return NextResponse.json({ error: 'Payload too large' }, { status: 413 });
     }
-    body = bodyText || null;
-  } catch (_error) {
-    // Body might be empty or invalid, that's okay
+    body = text || null;
+  } catch {
+    // An empty or unreadable body is not an error for a capture tool.
     body = null;
   }
 
-  // Create webhook object
   const webhook: Webhook = {
     id: generateProjectId(),
-    method,
-    url,
-    headers,
+    method: request.method,
+    url: request.url,
+    headers: sanitizeHeaders(rawHeaders),
     body,
     timestamp: Date.now(),
     direction: 'incoming',
@@ -87,28 +84,14 @@ async function handleWebhook(request: NextRequest, slug: string) {
   };
 
   try {
-    await Promise.all([
-      appendWebhook(slug, webhook),
-      incrementWebhookCount(slug, webhook.timestamp),
-    ]);
-
+    const store = await getProjectStore();
+    await store.recordWebhook(slug, webhook);
     return NextResponse.json(
-      {
-        success: true,
-        webhookId: webhook.id,
-        timestamp: webhook.timestamp,
-      },
-      {
-        status: 200,
-        headers: {
-          'X-RateLimit-Limit': rateLimitResult.limit.toString(),
-          'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
-          'X-RateLimit-Reset': rateLimitResult.reset.toString(),
-        },
-      },
+      { success: true, webhookId: webhook.id, timestamp: webhook.timestamp },
+      { status: 200, headers: rateLimitHeaders(rateLimit) },
     );
   } catch (error) {
-    console.error('Failed to save webhook:', error);
+    console.error('Failed to record webhook:', error);
     return NextResponse.json(
       { error: 'Failed to save webhook' },
       { status: 500 },
@@ -116,65 +99,28 @@ async function handleWebhook(request: NextRequest, slug: string) {
   }
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
-) {
-  return POST(request, { params });
-}
-
-export async function POST(
+async function ingest(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
 
-  // Skip reserved routes
-  if (slug === 'health') {
+  if (isReservedSlug(slug)) {
     return NextResponse.json({ error: 'Invalid endpoint' }, { status: 404 });
   }
 
-  // Check if project exists
-  const exists = await projectExists(slug);
-  if (!exists) {
+  const store = await getProjectStore();
+  if (!(await store.projectExists(slug))) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
   return handleWebhook(request, slug);
 }
 
-// Allow all HTTP methods
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
-) {
-  return POST(request, { params });
-}
-
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
-) {
-  return POST(request, { params });
-}
-
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
-) {
-  return POST(request, { params });
-}
-
-export async function HEAD(
-  request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
-) {
-  return POST(request, { params });
-}
-
-export async function OPTIONS(
-  request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> },
-) {
-  return POST(request, { params });
-}
+export const GET = ingest;
+export const POST = ingest;
+export const PUT = ingest;
+export const PATCH = ingest;
+export const DELETE = ingest;
+export const HEAD = ingest;
+export const OPTIONS = ingest;
