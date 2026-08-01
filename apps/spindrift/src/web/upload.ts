@@ -112,7 +112,7 @@ export async function handleUpload(
     // that was configured but unreachable still answered with a pod-local
     // handle no builder could fetch. A depot failure is now a `500` that says
     // so, because a staged bundle nobody can retrieve is not a staged bundle.
-    const context = deps.context(authentication.principal);
+    const context = await deps.context(authentication.principal);
     const depot = sourceDepotFor(
       context.manifest,
       request.headers.get('x-bucket'),

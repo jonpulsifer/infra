@@ -18,12 +18,16 @@
  * - **`auth`** is the one surface reachable without a session, because it is
  *   what produces one. `src/auth/routes.ts` carries why it cannot be a command.
  */
+import { isDeepStrictEqual } from 'node:util';
 import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
 import { systemClock } from '../commands/types.ts';
 import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
-import { loadStoredManifest } from '../config/manifest-store.ts';
+import {
+  currentStoredManifest,
+  loadStoredManifest,
+} from '../config/manifest-store.ts';
 import { createDb } from '../db/client.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
@@ -116,6 +120,38 @@ export async function start(
     clock: systemClock,
   });
 
+  /**
+   * The configuration a command runs against, current as of this request.
+   *
+   * `configureInstallation` writes the row, so a process-lifetime copy would
+   * mean an operator watching a form save a value nothing then reads. The read
+   * is one `select` per command; the adapters are rebuilt only when the
+   * document actually changed, which is what makes doing this per request
+   * affordable — `createAdapterRegistry` is pure assembly whose credentials are
+   * providers called per request, so rebuilding opens nothing.
+   *
+   * Deliberately **not** current: `auth` below. `controlPlane.hostname` is the
+   * passkey relying-party id, and a ceremony is scoped to the origin it began
+   * at — re-reading it mid-session would invalidate credentials rather than
+   * update them. Changing where an installation is served is a restart.
+   */
+  let current = { manifest, adapters };
+  const installationNow = async () => {
+    const stored = await currentStoredManifest(db);
+    if (stored === null || isDeepStrictEqual(stored, current.manifest)) {
+      return current;
+    }
+    current = {
+      manifest: stored,
+      adapters: createAdapterRegistry({
+        manifest: stored,
+        db,
+        clock: systemClock,
+      }),
+    };
+    return current;
+  };
+
   const auth: EnrolmentDeps & GatewayDeps = {
     db,
     clock: systemClock,
@@ -132,13 +168,16 @@ export async function start(
     client,
     {
       authenticate: (request) => authenticateRequest(request, auth),
-      context: (principal) => ({
-        principal,
-        clock: systemClock,
-        db,
-        adapters,
-        manifest,
-      }),
+      context: async (principal) => {
+        const installation = await installationNow();
+        return {
+          principal,
+          clock: systemClock,
+          db,
+          adapters: installation.adapters,
+          manifest: installation.manifest,
+        };
+      },
     },
     auth,
   );

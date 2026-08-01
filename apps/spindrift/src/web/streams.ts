@@ -26,7 +26,11 @@ export const STREAM_PATHS = [ATTEMPT_STREAM_PATH, RUNTIME_STREAM_PATH] as const;
 
 export interface StreamDeps {
   authenticate(request: Request): Promise<RequestAuthentication>;
-  context(principal: Principal): CommandContext;
+  /**
+   * Assembled per connection, and current as of it — the same reason the
+   * command boundary's is asynchronous: configuration is the UI's to drive.
+   */
+  context(principal: Principal): CommandContext | Promise<CommandContext>;
 }
 
 interface AttemptSocketData {
@@ -96,7 +100,7 @@ async function authenticate(
   }
   return {
     principal: authentication.principal,
-    context: deps.context(authentication.principal),
+    context: await deps.context(authentication.principal),
   };
 }
 
