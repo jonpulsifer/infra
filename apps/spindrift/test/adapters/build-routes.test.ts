@@ -66,6 +66,7 @@ const spec: BuildSpec = {
   kind: 'service',
   platform: { os: 'linux', arch: 'amd64' },
   destination: 'registry.example.test/app',
+  tags: ['sha256-bundle', 'latest'],
   buildArgs: {},
 };
 
@@ -761,6 +762,7 @@ describe('the BuildKit program', () => {
     bundleDigest: 'sha256:bundle',
     subpath: 'apps/web',
     destination: 'registry.example.test/app',
+    tags: ['sha256-bundle', 'latest'],
     zeroConfigFrontend: FRONTEND,
     buildArgs: { PUBLIC_URL: 'https://app.example.test' },
   });
@@ -781,6 +783,23 @@ describe('the BuildKit program', () => {
     // The same rule `archiveScope` applies: exactly one entry, and a directory.
     expect(program).toContain('ls -A "$workspace" | wc -l');
     expect(program).toContain('if [ -d "$only" ]');
+  });
+
+  test('pushes every tag core chose, under the repository core chose', () => {
+    // The exporter takes one comma-separated list of references and its own
+    // options are comma-separated too, so the field carries buildctl's CSV
+    // quotes inside the shell's — two layers, neither substituting for the
+    // other. Written flat, `push=true` would parse as part of the image name.
+    expect(program).toContain(
+      `--output 'type=image,"name=registry.example.test/app:sha256-bundle,registry.example.test/app:latest",push=true'`,
+    );
+  });
+
+  test('builds its immutable reference from the repository, never a tag', () => {
+    // §16 pins an artifact by digest, and `repository:tag@sha256:…` is not what
+    // the report should carry — the tag would ride along into the provenance
+    // and SBOM references derived from it.
+    expect(program).toContain(`ref='registry.example.test/app'@"$digest"`);
   });
 
   test('passes build arguments as build arguments', () => {
@@ -805,6 +824,7 @@ describe('the BuildKit program', () => {
       bundleDigest: 'sha256:bundle',
       subpath: '.',
       destination: 'registry.example.test/app',
+      tags: ['sha256-bundle', 'latest'],
       zeroConfigFrontend: FRONTEND,
       buildArgs: { EVIL: "'; rm -rf /; echo '" },
     });

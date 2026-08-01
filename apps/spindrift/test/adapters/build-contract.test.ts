@@ -30,6 +30,7 @@ const spec: BuildSpec = {
   kind: 'service',
   platform: { os: 'linux', arch: 'arm64' },
   destination: 'registry.example.test/apps',
+  tags: ['sha256-bundle', 'latest'],
   buildArgs: {},
 };
 

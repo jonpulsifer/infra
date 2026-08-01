@@ -63,6 +63,12 @@ jobs:
             printf 'destination=%s\n'  "$(read_key '.destination')"
             printf 'frontend=%s\n'     "$(read_key '.zeroConfigFrontend')"
             printf 'registry=%s\n'     "$(read_key '.destination | split("/")[0]')"
+            # §12 counts tags, so core sends every tag this push must carry and
+            # the runner composes none of its own. Full references, because that
+            # is what build-push-action's newline list takes.
+            printf 'tags<<SPINDRIFT_EOF\n'
+            read_key '.destination + ":" + .tags[]'
+            printf 'SPINDRIFT_EOF\n'
             printf 'buildArgs<<SPINDRIFT_EOF\n'
             read_key '.buildArgs | to_entries[] | "\(.key)=\(.value)"'
             printf 'SPINDRIFT_EOF\n'
@@ -137,7 +143,7 @@ jobs:
           file: ${{ steps.frontend.outputs.file }}
           build-args: ${{ steps.request.outputs.buildArgs }}
           push: true
-          tags: ${{ steps.request.outputs.destination }}
+          tags: ${{ steps.request.outputs.tags }}
           cache-from: |
             type=gha,scope=spindrift-build
             type=gha,scope=spindrift-push
