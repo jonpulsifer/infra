@@ -6,13 +6,21 @@
  * a fake adapter — the route's real submit body, its real status polling, and
  * its real page-cursored log reads all run against it.
  *
- * Two behaviours are modelled because the route has to survive them:
+ * Three behaviours are modelled because the route has to survive them:
  *
  * - **A build does not finish on the first read.** `duration` is how many status
  *   reads it takes, so a route that submitted and assumed would fail here.
- * - **The log arrives in pages, and the cursor is the only thing that knows
- *   what was already served.** A route that re-read page one would see its own
- *   output repeat, which is the bug the cursor exists to prevent.
+ * - **The log is ingested behind the writer.** A build writes as it runs and
+ *   finishes writing when it finishes; the log service only serves what had
+ *   been written by the previous status read. The report line lives in the last
+ *   region a build writes, so a route that stops reading the moment the status
+ *   turns terminal never sees it — which is the failure this models.
+ * - **A page token continues one search, not the log.** `entries.list` mints a
+ *   token against a *frozen* result set, exactly as the vendor documents it:
+ *   "retrieve the next batch of results from the preceding call to this
+ *   method". A route that saved one and presented it a poll later would be
+ *   paginating a snapshot of the past, so this fake freezes the snapshot rather
+ *   than treating the token as a watermark.
  */
 
 import type { Fetcher } from '../../../src/adapters/build/cloud-build.ts';
@@ -20,6 +28,9 @@ import { encodeBuildReport } from '../../../src/adapters/build/report.ts';
 
 export const BUILD_HOST = 'https://builds.invalid';
 export const LOGS_HOST = 'https://logs.invalid';
+
+/** When the first line of any build's log was ingested. */
+const INGEST_EPOCH = Date.parse('2026-07-28T00:00:00.000Z');
 
 export interface RecordedRequest {
   method: string;
@@ -35,6 +46,18 @@ export interface FakeCloudBuildOptions {
   status?: string;
   /** Lines the build writes, given the program it was submitted with. */
   log?: (program: string) => readonly string[];
+  /**
+   * Entries one page carries, whatever `pageSize` asked for. Small on purpose:
+   * the real service answers with fewer than requested routinely, and a route
+   * that read one page per poll would be permanently behind its own log.
+   */
+  pageSize?: number;
+  /**
+   * Answer the first page of every search empty *and with a token*, which the
+   * vendor documents as "the search found no log entries so far but it did not
+   * have time to search all the possible log entries" — not as a caught-up log.
+   */
+  cutShort?: boolean;
   /** When set, submitting is refused with this status. */
   refuseSubmit?: number;
   /** When set, every log read fails — the route must survive it. */
@@ -42,12 +65,27 @@ export interface FakeCloudBuildOptions {
   token?: string;
 }
 
+/** One ingested log entry, in the shape the log service serves it. */
+interface FakeEntry {
+  insertId: string;
+  textPayload: string;
+  timestamp: string;
+}
+
 interface FakeBuild {
   id: string;
   reads: number;
   lines: readonly string[];
-  /** How many lines have been served, which is what the cursor encodes. */
-  served: number;
+  /** Lines the build has written. Not yet what the log service will serve. */
+  written: number;
+  /** Lines the log service has ingested, which is what it will serve. */
+  ingested: FakeEntry[];
+}
+
+/** One `entries.list` search, frozen at the moment it was issued. */
+interface FakeSearch {
+  entries: readonly FakeEntry[];
+  from: number;
 }
 
 export class FakeCloudBuild {
@@ -58,7 +96,9 @@ export class FakeCloudBuild {
   readonly programs: string[] = [];
 
   private readonly builds = new Map<string, FakeBuild>();
+  private readonly searches = new Map<string, FakeSearch>();
   private counter = 0;
+  private searchCounter = 0;
   private readonly options: Required<
     Omit<FakeCloudBuildOptions, 'refuseSubmit' | 'token'>
   > &
@@ -69,6 +109,8 @@ export class FakeCloudBuild {
       duration: options.duration ?? 1,
       status: options.status ?? 'SUCCESS',
       log: options.log ?? defaultBuildLog,
+      pageSize: options.pageSize ?? 2,
+      cutShort: options.cutShort ?? false,
       breakLogs: options.breakLogs ?? false,
       ...(options.refuseSubmit === undefined
         ? {}
@@ -125,28 +167,47 @@ export class FakeCloudBuild {
       id,
       reads: 0,
       lines: this.options.log(program),
-      served: 0,
+      written: 0,
+      ingested: [],
     });
     return json(200, { metadata: { build: { id, status: 'QUEUED' } } });
   }
 
+  /**
+   * One status read, which is also when the build gets to write.
+   *
+   * The last region a build writes is the one that matters — `#8 exporting to
+   * image` and the report line — and it is written on the same tick the status
+   * turns terminal. That is not fake convenience; it is what a BuildKit run
+   * does, and it is why the read *after* the terminal status is the load-bearing
+   * one.
+   */
   private read(id: string): Response {
     const build = this.builds.get(id);
     if (build === undefined) return json(404, { error: 'no such build' });
     build.reads += 1;
+    const terminal = build.reads > this.options.duration;
+    build.written = terminal
+      ? build.lines.length
+      : Math.max(
+          build.written,
+          Math.floor(
+            (build.lines.length * build.reads) / (this.options.duration + 1),
+          ),
+        );
     return json(200, {
       id,
-      status:
-        build.reads > this.options.duration ? this.options.status : 'WORKING',
+      status: terminal ? this.options.status : 'WORKING',
     });
   }
 
   /**
    * One page of one build's log.
    *
-   * The cursor is "how many lines this build has already served", encoded as a
-   * string — which is enough to catch a route that ignores it and enough to be
-   * read by a test that wants to know how many pages there were.
+   * A request with no `pageToken` is a *new* search over whatever has been
+   * ingested by now; a request with one continues that earlier search's frozen
+   * result set. Nothing here lets a token act as a watermark, because nothing
+   * in the real API does.
    */
   private logs(body: unknown): Response {
     if (this.options.breakLogs) return json(503, { error: 'log service down' });
@@ -165,20 +226,59 @@ export class FakeCloudBuild {
     ) {
       return json(400, { error: 'resourceNames is required' });
     }
-    const id = /build_id="([^"]+)"/.exec(request.filter ?? '')?.[1] ?? '';
+
+    if (request.pageToken !== undefined) {
+      const search = this.searches.get(request.pageToken);
+      if (search === undefined) {
+        return json(400, { error: 'invalid pageToken' });
+      }
+      return this.page(search.entries, search.from);
+    }
+
+    const filter = request.filter ?? '';
+    const id = /build_id="([^"]+)"/.exec(filter)?.[1] ?? '';
     const build = this.builds.get(id);
     if (build === undefined) return json(200, { entries: [] });
 
-    const from = Number(request.pageToken ?? '0');
-    const entries = build.lines.slice(from).map((line) => ({
-      textPayload: line,
-      timestamp: '2026-07-28T00:00:00Z',
-    }));
-    build.served = build.lines.length;
-    return json(200, {
-      entries,
-      nextPageToken: String(build.lines.length),
-    });
+    this.ingest(build);
+    const since = /timestamp>="([^"]+)"/.exec(filter)?.[1];
+    const entries =
+      since === undefined
+        ? [...build.ingested]
+        : build.ingested.filter((entry) => entry.timestamp >= since);
+
+    // A cut-short search answers nothing and hands back a token anyway. The
+    // entries are still there; the route has to follow the token to see them.
+    return this.page(entries, 0, this.options.cutShort);
+  }
+
+  /** Ingestion catches up to what the build had written at its last status read. */
+  private ingest(build: FakeBuild): void {
+    while (build.ingested.length < build.written) {
+      const index = build.ingested.length;
+      build.ingested.push({
+        insertId: `${build.id}-${index}`,
+        textPayload: build.lines[index] ?? '',
+        timestamp: new Date(INGEST_EPOCH + index * 1_000).toISOString(),
+      });
+    }
+  }
+
+  private page(
+    entries: readonly FakeEntry[],
+    from: number,
+    cutShort = false,
+  ): Response {
+    const slice = cutShort
+      ? []
+      : entries.slice(from, from + this.options.pageSize);
+    const next = from + slice.length;
+    if (next >= entries.length) return json(200, { entries: slice });
+
+    this.searchCounter += 1;
+    const token = `search-${this.searchCounter}`;
+    this.searches.set(token, { entries, from: next });
+    return json(200, { entries: slice, nextPageToken: token });
   }
 }
 
