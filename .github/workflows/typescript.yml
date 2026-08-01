@@ -41,6 +41,9 @@ jobs:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
     runs-on: infra-offsite
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 15
     env:
       NEXT_TELEMETRY_DISABLED: 1
