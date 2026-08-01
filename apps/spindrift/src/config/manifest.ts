@@ -10,7 +10,9 @@
  * workload.
  */
 
+import { loadDeploymentFederation } from './federation-credential.ts';
 import {
+  type AuthoredManifest,
   type InstallationManifest,
   installationManifestSchema,
 } from './manifest.schema.ts';
@@ -42,7 +44,7 @@ type Env = Record<string, string | undefined>;
 export function parseManifest(
   document: string,
   source: string,
-): InstallationManifest {
+): AuthoredManifest {
   let parsed: unknown;
   try {
     parsed = Bun.YAML.parse(document);
@@ -55,12 +57,72 @@ export function parseManifest(
   return validateManifest(parsed, source);
 }
 
+/**
+ * Keys the schema no longer has, and where the fact went instead.
+ *
+ * Read as `[block, key, why]`. Every one of them was a copy of something the
+ * deployment already declares, so a document still carrying one is describing
+ * a fact it does not own.
+ */
+const DERIVED_AWAY: readonly (readonly [string, string, string])[] = [
+  [
+    'cloud',
+    'federation',
+    'it is read from the credential the deployment mounts',
+  ],
+  ['charts', 'installer', 'nothing reads it'],
+];
+
+/**
+ * Drop the keys that were derived away, before the strict schema sees them.
+ *
+ * Dropped rather than refused, and the difference matters: an installation
+ * seeded before the removal has one of these in its durable row, and a
+ * refusal would be a control plane that will not boot until someone edits
+ * Postgres by hand. The row is rewritten from what this returns, so it
+ * self-heals on the first start and the warning fires once.
+ *
+ * This is also what makes the removal complete. A key that is merely absent
+ * from the schema can be written back by any caller holding an older document;
+ * a key that is stripped on the way in cannot reach storage from any path.
+ */
+function withoutDerivedKeys(manifest: unknown, source: string): unknown {
+  if (
+    typeof manifest !== 'object' ||
+    manifest === null ||
+    Array.isArray(manifest)
+  ) {
+    return manifest;
+  }
+
+  let document = manifest as Record<string, unknown>;
+  for (const [blockName, key, why] of DERIVED_AWAY) {
+    const block = document[blockName];
+    if (
+      typeof block !== 'object' ||
+      block === null ||
+      Array.isArray(block) ||
+      !(key in block)
+    ) {
+      continue;
+    }
+    const { [key]: _dropped, ...rest } = block as Record<string, unknown>;
+    document = { ...document, [blockName]: rest };
+    console.warn(
+      `${source}: ${blockName}.${key} is no longer an installation manifest key — ${why}, so the value in this document is being discarded`,
+    );
+  }
+  return document;
+}
+
 /** Validate a parsed or stored manifest and report every bad field together. */
 export function validateManifest(
   manifest: unknown,
   source: string,
-): InstallationManifest {
-  const result = installationManifestSchema.safeParse(manifest);
+): AuthoredManifest {
+  const result = installationManifestSchema.safeParse(
+    withoutDerivedKeys(manifest, source),
+  );
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => {
@@ -79,7 +141,7 @@ export function validateManifest(
 export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
 
 /** High-trust default placeholder manifest used when initializing an unseeded installation. */
-export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
+export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
   installation: 'default',
   controlPlane: {
     hostname: 'spindrift.example.com',
@@ -98,18 +160,9 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
   cloud: {
     artifactsProject: 'spindrift-artifacts',
     homeVesselProject: 'spindrift-vessel',
-    federation: {
-      audience:
-        '//iam.googleapis.com/projects/1234567890/locations/global/workloadIdentityPools/spindrift-pool/providers/spindrift-provider',
-      tokenUrl: 'https://sts.googleapis.com/v1/token',
-      tokenPath: '/var/run/secrets/spindrift/gcp-token',
-      impersonationUrl:
-        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@spindrift-vessel.iam.gserviceaccount.com:generateAccessToken',
-    },
   },
   charts: {
     app: 'packages/charts/spindrift-app',
-    installer: 'packages/charts/spindrift',
   },
   supplyChain: {
     registry: 'ghcr.io/spindrift',
@@ -190,7 +243,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
  */
 export async function loadManifest(
   env: Env = Bun.env,
-): Promise<InstallationManifest> {
+): Promise<AuthoredManifest> {
   const manifest = await loadManifestIfPresent(env);
   if (manifest !== null) return manifest;
 
@@ -208,7 +261,7 @@ export async function loadManifest(
  */
 export async function loadManifestIfPresent(
   env: Env = Bun.env,
-): Promise<InstallationManifest | null> {
+): Promise<AuthoredManifest | null> {
   const explicitPath = env[MANIFEST_PATH_VAR]?.trim();
   const path = explicitPath || DEFAULT_MANIFEST_PATH;
 
@@ -231,6 +284,32 @@ export async function loadManifestIfPresent(
 }
 
 /**
+ * Attach the deployment facts an authored document deliberately omits.
+ *
+ * The one place the two halves meet, and the only place they may: everything
+ * upstream of this — parsing, validation, the durable write — handles an
+ * {@link AuthoredManifest} with no derived key on it, and everything downstream
+ * reads an {@link InstallationManifest} it cannot write back. That is what
+ * makes a second copy unrepresentable rather than merely discouraged.
+ *
+ * Resolved on every read rather than once at boot, because the credential is a
+ * projected volume the kubelet owns and a value captured at start is a value
+ * that stops being true when the deployment re-renders it.
+ */
+export async function resolveManifest(
+  manifest: AuthoredManifest,
+  env: Env = Bun.env,
+): Promise<InstallationManifest> {
+  return {
+    ...manifest,
+    cloud: {
+      ...manifest.cloud,
+      federation: await loadDeploymentFederation(env),
+    },
+  };
+}
+
+/**
  * Refuse to enable header authentication without its non-bypassable boundary.
  *
  * The process cannot observe a Kubernetes NetworkPolicy from inside its own
@@ -238,7 +317,7 @@ export async function loadManifestIfPresent(
  * a manifest copied into an unrestricted deployment fails closed at boot.
  */
 export function assertTrustedGatewayBoundary(
-  manifest: InstallationManifest,
+  manifest: Pick<InstallationManifest, 'auth'>,
   env: Env = Bun.env,
 ): void {
   if (
@@ -252,6 +331,7 @@ export function assertTrustedGatewayBoundary(
 }
 
 export type {
+  AuthoredManifest,
   GatewayAuthConfig,
   InstallationManifest,
 } from './manifest.schema.ts';

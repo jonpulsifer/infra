@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
-import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
+import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
   MANIFEST_INLINE_VAR,
@@ -10,6 +10,7 @@ import { loadStoredManifest } from '../../src/config/manifest-store.ts';
 import { createDb } from '../../src/db/client.ts';
 import { installation, targets } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
+import { FIXTURE_DEPLOYMENT_ENV } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const FIXTURE = new URL(
@@ -17,7 +18,7 @@ const FIXTURE = new URL(
   import.meta.url,
 );
 const fixtureText = await Bun.file(FIXTURE).text();
-const fixtureManifest = Bun.YAML.parse(fixtureText) as InstallationManifest;
+const fixtureManifest = Bun.YAML.parse(fixtureText) as AuthoredManifest;
 const connectedManifest = {
   ...fixtureManifest,
   targets: [
@@ -53,7 +54,7 @@ const connectedManifest = {
       },
     },
   ],
-} satisfies InstallationManifest;
+} satisfies AuthoredManifest;
 
 describe('the stored installation manifest', () => {
   test('stores declared configuration, then boots from the database alone', async () => {
@@ -185,7 +186,7 @@ describe('the stored installation manifest', () => {
             }
           : target,
       ),
-    } satisfies InstallationManifest;
+    } satisfies AuthoredManifest;
 
     // Configuration is the UI's to drive, so the trigger for reconciliation is
     // the stored manifest changing — which is what a settings write is.
@@ -328,7 +329,7 @@ describe('the stored installation manifest', () => {
         { name: 'cluster', adapter: 'kubernetes' },
         { name: 'cloud-cloudrun', adapter: 'kubernetes' },
       ],
-    } satisfies InstallationManifest;
+    } satisfies AuthoredManifest;
 
     await expect(
       loadStoredManifest(database().db, {
@@ -405,6 +406,49 @@ describe('the stored installation manifest', () => {
 
   test('seeds default placeholder manifest when the database is empty and no bootstrap exists', async () => {
     const loaded = await loadStoredManifest(database().db, {});
-    expect(loaded).toEqual(DEFAULT_PLACEHOLDER_MANIFEST);
+    // The placeholder as authored, plus the deployment facts resolved onto it.
+    // A deployment that mounts no cloud credential resolves `null`, which is
+    // what an installation with no cloud Targets honestly has.
+    expect(loaded).toEqual({
+      ...DEFAULT_PLACEHOLDER_MANIFEST,
+      cloud: { ...DEFAULT_PLACEHOLDER_MANIFEST.cloud, federation: null },
+    });
+  });
+
+  test('the stored row never holds a fact the deployment declares', async () => {
+    // The keys derived away are dropped on the way in, not merely absent from
+    // the schema — an installation seeded before the removal has them in its
+    // row, and refusing would be a control plane that will not boot.
+    await database().client`
+      INSERT INTO installation (manifest)
+      VALUES (${JSON.stringify({
+        ...fixtureManifest,
+        cloud: {
+          ...fixtureManifest.cloud,
+          federation: {
+            audience: '//iam.stale.test/pools/stale',
+            tokenUrl: 'https://sts.stale.test/v1/token',
+            tokenPath: '/var/run/secrets/stale/token',
+            impersonationUrl: null,
+          },
+        },
+        charts: { ...fixtureManifest.charts, installer: 'example/spindrift' },
+      })}::jsonb)
+    `;
+
+    // The deployment's credential wins outright, because it is the only copy
+    // left: the row's stale audience reaches no reader.
+    const loaded = await loadStoredManifest(
+      database().db,
+      FIXTURE_DEPLOYMENT_ENV,
+    );
+    expect(loaded.cloud.federation?.audience).toBe(
+      '//iam.example.test/projects/1/locations/global/workloadIdentityPools/example/providers/cluster',
+    );
+    expect(loaded.charts).not.toHaveProperty('installer');
+
+    const [row] = await database().db.select().from(installation).limit(1);
+    expect(row?.manifest.cloud).not.toHaveProperty('federation');
+    expect(row?.manifest.charts).not.toHaveProperty('installer');
   });
 });

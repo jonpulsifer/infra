@@ -14,15 +14,12 @@ dns:
 cloud:
   artifactsProject: example-artifacts
   homeVesselProject: example-home
-  federation:
-    audience: //iam.example.test/projects/1/locations/global/workloadIdentityPools/example/providers/cluster
-    tokenUrl: https://sts.example.test/v1/token
-    tokenPath: /var/run/secrets/cloud/token
-    impersonationUrl: https://iamcredentials.example.test/v1/projects/-/serviceAccounts/spindrift@example-home.example.test:generateAccessToken
+  # Federation comes from the external_account credential the deployment mounts,
+  # named by GOOGLE_APPLICATION_CREDENTIALS. A local run that sets neither has
+  # no cloud Targets, which is a supported installation.
 
 charts:
   app: example/spindrift-app
-  installer: example/spindrift
 
 supplyChain:
   registry: registry.example.test/artifacts

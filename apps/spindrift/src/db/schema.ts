@@ -43,7 +43,7 @@ import {
   DEPLOY_PHASES,
   FAILURE_REASONS,
 } from '../adapters/deploy/contract.ts';
-import type { InstallationManifest } from '../config/manifest.schema.ts';
+import type { AuthoredManifest } from '../config/manifest.schema.ts';
 import type {
   PrerequisiteResult,
   TargetDiscovery,
@@ -253,12 +253,17 @@ export const webauthnPurpose = pgEnum('webauthn_purpose', [
  * Postgres its durable store. A deployment declaration reconciles into this
  * row at process start; without one, every process can recover the same last
  * validated value from the database.
+ *
+ * The **authored** document, never the resolved one. What the deployment
+ * already declares — its federation credential — is read from the deployment on
+ * every load and is not representable here, so this row cannot hold a copy that
+ * disagrees with the pod it is running in.
  */
 export const installation = pgTable(
   'installation',
   {
     id: integer('id').primaryKey().default(1),
-    manifest: jsonbDocument('manifest').$type<InstallationManifest>().notNull(),
+    manifest: jsonbDocument('manifest').$type<AuthoredManifest>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

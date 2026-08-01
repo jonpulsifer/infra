@@ -371,3 +371,133 @@ describe('authenticated Gateway trust', () => {
     ).rejects.toThrow('gatewayAuth.from must name at least one');
   });
 });
+
+describe('the credential is the only copy of the federation', () => {
+  const audience =
+    '//iam.example.test/projects/1/locations/global/workloadIdentityPools/example/providers/cluster';
+  const impersonation =
+    'https://iamcredentials.example.test/v1/projects/-/serviceAccounts/spindrift@example-home.example.test:generateAccessToken';
+
+  test('renders a complete external_account document the process reads back', async () => {
+    const objects = await render({
+      serviceAccount: {
+        token: { gcpAudience: audience, gcpImpersonationUrl: impersonation },
+      },
+    });
+    const credential = one(
+      objects,
+      'ConfigMap',
+      'spindrift-federated-identity',
+    );
+    // Every fact `cloud.federation` used to ask for by hand, rendered once,
+    // from values a release already sets. The manifest has no key for any of
+    // them, so nothing is left that could disagree.
+    expect(JSON.parse(credential.data?.['gcp-credentials.json'] ?? '')).toEqual(
+      {
+        type: 'external_account',
+        audience,
+        subject_token_type: 'urn:ietf:params:oauth:token-type:jwt',
+        token_url: 'https://sts.googleapis.com/v1/token',
+        service_account_impersonation_url: impersonation,
+        credential_source: { file: '/var/run/secrets/spindrift/gcp-token' },
+      },
+    );
+
+    // And the deployment points ADC at exactly that file, which is how the
+    // process finds it without being told a second time.
+    const web = one(objects, 'Deployment', 'spindrift-web');
+    expect(web.spec.template.spec.containers[0].env).toContainEqual({
+      name: 'GOOGLE_APPLICATION_CREDENTIALS',
+      value: '/var/run/secrets/spindrift/gcp-credentials.json',
+    });
+  });
+
+  test('omits impersonation when the identity holds its own grants', async () => {
+    const objects = await render({
+      serviceAccount: { token: { gcpAudience: audience } },
+    });
+    const credential = JSON.parse(
+      one(objects, 'ConfigMap', 'spindrift-federated-identity').data?.[
+        'gcp-credentials.json'
+      ] ?? '',
+    );
+    expect(credential).not.toHaveProperty('service_account_impersonation_url');
+  });
+
+  test('refuses a declaration that restates the federation', async () => {
+    await expect(
+      render({
+        manifest: {
+          installation: 'declared',
+          cloud: { federation: { audience: '//iam.stale.test/pools/stale' } },
+        },
+      }),
+    ).rejects.toThrow('manifest.cloud.federation is not a manifest key');
+  });
+
+  test('refuses a declaration that names the chart it was installed from', async () => {
+    await expect(
+      render({
+        manifest: {
+          installation: 'declared',
+          charts: { app: 'example/spindrift-app', installer: 'example/x' },
+        },
+      }),
+    ).rejects.toThrow('manifest.charts.installer is not a manifest key');
+  });
+});
+
+describe('the relying party and the front door cannot disagree', () => {
+  test('refuses a declaration whose hostname is not the one served', async () => {
+    // `controlPlane.hostname` is kept rather than derived — it is the passkey
+    // relying-party id, bound at boot on purpose, and an installation with no
+    // Gateway still needs one. What is not kept is the ability for the two to
+    // differ, which would enrol nobody.
+    await expect(
+      render({
+        hostname: 'spindrift.example.test',
+        manifest: {
+          installation: 'declared',
+          controlPlane: { hostname: 'stale.example.test' },
+        },
+      }),
+    ).rejects.toThrow(
+      /manifest.controlPlane.hostname is "stale.example.test" but this release serves the control plane at "spindrift.example.test"/,
+    );
+  });
+
+  test('renders when they agree', async () => {
+    const objects = await render({
+      hostname: 'spindrift.example.test',
+      manifest: {
+        installation: 'declared',
+        controlPlane: { hostname: 'spindrift.example.test' },
+      },
+    });
+    expect(
+      one(objects, 'HTTPRoute', 'spindrift-http-route').spec.hostnames,
+    ).toEqual(['spindrift.example.test']);
+  });
+
+  test('leaves an in-cluster-only installation free to name its own relying party', async () => {
+    // The chart's `hostname` may be empty — no Gateway, no HTTPRoute, still a
+    // valid installation. That installation has no deployment fact to derive a
+    // relying party from, which is the structural reason the key stays.
+    const objects = await render({
+      manifest: {
+        installation: 'declared',
+        controlPlane: { hostname: 'spindrift.internal.example.test' },
+      },
+    });
+    expect(objects.some((object) => object.kind === 'HTTPRoute')).toBe(false);
+    expect(
+      Bun.YAML.parse(
+        one(objects, 'ConfigMap', 'spindrift-manifest').data?.[
+          'manifest.yaml'
+        ] ?? '',
+      ),
+    ).toMatchObject({
+      controlPlane: { hostname: 'spindrift.internal.example.test' },
+    });
+  });
+});

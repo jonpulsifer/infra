@@ -35,9 +35,20 @@ spec:
     # The Secret carries only the one-time enrolment token and optional
     # integration credentials.
     envFromSecret: spindrift-env
+    # The whole of §13's federation. These two values render the pod's
+    # `external_account` credential, and the process reads its federation out of
+    # that file — so this is the only place the facts are stated.
+    #
+    # The pool principal holds `roles/iam.workloadIdentityUser` and
+    # `roles/iam.serviceAccountTokenCreator` on this one service account and
+    # nothing else; every project role, the source bucket and the signer hang
+    # off the account. Impersonating it is therefore the only thing the
+    # federated identity can do, which is why the url is not optional here.
+    # Declared in terraform/gcp/projects/bluenose/iam.tf.
     serviceAccount:
       token:
         gcpAudience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+        gcpImpersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
     ingress:
       enabled: true
     # §19's own database, including the installation manifest singleton.

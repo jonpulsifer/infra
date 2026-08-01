@@ -1,3 +1,17 @@
+{{/*
+The whole of §13's federation, in one document, in one place.
+
+This is the only copy. The installation manifest used to restate `audience`,
+`token_url`, the token path and the impersonation url by hand, in a document
+this chart does not render — so the two could disagree, and when they did the
+failure arrived as an `iam.serviceAccounts.signBlob` refusal that read as a code
+defect. The process now reads its federation from this file, through
+`GOOGLE_APPLICATION_CREDENTIALS`, which the deployment already sets beside the
+mount.
+
+An ordinary ADC `external_account` document, so any client in the process finds
+the same credential rather than a Spindrift-shaped one only Spindrift reads.
+*/}}
 {{- if .Values.serviceAccount.token.gcpAudience }}
 ---
 apiVersion: v1
@@ -14,6 +28,9 @@ data:
       "audience": {{ .Values.serviceAccount.token.gcpAudience | quote }},
       "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
       "token_url": "https://sts.googleapis.com/v1/token",
+      {{- with .Values.serviceAccount.token.gcpImpersonationUrl }}
+      "service_account_impersonation_url": {{ . | quote }},
+      {{- end }}
       "credential_source": {
         "file": {{ printf "%s/gcp-token" .Values.serviceAccount.token.mountPath | quote }}
       }

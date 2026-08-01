@@ -10,8 +10,25 @@ under ordinary review — a manifest change is a pull request.
 
 Empty declares nothing, which stays a valid installation: the process falls back
 to the durable row exactly as it does today.
+
+**A declaration may not restate what this chart already renders.** The three
+refusals below are the mechanical half of that rule: a release whose manifest
+carries a fact this chart owns fails to render, which is the earliest moment the
+two copies can be compared and the only one where being wrong costs nothing. The
+alternative is a value that agrees today, drifts on the next edit, and surfaces
+as a refusal somewhere else entirely.
 */}}
 {{- if .Values.manifest }}
+{{- if dig "cloud" "federation" nil .Values.manifest }}
+{{- fail "manifest.cloud.federation is not a manifest key: federation is read from the external_account credential this chart renders. Set serviceAccount.token.gcpAudience and serviceAccount.token.gcpImpersonationUrl instead." }}
+{{- end }}
+{{- if dig "charts" "installer" nil .Values.manifest }}
+{{- fail "manifest.charts.installer is not a manifest key: it named this chart, and nothing reads it. Remove it." }}
+{{- end }}
+{{- $declaredHostname := dig "controlPlane" "hostname" "" .Values.manifest }}
+{{- if and .Values.hostname $declaredHostname (ne $declaredHostname .Values.hostname) }}
+{{- fail (printf "manifest.controlPlane.hostname is %q but this release serves the control plane at %q. It is the passkey relying-party id, so the disagreement would enrol nobody: a ceremony is scoped to the origin it began at, and the origin is the one the HTTPRoute answers on." $declaredHostname .Values.hostname) }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap

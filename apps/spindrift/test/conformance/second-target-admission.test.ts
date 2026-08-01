@@ -254,11 +254,12 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
   });
 
   test('Installer and App chart distribution use independently pinned, extractable artifacts', async () => {
-    // Check that manifest declares pinned chart references
+    // The App chart is a pinned reference an installation declares. The
+    // installer chart is not one of these: it named the release this process is
+    // already running from, nothing read it, and it has been removed.
     expect(manifest.charts.app).toBeDefined();
-    expect(manifest.charts.installer).toBeDefined();
     expect(typeof manifest.charts.app).toBe('string');
-    expect(typeof manifest.charts.installer).toBe('string');
+    expect(manifest.charts).not.toHaveProperty('installer');
   });
 
   test('Status, diagnosis, and logs identify the second Target while preserving App-first product view', async () => {

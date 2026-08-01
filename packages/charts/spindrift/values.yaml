@@ -34,7 +34,22 @@ serviceAccount:
     # Optional GCP workload identity provider audience. When set, both
     # processes receive a second projected token and an ADC-compatible
     # external-account credential file.
+    #
+    # This is the only place the audience is named. The installation manifest
+    # no longer carries a `cloud.federation` block; the process reads its
+    # federation out of the credential rendered from these two values, so there
+    # is nothing for it to disagree with.
     gcpAudience: ""
+    # The service account the federated identity impersonates, as a
+    # `generateAccessToken` url. Empty uses the federated identity's own grants
+    # directly, which is a supported installation rather than an omission —
+    # where the cloud resources grant the principal itself, that is one fewer
+    # identity to reason about.
+    #
+    # Set it when the roles live on a service account, which is the usual shape:
+    # the pool principal is granted `roles/iam.serviceAccountTokenCreator` on
+    # that account and every project role hangs off the account, not the pool.
+    gcpImpersonationUrl: ""
     expirationSeconds: 3600
     mountPath: /var/run/secrets/spindrift
 
