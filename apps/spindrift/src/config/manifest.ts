@@ -126,7 +126,17 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: InstallationManifest = {
   },
   build: {
     routes: [{ name: 'hosted', adapter: 'github-actions' }],
-    zeroConfigFrontend: 'ghcr.io/railwayapp/railpack:railpack-frontend',
+    /**
+     * The one value in this manifest that is not a placeholder, because it
+     * names a third party's image rather than anything about an installation:
+     * §5's ladder pulls it whenever a scope has no Dockerfile, so a
+     * stand-in here is a build that cannot fall through.
+     *
+     * Railpack publishes the frontend as its own repository with version tags —
+     * `railwayapp/railpack` is not a repository that serves, and there is no
+     * `latest` here to track, so the pin names a version.
+     */
+    zeroConfigFrontend: 'ghcr.io/railwayapp/railpack-frontend:v0.0.33',
   },
   secretStore: {
     adapter: 'onepassword',
