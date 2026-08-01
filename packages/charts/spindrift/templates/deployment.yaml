@@ -46,6 +46,14 @@ spec:
       {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
   template:
     metadata:
+      {{- if $top.Values.manifest }}
+      annotations:
+        # Both processes read the manifest once, at start. Without this the
+        # ConfigMap would change and the running processes would keep the
+        # declaration they booted with — a declared change that does nothing is
+        # the failure this document exists to end.
+        checksum/manifest: {{ toYaml $top.Values.manifest | sha256sum }}
+      {{- end }}
       labels:
         {{- include "spindrift.labels" $top | nindent 8 }}
         app.kubernetes.io/component: {{ $process.name }}
@@ -124,6 +132,13 @@ spec:
               value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- end }}
             {{- end }}
+            {{- if $top.Values.manifest }}
+            # Named explicitly rather than left to the default path, so a
+            # declaration that fails to mount is fatal instead of falling back
+            # to the durable row and serving the value it was meant to replace.
+            - name: SPINDRIFT_MANIFEST_PATH
+              value: /etc/spindrift/manifest.yaml
+            {{- end }}
             {{- if $top.Values.gatewayAuth.enabled }}
             # Rendered only beside the NetworkPolicy in gateway-auth.yaml.
             - name: SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY
@@ -159,6 +174,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if $top.Values.manifest }}
+            - name: manifest
+              mountPath: /etc/spindrift
+              readOnly: true
+            {{- end }}
             {{- if $process.federates }}
             - name: federated-identity
               mountPath: {{ $top.Values.serviceAccount.token.mountPath }}
@@ -179,6 +199,11 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if $top.Values.manifest }}
+        - name: manifest
+          configMap:
+            name: {{ include "spindrift.fullname" $top }}-manifest
+        {{- end }}
         {{- if $process.federates }}
         - name: federated-identity
           projected:

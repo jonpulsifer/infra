@@ -224,6 +224,76 @@ describe('ui-driven installation configuration', () => {
       ).toBe(false);
     }
   });
+
+  test('renders no manifest ConfigMap when the release declares none', async () => {
+    const objects = await render({ reconciler: { enabled: true } });
+    expect(
+      objects.some((object) => object.metadata.name === 'spindrift-manifest'),
+    ).toBe(false);
+    for (const deployment of objects.filter(
+      (object) => object.kind === 'Deployment',
+    )) {
+      const pod = deployment.spec.template.spec;
+      expect(
+        pod.volumes.some(
+          (volume: { name: string }) => volume.name === 'manifest',
+        ),
+      ).toBe(false);
+    }
+  });
+
+  test('mounts a declared manifest at the path both processes read', async () => {
+    const manifest = { installation: 'declared', build: { routes: [] } };
+    const objects = await render({ manifest, reconciler: { enabled: true } });
+
+    const configMap = one(objects, 'ConfigMap', 'spindrift-manifest');
+    expect(Bun.YAML.parse(configMap.data?.['manifest.yaml'] ?? '')).toEqual(
+      manifest,
+    );
+
+    const deployments = objects.filter(
+      (object) => object.kind === 'Deployment',
+    );
+    expect(deployments).toHaveLength(2);
+    for (const deployment of deployments) {
+      const pod = deployment.spec.template.spec;
+      // The declaration is named, not left to the default path, so a mount that
+      // never lands is fatal rather than a silent fall back to the stored row.
+      expect(pod.containers[0].env).toContainEqual({
+        name: 'SPINDRIFT_MANIFEST_PATH',
+        value: '/etc/spindrift/manifest.yaml',
+      });
+      expect(pod.containers[0].volumeMounts).toContainEqual({
+        name: 'manifest',
+        mountPath: '/etc/spindrift',
+        readOnly: true,
+      });
+      expect(pod.volumes).toContainEqual({
+        name: 'manifest',
+        configMap: { name: 'spindrift-manifest' },
+      });
+    }
+  });
+
+  test('rolls both processes when the declared manifest changes', async () => {
+    const checksums = async (manifest: Record<string, unknown>) =>
+      (await render({ manifest, reconciler: { enabled: true } }))
+        .filter((object) => object.kind === 'Deployment')
+        .map(
+          (object) =>
+            object.spec.template.metadata.annotations?.['checksum/manifest'],
+        );
+
+    const before = await checksums({ installation: 'declared' });
+    const after = await checksums({ installation: 'retuned' });
+
+    expect(before).toHaveLength(2);
+    for (const checksum of before) expect(checksum).toBeString();
+    // Both processes read the manifest once at start, so a ConfigMap change
+    // that does not restart them is a declaration that does nothing.
+    expect(after[0]).not.toBe(before[0]);
+    expect(after[1]).not.toBe(before[1]);
+  });
 });
 
 describe('authenticated Gateway trust', () => {
