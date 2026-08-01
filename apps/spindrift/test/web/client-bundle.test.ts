@@ -1,6 +1,6 @@
 /**
- * The client bundle's only edge into the command layer, and the ceiling that
- * keeps it from growing back.
+ * The client bundle's only two edges into the server — command dispatch and
+ * streaming — and the ceiling that keeps either from growing back.
  *
  * `.agent/plans/spindrift/issues/32-onboard-an-installation-without-a-manifest.md`
  * (2026-08-01 comment) names the landmine: `client.ts` value-imported
@@ -13,11 +13,22 @@
  * `config/manifest-store.ts` was the first command handler to reach for a
  * server-only Node polyfill the browser build does not carry.
  *
- * The fix moved `pathFor`, `COMMAND_PATH_PREFIX`, and `TransportFailureCode`
- * into `src/web/command-path.ts`, which takes `CommandName` as `import type`
- * only — erased at compile time, so Bun never turns it into a module edge.
- * `dispatch.ts` re-exports the three from there rather than defining them
- * itself, so the server side is unchanged.
+ * The fix (PR #1496) moved `pathFor`, `COMMAND_PATH_PREFIX`, and
+ * `TransportFailureCode` into `src/web/command-path.ts`, which takes
+ * `CommandName` as `import type` only — erased at compile time, so Bun never
+ * turns it into a module edge. `dispatch.ts` re-exports the three from there
+ * rather than defining them itself, so the server side is unchanged.
+ *
+ * `.agent/plans/spindrift/issues/34-keep-the-server-out-of-the-browser-bundle.md`
+ * names the same shape a second time, independently: `app.tsx` value-imported
+ * `subscribeAttempt`/`subscribeRuntime` from `stream-client.ts`, which
+ * value-imported the stream paths and message types from `streams.ts` —
+ * the WebSocket transport that value-imports `drizzle-orm`, `db/notify.ts`,
+ * and `db/schema.ts` to serve them. The fix is the same move: the two stream
+ * paths and the message types now live in `src/web/stream-path.ts`, which
+ * takes `AttemptLogCursor`/`AttemptLogEntry` (from `domain/attempt-log.ts`)
+ * and `RuntimeLogPage` (from `adapters/deploy/contract.ts`) as `import type`
+ * only. `streams.ts` re-exports from there rather than defining them itself.
  *
  * This runs `build.ts` itself, as a real subprocess — the same command the
  * Dockerfile's `builder` stage runs (`bun run build --filter=spindrift`,
@@ -70,6 +81,23 @@ describe('the client bundle', () => {
     // The handler whose server-only import broke #1492's build, named
     // directly rather than only through the registry it is reached from.
     expect(text).not.toContain('config/manifest-store.ts');
+  });
+
+  test('carries no fingerprint of the streaming transport it used to pull in', async () => {
+    const files = await readdir(DIST);
+    const entry = files.find((file) => file.endsWith('.js'));
+    expect(entry).toBeDefined();
+    const text = await Bun.file(join(DIST, entry!)).text();
+
+    // Ticket 34, edge 2: `stream-client.ts` used to value-import the two
+    // stream paths and the message types directly from `streams.ts`, which
+    // drags in the WebSocket transport — `upgradeAttempt`, `upgradeRuntime`,
+    // `readStreamPage` — and, through it, `db/notify.ts`'s `onAttemptEvent`.
+    // Neither module name should appear in the built bundle if the edge into
+    // `stream-path.ts` (`import type` only past the two message-shape
+    // dependencies) is holding.
+    expect(text).not.toContain('web/streams.ts');
+    expect(text).not.toContain('db/notify.ts');
   });
 
   test('stays within the ceiling cutting that edge bought back', async () => {

@@ -2,12 +2,19 @@
  * The two authenticated browser streams (§17): terminating attempt events and
  * non-terminating runtime output. Their routes, cursors, and payloads remain
  * distinct so build output can never be presented as application stdout.
+ *
+ * `ATTEMPT_STREAM_PATH`, `RUNTIME_STREAM_PATH`, `STREAM_PATHS`, and the
+ * message types live in `./stream-path.ts` and are re-exported below rather
+ * than defined here, because those are the only edge `stream-client.ts`
+ * needs into this file — everything else here pulls in `db/schema.ts`,
+ * `db/notify.ts`, and `drizzle-orm` as values, which drags the whole
+ * database layer into the browser bundle. `test/web/client-bundle.test.ts`
+ * guards against that edge coming back.
  */
 import { and, eq } from 'drizzle-orm';
 import type {
   DeployAdapter,
   DeployTarget,
-  RuntimeLogPage,
   RuntimeLogSubject,
 } from '../adapters/deploy/contract.ts';
 import type { RequestAuthentication } from '../auth/types.ts';
@@ -16,13 +23,27 @@ import { onAttemptEvent } from '../db/notify.ts';
 import { components, deploys, targets } from '../db/schema.ts';
 import {
   type AttemptLogCursor,
-  type AttemptLogEntry,
   readAttemptStream,
 } from '../domain/attempt-log.ts';
+import {
+  ATTEMPT_STREAM_PATH,
+  type AttemptStreamMessage,
+  RUNTIME_STREAM_PATH,
+  type RuntimeStreamMessage,
+  STREAM_PATHS,
+  type StreamErrorMessage,
+  type StreamMessage,
+} from './stream-path.ts';
 
-export const ATTEMPT_STREAM_PATH = '/internal/streams/build-attempt';
-export const RUNTIME_STREAM_PATH = '/internal/streams/runtime-log';
-export const STREAM_PATHS = [ATTEMPT_STREAM_PATH, RUNTIME_STREAM_PATH] as const;
+export {
+  ATTEMPT_STREAM_PATH,
+  type AttemptStreamMessage,
+  RUNTIME_STREAM_PATH,
+  type RuntimeStreamMessage,
+  STREAM_PATHS,
+  type StreamErrorMessage,
+  type StreamMessage,
+};
 
 export interface StreamDeps {
   authenticate(request: Request): Promise<RequestAuthentication>;
@@ -55,21 +76,6 @@ interface RuntimeSocketData {
 }
 
 export type StreamSocketData = AttemptSocketData | RuntimeSocketData;
-
-export interface AttemptStreamMessage {
-  readonly kind: 'attempt';
-  readonly entries: readonly AttemptLogEntry[];
-  readonly cursor: AttemptLogCursor | null;
-  readonly terminal: boolean;
-}
-
-export interface StreamErrorMessage {
-  readonly kind: 'error';
-  readonly message: string;
-}
-
-export type RuntimeStreamMessage = RuntimeLogPage | StreamErrorMessage;
-export type StreamMessage = AttemptStreamMessage | RuntimeStreamMessage;
 
 type StreamHandler = (
   request: Request,
