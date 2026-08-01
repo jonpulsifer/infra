@@ -26,7 +26,14 @@ spec:
   values:
     # Renovate pins the digest on this line. Flux picks up the change
     # and rolls out the new image automatically.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:be1a95161fe8b85d7bd63d212620425a959e7fed43594d49fa3ba9f360690b6a
+    #
+    # It must be an image whose schema agrees with the chart about which keys a
+    # declaration may carry. `be1a951` was pinned two minutes before #1500
+    # derived `cloud.federation` and `charts.installer` away, so it required the
+    # two keys the chart had begun refusing — the declaration could satisfy the
+    # chart or the process, never both, and the pods crashlooped on a manifest
+    # the chart would not have rendered had it carried them.
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:201b68bfeefcb394c3acf6459b7f00d9cb4753ee1566afdf4718931489485d6b
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
