@@ -24,6 +24,13 @@
  * What is left is transport: decode JSON, find a principal, call `dispatch`,
  * and choose a status code. Every decision about the act itself was already
  * made by the command.
+ *
+ * `pathFor`, `COMMAND_PATH_PREFIX`, and `TransportFailureCode` live in
+ * `./command-path.ts` and are re-exported below rather than defined here,
+ * because those three are the only edge `client.ts` needs into this file —
+ * everything else pulls in `commands/registry.ts` as a value, which drags the
+ * whole server-only command layer into the browser bundle.
+ * `test/web/client-bundle.test.ts` guards against that edge coming back.
  */
 
 import type { RequestAuthentication } from '../auth/types.ts';
@@ -32,29 +39,15 @@ import {
   commandNames,
   dispatch,
 } from '../commands/registry.ts';
-import type {
-  CommandContext,
-  CommandFailureCode,
-  Principal,
-} from '../commands/types.ts';
+import type { CommandContext, Principal } from '../commands/types.ts';
+import {
+  COMMAND_PATH_PREFIX,
+  pathFor,
+  type TransportFailureCode,
+} from './command-path.ts';
 
-/**
- * Unversioned, and named so that nobody has to be told twice. §21 permits a
- * purpose-specific integration protocol for the browser; this is that and
- * nothing more.
- */
-export const COMMAND_PATH_PREFIX = '/internal/commands';
-
-/**
- * The route a command is reached at, and the one place the path is composed.
- *
- * It takes a {@link CommandName} rather than a string on purpose: this file's
- * whole claim is that a path with no command behind it cannot be written, and a
- * `string` parameter here would be the one place somebody could write one.
- */
-export function pathFor(name: CommandName): string {
-  return `${COMMAND_PATH_PREFIX}/${name}`;
-}
+export type { TransportFailureCode };
+export { COMMAND_PATH_PREFIX, pathFor };
 
 export interface DispatchDeps {
   /**
@@ -80,27 +73,6 @@ export interface DispatchDeps {
    */
   context(principal: Principal): CommandContext | Promise<CommandContext>;
 }
-
-/**
- * Why a request was refused before, or instead of, a command running.
- *
- * The command layer's codes plus the two only a transport can produce. Both
- * additions are genuinely not the command layer's business: a request with no
- * session never reaches a command, and neither does one whose body is not JSON,
- * so neither could be a `CommandFailureCode` without inventing a failure the
- * command layer cannot cause.
- *
- * Keeping them in one union is what makes {@link STATUS} total. `client.ts`
- * imports this rather than widening to `string`, so a browser switching on a
- * refusal is switching over a closed set.
- */
-export type TransportFailureCode =
-  | CommandFailureCode
-  | 'UNAUTHENTICATED'
-  | 'FORBIDDEN'
-  | 'METHOD_NOT_ALLOWED'
-  | 'MALFORMED_REQUEST'
-  | 'INTERNAL';
 
 /**
  * The HTTP status a refusal reads as.
