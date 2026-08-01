@@ -153,103 +153,44 @@ export function commandRoutes(
   );
 }
 
-import {
-  httpRequestCounter,
-  httpRequestDuration,
-  logError,
-  logInfo,
-  tracer,
-} from '../telemetry/index.ts';
-
 async function handle(
   name: CommandName,
   request: Request,
   deps: DispatchDeps,
 ): Promise<Response> {
-  const startTime = Date.now();
+  if (request.method !== 'POST') {
+    // A command is an act. Making one reachable by GET would make it
+    // link-followable, pre-fetchable, and cacheable — three ways to run it
+    // without anybody asking.
+    return refuse('METHOD_NOT_ALLOWED', 'a command is dispatched with POST');
+  }
 
-  return tracer.startActiveSpan(`command ${name}`, async (span) => {
-    span.setAttribute('command.name', name);
-    span.setAttribute('http.method', request.method);
+  const authentication = await deps.authenticate(request);
+  if (authentication.kind === 'anonymous') {
+    return refuse(
+      'UNAUTHENTICATED',
+      'this surface is reachable only with a session',
+    );
+  }
+  if (authentication.kind === 'forbidden') {
+    return refuse('FORBIDDEN', authentication.message);
+  }
+  const { principal } = authentication;
 
-    if (request.method !== 'POST') {
-      const response = refuse(
-        'METHOD_NOT_ALLOWED',
-        'a command is dispatched with POST',
-      );
-      span.setStatus({ code: 2, message: 'Method not allowed' }); // 2 = ERROR
-      span.end();
-      return response;
-    }
+  let input: unknown;
+  try {
+    input = await request.json();
+  } catch {
+    return refuse('MALFORMED_REQUEST', 'the request body is not JSON');
+  }
 
-    const authentication = await deps.authenticate(request);
-    if (authentication.kind === 'anonymous') {
-      const response = refuse(
-        'UNAUTHENTICATED',
-        'this surface is reachable only with a session',
-      );
-      span.setStatus({ code: 2, message: 'Unauthenticated' });
-      span.end();
-      return response;
-    }
-    if (authentication.kind === 'forbidden') {
-      const response = refuse('FORBIDDEN', authentication.message);
-      span.setStatus({ code: 2, message: authentication.message });
-      span.end();
-      return response;
-    }
-    const { principal } = authentication;
-    span.setAttribute('principal.id', principal.id);
-
-    let input: unknown;
-    try {
-      input = await request.json();
-    } catch {
-      const response = refuse(
-        'MALFORMED_REQUEST',
-        'the request body is not JSON',
-      );
-      span.setStatus({ code: 2, message: 'Malformed JSON' });
-      span.end();
-      return response;
-    }
-
-    try {
-      const result = await dispatch(name, input, deps.context(principal));
-      const status = result.ok ? 200 : STATUS[result.failure.code];
-      const durationSec = (Date.now() - startTime) / 1000;
-
-      httpRequestCounter.add(1, { command: name, status: String(status) });
-      httpRequestDuration.record(durationSec, {
-        command: name,
-        status: String(status),
-      });
-
-      if (result.ok) {
-        span.setStatus({ code: 1 }); // 1 = OK
-        logInfo(`command ${name} succeeded`, { name, durationSec });
-        span.end();
-        return Response.json(result, { status: 200 });
-      }
-      span.setStatus({ code: 2, message: result.failure.message });
-      logError(`command ${name} failed: ${result.failure.message}`, undefined, {
-        name,
-        code: result.failure.code,
-      });
-      span.end();
-      return Response.json(result, { status: STATUS[result.failure.code] });
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      const durationSec = (Date.now() - startTime) / 1000;
-
-      httpRequestCounter.add(1, { command: name, status: '500' });
-      httpRequestDuration.record(durationSec, { command: name, status: '500' });
-
-      span.setStatus({ code: 2, message });
-      span.recordException(cause instanceof Error ? cause : new Error(message));
-      logError(`command ${name} internal error: ${message}`, cause, { name });
-      span.end();
-      return refuse('INTERNAL', message);
-    }
-  });
+  try {
+    const result = await dispatch(name, input, deps.context(principal));
+    return result.ok
+      ? Response.json(result, { status: 200 })
+      : Response.json(result, { status: STATUS[result.failure.code] });
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return refuse('INTERNAL', message);
+  }
 }
