@@ -9,6 +9,7 @@ import { asc, eq } from 'drizzle-orm';
 import {
   type BuildDispatchContext,
   dispatchBuild,
+  recordDispatchWait,
 } from '../commands/builds/dispatch.ts';
 import { routeForTarget } from '../commands/builds/route.ts';
 import {
@@ -40,6 +41,11 @@ export async function runBuildPass(
     .select({
       buildId: builds.id,
       targetId: componentTargetDesired.targetId,
+      // Carried for the refusal below, which needs an attempt reference and
+      // cannot get one from `dispatchBuild` — it never reaches it.
+      appId: components.appId,
+      componentId: components.id,
+      waitingOn: builds.dispatchWaitingOn,
     })
     .from(builds)
     .innerJoin(components, eq(builds.componentId, components.id))
@@ -57,7 +63,26 @@ export async function runBuildPass(
     if (visited.has(row.buildId)) continue;
     visited.add(row.buildId);
     const route = await routeForTarget(row.targetId, context);
-    if (route === null) continue;
+    if (route === null) {
+      // A Target whose policy no configured route satisfies. Skipping silently
+      // is what `dispatchBuild`'s own refusals used to do, with the same result:
+      // a Build PENDING forever and nothing anywhere saying why. Configuring a
+      // route is an operator act that makes the next tick work, so the Build
+      // stays PENDING — and now says so, once.
+      await recordDispatchWait(
+        context,
+        {
+          attempt: {
+            appId: row.appId,
+            componentId: row.componentId,
+            buildId: row.buildId,
+          },
+          waitingOn: row.waitingOn,
+        },
+        'no build route this installation configures meets the policy of the Target this Build is placed on, so nothing can run it',
+      );
+      continue;
+    }
     const result = await dispatchBuild(
       {
         buildId: row.buildId,

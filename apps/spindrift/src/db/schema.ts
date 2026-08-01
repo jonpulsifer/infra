@@ -515,6 +515,27 @@ export const builds = pgTable(
      * an in-cluster build and not a missing value to paper over.
      */
     runUrl: text('run_url'),
+    /**
+     * The sentence dispatch last refused this Build with, while it is still
+     * PENDING.
+     *
+     * A refusal an operator can clear — no federation, no route, a Target
+     * threshold no configured route meets — leaves the Build PENDING on
+     * purpose, so that configuring the thing makes the next tick work without
+     * anybody pressing Deploy again. The build loop runs once a second, so the
+     * refusal recurs at that rate, and the sentence belongs on the attempt log
+     * exactly once rather than once per tick.
+     *
+     * This column is what makes "exactly once" free. The Build row is already
+     * selected at the top of every dispatch, so comparing against it costs no
+     * query, and a refusal that has not changed writes nothing at all. It is a
+     * ledger of what was last said, not the place it was said: the operator
+     * reads the attempt log.
+     *
+     * Null whenever the Build is not waiting — never dispatched, claimed, or
+     * closed out.
+     */
+    dispatchWaitingOn: text('dispatch_waiting_on'),
     /** §4: durable identity for the dispatch attempt running or that ran this build. */
     dispatchId: text('dispatch_id'),
     /** Timestamp when the current runner claimed the dispatch lease. */
