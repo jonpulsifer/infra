@@ -26,6 +26,7 @@ import type {
   AuthoredManifest,
   InstallationManifest,
 } from '../../src/config/manifest.schema.ts';
+import { resolveManifest } from '../../src/config/manifest.ts';
 import {
   currentStoredManifest,
   loadStoredManifest,
@@ -125,7 +126,13 @@ describe('reading this installation from the browser', () => {
     // ask for.
     const stored = await storedManifest();
     expect(stored).toBeDefined();
-    expect(body.value.manifest).toEqual(stored as InstallationManifest);
+    // The row holds the *authored* document; the read answers that document
+    // with the deployment facts attached, which is the one place the two halves
+    // meet. Comparing against the row itself would assert the read had never
+    // resolved anything.
+    expect(body.value.manifest).toEqual(
+      await resolveManifest(stored as AuthoredManifest),
+    );
   });
 
   test('is refused without a session', async () => {
