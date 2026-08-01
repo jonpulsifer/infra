@@ -13,21 +13,63 @@
  * vault's overviews with the `filter` Connect supports, and delete. Anything
  * else answers `404`, so an adapter that started calling a fifth endpoint would
  * fail rather than silently pass against a permissive stand-in.
+ *
+ * **A created item comes back with more fields than were sent.** Connect
+ * populates the category's own defaults, and the caller's fields arrive after
+ * them — see {@link CATEGORY_DEFAULTS}. A fake that echoed only what it was
+ * given would put the caller's one concealed field at index 0 and let an
+ * adapter identify it by position, which is a rule the real service does not
+ * honour and production is the only place that would say so.
  */
 import type { Fetcher } from '../../../src/adapters/store/http.ts';
+
+interface StoredSection {
+  id: string;
+  label?: string;
+}
 
 interface StoredField {
   type: string;
   label?: string;
   value?: string;
+  section?: { id?: string };
 }
 
 interface StoredItem {
   id: string;
   title: string;
+  category: string;
   createdAt: string;
+  sections: StoredSection[];
+  /** What Connect returns: the category's defaults, then the caller's. */
   fields: StoredField[];
+  /** Only the caller's, held so a test can assert what was written. */
+  own: StoredField[];
 }
+
+/**
+ * The fields Connect adds to a created item on its own, per category.
+ *
+ * Auto-populated from the category template, not from the request — so they
+ * arrive labelled, in front of the caller's fields, and one of them is
+ * `CONCEALED`. That is what makes "the first labelled field" and "the first
+ * concealed field" both wrong ways to find the field Spindrift wrote.
+ *
+ * A second category is modelled so the defaults are visibly per-category rather
+ * than a constant this fake sprinkles on everything.
+ */
+const CATEGORY_DEFAULTS: Record<string, readonly StoredField[]> = {
+  API_CREDENTIAL: [
+    { type: 'STRING', label: 'username' },
+    { type: 'CONCEALED', label: 'credential' },
+    { type: 'STRING', label: 'notesPlain' },
+  ],
+  LOGIN: [
+    { type: 'STRING', label: 'username' },
+    { type: 'CONCEALED', label: 'password' },
+    { type: 'STRING', label: 'notesPlain' },
+  ],
+};
 
 /** Every request the adapter made, for a test to assert against. */
 export interface RecordedRequest {
@@ -69,9 +111,14 @@ export class FakeOnePasswordConnect {
     return this.items.size;
   }
 
-  /** What was written under one item id. Never reachable through the contract. */
+  /**
+   * What was written under one item id. Never reachable through the contract.
+   *
+   * Reads the caller's own fields, not the rendered item — a category default
+   * has no value to report and index 0 is one of them.
+   */
   valueOf(itemId: string): string | null {
-    return this.items.get(itemId)?.fields[0]?.value ?? null;
+    return this.items.get(itemId)?.own[0]?.value ?? null;
   }
 
   /** The transport to hand the adapter. */
@@ -116,27 +163,61 @@ export class FakeOnePasswordConnect {
     return json({ message: 'method not allowed' }, 405);
   };
 
+  /**
+   * Create an item, refusing the three things Connect refuses.
+   *
+   * `title` alone is not a create: an item belongs to a vault and is built from
+   * a category template, and Connect has a default for neither. An adapter that
+   * dropped `vault` or `category` would fail on the first real call and pass
+   * against a fake that only looked at the title.
+   */
   private create(body: unknown): Response {
-    const requested = body as { title?: string; fields?: StoredField[] };
+    const requested = body as {
+      title?: string;
+      category?: string;
+      vault?: { id?: string };
+      sections?: StoredSection[];
+      fields?: StoredField[];
+    };
     if (typeof requested?.title !== 'string') {
       return json({ message: 'title is required' }, 422);
     }
+    if (typeof requested.vault?.id !== 'string') {
+      return json({ message: 'vault.id is required' }, 422);
+    }
+    if (requested.vault.id !== this.vault) {
+      return json({ message: 'item vault does not match the path' }, 422);
+    }
+    if (typeof requested.category !== 'string') {
+      return json({ message: 'category is required' }, 422);
+    }
+    const defaults = CATEGORY_DEFAULTS[requested.category];
+    if (defaults === undefined) {
+      return json({ message: `unknown category ${requested.category}` }, 422);
+    }
+
     this.counter += 1;
+    const own = requested.fields ?? [];
     const item: StoredItem = {
       // Connect mints the id, which is why the adapter never has to invent a
       // version number and never has to count what already exists.
       id: `item-${this.counter}`,
       title: requested.title,
+      category: requested.category,
       createdAt: new Date(Date.UTC(2024, 0, this.counter)).toISOString(),
-      fields: requested.fields ?? [],
+      sections: requested.sections ?? [],
+      fields: [...defaults.map((field) => ({ ...field })), ...own],
+      own,
     };
     this.items.set(item.id, item);
-    return json(item, 200);
+    return json(render(item), 200);
   }
 
   private get(itemId: string): Response {
     const item = this.items.get(itemId);
-    return item ? json(item, 200) : json({ message: 'no such item' }, 404);
+    return item
+      ? json(render(item), 200)
+      : json({ message: 'no such item' }, 404);
   }
 
   /**
@@ -159,6 +240,12 @@ export class FakeOnePasswordConnect {
     }
     return new Response(null, { status: 204 });
   }
+}
+
+/** The item as Connect answers with it — `own` is this fake's bookkeeping. */
+function render(item: StoredItem) {
+  const { own: _own, ...rest } = item;
+  return rest;
 }
 
 function json(body: unknown, status: number): Response {

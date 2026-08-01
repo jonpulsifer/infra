@@ -17,6 +17,16 @@
  *   permissive fake without doing so.
  * - **Listing is paginated**, at a deliberately tiny page, because core reaps
  *   config from that list and a single-page fake would never run the loop.
+ *
+ * And `secrets.create` is held to its own two rules, because a fake that takes
+ * any id and any body would let the adapter drift into producing creates the
+ * real API refuses — which is a production-only bug by construction:
+ *
+ * - **The id must match `[A-Za-z0-9_-]{1,255}`.** The alphabet the adapter has
+ *   always sanitized to; the ceiling it did not enforce until it had to.
+ * - **The body must carry a replication policy.** The `Secret` resource has no
+ *   default for it, so a create without one is refused, and every write this
+ *   installation makes would fail on it.
  */
 import type { Fetcher } from '../../../src/adapters/store/http.ts';
 
@@ -51,6 +61,9 @@ export interface FakeSecretManagerOptions {
 }
 
 const BASE = 'https://secretmanager.invalid';
+
+/** The id `projects.secrets.create` accepts, alphabet and ceiling both. */
+const SECRET_ID = /^[A-Za-z0-9_-]{1,255}$/;
 
 export class FakeSecretManager {
   readonly project: string;
@@ -174,10 +187,46 @@ export class FakeSecretManager {
 
   private createSecret(id: string | null, body: unknown): Response {
     if (!id) return json({ error: { message: 'secretId is required' } }, 400);
+    // Both refusals come before the conflict check, as the real API's argument
+    // validation does: a malformed create is invalid whether or not the id it
+    // names is taken.
+    if (!SECRET_ID.test(id)) {
+      return json(
+        {
+          error: {
+            status: 'INVALID_ARGUMENT',
+            message:
+              `Secret ID [${id}] does not match the expected format ` +
+              '[[a-zA-Z_0-9-]+] or is longer than 255 characters',
+          },
+        },
+        400,
+      );
+    }
+    const requested = body as {
+      replication?: { automatic?: unknown; userManaged?: unknown };
+      annotations?: Record<string, string>;
+    };
+    // `Replication` is a oneof with no default, so neither an absent block nor
+    // an empty one names a policy.
+    const replication = requested?.replication;
+    if (
+      replication?.automatic === undefined &&
+      replication?.userManaged === undefined
+    ) {
+      return json(
+        {
+          error: {
+            status: 'INVALID_ARGUMENT',
+            message: 'Secret.replication must be specified.',
+          },
+        },
+        400,
+      );
+    }
     if (this.secrets.has(id)) {
       return json({ error: { message: 'already exists' } }, 409);
     }
-    const requested = body as { annotations?: Record<string, string> };
     const secret: StoredSecret = {
       id,
       annotations: requested?.annotations ?? {},

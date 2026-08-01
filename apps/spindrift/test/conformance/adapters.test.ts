@@ -224,12 +224,18 @@ buildAdapterSuite('in-cluster', () => {
 // Both pinning strategies run the same suite, because §10's claim is that
 // nothing above the seam can tell them apart. One of them passing would not
 // establish that.
+//
+// Each fake stands for the real store that pins that way and names its
+// references as that store does — `NATIVE` for Secret Manager's `--`-joined id,
+// `IMMUTABLE_ITEM_PER_VERSION` for 1Password's `/`-joined title. The labels say
+// so, because a reference shape neither store can hold would make this suite
+// compare two impossibilities and call them the same.
 storeAdapterSuite(
-  'fake native',
+  'fake native, standing for gcp-secret-manager',
   () => new FakeSecretStore({ pinning: 'NATIVE' }),
 );
 storeAdapterSuite(
-  'fake immutable item per version',
+  'fake immutable item per version, standing for onepassword',
   () => new FakeSecretStore({ pinning: 'IMMUTABLE_ITEM_PER_VERSION' }),
 );
 

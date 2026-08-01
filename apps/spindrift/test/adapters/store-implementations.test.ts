@@ -19,7 +19,10 @@ import {
   secretIdFor,
 } from '../../src/adapters/store/gcp-secret-manager.ts';
 import { StoreRequestError } from '../../src/adapters/store/http.ts';
-import { OnePasswordStore } from '../../src/adapters/store/onepassword.ts';
+import {
+  OnePasswordStore,
+  SPINDRIFT_SECTION,
+} from '../../src/adapters/store/onepassword.ts';
 import { FakeOnePasswordConnect } from '../harness/fakes/onepassword-connect.ts';
 import { FakeSecretManager } from '../harness/fakes/secret-manager-api.ts';
 
@@ -76,12 +79,74 @@ describe('1Password over Connect', () => {
       (request) => request.method === 'POST',
     );
     expect(created?.body).toMatchObject({
+      // Connect has no default for either, and refuses a create without them.
+      vault: { id: connect.vault },
+      category: 'API_CREDENTIAL',
       title: 'invoices/web/metal/DATABASE_URL',
+      sections: [{ id: SPINDRIFT_SECTION }],
       fields: [
-        { type: 'CONCEALED', label: 'DATABASE_URL', value: 'postgres://x' },
+        {
+          type: 'CONCEALED',
+          label: 'DATABASE_URL',
+          value: 'postgres://x',
+          section: { id: SPINDRIFT_SECTION },
+        },
       ],
     });
     expect(connect.valueOf(reference.version)).toBe('postgres://x');
+  });
+
+  test('reads back the variable it wrote, not a category default', async () => {
+    const { connect, store } = onepassword();
+    const reference = await store.put(scope, 'DATABASE_URL', 'postgres://x');
+
+    // Connect populates an API_CREDENTIAL with `username`, `credential` and
+    // `notesPlain` of its own. They come back in front of the caller's field
+    // and two of them are labelled, so an adapter reading "the first labelled
+    // field" reads `username` — a variable name that was never written, on a
+    // §10 read-back whose whole job is to prove a pin still resolves.
+    const item = (await connect
+      .fetch(
+        new Request(
+          `${connect.baseUrl}/v1/vaults/${connect.vault}/items/${reference.version}`,
+          { headers: { Authorization: 'Bearer connect-token' } },
+        ),
+      )
+      .then((response) => response.json())) as {
+      fields: { label?: string; type?: string }[];
+    };
+    expect(item.fields[0]?.label).not.toBe('DATABASE_URL');
+    expect(item.fields.map((field) => field.label)).toContain('credential');
+
+    const described = await store.describe(reference);
+    expect(described?.key).toBe('DATABASE_URL');
+  });
+
+  test('an item without a Spindrift field is not one this store wrote', async () => {
+    const { connect, store } = onepassword();
+    const created = (await connect
+      .fetch(
+        new Request(`${connect.baseUrl}/v1/vaults/${connect.vault}/items`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer connect-token' },
+          body: JSON.stringify({
+            vault: { id: connect.vault },
+            title: 'invoices/web/metal/DATABASE_URL',
+            category: 'LOGIN',
+            fields: [],
+          }),
+        }),
+      )
+      .then((response) => response.json())) as { id: string };
+
+    // Titled exactly as Spindrift titles one, and carrying nothing Spindrift
+    // wrote. Absent beats guessing the variable out of the title.
+    expect(
+      await store.describe({
+        key: 'invoices/web/metal/DATABASE_URL',
+        version: created.id,
+      }),
+    ).toBeNull();
   });
 
   test('never reads a value back', async () => {
@@ -160,6 +225,59 @@ describe('Secret Manager', () => {
     expect(
       api.requests.some((request) => request.path.includes(':access')),
     ).toBe(false);
+  });
+
+  test('the create carries a replication policy', async () => {
+    const { api, store } = secretManager();
+    await store.put(scope, 'DATABASE_URL', 'one');
+
+    // The Secret resource has no default for it and the API refuses a create
+    // without one, so dropping this line would break every write this
+    // installation makes and nothing else would say so.
+    const created = api.requests.find((request) =>
+      /\/secrets\?secretId=/.test(request.path),
+    );
+    expect(created?.body).toMatchObject({ replication: { automatic: {} } });
+  });
+
+  test('a scope past the id ceiling still names a secret the API accepts', async () => {
+    const { api, store } = secretManager();
+    const long = {
+      app: 'a'.repeat(63),
+      component: 'c'.repeat(63),
+      target: 't'.repeat(63),
+    };
+    const key = `K${'E'.repeat(120)}Y`;
+
+    // Three DNS labels at their own ceiling plus a long variable name clears
+    // 255 without anything unreasonable happening, and the API refuses the
+    // create rather than truncating for us.
+    const id = secretIdFor(long, key);
+    expect(id.length).toBeLessThanOrEqual(255);
+    expect(id).toMatch(/^[A-Za-z0-9_-]{1,255}$/);
+
+    const reference = await store.put(long, key, 'one');
+    expect(reference.key).toBe(id);
+    expect(api.annotationsOf(id)).toMatchObject({ 'spindrift-key': key });
+    expect((await store.describe(reference))?.key).toBe(key);
+  });
+
+  test('truncated ids keep two long scopes apart', async () => {
+    // Long enough that every id below is truncated, and identical far past the
+    // cut — so the head alone cannot tell any of them apart.
+    const long = { app: 'a'.repeat(240), component: 'web', target: 'metal' };
+
+    // Truncation on its own would widen the collision the sanitizer already
+    // opens. The digest of the exact scope is what keeps two scopes sharing a
+    // head apart…
+    expect(secretIdFor(long, 'TOKEN')).not.toBe(
+      secretIdFor({ ...long, component: 'worker' }, 'TOKEN'),
+    );
+    // …and what separates two that sanitizing flattens onto one name, which
+    // the untruncated form never could.
+    expect(secretIdFor({ ...long, app: `${long.app}.` }, 'TOKEN')).not.toBe(
+      secretIdFor({ ...long, app: `${long.app}/` }, 'TOKEN'),
+    );
   });
 
   test('records the exact scope as annotations', async () => {
@@ -244,5 +362,80 @@ describe('Secret Manager', () => {
     expect(store.put(scope, 'DATABASE_URL', 'one')).rejects.toThrow(
       StoreRequestError,
     );
+  });
+});
+
+/**
+ * The far side, driven directly.
+ *
+ * Everything above goes through an adapter that is correct today, so it proves
+ * the adapter and not the fake. These go straight at the fake, because a fake
+ * more permissive than the real API is how a production bug becomes a green
+ * test — and the fake is the half of that pair no adapter test can reach.
+ */
+describe('the store fakes refuse what the real APIs refuse', () => {
+  test('Secret Manager refuses an id outside its alphabet or ceiling', async () => {
+    const api = new FakeSecretManager();
+    for (const id of ['has/slash', 'has.dot', 'x'.repeat(256), '']) {
+      const response = await api.fetch(
+        new Request(
+          `${api.baseUrl}/v1/projects/${api.project}/secrets?secretId=${encodeURIComponent(id)}`,
+          {
+            method: 'POST',
+            headers: { Authorization: 'Bearer federated-token' },
+            body: JSON.stringify({ replication: { automatic: {} } }),
+          },
+        ),
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(api.secretCount).toBe(0);
+  });
+
+  test('Secret Manager refuses a create with no replication policy', async () => {
+    const api = new FakeSecretManager();
+    for (const body of [{}, { replication: {} }]) {
+      const response = await api.fetch(
+        new Request(
+          `${api.baseUrl}/v1/projects/${api.project}/secrets?secretId=fine`,
+          {
+            method: 'POST',
+            headers: { Authorization: 'Bearer federated-token' },
+            body: JSON.stringify(body),
+          },
+        ),
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(api.secretCount).toBe(0);
+  });
+
+  test('Connect refuses a create with no vault or no category', async () => {
+    const connect = new FakeOnePasswordConnect();
+    const bodies = [
+      { title: 'invoices/web/metal/TOKEN', category: 'API_CREDENTIAL' },
+      { title: 'invoices/web/metal/TOKEN', vault: { id: connect.vault } },
+      {
+        title: 'invoices/web/metal/TOKEN',
+        vault: { id: 'another-vault' },
+        category: 'API_CREDENTIAL',
+      },
+      {
+        title: 'invoices/web/metal/TOKEN',
+        vault: { id: connect.vault },
+        category: 'NOT_A_CATEGORY',
+      },
+    ];
+    for (const body of bodies) {
+      const response = await connect.fetch(
+        new Request(`${connect.baseUrl}/v1/vaults/${connect.vault}/items`, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer connect-token' },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(response.status).toBe(422);
+    }
+    expect(connect.itemCount).toBe(0);
   });
 });

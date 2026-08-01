@@ -347,9 +347,12 @@ export function storeAdapterSuite(
 export const ADAPTERS = {
   deploy: ['fake', 'kubernetes', 'cloudrun', 'static'],
   build: ['fake', 'github-actions', 'cloud-build', 'in-cluster'],
+  // The two fakes name the real store whose reference shape each one produces,
+  // because a suite comparing two shapes no store can hold would prove §10's
+  // "nothing above the seam can tell which strategy produced it" of nothing.
   store: [
-    'fake native',
-    'fake immutable item per version',
+    'fake native, standing for gcp-secret-manager',
+    'fake immutable item per version, standing for onepassword',
     'onepassword',
     'gcp-secret-manager',
   ],
