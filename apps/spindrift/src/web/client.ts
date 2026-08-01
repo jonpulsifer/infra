@@ -13,7 +13,7 @@
  */
 import type { commandRegistry } from '../commands/registry.ts';
 import type { CommandResult } from '../commands/types.ts';
-import { pathFor, type TransportFailureCode } from './dispatch.ts';
+import { pathFor, type TransportFailureCode } from './command-path.ts';
 
 type Registry = typeof commandRegistry;
 
