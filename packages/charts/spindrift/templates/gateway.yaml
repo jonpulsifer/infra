@@ -1,11 +1,10 @@
 {{/*
 The control plane's own edge.
 
-cert-manager issues the certificate from the annotation, and external-dns
-publishes the record from the HTTPRoute beside this (its `gateway-httproute`
-source) — so a hostname is the whole of what a release supplies to be reachable
-on the internet with TLS. Nothing here writes a DNS record or holds a
-Cloudflare credential, which is the same rule §9 fixes for Apps.
+cert-manager issues the certificate from the annotation and external-dns
+publishes the record from the HTTPRoute beside this, so a hostname is the whole
+of what a release supplies to be reachable on the internet with TLS. Nothing
+here writes a DNS record or holds a Cloudflare credential.
 */}}
 {{- if and .Values.ingress.enabled .Values.hostname }}
 apiVersion: gateway.networking.k8s.io/v1beta1

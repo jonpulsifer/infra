@@ -1,66 +1,33 @@
-# The installer chart's values (Task 41, §19, §20).
-#
-# §20 line 3: "everything naming this installation is a value in the
-# installation manifest; a literal outside it is a bug." This file holds no
-# installation name at all — not a zone, not a project, not a cluster. A
-# release supplies the manifest document plus `hostname`, which is where this
-# control plane is served; both are empty here.
-#
-# The installation manifest is ordinary configuration. It is mounted from a
-# ConfigMap and reconciled into Spindrift's durable database when each process
-# starts. Public identifiers such as a GitHub App id do not make the document a
-# credential.
+# The Spindrift control plane: one image, two processes, its own database.
 
 image: ""
 
-# The installation manifest document. Empty declares nothing and leaves the
-# durable row in charge, which is what every installation did before this key
-# existed and remains a valid way to run.
-#
-# Declaring it is how a manifest value gets corrected. The row is written from a
-# declaration when one is present and otherwise from itself, and no product
-# command writes it — so an installation whose row is already seeded has no
-# other hand to change it with.
+# The installation manifest document, mounted as a ConfigMap and reconciled into
+# the durable database at process start. Empty leaves the durable row in charge.
+# Declaring it is the only hand that can correct a manifest value.
 manifest: {}
 
-# One named identity for the control plane. Kubernetes never automounts its
-# default API credential: both processes receive projected, audience-scoped
-# credentials because the reconciler deploys and the web process tails logs.
+# One named identity for the control plane. Both processes receive projected,
+# audience-scoped credentials; the default API credential is never automounted.
 serviceAccount:
   create: true
   name: ""
   token:
     audience: api
-    # Optional GCP workload identity provider audience. When set, both
-    # processes receive a second projected token and an ADC-compatible
-    # external-account credential file.
-    #
-    # This is the only place the audience is named. The installation manifest
-    # no longer carries a `cloud.federation` block; the process reads its
-    # federation out of the credential rendered from these two values, so there
-    # is nothing for it to disagree with.
+    # GCP workload identity provider audience. When set, both processes receive
+    # a second projected token and an ADC-compatible external-account
+    # credential file, and the process reads its federation out of that file.
     gcpAudience: ""
     # The service account the federated identity impersonates, as a
-    # `generateAccessToken` url. Empty uses the federated identity's own grants
-    # directly, which is a supported installation rather than an omission —
-    # where the cloud resources grant the principal itself, that is one fewer
-    # identity to reason about.
-    #
-    # Set it when the roles live on a service account, which is the usual shape:
-    # the pool principal is granted `roles/iam.serviceAccountTokenCreator` on
-    # that account and every project role hangs off the account, not the pool.
+    # `generateAccessToken` url. Empty uses the federated identity's own grants.
     gcpImpersonationUrl: ""
     expirationSeconds: 3600
     mountPath: /var/run/secrets/spindrift
 
 # Where the control plane's own UI is served. Empty renders no Gateway and no
-# HTTPRoute, which is a valid installation — the UI is then reachable only
-# in-cluster.
+# HTTPRoute, leaving the UI reachable only in-cluster.
 hostname: ""
 
-# §19: "One image, two Deployments." The reconciler is the second entrypoint off
-# the same image. It remains opt-in so an installation can validate and roll out
-# the process independently of the web Deployment.
 web:
   replicas: 1
   resources:
@@ -71,10 +38,11 @@ web:
       memory: 512Mi
       cpu: 500m
 
+# The second process off the same image. Opt-in, so it can be rolled out
+# independently of the web Deployment.
 reconciler:
   enabled: false
   replicas: 1
-  command: "bun run src/reconciler/main.ts"
   resources:
     requests:
       memory: 256Mi
@@ -84,75 +52,39 @@ reconciler:
       cpu: 500m
 
 port: 3000
-command: "bun run src/web/server.ts"
 
-# gVisor is available on some nodes and not others; a release that wants it says
-# so rather than the chart assuming a runtime class exists.
+# Run every pod under gVisor. Only some nodes offer the runtime class.
 sandbox: false
 
-# The Secret carrying `SPINDRIFT_ENROLMENT_TOKEN` and repository credentials
-# when those integrations are configured. It contains credentials only.
+# Secret carrying `SPINDRIFT_ENROLMENT_TOKEN` and repository credentials.
 envFromSecret: ""
 
-# Header authentication is safe only behind a Gateway that strips and replaces
+# Header authentication, safe only behind a Gateway that strips and replaces
 # identity headers and is the sole network path to the web pod. Enabling this
-# renders a default-deny ingress NetworkPolicy, admits exactly these peers, and
-# attests that boundary to the process. `from` is a list of Kubernetes
-# NetworkPolicyPeer objects and must be non-empty when enabled.
+# renders a default-deny ingress NetworkPolicy admitting exactly `from`, and
+# attests that boundary to the process. `from` is a list of NetworkPolicyPeer
+# and must be non-empty when enabled.
 gatewayAuth:
   enabled: false
   from: []
 
 env: []
 
-# §19: "Its chart renders its own database cluster with a keep policy,
-# overridable." Off by default so the chart can be installed without CNPG; the
-# offsite release turns it on.
 database:
   enabled: false
   instances: 1
   size: 2Gi
   name: spindrift
   storageClass: local-path
-  # §19's keep policy. The data PVC is owned by the CNPG Cluster, so removing
-  # the Cluster discards the desired-state rows, the attempt log, and the config
-  # version pins — none of which are in any source, because §12 ships no backups
-  # and the loss story is reconcile-from-sources.
-  #
-  # Turn it off to make an uninstall a real teardown. That is the loop for
-  # working on onboarding itself: every redeploy is then a fresh installation,
-  # which is the only way to exercise seeding and the wizard repeatedly.
+  # CNPG owns the data PVC through the Cluster, so keeping the Cluster is what
+  # keeps the desired-state rows, the attempt log, and the config version pins.
+  # Turn it off to make an uninstall a real teardown, which is the loop for
+  # working on seeding and the onboarding wizard.
   keepOnDelete: true
-  # The Job is part of an installation that owns its database. Its default
-  # command is compatible with images that expose applyMigrations before the
-  # executable entrypoint exists.
+  # Apply the image's committed migrations with a Job, and hold both processes
+  # below Ready until its journal is present.
   migration:
     enabled: true
-    command: >-
-      bun -e 'import { createClient } from "./src/db/client.ts";
-      import { applyMigrations } from "./src/db/migrate.ts";
-      const client = createClient();
-      try { await applyMigrations(client); } finally { await client.close(); }'
-    # The fallback lets a chart revision safely precede its matching image
-    # digest. Both paths read the migration journal embedded in that image.
-    waitCommand: >-
-      if [ -f src/db/wait-for-schema.ts ]; then
-      bun run src/db/wait-for-schema.ts;
-      else bun -e 'import journal from "./src/db/migrations/meta/_journal.json";
-      import { createClient } from "./src/db/client.ts";
-      const expected = Math.max(0, ...journal.entries.map((entry) => entry.when));
-      const client = createClient();
-      const deadline = Date.now() + 600000;
-      while (Date.now() < deadline) {
-      try {
-      const rows = await client.unsafe("SELECT max(created_at)::bigint AS latest FROM drizzle.__drizzle_migrations");
-      if (Number(rows[0]?.latest ?? 0) >= expected) { await client.close(); process.exit(0); }
-      } catch {}
-      await Bun.sleep(1000);
-      }
-      await client.close();
-      throw new Error(`database schema did not reach migration ${expected}`);
-      '; fi
 
 ingress:
   enabled: true

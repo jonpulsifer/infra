@@ -1,14 +1,8 @@
 {{/*
-§19: "Its chart renders **its own database cluster with a keep policy,
-overridable** — the orphan-tracking objection does not bind at one instance, and
-this is not the refused escape hatch, since it undermines no guarantee about
-Apps."
-
-The keep policy is the load-bearing half. §12 ships no backups deliberately and
-the loss story is reconcile-from-sources — but the desired-state rows, the
-attempt log, and the config version pins are not in any source. So the PVC
-outlives the Cluster: deleting the release must not be the thing that discards
-them.
+The control plane's own database. There are no backups: the loss story is
+reconcile-from-sources, and the desired-state rows, the attempt log, and the
+config version pins are the part of it no source holds. So the PVC outlives the
+Cluster — deleting the release must not be what discards them.
 */}}
 {{- if .Values.database.enabled }}
 apiVersion: postgresql.cnpg.io/v1
@@ -20,10 +14,9 @@ metadata:
     {{- include "spindrift.labels" . | nindent 4 }}
   {{- if .Values.database.keepOnDelete }}
   annotations:
-    # The keep policy the comment above describes. CNPG owns the data PVC
-    # through the Cluster, so an uninstall that removes the Cluster garbage
-    # collects the volume with it whatever the storage class reclaims — keeping
-    # the Cluster is what keeps the data.
+    # CNPG owns the data PVC through the Cluster, so an uninstall that removes
+    # the Cluster collects the volume with it whatever the storage class
+    # reclaims. Keeping the Cluster is what keeps the data.
     helm.sh/resource-policy: keep
   {{- end }}
 spec:

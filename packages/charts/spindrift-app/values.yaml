@@ -1,17 +1,12 @@
-# The App chart's values (§7).
+# One App Component, as values.
 #
-# Three value classes, not two: some keys are written by both the operator and
-# Spindrift, so a disjointness rule would reject a correct config. The classes
-# are the three top-level keys below, and the boundary between them is enforced
-# where a Target's chart-values are saved — not here, because a chart cannot
-# know who set a value.
+# Three value classes, by who writes them. The boundary is enforced where a
+# Target's chart-values are saved, not here — a chart cannot know who set a
+# value.
 #
 #   app.*       Spindrift writes. Never an operator's to set.
 #   platform.*  The operator writes, per Target. Spindrift never renders into it.
 #   shared.*    Either may write. Spindrift's value wins where both do.
-#
-# Everything a Component is, is a value. `website` is not a template branch —
-# it is a service with `expose` forced and a fixed port (§7).
 
 # --- Spindrift's class ------------------------------------------------------
 app:
@@ -21,51 +16,50 @@ app:
   component: ""
 
   # service | website | job. `job` is the one branch: it renders a CronJob
-  # rather than a Deployment (§7).
+  # rather than a Deployment. A website is a service with `expose` forced and a
+  # fixed port.
   kind: service
 
-  # Digest-pinned image reference. §16 correlates on digest everywhere, so a
-  # tag here would break the join between what was signed and what runs.
+  # Digest-pinned image reference. The supply chain correlates on digest, so a
+  # tag would break the join between what was signed and what runs.
   image: ""
 
-  # The port this non-job Component listens on. Spindrift supplies the fixed
-  # website port as this value, leaving `job` as the only chart branch.
+  # The port this non-job Component listens on.
   port: 8080
 
-  # Whether this non-job Component serves traffic. Spindrift forces this on
-  # when it normalizes a website; an unexposed service is a queue worker (§2).
+  # Whether this non-job Component serves traffic. An unexposed service is a
+  # queue worker.
   expose: true
 
-  # internal | private | public (§9). The chart renders a route for a Component
-  # that is exposed and not `internal`; a private route delegates authentication
-  # to the Target's shared proxy while a public route is filter-free.
+  # internal | private | public. A route renders for a Component that is exposed
+  # and not `internal`; a private route delegates authentication to the Target's
+  # shared proxy, a public route is filter-free.
   exposure: private
 
-  # Job only. Empty renders a suspended CronJob — a job always renders one, so
-  # a manual run and a scheduled run are one object with a field flipped (§7).
+  # Job only. Empty renders a suspended CronJob, so a manual run and a scheduled
+  # run are one object with a field flipped.
   schedule: ""
 
   # The Deploy this release came from. Rendered onto the pod template and
-  # **never** into a selector, which is immutable and would brick every
-  # upgrade (§7).
+  # **never** into a selector, which is immutable.
   deployId: ""
 
-  # What is running here, as a digest. Kept on the delivery object so observe
-  # can report drift against core's desired state (§6).
+  # What is running here, as a digest, so observe can report drift against
+  # core's desired state.
   artifactDigest: ""
 
   # Hostnames the route answers on: the canonical name first, the vanity name
-  # after it where one exists (§9).
+  # after it where one exists.
   hostnames: []
 
-  # Plain environment. §10 keeps no secret/non-secret classification; a value
-  # that is a secret arrives through `secretEnv` as a reference, never here.
+  # Plain environment. A value that is a secret arrives through `secretEnv` as a
+  # reference, never here.
   env: []
   # [{ name, secretName, remote: { key, version } }] — one secret per variable,
-  # not a blob (§10). `name` is both the variable and the key inside the
-  # materialized Secret; `remote` is the **pinned** reference in the store of
-  # record, never a floating latest. The chart renders one ExternalSecret from
-  # these and the platform's own secret operator materializes it.
+  # not a blob. `name` is both the variable and the key inside the materialized
+  # Secret; `remote` is the **pinned** reference in the store of record, never a
+  # floating latest. The chart renders one ExternalSecret from these and the
+  # platform's secret operator materializes it.
   secretEnv: []
 
   # Entrypoint overrides. Empty means the image's own.
@@ -74,13 +68,13 @@ app:
 
 # --- The operator's class ---------------------------------------------------
 platform:
-  # Sandbox runtime class, defaulting to unset (§7).
+  # Sandbox runtime class.
   runtimeClassName: ""
 
   imagePullSecrets: []
 
-  # The shared gateway routes attach to. No Gateway and no certificate are
-  # rendered here — routes attach to the existing HTTP listener (§7, §9).
+  # The shared gateway routes attach to, on its existing HTTP listener. This
+  # chart renders no Gateway and no certificate.
   gateway:
     name: ""
     namespace: ""
@@ -92,25 +86,23 @@ platform:
     namespace: ""
     port: 80
 
-  # The ClusterSecretStore config is fetched through. A Target property: §10
-  # gives a Kubernetes Target an admin-chosen store, and the operator is the
-  # one who knows what theirs is called. Rendering config without it is refused
-  # rather than guessed — see templates/externalsecret.yaml.
+  # The ClusterSecretStore config is fetched through — an admin-chosen Target
+  # property. Rendering config without it is refused rather than guessed; see
+  # templates/externalsecret.yaml.
   secretStore:
     kind: ClusterSecretStore
     name: ""
 
   networkPolicy:
-    # Ingress is default-deny with a fixed exception list whose **names are
-    # Target configuration while the shape is fixed** (§8). Same-namespace
-    # siblings are always allowed; these are the namespaces outside it.
+    # Ingress is default-deny with a fixed exception shape whose **names are
+    # Target configuration**. Same-namespace siblings are always allowed; these
+    # are the namespaces outside it.
     allowedNamespaces: []
 
 # --- Written by both --------------------------------------------------------
 shared:
   # The operator sets a Target's defaults; Spindrift overrides them per
-  # Component. Both are legitimate authors of the same key, which is the whole
-  # reason this class exists.
+  # Component.
   resources:
     requests:
       cpu: 50m
