@@ -17,6 +17,10 @@
  */
 import { ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
+import {
+  type AppDeletionControls,
+  DeleteAppButton,
+} from '../../components/delete-app.tsx';
 import { EmptyState, LogPane } from '../../components/log-pane.tsx';
 import { PhasePill } from '../../components/status.tsx';
 import type {
@@ -35,11 +39,18 @@ export function Workspace({
   onDeploy,
   deploying = false,
   onNavigate,
+  deletion,
 }: {
   view: WorkspaceView;
   onDeploy?: () => void;
   deploying?: boolean;
   onNavigate?: (path: string) => void;
+  /**
+   * Absent where there is nothing to navigate back to after a delete — the
+   * screen owns where the operator lands, so a caller that cannot answer that
+   * question does not offer the act.
+   */
+  deletion?: AppDeletionControls;
 }) {
   const primary = view.components[0];
 
@@ -53,6 +64,9 @@ export function Workspace({
           <h1 className="text-2xl font-semibold tracking-tight">{view.app}</h1>
         </div>
         <div className="ml-auto flex gap-2">
+          {deletion ? (
+            <DeleteAppButton name={view.app} deletion={deletion} label />
+          ) : null}
           <Button variant="outline" asChild>
             <a href={`https://${view.url}`}>
               Open app <ExternalLink aria-hidden="true" />

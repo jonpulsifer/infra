@@ -8,8 +8,19 @@
  *
  * An empty list is its own onboarding: the first thing a fresh install sees is
  * the New App action, not a dashboard with empty charts.
+ *
+ * The one exception to "the one action is New App" is the trash affordance on
+ * each row. It is here rather than only in the workspace because the App this
+ * list most often has too many of is the one nothing was ever deployed from, and
+ * making the operator open a workspace to throw one away is what leaves a fresh
+ * install's failed first attempts on the screen forever. What it opens is a
+ * review, not a delete — `components/delete-app.tsx` owns that whole flow.
  */
 import { ExternalLink, Globe, Plus, Server, Zap } from 'lucide-react';
+import {
+  type AppDeletionControls,
+  DeleteAppButton,
+} from '../../components/delete-app.tsx';
 import type { AppListItem, DeployPhase } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
@@ -53,9 +64,11 @@ function phaseTone(
 export function AppList({
   apps,
   onNavigate,
+  deletion,
 }: {
   apps: readonly AppListItem[];
   onNavigate: (path: string) => void;
+  deletion: AppDeletionControls;
 }) {
   return (
     <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
@@ -90,48 +103,57 @@ export function AppList({
       ) : (
         <div className="flex flex-col gap-2">
           {apps.map((app) => (
-            <button
+            // A row is a navigation and a delete, so the row itself is not the
+            // button: an interactive control inside a `<button>` is neither
+            // valid HTML nor reachable by keyboard.
+            <div
               key={app.name}
-              type="button"
-              onClick={() => onNavigate(`/apps/${app.name}`)}
               className={cn(
-                'flex items-center gap-4 rounded-lg border border-border bg-card px-4 py-3.5 text-left transition-colors',
-                'hover:border-primary hover:bg-secondary/60',
+                'group flex items-center gap-2 rounded-lg border border-border bg-card pr-2 transition-colors',
+                'focus-within:border-primary hover:border-primary hover:bg-secondary/60',
               )}
             >
-              {kindIcon(app.kind)}
+              <button
+                type="button"
+                onClick={() => onNavigate(`/apps/${app.name}`)}
+                className="flex min-w-0 flex-1 items-center gap-4 px-4 py-3.5 text-left"
+              >
+                {kindIcon(app.kind)}
 
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold">{app.name}</span>
-                  <Badge tone={phaseTone(app.phase)}>
-                    {app.phase.toLowerCase()}
-                  </Badge>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold">{app.name}</span>
+                    <Badge tone={phaseTone(app.phase)}>
+                      {app.phase.toLowerCase()}
+                    </Badge>
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {app.target}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {app.source}
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+
+                <div className="hidden flex-col items-end gap-0.5 sm:flex">
                   <span className="font-mono text-xs text-muted-foreground">
-                    {app.target}
+                    {app.url}
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    {app.source}
-                  </span>
+                  <span className="text-xs text-subtle">{app.release}</span>
                 </div>
-              </div>
 
-              <div className="hidden flex-col items-end gap-0.5 sm:flex">
-                <span className="font-mono text-xs text-muted-foreground">
-                  {app.url}
-                </span>
-                <span className="text-xs text-subtle">{app.release}</span>
-              </div>
+                {app.urlLive ? (
+                  <ExternalLink
+                    aria-hidden="true"
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                ) : null}
+              </button>
 
-              {app.urlLive ? (
-                <ExternalLink
-                  aria-hidden="true"
-                  className="size-3.5 shrink-0 text-muted-foreground"
-                />
-              ) : null}
-            </button>
+              <DeleteAppButton name={app.name} deletion={deletion} />
+            </div>
           ))}
         </div>
       )}
