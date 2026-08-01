@@ -21,12 +21,14 @@
  * takes one immutable view; its controller replaces that view as authenticated
  * attempt events arrive.
  */
+import { RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
 import type { DeployView } from '../../model.ts';
+import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
 import {
   Collapsible,
@@ -35,11 +37,25 @@ import {
 } from '../../ui/collapsible.tsx';
 import { cn } from '../../ui/utils.ts';
 
-export function DeployDetail({ view }: { view: DeployView }) {
+export function DeployDetail({
+  view,
+  onRedeploy,
+  redeploying = false,
+  onNavigate,
+}: {
+  view: DeployView;
+  onRedeploy?: () => void;
+  redeploying?: boolean;
+  onNavigate?: (path: string) => void;
+}) {
   return (
     <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-4 px-5 py-6">
-      <Chrome view={view} />
-      <Hero view={view} />
+      <Chrome view={view} onNavigate={onNavigate} />
+      <Hero
+        view={view}
+        onRedeploy={onRedeploy}
+        redeploying={redeploying}
+      />
 
       {view.diagnosis ? (
         <DiagnosisPanel
@@ -74,11 +90,27 @@ export function DeployDetail({ view }: { view: DeployView }) {
  * every phase — identity, not status. The runner carries its `logFidelity`
  * because that is the fact explaining why the log below may be silent (§4).
  */
-function Chrome({ view }: { view: DeployView }) {
+function Chrome({
+  view,
+  onNavigate,
+}: {
+  view: DeployView;
+  onNavigate?: (path: string) => void;
+}) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
       <p className="font-mono text-sm">
-        <span className="font-semibold">{view.app}</span>
+        {onNavigate ? (
+          <button
+            type="button"
+            onClick={() => onNavigate(`/apps/${view.app}`)}
+            className="font-semibold hover:underline"
+          >
+            {view.app}
+          </button>
+        ) : (
+          <span className="font-semibold">{view.app}</span>
+        )}
         <span className="mx-1.5 text-muted-foreground">/</span>
         <span className="text-subtle">{view.component}</span>
       </p>
@@ -111,7 +143,15 @@ function Meta({ label, value }: { label: string; value: string }) {
  * The URL is the answer to the only question a developer opens this screen
  * with, so it is never further down than the phase that describes it.
  */
-function Hero({ view }: { view: DeployView }) {
+function Hero({
+  view,
+  onRedeploy,
+  redeploying = false,
+}: {
+  view: DeployView;
+  onRedeploy?: () => void;
+  redeploying?: boolean;
+}) {
   return (
     <Card className="flex flex-wrap items-center gap-4 px-5 py-5">
       <div className="flex flex-col gap-2">
@@ -119,6 +159,21 @@ function Hero({ view }: { view: DeployView }) {
         <h1 className="text-[27px] font-semibold leading-tight tracking-[-0.02em]">
           {view.headline}
         </h1>
+        {onRedeploy ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRedeploy}
+            disabled={redeploying}
+            className="self-start"
+          >
+            <RefreshCw
+              aria-hidden="true"
+              className={cn('size-3.5', redeploying && 'animate-spin')}
+            />
+            {redeploying ? 'Deploying…' : 'Redeploy'}
+          </Button>
+        ) : null}
       </div>
       <UrlBlock view={view} />
     </Card>

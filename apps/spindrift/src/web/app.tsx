@@ -398,6 +398,9 @@ function DeployScreen({
     | { type: 'success'; deploy: DeployView }
   >({ type: 'loading' });
 
+  const [redeploying, setRedeploying] = useState(false);
+  const [redeployError, setRedeployError] = useState<string | null>(null);
+
   useEffect(() => {
     let live = true;
     let stopStream: (() => void) | null = null;
@@ -457,6 +460,25 @@ function DeployScreen({
     };
   }, [deployId]);
 
+  const handleRedeploy = async () => {
+    if (state.type !== 'success') return;
+    setRedeploying(true);
+    setRedeployError(null);
+    try {
+      const result = await command('deployApp', { name: state.deploy.app });
+      if (result.ok) {
+        onNavigate(`/deploys/${result.value.deployId}`);
+      } else {
+        setRedeployError(result.failure.message);
+      }
+    } catch (e: unknown) {
+      setRedeployError(e instanceof Error ? e.message : 'Redeploy failed');
+    } finally {
+      setRedeploying(false);
+    }
+  };
+
+
   if (state.type === 'loading') {
     return (
       <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
@@ -497,7 +519,33 @@ function DeployScreen({
     );
   }
 
-  return <DeployDetail view={state.deploy} />;
+  return (
+    <>
+      {redeployError ? (
+        <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Redeploy failed</p>
+              <p className="text-sm mt-0.5">{redeployError}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRedeployError(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <DeployDetail
+        view={state.deploy}
+        onRedeploy={handleRedeploy}
+        redeploying={redeploying}
+        onNavigate={onNavigate}
+      />
+    </>
+  );
 }
 
 function TargetsScreen() {
