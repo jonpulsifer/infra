@@ -21,6 +21,7 @@
  * because it rotates, and a projected token is not a held credential (§13).
  */
 
+import { createHash } from 'node:crypto';
 import type { AdapterRegistry } from '../commands/types.ts';
 import type {
   BuildRouteConfig,
@@ -34,11 +35,15 @@ import type {
   RepositoryAuthorization,
   RepositoryHost,
 } from '../domain/repository.ts';
-import type { RepositorySourceStager } from '../domain/source-bundle.ts';
+import {
+  type RepositorySourceStager,
+  stageSourceBundle,
+} from '../domain/source-bundle.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
 import { CredentialKeyring } from '../integrations/github/credential-crypto.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
 import { GitHubDeviceOAuth } from '../integrations/github/oauth.ts';
+import { stageArchiveBytes } from '../storage/archives.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
@@ -278,7 +283,59 @@ export function createAdapterRegistry(
     },
 
     source() {
-      return options.source ?? null;
+      if (options.source !== undefined) return options.source;
+      if (app === null) return null;
+      const defaultSourceStager: RepositorySourceStager = {
+        async stageRepository(input) {
+          const staged = await stageSourceBundle(
+            {
+              kind: 'git',
+              repository: input.repository,
+              commit: input.commit,
+              credential: input.ref,
+            },
+            {
+              fetcher: app,
+              depot: {
+                async putImmutable(item) {
+                  const archived = await stageArchiveBytes(
+                    `bundle-${item.digest.replace('sha256:', '')}.zip`,
+                    item.bytes,
+                  );
+                  return { location: archived.location };
+                },
+              },
+              signer: {
+                async sign(payload) {
+                  const hash = createHash('sha256')
+                    .update(payload)
+                    .digest('hex');
+                  return {
+                    keyId: options.manifest.supplyChain.signer,
+                    algorithm: 'sha256',
+                    value: hash,
+                  };
+                },
+              },
+              receipts: {
+                async putImmutable(receipt) {
+                  const bytes = new TextEncoder().encode(
+                    JSON.stringify(receipt),
+                  );
+                  const archived = await stageArchiveBytes(
+                    `receipt-${receipt.statement.subject.digest.replace('sha256:', '')}.json`,
+                    bytes,
+                  );
+                  return { location: archived.location };
+                },
+              },
+            },
+            input.stagedAt,
+          );
+          return staged.bundle;
+        },
+      };
+      return defaultSourceStager;
     },
 
     repositoryAuthorization(): RepositoryAuthorization | null {
