@@ -6,6 +6,7 @@
  * handed — so a test can assert that the bundle digest reached the route, which
  * is §16's whole join — and replays a scripted result.
  */
+import { createHash } from 'node:crypto';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -99,23 +100,31 @@ export class FakeBuildAdapter implements BuildAdapter {
       };
     }
 
+    const digest =
+      scripted.result.digest ?? fakeDigest(`${this.name}-${this.builds}`);
+
     return {
       status: 'SUCCEEDED',
       artifact: {
         type: spec.artifactType,
-        digest: scripted.result.digest ?? `sha256:${this.name}-${this.builds}`,
-        refs: [`${spec.destination}@${scripted.result.digest ?? 'fake'}`],
+        digest,
+        refs: [`${spec.destination}@${digest}`],
       },
       logs,
       provenance: {
         // Echoed, never invented: this is the join §16 asks a route for.
         bundleDigest: source.bundleDigest,
         claimedLevel: this.buildLevel,
-        statement: { fake: true },
+        statement: fakeStatement({
+          builderId: this.provenanceBuilderId,
+          bundleDigest: source.bundleDigest,
+          destination: spec.destination,
+          digest,
+        }),
       },
       baseDigest: scripted.result.baseDigest ?? null,
-      buildkitProvenanceRef: `${spec.destination}@${scripted.result.digest ?? 'fake'}#buildkit`,
-      sbomRef: `${spec.destination}@${scripted.result.digest ?? 'fake'}#spdx`,
+      buildkitProvenanceRef: `${spec.destination}@${digest}#buildkit`,
+      sbomRef: `${spec.destination}@${digest}#spdx`,
     };
   }
 
@@ -125,4 +134,56 @@ export class FakeBuildAdapter implements BuildAdapter {
     this.builds += 1;
     return this.script[index] ?? DEFAULT_BUILD;
   }
+}
+
+/**
+ * A digest the product would accept.
+ *
+ * `sha256:fake-0` was the old default, and three places in `src/` validate a
+ * digest against `^sha256:[0-9a-f]{64}$` — so every command test that ran a
+ * build through to a Deploy ran on an artifact the real system cannot produce
+ * and would refuse. Hashing the label keeps it deterministic and readable in a
+ * diff while being a real digest.
+ */
+export function fakeDigest(label: string): string {
+  return `sha256:${createHash('sha256').update(label).digest('hex')}`;
+}
+
+/**
+ * The provenance document a route reports (§16).
+ *
+ * `{ fake: true }` was here, and it made the verification chain vacuous: the
+ * real {@link import('../../../src/supply-chain/verify.ts').SlsaVerifier} reads
+ * the *verified envelope* for `predicate.buildDefinition.externalParameters
+ * .bundleDigest` and refuses when it does not name the source bundle. A
+ * statement without that path fails that check, so nothing that ran against the
+ * old value was ever asserting the join §16 is built on.
+ *
+ * The shape is an in-toto v1 statement because that is what the pinned verifier
+ * parses — subject digest, builder id, and bundle digest all live where
+ * `apps/spindrift-verifier/pkg/verifier/verify.go` looks for them.
+ */
+export function fakeStatement(input: {
+  builderId: string;
+  bundleDigest: string;
+  destination: string;
+  digest: string;
+}): unknown {
+  return {
+    _type: 'https://in-toto.io/Statement/v1',
+    subject: [
+      {
+        name: input.destination,
+        digest: { sha256: input.digest.replace(/^sha256:/, '') },
+      },
+    ],
+    predicateType: 'https://slsa.dev/provenance/v1',
+    predicate: {
+      buildDefinition: {
+        buildType: 'https://spindrift.dev/buildkit/v1',
+        externalParameters: { bundleDigest: input.bundleDigest },
+      },
+      runDetails: { builder: { id: input.builderId } },
+    },
+  };
 }

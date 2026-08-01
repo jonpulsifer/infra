@@ -13,7 +13,7 @@ import type {
   BuildProvenance,
   BuildSource,
 } from '../adapters/build/contract.ts';
-import { type Artifact, immutableImageRef } from '../domain/desired-state.ts';
+import type { Artifact } from '../domain/desired-state.ts';
 
 export interface ProcessResult {
   readonly exitCode: number;
@@ -24,6 +24,23 @@ export interface ProcessResult {
 /** The native process seam; tests replace the far side, never this module. */
 export interface ProcessExecutor {
   run(command: readonly string[]): Promise<ProcessResult>;
+}
+
+/**
+ * The reference that pins an artifact to its digest, whatever it is made of.
+ *
+ * `immutableImageRef` is the deploy side's version of this and gates on
+ * `type === 'image'`, which is right there — a workload needs an image. It is
+ * wrong here. §16 says core "signs that digest", and the digest of a `files`
+ * artifact is as signable as an image's; the property this module needs is only
+ * that the reference names the digest rather than a tag, which is what closes
+ * the check/use race the verifier's own contract warns about. Gating on image
+ * meant every static-site build was refused before the verifier was spawned.
+ */
+export function digestPinnedRef(artifact: Artifact): string | null {
+  return (
+    artifact.refs.find((ref) => ref.endsWith(`@${artifact.digest}`)) ?? null
+  );
 }
 
 /** Execute one pinned tool without a shell. */
@@ -92,6 +109,24 @@ export interface SlsaVerifierOptions {
  *
  * It verifies an immutable reference and a copied envelope. No tag reaches the
  * tool, closing the check/use race the verifier's own contract warns about.
+ *
+ * **Two limitations of the `verify-image` path, recorded rather than hidden.**
+ * `apps/spindrift-verifier/main.go` builds that path's request with
+ * `ClaimedLevel: 2`, `MinimumLevel: 1`, `MaximumLevel: 2` and
+ * `Backend: "hosted"` hardcoded, and nothing on the command line conveys any of
+ * them:
+ *
+ * 1. *The level is decided here, not there.* Those constants make the binary's
+ *    own level arithmetic inert on this path — `min(2, 2) = 2 >= 1` always
+ *    passes — so the achieved level is entirely {@link lowerLevel} below,
+ *    against the route profile's ceiling. That matches §16 ("guarantees belong
+ *    to code-defined backend/runner profiles"), but it does mean an L3 claim
+ *    rests on {@link CloudBuildRoute}'s constant and on nothing the envelope
+ *    says. Passing the level through would need a flag on both sides and a new
+ *    verifier image; it would not change any verdict today.
+ * 2. *`--source-uri` is accepted and ignored.* `Expectations.SourceURI` is
+ *    declared in `pkg/verifier/types.go` and never read by `Verify`, so the
+ *    only source binding anything checks is {@link bundleDigestOf} below.
  */
 export class SlsaVerifier implements ProvenanceVerifier {
   private readonly executable: string;
@@ -112,12 +147,12 @@ export class SlsaVerifier implements ProvenanceVerifier {
         message: `${input.backend} returned no backend provenance`,
       };
     }
-    const immutableRef = immutableImageRef(input.artifact);
+    const immutableRef = digestPinnedRef(input.artifact);
     if (immutableRef === null) {
       return {
         ok: false,
         code: 'PROVENANCE_INVALID',
-        message: `${input.backend} returned no immutable image reference for ${input.artifact.digest}`,
+        message: `${input.backend} returned no immutable reference for ${input.artifact.digest}`,
       };
     }
 

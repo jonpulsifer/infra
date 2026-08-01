@@ -15,6 +15,10 @@ import type {
   ProvenanceVerifier,
 } from '../../src/supply-chain/verify.ts';
 import { SlsaVerifier } from '../../src/supply-chain/verify.ts';
+import {
+  FakeVerifierProcess,
+  TEST_SIGNER_KEY,
+} from '../harness/fakes/supply-chain.ts';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const BUNDLE = `sha256:${'b'.repeat(64)}`;
@@ -406,5 +410,287 @@ describe('the pinned verify-signature process boundary', () => {
     expect(checked.reason).toBe(
       'signature does not verify against the artifact digest',
     );
+  });
+});
+
+/**
+ * The real classes over the pinned binary's process seam (Task 17).
+ *
+ * Everything above this point either drives `CoreSupplyChain` over hand-written
+ * doubles or drives one real class over a process that always says yes. What is
+ * here is the part that used to be unreachable: the verifier's own refusals,
+ * its `min()`, its four-deep read of the envelope, and a signature that is
+ * signed and re-verified rather than asserted.
+ */
+describe('the real verifier over the pinned process', () => {
+  function statement(overrides: {
+    bundleDigest?: string | null;
+    builderId?: string;
+    subject?: string;
+  }): unknown {
+    return {
+      _type: 'https://in-toto.io/Statement/v1',
+      subject: [
+        {
+          name: 'registry.example.test/apps/shop',
+          digest: {
+            sha256: (overrides.subject ?? DIGEST).replace(/^sha256:/, ''),
+          },
+        },
+      ],
+      predicateType: 'https://slsa.dev/provenance/v1',
+      predicate: {
+        buildDefinition: {
+          externalParameters:
+            overrides.bundleDigest === null
+              ? {}
+              : { bundleDigest: overrides.bundleDigest ?? BUNDLE },
+        },
+        runDetails: {
+          builder: {
+            id:
+              overrides.builderId ??
+              'https://github.com/actions/runner/github-hosted',
+          },
+        },
+      },
+    };
+  }
+
+  function verifying(processes: FakeVerifierProcess) {
+    return new SlsaVerifier({
+      processes,
+      now: () => new Date('2024-06-01T00:00:00.000Z'),
+    });
+  }
+
+  test('the achieved level is the lower of the claim and the profile ceiling', async () => {
+    // `min(claimedLevel, maximumLevel)` had no coverage while the fake answered
+    // `achievedLevel: input.maximumLevel`, so a route claiming less than its
+    // profile permits was recorded at its ceiling.
+    const processes = new FakeVerifierProcess();
+    const claimingLess = await verifying(processes).verify({
+      ...input(),
+      provenance: {
+        bundleDigest: BUNDLE,
+        claimedLevel: 1,
+        statement: statement({}),
+      },
+      maximumLevel: 3,
+    });
+
+    expect(claimingLess.ok).toBe(true);
+    if (!claimingLess.ok) return;
+    expect(claimingLess.assessment.achievedLevel).toBe(1);
+  });
+
+  test('a claim above the profile ceiling is capped, not honoured', async () => {
+    const processes = new FakeVerifierProcess();
+    const claimingMore = await verifying(processes).verify({
+      ...input(),
+      provenance: {
+        bundleDigest: BUNDLE,
+        claimedLevel: 3,
+        statement: statement({}),
+      },
+      maximumLevel: 2,
+    });
+
+    expect(claimingMore.ok).toBe(true);
+    if (!claimingMore.ok) return;
+    expect(claimingMore.assessment.achievedLevel).toBe(2);
+  });
+
+  test('a verified envelope naming another bundle refuses', async () => {
+    // §16's join, checked rather than copied: the *verified* document has to
+    // name the bundle core staged, or the provenance describes another build.
+    const other = `sha256:${'d'.repeat(64)}`;
+    const result = await verifying(new FakeVerifierProcess()).verify({
+      ...input(),
+      provenance: {
+        bundleDigest: BUNDLE,
+        claimedLevel: 2,
+        statement: statement({ bundleDigest: other }),
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('PROVENANCE_INVALID');
+    expect(result.message).toContain(`names bundle ${other}`);
+  });
+
+  test('a verified envelope that binds no bundle at all refuses', async () => {
+    const result = await verifying(new FakeVerifierProcess()).verify({
+      ...input(),
+      provenance: {
+        bundleDigest: BUNDLE,
+        claimedLevel: 2,
+        statement: statement({ bundleDigest: null }),
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('PROVENANCE_INVALID');
+    expect(result.message).toContain('does not bind the source bundle digest');
+  });
+
+  test('an artifact with no digest-pinned reference never spawns anything', async () => {
+    // The check/use race the verifier's contract warns about: a tag can move
+    // between the check and the pull, so a tag never reaches the tool.
+    const processes = new FakeVerifierProcess();
+    const result = await verifying(processes).verify({
+      ...input(),
+      artifact: {
+        type: 'image',
+        digest: DIGEST,
+        refs: ['registry.example.test/apps/shop:latest'],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('PROVENANCE_INVALID');
+    expect(result.message).toContain('no immutable reference');
+    expect(processes.runs).toHaveLength(0);
+  });
+
+  test('a builder the route did not expect refuses at the binary', async () => {
+    const result = await verifying(new FakeVerifierProcess()).verify({
+      ...input(),
+      provenance: {
+        bundleDigest: BUNDLE,
+        claimedLevel: 2,
+        statement: statement({
+          builderId: 'https://github.com/untrusted/workflows/build.yml',
+        }),
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('PROVENANCE_INVALID');
+    expect(result.message).toContain('builder mismatch');
+  });
+
+  test('a files artifact is verified and signed like any other digest', async () => {
+    // §16 says core "signs that digest", and a static site has one. Gating the
+    // supply chain on `type === 'image'` refused every files build before the
+    // verifier was even spawned.
+    const processes = new FakeVerifierProcess();
+    const artifact: Artifact = {
+      type: 'files',
+      digest: DIGEST,
+      refs: [`registry.example.test/artifacts@${DIGEST}`],
+    };
+    const verified = await verifying(processes).verify({
+      ...input(),
+      artifact,
+      provenance: {
+        bundleDigest: BUNDLE,
+        claimedLevel: 2,
+        statement: statement({}),
+      },
+    });
+
+    expect(verified.ok).toBe(true);
+    const signature = await new CosignSigner({
+      key: TEST_SIGNER_KEY,
+      processes,
+    }).sign(artifact);
+    expect(signature.artifactDigest).toBe(DIGEST);
+  });
+});
+
+describe('a signature that is signed and re-verified, not asserted', () => {
+  const ARTIFACT_REF = `registry.example.test/apps/shop@${DIGEST}`;
+
+  async function signOnce(processes: FakeVerifierProcess) {
+    return new CosignSigner({ key: TEST_SIGNER_KEY, processes }).sign({
+      type: 'image',
+      digest: DIGEST,
+      refs: [ARTIFACT_REF],
+    });
+  }
+
+  test('what the signer wrote is what admission admits', async () => {
+    const processes = new FakeVerifierProcess();
+    const signature = await signOnce(processes);
+
+    const admitted = await new SpindriftSignatureVerifier({
+      processes,
+      signerKey: TEST_SIGNER_KEY,
+    }).verify({ artifactDigest: DIGEST, signature });
+
+    expect(admitted).toEqual({ ok: true, reason: null });
+    // The bundle came back through the file the signer wrote, not through
+    // stdout — which is the path `CosignSigner` prefers and had never been
+    // exercised against a process that writes one.
+    expect(processes.callsTo('sign')).toHaveLength(1);
+  });
+
+  test('a bundle covering another digest is refused at admission', async () => {
+    const processes = new FakeVerifierProcess();
+    const signature = await signOnce(processes);
+
+    const admitted = await new SpindriftSignatureVerifier({
+      processes,
+      signerKey: TEST_SIGNER_KEY,
+    }).verify({ artifactDigest: `sha256:${'e'.repeat(64)}`, signature });
+
+    expect(admitted.ok).toBe(false);
+    if (admitted.ok) return;
+    expect(admitted.reason).toContain('bundle covers digest');
+  });
+
+  test('a bundle signed by another key is refused even though it is self-consistent', async () => {
+    // The pin: admission derives the expected public key from the trusted
+    // signer reference, so a bundle whose own key verifies its own signature
+    // still fails.
+    const signature = await signOnce(
+      new FakeVerifierProcess({ signerKey: '/spindrift/other.key' }),
+    );
+    const forged = {
+      ...signature,
+      bundle: {
+        ...(signature.bundle as Record<string, unknown>),
+        publicKey:
+          'MCowBQYDK2VwAyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+      },
+    };
+
+    const admitted = await new SpindriftSignatureVerifier({
+      processes: new FakeVerifierProcess(),
+      signerKey: TEST_SIGNER_KEY,
+    }).verify({ artifactDigest: DIGEST, signature: forged });
+
+    expect(admitted.ok).toBe(false);
+    if (admitted.ok) return;
+    expect(admitted.reason).toContain('not the trusted Spindrift signer');
+  });
+
+  test('a tampered signature is refused', async () => {
+    const processes = new FakeVerifierProcess();
+    const signature = await signOnce(processes);
+    const bundle = signature.bundle as { signature: string };
+    const tampered = {
+      ...signature,
+      bundle: {
+        ...bundle,
+        signature: Buffer.from(
+          Buffer.from(bundle.signature, 'base64').reverse(),
+        ).toString('base64'),
+      },
+    };
+
+    const admitted = await new SpindriftSignatureVerifier({
+      processes,
+      signerKey: TEST_SIGNER_KEY,
+    }).verify({ artifactDigest: DIGEST, signature: tampered });
+
+    expect(admitted.ok).toBe(false);
+    if (admitted.ok) return;
+    expect(admitted.reason).toContain('does not verify');
   });
 });

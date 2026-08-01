@@ -13,10 +13,11 @@ import type {
   BuildProvenance,
   BuildSource,
 } from '../adapters/build/contract.ts';
-import { type Artifact, immutableImageRef } from '../domain/desired-state.ts';
+import type { Artifact } from '../domain/desired-state.ts';
 import {
   type BackendProvenanceAssessment,
   bunProcessExecutor,
+  digestPinnedRef,
   type ProcessExecutor,
   type ProvenanceVerifier,
 } from './verify.ts';
@@ -172,7 +173,7 @@ export class CosignSigner implements ArtifactSigner {
     const directory = await mkdtemp(join(tmpdir(), 'spindrift-signature-'));
     const bundlePath = join(directory, 'bundle.json');
     try {
-      const command = this.imageCommand(artifact, bundlePath);
+      const command = this.signCommand(artifact, bundlePath);
       const result = await this.processes.run(command);
       if (result.exitCode !== 0) {
         const detail = result.stderr.trim() || result.stdout.trim();
@@ -193,11 +194,13 @@ export class CosignSigner implements ArtifactSigner {
     }
   }
 
-  private imageCommand(
+  private signCommand(
     artifact: Artifact,
     bundlePath: string,
   ): readonly string[] {
-    const immutableRef = immutableImageRef(artifact);
+    // Any artifact type, so long as the reference names the digest: §16 signs
+    // the digest, and a `files` artifact has one.
+    const immutableRef = digestPinnedRef(artifact);
     if (immutableRef === null) {
       throw new Error(`artifact ${artifact.digest} has no immutable reference`);
     }
