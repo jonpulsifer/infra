@@ -1,5 +1,6 @@
 { inputs, lib, ... }:
 let
+  fleet = import ../lib/fleet.nix;
   # CoreDNS forwards over TLS; the host itself uses the local resolver first
   # and these same endpoints as recovery if CoreDNS is unavailable.
   upstreams = [
@@ -44,7 +45,7 @@ in
           fallthrough
         }
         cache {
-          disable denial lolwtf.ca
+          disable denial ${fleet.dnsZone}
         }
         forward . ${lib.concatStringsSep " " (map (upstream: "tls://${upstream}") upstreams)} {
           policy random

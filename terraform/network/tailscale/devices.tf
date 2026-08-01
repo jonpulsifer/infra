@@ -10,7 +10,7 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  tailnet_domain = "pirate-musical.ts.net"
+  tailnet_domain = local.fleet.tailnet
 
   devices = {
     "atomic" = {

@@ -19,7 +19,7 @@ terraform {
 
 locals {
   vault_id = "ib23znjeikv74p37f6mbfk7uya"
-  tailnet  = "pirate-musical.ts.net"
+  tailnet  = local.fleet.tailnet
 }
 
 ephemeral "onepassword_item" "tailscale_oauth_client" {

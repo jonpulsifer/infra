@@ -6,6 +6,7 @@
 }:
 
 let
+  fleet = import ../lib/fleet.nix;
   downloadDir = "/mnt/disks/transmission";
   uiPort = 9091;
 in
@@ -39,7 +40,7 @@ in
         lpd-enabled = false;
 
         rpc-bind-address = "0.0.0.0";
-        rpc-host-whitelist = "*.pirate-musical.ts.net";
+        rpc-host-whitelist = "*.${fleet.tailnet}";
         rpc-host-whitelist-enabled = false;
         rpc-port = uiPort;
         rpc-whitelist-enabled = false;
