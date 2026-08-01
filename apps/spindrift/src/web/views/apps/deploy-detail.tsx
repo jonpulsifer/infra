@@ -51,11 +51,7 @@ export function DeployDetail({
   return (
     <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-4 px-5 py-6">
       <Chrome view={view} onNavigate={onNavigate} />
-      <Hero
-        view={view}
-        onRedeploy={onRedeploy}
-        redeploying={redeploying}
-      />
+      <Hero view={view} onRedeploy={onRedeploy} redeploying={redeploying} />
 
       {view.diagnosis ? (
         <DiagnosisPanel

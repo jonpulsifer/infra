@@ -478,7 +478,6 @@ function DeployScreen({
     }
   };
 
-
   if (state.type === 'loading') {
     return (
       <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
