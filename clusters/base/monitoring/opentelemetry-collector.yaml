@@ -1,0 +1,85 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: opentelemetry-collector
+  namespace: monitoring
+spec:
+  interval: 1m0s
+  maxHistory: 2
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: 0.117.0
+      sourceRef:
+        kind: HelmRepository
+        name: open-telemetry
+        namespace: flux-system
+      interval: 5m0s
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  values:
+    mode: deployment
+    image:
+      repository: otel/opentelemetry-collector-contrib
+    config:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+        prometheus:
+          config:
+            scrape_configs:
+              - job_name: opentelemetry-collector
+                scrape_interval: 15s
+                static_configs:
+                  - targets: [0.0.0.0:8888]
+      processors:
+        memory_limiter:
+          check_interval: 5s
+          limit_percentage: 80
+          spike_limit_percentage: 25
+        batch:
+          send_batch_size: 8192
+          timeout: 5s
+        resourcedetection:
+          detectors: [env, system]
+          timeout: 2s
+      exporters:
+        debug:
+          verbosity: detailed
+        loki:
+          endpoint: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+      service:
+        pipelines:
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [debug]
+          metrics:
+            receivers: [otlp, prometheus]
+            processors: [memory_limiter, batch]
+            exporters: [debug]
+          logs:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [debug, loki]
+    ports:
+      otlp:
+        enabled: true
+        containerPort: 4317
+        servicePort: 4317
+        protocol: TCP
+      otlp-http:
+        enabled: true
+        containerPort: 4318
+        servicePort: 4318
+        protocol: TCP
