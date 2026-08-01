@@ -17,9 +17,14 @@
  * - **Retained secrets.** §10's store items are reaped with the App; the ones a
  *   store refused are named, because nothing will reach them again.
  *
- * The confirm call goes by `appId`, never by the name that was typed: the review
- * already resolved which App this is, and re-resolving a name that a second App
- * has since taken would delete the wrong one.
+ * Both calls go by `appId`, never by the name on the button: `apps` has no
+ * unique constraint on `name`, so a name is a label rather than an identifier.
+ * The review refuses `INVALID_INPUT` on a name two Apps answer to — correctly,
+ * because guessing which of two to delete is not recoverable — and a screen
+ * that could only offer the name would dead-end there, never reaching the
+ * confirmation that carries the id. The name is still carried alongside,
+ * because every sentence in the dialog before the review lands is about the App
+ * the operator pointed at, and a uuid is not what they pointed at.
  */
 import { AlertTriangle, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -31,17 +36,27 @@ import { command } from '../client.ts';
 import { Button } from '../ui/button.tsx';
 import { Eyebrow } from '../ui/card.tsx';
 
+/** Which App this is, and what the operator calls it. */
+export interface AppIdentity {
+  /** What both `deleteApp` calls resolve on. */
+  readonly id: string;
+  /** What the dialog says while it is still talking about a pending act. */
+  readonly name: string;
+}
+
 export type AppDeletion =
   | { readonly kind: 'idle' }
   /** The review call is in flight. */
-  | { readonly kind: 'reviewing'; readonly name: string }
+  | { readonly kind: 'reviewing'; readonly id: string; readonly name: string }
   | {
       readonly kind: 'confirming';
+      readonly id: string;
       readonly name: string;
       readonly effects: DeleteAppEffects;
     }
   | {
       readonly kind: 'deleting';
+      readonly id: string;
       readonly name: string;
       readonly effects: DeleteAppEffects;
     }
@@ -61,7 +76,7 @@ export type AppDeletion =
 export interface AppDeletionControls {
   readonly state: AppDeletion;
   /** Ask what deleting this App would do. Nothing is written. */
-  review(name: string): void;
+  review(app: AppIdentity): void;
   /** Do it. Only meaningful from `confirming`. */
   confirm(): void;
   /** Back out, or acknowledge the aftermath. */
@@ -85,15 +100,17 @@ export function useAppDeletion(
   const deleted = useRef(onDeleted);
   deleted.current = onDeleted;
 
-  const review = useCallback((name: string) => {
-    setState({ kind: 'reviewing', name });
-    command('deleteApp', { name, confirm: false })
+  const review = useCallback(({ id, name }: AppIdentity) => {
+    setState({ kind: 'reviewing', id, name });
+    // `deleteApp` takes the id in the field it names `name`, precisely so a
+    // caller holding one does not have to go back through a name.
+    command('deleteApp', { name: id, confirm: false })
       .then((result) => {
         if (!result.ok) {
           setState({ kind: 'failed', name, message: result.failure.message });
           return;
         }
-        setState({ kind: 'confirming', name, effects: result.value });
+        setState({ kind: 'confirming', id, name, effects: result.value });
       })
       .catch((error: unknown) => {
         setState({
@@ -110,7 +127,7 @@ export function useAppDeletion(
   const confirm = useCallback(() => {
     setState((current) => {
       if (current.kind !== 'confirming') return current;
-      const { name, effects } = current;
+      const { id, name, effects } = current;
 
       command('deleteApp', { name: effects.appId, confirm: true })
         .then((result) => {
@@ -143,7 +160,7 @@ export function useAppDeletion(
           });
         });
 
-      return { kind: 'deleting', name, effects };
+      return { kind: 'deleting', id, name, effects };
     });
   }, []);
 
@@ -159,12 +176,20 @@ export function useAppDeletion(
   return { state, review, confirm, dismiss };
 }
 
-/** The trash affordance, so no screen writes its own. */
+/**
+ * The trash affordance, so no screen writes its own.
+ *
+ * It takes the id as well as the name because the name is what the operator
+ * reads and the id is what the command acts on — a button offered per row has
+ * to be able to say which row, and two rows can share a name.
+ */
 export function DeleteAppButton({
+  appId,
   name,
   deletion,
   label = false,
 }: {
+  appId: string;
   name: string;
   deletion: AppDeletionControls;
   /** Show the word beside the icon — the workspace has room, a list row does not. */
@@ -180,7 +205,7 @@ export function DeleteAppButton({
       onClick={(event) => {
         // A list row is a link to the workspace; deleting is not navigating.
         event.stopPropagation();
-        deletion.review(name);
+        deletion.review({ id: appId, name });
       }}
     >
       <Trash2 aria-hidden="true" />

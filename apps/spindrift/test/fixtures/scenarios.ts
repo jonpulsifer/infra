@@ -782,6 +782,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
 /** App list demo data. */
 export const APP_LIST: readonly AppListItem[] = [
   {
+    id: '00000000-0000-4000-8000-0000000000a1',
     name: 'hub',
     phase: 'LIVE',
     target: 'Primary',
@@ -793,6 +794,7 @@ export const APP_LIST: readonly AppListItem[] = [
     release: 'Deploy #14 · a1b2c3d',
   },
   {
+    id: '00000000-0000-4000-8000-0000000000a2',
     name: 'api',
     phase: 'LIVE',
     target: 'Primary',
@@ -804,6 +806,7 @@ export const APP_LIST: readonly AppListItem[] = [
     release: 'Deploy #8 · m3n4o5p',
   },
   {
+    id: '00000000-0000-4000-8000-0000000000a3',
     name: 'wiki',
     phase: 'FAILED',
     target: 'Cloud Run · vessel-a',
@@ -815,6 +818,7 @@ export const APP_LIST: readonly AppListItem[] = [
     release: 'Deploy #3 · q6r7s8t',
   },
   {
+    id: '00000000-0000-4000-8000-0000000000a4',
     name: 'weather-card',
     phase: 'APPLYING',
     target: 'Firebase · vessel-a',

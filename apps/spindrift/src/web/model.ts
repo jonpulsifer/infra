@@ -86,8 +86,17 @@ export interface Diagnosis {
   readonly blame: Blame | null;
   /** The sentence the developer reads. */
   readonly detail: string;
-  /** What core actually saw — events, exit codes, probe results. */
-  readonly evidence: string;
+  /**
+   * What core actually saw — events, exit codes, probe results — or `null`
+   * where it recorded nothing.
+   *
+   * Nullable for the same reason `BuildView.log` is: a Deploy that went red
+   * before anything observable happened has no evidence, and the honest
+   * rendering of that is no pane at all. Rendering `"{}"` — a serialised
+   * absence — puts a line on the screen no runner ever emitted, which is the
+   * fabrication §6 exists to refuse.
+   */
+  readonly evidence: string | null;
 }
 
 /** The build half of an attempt, present only when a builder actually ran. */
@@ -479,6 +488,17 @@ export interface LinkedRepoView {
  * one navigates to the workspace.
  */
 export interface AppListItem {
+  /**
+   * The App's id, and the only thing on this row that identifies it.
+   *
+   * `apps` carries no unique constraint on `name` — §2's Components and Targets
+   * do, `apps` does not — so two rows can wear one name. A list that keyed,
+   * linked, and deleted by name would hand both of them the same React key, the
+   * same workspace, and a delete `deleteApp` refuses as ambiguous. Every
+   * consumer already takes an id in the field it takes a name in
+   * (`getAppWorkspace`, `deleteApp`), so the id travels with the row.
+   */
+  readonly id: string;
   readonly name: string;
   readonly phase: DeployPhase;
   readonly target: string;

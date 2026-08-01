@@ -70,8 +70,16 @@ export function Workspace({
           <h1 className="text-2xl font-semibold tracking-tight">{view.app}</h1>
         </div>
         <div className="ml-auto flex gap-2">
-          {deletion ? (
-            <DeleteAppButton name={view.app} deletion={deletion} label />
+          {/* And the id, because a name is not one: `deleteApp` resolves on the
+              id, and a workspace that only knew what this App is called could
+              not tell it apart from another App called the same thing. */}
+          {deletion && view.appId ? (
+            <DeleteAppButton
+              appId={view.appId}
+              name={view.app}
+              deletion={deletion}
+              label
+            />
           ) : null}
           <Button variant="outline" asChild>
             <a href={`https://${view.url}`}>

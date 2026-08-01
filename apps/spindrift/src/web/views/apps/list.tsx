@@ -15,6 +15,12 @@
  * making the operator open a workspace to throw one away is what leaves a fresh
  * install's failed first attempts on the screen forever. What it opens is a
  * review, not a delete — `components/delete-app.tsx` owns that whole flow.
+ *
+ * **A row stands for an App, not for a name.** `apps` has no unique constraint
+ * on `name`, so the key, the link, and the delete all go by `AppListItem.id`.
+ * By name, two Apps called the same thing share one React key, one workspace,
+ * and one refused delete — which leaves the second one persisted and with no
+ * route to it at all.
  */
 import { ExternalLink, Globe, Plus, Server, Zap } from 'lucide-react';
 import {
@@ -107,7 +113,7 @@ export function AppList({
             // button: an interactive control inside a `<button>` is neither
             // valid HTML nor reachable by keyboard.
             <div
-              key={app.name}
+              key={app.id}
               className={cn(
                 'group flex items-center gap-2 rounded-lg border border-border bg-card pr-2 transition-colors',
                 'focus-within:border-primary hover:border-primary hover:bg-secondary/60',
@@ -115,7 +121,7 @@ export function AppList({
             >
               <button
                 type="button"
-                onClick={() => onNavigate(`/apps/${app.name}`)}
+                onClick={() => onNavigate(`/apps/${app.id}`)}
                 className="flex min-w-0 flex-1 items-center gap-4 px-4 py-3.5 text-left"
               >
                 {kindIcon(app.kind)}
@@ -152,7 +158,11 @@ export function AppList({
                 ) : null}
               </button>
 
-              <DeleteAppButton name={app.name} deletion={deletion} />
+              <DeleteAppButton
+                appId={app.id}
+                name={app.name}
+                deletion={deletion}
+              />
             </div>
           ))}
         </div>

@@ -50,6 +50,7 @@ export const listApps: Command<
     const target = deploy?.target;
 
     return {
+      id: app.id,
       name: app.name,
       vessel: app.vesselRef ?? '',
       source,
