@@ -1,6 +1,13 @@
 ---
 name: sops-secrets
-description: Work with sops-nix and the age keys this repo uses to encrypt per-host secrets. Use when adding a new SOPS-managed host, generating or rotating a harmonia binary-cache key, decrypting a sops file, re-encrypting with a new recipient, or chasing "sops: command not found / no matching key / decryption failed" errors. The dev-machine operator key is in 1Password (homelab vault) and at ~/.config/age/keys.txt — NOT at the sops binary's default of ~/.config/sops/age/keys.txt.
+description: >-
+  Work with sops-nix and the age keys this repo uses to encrypt per-host
+  secrets. Use when adding a new SOPS-managed host, generating or rotating a
+  harmonia binary-cache key, decrypting a sops file, re-encrypting with a new
+  recipient, or chasing "sops: command not found / no matching key /
+  decryption failed" errors. The dev-machine operator key is in 1Password
+  (homelab vault) and at ~/.config/age/keys.txt — NOT at the sops binary's
+  default of ~/.config/sops/age/keys.txt.
 metadata:
   runbook: docs/pages/Runbooks___SOPS Secrets and Age Keys.md
 ---
