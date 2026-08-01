@@ -18,7 +18,6 @@
  * - **`auth`** is the one surface reachable without a session, because it is
  *   what produces one. `src/auth/routes.ts` carries why it cannot be a command.
  */
-import { isDeepStrictEqual } from 'node:util';
 import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
@@ -138,7 +137,7 @@ export async function start(
   let current = { manifest, adapters };
   const installationNow = async () => {
     const stored = await currentStoredManifest(db);
-    if (stored === null || isDeepStrictEqual(stored, current.manifest)) {
+    if (stored === null || Bun.deepEquals(stored, current.manifest, true)) {
       return current;
     }
     current = {

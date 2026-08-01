@@ -5,7 +5,6 @@
  * row and reconciles a deployment declaration — including ordered Target
  * identities — into durable state.
  */
-import { isDeepStrictEqual } from 'node:util';
 import { sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { installation, targets } from '../db/schema.ts';
@@ -125,7 +124,7 @@ async function reconcileManifestTargets(
     );
     const hasConnectionChange =
       declaredConnection !== null &&
-      !isDeepStrictEqual(existing?.connection, declaredConnection);
+      !Bun.deepEquals(existing?.connection, declaredConnection, true);
 
     await db
       .insert(targets)
