@@ -17,10 +17,7 @@
  * - **`in-cluster` is L1**, which is what makes an L2 Target refuse it.
  */
 import { describe, expect, test } from 'bun:test';
-import {
-  buildKitProgram,
-  railpackVersion,
-} from '../../src/adapters/build/buildkit.ts';
+import { buildKitProgram } from '../../src/adapters/build/buildkit.ts';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import type {
   BuildEvent,
@@ -792,36 +789,34 @@ describe('the BuildKit program', () => {
 
   test('generates the plan with the release that reads it', () => {
     // The plan is railpack's own serialisation format, versioned with railpack,
-    // so generator and frontend must be one release. The tag is the only thing
-    // that says which, and pinning it twice is how the two drift apart.
-    expect(railpackVersion(FRONTEND)).toBe('pinned');
+    // so generator and frontend must be one release. They are one *artifact*:
+    // the generator is extracted from the frontend image itself, which is why
+    // no version is derived from the tag and nothing is downloaded.
     expect(program).toContain(
-      'https://github.com/railwayapp/railpack/releases/download/pinned/',
+      `--opt context:railpack=docker-image://'${FRONTEND}'`,
     );
-    // The architecture is the runner's to report, so it expands where the
-    // version — a manifest value reaching a shell — stays quoted.
-    expect(program).toContain(`asset='railpack-pinned-'"$arch"'`);
-    // The generator reads the developer's source, so the download is checked
-    // against the release's own checksums rather than trusted.
-    expect(program).toContain('checksums.txt');
-    expect(program).toContain('sha256sum -c -');
+    expect(program).toContain('COPY --from=railpack /railpack /railpack');
+    expect(program).toContain('--output type=local,dest="$bin"');
+    // Nothing is fetched from GitHub releases any more — no release URL, no
+    // checksum dance, and no architecture to map to an asset name.
+    expect(program).not.toContain('releases/download');
+    expect(program).not.toContain('checksums.txt');
+    expect(program).not.toContain('uname -m');
   });
 
-  test('reads a version only where the reference actually carries a tag', () => {
-    expect(
-      railpackVersion('ghcr.io/railwayapp/railpack-frontend:v0.0.33'),
-    ).toBe('v0.0.33');
-    // A digest names bytes, and bytes carry no release number.
-    expect(railpackVersion('ghcr.io/railwayapp/x@sha256:0864b2ee')).toBeNull();
-    expect(railpackVersion('ghcr.io/railwayapp/railpack-frontend')).toBeNull();
-    // A colon in the registry is a port, not a tag.
-    expect(railpackVersion('localhost:5000/railpack-frontend')).toBeNull();
+  test('exports the generator alone, not a root filesystem', () => {
+    // `FROM scratch` is what makes the local export one file: anything else
+    // would write the frontend's whole filesystem into the workspace.
+    expect(program).toContain('FROM scratch');
+    // The binary and the plan are separate directories because only the second
+    // is mounted into the build.
+    expect(program).toContain('"$bin"/railpack prepare . --plan-out');
+    expect(program).toContain('--local dockerfile="$plan"');
   });
 
-  test('fails inside the arm that needs the version, not at compose time', () => {
-    // A refusal to compose would take the Dockerfile arm down with it and be
-    // recorded nowhere an operator looks; failing in the arm puts the reason in
-    // the attempt log and leaves every Dockerfile build working.
+  test('needs no tag to reach the generator', () => {
+    // The version-from-tag derivation is gone, so a reference without one is a
+    // reference BuildKit resolves normally rather than an arm that refuses.
     const untagged = buildKitProgram({
       bundleUrl: 'staged://bundle',
       bundleDigest: 'sha256:bundle',
@@ -832,8 +827,8 @@ describe('the BuildKit program', () => {
       buildArgs: {},
     });
     expect(untagged).toContain('--frontend dockerfile.v0');
-    expect(untagged).toContain('carries no version tag');
-    expect(untagged).not.toContain('railpack prepare');
+    expect(untagged).not.toContain('carries no version tag');
+    expect(untagged).toContain('railpack prepare');
   });
 
   test('applies §5’s unwrap before it applies the subpath', () => {
