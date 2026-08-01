@@ -70,6 +70,43 @@ export function sourceDepotFor(
   return { bucket, federation };
 }
 
+/**
+ * The schemes a bundle location may wear and still name something a builder
+ * can end up holding.
+ *
+ * `gs://` is the depot's own address — unresolvable as written, but dispatch
+ * exchanges it for a short-TTL signed URL, so a Build carrying one is a Build
+ * that can be run. `https://` (and `http://`, for a depot an installation
+ * fronts itself) is already what the reusable workflow's `curl` expects.
+ *
+ * Everything else — `upload://` above all — names bytes on one process's own
+ * disk. That handle is deliberately not a URL, and the honest consequence of
+ * that decision is this set: a location outside it is not a location a build
+ * can be dispatched with, at any point, by any route.
+ */
+const FETCHABLE_SCHEMES: ReadonlySet<string> = new Set([
+  'gs:',
+  'https:',
+  'http:',
+]);
+
+/**
+ * Whether any builder could be handed this address and fetch what it names.
+ *
+ * The predicate both halves of the retirement read: a Build being created will
+ * not inherit an address this rejects, and a Build being dispatched with one is
+ * refused before a workflow is spent on it. One function so the two agree —
+ * they disagreed once, and the disagreement was a `curl: (1) Protocol "upload"
+ * not supported` inside a runner log nobody was watching.
+ */
+export function isFetchableBundleLocation(
+  location: string | null | undefined,
+): boolean {
+  if (!location) return false;
+  const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(location)?.[0]?.toLowerCase();
+  return scheme !== undefined && FETCHABLE_SCHEMES.has(scheme);
+}
+
 export function storageDir(): string {
   const custom = process.env.SPINDRIFT_STORAGE_DIR?.trim();
   if (custom) return custom;

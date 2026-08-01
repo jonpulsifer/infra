@@ -8,6 +8,7 @@
  * blamed the developer for it.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
 import type {
   AdapterRegistry,
@@ -213,6 +214,113 @@ describe('the bundle location a route is dispatched with', () => {
     expect(route.built[0]?.source.origin.location).toBe(
       'https://staging.lolwtf.ca/bundle.tar.gz',
     );
+  });
+
+  test('refuses a pre-depot handle instead of handing it to curl', async () => {
+    // Build 10, verbatim. `upload://` names the web pod's own disk and is
+    // deliberately not a URL, which makes it precisely what this function exists
+    // to catch — and it was the one scheme it let through, so the refusal
+    // arrived as `curl: (1) Protocol "upload" not supported or disabled in
+    // libcurl` on a hosted runner instead of as a sentence before dispatch.
+    const context = withFederation(signable);
+    const build = await seedBuild(`upload://${BUNDLE_DIGEST.slice(7)}`);
+
+    const result = await dispatchBuild(
+      { buildId: build.id, route: 'hosted' },
+      context,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('NOT_BUILDABLE');
+      expect(result.failure.message).toContain('upload://');
+      // The App, and what makes it buildable again.
+      expect(result.failure.message).toContain('app-repo-');
+      expect(result.failure.message).toContain('deploy');
+    }
+    expect(route.built).toHaveLength(0);
+  });
+
+  test('the refusal lands where the operator is already looking', async () => {
+    // `runBuildPass` keeps the successes and drops everything else, so a
+    // refusal that is only returned is a Build stuck PENDING with nobody told
+    // why, retried every second. This one is written to the attempt log and
+    // closes the Build out, because the location is a column on the row and no
+    // later tick will make it fetchable.
+    const context = withFederation(signable);
+    const build = await seedBuild('upload://3f5cbbc2ced9');
+
+    await dispatchBuild({ buildId: build.id, route: 'hosted' }, context);
+
+    const events = await context.db
+      .select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.buildId, build.id));
+    expect(events.some((event) => event.line?.includes('upload://'))).toBe(
+      true,
+    );
+    const terminal = events.find((event) => event.eventType === 'status');
+    expect(terminal?.phase).toBe('FAILED');
+    // §6: nothing the developer wrote caused this. Spindrift held the location.
+    expect(terminal?.reason).toBe('ARTIFACT_UNAVAILABLE');
+    expect(terminal?.blame).toBe('platform');
+
+    const [row] = await context.db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, build.id));
+    expect(row?.status).toBe('FAILED');
+  });
+
+  test('a federation gap leaves the Build for the next tick', async () => {
+    // The mirror of the case above: nothing is wrong with this row, so the
+    // Build stays PENDING and an operator who configures federation gets it
+    // dispatched rather than having to press anything again.
+    const context = withFederation(null);
+    const build = await seedBuild(DEPOT_LOCATION);
+
+    await dispatchBuild({ buildId: build.id, route: 'hosted' }, context);
+
+    const [row] = await context.db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, build.id));
+    expect(row?.status).toBe('PENDING');
+  });
+
+  test('tells an archive App to upload again rather than to redeploy', async () => {
+    // §15: "repo bundles are ephemeral, archives durable." Only one of the two
+    // can be produced a second time from something Spindrift holds, so only one
+    // of them is told to deploy again.
+    const context = withFederation(signable);
+    const build = await seedBuild('upload://3f5cbbc2', 'archive');
+
+    const result = await dispatchBuild(
+      { buildId: build.id, route: 'hosted' },
+      context,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('NOT_BUILDABLE');
+      expect(result.failure.message).toContain('upload');
+      expect(result.failure.message).toContain('archive');
+    }
+    expect(route.built).toHaveLength(0);
+  });
+
+  test('refuses a location wearing no scheme at all', async () => {
+    // Nothing stages one — a bundle is a `gs://` object or an `upload://`
+    // handle — so this only ever arrives from a row somebody wrote by hand, and
+    // `curl bundles/site.zip` is not a fetch either.
+    const context = withFederation(signable);
+    const build = await seedBuild('bundles/site.zip');
+
+    const result = await dispatchBuild(
+      { buildId: build.id, route: 'hosted' },
+      context,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('NOT_BUILDABLE');
+    expect(route.built).toHaveLength(0);
   });
 
   test('refuses rather than dispatching a location no route could resolve', async () => {

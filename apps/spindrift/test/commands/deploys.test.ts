@@ -154,7 +154,7 @@ async function succeededBuild(
       bundleDigest: digest(seed),
       // Where the bundle was staged. A Build without one cannot be dispatched
       // at all — a route would have nothing to fetch.
-      bundleLocation: `bundles/${seed}.zip`,
+      bundleLocation: `https://depot.lolwtf.ca/bundles/${seed}.zip`,
       status: 'SUCCEEDED',
       verifiedBuildLevel,
       // A signature the pinned verifier will actually admit: §16's gate is
@@ -291,7 +291,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
         componentId: component.id,
         targetId: target.id,
         bundleDigest: digest(5),
-        location: 'bundles/shop/site.zip',
+        location: 'https://depot.lolwtf.ca/bundles/shop/site.zip',
         contents: 'artifact',
         subpath: '.',
       },
@@ -428,7 +428,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
         componentId: component.id,
         targetId: target.id,
         bundleDigest: digest(11),
-        location: 'bundles/shop/site.zip',
+        location: 'https://depot.lolwtf.ca/bundles/shop/site.zip',
         contents: 'artifact',
         subpath: '.',
       },
@@ -870,7 +870,7 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
         componentId: component.id,
         targetId: target.id,
         bundleDigest: digest(60),
-        location: 'bundles/shop-web/60.zip',
+        location: 'https://depot.lolwtf.ca/bundles/shop-web/60.zip',
         contents: 'artifact',
         subpath: '.',
       },
@@ -905,7 +905,7 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
         componentId: component.id,
         targetId: target.id,
         bundleDigest: digest(61),
-        location: 'bundles/shop-web/61.zip',
+        location: 'https://depot.lolwtf.ca/bundles/shop-web/61.zip',
         contents: 'source',
         subpath: '.',
       },
@@ -938,7 +938,7 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
         componentId: component.id,
         targetId: target.id,
         bundleDigest: digest(63),
-        location: 'bundles/shop-web/63.zip',
+        location: 'https://depot.lolwtf.ca/bundles/shop-web/63.zip',
         contents: 'source',
         subpath: 'apps/web',
       },
@@ -957,7 +957,9 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
     const origin = builder.built[0]!.source.origin;
     expect(origin.type).toBe('archive');
     if (origin.type !== 'archive') return;
-    expect(origin.location).toBe('bundles/shop-web/63.zip');
+    expect(origin.location).toBe(
+      'https://depot.lolwtf.ca/bundles/shop-web/63.zip',
+    );
     // §5's scope, per Build: the unwrap is a fact about the uploaded bytes.
     expect(origin.subpath).toBe('apps/web');
     // §16's join reaches the route on every path.
@@ -999,7 +1001,7 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
       componentId: component.id,
       targetId: target.id,
       bundleDigest: digest(62),
-      location: 'bundles/shop-web/62.zip',
+      location: 'https://depot.lolwtf.ca/bundles/shop-web/62.zip',
       contents: 'artifact' as const,
       subpath: '.',
     };
@@ -1021,7 +1023,9 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
       .where(eq(builds.id, first.value.buildId));
     expect(row?.status).toBe('SUCCEEDED');
     expect(row?.artifactDigest).toBe(digest(62));
-    expect(row?.artifactRefs).toEqual(['bundles/shop-web/62.zip']);
+    expect(row?.artifactRefs).toEqual([
+      'https://depot.lolwtf.ca/bundles/shop-web/62.zip',
+    ]);
   });
 
   test('a source re-upload cannot blank a Build that already succeeded', async () => {
@@ -1031,7 +1035,7 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
       componentId: component.id,
       targetId: target.id,
       bundleDigest: digest(65),
-      location: 'bundles/shop-web/65.zip',
+      location: 'https://depot.lolwtf.ca/bundles/shop-web/65.zip',
       subpath: '.',
     };
 
@@ -1055,7 +1059,9 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
       .where(eq(builds.id, supplied.value.buildId));
     expect(row?.status).toBe('SUCCEEDED');
     expect(row?.artifactDigest).toBe(digest(65));
-    expect(row?.artifactRefs).toEqual(['bundles/shop-web/65.zip']);
+    expect(row?.artifactRefs).toEqual([
+      'https://depot.lolwtf.ca/bundles/shop-web/65.zip',
+    ]);
   });
 });
 
@@ -1081,7 +1087,7 @@ describe('§16: verify → sign → record is fail-closed', () => {
         targetShape: 'image',
         artifactType: 'image',
         bundleDigest: digest(70),
-        bundleLocation: 'bundles/70.zip',
+        bundleLocation: 'https://depot.lolwtf.ca/bundles/70.zip',
         status: 'PENDING',
       })
       .returning();
@@ -1125,7 +1131,7 @@ describe('§16: verify → sign → record is fail-closed', () => {
         targetShape: 'image',
         artifactType: 'image',
         bundleDigest: digest(71),
-        bundleLocation: 'bundles/71.zip',
+        bundleLocation: 'https://depot.lolwtf.ca/bundles/71.zip',
         status: 'PENDING',
       })
       .returning();
