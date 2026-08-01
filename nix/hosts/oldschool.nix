@@ -10,8 +10,6 @@
     ../system/tailscale-disable.nix
   ];
 
-  virtualisation.docker.enable = true;
-
   homelab.disko.device = "/dev/sda";
   # 200G root (default is 100G) — leaves headroom for the harmonia
   # binary cache + remote-builder role on top of docker/runner/yarr.

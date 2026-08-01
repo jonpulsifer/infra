@@ -3,6 +3,7 @@ USER root
 RUN apt-get update && apt-get -qqy upgrade &&\
     apt-get install -qqy --no-install-recommends \
       curl \
+      docker.io \
       git \
       jq \
       unzip \
