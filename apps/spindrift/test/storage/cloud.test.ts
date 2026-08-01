@@ -57,7 +57,6 @@ describe('cloud storage WIF permissions and publishing', () => {
       bucketName: 'test-bucket',
       federation: {
         ...mockFederation,
-        // @ts-expect-error test fetch injection
         fetch: mockFetch,
         readToken: async () => 'projected-jwt-token',
       },
@@ -106,7 +105,6 @@ describe('cloud storage WIF permissions and publishing', () => {
       bytes: payload,
       federation: {
         ...mockFederation,
-        // @ts-expect-error test fetch injection
         fetch: mockFetch,
         readToken: async () => 'projected-jwt-token',
       },

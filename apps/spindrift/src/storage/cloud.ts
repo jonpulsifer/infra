@@ -5,14 +5,14 @@
  * Tests bucket access permissions via WIF without static service account keys.
  */
 import {
-  type FederationConfig,
   FederationError,
+  type FederationOptions,
   workloadIdentityToken,
 } from '../adapters/deploy/cloud/federation.ts';
 
 export interface TestBucketPermissionsInput {
   readonly bucketName: string;
-  readonly federation: FederationConfig;
+  readonly federation: FederationOptions;
 }
 
 export interface TestBucketPermissionsResult {
@@ -30,7 +30,7 @@ export async function testGcsBucketPermissions({
   const getToken = workloadIdentityToken(federation);
   const token = await getToken();
 
-  const send = (federation as any).fetch ?? fetch;
+  const send = federation.fetch ?? ((request: Request) => fetch(request));
   const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucketName)}`;
   const response = await send(
     new Request(url, {
@@ -61,7 +61,7 @@ export interface UploadToGcsInput {
   readonly bucketName: string;
   readonly objectName: string;
   readonly bytes: Uint8Array;
-  readonly federation: FederationConfig;
+  readonly federation: FederationOptions;
 }
 
 /** Upload an archive bundle directly to a GCS bucket using WIF token authentication. */
@@ -74,7 +74,7 @@ export async function uploadToGcsBucket({
   const getToken = workloadIdentityToken(federation);
   const token = await getToken();
 
-  const send = (federation as any).fetch ?? fetch;
+  const send = federation.fetch ?? ((request: Request) => fetch(request));
   const url = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucketName)}/o?uploadType=media&name=${encodeURIComponent(objectName)}`;
   const response = await send(
     new Request(url, {

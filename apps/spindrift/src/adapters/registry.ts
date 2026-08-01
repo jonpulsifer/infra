@@ -43,7 +43,7 @@ import { GitHubApp } from '../integrations/github/app.ts';
 import { CredentialKeyring } from '../integrations/github/credential-crypto.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
 import { GitHubDeviceOAuth } from '../integrations/github/oauth.ts';
-import { stageArchiveBytes } from '../storage/archives.ts';
+import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
@@ -285,6 +285,11 @@ export function createAdapterRegistry(
     source() {
       if (options.source !== undefined) return options.source;
       if (app === null) return null;
+      // §15 stages one immutable bundle "for either builder", so a repository
+      // commit lands in the same durable depot an upload does. It is the same
+      // fix and the same reason: a bundle on this pod's disk is unfetchable by
+      // a hosted runner whatever kind of source produced it.
+      const depot = sourceDepotFor(options.manifest);
       const defaultSourceStager: RepositorySourceStager = {
         async stageRepository(input) {
           const staged = await stageSourceBundle(
@@ -299,8 +304,12 @@ export function createAdapterRegistry(
               depot: {
                 async putImmutable(item) {
                   const archived = await stageArchiveBytes(
-                    `bundle-${item.digest.replace('sha256:', '')}.zip`,
+                    // A gzipped tar, because that is what the repository host's
+                    // tarball endpoint answers with and what the reusable
+                    // workflow's `tar -xz` expects.
+                    `bundle-${item.digest.replace('sha256:', '')}.tgz`,
                     item.bytes,
+                    depot,
                   );
                   return { location: archived.location };
                 },
@@ -325,6 +334,7 @@ export function createAdapterRegistry(
                   const archived = await stageArchiveBytes(
                     `receipt-${receipt.statement.subject.digest.replace('sha256:', '')}.json`,
                     bytes,
+                    depot,
                   );
                   return { location: archived.location };
                 },
