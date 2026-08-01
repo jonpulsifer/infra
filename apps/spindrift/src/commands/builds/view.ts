@@ -136,6 +136,7 @@ export async function buildViewOf(
       // states the first rather than rendering the second as an empty pane.
       log: log.length > 0 ? log : null,
       runner: build.runner ?? 'hosted runner',
+      runUrl: build.runUrl ?? null,
     },
     events,
   };

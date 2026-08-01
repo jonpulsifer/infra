@@ -59,6 +59,15 @@ export interface ActionsRun {
   readonly name: string | null;
   readonly status: string;
   readonly conclusion: string | null;
+  /**
+   * The run's page on the host, where its log can be watched live.
+   *
+   * Nullable because it is the host's to report and this route does not
+   * compose one from the run id — a URL this module invented would be a guess
+   * about a layout GitHub owns, and a wrong guess is a dead link offered as
+   * the remedy for an empty log.
+   */
+  readonly htmlUrl: string | null;
 }
 
 /** One job of a run, and the steps inside it. */
@@ -299,6 +308,18 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     }
 
     yield { type: 'log', at: now(), line: `run ${run.id} started` };
+
+    // Announced the moment the run is correlated, because this route is
+    // `LIVE_STATUS`: the checklist is the only live thing Spindrift can show,
+    // and this is where the live *text* is. Emitting it here rather than with
+    // the result is what makes it usable during the run instead of after it.
+    //
+    // Truthiness rather than a null check: a host that omits the field entirely
+    // is saying the same thing as one that reports it empty, and an event
+    // carrying `undefined` would reach the Build row as a link to nowhere.
+    if (run.htmlUrl) {
+      yield { type: 'runner', at: now(), url: run.htmlUrl };
+    }
 
     const budget = deadlineFrom(this.options);
     const seen = new Set<string>();

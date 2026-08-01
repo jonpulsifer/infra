@@ -141,10 +141,21 @@ export const BUILD_STATES = ['RUNNING', 'SUCCEEDED', 'FAILED'] as const;
 
 export type BuildState = (typeof BUILD_STATES)[number];
 
-/** What a route yields while it runs, at whatever fidelity it declared. */
+/**
+ * What a route yields while it runs, at whatever fidelity it declared.
+ *
+ * `runner` is not a log line, and the distinction is the point. A route that
+ * can be watched somewhere else says so **once, as a fact about the run**, and
+ * core records it on the Build rather than appending it to the stream. Putting
+ * it in the log would file it under exactly the thing it compensates for: at
+ * `LIVE_STATUS` the log is empty until the run ends, so a link inside it would
+ * arrive too late to be worth following. Emitted as soon as the backend knows
+ * where the run is, which is what makes it useful while the run is going.
+ */
 export type BuildEvent =
   | { type: 'log'; at: Date; line: string; step?: string }
-  | { type: 'step'; at: Date; step: string; state: BuildState };
+  | { type: 'step'; at: Date; step: string; state: BuildState }
+  | { type: 'runner'; at: Date; url: string };
 
 /**
  * SLSA Build Level. A Target has a minimum defaulting to L2 and an ordered list

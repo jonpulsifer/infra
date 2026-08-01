@@ -278,6 +278,32 @@ describe('a runner that withholds log text', () => {
   test('shows the checklist it just called live', () => {
     expect(markup).toContain('export image');
   });
+
+  test('sends the reader where the text is actually being written', () => {
+    // Stating the limit is necessary but not sufficient. The log exists and is
+    // live; it is only somewhere Spindrift cannot read from until the run ends,
+    // so the sentence that admits that carries the way to go read it.
+    const url = DEPLOY_SCENARIOS.building.build.runUrl;
+    expect(url).not.toBeNull();
+    expect(markup).toContain(`href="${url}"`);
+    expect(markup).toContain('Open the run');
+  });
+
+  test('opens it away from the app, and without handing over the referrer', () => {
+    expect(markup).toContain('target="_blank"');
+    expect(markup).toContain('rel="noreferrer noopener"');
+  });
+
+  test('offers no link where the runner reported none', () => {
+    // A guessed URL that 404s is worse than no link, because it is offered at
+    // the moment the reader has already been told the log is elsewhere.
+    const withoutLink = deploy({
+      ...DEPLOY_SCENARIOS.building,
+      build: { ...DEPLOY_SCENARIOS.building.build, runUrl: null },
+    } as DeployView);
+    expect(withoutLink).toContain('the live view');
+    expect(withoutLink).not.toContain('Open the run');
+  });
 });
 
 describe('a release that was extracted rather than built', () => {

@@ -571,6 +571,18 @@ export const dispatchBuild = async (
     let next = await stream.next();
     while (!next.done) {
       const event = next.value;
+      // Where the run can be watched is a fact about the Build, not a line in
+      // its log — and it is written as soon as the route reports it so the
+      // screen can offer it *during* the run, which is the whole of its value
+      // on a `LIVE_STATUS` route whose text arrives only at the end.
+      if (event.type === 'runner') {
+        await context.db
+          .update(builds)
+          .set({ runUrl: event.url })
+          .where(eq(builds.id, build.id));
+        next = await stream.next();
+        continue;
+      }
       // §6's one attempt-scoped log: build events and deploy events land on the
       // same stream for the same attempt, so the UI subscribes once.
       await recordBuildEvent(

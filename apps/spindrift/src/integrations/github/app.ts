@@ -486,6 +486,7 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       readonly name: string | null;
       readonly status: string;
       readonly conclusion: string | null;
+      readonly htmlUrl: string | null;
     }[]
   > {
     const runs = await this.http(ref).json<{
@@ -494,6 +495,7 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
         name?: string | null;
         status: string;
         conclusion: string | null;
+        html_url?: string | null;
       }[];
     }>({
       method: 'GET',
@@ -509,6 +511,10 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       name: run.name ?? null,
       status: run.status,
       conclusion: run.conclusion,
+      // The page a human opens, served by the host rather than composed here:
+      // the API knows its own web address and a hand-built one would be this
+      // module guessing at a URL layout it does not own.
+      htmlUrl: run.html_url ?? null,
     }));
   }
 
