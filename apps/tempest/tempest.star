@@ -104,10 +104,8 @@ def get_forecast(api_url, cache_suffix):
     cache_key = "forecast:%s" % cache_suffix
     cached = cache.get(cache_key)
     if cached != None:
-        print("Cache hit!")
         return json.decode(cached), None
 
-    print("Cache miss! Calling WeatherFlow API")
     rep = http.get(api_url)
     if rep.status_code != 200:
         return None, "WeatherFlow API error %d" % rep.status_code
@@ -124,13 +122,13 @@ def get_forecast(api_url, cache_suffix):
 def page_current(current, unit_labels, scale):
     temp = int(current.get("air_temperature", 0))
     feels = int(current.get("feels_like", temp))
-    icon_name = current.get("icon", "cloudy")
+    cond = sky_condition(current.get("icon", "cloudy"))
     fonts = FONTS[scale]
 
     icon_frames = []
     for state in range(ICON_STATES):
         for _ in range(ICON_HOLD * scale):
-            icon_frames.append(weather_icon(icon_name, 20 * scale, state, scale))
+            icon_frames.append(draw_icon(cond, 20 * scale, state, scale))
 
     right = render.Column(
         main_align = "center",
@@ -197,7 +195,7 @@ def page_forecast(daily, tz, scale):
         children = [
             render.Text(name, font = fonts["small"], color = COLOR_LABEL),
             render.Box(width = 1, height = scale),
-            weather_icon(day.get("icon", "cloudy"), 10 * scale, 0, scale),
+            draw_icon(sky_condition(day.get("icon", "cloudy")), 10 * scale, 0, scale),
             render.Box(width = 1, height = scale),
             render.Text("%d°" % int(day.get("air_temp_high", 0)), font = fonts["small"], color = COLOR_HI),
             render.Text("%d°" % int(day.get("air_temp_low", 0)), font = fonts["small"], color = COLOR_LO),
@@ -259,7 +257,7 @@ def splash(message):
             cross_align = "center",
             children = [
                 render.Row(children = [
-                    weather_icon("partly-cloudy-day", 10 * scale, 0, scale),
+                    draw_icon({"kind": PARTLY, "night": False}, 10 * scale, 0, scale),
                     render.Box(width = 2 * scale, height = 1),
                     render.Text("TEMPEST", font = fonts["ticker"], color = COLOR_LABEL),
                 ]),
@@ -293,11 +291,52 @@ def temp_color(t):
 def at(x, y, widget):
     return render.Padding(pad = (x, y, 0, 0), child = widget)
 
-def weather_icon(name, size, state, px):
-    """Draw a pixel-art icon for a WeatherFlow icon name.
+# The sky conditions the renderer knows how to draw. Provider vocabularies map
+# onto these; nothing below sky_condition() speaks WeatherFlow.
+CLEAR = "clear"
+PARTLY = "partly"
+CLOUDY = "cloudy"
+RAIN = "rain"
+SNOW = "snow"
+SLEET = "sleet"
+THUNDER = "thunder"
+FOG = "fog"
+WIND = "wind"
+
+def sky_condition(name):
+    """Adapt a WeatherFlow icon id to a sky condition.
 
     Args:
         name: WeatherFlow icon id, e.g. "partly-cloudy-day".
+
+    Returns:
+        A dict of {"kind": one of the condition constants, "night": bool}.
+    """
+    night = name.endswith("night")
+    kind = CLOUDY  # cloudy and anything unknown
+    if name.startswith("clear"):
+        kind = CLEAR
+    elif "thunder" in name:
+        kind = THUNDER
+    elif "snow" in name:
+        kind = SNOW
+    elif "sleet" in name:
+        kind = SLEET
+    elif "rain" in name:
+        kind = RAIN
+    elif name.startswith("partly"):
+        kind = PARTLY
+    elif name.startswith("fog"):
+        kind = FOG
+    elif name.startswith("wind"):
+        kind = WIND
+    return {"kind": kind, "night": night}
+
+def draw_icon(cond, size, state, px):
+    """Draw a pixel-art icon for a sky condition.
+
+    Args:
+        cond: a sky_condition() dict.
         size: icon canvas edge in pixels (tuned for 10 and 20 per scale).
         state: animation state in [0, ICON_STATES).
         px: stroke thickness, the display scale (1 or 2).
@@ -305,27 +344,28 @@ def weather_icon(name, size, state, px):
     Returns:
         A size x size widget.
     """
-    night = name.endswith("night")
+    kind = cond["kind"]
+    night = cond["night"]
     parts = []
 
-    if name.startswith("clear"):
+    if kind == CLEAR:
         parts = moon_parts(size) if night else sun_parts(size, state, px)
-    elif "thunder" in name:
+    elif kind == THUNDER:
         parts = cloud_parts(size, COLOR_CLOUD_DARK, 0) + bolt_parts(size, state)
-    elif "snow" in name:
+    elif kind == SNOW:
         parts = cloud_parts(size, COLOR_CLOUD, 0) + snow_parts(size, state, px)
-    elif "sleet" in name:
+    elif kind == SLEET:
         parts = cloud_parts(size, COLOR_CLOUD, 0) + sleet_parts(size, state, px)
-    elif "rain" in name:
+    elif kind == RAIN:
         parts = cloud_parts(size, COLOR_CLOUD_DARK, 0) + rain_parts(size, state, px)
-    elif name.startswith("partly"):
+    elif kind == PARTLY:
         peek = moon_parts(size * 3 // 4) if night else sun_parts(size * 3 // 4, state, px)
         parts = peek + cloud_parts(size, COLOR_CLOUD, size // 5)
-    elif name.startswith("fog"):
+    elif kind == FOG:
         parts = fog_parts(size, state, px)
-    elif name.startswith("wind"):
+    elif kind == WIND:
         parts = wind_parts(size, state, px)
-    else:  # cloudy and anything unknown
+    else:
         parts = cloud_parts(size, COLOR_CLOUD, size // 8)
 
     return render.Box(

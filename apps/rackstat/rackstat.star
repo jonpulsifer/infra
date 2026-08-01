@@ -7,6 +7,10 @@ node grid, GitOps state, network probes, and a 24h CPU sparkline rotate.
 Every page carries a clock in the header: the renderer runs in-cluster, so a
 frozen clock means the cluster (or tronbyt) is down - a dead man's switch.
 
+The raw snapshot is read exactly once, by display_state(); pages render the
+state it returns and never classify health themselves. Page chrome (scale,
+fonts, clock, staleness) travels as a single ctx.
+
 Supports 2x (128x64) displays via canvas.is2x() and the manifest supports2x.
 """
 
@@ -21,6 +25,7 @@ DEFAULT_API_URL = "http://rackstat:8080/api/rackstat"
 DEFAULT_TZ = "America/Halifax"
 CACHE_TTL_SECONDS = 15
 STALE_AFTER_SECONDS = 300
+HOT_TEMP_C = 75
 
 FRAME_MS = 100  # divided by scale on 2x
 PAGE_FRAMES = 30  # ~3s per held page at 1x
@@ -40,6 +45,14 @@ COLOR_LABEL = "#9ab8d8"
 COLOR_CLOCK = "#ffb300"
 COLOR_HEADER_BG = "#101820"
 
+# status -> (lit color, unlit color). Only the two failure states blink.
+STATUS_COLORS = {
+    "down": (COLOR_BAD, "#401010"),
+    "notready": (COLOR_WARN, "#403010"),
+    "hot": (COLOR_WARN, COLOR_WARN),
+    "ok": (COLOR_OK, COLOR_OK),
+}
+
 def main(config):
     """Render the rackstat display.
 
@@ -54,27 +67,31 @@ def main(config):
     if err != None:
         return render.Root(child = splash(err, scale))
 
-    stale = is_stale(snap)
-    trouble = has_trouble(snap)
-    clock = time.now().in_location(tz).format("15:04")
+    st = display_state(snap)
+    ctx = {
+        "scale": scale,
+        "fonts": FONTS[scale],
+        "clock": time.now().in_location(tz).format("15:04"),
+        "stale": st["stale"],
+    }
 
     pages = []
-    if trouble:
+    if st["trouble"]:
         # problems first: what is wrong, then where
-        pages.append(page_alerts(snap, scale, clock, stale))
-        pages.append(page_nodes(snap, scale, clock, stale))
-        pages.append(page_net(snap, scale, clock, stale))
+        pages.append(page_alerts(st, ctx))
+        pages.append(page_nodes(st, ctx))
+        pages.append(page_net(st, ctx))
         if config.bool("show_gitops", True):
-            pages.append(page_gitops(snap, scale, clock, stale))
+            pages.append(page_gitops(st, ctx))
     else:
-        pages.append(page_summary(snap, scale, clock, stale))
-        pages.append(page_nodes(snap, scale, clock, stale))
+        pages.append(page_summary(st, ctx))
+        pages.append(page_nodes(st, ctx))
         if config.bool("show_gitops", True):
-            pages.append(page_gitops(snap, scale, clock, stale))
+            pages.append(page_gitops(st, ctx))
         if config.bool("show_net", True):
-            pages.append(page_net(snap, scale, clock, stale))
-        if config.bool("show_cpu", True) and len(snap.get("cpu_history", [])) > 1:
-            pages.append(page_cpu(snap, scale, clock, stale))
+            pages.append(page_net(st, ctx))
+        if config.bool("show_cpu", True) and len(st["cpu_history"]) > 1:
+            pages.append(page_cpu(st, ctx))
 
     return render.Root(
         delay = FRAME_MS // scale,
@@ -83,6 +100,11 @@ def main(config):
     )
 
 def get_snapshot(api_url):
+    """Fetch the aggregator snapshot, serving from cache when possible.
+
+    Returns:
+        (snapshot dict, None) on success, (None, error message) on failure.
+    """
     cache_key = "rackstat:%s" % api_url
     cached = cache.get(cache_key)
     if cached != None:
@@ -97,6 +119,99 @@ def get_snapshot(api_url):
     cache.set(cache_key, json.encode(snap), ttl_seconds = CACHE_TTL_SECONDS)
     return snap, None
 
+# ---------------------------------------------------------------------------
+# display state
+#
+# The one place that reads the wire format and decides what "wrong" means.
+# ---------------------------------------------------------------------------
+
+def display_state(snap):
+    """Resolve a raw snapshot into everything the pages need to render.
+
+    Returns:
+        A dict of resolved nodes, probes, GitOps counters, the ordered problem
+        list, and the flags derived from them.
+    """
+    nodes = [node_state(n) for n in snap.get("nodes", [])]
+    probes = [probe_state(p) for p in snap.get("probes", [])]
+    counts = snap.get("alert_counts", {})
+
+    # Problems are collected once, in the order the alert page reads them:
+    # what is firing, then which machines, then which paths.
+    problems = []
+    for alert in snap.get("alerts", []):
+        if alert.get("severity") in ["critical", "warning"]:
+            problems.append(alert.get("name", "alert"))
+    for node in nodes:
+        if node["status"] == "down":
+            problems.append("%s down" % node["name"])
+        elif node["status"] == "notready":
+            problems.append("%s not ready" % node["name"])
+    for probe in probes:
+        if not probe["ok"]:
+            problems.append("%s unreachable" % probe["name"])
+
+    critical = counts.get("critical", 0)
+    warning = counts.get("warning", 0)
+    gitops = snap.get("gitops") or {}
+
+    return {
+        "cluster": snap.get("cluster", "rack"),
+        "nodes": nodes,
+        "probes": probes,
+        "problems": problems,
+        "critical": critical,
+        "alert_total": critical + warning,
+        "nodes_up": len([n for n in nodes if n["up"]]),
+        "any_node_down": len([n for n in nodes if n["status"] == "down"]) > 0,
+        "gitops": gitops_state(gitops),
+        "cpu_history": snap.get("cpu_history", []),
+        "stale": is_stale(snap),
+        "trouble": len(problems) > 0,
+    }
+
+def node_state(node):
+    """Resolve one node to a single status: down, notready, hot, or ok."""
+    temp = node.get("temp_c")
+    status = "ok"
+    if not node.get("up", False):
+        status = "down"
+    elif node.get("k8s") and node.get("ready") == False:
+        status = "notready"
+    elif temp != None and temp >= HOT_TEMP_C:
+        status = "hot"
+    return {
+        "name": node.get("name", "?"),
+        "up": node.get("up", False),
+        "k8s": node.get("k8s", False),
+        "temp_c": temp,
+        "status": status,
+    }
+
+def probe_state(probe):
+    return {
+        "name": probe.get("name", "?"),
+        "ok": probe.get("ok", False),
+        "ms": probe.get("ms", 0),
+    }
+
+def gitops_state(gitops):
+    revision = gitops.get("revision", "")
+    ks_ready = gitops.get("ks_ready", 0)
+    ks_total = gitops.get("ks_total", 0)
+    hr_ready = gitops.get("hr_ready", 0)
+    hr_total = gitops.get("hr_total", 0)
+    return {
+        "ks_ready": ks_ready,
+        "ks_total": ks_total,
+        "ks_ok": ks_ready == ks_total,
+        "hr_ready": hr_ready,
+        "hr_total": hr_total,
+        "hr_ok": hr_ready == hr_total,
+        "sha": revision.split(":")[-1][0:7] if ":" in revision else "unknown",
+        "branch": revision.split("@")[0] if "@" in revision else "rev",
+    }
+
 def is_stale(snap):
     if len(snap.get("errors", {})) > 0:
         return True
@@ -106,38 +221,28 @@ def is_stale(snap):
     ts = time.parse_time(generated)
     return (time.now() - ts).seconds > STALE_AFTER_SECONDS
 
-def has_trouble(snap):
-    counts = snap.get("alert_counts", {})
-    if counts.get("critical", 0) > 0 or counts.get("warning", 0) > 0:
-        return True
-    for node in snap.get("nodes", []):
-        if not node.get("up", False):
-            return True
-        if node.get("k8s") and node.get("ready") == False:
-            return True
-    for probe in snap.get("probes", []):
-        if not probe.get("ok", False):
-            return True
-    return False
-
 # ---------------------------------------------------------------------------
 # page chrome
 # ---------------------------------------------------------------------------
 
-def held(builder, scale):
-    """Animate a page builder(state) for PAGE_FRAMES, blinking via state."""
+def blink(builder, ctx):
+    """Animate a page builder(lit) for a page hold, toggling every BLINK_FRAMES."""
+    scale = ctx["scale"]
     frames = []
     for i in range(PAGE_FRAMES * scale):
         frames.append(builder(i // (BLINK_FRAMES * scale) % 2 == 0))
     return render.Animation(children = frames)
 
-def header(label, color, scale, clock, stale):
-    fonts = FONTS[scale]
-    if stale:
+def still(page, ctx):
+    """Hold a page that has nothing to animate, built once."""
+    return render.Animation(children = [page for _ in range(PAGE_FRAMES * ctx["scale"])])
+
+def header(label, color, ctx):
+    if ctx["stale"]:
         label, color = "STALE", COLOR_WARN
     return render.Box(
         width = canvas.width(),
-        height = 7 * scale,
+        height = 7 * ctx["scale"],
         color = COLOR_HEADER_BG,
         child = render.Row(
             expanded = True,
@@ -145,20 +250,24 @@ def header(label, color, scale, clock, stale):
             cross_align = "center",
             children = [
                 render.Row(children = [
-                    render.Box(width = scale, height = 5 * scale, color = color),
-                    render.Box(width = 2 * scale, height = 1),
-                    render.Text(label, font = fonts["small"], color = color),
+                    render.Box(width = ctx["scale"], height = 5 * ctx["scale"], color = color),
+                    render.Box(width = 2 * ctx["scale"], height = 1),
+                    render.Text(label, font = ctx["fonts"]["small"], color = color),
                 ]),
-                render.Text(clock, font = fonts["small"], color = COLOR_CLOCK),
+                render.Text(ctx["clock"], font = ctx["fonts"]["small"], color = COLOR_CLOCK),
             ],
         ),
     )
 
-def framed(label, color, scale, clock, stale, body):
-    return render.Column(children = [header(label, color, scale, clock, stale), body])
+def framed(label, color, ctx, body):
+    return render.Column(children = [header(label, color, ctx), body])
 
-def dot(color, scale):
-    return render.Circle(color = color, diameter = 3 * scale)
+def dot(color, ctx):
+    return render.Circle(color = color, diameter = 3 * ctx["scale"])
+
+def status_dot(status, lit, ctx):
+    on_color, off_color = STATUS_COLORS[status]
+    return dot(on_color if lit else off_color, ctx)
 
 def splash(message, scale):
     fonts = FONTS[scale]
@@ -179,18 +288,16 @@ def splash(message, scale):
 # pages
 # ---------------------------------------------------------------------------
 
-def page_summary(snap, scale, clock, stale):
-    fonts = FONTS[scale]
-    nodes = snap.get("nodes", [])
-    up = len([n for n in nodes if n.get("up")])
-    gitops = snap.get("gitops") or {}
-    probes = {p["name"]: p for p in snap.get("probes", [])}
-    wan = probes.get("wan", {})
+def page_summary(st, ctx):
+    fonts = ctx["fonts"]
+    total = len(st["nodes"])
+    gitops = st["gitops"]
+    wan = first_probe(st["probes"], "wan")
 
     chips = [
-        chip("NODE", "%d/%d" % (up, len(nodes)), COLOR_OK if up == len(nodes) else COLOR_WARN, scale),
-        chip("SYNC", "%d/%d" % (gitops.get("ks_ready", 0), gitops.get("ks_total", 0)), COLOR_OK if gitops.get("ks_ready") == gitops.get("ks_total") else COLOR_WARN, scale),
-        chip("WAN", "%dms" % wan.get("ms", 0) if wan.get("ok") else "DOWN", COLOR_OK if wan.get("ok") else COLOR_BAD, scale),
+        chip("NODE", "%d/%d" % (st["nodes_up"], total), COLOR_OK if st["nodes_up"] == total else COLOR_WARN, ctx),
+        chip("SYNC", "%d/%d" % (gitops["ks_ready"], gitops["ks_total"]), COLOR_OK if gitops["ks_ok"] else COLOR_WARN, ctx),
+        chip("WAN", "%dms" % wan["ms"] if wan["ok"] else "DOWN", COLOR_OK if wan["ok"] else COLOR_BAD, ctx),
     ]
 
     body = render.Column(
@@ -202,51 +309,40 @@ def page_summary(snap, scale, clock, stale):
             render.Row(expanded = True, main_align = "space_evenly", children = chips),
         ],
     )
-    page = framed(snap.get("cluster", "rack").upper(), COLOR_OK, scale, clock, stale, body)
-    return held(lambda _: page, scale)
+    return still(framed(st["cluster"].upper(), COLOR_OK, ctx, body), ctx)
 
-def chip(label, value, color, scale):
-    fonts = FONTS[scale]
+def first_probe(probes, name):
+    for probe in probes:
+        if probe["name"] == name:
+            return probe
+    return {"name": name, "ok": False, "ms": 0}
+
+def chip(label, value, color, ctx):
     return render.Column(
         cross_align = "center",
         children = [
-            render.Text(label, font = fonts["small"], color = COLOR_DIM),
-            render.Text(value, font = fonts["small"], color = color),
+            render.Text(label, font = ctx["fonts"]["small"], color = COLOR_DIM),
+            render.Text(value, font = ctx["fonts"]["small"], color = color),
         ],
     )
 
-def page_alerts(snap, scale, clock, stale):
-    fonts = FONTS[scale]
-    counts = snap.get("alert_counts", {})
-    alerts = snap.get("alerts", [])
-    down = [n["name"] for n in snap.get("nodes", []) if not n.get("up")]
-    bad_probes = [p["name"] for p in snap.get("probes", []) if not p.get("ok")]
+def page_alerts(st, ctx):
+    fonts = ctx["fonts"]
+    problems = st["problems"]
+    issues = max(st["alert_total"], len(problems))
+    color = COLOR_BAD if st["critical"] > 0 or st["any_node_down"] else COLOR_WARN
 
-    total = counts.get("critical", 0) + counts.get("warning", 0)
-    color = COLOR_BAD if counts.get("critical", 0) > 0 or len(down) > 0 else COLOR_WARN
-
-    problems = []
-    for a in alerts:
-        if a.get("severity") in ["critical", "warning"]:
-            problems.append(a["name"])
-    for name in down:
-        problems.append("%s down" % name)
-    for name in bad_probes:
-        problems.append("%s unreachable" % name)
-    if len(problems) == 0:
-        problems = ["node not ready"]
-
-    def build(on):
+    def build(lit):
         headline = render.Row(
             main_align = "center",
             cross_align = "center",
             children = [
-                dot(color if on else COLOR_HEADER_BG, scale),
-                render.Box(width = 2 * scale, height = 1),
-                render.Text("%d ISSUE%s" % (max(total, len(problems)), "S" if max(total, len(problems)) != 1 else ""), font = fonts["big"], color = color),
+                dot(color if lit else COLOR_HEADER_BG, ctx),
+                render.Box(width = 2 * ctx["scale"], height = 1),
+                render.Text("%d ISSUE%s" % (issues, "S" if issues != 1 else ""), font = fonts["big"], color = color),
             ],
         )
-        return framed("ALERT", color, scale, clock, stale, render.Column(
+        return framed("ALERT", color, ctx, render.Column(
             expanded = True,
             main_align = "space_evenly",
             cross_align = "center",
@@ -254,69 +350,54 @@ def page_alerts(snap, scale, clock, stale):
                 headline,
                 render.Marquee(
                     width = canvas.width(),
-                    offset_start = 8 * scale,
+                    offset_start = 8 * ctx["scale"],
                     child = render.Text("  ".join(problems), font = fonts["small"], color = "#ffffff"),
                 ),
             ],
         ))
 
-    return held(build, scale)
+    return blink(build, ctx)
 
-def node_color(node, on):
-    if not node.get("up"):
-        return COLOR_BAD if on else "#401010"
-    if node.get("k8s") and node.get("ready") == False:
-        return COLOR_WARN if on else "#403010"
-    temp = node.get("temp_c")
-    if temp != None and temp >= 75:
-        return COLOR_WARN
-    return COLOR_OK
+def page_nodes(st, ctx):
+    fonts = ctx["fonts"]
+    scale = ctx["scale"]
+    k8s = [n for n in st["nodes"] if n["k8s"]]
+    bare = [n for n in st["nodes"] if not n["k8s"]]
 
-def page_nodes(snap, scale, clock, stale):
-    fonts = FONTS[scale]
-    nodes = snap.get("nodes", [])
-
-    def build(on):
-        k8s = [n for n in nodes if n.get("k8s")]
-        bare = [n for n in nodes if not n.get("k8s")]
+    def build(lit):
         cols = []
         for group in [k8s, bare]:
             rows = []
-            for n in group[0:4]:
-                name = n["name"][0:6 if scale == 1 else 8]
+            for node in group[0:4]:
+                name = node["name"][0:6 if scale == 1 else 8]
                 row = [
-                    dot(node_color(n, on), scale),
+                    status_dot(node["status"], lit, ctx),
                     render.Box(width = scale, height = 1),
-                    render.Text(name, font = fonts["small"], color = "#ffffff" if n.get("up") else COLOR_DIM),
+                    render.Text(name, font = fonts["small"], color = "#ffffff" if node["up"] else COLOR_DIM),
                 ]
-                if scale == 2 and n.get("temp_c") != None:
+                if scale == 2 and node["temp_c"] != None:
                     row.append(render.Box(width = 2, height = 1))
-                    row.append(render.Text("%d°" % int(n["temp_c"]), font = fonts["small"], color = COLOR_DIM))
+                    row.append(render.Text("%d°" % int(node["temp_c"]), font = fonts["small"], color = COLOR_DIM))
                 rows.append(render.Row(cross_align = "center", children = row))
             cols.append(render.Column(main_align = "space_evenly", expanded = True, children = rows))
-        return framed("NODES", COLOR_LABEL, scale, clock, stale, render.Row(
+        return framed("NODES", COLOR_LABEL, ctx, render.Row(
             expanded = True,
             main_align = "space_evenly",
             children = cols,
         ))
 
-    return held(build, scale)
+    return blink(build, ctx)
 
-def page_gitops(snap, scale, clock, stale):
-    fonts = FONTS[scale]
-    g = snap.get("gitops") or {}
-    ks_ok = g.get("ks_ready", 0) == g.get("ks_total", 0)
-    hr_ok = g.get("hr_ready", 0) == g.get("hr_total", 0)
-    revision = g.get("revision", "")
-    sha = revision.split(":")[-1][0:7] if ":" in revision else "unknown"
-    branch = revision.split("@")[0] if "@" in revision else "rev"
+def page_gitops(st, ctx):
+    fonts = ctx["fonts"]
+    gitops = st["gitops"]
 
     def line(label, ready, total, ok):
         return render.Row(
             cross_align = "center",
             children = [
-                dot(COLOR_OK if ok else COLOR_WARN, scale),
-                render.Box(width = 2 * scale, height = 1),
+                dot(COLOR_OK if ok else COLOR_WARN, ctx),
+                render.Box(width = 2 * ctx["scale"], height = 1),
                 render.Text("%s %d/%d" % (label, ready, total), font = fonts["small"], color = "#ffffff" if ok else COLOR_WARN),
             ],
         )
@@ -326,58 +407,57 @@ def page_gitops(snap, scale, clock, stale):
         main_align = "space_evenly",
         cross_align = "center",
         children = [
-            line("KS", g.get("ks_ready", 0), g.get("ks_total", 0), ks_ok),
-            line("HR", g.get("hr_ready", 0), g.get("hr_total", 0), hr_ok),
-            render.Text("%s %s" % (branch, sha), font = fonts["small"], color = COLOR_INFO),
+            line("KS", gitops["ks_ready"], gitops["ks_total"], gitops["ks_ok"]),
+            line("HR", gitops["hr_ready"], gitops["hr_total"], gitops["hr_ok"]),
+            render.Text("%s %s" % (gitops["branch"], gitops["sha"]), font = fonts["small"], color = COLOR_INFO),
         ],
     )
-    page = framed("GITOPS", COLOR_OK if ks_ok and hr_ok else COLOR_WARN, scale, clock, stale, body)
-    return held(lambda _: page, scale)
+    all_ok = gitops["ks_ok"] and gitops["hr_ok"]
+    return still(framed("GITOPS", COLOR_OK if all_ok else COLOR_WARN, ctx, body), ctx)
 
-def page_net(snap, scale, clock, stale):
-    fonts = FONTS[scale]
-    probes = snap.get("probes", [])
-    all_ok = all([p.get("ok") for p in probes]) if len(probes) > 0 else False
+def page_net(st, ctx):
+    fonts = ctx["fonts"]
+    probes = st["probes"]
+    all_ok = all([p["ok"] for p in probes]) if len(probes) > 0 else False
 
-    def build(on):
+    def build(lit):
         rows = []
-        for p in probes[0:3]:
-            ok = p.get("ok", False)
+        for probe in probes[0:3]:
+            ok = probe["ok"]
             rows.append(render.Row(
                 expanded = True,
                 main_align = "space_between",
                 cross_align = "center",
                 children = [
                     render.Row(cross_align = "center", children = [
-                        dot((COLOR_OK if ok else (COLOR_BAD if on else "#401010")), scale),
-                        render.Box(width = 2 * scale, height = 1),
-                        render.Text(p["name"].upper(), font = fonts["small"], color = "#ffffff" if ok else COLOR_BAD),
+                        status_dot("ok" if ok else "down", lit, ctx),
+                        render.Box(width = 2 * ctx["scale"], height = 1),
+                        render.Text(probe["name"].upper(), font = fonts["small"], color = "#ffffff" if ok else COLOR_BAD),
                     ]),
-                    render.Text("%dms" % p.get("ms", 0) if ok else "DOWN", font = fonts["small"], color = COLOR_DIM if ok else COLOR_BAD),
+                    render.Text("%dms" % probe["ms"] if ok else "DOWN", font = fonts["small"], color = COLOR_DIM if ok else COLOR_BAD),
                 ],
             ))
-        return framed("NET", COLOR_OK if all_ok else COLOR_BAD, scale, clock, stale, render.Box(
-            padding = 2 * scale,
+        return framed("NET", COLOR_OK if all_ok else COLOR_BAD, ctx, render.Box(
+            padding = 2 * ctx["scale"],
             child = render.Column(expanded = True, main_align = "space_evenly", children = rows),
         ))
 
-    return held(build, scale)
+    return blink(build, ctx)
 
-def page_cpu(snap, scale, clock, stale):
-    history = snap.get("cpu_history", [])
+def page_cpu(st, ctx):
+    history = st["cpu_history"]
     now = history[-1] if len(history) > 0 else 0
 
     plot = render.Plot(
         data = [(i, history[i]) for i in range(len(history))],
         width = canvas.width(),
-        height = 25 * scale,
+        height = 25 * ctx["scale"],
         color = COLOR_INFO,
         fill = True,
         fill_color = "#0a2c55",
         y_lim = (0, None),
     )
-    page = framed("CPU 24H  %d%%" % int(now), COLOR_INFO, scale, clock, stale, plot)
-    return held(lambda _: page, scale)
+    return still(framed("CPU 24H  %d%%" % int(now), COLOR_INFO, ctx, plot), ctx)
 
 # ---------------------------------------------------------------------------
 # schema

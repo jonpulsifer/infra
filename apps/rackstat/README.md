@@ -21,9 +21,20 @@ a 24h CPU sparkline rotate.
 Every page header carries a clock rendered in-cluster. A frozen clock means
 the renderer (or the cluster under it) is down — a built-in dead man's switch.
 
-## Aggregator (`main.go`)
+## Aggregator
 
 Serves `/api/rackstat` and `/healthz` on `:8080`, caching snapshots for 15s.
+
+| File | Holds |
+| --- | --- |
+| `main.go` | config, the HTTP handler, the snapshot cache, and the fan-out across sources |
+| `prom.go` | the `promSource` port and its HTTP adapter |
+| `fleet.go` | node and alert modelling — samples in, `[]Node`/`[]Alert` out |
+| `kube.go` | the in-cluster REST client for the Flux CRDs |
+
+`promSource` is what the fleet modelling reads through, so it can be exercised
+from sample literals; `go test ./...` covers both that and the HTTP adapter.
+
 Sources, each degrading independently:
 
 - **Prometheus** — node up/temp/CPU/mem from the `node-exporter` job (k8s

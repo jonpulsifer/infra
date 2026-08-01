@@ -1,0 +1,40 @@
+name: rackstat
+on:
+  pull_request:
+    paths:
+      - 'apps/rackstat/**.go'
+      - 'apps/rackstat/go.mod'
+      - '.github/workflows/rackstat.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/rackstat/**.go'
+      - 'apps/rackstat/go.mod'
+      - '.github/workflows/rackstat.yml'
+
+concurrency:
+  group: rackstat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/rackstat/go.mod
+          cache: false # no third-party dependencies, so no go.sum to key on
+
+      - name: Vet
+        working-directory: apps/rackstat
+        run: go vet ./...
+
+      - name: Test
+        working-directory: apps/rackstat
+        run: go test -race ./...
