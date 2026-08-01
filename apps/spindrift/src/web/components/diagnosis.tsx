@@ -13,9 +13,13 @@
  *    says the previous release is still serving", and that "changed the feel of
  *    failure more than anything else". §6 guarantees it is true — exposure is
  *    never mutated by a failed deploy.
- * 4. **The evidence, collapsed.** §6 reads pods and events once on red and
- *    persists what it found, because the platform will not keep it. It is
- *    behind a disclosure because it is the second question, never the first.
+ * 4. **The evidence, collapsed** — and only when there is some. §6 reads pods
+ *    and events once on red and persists what it found, because the platform
+ *    will not keep it. It is behind a disclosure because it is the second
+ *    question, never the first. A failure core decided for itself never reached
+ *    a platform to read, so `evidence` is null and the disclosure is absent:
+ *    offering "show what Spindrift found" over an empty pane promises an answer
+ *    that was never recorded.
  */
 import { useState } from 'react';
 import { reasonCovers } from '../../adapters/deploy/contract.ts';
@@ -61,16 +65,18 @@ export function DiagnosisPanel({
           </Notice>
         ) : null}
 
-        <Collapsible open={open} onOpenChange={setOpen}>
-          <CollapsibleTrigger className="text-[11.5px] font-semibold uppercase tracking-[0.05em] text-muted-foreground hover:text-foreground">
-            {open ? 'Hide' : 'Show'} what Spindrift found
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-2">
-            <LogPane
-              lines={diagnosis.evidence.split('\n').map((text) => ({ text }))}
-            />
-          </CollapsibleContent>
-        </Collapsible>
+        {diagnosis.evidence === null ? null : (
+          <Collapsible open={open} onOpenChange={setOpen}>
+            <CollapsibleTrigger className="text-[11.5px] font-semibold uppercase tracking-[0.05em] text-muted-foreground hover:text-foreground">
+              {open ? 'Hide' : 'Show'} what Spindrift found
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <LogPane
+                lines={diagnosis.evidence.split('\n').map((text) => ({ text }))}
+              />
+            </CollapsibleContent>
+          </Collapsible>
+        )}
       </div>
     </section>
   );

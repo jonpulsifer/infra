@@ -904,6 +904,94 @@ describe('getDeployDetail command', () => {
     expect(deploy.diagnosis?.reason).toBe('BUILD_FAILED');
     expect(deploy.diagnosis?.blame).toBe('developer');
     expect(deploy.diagnosis?.detail).toContain('Type error');
+    // The recorded payload is the evidence, and with no `log` event to show it
+    // is what the deploy-log card falls back to. That fallback is the reason
+    // the null case below matters: it only reads as evidence when there is any.
+    expect(deploy.diagnosis?.evidence).toBe('{"exitCode":1}');
+    expect(deploy.deployLog).toEqual([
+      { text: '{"exitCode":1}', tone: 'error' },
+    ]);
+  });
+
+  test('a failed deploy that recorded nothing shows nothing', async () => {
+    // The shape every failed Deploy on a real installation has. Core decides an
+    // `INTERNAL` failure by itself — it never reaches a platform that could
+    // hand back events to persist — so `debug` stays null. `?? {}` turned that
+    // absence into `"{}"`, which is truthy, which the deploy-log fallback then
+    // adopted as a log line. The result was one red line reading `{}` on every
+    // red screen, attributed to a runner that never emitted it.
+    const ctx = context();
+    const { componentId, appId, target } = await scaffold(ctx, {
+      prefix: 'silent',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'ccc3333',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'SUCCEEDED',
+      })
+      .returning();
+
+    const [failed] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'FAILED',
+        reason: 'INTERNAL',
+        blame: 'platform',
+        detail: 'the artifact carries no address to pull it by',
+        // `debug` is deliberately unset. Seeding a payload here is what let
+        // this reach production.
+      })
+      .returning();
+
+    // Status rows and nothing else, as the reconciler wrote them: no `log`
+    // event exists, so the deploy log is empty before the fallback runs.
+    await ctx.db.insert(attemptEvents).values([
+      {
+        appId,
+        componentId,
+        attemptKind: 'deploy',
+        deployId: failed!.id,
+        eventType: 'status',
+        phase: 'FAILED',
+        reason: 'INTERNAL',
+      },
+      {
+        appId,
+        componentId,
+        attemptKind: 'deploy',
+        deployId: failed!.id,
+        eventType: 'status',
+        phase: 'FAILED',
+        reason: 'INTERNAL',
+      },
+    ]);
+
+    const result = await getDeployDetail({ id: failed!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { deploy } = result.value;
+    // The diagnosis is still made — the reason, the blame and the sentence are
+    // all there. It is only the evidence that is absent, and it says so.
+    expect(deploy.diagnosis).not.toBeNull();
+    expect(deploy.diagnosis?.reason).toBe('INTERNAL');
+    expect(deploy.diagnosis?.blame).toBe('platform');
+    expect(deploy.diagnosis?.detail).toBe(
+      'the artifact carries no address to pull it by',
+    );
+    expect(deploy.diagnosis?.evidence).toBeNull();
+
+    // And nothing was manufactured from it: `null` is what the deploy-log card
+    // reads to render its own LIVE_STATUS notice.
+    expect(deploy.deployLog).toBeNull();
   });
 });
 

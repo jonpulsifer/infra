@@ -245,6 +245,38 @@ describe('the deploy screen, on red', () => {
   });
 });
 
+describe('a red deploy that recorded nothing', () => {
+  // The shape every failed Deploy on a real installation has: `debug` null, no
+  // `log` event, so `getDeployDetail` projects a diagnosis with no evidence and
+  // a null deploy log. The screen has an honest sentence for exactly this and
+  // never used to reach it, because `"{}"` arrived where the null belonged.
+  const silent: DeployView = {
+    ...DEPLOY_SCENARIOS.imageUnpullable,
+    diagnosis: {
+      ...DEPLOY_SCENARIOS.imageUnpullable.diagnosis!,
+      evidence: null,
+    },
+    deployLog: null,
+  };
+  const markup = deploy(silent);
+
+  test('still names the failure it does know', () => {
+    expect(markup).toContain('ARTIFACT_UNAVAILABLE');
+    expect(markup).toContain('platform');
+  });
+
+  test('offers no disclosure over evidence it does not have', () => {
+    // The trigger promises an answer. Opening it onto an empty pane is the
+    // promise broken, and there is nothing to put behind it.
+    expect(markup).not.toContain('what Spindrift found');
+  });
+
+  test('says the deploy log is live status rather than inventing a line', () => {
+    expect(markup).toContain('no text line has arrived yet');
+    expect(markup).not.toContain('{}');
+  });
+});
+
 describe('the deploy screen, on green', () => {
   const markup = deploy(DEPLOY_SCENARIOS.live);
 

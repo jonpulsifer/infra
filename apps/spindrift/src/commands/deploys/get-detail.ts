@@ -16,6 +16,30 @@ export const getDeployDetailInput = z.object({
 });
 export type GetDeployDetailInput = z.infer<typeof getDeployDetailInput>;
 
+/**
+ * §6's raw `debug` payload as a screen can read it, or `null` where core
+ * recorded nothing.
+ *
+ * `debug` is nullable and usually null: a Deploy that goes red on something
+ * core decided for itself — an artifact with no address to pull it by — never
+ * reaches a platform that could hand back events to persist. Serialising that
+ * absence yields `"{}"`, which is not evidence, is not what any runner emitted,
+ * and is truthy enough to be mistaken for both by everything downstream. So
+ * nothing is reported as nothing, and the views that already know how to say
+ * "there is nothing here" get to say it.
+ */
+function evidenceOf(debug: unknown): string | null {
+  if (debug === null || debug === undefined) return null;
+  if (typeof debug === 'string') return debug.trim() === '' ? null : debug;
+  const serialised = JSON.stringify(debug);
+  // An empty document is the same absence wearing braces — a red Deploy whose
+  // adapter opened a payload and put nothing in it saw nothing either.
+  if (serialised === undefined || serialised === '{}' || serialised === '[]') {
+    return null;
+  }
+  return serialised;
+}
+
 export const getDeployDetail: Command<
   GetDeployDetailInput,
   { deploy: DeployView }
@@ -89,10 +113,7 @@ export const getDeployDetail: Command<
       reason: deploy.reason as FailureReason,
       blame: (deploy.blame ?? null) as Blame | null,
       detail: deploy.detail ?? 'Deploy failed',
-      evidence:
-        typeof deploy.debug === 'string'
-          ? deploy.debug
-          : JSON.stringify(deploy.debug ?? {}),
+      evidence: evidenceOf(deploy.debug),
     };
   }
 
@@ -142,6 +163,10 @@ export const getDeployDetail: Command<
       text: event.line!,
       tone: event.reason ? ('error' as const) : undefined,
     }));
+  // Evidence stands in for a deploy log only when there is evidence. Where
+  // there is none, `deployLog` stays null and the card renders its own
+  // `LIVE_STATUS` notice — the true sentence about a controller that reports
+  // status without text.
   if (deployLogs.length === 0 && diagnosis?.evidence) {
     deployLogs.push(
       ...diagnosis.evidence.split('\n').map((text) => ({
