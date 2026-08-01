@@ -118,27 +118,66 @@ jobs:
           exit-code: 0
           severity: CRITICAL,HIGH
       - name: Update manifest digest for selective continuous delivery
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.manifests != '[]' && matrix.manifests != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           IMAGE_NAME: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
           MANIFESTS: ${{ toJson(matrix.manifests) }}
         run: |
           set -euo pipefail
-          updated=false
           mapfile -t targets < <(jq -r '.[]' <<<"$MANIFESTS")
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "$IMAGE_NAME has no deploy targets in .github/containers.json"
+            exit 0
+          fi
+
           for manifest in "${targets[@]}"; do
-            if [ -f "$manifest" ]; then
-              echo "Updating digest for $IMAGE_NAME in $manifest..."
-              sed -i -E "s|(@sha256:)[0-9a-f]{64}|\1${DIGEST}|g" "$manifest"
-              updated=true
+            # A declared target that is missing, or that pins no digest, means
+            # the deploy map is wrong. Fail loudly: a silent no-op here is
+            # indistinguishable from a successful deploy.
+            if [ ! -f "$manifest" ]; then
+              echo "::error::$manifest is a deploy target for $IMAGE_NAME but does not exist"
+              exit 1
             fi
+            pins=$(grep -cE '@sha256:[0-9a-f]{64}' "$manifest" || true)
+            if [ "$pins" -eq 0 ]; then
+              echo "::error::$manifest pins no image digest, so $IMAGE_NAME can never roll from it"
+              exit 1
+            fi
+            # The rewrite is a blanket one; more than one pin means it would
+            # stamp this image's digest onto some other image.
+            if [ "$pins" -gt 1 ]; then
+              echo "::error::$manifest pins $pins digests; rewriting would clobber images other than $IMAGE_NAME"
+              exit 1
+            fi
+            echo "Updating digest for $IMAGE_NAME in $manifest..."
+            # DIGEST already carries the sha256: prefix, so the capture group
+            # must not be replayed into the replacement.
+            sed -i -E "s|@sha256:[0-9a-f]{64}|@${DIGEST}|g" "$manifest"
           done
 
-          if [ "$updated" = "true" ] && ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add .
-            git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
-            git push
+          if git diff --quiet -- "${targets[@]}"; then
+            echo "$IMAGE_NAME manifests already pin $DIGEST"
+            exit 0
           fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Stage only the manifests this step edited. A blanket `git add .`
+          # also sweeps up whatever the build and scan steps left behind — the
+          # Trivy action's multi-gigabyte vulnerability DB under .cache/ is
+          # what wedged this step shut.
+          git add -- "${targets[@]}"
+          git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
+
+          # Sibling matrix jobs push to main concurrently. Each owns different
+          # manifests, so a rejected push only needs replaying on top of theirs.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "push rejected (attempt ${attempt}/5); rebasing onto origin/main"
+            git pull --rebase origin main
+          done
+          echo "::error::could not push the ${IMAGE_NAME} digest update after 5 attempts"
+          exit 1

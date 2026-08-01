@@ -53,6 +53,11 @@ docs/.trash/
 node_modules/
 .turbo/
 
+# ─── Tool caches ─────────────────────────────────────────────────────────────
+# aquasecurity/trivy-action caches its vulnerability DB in the workspace at
+# .cache/trivy — trivy.db alone is over 1GB, well past GitHub's 100MB limit.
+.cache/
+
 # ─── IDE / Editor ────────────────────────────────────────────────────────────
 .vscode/
 .idea/
