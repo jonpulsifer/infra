@@ -111,6 +111,17 @@ while building them:
   and the optional Gateway binding. Every mutation requires a fresh passkey
   assertion, and the final account-root passkey cannot be removed.
 
+**Deleting an App is review-then-confirm**, from the App list row or the
+workspace header (`components/delete-app.tsx`). `deleteApp` called without
+`confirm` writes nothing and answers with what the delete would do — the
+Components, Builds, Deploys and config keys that go, the Datastores that survive
+detached (§11), and the live workloads it would strand. The confirm call goes by
+the id the review resolved. **Nothing is torn down**: as with disconnect, a
+running workload keeps running and is named again afterwards, because once the
+rows are gone that list is the only record it is there. §10 store items are
+reaped with the App, and a key the store refuses to destroy is named rather than
+failing a delete that already happened.
+
 Authenticated product operations reach the server through a dispatch surface
 generated from the command registry (`src/web/dispatch.ts`): one route per
 command, built by `Object.fromEntries` over `commandNames`. Authentication uses

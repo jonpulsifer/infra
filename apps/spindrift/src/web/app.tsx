@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
 import { command, type InputOf } from './client.ts';
+import { DeleteAppDialog, useAppDeletion } from './components/delete-app.tsx';
 import type {
   AppListItem,
   DeployView,
@@ -153,6 +154,19 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     | { type: 'success'; apps: readonly AppListItem[] }
   >({ type: 'loading' });
 
+  // The row goes when the App does. Re-reading the list instead would be a
+  // second round trip to learn something this screen was just told.
+  const deletion = useAppDeletion((name) => {
+    setState((current) =>
+      current.type === 'success'
+        ? {
+            type: 'success',
+            apps: current.apps.filter((app) => app.name !== name),
+          }
+        : current,
+    );
+  });
+
   useEffect(() => {
     let live = true;
     command('listApps', {})
@@ -197,7 +211,12 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     );
   }
 
-  return <AppList apps={state.apps} onNavigate={onNavigate} />;
+  return (
+    <>
+      <AppList apps={state.apps} onNavigate={onNavigate} deletion={deletion} />
+      <DeleteAppDialog deletion={deletion} />
+    </>
+  );
 }
 
 function WorkspaceScreen({
@@ -221,6 +240,9 @@ function WorkspaceScreen({
    * are already on re-reads itself and the new Build shows up in its activity.
    */
   const [reloadToken, setReloadToken] = useState(0);
+
+  // There is no workspace left to stand on once the App is gone.
+  const deletion = useAppDeletion(() => onNavigate('/apps'));
 
   useEffect(() => {
     let live = true;
@@ -397,7 +419,9 @@ function WorkspaceScreen({
         onDeploy={handleDeploy}
         deploying={deploying}
         onNavigate={onNavigate}
+        deletion={deletion}
       />
+      <DeleteAppDialog deletion={deletion} />
     </>
   );
 }

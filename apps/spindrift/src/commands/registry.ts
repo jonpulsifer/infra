@@ -29,6 +29,7 @@
  * nothing left for a route to decide.
  */
 import type { z } from 'zod';
+import { deleteApp, deleteAppInput } from './apps/delete.ts';
 import { deployApp, deployAppInput } from './apps/deploy.ts';
 import { listApps, listAppsInput } from './apps/list.ts';
 import {
@@ -106,6 +107,7 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 
 /** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
+  deleteApp: { input: deleteAppInput, handler: deleteApp },
   deployApp: { input: deployAppInput, handler: deployApp },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
