@@ -180,7 +180,7 @@ async function succeededBuild(componentId: string, seed: number) {
       artifactType: 'image',
       artifactDigest: digest(seed),
       bundleDigest: digest(seed),
-      bundleLocation: `bundles/${seed}.zip`,
+      bundleLocation: `https://depot.lolwtf.ca/bundles/${seed}.zip`,
       status: 'SUCCEEDED',
       verifiedBuildLevel: 2,
       signature: testSignature(digest(seed), FROZEN.toISOString()),

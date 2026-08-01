@@ -136,7 +136,7 @@ async function stagedBuild(componentId: string) {
       targetShape: 'files',
       artifactType: 'files',
       bundleDigest: digest,
-      bundleLocation: 'bundles/site.zip',
+      bundleLocation: 'https://depot.lolwtf.ca/bundles/site.zip',
       status: 'PENDING',
     })
     .returning();
@@ -457,7 +457,7 @@ describe('builds run concurrently up to a per-App limit', () => {
           targetShape: 'image',
           artifactType: 'image',
           bundleDigest: `sha256:${'2'.repeat(64)}`,
-          bundleLocation: 'bundles/site.zip',
+          bundleLocation: 'https://depot.lolwtf.ca/bundles/site.zip',
           status: 'RUNNING',
         });
     }

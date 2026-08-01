@@ -45,6 +45,7 @@ import {
 } from '../../domain/build-route.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
+import { isFetchableBundleLocation } from '../../storage/archives.ts';
 import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
 import {
@@ -189,16 +190,35 @@ function routeRefusedByTarget(
  * debug a Dockerfile over a location Spindrift itself had made unusable. A
  * refusal costs one dispatch and says the true thing.
  *
- * Any other scheme passes through untouched. An `https://` location is already
- * fetchable, and an `upload://` handle names this process's own disk — the
- * no-depot fallback — which is honest about being unfetchable and is left to
- * fail where it fails rather than being dressed up here.
+ * An `https://` location is already fetchable and passes through untouched.
+ * **Anything else is refused here rather than forwarded.** It used to be
+ * forwarded, on the reasoning that an `upload://` handle is honest about being
+ * unfetchable and could be left to fail where it fails. Where it failed was
+ * `curl: (1) Protocol "upload" not supported or disabled in libcurl`, on a
+ * hosted runner, after a workflow had been dispatched — a failure the operator
+ * reads out of a CI log for a refusal this function could have made for free.
+ * A location no route can resolve is exactly what this function exists to
+ * catch, so it catches it.
  */
 async function fetchableBundleLocation(
   context: Pick<BuildDispatchContext, 'manifest'>,
+  app: Pick<typeof apps.$inferSelect, 'name' | 'sourceKind'>,
   location: string,
 ): Promise<CommandResult<string>> {
-  if (parseGcsLocation(location) === null) return ok(location);
+  if (parseGcsLocation(location) === null) {
+    if (isFetchableBundleLocation(location)) return ok(location);
+    // The remedy differs by source, because re-staging does: a repository can be
+    // fetched again at the same commit, while the bytes behind an archive only
+    // ever existed as what a developer uploaded.
+    const remedy =
+      app.sourceKind === 'repo'
+        ? `deploy ${app.name} again to stage a fresh bundle from its repository`
+        : `upload ${app.name}'s archive again to stage it in the depot`;
+    return failed(
+      'NOT_BUILDABLE',
+      `${app.name}'s staged bundle is at ${location}, which names this installation's own disk rather than anything a build route can fetch — ${remedy}`,
+    );
+  }
 
   const federation = context.manifest?.cloud?.federation ?? null;
   if (federation === null) {
@@ -347,11 +367,47 @@ export const dispatchBuild = async (
   // dispatch is what keeps it out of the Build row, out of the attempt log, and
   // out of any window between staging and running. What is persisted is the
   // `gs://` object; what a route is handed is a URL that resolves.
+  const attempt = {
+    appId: app.id,
+    componentId: component.id,
+    buildId: build.id,
+  };
+
   const fetchable = await fetchableBundleLocation(
     context,
+    app,
     build.bundleLocation,
   );
-  if (!fetchable.ok) return fetchable;
+  if (!fetchable.ok) {
+    // A refusal returned to `runBuildPass` reaches nobody — the loop keeps the
+    // successes and drops the rest — so a Build refused here would sit PENDING
+    // and be refused again every tick, silently. Where the location itself is
+    // the problem, the sentence goes on the attempt log the operator is already
+    // reading and the Build is closed out: the location is a column on this row
+    // and no later tick makes it fetchable. §6's `ARTIFACT_UNAVAILABLE` is the
+    // platform-blamed reason for an object that is not there to be fetched.
+    //
+    // The other refusals from that function are about this installation's
+    // federation rather than about this row, so they stay PENDING — configuring
+    // federation is a thing an operator can do that makes the next tick work.
+    if (!isFetchableBundleLocation(build.bundleLocation)) {
+      await recordBuildEvent(context.db, attempt, {
+        type: 'log',
+        line: fetchable.failure.message,
+        resource: 'bundle',
+      });
+      await recordBuildEvent(context.db, attempt, {
+        type: 'status',
+        phase: 'FAILED',
+        reason: 'ARTIFACT_UNAVAILABLE',
+      });
+      await context.db
+        .update(builds)
+        .set({ status: 'FAILED' })
+        .where(eq(builds.id, build.id));
+    }
+    return fetchable;
+  }
 
   const source: Source =
     app.sourceKind === 'repo'
@@ -402,12 +458,6 @@ export const dispatchBuild = async (
       effectiveTargetId === undefined || !isBuildTimeConfig(component.kind)
         ? {}
         : await readBuildArgs(context.db, component.id, effectiveTargetId),
-  };
-
-  const attempt = {
-    appId: app.id,
-    componentId: component.id,
-    buildId: build.id,
   };
 
   const dispatchId = input.dispatchId ?? crypto.randomUUID();
