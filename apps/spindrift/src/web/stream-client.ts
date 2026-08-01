@@ -1,10 +1,18 @@
-/** Reconnecting browser clients for the two internal WebSocket purposes. */
+/**
+ * Reconnecting browser clients for the two internal WebSocket purposes.
+ *
+ * Imports from `./stream-path.ts` rather than `./streams.ts` — the paths and
+ * message types are the only edge this file needs into the streaming
+ * transport, and `streams.ts` pulls in `db/schema.ts`, `db/notify.ts`, and
+ * `drizzle-orm` as values. `test/web/client-bundle.test.ts` guards against
+ * this file reaching those instead.
+ */
 import {
   ATTEMPT_STREAM_PATH,
   type AttemptStreamMessage,
   RUNTIME_STREAM_PATH,
   type RuntimeStreamMessage,
-} from './streams.ts';
+} from './stream-path.ts';
 
 export interface BrowserSocket {
   onmessage: ((event: { data: string }) => void) | null;
