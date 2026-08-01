@@ -17,6 +17,15 @@
  * Anything it does not model answers `404`, so a client that started calling a
  * new endpoint fails here rather than silently passing against a permissive
  * stand-in.
+ *
+ * **It negotiates content, because the real API does and a fake that did not
+ * would be strictly more permissive than the thing it stands for.** That is not
+ * a hypothetical: `jobLog` shipped asking for `text/plain`, every test passed,
+ * and every build in production died on the `415` this fake now answers with.
+ * The two endpoints that serve anything other than plain JSON are the two
+ * modelled here — job logs, which negotiate as JSON and answer with text, and
+ * contents, which answers raw bytes only to a client that asked for them. A
+ * request whose `Accept` the real API would refuse is refused here.
  */
 import { encodeBuildReport } from '../../../src/adapters/build/report.ts';
 import type { Fetcher } from '../../../src/integrations/github/http.ts';
@@ -30,6 +39,8 @@ export interface RecordedRequest {
   path: string;
   body: unknown;
   authorization: string | null;
+  /** What the client said it would take — assertable, because it matters. */
+  accept: string | null;
 }
 
 /** One pull request the client opened. */
@@ -73,6 +84,12 @@ export interface FakeActionsOptions {
    * rather than the state every other test wants to start from.
    */
   log?: (spec: Record<string, unknown>) => string;
+  /**
+   * The status the logs endpoint answers with. `200` serves the log; anything
+   * else stands in for a host that concluded a run and then would not hand over
+   * its text — the one failure a green run can still die of.
+   */
+  logStatus?: number;
 }
 
 interface FakeRun {
@@ -100,6 +117,27 @@ export interface FakeGitHubOptions {
  */
 function objectId(counter: number): string {
   return counter.toString(16).padStart(40, '0');
+}
+
+/**
+ * Whether an `Accept` names a media type the host will negotiate as JSON.
+ *
+ * Deliberately not a full RFC 7231 matcher — it exists to draw one line, the
+ * one the real API's own refusal draws: "Must accept 'application/json'".
+ * `application/vnd.github+json` is that, spelled the way GitHub spells it, and
+ * `text/plain` is not.
+ */
+function acceptsJson(accept: string | null): boolean {
+  if (accept === null || accept.trim() === '') return true;
+  return accept.split(',').some((entry) => {
+    const media = entry.split(';')[0]?.trim() ?? '';
+    return (
+      media === '*/*' ||
+      media === 'application/*' ||
+      media === 'application/json' ||
+      /^application\/vnd\.github(\.[^+]+)?\+json$/.test(media)
+    );
+  });
 }
 
 export class FakeGitHub {
@@ -143,6 +181,7 @@ export class FakeGitHub {
       duration: options.actions?.duration ?? 1,
       conclusion: options.actions?.conclusion ?? 'success',
       log: options.actions?.log ?? defaultBuildLog,
+      logStatus: options.actions?.logStatus ?? 200,
     };
   }
 
@@ -205,16 +244,29 @@ export class FakeGitHub {
     return new Response('{"message":"Not Found"}', { status: 404 });
   }
 
+  /** The host's own refusal, message and all, for an `Accept` it will not serve. */
+  private unsupportedMediaType(accept: string | null): Response {
+    return this.json(
+      {
+        message: `Unsupported 'Accept' header: '${accept ?? ''}'. Must accept 'application/json'.`,
+        status: '415',
+      },
+      415,
+    );
+  }
+
   /** The transport to hand the real client. */
   readonly fetch: Fetcher = async (request) => {
     const url = new URL(request.url);
     const path = `${url.pathname}${url.search}`;
     const raw = request.method === 'GET' ? null : await request.text();
+    const accept = request.headers.get('Accept');
     this.requests.push({
       method: request.method,
       path,
       body: raw === null || raw === '' ? null : JSON.parse(raw),
       authorization: request.headers.get('Authorization'),
+      accept,
     });
 
     if (this.rateLimited) {
@@ -263,8 +315,8 @@ export class FakeGitHub {
 
     const body = raw === null || raw === '' ? {} : JSON.parse(raw);
     return (
-      this.actionsEndpoints(rest, request.method, body) ??
-      this.readEndpoints(rest, url, request.method) ??
+      this.actionsEndpoints(rest, request.method, body, accept) ??
+      this.readEndpoints(rest, url, request.method, accept) ??
       this.writeEndpoints(rest, request.method, body) ??
       this.notFound()
     );
@@ -281,6 +333,7 @@ export class FakeGitHub {
     rest: string,
     method: string,
     body: Record<string, unknown>,
+    accept: string | null,
   ): Response | null {
     if (rest === '/installation' && method === 'GET') {
       return this.json({ id: Number(this.installationId) });
@@ -360,8 +413,17 @@ export class FakeGitHub {
 
     const log = rest.match(/^\/actions\/jobs\/(\d+)\/logs$/);
     if (log && method === 'GET') {
+      // The endpoint negotiates as JSON and *answers* with a redirect to a
+      // plain-text blob. Asking for the media type of the answer is the mistake
+      // that reads as obviously correct, so it is the one refused first — before
+      // the job is even looked up, exactly as the real API refuses it.
+      if (!acceptsJson(accept)) return this.unsupportedMediaType(accept);
       const run = this.runs.find((each) => each.id === Number(log[1]));
-      return run === undefined ? this.notFound() : new Response(run.log);
+      if (run === undefined) return this.notFound();
+      if (this.actions.logStatus !== 200) {
+        return this.json({ message: 'Server Error' }, this.actions.logStatus);
+      }
+      return new Response(run.log);
     }
 
     return null;
@@ -371,6 +433,7 @@ export class FakeGitHub {
     rest: string,
     url: URL,
     method: string,
+    accept: string | null,
   ): Response | null {
     if (method !== 'GET') return null;
 
@@ -404,7 +467,18 @@ export class FakeGitHub {
       const ref = url.searchParams.get('ref') ?? this.defaultBranch;
       const at = this.branches.get(ref) ?? ref;
       const file = this.filesAt(at)[decodeURIComponent(contents[1] ?? '')];
-      return file === undefined ? this.notFound() : new Response(file);
+      if (file === undefined) return this.notFound();
+      // Raw bytes only to a client that asked for them. To anyone else this
+      // endpoint answers metadata with the file base64'd inside it — so a caller
+      // that dropped the raw media type reads a JSON envelope where it expected
+      // a `spindrift.yaml`, here as in production.
+      return accept === 'application/vnd.github.raw'
+        ? new Response(file)
+        : this.json({
+            name: decodeURIComponent(contents[1] ?? ''),
+            content: btoa(file),
+            encoding: 'base64',
+          });
     }
 
     const tarball = rest.match(/^\/tarball\/(.+)$/);

@@ -214,3 +214,59 @@ describe('what the far side refusing means', () => {
     ).rejects.toMatchObject({ code: 'ACCESS_LOST' });
   });
 });
+
+/**
+ * Content negotiation, asserted against the fake directly.
+ *
+ * Two endpoints here serve something other than plain JSON, and the client gets
+ * one media type wrong in each direction — so these assert the *host's* half of
+ * the contract, not the client's. A fake that answered everything to everyone
+ * would make the client's half untestable, which is exactly how `jobLog` shipped
+ * asking for `text/plain` and failed every build in production.
+ */
+describe('the media types this host serves', () => {
+  function get(fake: FakeGitHub, path: string, accept: string) {
+    return fake.fetch(
+      new Request(`${fake.baseUrl}${path}`, { headers: { Accept: accept } }),
+    );
+  }
+
+  test('a job log asked for as text is refused, as the real API refuses it', async () => {
+    const fake = new FakeGitHub();
+    const refused = await get(
+      fake,
+      `/repos/${fake.fullName}/actions/jobs/1/logs`,
+      'text/plain',
+    );
+
+    expect(refused.status).toBe(415);
+    expect(await refused.text()).toContain("Must accept 'application/json'");
+  });
+
+  test('a job log asked for as JSON gets past negotiation to the job itself', async () => {
+    const fake = new FakeGitHub();
+    const answered = await get(
+      fake,
+      `/repos/${fake.fullName}/actions/jobs/1/logs`,
+      'application/vnd.github+json',
+    );
+
+    // 404 because no run was dispatched — which is the point: negotiation let
+    // this through, and the endpoint got as far as looking the job up.
+    expect(answered.status).toBe(404);
+  });
+
+  test('file contents are raw only to a client that asked for raw', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'spindrift.yaml': 'version: 1' });
+    const path = `/repos/${fake.fullName}/contents/spindrift.yaml?ref=main`;
+
+    const raw = await get(fake, path, 'application/vnd.github.raw');
+    expect(await raw.text()).toBe('version: 1');
+
+    // The default media type answers metadata, so a caller that dropped the raw
+    // override would parse a JSON envelope as if it were the file.
+    const envelope = await get(fake, path, 'application/vnd.github+json');
+    expect(await envelope.json()).toMatchObject({ encoding: 'base64' });
+  });
+});

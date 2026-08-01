@@ -329,7 +329,34 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     // even on a red run is the point: the failure is in there.
     let log = '';
     for (const job of jobs) {
-      const text = await host.jobLog(ref, repository, job.id);
+      let text: string | null;
+      try {
+        text = await host.jobLog(ref, repository, job.id);
+      } catch (error) {
+        // A verdict of its own, and the reason it is not the dispatch's: by now
+        // the workflow has been dispatched, correlated, and concluded, so
+        // `dispatch failed:` would name the one part that demonstrably worked
+        // and send an operator to read a green run's logs looking for a refusal
+        // that is not in them.
+        //
+        // It is still a failure, because consequence 2 above holds: the report
+        // rides the log, so a log this route cannot read is a build that cannot
+        // say what it built (`report.ts`). `TARGET_UNREACHABLE` is §6's
+        // platform-blamed reason for an API that would not answer, which is
+        // exactly what this is — nothing the developer wrote is at fault.
+        const detail = error instanceof Error ? error.message : String(error);
+        yield {
+          type: 'log',
+          at: now(),
+          line: `could not read the log of job ${job.id}: ${detail}`,
+        };
+        return buildFailed(
+          logs,
+          'TARGET_UNREACHABLE',
+          `run ${run.id} in ${repository} concluded ${conclusion ?? 'without a conclusion'} but its log could not be read, and a build reports what it built in its log: ${detail}`,
+          { runId: run.id, jobId: job.id, conclusion },
+        );
+      }
       if (text === null) continue;
       log += text;
       for (const line of text.split('\n')) {

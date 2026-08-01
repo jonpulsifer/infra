@@ -580,6 +580,13 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
    * A `404` is tolerated because a job that never started has no log, and an
    * empty log is a truthful thing to show — unlike lost access, which every
    * other call in this module still classifies.
+   *
+   * **The text is read without asking for a text media type**, which reads
+   * backwards and is the whole point. The endpoint *negotiates* as JSON and
+   * *answers* with a redirect to a plain-text blob, so it refuses
+   * `Accept: text/plain` with a `415` — "Must accept 'application/json'" — and
+   * serves the log to the module's default `application/vnd.github+json`. The
+   * media type names what the endpoint speaks, not what comes back through it.
    */
   async jobLog(
     ref: InstallationRef,
@@ -589,7 +596,6 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
     const response = await this.http(ref).send({
       method: 'GET',
       path: `/repos/${fullName}/actions/jobs/${jobId}/logs`,
-      accept: 'text/plain',
       tolerate: [404],
     });
     return response === null ? null : await response.text();
