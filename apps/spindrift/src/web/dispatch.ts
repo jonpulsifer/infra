@@ -68,8 +68,17 @@ export interface DispatchDeps {
    * not a stub that returns a fake principal.
    */
   authenticate(request: Request): Promise<RequestAuthentication>;
-  /** Everything a command may reach, assembled per request (§21). */
-  context(principal: Principal): CommandContext;
+  /**
+   * Everything a command may reach, assembled per request (§21).
+   *
+   * Asynchronous because configuration is the UI's to drive: a command that
+   * reads `context.manifest` has to see what `configureInstallation` last
+   * wrote, and the row is the only place that is known. A process-lifetime
+   * copy would have made every configuration change require a restart — the
+   * declared-change-that-does-nothing failure §20's authoring path exists to
+   * remove.
+   */
+  context(principal: Principal): CommandContext | Promise<CommandContext>;
 }
 
 /**
@@ -185,7 +194,7 @@ async function handle(
   }
 
   try {
-    const result = await dispatch(name, input, deps.context(principal));
+    const result = await dispatch(name, input, await deps.context(principal));
     return result.ok
       ? Response.json(result, { status: 200 })
       : Response.json(result, { status: STATUS[result.failure.code] });

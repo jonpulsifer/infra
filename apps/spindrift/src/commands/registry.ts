@@ -62,6 +62,10 @@ import { listDeploys, listDeploysInput } from './deploys/list.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import type * as commands from './index.ts';
 import {
+  configureInstallation,
+  configureInstallationInput,
+} from './installation/configure.ts';
+import {
   beginRepositoryAuthorization,
   beginRepositoryAuthorizationInput,
   pollRepositoryAuthorization,
@@ -152,6 +156,10 @@ export const commandRegistry = {
   createComponent: { input: createComponentInput, handler: createComponent },
   placeComponent: { input: placeComponentInput, handler: placeComponent },
   setConfig: { input: setConfigInput, handler: setConfig },
+  configureInstallation: {
+    input: configureInstallationInput,
+    handler: configureInstallation,
+  },
   replaceConfig: { input: replaceConfigInput, handler: replaceConfig },
   uploadArchive: { input: uploadArchiveInput, handler: uploadArchive },
   dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },

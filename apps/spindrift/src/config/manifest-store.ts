@@ -5,7 +5,6 @@
  * row and reconciles a deployment declaration — including ordered Target
  * identities — into durable state.
  */
-import { isDeepStrictEqual } from 'node:util';
 import { sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { installation, targets } from '../db/schema.ts';
@@ -47,18 +46,48 @@ export async function loadStoredManifest(
     );
   }
   const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
-
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(installation)
-      .values({ manifest: declared })
-      .onConflictDoUpdate({
-        target: installation.id,
-        set: { manifest: declared },
-      });
-    await reconcileManifestTargets(tx, declared);
-  });
+  await writeStoredManifest(db, declared);
   return declared;
+}
+
+/**
+ * Write the durable singleton and reconcile what it declares, atomically.
+ *
+ * The seed path and the configure command are the same act — a manifest becomes
+ * this installation's — and the Target reconciliation below is why they must not
+ * be two implementations. A write that skipped it would leave a Target declared
+ * in the document and absent from the table, which is the state no reader
+ * checks for because nothing has ever produced it.
+ *
+ * One transaction, so an incompatible Target cannot leave a half-configured
+ * installation behind: the manifest and the Targets it names land together or
+ * neither does.
+ */
+export async function writeStoredManifest(
+  db: Database,
+  manifest: InstallationManifest,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.insert(installation).values({ manifest }).onConflictDoUpdate({
+      target: installation.id,
+      set: { manifest },
+    });
+    await reconcileManifestTargets(tx, manifest);
+  });
+}
+
+/**
+ * The manifest this installation currently has, or `null` if it has none.
+ *
+ * Read-only, unlike {@link loadStoredManifest}, which seeds and reconciles.
+ * That distinction is the whole reason this is exported: a process that wants
+ * to know whether configuration changed asks this on every command, and running
+ * a transaction to answer a question would make the asking too expensive to do.
+ */
+export async function currentStoredManifest(
+  db: Database,
+): Promise<InstallationManifest | null> {
+  return readStoredManifest(db);
 }
 
 /**
@@ -95,7 +124,7 @@ async function reconcileManifestTargets(
     );
     const hasConnectionChange =
       declaredConnection !== null &&
-      !isDeepStrictEqual(existing?.connection, declaredConnection);
+      !Bun.deepEquals(existing?.connection, declaredConnection, true);
 
     await db
       .insert(targets)
