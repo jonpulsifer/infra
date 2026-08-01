@@ -329,3 +329,29 @@ describe('the list renders two same-named rows as two Apps', () => {
     expect(reviewed).toEqual([{ id: IDS[1]!, name: 'twins' }]);
   });
 });
+
+/**
+ * The optimistic drop, which is the last place a name was still standing in for
+ * an identity.
+ *
+ * `app.tsx` removes the row itself rather than re-reading the list, so the
+ * predicate it filters on decides what an operator sees the instant a delete
+ * completes. Filtering on the name hid *both* twins until a reload — the App
+ * that survived being exactly the one this ticket exists to keep reachable.
+ *
+ * The wiring is additionally guarded by the type system: `onDeleted` now takes
+ * an `AppIdentity`, so the old `app.name !== name` predicate is a compile error
+ * rather than a silent behaviour, and `bun run typecheck` fails if it returns.
+ */
+describe('deleting one twin leaves the other on screen', () => {
+  test('dropping the row by id keeps its same-named sibling', () => {
+    const remaining = TWIN_ROWS.filter((app) => app.id !== IDS[0]);
+    expect(remaining.map((app) => app.id)).toEqual([IDS[1]!]);
+  });
+
+  test('dropping the row by name would have taken both', () => {
+    const byName = TWIN_ROWS[0]!.name;
+    expect(TWIN_ROWS.every((app) => app.name === byName)).toBe(true);
+    expect(TWIN_ROWS.filter((app) => app.name !== byName)).toEqual([]);
+  });
+});

@@ -164,12 +164,17 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
 
   // The row goes when the App does. Re-reading the list instead would be a
   // second round trip to learn something this screen was just told.
-  const deletion = useAppDeletion((name) => {
+  //
+  // By id, because `apps` has no unique constraint on `name`: filtering on the
+  // name drops every row sharing it, so deleting one of two same-named Apps
+  // would hide the other until a reload — and reaching the other one is the
+  // whole point of giving this list an identity.
+  const deletion = useAppDeletion(({ id }) => {
     setState((current) =>
       current.type === 'success'
         ? {
             type: 'success',
-            apps: current.apps.filter((app) => app.name !== name),
+            apps: current.apps.filter((app) => app.id !== id),
           }
         : current,
     );

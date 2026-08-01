@@ -63,6 +63,8 @@ export type AppDeletion =
   /** Done, and something outlived it that somebody has to go and deal with. */
   | {
       readonly kind: 'aftermath';
+      /** Carried so `dismiss` can report *which* App went, not just its label. */
+      readonly id: string;
       readonly name: string;
       readonly stranded: readonly StrandedWorkload[];
       readonly retainedSecrets: readonly string[];
@@ -89,9 +91,15 @@ export interface AppDeletionControls {
  * `onDeleted` fires once per completed delete, after the operator has seen any
  * aftermath — so a caller can navigate away or drop a row without racing the
  * one screen that still names what was stranded.
+ *
+ * It reports the whole {@link AppIdentity} rather than the name, for the reason
+ * this module already gives about `deleteApp`'s own arguments: `apps` has no
+ * unique constraint on `name`. A list that dropped its row by name would hide
+ * every App sharing it, which is precisely the pair this flow exists to let an
+ * operator take apart.
  */
 export function useAppDeletion(
-  onDeleted: (name: string) => void,
+  onDeleted: (app: AppIdentity) => void,
 ): AppDeletionControls {
   const [state, setState] = useState<AppDeletion>({ kind: 'idle' });
 
@@ -139,11 +147,12 @@ export function useAppDeletion(
           const retained = value.deleted ? value.retainedSecrets : [];
           if (value.stranded.length === 0 && retained.length === 0) {
             setState({ kind: 'idle' });
-            deleted.current(name);
+            deleted.current({ id, name });
             return;
           }
           setState({
             kind: 'aftermath',
+            id,
             name,
             stranded: value.stranded,
             retainedSecrets: retained,
@@ -168,7 +177,8 @@ export function useAppDeletion(
     setState((current) => {
       // The App is already gone by then; the caller has to hear about it even
       // though what closed the panel was a dismissal rather than a success.
-      if (current.kind === 'aftermath') deleted.current(current.name);
+      if (current.kind === 'aftermath')
+        deleted.current({ id: current.id, name: current.name });
       return { kind: 'idle' };
     });
   }, []);
