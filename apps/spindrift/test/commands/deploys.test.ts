@@ -46,7 +46,10 @@ import { policyDrift } from '../../src/supply-chain/posture.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
+import {
+  SupplyChainHarness,
+  testSignature,
+} from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -154,13 +157,10 @@ async function succeededBuild(
       bundleLocation: `bundles/${seed}.zip`,
       status: 'SUCCEEDED',
       verifiedBuildLevel,
-      signature: {
-        artifactDigest: digest(seed),
-        signer: 'gcpkms://test/signer',
-        format: 'cosign',
-        bundle: { mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json' },
-        signedAt: FROZEN.toISOString(),
-      },
+      // A signature the pinned verifier will actually admit: §16's gate is
+      // real now, so a placeholder bundle would be refused here exactly as it
+      // would in production.
+      signature: testSignature(digest(seed), FROZEN.toISOString()),
     })
     .returning();
   return build!;

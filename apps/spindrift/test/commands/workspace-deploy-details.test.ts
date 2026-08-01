@@ -19,7 +19,10 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
+import {
+  SupplyChainHarness,
+  testSignature,
+} from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const manifest = await fixtureManifest();
@@ -508,16 +511,10 @@ describe('deployApp command', () => {
           'sha256:1111222233334444555566667777888899990000111122223333444455556666',
         status: 'SUCCEEDED',
         verifiedBuildLevel: 2,
-        signature: {
-          artifactDigest:
-            'sha256:1111222233334444555566667777888899990000111122223333444455556666',
-          signer: 'gcpkms://test/signer',
-          format: 'cosign',
-          bundle: {
-            mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
-          },
-          signedAt: FROZEN.toISOString(),
-        },
+        signature: testSignature(
+          'sha256:1111222233334444555566667777888899990000111122223333444455556666',
+          FROZEN.toISOString(),
+        ),
       })
       .returning();
 
@@ -587,16 +584,10 @@ describe('deployApp command', () => {
           'sha256:1111222233334444555566667777888899990000111122223333444455556666',
         status: 'SUCCEEDED',
         verifiedBuildLevel: 2,
-        signature: {
-          artifactDigest:
-            'sha256:1111222233334444555566667777888899990000111122223333444455556666',
-          signer: 'gcpkms://test/signer',
-          format: 'cosign',
-          bundle: {
-            mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
-          },
-          signedAt: FROZEN.toISOString(),
-        },
+        signature: testSignature(
+          'sha256:1111222233334444555566667777888899990000111122223333444455556666',
+          FROZEN.toISOString(),
+        ),
       })
       .returning();
 

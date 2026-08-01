@@ -14,6 +14,7 @@
  */
 import { z } from 'zod';
 import { apps } from '../db/schema.ts';
+import { digestSchema } from '../domain/digest.ts';
 import { type Command, ok } from './types.ts';
 
 /** A DNS-safe label: the name appears in canonical hostnames (§9). */
@@ -47,10 +48,7 @@ const vanityLabel = z
 const vesselRef = z.string().trim().min(1);
 
 /** A content digest of the uploaded bundle (§4: the bundle digest joins the receipt to its provenance). */
-const archiveDigest = z
-  .string()
-  .trim()
-  .regex(/^sha256:[0-9a-f]{64}$/, 'must be a sha256 digest');
+const archiveDigest = digestSchema;
 
 const common = {
   name: appName,

@@ -50,7 +50,10 @@ import {
   FakeDeployAdapter,
 } from '../harness/fakes/deploy-adapter.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
-import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
+import {
+  SupplyChainHarness,
+  testSignature,
+} from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
@@ -180,13 +183,7 @@ async function succeededBuild(componentId: string, seed: number) {
       bundleLocation: `bundles/${seed}.zip`,
       status: 'SUCCEEDED',
       verifiedBuildLevel: 2,
-      signature: {
-        artifactDigest: digest(seed),
-        signer: 'gcpkms://test/signer',
-        format: 'cosign',
-        bundle: { mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json' },
-        signedAt: FROZEN.toISOString(),
-      },
+      signature: testSignature(digest(seed), FROZEN.toISOString()),
     })
     .returning();
   return build!;

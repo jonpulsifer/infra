@@ -24,6 +24,7 @@
  * something an ordinary compiler emits.
  */
 import { z } from 'zod';
+import { digestSchema as digest } from '../../domain/digest.ts';
 
 /**
  * The prefix a report line starts with.
@@ -33,12 +34,6 @@ import { z } from 'zod';
  * a marker the runner's log processor may swallow.
  */
 export const BUILD_REPORT_MARKER = 'spindrift-result';
-
-/** A digest, in the only form anything here accepts. */
-const digest = z
-  .string()
-  .trim()
-  .regex(/^sha256:[0-9a-f]{64}$/, 'must be a sha256 digest');
 
 /**
  * What a runner reports.
