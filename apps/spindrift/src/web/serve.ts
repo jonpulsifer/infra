@@ -39,10 +39,14 @@ import { type StreamSocketData, streamWebSocket } from './streams.ts';
  */
 export const ENROLMENT_TOKEN_VAR = 'SPINDRIFT_ENROLMENT_TOKEN';
 
+import { initTelemetry, logInfo } from '../telemetry/index.ts';
+
 export async function start(
   client: Record<string, ClientRoute>,
   { development }: { development: boolean },
 ): Promise<void> {
+  initTelemetry('web');
+
   const db = createDb();
   const manifest = await loadStoredManifest(db);
   assertTrustedGatewayBoundary(manifest);
@@ -84,5 +88,8 @@ export async function start(
     websocket: streamWebSocket,
   });
 
-  console.log(`spindrift web → ${server.url} (${manifest.installation})`);
+  logInfo(`spindrift web → ${server.url} (${manifest.installation})`, {
+    url: String(server.url),
+    installation: manifest.installation,
+  });
 }

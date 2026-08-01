@@ -27,15 +27,31 @@ try {
   process.off('SIGTERM', stop);
 }
 
+import {
+  logError,
+  logInfo,
+  logWarn,
+  reconcilerErrorCounter,
+  reconcilerLoopCounter,
+} from '../telemetry/index.ts';
+
 function report(event: ReconcilerProcessEvent): void {
   if (event.type === 'failure') {
-    console.error(
+    reconcilerErrorCounter.add(1, { loop: event.loop });
+    logError(
       `spindrift reconciler → ${event.loop} loop failed; retrying in ${event.retryInMs}ms`,
       event.cause,
+      { loop: event.loop, retryInMs: event.retryInMs },
     );
   } else if (event.type === 'disabled') {
-    console.log(
+    logWarn(
       `spindrift reconciler → ${event.loop} loop disabled: ${event.reason}`,
+      { loop: event.loop, reason: event.reason },
     );
+  } else {
+    reconcilerLoopCounter.add(1, { loop: event.loop });
+    logInfo(`spindrift reconciler → ${event.loop} loop processed event`, {
+      loop: event.loop,
+    });
   }
 }
