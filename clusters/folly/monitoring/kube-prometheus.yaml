@@ -95,6 +95,7 @@ spec:
       additionalDataSources:
         - name: Loki
           type: loki
+          uid: loki
           isDefault: false
           access: proxy
           url: https://loki.${SECRET_DOMAIN}
@@ -104,6 +105,21 @@ spec:
             httpHeaderName1: "X-Scope-OrgID"
           secureJsonData:
             httpHeaderValue1: "1"
+        - name: Tempo
+          type: tempo
+          uid: tempo
+          isDefault: false
+          access: proxy
+          url: http://tempo.monitoring.svc.cluster.local:3200
+          orgId: 1
+          version: 1
+          jsonData:
+            tracesToLogs:
+              datasourceUid: loki
+              filterByTraceID: false
+              tags:
+                - key: pod
+                  value: pod
         - name: FlameBoss
           type: grafana-mqtt-datasource
           orgId: 1

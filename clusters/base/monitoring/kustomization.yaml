@@ -6,6 +6,9 @@ resources:
   - helm-repository-metrics-server.yaml
   - metrics-server.yaml
   - helm-repository-vector.yaml
-  - vector.yaml
   - helm-repository-open-telemetry.yaml
   - opentelemetry-collector.yaml
+  - opentelemetry-collector-servicemonitor.yaml
+  - grafana-dashboards
+  - helm-repository-grafana.yaml
+  - helm-repository-prometheus.yaml
