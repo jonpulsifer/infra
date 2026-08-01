@@ -33,7 +33,7 @@ spec:
     # two keys the chart had begun refusing — the declaration could satisfy the
     # chart or the process, never both, and the pods crashlooped on a manifest
     # the chart would not have rendered had it carried them.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:201b68bfeefcb394c3acf6459b7f00d9cb4753ee1566afdf4718931489485d6b
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:07ff8fa911dd199ef8399979793ee129963a6374ca927a5e75c5531673424131
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
