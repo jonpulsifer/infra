@@ -41,6 +41,7 @@ jobs:
       contents: write
       id-token: write
       packages: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
@@ -123,6 +124,7 @@ jobs:
           IMAGE_NAME: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
           MANIFESTS: ${{ toJson(matrix.manifests) }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mapfile -t targets < <(jq -r '.[]' <<<"$MANIFESTS")
@@ -161,6 +163,9 @@ jobs:
             exit 0
           fi
 
+          BRANCH_NAME="cd/update-${IMAGE_NAME}-digest"
+          git checkout -b "$BRANCH_NAME"
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Stage only the manifests this step edited. A blanket `git add .`
@@ -170,14 +175,15 @@ jobs:
           git add -- "${targets[@]}"
           git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
 
-          # Sibling matrix jobs push to main concurrently. Each owns different
-          # manifests, so a rejected push only needs replaying on top of theirs.
-          for attempt in 1 2 3 4 5; do
-            if git push; then
-              exit 0
-            fi
-            echo "push rejected (attempt ${attempt}/5); rebasing onto origin/main"
-            git pull --rebase origin main
-          done
-          echo "::error::could not push the ${IMAGE_NAME} digest update after 5 attempts"
-          exit 1
+          git push origin "$BRANCH_NAME" --force
+
+          if ! gh pr view "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}" \
+              --body "Automated image digest update for continuous delivery of ${IMAGE_NAME}." \
+              --head "$BRANCH_NAME" \
+              --base main
+          fi
+
+          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash || gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --merge
