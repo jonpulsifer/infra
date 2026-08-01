@@ -101,17 +101,16 @@ spec:
         # change what built it, and this is the only input to a zero-config
         # build that no digest covers.
         zeroConfigFrontend: ghcr.io/railwayapp/railpack-frontend:v0.35.0
+      # No `federation` key: §13's one auth mode is the `external_account`
+      # credential this chart renders from `serviceAccount.token` above, and the
+      # process reads its federation out of that file. Restating it here is a
+      # second copy to drift, which the chart refuses to render.
       cloud:
-        federation:
-          audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
-          tokenUrl: https://sts.googleapis.com/v1/token
-          tokenPath: /var/run/secrets/spindrift/gcp-token
-          impersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
         artifactsProject: trusted-builds
         homeVesselProject: bluenose
+      # No `installer` key: it named this chart, and nothing reads it.
       charts:
         app: packages/charts/spindrift-app
-        installer: packages/charts/spindrift
       github:
         clientId: Iv1.918d699f36ee7afc
         apiBaseUrl: https://api.github.com
