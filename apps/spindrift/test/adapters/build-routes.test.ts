@@ -771,6 +771,18 @@ describe('the BuildKit program', () => {
     expect(program).toContain(`--opt source='${FRONTEND}'`);
   });
 
+  test('applies §5’s unwrap before it applies the subpath', () => {
+    // The subpath is relative to the source root, and a repository tarball
+    // wraps the tree in one directory — so entering the subpath straight off
+    // the extraction root is what makes every repo build miss its Dockerfile.
+    expect(program).toContain('root="$workspace"');
+    expect(program).toContain(`cd "$root"/'apps/web'`);
+    expect(program).not.toContain(`cd "$workspace"/'apps/web'`);
+    // The same rule `archiveScope` applies: exactly one entry, and a directory.
+    expect(program).toContain('ls -A "$workspace" | wc -l');
+    expect(program).toContain('if [ -d "$only" ]');
+  });
+
   test('passes build arguments as build arguments', () => {
     expect(program).toContain(
       `--opt 'build-arg:PUBLIC_URL=https://app.example.test'`,
