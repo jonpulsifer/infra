@@ -10,7 +10,7 @@ import { logs, SeverityNumber } from '@opentelemetry/api-logs';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
@@ -32,7 +32,7 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
     return sdkInstance;
   }
 
-  const resource = new Resource({
+  const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: `${SERVICE_NAME}-${component}`,
     [ATTR_SERVICE_VERSION]: SERVICE_VERSION,
   });
@@ -54,7 +54,9 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
     exportIntervalMillis: 10000,
   });
 
-  const logRecordProcessor = new BatchLogRecordProcessor(logExporter);
+  const logRecordProcessor = new BatchLogRecordProcessor({
+    exporter: logExporter,
+  });
 
   sdkInstance = new NodeSDK({
     resource,
