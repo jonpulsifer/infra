@@ -29,7 +29,10 @@ import {
   GitHubActionsBuildRoute,
   reusableWorkflowRepository,
 } from '../../src/adapters/build/github-actions.ts';
-import { InClusterBuildRoute } from '../../src/adapters/build/in-cluster.ts';
+import {
+  InClusterBuildRoute,
+  JOB_LABEL,
+} from '../../src/adapters/build/in-cluster.ts';
 import {
   BUILD_REPORT_MARKER,
   encodeBuildReport,
@@ -501,7 +504,14 @@ function clusterRoute(options: FakeKubernetesOptions = {}): {
         {
           apiVersion: 'v1',
           kind: 'Pod',
-          metadata: { name: 'build-pod', namespace: 'builds' },
+          metadata: {
+            name: 'build-pod',
+            namespace: 'builds',
+            // The label the route selects the build's own pod by. The cluster
+            // filters on it, so a fixture without it is a pod no build would
+            // ever find its log through.
+            labels: { [JOB_LABEL]: 'spindrift-build-fixed' },
+          },
         },
       ],
     },

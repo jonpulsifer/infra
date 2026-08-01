@@ -307,6 +307,93 @@ describe('§6: phases come from the revision', () => {
   });
 });
 
+describe('the write is asynchronous, and the document is checked', () => {
+  test('apply survives the window in which the Service is not there yet', async () => {
+    // The `PATCH` answers with an Operation and the Service is created behind
+    // it, so a `GET` straight afterwards can come back `404`. That is the one
+    // window a *first* deploy is guaranteed to hit, so it is driven here
+    // rather than left to never happen.
+    const { api, adapter } = adapterFor({ createLatencyReads: 3 });
+    const { events, verdict } = await drain(adapter.apply(target(), desired()));
+
+    expect(verdict.phase).toBe('LIVE');
+    // An absent Service is "still applying", not a failure — so no second
+    // APPLYING lands on the timeline and nothing goes red while it is created.
+    const phases = events
+      .filter((event) => event.type === 'status')
+      .map((event) => (event.type === 'status' ? event.phase : ''));
+    expect(phases).toEqual(['APPLYING', 'WAITING', 'LIVE']);
+    // Three reads that found nothing, then the ones that found it.
+    expect(api.pathsOf('GET').length).toBeGreaterThan(3);
+  });
+
+  test('a write answers with an Operation, which is what a poll would need', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), desired()));
+
+    const write = api.requests.find((request) => request.method === 'PATCH');
+    expect(write?.url).toContain('allowMissing=true');
+    // The adapter discards the body today. The `name` is the handle an
+    // operation is polled by, so a fake without one could not tell the moment
+    // anything wanted to.
+    const operation = api.operations[0];
+    expect(operation?.name).toMatch(/\/operations\//);
+    expect(operation?.done).toBe(false);
+  });
+
+  test('a Service naming a field the schema does not define is refused', async () => {
+    // Google's protobuf-JSON parsers refuse an unknown member outright. The
+    // rendered document is the single thing standing between this product and
+    // a Cloud Run deploy, and every other test in this file asserts the real
+    // one is *accepted*; this asserts the check is real.
+    const api = new FakeCloudRun();
+    const refused = await api.fetch(
+      new Request(
+        `${api.endpoint}/v2/projects/${api.project}/locations/${api.region}/services/shop-web?allowMissing=true`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer federated-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ingress: 'INGRESS_TRAFFIC_ALL',
+            template: {
+              containers: [
+                { image: 'registry.example.test/shop@sha256:abc', cpu: '1' },
+              ],
+            },
+          }),
+        },
+      ),
+    );
+
+    expect(refused.status).toBe(400);
+    const body = (await refused.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('template.containers[0].cpu');
+  });
+
+  test('a label in a namespace the v2 API reserves is refused', async () => {
+    const api = new FakeCloudRun();
+    const refused = await api.fetch(
+      new Request(
+        `${api.endpoint}/v2/projects/${api.project}/locations/${api.region}/services/shop-web?allowMissing=true`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: 'Bearer federated-token',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            labels: { 'run.googleapis.com/launch-stage': 'beta' },
+          }),
+        },
+      ),
+    );
+    expect(refused.status).toBe(400);
+  });
+});
+
 describe('observe and destroy', () => {
   test('observe reports the digest the Service still carries', async () => {
     const { adapter } = adapterFor();
