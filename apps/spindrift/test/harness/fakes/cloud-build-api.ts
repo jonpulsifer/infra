@@ -91,6 +91,14 @@ export class FakeCloudBuild {
       authorization: request.headers.get('Authorization'),
     });
 
+    // Both services are authorized, and both refuse a request that is not.
+    // The header was recorded and never read, so a route that stopped sending
+    // it — or sent the wrong one — passed every test against a real API that
+    // would answer `401`.
+    if (request.headers.get('Authorization') !== `Bearer ${this.token()}`) {
+      return json(401, { error: 'unauthenticated' });
+    }
+
     if (url.origin === LOGS_HOST) return this.logs(body);
     if (url.origin !== BUILD_HOST) return json(404, { error: 'no such host' });
 
@@ -143,7 +151,20 @@ export class FakeCloudBuild {
   private logs(body: unknown): Response {
     if (this.options.breakLogs) return json(503, { error: 'log service down' });
 
-    const request = (body ?? {}) as { filter?: string; pageToken?: string };
+    const request = (body ?? {}) as {
+      filter?: string;
+      pageToken?: string;
+      resourceNames?: unknown;
+    };
+    // `entries.list` documents `resourceNames` as the parents to read from. A
+    // request without them is refused rather than answered, so a route that
+    // dropped the field would fail here rather than only in production.
+    if (
+      !Array.isArray(request.resourceNames) ||
+      request.resourceNames.length === 0
+    ) {
+      return json(400, { error: 'resourceNames is required' });
+    }
     const id = /build_id="([^"]+)"/.exec(request.filter ?? '')?.[1] ?? '';
     const build = this.builds.get(id);
     if (build === undefined) return json(200, { entries: [] });

@@ -119,6 +119,12 @@ export interface DeployView {
   readonly buildId: number;
   readonly componentId: string;
   readonly targetId: string;
+  /**
+   * The App's id, beside its name because only the id identifies it: `apps` has
+   * no unique constraint on `name`, so the redeploy button on this screen has to
+   * act on the id or it acts on whichever row shares the name.
+   */
+  readonly appId: string;
   readonly app: string;
   readonly component: string;
   readonly target: string;

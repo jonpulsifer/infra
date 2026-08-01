@@ -215,6 +215,12 @@ function WorkspaceScreen({
   >({ type: 'loading' });
   const [deploying, setDeploying] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
+  /**
+   * Bumped when the button started a Build rather than a Deploy. There is no
+   * deploy screen to send the operator to in that case, so the workspace they
+   * are already on re-reads itself and the new Build shows up in its activity.
+   */
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -245,7 +251,7 @@ function WorkspaceScreen({
     return () => {
       live = false;
     };
-  }, [appName]);
+  }, [appName, reloadToken]);
 
   const runtime =
     state.type === 'success' && state.workspace.runtime.kind === 'stream'
@@ -342,10 +348,22 @@ function WorkspaceScreen({
     setDeploying(true);
     setDeployError(null);
     try {
-      const result = await command('deployApp', { name: appName });
+      // By id where the workspace knows one: `apps` does not constrain `name`,
+      // and the command refuses a name two Apps answer to rather than guessing.
+      const result = await command('deployApp', {
+        name: state.workspace.appId ?? appName,
+      });
       if (result.ok) {
-        onNavigate(`/deploys/${result.value.deployId}`);
+        if (result.value.deployId === null) {
+          // A Build was started, so there is no deploy screen yet. Re-read the
+          // workspace rather than navigating somewhere that does not exist.
+          setReloadToken((token) => token + 1);
+        } else {
+          onNavigate(`/deploys/${result.value.deployId}`);
+        }
       } else {
+        // The sentence the command refused with, unedited — a disconnected
+        // Target, a signature that did not verify. Nothing is retried behind it.
         setDeployError(result.failure.message);
       }
     } catch (e: unknown) {
@@ -465,10 +483,21 @@ function DeployScreen({
     setRedeploying(true);
     setRedeployError(null);
     try {
-      const result = await command('deployApp', { name: state.deploy.app });
+      // The App's id, not its name: `apps` has no unique constraint on `name`,
+      // so redeploying by name would act on whichever row shares it.
+      const result = await command('deployApp', { name: state.deploy.appId });
       if (result.ok) {
-        onNavigate(`/deploys/${result.value.deployId}`);
+        if (result.value.deployId === null) {
+          // Nothing was deployable, so a Build started instead. The workspace is
+          // where a Build in flight is visible; this screen belongs to a deploy
+          // that does not exist yet.
+          onNavigate(`/apps/${state.deploy.appId}`);
+        } else {
+          onNavigate(`/deploys/${result.value.deployId}`);
+        }
       } else {
+        // Surfaced verbatim and acted on no further: a refused redeploy is a
+        // fact about this artifact and this Target, not a cue to build another.
         setRedeployError(result.failure.message);
       }
     } catch (e: unknown) {

@@ -132,7 +132,7 @@ async function liveDeploy(appId: string) {
     .values({
       componentId: component!.id,
       commit: '1111111111111111111111111111111111111111',
-      targetShape: 'kubernetes',
+      targetShape: 'image',
       artifactType: 'image',
       artifactDigest: `sha256:${'a'.repeat(64)}`,
       status: 'SUCCEEDED',

@@ -119,7 +119,7 @@ describe('build dispatch follow-ups', () => {
       .values({
         componentId: comp!.id,
         commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
-        targetShape: 'container',
+        targetShape: 'image',
         artifactType: 'image',
         status: 'RUNNING',
         dispatchId: dispatchId1,
@@ -183,7 +183,7 @@ describe('build dispatch follow-ups', () => {
       .values({
         componentId: comp!.id,
         commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
-        targetShape: 'container',
+        targetShape: 'image',
         artifactType: 'image',
         bundleDigest:
           'sha256:2222222222222222222222222222222222222222222222222222222222222222',
@@ -236,7 +236,7 @@ describe('build dispatch follow-ups', () => {
       await ctx.db.insert(builds).values({
         componentId: comp!.id,
         commit: `commit-${i}`.padEnd(40, '0'),
-        targetShape: `shape-${i}`,
+        targetShape: 'image',
         artifactType: 'image',
         status: 'RUNNING',
         leasedAt: ctx.clock.now(),
@@ -249,7 +249,7 @@ describe('build dispatch follow-ups', () => {
       .values({
         componentId: comp!.id,
         commit: 'new-commit'.padEnd(40, '0'),
-        targetShape: 'new-shape',
+        targetShape: 'image',
         artifactType: 'image',
         bundleDigest:
           'sha256:3333333333333333333333333333333333333333333333333333333333333333',
