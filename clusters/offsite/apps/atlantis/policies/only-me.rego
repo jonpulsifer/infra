@@ -7,6 +7,7 @@ atlantis_users := {
     "rowbutt",
     "renovate[bot]",
     "dependabot[bot]",
+    "github-actions[bot]",
 }
 
 allowed if {
