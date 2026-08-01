@@ -253,6 +253,38 @@ describe('the hosted build route', () => {
     expect(text(events)).toContain('exporting to image');
   });
 
+  test('the log is asked for as JSON, which is the only thing the host serves', async () => {
+    // The endpoint negotiates as JSON and answers with a redirect to a text
+    // blob, so asking for `text/plain` — the media type of the *answer* — is a
+    // `415` and a build that dispatched perfectly is recorded as failed. It
+    // shipped that way, and no test could see it until the fake negotiated too.
+    const { host, route } = hostedRoute();
+    const { result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('SUCCEEDED');
+    const read = host.requests.find((request) =>
+      request.path.includes('/actions/jobs/'),
+    );
+    expect(read?.accept).toBe('application/vnd.github+json');
+  });
+
+  test('a log the host will not serve fails the build without blaming the dispatch', async () => {
+    // The run was dispatched, correlated, and concluded green; only the text
+    // could not be fetched. Naming that `dispatch failed:` sends an operator to
+    // look for a refusal that is not there — but it is still a failure, because
+    // the artifact digest travels in the log and nowhere else (`report.ts`).
+    const { route } = hostedRoute({ actions: { logStatus: 500 } });
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') {
+      expect(result.reason).toBe('TARGET_UNREACHABLE');
+      expect(result.detail).toContain('could not be read');
+    }
+    expect(text(events)).toContain('could not read the log of job');
+    expect(text(events)).not.toContain('dispatch failed');
+  });
+
   test('step transitions arrive once each, not once per poll', async () => {
     const { route } = hostedRoute({ actions: { duration: 4 } });
     const { events } = await run(route.build(archiveSource(), spec));
