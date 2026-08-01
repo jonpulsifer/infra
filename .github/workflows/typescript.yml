@@ -40,7 +40,7 @@ jobs:
   validate:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
-    runs-on: infra-offsite
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write

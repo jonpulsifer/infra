@@ -47,7 +47,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: infra-offsite
+    runs-on: ubuntu-latest
     steps:
       - name: Read the build request
         id: request
