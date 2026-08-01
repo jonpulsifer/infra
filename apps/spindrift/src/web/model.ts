@@ -225,6 +225,11 @@ export interface ComponentView {
  */
 export interface WorkspaceView {
   readonly app: string;
+  readonly appId?: string;
+  readonly componentId?: string;
+  readonly targetId?: string;
+  readonly latestDeployId?: number;
+  readonly latestBuildId?: number;
   readonly target: string;
   readonly vessel: string;
   readonly prerequisitesMet: boolean;

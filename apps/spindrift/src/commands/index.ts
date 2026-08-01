@@ -16,6 +16,7 @@
  * named commands and arrive with the milestones that implement them.
  */
 
+export { deployApp } from './apps/deploy.ts';
 export { listApps } from './apps/list.ts';
 export { resolveComponentPlacement } from './apps/resolve-placement.ts';
 export { uploadArchive } from './apps/upload-archive.ts';

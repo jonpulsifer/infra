@@ -186,6 +186,11 @@ export const getAppWorkspace: Command<
 
   const workspace: WorkspaceView = {
     app: app.name,
+    appId: app.id,
+    componentId: primaryComponent?.id,
+    targetId: workspaceTarget?.id,
+    latestDeployId: latestDeploy?.id,
+    latestBuildId: primaryComponent?.builds[0]?.id,
     target: workspaceTarget?.name ?? 'none',
     vessel: app.vesselRef ?? 'none',
     prerequisitesMet: workspaceTarget
