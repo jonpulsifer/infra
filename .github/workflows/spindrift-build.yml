@@ -66,8 +66,18 @@ jobs:
             # §12 counts tags, so core sends every tag this push must carry and
             # the runner composes none of its own. Full references, because that
             # is what build-push-action's newline list takes.
+            #
+            # `// ["latest"]` because this file and the controller ship on
+            # different clocks: the caller pins with `uses: ./…`, a local
+            # reference resolving to the default branch's own commit, so a merge
+            # here reaches the next dispatch immediately while the controller
+            # image waits on a Flux rollout. A spec written before `tags`
+            # existed must therefore still build — and `:latest` is exactly what
+            # the bare destination meant to the reader of this file before it
+            # did. Absent the default, every dispatch in that window dies here,
+            # at the step before anything is recorded.
             printf 'tags<<SPINDRIFT_EOF\n'
-            read_key '.destination + ":" + .tags[]'
+            read_key '.destination + ":" + (.tags // ["latest"])[]'
             printf 'SPINDRIFT_EOF\n'
             printf 'buildArgs<<SPINDRIFT_EOF\n'
             read_key '.buildArgs | to_entries[] | "\(.key)=\(.value)"'
