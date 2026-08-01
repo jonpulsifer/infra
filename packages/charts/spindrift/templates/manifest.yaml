@@ -1,0 +1,28 @@
+{{/*
+§20's installation manifest, declared by the release.
+
+Without this the durable row is the only copy, and it can only ever be seeded:
+`loadStoredManifest` writes a declaration when one is present and otherwise
+reads the row back, and no command writes that row. A value corrected in code
+therefore cannot reach an installation that already has one, and a value nothing
+seeds correctly stays wrong forever. Declaring the document here puts it back
+under ordinary review — a manifest change is a pull request.
+
+Empty declares nothing, which stays a valid installation: the process falls back
+to the durable row exactly as it does today.
+*/}}
+{{- if .Values.manifest }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "spindrift.fullname" . }}-manifest
+  namespace: {{ include "spindrift.namespace" . }}
+  labels:
+    {{- include "spindrift.labels" . | nindent 4 }}
+data:
+  # The filename the process looks for. It is mounted at the directory so the
+  # key lands at the path `DEFAULT_MANIFEST_PATH` names.
+  manifest.yaml: |-
+    {{- toYaml .Values.manifest | nindent 4 }}
+{{- end }}
