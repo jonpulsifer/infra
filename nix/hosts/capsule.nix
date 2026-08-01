@@ -1,17 +1,12 @@
-{ lib, name, ... }:
+# capsule: NVMe-rooted Pi 5 running the other half of the lab's recursive DNS
+# pair plus the lab NTP server.
+{ lib, ... }:
 {
   imports = [
-    ../hardware/pi5
-    ../hardware/pi5/nvme-hat.nix
-    ../services/common.nix
+    ../profiles/pi5-nvme.nix
     ../services/coredns-sinkhole.nix
     ../services/ntp-server.nix
   ];
-
-  networking = {
-    hostName = name;
-    wireless.enable = lib.mkForce false;
-  };
 
   # Keep the labels already installed on the NVMe. The Pi 5 hardware module
   # normally derives these from `name`, but changing them during a hostname

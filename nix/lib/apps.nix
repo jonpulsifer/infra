@@ -1,62 +1,50 @@
+# `nix run` entry points for reaching the fleet over the tailnet.
+#
+#   nix run .        -- uptime      run on every deploy host, output prefixed
+#   nix run .#forge  -- journalctl  one host, with a pty
+#
+# Both resolve hosts through MagicDNS, so they only work from a machine on the
+# tailnet.
 {
   mkApps =
-    {
-      pkgs,
-      deployHosts,
-      nixosConfigurations,
-    }:
+    { pkgs, deployHosts }:
     let
+      fleet = import ./fleet.nix;
+
       mkApp = name: text: {
         type = "app";
         program = "${(pkgs.writeShellScriptBin name text)}/bin/${name}";
       };
 
-      hostNames = deployHosts;
-
-      # Generic SSH runner: nix run . -- <command>
-      # Runs on ALL hosts
-      sshApp = mkApp "ssh" ''
+      fanOut = mkApp "ssh" ''
         if [ -z "$1" ]; then
           echo "Usage: nix run . -- <command>"
           exit 1
         fi
 
-        # Colors
         GREEN='\033[0;32m'
-        NC='\033[0m' # No Color
+        NC='\033[0m'
 
-        HOSTS="${builtins.concatStringsSep " " hostNames}"
-
-        for HOST in $HOSTS; do
-          # Run in background to parallelize? User example implied sequence or at least grouped output.
-          # Sequential is cleaner for reading.
-          
-          # We use a subshell and sed to prefix output
-          # ssh -q: quiet mode
-          # -o ConnectTimeout=5: timeout after 5 seconds
-          # -t: force pseudo-terminal (might mess up prefixing if not careful, but needed for some interactive commands)
-          # However, for "nix run .# date", we probably don't need -t if we want to capture output.
-          # But if user runs "top", they need -t.
-          # Let's try without -t for the "run on all" case as it's likely for batch commands.
-          # If they want interactive, they should use the single host app.
-          
-          ${pkgs.openssh}/bin/ssh -q -o ConnectTimeout=5 "$HOST.pirate-musical.ts.net" "$@" 2>&1 | \
+        # Sequential and without a pty: this path is for batch commands whose
+        # output is read afterwards. Use `nix run .#<host>` for anything
+        # interactive.
+        for HOST in ${builtins.concatStringsSep " " deployHosts}; do
+          ${pkgs.openssh}/bin/ssh -q -o ConnectTimeout=5 "$HOST.${fleet.tailnet}" "$@" 2>&1 | \
             while IFS= read -r line; do
               echo -e "''${GREEN}[$HOST]:''${NC} $line"
             done
         done
       '';
 
-      # Host specific runners: nix run .#<host> -- <command>
-      hostApps = pkgs.lib.genAttrs deployHosts (
+      perHost = pkgs.lib.genAttrs deployHosts (
         name:
         mkApp "ssh-${name}" ''
-          exec ${pkgs.openssh}/bin/ssh -o ConnectTimeout=5 -t "${name}.pirate-musical.ts.net" "$@"
+          exec ${pkgs.openssh}/bin/ssh -o ConnectTimeout=5 -t "${name}.${fleet.tailnet}" "$@"
         ''
       );
     in
     {
-      default = sshApp;
+      default = fanOut;
     }
-    // hostApps;
+    // perHost;
 }

@@ -1,27 +1,7 @@
-{ config, name, ... }:
+# homepi4: kiosk Pi 4 on the hidden lab SSID.
+{ ... }:
 {
-  imports = [
-    ../hardware/pi4
-    ../services/common.nix
-    ../services/iperf3.nix
-    ../services/kiosk.nix
-  ];
+  imports = [ ../profiles/pi4-kiosk.nix ];
 
-  networking = {
-    hostName = name;
-    wireless = {
-      enable = true;
-      networks = {
-        lab = {
-          hidden = true;
-        };
-      };
-    };
-  };
-
-  services.kiosk = {
-    enable = true;
-    container = false;
-    url = "https://hub.lolwtf.ca";
-  };
+  networking.wireless.networks.lab.hidden = true;
 }

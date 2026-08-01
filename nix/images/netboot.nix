@@ -8,7 +8,6 @@
   imports = [
     (modulesPath + "/installer/netboot/netboot-minimal.nix")
     ../hardware/x86
-    ../services/common.nix
   ];
 
   users.users = {

@@ -27,7 +27,7 @@ let
   wslEnv = lib.optionalString isWsl ''WSL_DISTRO_NAME="''${WSL_DISTRO_NAME:-NixOS}" '';
   preserveEnv = "HOME,MISE_YES" + lib.optionalString isWsl ",WSL_DISTRO_NAME";
 in
-lib.mkIf (user.isNormalUser or false) {
+lib.mkIf (config.homelab.fleet.miseDotfiles && (user.isNormalUser or false)) {
   system.activationScripts.miseDotfiles = {
     deps = [
       "users"

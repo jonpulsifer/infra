@@ -69,25 +69,43 @@
           inherit lib nixosSystem inputs;
         })
         mkHost
-        mkImage
         ;
 
-      deployHosts = [
-        "optiplex"
-        "riptide"
-        "shale"
-        "oldschool"
-        "retrofit"
-        "cloudpi4"
-        "homepi4"
-        "weatherpi4"
-        "capsule"
-        "forge"
-        "oldboy"
-        "spore"
-        "radiopi0"
-        "blinkypi0"
-      ];
+      # The one list. Everything below is derived from it — see nix/hosts/default.nix.
+      registry = import ./nix/hosts;
+
+      isHost = entry: (entry.kind or "host") == "host";
+      deployHosts = lib.attrNames (lib.filterAttrs (_: isHost) registry);
+
+      # Cross-host wiring: edges that belong to neither host alone because they
+      # need a derivation from the other. Kept here, where both configurations
+      # are in scope, rather than split across two host files.
+      crossHostModules = {
+        # Spore signs and serves rackpi5's RAM-boot image for forge's EEPROM
+        # fallback path. See nix/hosts/spore.nix and nix/hosts/rackpi5.nix.
+        spore = [
+          {
+            services.spore.nativeBootTargets.rackpi5 = {
+              package = nixosConfigurations.rackpi5.config.system.build.piBootImg;
+              signingKey = "/var/lib/pi-boot-sign/private.pem";
+              httpPath = "/rackpi5-ram/";
+            };
+          }
+        ];
+      };
+
+      nixosConfigurations = lib.mapAttrs (
+        name: entry:
+        mkHost name {
+          system = entry.system or "x86_64-linux";
+          tags = entry.tags or [ ];
+          baseline = entry.baseline or (if isHost entry then "fleet" else "base");
+          modules = [
+            (entry.module or (./nix/hosts + "/${name}.nix"))
+          ]
+          ++ (crossHostModules.${name} or [ ]);
+        }
+      ) registry;
 
       legacyPackages = forAllSystems (
         system:
@@ -100,225 +118,107 @@
         }
       );
 
-      nixosConfigurations =
+      # An entry's artifact is published under `packageSystem`, which for the
+      # aarch64 Pis is deliberately x86_64-linux: those sdImage derivations are
+      # pinned to aarch64 internally (each Pi's nixosSystem is called with
+      # system = "aarch64-linux"), and the x86_64 aliases are the image-builder
+      # workflow's interface. radiopi0/blinkypi0 are the exception — they are
+      # cross-compiled, so their build platform genuinely has to be the machine
+      # running `nix build`.
+      packagesFor =
+        system:
+        lib.mapAttrs (name: entry: nixosConfigurations.${name}.config.system.build.${entry.artifact}) (
+          lib.filterAttrs (
+            _: entry: entry ? artifact && (entry.packageSystem or "x86_64-linux") == system
+          ) registry
+        );
+
+      # Eval-time assertions over the whole fleet: this is where a cross-host
+      # coupling gets stated instead of left to convention. They run inside
+      # `nix flake check` in seconds and need no builder and no hardware.
+      fleetChecks =
+        pkgs:
         let
-          # rackpi5 is the minimal image-only source for spore's native-boot
-          # publisher. Forge's EEPROM keeps this signed HTTP/RAM artifact as
-          # its fallback path.
-          rackpi5Configuration = mkHost "rackpi5" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/rackpi5.nix ];
-          };
+          ok = name: pkgs.runCommand "check-${name}" { } "touch $out";
+          require =
+            name: cond: message:
+            if cond then ok name else throw "check '${name}' failed: ${message}";
+
+          configs = lib.mapAttrs (_: c: c.config) nixosConfigurations;
+          k8sHosts = lib.filterAttrs (_: c: c.services.k8s.enable or false) configs;
         in
         {
-          optiplex = mkHost "optiplex" {
-            role = "control-plane";
-            tags = [ "folly" ];
-            clusterCa = {
-              enable = true;
-            };
-            imports = [
-              ./nix/system/tailscale-disable.nix
-              ./nix/system/sops.nix
-            ];
-            extraConfig = {
-              homelab.disko.device = "/dev/sda";
-              sops.defaultSopsFile = ./nix/secrets/optiplex.sops.yaml;
-              sops.secrets."k8s-sa-signing-key" = {
-                owner = "kubernetes";
-                group = "kubernetes";
-                mode = "0400";
-                restartUnits = [
-                  "kube-apiserver.service"
-                  "kube-controller-manager.service"
-                ];
-              };
-              sops.secrets."k8s-cluster-ca-key" = {
-                owner = "cfssl";
-                group = "cfssl";
-                mode = "0400";
-                path = "/var/lib/cfssl/ca-key.pem";
-                restartUnits = [ "cfssl.service" ];
-              };
-            };
-          };
-          riptide = mkHost "riptide" {
-            tags = [ "folly" ];
-            clusterCa = {
-              enable = true;
-            };
-            imports = [
-              ./nix/system/tailscale-disable.nix
-            ];
-            extraConfig.homelab.disko.device = "/dev/nvme0n1";
-          };
-          shale = mkHost "shale" {
-            tags = [ "folly" ];
-            clusterCa = {
-              enable = true;
-            };
-            imports = [
-              ./nix/system/tailscale-disable.nix
-            ];
-            extraConfig.homelab.disko.device = "/dev/sda";
-          };
+          # Every configuration still evaluates. Naming it as a check makes it
+          # something you can run on its own, not just a side effect of
+          # `nix flake check` walking nixosConfigurations.
+          fleet-hosts-evaluate = pkgs.runCommand "check-fleet-hosts-evaluate" {
+            drvPaths = lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (_: c: c.config.system.build.toplevel.drvPath) nixosConfigurations
+            );
+          } "touch $out";
 
-          oldschool = mkHost "oldschool" {
-            tags = [ "offsite" ];
-            imports = [
-              ./nix/system/quiker.nix
-              ./nix/system/tailscale-disable.nix
-              ./nix/system/sops.nix
-              ./nix/services/yarr.nix
-            ];
-            extraConfig = {
-              virtualisation.docker.enable = true;
-              homelab.disko.device = "/dev/sda";
-              # 200G root (default is 100G) — leaves headroom for the harmonia
-              # binary cache + remote-builder role on top of docker/runner/yarr.
-              homelab.disko.rootSize = "200G";
-              sops.defaultSopsFile = ./nix/secrets/oldschool.sops.yaml;
-              # harmonia's binary-cache signing key (public half committed at
-              # nix/secrets/oldschool-harmonia-cache.pub); wired into
-              # services.harmonia in the deploy-harmonia ticket.
-              sops.secrets."harmonia-cache-key" = { };
-            };
-          };
-          retrofit = mkHost "retrofit" {
-            tags = [ "offsite" ];
-            role = "control-plane";
-            imports = [
-              ./nix/system/tailscale-disable.nix
-              ./nix/system/sops.nix
-            ];
-            extraConfig = {
-              homelab.disko.device = "/dev/sda";
-              sops.defaultSopsFile = ./nix/secrets/retrofit.sops.yaml;
-              sops.secrets."k8s-sa-signing-key" = {
-                owner = "kubernetes";
-                group = "kubernetes";
-                mode = "0400";
-                restartUnits = [
-                  "kube-apiserver.service"
-                  "kube-controller-manager.service"
-                ];
-              };
-            };
-          };
+          # The repo-managed cluster CA consumes Terraform PKI outputs by path.
+          # Nix path interpolation is lazy, so a missing cert for a cluster that
+          # has not turned clusterCa on yet fails nothing until the day it does.
+          k8s-cluster-ca-certs =
+            let
+              missing = lib.unique (
+                lib.concatMap (
+                  c:
+                  let
+                    net = c.services.k8s.network;
+                  in
+                  lib.filter (f: !builtins.pathExists (./terraform/pki/certs + "/${f}")) [
+                    "${net}-ca.pem"
+                    "${net}-ca-bundle.pem"
+                    "${net}-sa-signer.pem"
+                  ]
+                ) (lib.attrValues (lib.filterAttrs (_: c: c.services.k8s.clusterCa.enable) k8sHosts))
+              );
+            in
+            require "k8s-cluster-ca-certs" (missing == [ ])
+              "services.k8s.clusterCa is enabled for a cluster whose Terraform PKI outputs are missing from terraform/pki/certs: ${lib.concatStringsSep ", " missing}";
 
-          cloudpi4 = mkHost "cloudpi4" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/cloudpi4.nix ];
-          };
-          homepi4 = mkHost "homepi4" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/homepi4.nix ];
-          };
-          weatherpi4 = mkHost "weatherpi4" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/weatherpi4.nix ];
-          };
-          capsule = mkHost "capsule" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/capsule.nix ];
-          };
-          rackpi5 = rackpi5Configuration;
-          forge = mkHost "forge" {
-            system = "aarch64-linux";
-            tags = [ "lab-host" ];
-            modules = [
-              ./nix/system/sops.nix
-              ./nix/hosts/forge.nix
-              (
-                { config, ... }:
-                {
-                  sops.defaultSopsFile = ./nix/secrets/forge.sops.yaml;
-                  # harmonia's binary-cache signing key. Public half is
-                  # committed in the clear at nix/secrets/forge-harmonia-cache.pub
-                  # so clients can pin it in their `trusted-public-keys`.
-                  sops.secrets."harmonia-cache-key" = { };
-                  sops.secrets."tailscale-auth-key" = { };
+          # A control-plane node signs service-account tokens with a key that
+          # only sops delivers; without the secret the apiserver unit has
+          # nothing to read.
+          k8s-control-plane-sa-signing-key =
+            let
+              missing = lib.attrNames (
+                lib.filterAttrs (_: c: !((c.sops.secrets or { }) ? "k8s-sa-signing-key")) (
+                  lib.filterAttrs (_: c: c.services.k8s.role == "control-plane") k8sHosts
+                )
+              );
+            in
+            require "k8s-control-plane-sa-signing-key" (missing == [ ])
+              "control-plane nodes without sops.secrets.\"k8s-sa-signing-key\": ${lib.concatStringsSep ", " missing}";
 
-                  services.tailscale = {
-                    authKeyFile = config.sops.secrets."tailscale-auth-key".path;
-                    authKeyParameters = {
-                      ephemeral = false;
-                      preauthorized = true;
-                    };
-                  };
-                }
-              )
-            ];
-          };
-          spore = mkHost "spore" {
-            system = "aarch64-linux";
-            modules = [
-              ./nix/hosts/spore.nix
-              {
-                services.spore.nativeBootTargets.rackpi5 = {
-                  package = rackpi5Configuration.config.system.build.piBootImg;
-                  signingKey = "/var/lib/pi-boot-sign/private.pem";
-                  httpPath = "/rackpi5-ram/";
-                };
-              }
-            ];
-          };
-
-          # armv6l Pi Zero W: no native builder/cache exists for this arch, so
-          # this is cross-compiled (nix/hardware/pi0.nix sets nixpkgs.crossSystem)
-          # on forge, hence the aarch64-linux system below matching its native
-          # architecture.
-          radiopi0 = mkHost "radiopi0" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/radiopi0.nix ];
-          };
-          # Same board family as radiopi0 (Pi Zero W, armv6l), same cross-build
-          # story -- but the physical device is currently unplugged, so this
-          # config is derived from docs/pages/Hosts___blinkypi0.md and mirrors
-          # radiopi0.nix rather than being verified against live hardware.
-          blinkypi0 = mkHost "blinkypi0" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/blinkypi0.nix ];
-          };
-
-          oldboy = mkHost "oldboy" {
-            tags = [ "gcp" ];
-            modules = [ ./nix/hosts/oldboy.nix ];
-          };
-
-          wsl = mkImage ./nix/images/wsl.nix;
-          iso = mkImage ./nix/images/iso.nix;
-          gce = mkImage ./nix/images/gce.nix;
-          container = mkImage ./nix/images/container.nix;
-          netboot = mkImage ./nix/images/netboot.nix;
+          # Two normal users sharing a uid silently breaks file ownership on
+          # the NFS exports every cluster host mounts.
+          fleet-unique-uids =
+            let
+              clashing = lib.attrNames (
+                lib.filterAttrs (
+                  _: c:
+                  let
+                    uids = lib.mapAttrsToList (_: u: u.uid) (
+                      lib.filterAttrs (_: u: u.isNormalUser && u.uid != null) c.users.users
+                    );
+                  in
+                  lib.length (lib.unique uids) != lib.length uids
+                ) configs
+              );
+            in
+            require "fleet-unique-uids" (
+              clashing == [ ]
+            ) "hosts with two normal users sharing a uid: ${lib.concatStringsSep ", " clashing}";
         };
     in
     {
       inherit nixosConfigurations;
 
       packages = {
-        # sdImage derivations are pinned to aarch64-linux internally (each
-        # Pi's nixosSystem is called with system = "aarch64-linux" above).
-        # These x86_64 aliases remain the image-builder workflow interface;
-        # interactive ARM host builds target nixosConfigurations directly and
-        # run on forge.
-        x86_64-linux = {
-          cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
-          homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
-          weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
-          capsule = nixosConfigurations.capsule.config.system.build.sdImage;
-          # Legacy: spore's rackpi5 native-boot publisher still signs boot.img
-          # off this derivation for forge's EEPROM fallback.
-          rackpi5 = nixosConfigurations.rackpi5.config.system.build.piBootImg;
-          # Forge's installable NVMe image.
-          forge = nixosConfigurations.forge.config.system.build.sdImage;
-          spore = nixosConfigurations.spore.config.system.build.sdImage;
-
-          iso = nixosConfigurations.iso.config.system.build.isoImage;
-          wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
-          container = nixosConfigurations.container.config.system.build.tarball;
-          gce = nixosConfigurations.gce.config.system.build.googleComputeImage;
-          oldboy = nixosConfigurations.oldboy.config.system.build.googleComputeImage;
+        x86_64-linux = packagesFor "x86_64-linux" // {
           netboot = legacyPackages.x86_64-linux.symlinkJoin {
             name = "netboot";
             paths = with nixosConfigurations.netboot.config.system.build; [
@@ -329,16 +229,13 @@
             preferLocalBuild = true;
           };
         };
-
-        # radiopi0's armv6l target is cross-compiled, not natively built, so
-        # its build platform (aarch64-linux, matching forge) actually needs to
-        # be the system running `nix build`, unlike the x86_64-linux aliases
-        # above.
-        aarch64-linux = {
-          radiopi0 = nixosConfigurations.radiopi0.config.system.build.sdImage;
-          blinkypi0 = nixosConfigurations.blinkypi0.config.system.build.sdImage;
-        };
+        aarch64-linux = packagesFor "aarch64-linux";
       };
+
+      # Scoped to x86_64-linux: the assertions are platform-independent, and
+      # every machine that runs `nix flake check` (CI and dev shells alike) is
+      # x86_64. Running them on aarch64 too would only demand a second builder.
+      checks.x86_64-linux = fleetChecks legacyPackages.x86_64-linux;
 
       inherit legacyPackages;
 
@@ -354,7 +251,7 @@
         system:
         (import ./nix/lib/apps.nix).mkApps {
           pkgs = legacyPackages.${system};
-          inherit deployHosts nixosConfigurations;
+          inherit deployHosts;
         }
       );
     };

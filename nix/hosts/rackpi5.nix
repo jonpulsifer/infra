@@ -29,7 +29,6 @@
   lib,
   pkgs,
   modulesPath,
-  name,
   ...
 }:
 let
@@ -45,13 +44,19 @@ let
   '';
 in
 {
+  # Deliberately not the fleet baseline: this is a stateless RAM-booted image
+  # whose squashfs is fetched over HTTP on every boot, so it takes only the
+  # floor (../profiles/base.nix, applied by mkHost) plus the two modules its
+  # recovery path actually needs — ssh.nix for sshd and user.nix for the
+  # authorized keys the initrd sshd below reuses.
   imports = [
     (modulesPath + "/installer/netboot/netboot-minimal.nix")
     ../hardware/pi5/base.nix
+    ../system/ssh.nix
+    ../system/user.nix
   ];
 
   networking = {
-    hostName = name;
     wireless.enable = lib.mkForce false;
     useDHCP = lib.mkForce true;
   };
