@@ -21,7 +21,7 @@ Validate by change area — running everything is slow and usually unnecessary.
 | Changed | Run |
 | --- | --- |
 | `terraform/**`, `clusters/*/bootstrap/**` | `mise run tf:validate`, `mise run tf:fmt` |
-| `clusters/**` | `mise run k8s:render-apps` (what CI runs), or `kubectl kustomize clusters/<site>/<category>` |
+| `clusters/**`, `packages/charts/**` | `mise run k8s:render-apps` (what CI runs), or `kubectl kustomize clusters/<site>/<category>` |
 | `nix/**`, `flake.nix` | `mise run nix:check`; `HOST=<host> mise run nix:build` for one closure |
 | `docs/**`, `apps/wiki/**` | `mise run docs:build`, then `mise run docs:check` |
 | TypeScript under `apps/`, `packages/` | `mise run ts:check` |
@@ -32,6 +32,11 @@ Validate by change area — running everything is slow and usually unnecessary.
   particular the OpenTofu binary is `tofu`, never `terraform`.
 - For `clusters/base/` changes, render **both** clusters — they are not
   symmetric and a base change can render on folly and fail on offsite.
+- `k8s:render-apps` also runs `helm template` over every in-repo chart a
+  rendered HelmRelease names, with that release's `.spec.values`. A chart guard
+  or template error is a failed task here rather than a failed Flux reconcile,
+  so run it for a chart edit as well as a manifest edit. Charts from a
+  HelmRepository or OCIRepository are named and skipped, not silently passed.
 - `nix flake check` evaluates every host and is slow. When iterating on one
   host, build just that closure.
 - `mise run docs:check` enforces the docs contract: every wikilink resolves,

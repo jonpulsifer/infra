@@ -21,6 +21,7 @@ kustomize = "latest"
 shellcheck = "latest"
 shfmt = "latest"
 sops = "latest"
+yq = "latest"
 # tofu is the apply-path binary (Atlantis runs ATLANTIS_DEFAULT_TF_DISTRIBUTION=opentofu);
 # terraform stays installed for anything not yet migrated.
 opentofu = "1.12.5"
@@ -52,7 +53,7 @@ description = "Test validation-impact routing"
 run = "bash .github/scripts/validation-impact_test.sh"
 
 [tasks."k8s:render-apps"]
-description = "Render shared folly and offsite app overlays"
+description = "Render shared folly and offsite app overlays, then template the in-repo charts their HelmReleases name"
 run = "bash .github/scripts/render-cluster-apps.sh"
 
 [tasks."tf:init"]
