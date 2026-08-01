@@ -85,6 +85,7 @@ for dockerfile in "${dockerfiles[@]}"; do
     file=$(jq -r '.file        // ""' <<<"$entry")
     build_args=$(jq -r '."build-args" // ""' <<<"$entry")
     platforms=$(jq -r '.platforms   // ""' <<<"$entry")
+    deploy_manifests=$(jq -c --arg img "$image" '.deploy[$img] // []' "$manifest")
 
     should_build="$rebuild_all"
     if [[ "$should_build" != "true" ]]; then
@@ -100,8 +101,8 @@ for dockerfile in "${dockerfiles[@]}"; do
     if [[ "$should_build" == "true" ]]; then
       includes=$(jq -cn --argjson a "$includes" \
         --arg img "$image" --arg ctx "$context" --arg f "$file" --arg ba "$build_args" \
-        --arg p "$platforms" \
-        '$a + [{"image":$img,"context":$ctx,"file":$f,"build-args":$ba,"platforms":$p}]')
+        --arg p "$platforms" --argjson m "$deploy_manifests" \
+        '$a + [{"image":$img,"context":$ctx,"file":$f,"build-args":$ba,"platforms":$p,"manifests":$m}]')
     fi
   done
 done

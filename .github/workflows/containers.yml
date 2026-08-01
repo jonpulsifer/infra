@@ -38,7 +38,7 @@ jobs:
     if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
       packages: write
     strategy:
@@ -117,3 +117,28 @@ jobs:
           ignore-unfixed: true
           exit-code: 0
           severity: CRITICAL,HIGH
+      - name: Update manifest digest for selective continuous delivery
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.manifests != '[]' && matrix.manifests != ''
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          MANIFESTS: ${{ toJson(matrix.manifests) }}
+        run: |
+          set -euo pipefail
+          updated=false
+          mapfile -t targets < <(jq -r '.[]' <<<"$MANIFESTS")
+          for manifest in "${targets[@]}"; do
+            if [ -f "$manifest" ]; then
+              echo "Updating digest for $IMAGE_NAME in $manifest..."
+              sed -i -E "s|(@sha256:)[0-9a-f]{64}|\1${DIGEST}|g" "$manifest"
+              updated=true
+            fi
+          done
+
+          if [ "$updated" = "true" ] && ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
+            git push
+          fi

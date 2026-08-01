@@ -13,6 +13,30 @@
     "spindrift-demo",
     "spindrift-verifier"
   ],
+  "deploy": {
+    "actions-runner": [
+      "clusters/base/apps/arc/infra.yaml"
+    ],
+    "ai-agents": [
+      "clusters/offsite/apps/dave.yaml"
+    ],
+    "atlantis": [
+      "clusters/offsite/apps/atlantis/helm-release.yaml"
+    ],
+    "hub": [
+      "clusters/offsite/apps/hub/helm-release.yaml"
+    ],
+    "netbench": [
+      "clusters/base/apps/iperf3/iperf3-daemonset.yaml",
+      "clusters/folly/apps/netbench/03-deployment.yaml"
+    ],
+    "rackstat": [
+      "clusters/folly/apps/tronbyt/07-rackstat-deployment.yaml"
+    ],
+    "spindrift": [
+      "clusters/offsite/apps/spindrift/helm-release.yaml"
+    ]
+  },
   "ignore": [
     "bashcurljq",
     "kernel-builder",
