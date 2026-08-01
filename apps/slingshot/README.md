@@ -1,155 +1,124 @@
-# Slingshot - Webhook Testing Platform
+# Slingshot — Webhook Testing Platform
 
-A modern, serverless webhook testing platform built with Next.js 16, Google Cloud Firestore, and distributed serverless primitives.
+Capture, inspect, diff, and replay webhooks. Next.js 16 App Router over Google
+Cloud Firestore.
 
 ## Features
 
-- 🚀 **Serverless-first** — Runs on Vercel Edge with no dedicated servers to manage
-- ⚡ **Live stream** — Real-time webhook ingestion with SSE + local cache hydration
-- 🔍 **Rich inspection** — Headers, body, response, and raw payload views with syntax highlighting
-- 🟥🟩 **Color-coded diffs** — Inline and side-by-side diffs to compare any two events
-- 🎯 **Replay safely** — Server-side SSRF protection: domain allowlist plus resolved-IP validation on the initial request and every redirect hop (`lib/outgoing-webhook-sender.ts`)
-- 🔒 **Rate limiting** — 5 req/sec per project to prevent congestion
-- 📦 **Single-file storage** — Circular buffer per project with etag-based freshness polling
-- 🧭 **Quick copy** — One-click cURL/HTTPie/Burp export for fast debugging
-- 📱 **Responsive UI** — Resizable panels and keyboard-friendly interactions
+- **Capture** — every HTTP method, headers, body, IP, and user agent
+- **Live feed** — etag-based freshness polling with a local-first cache
+- **Inspect** — headers, body, response, and raw payload with syntax highlighting
+- **Diff** — inline and side-by-side comparison of any two events
+- **Replay safely** — server-side SSRF protection: domain allowlist plus
+  resolved-IP validation on the initial request and every redirect hop
+- **Rate limiting** — 5 req/sec per project
+- **Circular buffer** — the newest 100 webhooks per project
 
 ## Architecture
 
-### Technology Stack
+### Storage
 
-- **Framework**: Next.js 16 (App Router, React Server Components)
-- **Storage**: Google Cloud Firestore (NoSQL database)
-- **Routing**: Middleware-based slug-to-ID resolution
-- **Rate Limiting**: In-memory sliding window (5 RPS)
-- **Real-time**: Server-Sent Events with polling fallback
-- **UI**: ShadCN UI, Tailwind CSS, React Resizable Panels, Prism highlighting
+One module owns persistence: `lib/project-store.ts` declares the interface, and
+two adapters satisfy it — `lib/project-store-firestore.ts` in production and
+`lib/project-store-memory.ts` in the tests.
 
-### Key Design Decisions
+Document model:
 
-1. **Single-File Storage**: All webhooks for a project are stored in one JSON file (`projects/{id}/webhooks.json`) with a circular buffer limit of 100 webhooks
-2. **Freshness Polling**: Uses ETag-based change detection (`lib/webhook-feed.ts`) so clients can poll without re-downloading unchanged data (no Redis required)
-3. **Server-Side SSRF Protection**: Webhook replay/test-send goes through `lib/outgoing-webhook-sender.ts`, which validates the domain allowlist and resolved IP before the initial request and on every redirect hop
-4. **Google Cloud Firestore**: Uses Firestore with Workload Identity Federation for authentication
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+ and Bun
-- Google Cloud Project with Workload Identity Federation configured
-- Firestore database with appropriate permissions
-
-### Installation
-
-1. Install dependencies:
-
-```bash
-bun install
+```
+slingshot/{slug}              project, counters, and version markers
+slingshot/{slug}/webhooks/*   the circular buffer
+slingshot/_meta               global counters
 ```
 
-2. Set up environment variables:
+Appending a webhook, evicting past the cap, and updating the counters happen in
+a single transaction, so `webhookCount` always matches the number of documents
+retained and `_meta.totalWebhooks` stays equal to the sum of the per-project
+counts.
 
-Create a `.env.local` file:
+### Freshness
 
-```env
-# Optional: Use NanoID instead of slug as project ID (default: false)
-USE_NANOID=false
-```
+`webhooksUpdatedAt` on the project document is the feed etag; `_meta.updatedAt`
+is the stats etag. Both are millisecond timestamps stamped on every write.
+Clients poll `pollFeedAction` with the etag they hold and get data back only
+when it has moved. This is staleness detection, not locking — a client cannot
+use an etag to prevent a write, only to skip a download.
 
-**Note:** Authentication uses Workload Identity Federation when deployed on Vercel. For local development, you may need to set up Application Default Credentials or use a service account key.
+### Feed state
 
-3. Run the development server:
+`hooks/use-webhook-feed.ts` owns the client-side feed: the localStorage cache,
+the 2-second poll, and the selection. Components render what it returns.
 
-```bash
-bun run dev
-```
+### Slugs
 
-4. Open [http://localhost:3000](http://localhost:3000)
+`lib/slug.ts` owns both the shape rules and the reserved names. The ingest
+route, the project page, the create form, and the nav all ask it — there is no
+second list.
 
-## Usage
+### Outgoing requests
 
-### Creating a Project
+`lib/request-draft.ts` holds the pure conversions between key/value fields and
+raw JSON, and resolves a draft into the request that gets sent.
+`sendOutgoingWebhookAction` is the only path that sends one, and it goes through
+`lib/outgoing-webhook-sender.ts` for the SSRF checks.
 
-1. Navigate to the home page
-2. Enter a project slug (e.g., `my-webhook-test`)
-3. Click "Create Project"
-4. You'll be redirected to your project page
+### Authentication
 
-### Receiving Webhooks
+Workload Identity Federation on Vercel; Application Default Credentials
+elsewhere. Reads degrade to empty results when credentials are unavailable so a
+build without them still completes.
 
-Your webhook endpoint will be:
-```
-POST /api/webhook/{projectId}
-```
-
-You can send any HTTP request (GET, POST, PUT, PATCH, DELETE) to this endpoint. The platform will:
-- Capture all headers
-- Store the request body
-- Record timestamp, IP, and user agent
-- Display it in real-time via SSE
-
-### Features
-
-- **View Webhooks**: Click on any webhook in the list to see full details
-- **Inspect Headers**: View all request headers in a searchable table
-- **View Body**: Pretty-printed JSON with syntax highlighting
-- **Copy as cURL**: One-click export to cURL command
-- **Resend**: Replay webhooks to any target URL (client-side, SSRF-safe)
-- **Compare**: Inline and side-by-side diffs with color-coded changes
-- **Clear History**: Delete all webhooks for a project
-
-## Project Structure
+## Layout
 
 ```
 apps/slingshot/
 ├── app/
-│   ├── api/
-│   │   ├── projects/          # Project creation
-│   │   ├── webhook/[id]/      # Webhook ingestion
-│   │   ├── webhooks/[id]/     # Webhook CRUD
-│   │   └── stream/[id]/       # SSE endpoint
-│   ├── projects/[id]/         # Project viewer page
-│   └── page.tsx                # Home page
+│   ├── api/[slug]/         webhook ingestion
+│   ├── api/healthz/        health check
+│   ├── [slug]/             project page
+│   ├── cache/              local cache inspector
+│   ├── environment/        environment variables
+│   ├── gcp/                Firestore collections
+│   ├── jwt-decoder/        JWT decoder
+│   └── request-headers/    request header inspector
 ├── components/
-│   ├── create-project-form.tsx
-│   ├── webhook-viewer.tsx
-│   ├── webhook-list.tsx
-│   ├── webhook-detail.tsx
-│   └── webhook-diff.tsx
-├── lib/
-│   ├── storage.ts             # Webhook storage operations
-│   ├── projects-storage.ts    # Project mapping management
-│   ├── stats-storage.ts       # Statistics storage
-│   ├── rate-limit.ts          # Rate limiting logic
-│   ├── nanoid.ts              # ID generation
-│   └── types.ts               # TypeScript types
-└── middleware.ts              # Slug-to-ID routing
+├── hooks/
+└── lib/
 ```
 
-## Rate Limiting
+## Development
 
-The platform implements a 5 requests per second rate limiter per project to prevent storage congestion. The rate limiter uses a sliding window algorithm and is currently in-memory (per-instance). For production deployments with multiple instances, consider using Vercel KV or Edge Config for distributed rate limiting.
+```bash
+bun install
+bun run dev        # http://localhost:3000
+bun test           # unit tests
+bun run typecheck
+bun run lint
+```
 
-## Deployment
+Set `WEBHOOK_ALLOWED_OUTGOING_DOMAINS` (comma-separated, `*.example.com`
+supported) to permit replay targets in production. Without it, production
+refuses every outgoing destination. In development all domains are allowed,
+though private and link-local addresses are still refused.
 
-### Deploy to Vercel
+## Usage
 
-1. Push your code to GitHub
-2. Import the project in [Vercel Dashboard](https://vercel.com/new)
-3. Ensure Workload Identity Federation is configured for your Vercel project
-4. Deploy!
+Create a project, then send anything to `POST /api/{slug}`:
 
-The platform uses Google Cloud Firestore with Workload Identity Federation for authentication when deployed on Vercel, and will automatically scale.
+```bash
+curl -X POST https://<host>/api/my-project \
+  -H 'Content-Type: application/json' \
+  -d '{"hello":"world"}'
+```
+
+The request appears in the feed within a couple of seconds.
 
 ## Limitations
 
-- **Single-File Storage**: Write amplification occurs when adding webhooks (must read entire file, modify, write back)
-- **Rate Limiting**: In-memory rate limiter is per-instance (not distributed)
-- **SSE Polling**: Without Redis pub/sub, SSE uses polling (500ms interval) instead of true event streaming
-- **Concurrency**: Optimistic locking with retries may fail under extreme concurrency (>50 req/sec)
+- The rate limiter is in-memory and per-instance, not distributed.
+- The feed polls on a 2-second interval rather than streaming.
+- Only the newest 100 webhooks per project are retained.
 
-These limitations are acceptable for a webhook testing/debugging tool but may not suit production webhook consumers.
+Acceptable for a debugging tool; not intended as a production webhook consumer.
 
 ## License
 

@@ -8,102 +8,41 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { getWebhooksWithCache, sendTestWebhookAction } from '@/lib/actions';
+import { useWebhookFeed } from '@/hooks/use-webhook-feed';
+import { sendTestWebhookAction } from '@/lib/actions';
 import type { Webhook } from '@/lib/types';
-import { getCachedWebhooksEntry } from '@/lib/webhook-cache';
 import { CopyButton } from './copy-button';
 import { OutgoingWebhook } from './outgoing-webhook';
 import { WebhookViewer } from './webhook-viewer';
+
+/**
+ * The project page: the endpoint panel, the outgoing sender, and the feed.
+ * The feed's state lives in `useWebhookFeed`; this module only renders it and
+ * asks for a refresh after a send.
+ */
 
 interface WebhookSectionProps {
   projectSlug: string;
 }
 
 export function WebhookSection({ projectSlug }: WebhookSectionProps) {
-  const webhookUrl = `/api/${projectSlug}`;
-  const [activeTab, setActiveTab] = useState('incoming');
+  const feed = useWebhookFeed(projectSlug);
+  const [activeTab, setActiveTab] = useState<'incoming' | 'outgoing'>(
+    'incoming',
+  );
   const [webhookToResend, setWebhookToResend] = useState<Webhook | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [hydratedWebhooks, setHydratedWebhooks] = useState<Webhook[] | null>(
-    null,
-  );
-  const [_hydratedEtag, setHydratedEtag] = useState<string | null>(null);
-  const [_hydratedMaxSize, setHydratedMaxSize] = useState<number | undefined>(
-    undefined,
-  );
-  const [isLoadingWebhooks, setIsLoadingWebhooks] = useState(false);
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
   const [elementRef, bounds] = useMeasure();
-  const [displayUrl, setDisplayUrl] = useState(webhookUrl);
+  const [displayUrl, setDisplayUrl] = useState(`/api/${projectSlug}`);
 
   useEffect(() => {
-    // Use current location origin if available
-    if (typeof window !== 'undefined') {
-      const origin = window.location.origin;
-      const apiPath = `/api/${projectSlug}`;
-      setDisplayUrl(`${origin}${apiPath}`);
-    } else {
-      setDisplayUrl(`/api/${projectSlug}`);
-    }
+    const origin = typeof window === 'undefined' ? '' : window.location.origin;
+    setDisplayUrl(`${origin}/api/${projectSlug}`);
   }, [projectSlug]);
 
-  // Reset tab state when switching projects
   useEffect(() => {
     setActiveTab('incoming');
     setWebhookToResend(null);
-    setRefreshKey(0);
-    setHydratedWebhooks(null);
-    setIsLoadingWebhooks(false);
-  }, [projectSlug]);
-
-  // Client-side hydrate initial webhooks from cache/server to avoid server streaming
-  // Add a small delay to prevent race conditions during navigation
-  useEffect(() => {
-    let cancelled = false;
-    let timeoutId: NodeJS.Timeout;
-
-    async function hydrate() {
-      try {
-        setIsLoadingWebhooks(true);
-        const result = await getWebhooksWithCache(projectSlug);
-        if (!cancelled) {
-          const { webhooks, etag, maxSize } = result;
-          setHydratedWebhooks(webhooks);
-          setHydratedEtag(etag ?? null);
-          setHydratedMaxSize(maxSize);
-          if (webhooks?.length) {
-            setRefreshKey((k) => k + 1); // trigger SWR refresh path
-          }
-        }
-      } catch (error) {
-        console.error('Failed to hydrate webhooks:', error);
-      } finally {
-        if (!cancelled) {
-          setIsLoadingWebhooks(false);
-        }
-      }
-    }
-
-    // Start loading immediately if we don't have cached data
-    const cachedEntry = getCachedWebhooksEntry(projectSlug);
-    const hasCachedData =
-      cachedEntry?.webhooks && cachedEntry.webhooks.length > 0;
-    if (!hasCachedData) {
-      setIsLoadingWebhooks(true);
-    }
-
-    // Small delay to allow navigation to settle before hydrating
-    timeoutId = setTimeout(() => {
-      if (!cancelled) {
-        hydrate();
-      }
-    }, 50);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSlug]);
 
   const handleResend = (webhook: Webhook) => {
@@ -111,55 +50,72 @@ export function WebhookSection({ projectSlug }: WebhookSectionProps) {
     setActiveTab('outgoing');
   };
 
-  const handleWebhookSent = () => {
-    // Trigger refresh of webhook list
-    setRefreshKey((prev) => prev + 1);
+  const handleSendTest = async () => {
+    if (isTestingWebhook) {
+      return;
+    }
+    setIsTestingWebhook(true);
+    try {
+      const result = await sendTestWebhookAction(displayUrl, 'GET');
+      toast.success(`Test webhook sent! Status: ${result.status}`);
+      feed.refresh();
+    } catch (error) {
+      toast.error(
+        `Failed to send test webhook: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+    } finally {
+      setIsTestingWebhook(false);
+    }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Tabs for top section only */}
+    <div className="flex min-w-0 flex-1 flex-col gap-6">
       <div className="rounded-lg border border-border/50 shadow-md bg-card overflow-hidden">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) =>
+            setActiveTab(value as 'incoming' | 'outgoing')
+          }
+          className="w-full"
+        >
           <div className="border-b border-border/50 px-6 pt-4">
             <TabsList className="grid w-full max-w-md grid-cols-2 relative bg-muted/50 p-1">
               <div
                 className="absolute inset-0 bg-background/50 rounded-lg"
                 aria-hidden="true"
               />
-              {['incoming', 'outgoing'].map((tab) => {
-                const isActive = activeTab === tab;
-                return (
-                  <TabsTrigger
-                    key={tab}
-                    value={tab}
-                    className="relative z-10 gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-primary-foreground transition-colors hover:text-foreground/80"
-                  >
-                    {isActive && (
-                      <motion.div
-                        layoutId={`activeTab-${projectSlug}`}
-                        className="absolute inset-0 bg-primary rounded-sm shadow-sm"
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{
-                          type: 'spring',
-                          bounce: 0.15,
-                          duration: 0.3,
-                        }}
-                      />
+              {(['incoming', 'outgoing'] as const).map((tab) => (
+                <TabsTrigger
+                  key={tab}
+                  value={tab}
+                  className="relative z-10 gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-primary-foreground transition-colors hover:text-foreground/80"
+                >
+                  {activeTab === tab && (
+                    <motion.div
+                      layoutId={`activeTab-${projectSlug}`}
+                      className="absolute inset-0 bg-primary rounded-sm shadow-sm"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{
+                        type: 'spring',
+                        bounce: 0.15,
+                        duration: 0.3,
+                      }}
+                    />
+                  )}
+                  <span className="relative z-10 flex items-center gap-2">
+                    {tab === 'incoming' ? (
+                      <Download className="h-4 w-4" />
+                    ) : (
+                      <Send className="h-4 w-4" />
                     )}
-                    <span className="relative z-10 flex items-center gap-2">
-                      {tab === 'incoming' ? (
-                        <Download className="h-4 w-4" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                    </span>
-                  </TabsTrigger>
-                );
-              })}
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </span>
+                </TabsTrigger>
+              ))}
             </TabsList>
           </div>
 
@@ -177,12 +133,12 @@ export function WebhookSection({ projectSlug }: WebhookSectionProps) {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.2, ease: 'easeInOut' }}
-                    className="p-6 space-y-6"
+                    className="p-6"
                   >
                     <TabsContent
                       value="incoming"
                       forceMount
-                      className="m-0 focus-visible:ring-0 focus-visible:outline-none mt-0"
+                      className="m-0 space-y-6 focus-visible:ring-0 focus-visible:outline-none mt-0"
                     >
                       <div>
                         <h2 className="text-xl font-semibold text-foreground mb-1">
@@ -198,7 +154,7 @@ export function WebhookSection({ projectSlug }: WebhookSectionProps) {
                           Endpoint URL
                         </div>
                         <div className="flex items-center gap-2">
-                          <code className="flex-1 bg-muted/50 p-4 rounded-lg text-sm font-mono break-all border border-border/50">
+                          <code className="flex-1 min-w-0 bg-muted/50 p-4 rounded-lg text-sm font-mono break-all border border-border/50">
                             {displayUrl}
                           </code>
                           <CopyButton text={displayUrl} />
@@ -206,28 +162,7 @@ export function WebhookSection({ projectSlug }: WebhookSectionProps) {
                             variant="outline"
                             size="icon"
                             disabled={isTestingWebhook}
-                            onClick={async () => {
-                              if (isTestingWebhook) return;
-
-                              setIsTestingWebhook(true);
-                              try {
-                                const result = await sendTestWebhookAction(
-                                  displayUrl,
-                                  'GET',
-                                );
-                                toast.success(
-                                  `Test webhook sent! Status: ${result.status}`,
-                                );
-                                // Trigger refresh
-                                setRefreshKey((prev) => prev + 1);
-                              } catch (error) {
-                                toast.error(
-                                  `Failed to send test webhook: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                                );
-                              } finally {
-                                setIsTestingWebhook(false);
-                              }
-                            }}
+                            onClick={handleSendTest}
                             className="shrink-0"
                             title={
                               isTestingWebhook
@@ -280,10 +215,9 @@ export function WebhookSection({ projectSlug }: WebhookSectionProps) {
                       </div>
                       <OutgoingWebhook
                         projectSlug={projectSlug}
-                        webhookUrl={displayUrl}
                         webhookToResend={webhookToResend}
                         onResendComplete={() => setWebhookToResend(null)}
-                        onWebhookSent={handleWebhookSent}
+                        onWebhookSent={feed.refresh}
                       />
                     </TabsContent>
                   </motion.div>
@@ -294,14 +228,11 @@ export function WebhookSection({ projectSlug }: WebhookSectionProps) {
         </Tabs>
       </div>
 
-      {/* Webhook list always visible below */}
-      <div className="flex-1 min-h-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <WebhookViewer
           projectSlug={projectSlug}
-          initialWebhooks={hydratedWebhooks ?? []}
+          feed={feed}
           onResend={handleResend}
-          refreshTrigger={refreshKey}
-          isLoadingWebhooks={isLoadingWebhooks}
         />
       </div>
     </div>

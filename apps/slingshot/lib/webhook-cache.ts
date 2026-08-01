@@ -60,22 +60,6 @@ export function getCachedWebhooksEntry(
 }
 
 /**
- * Get cached webhooks (simplified API)
- */
-export function getCachedWebhooks(projectSlug: string): Webhook[] | null {
-  const entry = getCachedWebhooksEntry(projectSlug);
-  return entry?.webhooks || null;
-}
-
-/**
- * Get cached etag
- */
-export function getCachedEtag(projectSlug: string): string | null {
-  const entry = getCachedWebhooksEntry(projectSlug);
-  return entry?.etag || null;
-}
-
-/**
  * Set cached webhooks (single key write)
  */
 export function setCachedWebhooks(
@@ -120,35 +104,6 @@ export function setCachedWebhooks(
       console.error('Failed to cache webhooks:', error);
     }
   }
-}
-
-/**
- * Update cached webhooks optimistically
- * Used for immediate UI updates before server confirmation
- */
-export function updateCachedWebhooks(
-  projectSlug: string,
-  updater: (webhooks: Webhook[]) => Webhook[],
-): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const entry = getCachedWebhooksEntry(projectSlug);
-  if (entry) {
-    const updated = updater(entry.webhooks);
-    setCachedWebhooks(projectSlug, updated, entry.etag, entry.maxSize);
-  }
-}
-
-/**
- * Add webhook optimistically to cache
- */
-export function addWebhookToCache(projectSlug: string, webhook: Webhook): void {
-  updateCachedWebhooks(projectSlug, (webhooks) => {
-    // Add to beginning (newest first)
-    return [webhook, ...webhooks];
-  });
 }
 
 /**

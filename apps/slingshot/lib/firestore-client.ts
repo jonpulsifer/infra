@@ -26,16 +26,33 @@ let cachedAuthClient: ExternalAccountClient | null = null;
 let cachedDefaultFirestore: Firestore | null = null;
 let cachedExternalFirestore: Firestore | null = null;
 
+/** gRPC status codes: PERMISSION_DENIED, UNAUTHENTICATED. */
+const UNAVAILABLE_CODES = new Set<number | string>([7, 16, 401, 403, 404]);
+
+/**
+ * True when Firestore could not be reached because of credentials rather than
+ * because of the data - the caller has no token, an expired one, or no
+ * permission. Callers degrade to empty results on these so a build or a
+ * prerender without credentials still completes; anything else propagates.
+ */
+const UNAVAILABLE_MESSAGES = [
+  'Missing or insufficient permissions',
+  'Caller does not have permission',
+  'unauthorized',
+  'UNAUTHENTICATED',
+  // Credentials could not be obtained at all.
+  'Could not load the default credentials',
+  'Getting metadata from plugin failed',
+  'invalid_grant',
+  'invalid_rapt',
+];
+
 export const isFirestoreUnavailableError = (error: unknown) => {
-  const err = error as { code?: number | string; message?: string };
+  const err = error as { code?: number | string; message?: string } | null;
   if (!err) return false;
-  if (err.code === 401 || err.code === 403 || err.code === 404) return true;
-  const msg = err.message || '';
-  return (
-    msg.includes('Missing or insufficient permissions') ||
-    msg.includes('Caller does not have permission') ||
-    msg.includes('unauthorized')
-  );
+  if (err.code !== undefined && UNAVAILABLE_CODES.has(err.code)) return true;
+  const message = err.message || '';
+  return UNAVAILABLE_MESSAGES.some((needle) => message.includes(needle));
 };
 
 /**
