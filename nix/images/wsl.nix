@@ -14,6 +14,11 @@
 
   nixpkgs.config.allowUnfree = true;
 
+  # The generic image identity. Not the flake attribute name: the real distro
+  # name is chosen at `wsl --import` time and this is only what the tarball
+  # boots with until then.
+  networking.hostName = "nixos";
+
   # Emulate aarch64 via qemu-user/binfmt so we can build the Pi (pi4/pi5)
   # sdImage outputs on this x86_64 host instead of needing a native aarch64
   # builder or a remote builder.

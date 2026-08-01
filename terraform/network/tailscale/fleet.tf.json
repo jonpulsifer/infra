@@ -1,0 +1,9 @@
+{
+  "//": "Fleet-wide naming single source of truth: the tailnet MagicDNS domain and the public DNS zone, for consumers that would otherwise inline the literals. Terraform auto-loads this file as local.fleet (versions.tf and devices.tf read it); the Nix fleet facts module reads the same file with builtins.fromJSON via .locals.fleet (nix/lib/fleet.nix). Change the name here and it flows into Terraform and every NixOS host alike.",
+  "locals": {
+    "fleet": {
+      "tailnet": "pirate-musical.ts.net",
+      "dns_zone": "lolwtf.ca"
+    }
+  }
+}

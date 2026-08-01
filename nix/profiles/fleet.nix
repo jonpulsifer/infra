@@ -1,3 +1,11 @@
+# The baseline every deployed host gets, applied unconditionally by
+# nix/lib/mkHost.nix. Hosts diverge by setting a `homelab.fleet.*` option, not
+# by omitting an import — an absent capability is visible in the host file
+# rather than inferred from what it forgot to pull in.
+#
+# Image configurations that deliberately want less than this (nix/images/wsl.nix,
+# nix/images/container.nix) take ./base.nix from mkImage and compose their own
+# narrow import list instead.
 {
   config,
   lib,
@@ -6,8 +14,9 @@
 }:
 {
   imports = [
-    ../system/mise-dotfiles.nix
+    ./base.nix
     ../system/ddnsd.nix
+    ../system/mise-dotfiles.nix
     ../system/nixos.nix
     ../system/ssh.nix
     ../system/tailscale.nix
@@ -44,10 +53,10 @@
     zsh
     git
   ];
-  environment.enableAllTerminfo = true;
+  environment.enableAllTerminfo = config.homelab.fleet.terminfo;
 
   services.prometheus.exporters.node = {
-    enable = lib.mkDefault true;
+    enable = lib.mkDefault config.homelab.fleet.metrics;
     openFirewall = true;
     # Unit-state metrics so Prometheus can alert on the services these hosts
     # exist to run (nfsd/dnsmasq/nginx on spore, coredns on the resolvers, ...).

@@ -9,6 +9,21 @@
 let
   disko = inputs.disko.packages.${pkgs.stdenv.hostPlatform.system}.disko;
 
+  # The hosts homelab-install can provision: the x86 Kubernetes nodes, read
+  # from the fleet registry so this banner cannot fall behind it.
+  installableHosts = lib.attrNames (
+    lib.filterAttrs (
+      _: entry:
+      lib.any (
+        tag:
+        lib.elem tag [
+          "folly"
+          "offsite"
+        ]
+      ) (entry.tags or [ ])
+    ) (import ../hosts)
+  );
+
   homelab-install = pkgs.writeShellApplication {
     name = "homelab-install";
     runtimeInputs = [
@@ -23,7 +38,6 @@ in
   imports = [
     (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix")
     ../hardware/x86
-    ../services/common.nix
   ];
 
   # Provisioning tooling + instructions baked into the live image.
@@ -39,7 +53,7 @@ in
     === jonpulsifer/infra live installer ===
     Install a host:   sudo homelab-install <host>
     Full guide:       less /etc/README
-    Hosts:            optiplex riptide shale oldschool retrofit
+    Hosts:            ${lib.concatStringsSep " " installableHosts}
   '';
 
   users.users = {

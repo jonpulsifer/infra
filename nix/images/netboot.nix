@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  pkgs,
   modulesPath,
   ...
 }:
@@ -8,8 +9,19 @@
   imports = [
     (modulesPath + "/installer/netboot/netboot-minimal.nix")
     ../hardware/x86
-    ../services/common.nix
   ];
+
+  # A PXE boot needs all three artifacts together, so publish them as one
+  # derivation the registry can name like any other `artifact`.
+  system.build.netbootBundle = pkgs.symlinkJoin {
+    name = "netboot";
+    paths = with config.system.build; [
+      netbootRamdisk
+      kernel
+      netbootIpxeScript
+    ];
+    preferLocalBuild = true;
+  };
 
   users.users = {
     # Remove initialHashedPassword for root and nixos

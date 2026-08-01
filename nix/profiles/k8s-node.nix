@@ -1,14 +1,28 @@
+# An x86 Kubernetes node in one of the two clusters.
+#
+# Cluster membership is read from the host's tailnet tags: a node tagged
+# "folly" or "offsite" joins that cluster. The tag is the same one Tailscale
+# advertises for ACL purposes, so there is one fact, not two to keep in sync.
 {
   lib,
-  name,
   pkgs,
+  tags,
   ...
 }:
+let
+  clusters = [
+    "folly"
+    "offsite"
+  ];
+  network =
+    lib.findFirst (tag: lib.elem tag clusters)
+      (throw "a k8s node must advertise its cluster as a tag: tags = [ \"folly\" ] or [ \"offsite\" ]")
+      tags;
+in
 {
   imports = [
     ../hardware/x86
     ../disko
-    ../services/common.nix
     ../services/k8s
   ];
 
@@ -26,7 +40,8 @@
     nfs-utils
   ];
 
-  services.k8s.enable = true;
-  networking.hostName = name;
-
+  services.k8s = {
+    enable = true;
+    inherit network;
+  };
 }

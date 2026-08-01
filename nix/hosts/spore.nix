@@ -18,27 +18,18 @@
 # the disk to a labeled ext4 partition for /nfs/data.
 {
   config,
-  lib,
-  name,
   pkgs,
   ...
 }:
 {
   imports = [
-    ../hardware/pi5
-    ../hardware/pi5/nvme-hat.nix
-    ../services/common.nix
+    ../profiles/pi5-nvme.nix
     ../services/coredns-sinkhole.nix
     ../services/nfs-server.nix
     ../services/ntp-server.nix
     ../services/pxe-netboot.nix
     ../services/spore-native-boot.nix
   ];
-
-  networking = {
-    hostName = name;
-    wireless.enable = lib.mkForce false;
-  };
 
   # Alpine already ran this HAT's NVMe stable at Gen 3
   # (dtparam=pciex1_gen=3 in spore's old /boot/config.txt); carry that over
@@ -50,8 +41,10 @@
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
-  # Signed native-boot publishing for rackpi5. The target's boot.img package and
-  # signing key are wired in flake.nix, where rackpi5's config is in scope.
+  # Signed native-boot publishing for rackpi5. The target itself is declared in
+  # flake.nix under `crossHostModules` -- it needs rackpi5's boot.img
+  # derivation, which only exists once rackpi5's own configuration has been
+  # evaluated, so it cannot be stated from inside this file.
   services.spore.enable = true;
 
   sdImage.expandOnBoot = false;

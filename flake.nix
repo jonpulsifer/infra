@@ -52,310 +52,64 @@
     };
   };
 
+  # Add a host: one file in nix/hosts/ and one entry in nix/hosts/default.nix.
+  # Nothing below needs touching — every output is derived from that registry.
   outputs =
     inputs@{ nixpkgs, ... }:
     let
-      lib = nixpkgs.lib;
-      inherit (lib) genAttrs nixosSystem;
+      inherit (nixpkgs) lib;
 
-      systems = [
+      forAllSystems = lib.genAttrs [
         "x86_64-linux"
         "aarch64-linux"
       ];
-      forAllSystems = f: genAttrs systems (system: f system);
 
-      inherit
-        (import ./nix/lib/mkHost.nix {
-          inherit lib nixosSystem inputs;
-        })
-        mkHost
-        mkImage
-        ;
-
-      deployHosts = [
-        "optiplex"
-        "riptide"
-        "shale"
-        "oldschool"
-        "retrofit"
-        "cloudpi4"
-        "homepi4"
-        "weatherpi4"
-        "capsule"
-        "forge"
-        "oldboy"
-        "spore"
-        "radiopi0"
-        "blinkypi0"
-      ];
-
-      legacyPackages = forAllSystems (
+      pkgsFor = forAllSystems (
         system:
         import nixpkgs {
           inherit system;
           config.allowUnfree = true;
-          overlays = [
-            (import ./nix/overlays/mise.nix)
-          ];
+          overlays = [ (import ./nix/overlays/mise.nix) ];
         }
       );
 
-      nixosConfigurations =
-        let
-          # rackpi5 is the minimal image-only source for spore's native-boot
-          # publisher. Forge's EEPROM keeps this signed HTTP/RAM artifact as
-          # its fallback path.
-          rackpi5Configuration = mkHost "rackpi5" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/rackpi5.nix ];
-          };
-        in
-        {
-          optiplex = mkHost "optiplex" {
-            role = "control-plane";
-            tags = [ "folly" ];
-            clusterCa = {
-              enable = true;
-            };
-            imports = [
-              ./nix/system/tailscale-disable.nix
-              ./nix/system/sops.nix
-            ];
-            extraConfig = {
-              homelab.disko.device = "/dev/sda";
-              sops.defaultSopsFile = ./nix/secrets/optiplex.sops.yaml;
-              sops.secrets."k8s-sa-signing-key" = {
-                owner = "kubernetes";
-                group = "kubernetes";
-                mode = "0400";
-                restartUnits = [
-                  "kube-apiserver.service"
-                  "kube-controller-manager.service"
-                ];
-              };
-              sops.secrets."k8s-cluster-ca-key" = {
-                owner = "cfssl";
-                group = "cfssl";
-                mode = "0400";
-                path = "/var/lib/cfssl/ca-key.pem";
-                restartUnits = [ "cfssl.service" ];
-              };
-            };
-          };
-          riptide = mkHost "riptide" {
-            tags = [ "folly" ];
-            clusterCa = {
-              enable = true;
-            };
-            imports = [
-              ./nix/system/tailscale-disable.nix
-            ];
-            extraConfig.homelab.disko.device = "/dev/nvme0n1";
-          };
-          shale = mkHost "shale" {
-            tags = [ "folly" ];
-            clusterCa = {
-              enable = true;
-            };
-            imports = [
-              ./nix/system/tailscale-disable.nix
-            ];
-            extraConfig.homelab.disko.device = "/dev/sda";
-          };
-
-          oldschool = mkHost "oldschool" {
-            tags = [ "offsite" ];
-            imports = [
-              ./nix/system/quiker.nix
-              ./nix/system/tailscale-disable.nix
-              ./nix/system/sops.nix
-              ./nix/services/yarr.nix
-            ];
-            extraConfig = {
-              virtualisation.docker.enable = true;
-              homelab.disko.device = "/dev/sda";
-              # 200G root (default is 100G) — leaves headroom for the harmonia
-              # binary cache + remote-builder role on top of docker/runner/yarr.
-              homelab.disko.rootSize = "200G";
-              sops.defaultSopsFile = ./nix/secrets/oldschool.sops.yaml;
-              # harmonia's binary-cache signing key (public half committed at
-              # nix/secrets/oldschool-harmonia-cache.pub); wired into
-              # services.harmonia in the deploy-harmonia ticket.
-              sops.secrets."harmonia-cache-key" = { };
-            };
-          };
-          retrofit = mkHost "retrofit" {
-            tags = [ "offsite" ];
-            role = "control-plane";
-            imports = [
-              ./nix/system/tailscale-disable.nix
-              ./nix/system/sops.nix
-            ];
-            extraConfig = {
-              homelab.disko.device = "/dev/sda";
-              sops.defaultSopsFile = ./nix/secrets/retrofit.sops.yaml;
-              sops.secrets."k8s-sa-signing-key" = {
-                owner = "kubernetes";
-                group = "kubernetes";
-                mode = "0400";
-                restartUnits = [
-                  "kube-apiserver.service"
-                  "kube-controller-manager.service"
-                ];
-              };
-            };
-          };
-
-          cloudpi4 = mkHost "cloudpi4" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/cloudpi4.nix ];
-          };
-          homepi4 = mkHost "homepi4" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/homepi4.nix ];
-          };
-          weatherpi4 = mkHost "weatherpi4" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/weatherpi4.nix ];
-          };
-          capsule = mkHost "capsule" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/capsule.nix ];
-          };
-          rackpi5 = rackpi5Configuration;
-          forge = mkHost "forge" {
-            system = "aarch64-linux";
-            tags = [ "lab-host" ];
-            modules = [
-              ./nix/system/sops.nix
-              ./nix/hosts/forge.nix
-              (
-                { config, ... }:
-                {
-                  sops.defaultSopsFile = ./nix/secrets/forge.sops.yaml;
-                  # harmonia's binary-cache signing key. Public half is
-                  # committed in the clear at nix/secrets/forge-harmonia-cache.pub
-                  # so clients can pin it in their `trusted-public-keys`.
-                  sops.secrets."harmonia-cache-key" = { };
-                  sops.secrets."tailscale-auth-key" = { };
-
-                  services.tailscale = {
-                    authKeyFile = config.sops.secrets."tailscale-auth-key".path;
-                    authKeyParameters = {
-                      ephemeral = false;
-                      preauthorized = true;
-                    };
-                  };
-                }
-              )
-            ];
-          };
-          spore = mkHost "spore" {
-            system = "aarch64-linux";
-            modules = [
-              ./nix/hosts/spore.nix
-              {
-                services.spore.nativeBootTargets.rackpi5 = {
-                  package = rackpi5Configuration.config.system.build.piBootImg;
-                  signingKey = "/var/lib/pi-boot-sign/private.pem";
-                  httpPath = "/rackpi5-ram/";
-                };
-              }
-            ];
-          };
-
-          # armv6l Pi Zero W: no native builder/cache exists for this arch, so
-          # this is cross-compiled (nix/hardware/pi0.nix sets nixpkgs.crossSystem)
-          # on forge, hence the aarch64-linux system below matching its native
-          # architecture.
-          radiopi0 = mkHost "radiopi0" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/radiopi0.nix ];
-          };
-          # Same board family as radiopi0 (Pi Zero W, armv6l), same cross-build
-          # story -- but the physical device is currently unplugged, so this
-          # config is derived from docs/pages/Hosts___blinkypi0.md and mirrors
-          # radiopi0.nix rather than being verified against live hardware.
-          blinkypi0 = mkHost "blinkypi0" {
-            system = "aarch64-linux";
-            modules = [ ./nix/hosts/blinkypi0.nix ];
-          };
-
-          oldboy = mkHost "oldboy" {
-            tags = [ "gcp" ];
-            modules = [ ./nix/hosts/oldboy.nix ];
-          };
-
-          wsl = mkImage ./nix/images/wsl.nix;
-          iso = mkImage ./nix/images/iso.nix;
-          gce = mkImage ./nix/images/gce.nix;
-          container = mkImage ./nix/images/container.nix;
-          netboot = mkImage ./nix/images/netboot.nix;
-        };
+      fleet = import ./nix/lib/registry.nix {
+        inherit lib;
+        registry = import ./nix/hosts;
+        inherit
+          (import ./nix/lib/mkHost.nix {
+            inherit lib inputs;
+            inherit (lib) nixosSystem;
+          })
+          mkHost
+          ;
+      };
     in
     {
-      inherit nixosConfigurations;
+      inherit (fleet) nixosConfigurations;
 
-      packages = {
-        # sdImage derivations are pinned to aarch64-linux internally (each
-        # Pi's nixosSystem is called with system = "aarch64-linux" above).
-        # These x86_64 aliases remain the image-builder workflow interface;
-        # interactive ARM host builds target nixosConfigurations directly and
-        # run on forge.
-        x86_64-linux = {
-          cloudpi4 = nixosConfigurations.cloudpi4.config.system.build.sdImage;
-          homepi4 = nixosConfigurations.homepi4.config.system.build.sdImage;
-          weatherpi4 = nixosConfigurations.weatherpi4.config.system.build.sdImage;
-          capsule = nixosConfigurations.capsule.config.system.build.sdImage;
-          # Legacy: spore's rackpi5 native-boot publisher still signs boot.img
-          # off this derivation for forge's EEPROM fallback.
-          rackpi5 = nixosConfigurations.rackpi5.config.system.build.piBootImg;
-          # Forge's installable NVMe image.
-          forge = nixosConfigurations.forge.config.system.build.sdImage;
-          spore = nixosConfigurations.spore.config.system.build.sdImage;
+      packages = forAllSystems fleet.packagesFor;
 
-          iso = nixosConfigurations.iso.config.system.build.isoImage;
-          wsl = nixosConfigurations.wsl.config.system.build.tarballBuilder;
-          container = nixosConfigurations.container.config.system.build.tarball;
-          gce = nixosConfigurations.gce.config.system.build.googleComputeImage;
-          oldboy = nixosConfigurations.oldboy.config.system.build.googleComputeImage;
-          netboot = legacyPackages.x86_64-linux.symlinkJoin {
-            name = "netboot";
-            paths = with nixosConfigurations.netboot.config.system.build; [
-              netbootRamdisk
-              kernel
-              netbootIpxeScript
-            ];
-            preferLocalBuild = true;
-          };
-        };
-
-        # radiopi0's armv6l target is cross-compiled, not natively built, so
-        # its build platform (aarch64-linux, matching forge) actually needs to
-        # be the system running `nix build`, unlike the x86_64-linux aliases
-        # above.
-        aarch64-linux = {
-          radiopi0 = nixosConfigurations.radiopi0.config.system.build.sdImage;
-          blinkypi0 = nixosConfigurations.blinkypi0.config.system.build.sdImage;
-        };
+      checks.x86_64-linux = import ./nix/lib/checks.nix {
+        inherit lib;
+        inherit (fleet) nixosConfigurations;
+        pkgs = pkgsFor.x86_64-linux;
       };
-
-      inherit legacyPackages;
-
-      formatter = forAllSystems (system: legacyPackages.${system}.nixfmt-tree);
-
-      devShells = forAllSystems (system: {
-        default = import ./shell.nix {
-          pkgs = legacyPackages.${system};
-        };
-      });
 
       apps = forAllSystems (
         system:
         (import ./nix/lib/apps.nix).mkApps {
-          pkgs = legacyPackages.${system};
-          inherit deployHosts nixosConfigurations;
+          pkgs = pkgsFor.${system};
+          inherit (fleet) deployHosts;
         }
       );
+
+      devShells = forAllSystems (system: {
+        default = import ./shell.nix { pkgs = pkgsFor.${system}; };
+      });
+
+      formatter = forAllSystems (system: pkgsFor.${system}.nixfmt-tree);
+
+      legacyPackages = pkgsFor;
     };
 }

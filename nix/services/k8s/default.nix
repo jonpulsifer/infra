@@ -7,10 +7,11 @@
 let
   networks = import ./networks.nix { inherit lib; };
   networkConfig = networks.${config.services.k8s.network};
+  fleet = import ../../lib/fleet.nix;
   cfg = config.services.k8s;
-  fmlIssuer = "https://oidc.lolwtf.ca/${cfg.network}";
+  fmlIssuer = "https://${fleet.oidcHost}/${cfg.network}";
   peerNetwork = if cfg.network == "folly" then "offsite" else "folly";
-  peerIssuer = "https://oidc.lolwtf.ca/${peerNetwork}";
+  peerIssuer = "https://${fleet.oidcHost}/${peerNetwork}";
   fmlSignerCert = ../../../terraform/pki/certs/${cfg.network}-sa-signer.pem;
   fmlClusterCaCert = ../../../terraform/pki/certs/${cfg.network}-ca.pem;
   fmlClusterCaBundle = ../../../terraform/pki/certs/${cfg.network}-ca-bundle.pem;
@@ -193,9 +194,9 @@ in
           allowPrivileged = true;
           extraSANs = [
             config.networking.hostName
-            "${config.networking.hostName}.lolwtf.ca"
-            "${config.networking.hostName}.${config.services.k8s.network}.lolwtf.ca"
-            "${config.networking.hostName}.pirate-musical.ts.net"
+            "${config.networking.hostName}.${fleet.dnsZone}"
+            "${config.networking.hostName}.${cfg.network}.${fleet.dnsZone}"
+            "${config.networking.hostName}.${fleet.tailnet}"
             config.services.kubernetes.apiserver.advertiseAddress
           ];
           serviceAccountIssuer = fmlIssuer;
