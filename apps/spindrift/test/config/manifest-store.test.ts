@@ -163,7 +163,7 @@ describe('the stored installation manifest', () => {
     ]);
   });
 
-  test('a changed declared connection resets its assessment and timestamp', async () => {
+  test('a changed Target connection resets its assessment and timestamp', async () => {
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
     });
@@ -187,9 +187,10 @@ describe('the stored installation manifest', () => {
       ),
     } satisfies InstallationManifest;
 
-    await loadStoredManifest(database().db, {
-      [MANIFEST_INLINE_VAR]: JSON.stringify(changed),
-    });
+    // Configuration is the UI's to drive, so the trigger for reconciliation is
+    // the stored manifest changing — which is what a settings write is.
+    await database().db.update(installation).set({ manifest: changed });
+    await loadStoredManifest(database().db, {});
 
     const cluster = await database().db.query.targets.findFirst({
       where: (targets, { eq }) => eq(targets.name, 'cluster'),
@@ -202,8 +203,27 @@ describe('the stored installation manifest', () => {
     expect(cluster?.updatedAt.getTime()).toBeGreaterThan(old.getTime());
   });
 
-  test('changed declared configuration updates the durable manifest', async () => {
+  test('a declaration seeds an empty installation and never governs a seeded one', async () => {
     const first = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    expect(first.installation).toBe('example');
+    const changed = fixtureText.replace(
+      'installation: example',
+      'installation: replacement',
+    );
+
+    // A rollout must not revert what an operator just configured, so the row
+    // wins over the declaration that seeded it.
+    const later = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: changed,
+    });
+    expect(later).toEqual(first);
+    expect(later.installation).toBe('example');
+  });
+
+  test('discarding the row re-seeds from the declaration', async () => {
+    await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
     const changed = fixtureText.replace(
@@ -211,12 +231,16 @@ describe('the stored installation manifest', () => {
       'installation: replacement',
     );
 
-    const later = await loadStoredManifest(database().db, {
+    // The deliberate act that makes a declaration apply again. It is also the
+    // whole of the tear-down-and-redeploy loop: an installation that lost its
+    // database comes back configured without anyone opening a browser.
+    await database().db.delete(installation);
+
+    const reseeded = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: changed,
     });
-    expect(later).not.toEqual(first);
-    expect(later.installation).toBe('replacement');
-    expect(await loadStoredManifest(database().db, {})).toEqual(later);
+    expect(reseeded.installation).toBe('replacement');
+    expect(await loadStoredManifest(database().db, {})).toEqual(reseeded);
   });
 
   test('updating declared configuration preserves connected Target state', async () => {
@@ -294,6 +318,9 @@ describe('the stored installation manifest', () => {
       .db.update(targets)
       .set({ rank: 99 })
       .where(eq(targets.name, 'cluster'));
+    // Re-seeding is where a declaration can still meet Target rows it did not
+    // create: discarding the installation row leaves the Targets behind.
+    await database().db.delete(installation);
     const incompatible = {
       ...fixtureManifest,
       installation: 'incompatible',
@@ -309,8 +336,9 @@ describe('the stored installation manifest', () => {
       }),
     ).rejects.toThrow(/stored Target uses cloudrun/);
 
-    const [stored] = await database().db.select().from(installation);
-    expect(stored?.manifest).toEqual(fixtureManifest);
+    // The whole seed is one transaction, so a refused Target leaves no
+    // half-seeded installation behind and no rank change from the attempt.
+    expect(await database().db.select().from(installation)).toEqual([]);
     const cluster = await database().db.query.targets.findFirst({
       where: (targets, { eq }) => eq(targets.name, 'cluster'),
     });
