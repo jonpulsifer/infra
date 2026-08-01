@@ -5,6 +5,10 @@ resource "google_organization_iam_policy" "organization" {
 
 data "google_iam_policy" "org" {
   binding {
+    role    = "roles/assuredworkloads.admin"
+    members = ["user:jonathan@pulsifer.ca"]
+  }
+  binding {
     role    = "roles/owner"
     members = ["group:cloud@pulsifer.ca"]
   }
