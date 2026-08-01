@@ -22,7 +22,10 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { CommandContext, Principal } from '../../src/commands/types.ts';
-import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
+import type {
+  AuthoredManifest,
+  InstallationManifest,
+} from '../../src/config/manifest.schema.ts';
 import {
   currentStoredManifest,
   loadStoredManifest,
@@ -102,7 +105,7 @@ async function seed(): Promise<void> {
   });
 }
 
-async function storedManifest(): Promise<InstallationManifest | undefined> {
+async function storedManifest(): Promise<AuthoredManifest | undefined> {
   const [row] = await database().db.select().from(installation);
   return row?.manifest;
 }
