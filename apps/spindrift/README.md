@@ -247,6 +247,22 @@ One half is still missing from the Target surface:
 `targets.min_build_level` is read but nothing sets it, and there is no ordered
 per-Target route list — both belong to the Target model and the connect act.
 
+Every refusal `dispatchBuild` makes happens *before* the claim, so it is
+returned to `runBuildPass` — which is `if (result.ok) dispatched += 1` and drops
+everything else. That makes writing the refusal down the only way it reaches
+anybody, and `refuseDispatch` splits them on one question: can a later tick
+clear this? A fact about the row — a location no route can fetch, a name no
+registry will accept, a bundle never staged — closes the Build out with §6's
+reason, because retrying it once a second forever is the only alternative. A
+fact about the installation — no federation, no such route, a threshold no
+configured route meets — leaves the Build `PENDING`, so that configuring the
+thing makes the next tick work without anybody pressing Deploy again, and
+records what is being waited on. The build loop runs at 1Hz, so the sentence is
+written once and suppressed against `builds.dispatch_waiting_on` until it
+changes; the claim clears the column. `runBuildPass` writes the one refusal of
+that class made before dispatch is reached — a Target no configured route can
+serve — through the same function.
+
 Core's supply-chain gate is verify → sign → record. It joins the source receipt
 and backend envelope on the bundle digest, invokes the pinned verifier against
 an immutable artifact reference, caps the achieved level by the route's

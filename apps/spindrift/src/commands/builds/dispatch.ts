@@ -30,6 +30,7 @@ import type {
   BuildSource,
   BuildSpec,
 } from '../../adapters/build/contract.ts';
+import type { FailureReason } from '../../adapters/deploy/contract.ts';
 import {
   apps,
   builds,
@@ -42,7 +43,10 @@ import {
   artifactTags,
   componentRepository,
 } from '../../domain/artifact-name.ts';
-import { recordBuildEvent } from '../../domain/attempt-log.ts';
+import {
+  type BuildAttemptRef,
+  recordBuildEvent,
+} from '../../domain/attempt-log.ts';
 import {
   buildRouteCandidates,
   DEFAULT_MINIMUM_BUILD_LEVEL,
@@ -54,6 +58,7 @@ import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
 import {
   type CommandContext,
+  type CommandFailureCode,
   type CommandResult,
   failed,
   ok,
@@ -245,6 +250,114 @@ async function fetchableBundleLocation(
   }
 }
 
+/**
+ * How a dispatch refusal is recorded, and why there are exactly two ways.
+ *
+ * Everything below the Build row's own existence is refused *before* the claim
+ * transaction, which means the refusal is returned to `runBuildPass` — and
+ * `runBuildPass` is `if (result.ok) dispatched += 1`. It keeps the successes and
+ * drops everything else. A refusal that only returns therefore reaches nobody,
+ * and the Build sits PENDING being refused again every second in silence.
+ *
+ * What separates the two arms is not severity, it is **whether a later tick can
+ * clear it**:
+ *
+ * - `closes` — the refusal is a fact about this row. A location no route can
+ *   fetch, a name no registry will accept, a bundle that was never staged: no
+ *   tick makes any of those legal, so the Build is failed with §6's reason and
+ *   the sentence goes on the attempt log. Retrying it once a second forever is
+ *   the alternative, and it is not one.
+ * - `waits` — the refusal is a fact about the *installation*. Federation that
+ *   is not configured, a route this installation does not have, a Target
+ *   threshold no configured route meets: configuring the thing is a thing an
+ *   operator can do, and the next tick should then work without anybody
+ *   pressing Deploy again. So the Build stays PENDING — and says what it is
+ *   waiting on, which is the half that was missing.
+ *
+ * That gap cost real time. Build 13 sat PENDING for two hours over a missing
+ * `roles/iam.serviceAccountTokenCreator` binding while
+ * {@link fetchableBundleLocation} composed the true sentence once a second and
+ * threw it away every time; it was finally named by reading Terraform, not by
+ * anything Spindrift said. The sentence existed. Nobody could see it.
+ *
+ * Repeat suppression is what makes the `waits` arm bearable at 1Hz, and it is
+ * keyed on `builds.dispatchWaitingOn` — the row is already in hand, so an
+ * unchanged refusal costs no query and writes nothing. A *changed* one writes,
+ * because a refusal that has changed is news.
+ */
+type RefusalDisposition =
+  | { readonly kind: 'closes'; readonly reason: FailureReason }
+  | { readonly kind: 'waits' };
+
+/** Everything {@link refuseDispatch} needs to know about the Build it is refusing. */
+export interface RefusalSubject {
+  readonly attempt: BuildAttemptRef;
+  /** `builds.dispatchWaitingOn` as it stands, for suppressing a repeat. */
+  readonly waitingOn: string | null;
+}
+
+async function refuseDispatch<Output>(
+  context: Pick<BuildDispatchContext, 'db'>,
+  subject: RefusalSubject,
+  code: CommandFailureCode,
+  sentence: string,
+  disposition: RefusalDisposition,
+): Promise<CommandResult<Output>> {
+  if (disposition.kind === 'closes') {
+    await recordBuildEvent(context.db, subject.attempt, {
+      type: 'log',
+      line: sentence,
+      resource: 'dispatch',
+    });
+    await recordBuildEvent(context.db, subject.attempt, {
+      type: 'status',
+      phase: 'FAILED',
+      reason: disposition.reason,
+    });
+    await context.db
+      .update(builds)
+      // Cleared with the same statement that ends the wait: a FAILED Build is
+      // not waiting on anything, and leaving the sentence behind would read as
+      // though it were.
+      .set({ status: 'FAILED', dispatchWaitingOn: null })
+      .where(eq(builds.id, subject.attempt.buildId));
+    return failed(code, sentence);
+  }
+
+  await recordDispatchWait(context, subject, sentence);
+  return failed(code, sentence);
+}
+
+/**
+ * Say once, on the attempt log, what a PENDING Build is waiting for.
+ *
+ * Exported because one refusal of this class is made before `dispatchBuild` is
+ * ever called: `runBuildPass` selects a route for the Target and skips the
+ * Build when there is none, so the sentence has to be written from there. It is
+ * the same disposition and the same suppression, which is why it is the same
+ * function rather than a second one that drifts.
+ *
+ * No status event is written: the Build has not failed and its phase has not
+ * moved. It is PENDING, which is what it was, and the log now says why it
+ * still is.
+ */
+export async function recordDispatchWait(
+  context: Pick<BuildDispatchContext, 'db'>,
+  subject: RefusalSubject,
+  sentence: string,
+): Promise<void> {
+  if (subject.waitingOn === sentence) return;
+  await recordBuildEvent(context.db, subject.attempt, {
+    type: 'log',
+    line: sentence,
+    resource: 'dispatch',
+  });
+  await context.db
+    .update(builds)
+    .set({ dispatchWaitingOn: sentence })
+    .where(eq(builds.id, subject.attempt.buildId));
+}
+
 export const dispatchBuild = async (
   input: DispatchBuildInput,
   context: BuildDispatchContext,
@@ -300,21 +413,46 @@ export const dispatchBuild = async (
     });
   }
 
+  // Everything from here down can refuse, and every refusal below is made
+  // before the claim — so every one of them is dropped by `runBuildPass` unless
+  // it is written somewhere first. See {@link refuseDispatch}: the App and the
+  // Component are known by now, which is all an attempt reference needs, so the
+  // subject is assembled once and each refusal only has to say which of the two
+  // dispositions it is.
+  const subject: RefusalSubject = {
+    attempt: {
+      appId: app.id,
+      componentId: component.id,
+      buildId: build.id,
+    },
+    waitingOn: build.dispatchWaitingOn,
+  };
+
   if (build.bundleDigest === null) {
     // §16: "the bundle digest must be a build parameter on every route, or the
     // correlation between a source receipt and a provenance document has no
-    // join." A Build without one cannot be dispatched at all.
-    return failed(
+    // join." A Build without one cannot be dispatched at all — and no tick
+    // stages one, because staging happens where the Build is created.
+    return refuseDispatch(
+      context,
+      subject,
       'NOT_BUILDABLE',
       `Build ${build.id} has no staged bundle, so no route can be given one`,
+      { kind: 'closes', reason: 'ARTIFACT_UNAVAILABLE' },
     );
   }
 
   const adapter = context.adapters.build(input.route);
   if (adapter === null) {
-    return failed(
+    // The route set is §4's installation configuration, so this names a
+    // prerequisite rather than a defect: an operator who configures the route
+    // gets this Build dispatched on the next tick.
+    return refuseDispatch(
+      context,
+      subject,
       'NOT_FOUND',
-      `this installation has no build route named ${input.route}`,
+      `this installation has no build route named ${input.route}, so nothing can run this Build until one is configured`,
+      { kind: 'waits' },
     );
   }
 
@@ -331,18 +469,28 @@ export const dispatchBuild = async (
       placements.length > 0 &&
       !placements.some((p) => p.targetId === effectiveTargetId)
     ) {
-      return failed(
+      // Placements are rows an operator edits, so this is `waits` for the same
+      // reason a missing route is: it is not reachable from the loop at all
+      // (the loop dispatches the placement it read), and where it does arrive
+      // the remedy is a placement, not a rebuild.
+      return refuseDispatch(
+        context,
+        subject,
         'NOT_BUILDABLE',
         `Target ${effectiveTargetId} is not a placement target for Component ${component.id}`,
+        { kind: 'waits' },
       );
     }
   } else {
     if (placements.length === 1) {
       effectiveTargetId = placements[0]!.targetId;
     } else if (placements.length > 1) {
-      return failed(
+      return refuseDispatch(
+        context,
+        subject,
         'NOT_BUILDABLE',
         `Component ${component.id} has multiple target placements, so dispatch must name an explicit placementTargetId`,
+        { kind: 'waits' },
       );
     }
   }
@@ -351,18 +499,29 @@ export const dispatchBuild = async (
   // is the Target's, so it is only checkable where a placement is named — and
   // where one is, a route below it is refused here rather than producing an
   // artifact the Target would refuse to admit anyway.
+  //
+  // `waits`, because both halves of the comparison are configuration: the
+  // Target's threshold and the set of routes this installation offers. Lowering
+  // one or adding a better route makes the next tick work.
   const targetPolicy = await targetBuildPolicy(context, effectiveTargetId);
   const refusal = routeRefusedByTarget(targetPolicy, adapter);
-  if (refusal !== null) return failed('NOT_BUILDABLE', refusal);
+  if (refusal !== null) {
+    return refuseDispatch(context, subject, 'NOT_BUILDABLE', refusal, {
+      kind: 'waits',
+    });
+  }
 
   // The staged bundle's own columns, not the artifact's. §15 stages a bundle for
   // either builder — a repo commit and an upload alike — and a Build that has
   // not run has no artifact refs to borrow an address from, so a missing
   // location is what would otherwise reach a route as an empty URL.
   if (build.bundleLocation === null) {
-    return failed(
+    return refuseDispatch(
+      context,
+      subject,
       'NOT_BUILDABLE',
       `Build ${build.id} has no staged bundle location, so no route can fetch it`,
+      { kind: 'closes', reason: 'ARTIFACT_UNAVAILABLE' },
     );
   }
 
@@ -371,11 +530,7 @@ export const dispatchBuild = async (
   // dispatch is what keeps it out of the Build row, out of the attempt log, and
   // out of any window between staging and running. What is persisted is the
   // `gs://` object; what a route is handed is a URL that resolves.
-  const attempt = {
-    appId: app.id,
-    componentId: component.id,
-    buildId: build.id,
-  };
+  const attempt = subject.attempt;
 
   /**
    * §16 names one registry per installation — "every artifact is pushed to and
@@ -406,24 +561,13 @@ export const dispatchBuild = async (
       `App "${app.name}" / Component "${component.name}" cannot name a ` +
       `repository under ${context.manifest.supplyChain.registry}: a registry ` +
       `path segment is lowercase alphanumerics separated by "-", "_" or "."`;
-    await recordBuildEvent(context.db, attempt, {
-      type: 'log',
-      line: sentence,
-      resource: 'bundle',
-    });
-    await recordBuildEvent(context.db, attempt, {
-      // §6's table covers "invalid spec" here, which is what a name no registry
-      // will accept is — and it blames the developer, who is the one who can
-      // rename the thing.
-      type: 'status',
-      phase: 'FAILED',
+    // §6's table covers "invalid spec" here, which is what a name no registry
+    // will accept is — and it blames the developer, who is the one who can
+    // rename the thing.
+    return refuseDispatch(context, subject, 'NOT_BUILDABLE', sentence, {
+      kind: 'closes',
       reason: 'REJECTED',
     });
-    await context.db
-      .update(builds)
-      .set({ status: 'FAILED' })
-      .where(eq(builds.id, build.id));
-    return failed('NOT_BUILDABLE', sentence);
   }
 
   const fetchable = await fetchableBundleLocation(
@@ -432,34 +576,25 @@ export const dispatchBuild = async (
     build.bundleLocation,
   );
   if (!fetchable.ok) {
-    // A refusal returned to `runBuildPass` reaches nobody — the loop keeps the
-    // successes and drops the rest — so a Build refused here would sit PENDING
-    // and be refused again every tick, silently. Where the location itself is
-    // the problem, the sentence goes on the attempt log the operator is already
-    // reading and the Build is closed out: the location is a column on this row
-    // and no later tick makes it fetchable. §6's `ARTIFACT_UNAVAILABLE` is the
-    // platform-blamed reason for an object that is not there to be fetched.
+    // Both dispositions come out of this one function, and which one is decided
+    // by the location rather than by the error. Where the location itself is
+    // the problem it is a column on this row and no later tick makes it
+    // fetchable, so the Build is closed out — §6's `ARTIFACT_UNAVAILABLE` is
+    // the platform-blamed reason for an object that is not there to be fetched.
     //
-    // The other refusals from that function are about this installation's
-    // federation rather than about this row, so they stay PENDING — configuring
-    // federation is a thing an operator can do that makes the next tick work.
-    if (!isFetchableBundleLocation(build.bundleLocation)) {
-      await recordBuildEvent(context.db, attempt, {
-        type: 'log',
-        line: fetchable.failure.message,
-        resource: 'bundle',
-      });
-      await recordBuildEvent(context.db, attempt, {
-        type: 'status',
-        phase: 'FAILED',
-        reason: 'ARTIFACT_UNAVAILABLE',
-      });
-      await context.db
-        .update(builds)
-        .set({ status: 'FAILED' })
-        .where(eq(builds.id, build.id));
-    }
-    return fetchable;
+    // The other refusals are about this installation's federation rather than
+    // about this row, so they wait: configuring federation is a thing an
+    // operator can do that makes the next tick work. **This is the arm that
+    // recorded nothing at all**, and it is the one build 13 sat two hours in.
+    return refuseDispatch(
+      context,
+      subject,
+      'NOT_BUILDABLE',
+      fetchable.failure.message,
+      isFetchableBundleLocation(build.bundleLocation)
+        ? { kind: 'waits' }
+        : { kind: 'closes', reason: 'ARTIFACT_UNAVAILABLE' },
+    );
   }
 
   const source: Source =
@@ -546,6 +681,11 @@ export const dispatchBuild = async (
         logFidelity: adapter.logFidelity,
         dispatchId,
         leasedAt: now,
+        // The wait is over, so what it was waiting on stops being true. Cleared
+        // here rather than left to age out, so that a Build whose lease expires
+        // and is refused again reports it again instead of being suppressed
+        // against a sentence from a previous attempt.
+        dispatchWaitingOn: null,
       })
       .where(
         and(
@@ -574,9 +714,17 @@ export const dispatchBuild = async (
   });
 
   if (claimResult.type === 'CONCURRENCY_EXCEEDED') {
-    return failed(
+    // `waits`, and the one refusal in this file that clears itself: the
+    // prerequisite is a free slot, which a running sibling gives up on its own.
+    // Recorded anyway, because "PENDING and not moving" looks identical to the
+    // developer whether the cause is a queue or a missing IAM binding, and the
+    // difference is the whole of what they want to know.
+    return refuseDispatch(
+      context,
+      subject,
       'NOT_BUILDABLE',
       `${app.name} already has ${claimResult.count} builds running, which is this installation's limit`,
+      { kind: 'waits' },
     );
   }
 
@@ -608,6 +756,10 @@ export const dispatchBuild = async (
         dispatchId: current.dispatchId ?? dispatchId,
       });
     }
+    // Deliberately not recorded. Losing the claim is not a refusal to report to
+    // anybody: another replica won the same row and is writing that Build's log
+    // right now, so a line here would say "not dispatched" underneath the events
+    // of the dispatch that did happen.
     return failed(
       'NOT_BUILDABLE',
       `Build ${build.id} is already running on ${current?.runner ?? adapter.name}`,
