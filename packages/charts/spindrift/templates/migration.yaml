@@ -1,10 +1,8 @@
 {{/*
-The database owner applies committed migrations with a retryable Job. Its name
-contains a digest of the execution inputs, so an unchanged release reuses the
-completed Job and changed migration inputs create a fresh attempt. The pod
-template excludes revision-varying chart labels because Jobs are immutable.
-Process init containers independently hold web and reconciler below Ready until
-that image's journal is present.
+Applies the image's committed migrations. The Job name digests its execution
+inputs, so an unchanged release reuses the completed Job and a new image creates
+a fresh attempt. The pod template excludes revision-varying chart labels because
+Jobs are immutable.
 */}}
 {{- if and .Values.database.enabled .Values.database.migration.enabled }}
 apiVersion: batch/v1
@@ -16,9 +14,9 @@ metadata:
     {{- include "spindrift.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
 spec:
-  # Database startup and network readiness are eventually consistent. Keep
-  # retrying this image-scoped, idempotent act until it succeeds; a finite
-  # backoff would leave the same declared release permanently failed.
+  # Database startup and network readiness are eventually consistent. Retry this
+  # idempotent act until it succeeds; a finite backoff would leave the same
+  # declared release permanently failed.
   backoffLimit: 2147483647
   template:
     metadata:
@@ -37,10 +35,7 @@ spec:
       containers:
         - name: migrate
           image: {{ .Values.image }}
-          command:
-            - sh
-            - -c
-            - {{ .Values.database.migration.command | quote }}
+          command: ["bun", "run", "src/db/migrate.ts"]
           env:
             - name: TMPDIR
               value: /tmp

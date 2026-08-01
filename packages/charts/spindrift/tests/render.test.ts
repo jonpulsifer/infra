@@ -15,11 +15,11 @@ describe('process topology', () => {
       .template.spec.containers[0];
 
     expect(reconciler.image).toBe(web.image);
-    expect(web.command).toEqual(['sh', '-c', 'bun run src/web/server.ts']);
+    expect(web.command).toEqual(['bun', 'run', 'src/web/server.ts']);
     expect(reconciler.command).toEqual([
-      'sh',
-      '-c',
-      'bun run src/reconciler/main.ts',
+      'bun',
+      'run',
+      'src/reconciler/main.ts',
     ]);
   });
 });
@@ -60,18 +60,18 @@ describe('declarative schema ordering', () => {
     expect(migration.spec.backoffLimit).toBe(2147483647);
     expect(migration.spec.ttlSecondsAfterFinished).toBeUndefined();
     expect(migration.spec.template.spec.containers[0].command).toEqual([
-      'sh',
-      '-c',
-      expect.stringContaining('applyMigrations'),
+      'bun',
+      'run',
+      'src/db/migrate.ts',
     ]);
 
     for (const name of ['spindrift-web', 'spindrift-reconciler']) {
       const deployment = one(objects, 'Deployment', name);
-      const waitCommand =
-        deployment.spec.template.spec.initContainers[0].command;
-      expect(waitCommand.slice(0, 2)).toEqual(['sh', '-c']);
-      expect(waitCommand[2]).toContain('wait-for-schema.ts');
-      expect(waitCommand[2]).toContain('drizzle.__drizzle_migrations');
+      expect(deployment.spec.template.spec.initContainers[0].command).toEqual([
+        'bun',
+        'run',
+        'src/db/wait-for-schema.ts',
+      ]);
       expect(
         deployment.spec.template.spec.initContainers[0].env,
       ).toContainEqual({
@@ -183,13 +183,7 @@ describe('Secret-backed authentication configuration', () => {
 });
 
 describe('migration Job identity', () => {
-  const database = {
-    enabled: true,
-    migration: {
-      enabled: true,
-      command: 'bun run migrate',
-    },
-  };
+  const database = { enabled: true, migration: { enabled: true } };
 
   test('is stable for the same execution inputs and excludes chart revision labels', async () => {
     const first = one(await render({ database }), 'Job');
@@ -206,15 +200,7 @@ describe('migration Job identity', () => {
   test('changes when an immutable execution input changes', async () => {
     const first = one(await render({ database }), 'Job');
     const changed = one(
-      await render({
-        database: {
-          ...database,
-          migration: {
-            enabled: true,
-            command: 'bun run migrate --strict',
-          },
-        },
-      }),
+      await render({ database, image: 'ghcr.io/jonpulsifer/spindrift:next' }),
       'Job',
     );
 

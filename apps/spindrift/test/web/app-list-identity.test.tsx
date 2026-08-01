@@ -181,8 +181,8 @@ describe('two Apps answer to one name', () => {
       expect(review.value.appId).toBe(row.id);
     }
 
-    // The review the list used to be able to make, and the refusal that left
-    // both Apps undeletable.
+    // A review by name alone is ambiguous across the two rows, and the refusal
+    // is what keeps either from being deleted by accident.
     const ambiguous = await deleteApp({ name, confirm: false }, ctx);
     expect(ambiguous.ok).toBe(false);
     if (ambiguous.ok) return;

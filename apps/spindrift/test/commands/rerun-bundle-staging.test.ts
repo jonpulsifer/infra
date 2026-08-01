@@ -2,10 +2,9 @@
  * What bundle a rerun's Build is created with (ticket 24).
  *
  * §15 has Spindrift stage an immutable source bundle for either builder, and
- * the thing it is staged *for* is a Build. `deployApp` used to copy the
- * previous Build's `bundleLocation` forward instead, so a handle staged before
- * the depot existed survived every release that fixed staging: build 10 was
- * build 9's `upload://3f5cbbc2…`, and it died at `curl` for build 9's reason.
+ * the thing it is staged *for* is a Build. Copying the previous Build's
+ * `bundleLocation` forward instead would carry an unfetchable `upload://`
+ * handle into build 10 that dies at `curl` for build 9's reason.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';

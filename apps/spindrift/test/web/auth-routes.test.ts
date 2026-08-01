@@ -174,7 +174,7 @@ describe('enrolling over the route table', () => {
   });
 
   test('and the session it mints reaches a command', async () => {
-    // The whole point. Before this, every command route answered 401.
+    // The whole point of enrolment: without it every command route answers 401.
     const { routes } = serve();
     const cookie = cookieFrom(await enrolOverHttp(routes));
     expect(cookie).not.toBeNull();

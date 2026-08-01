@@ -3,12 +3,10 @@
  *
  * §4: "a build records an artifact rather than deploying one", so pressing
  * Deploy on an App with nothing deployable starts a Build and writes no intent
- * (`deployApp` returns `deployId: null`). Before this command existed there was
- * nowhere for that press to land: the operator stayed on the workspace and the
- * act they had just taken had no screen. A Build is an attempt with a durable
- * id and a live event stream, which is everything an attempt screen needs — the
- * only thing it lacks is the intent row, and that absence is what
- * {@link DeployView.id} being `null` says.
+ * (`deployApp` returns `deployId: null`). This is where that press lands. A
+ * Build is an attempt with a durable id and a live event stream, which is
+ * everything an attempt screen needs — the only thing it lacks is the intent
+ * row, and that absence is what {@link DeployView.id} being `null` says.
  *
  * The result also carries {@link GetBuildDetailResult.deployId}. A Build that
  * has since been deployed has a better screen than this one, and the client

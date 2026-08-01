@@ -1,11 +1,10 @@
 {{/*
-A job **always** renders a CronJob, suspended when unscheduled (§7).
+A job **always** renders a CronJob, suspended when unscheduled.
 
-Two facts force it: a Job's template is immutable, so a chart rendering one
-cannot be upgraded — and Helm then prunes the old Job on the next upgrade,
-which would silently cut an N-deep execution history to one. A CronJob owns its
-executions, so a scheduled run and a manual run are the same object with a
-field flipped, and `apply` for a job becomes two acts rather than two objects.
+A Job's template is immutable, so a chart rendering one cannot be upgraded, and
+Helm prunes the old Job on the next upgrade — cutting an N-deep execution
+history to one. A CronJob owns its executions, so a scheduled run and a manual
+run are the same object with a field flipped.
 */}}
 {{- if eq .Values.app.kind "job" }}
 apiVersion: batch/v1

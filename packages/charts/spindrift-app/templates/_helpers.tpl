@@ -1,10 +1,8 @@
 {{/*
 The release's object name: one App's one Component.
 
-Names are already DNS labels by the time Spindrift writes them (§9 mints the
-canonical hostname from the same two), so this composes rather than sanitizes —
-a value that needed sanitizing here would be a value that could not be a
-hostname either.
+Both names are already DNS labels — the canonical hostname is minted from the
+same two — so this composes rather than sanitizes.
 */}}
 {{- define "spindrift-app.fullname" -}}
 {{- printf "%s-%s" .Values.app.name .Values.app.component | trunc 63 | trimSuffix "-" }}
@@ -13,10 +11,8 @@ hostname either.
 {{/*
 Selector labels: what a Deployment's selector and a Service's selector match on.
 
-**Immutable by construction.** Nothing that changes deploy to deploy is here —
-the deploy label lives on the pod template only (§7), because a selector cannot
-be edited on an existing Deployment and putting a per-deploy value in one would
-brick every upgrade after the first.
+**Immutable by construction.** A selector cannot be edited on an existing
+Deployment, so nothing that changes deploy to deploy belongs here.
 */}}
 {{- define "spindrift-app.selectorLabels" -}}
 app.kubernetes.io/name: {{ .Values.app.component }}
@@ -36,9 +32,8 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 {{/*
 Pod template labels: the common set plus the one label that moves per deploy.
 
-§7: "a deploy label goes on the pod template and **never** in the selector",
-because both delivery flavours enumerate applied objects and neither covers
-pods — the label is how a pod is traced back to the Deploy that placed it.
+Neither delivery flavour's applied-object enumeration covers pods, so this
+label is how a pod is traced back to the Deploy that placed it.
 */}}
 {{- define "spindrift-app.podLabels" -}}
 {{ include "spindrift-app.labels" . }}
@@ -51,31 +46,25 @@ spindrift.dev/deploy: {{ . | quote }}
 {{- end }}
 
 {{/*
-The value-contract version the chart declares, read back onto every object.
-
-The pin-time read is of `Chart.yaml`; this puts the same number on what was
-rendered, so an object in a cluster can be traced to the contract it was
-rendered under without holding the chart that did it.
+The value-contract version from `Chart.yaml`, stamped onto every object, so an
+object in a cluster can be traced to the contract it was rendered under without
+holding the chart that did it.
 */}}
 {{- define "spindrift-app.contractAnnotations" -}}
 spindrift.dev/values-contract: {{ index .Chart.Annotations "spindrift.dev/values-contract" | quote }}
 {{- end }}
 
 {{/*
-The port this Component serves on.
-
-A website is already normalized to a service with a fixed port in values (§7),
-so this helper never needs to know which non-job kind it rendered.
+The port this Component serves on. A website arrives normalized to a service
+with a fixed port, so this never needs to know which non-job kind it rendered.
 */}}
 {{- define "spindrift-app.port" -}}
 {{- .Values.app.port }}
 {{- end }}
 
 {{/*
-Whether this Component serves traffic at all.
-
-`expose` is a field on a service; website normalization has already forced it
-on (§2, §7). A job is the only workload branch and never serves.
+Whether this Component serves traffic at all. A job is the only workload branch
+and never serves.
 */}}
 {{- define "spindrift-app.serving" -}}
 {{- if and (ne .Values.app.kind "job") .Values.app.expose }}true{{ end }}
@@ -84,10 +73,9 @@ on (§2, §7). A job is the only workload branch and never serves.
 {{/*
 The container: identical between the Deployment and the CronJob.
 
-Hardening is fixed with no per-App opt-out (§7), which is why every security
-field here is a literal rather than a value. The readiness probe is the other
-half of that rule — **readiness on the port, no liveness probe** — and it is
-absent for a job, which has no port to probe.
+Hardening is fixed with no per-App opt-out, so every security field here is a
+literal rather than a value. Readiness on the port, no liveness probe; a job
+has no port to probe.
 */}}
 {{- define "spindrift-app.container" -}}
 - name: app

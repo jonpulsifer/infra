@@ -1,12 +1,11 @@
 /**
  * What dispatch tells a route to push, and where.
  *
- * This is the layer the defect lived at. `dispatch.ts` handed the installation's
- * registry through unchanged — a namespace, which no registry accepts as a
- * repository — and every adapter-level fixture supplied an already-correct
- * value, so the routes were tested against the shape they expect and the caller
- * that produced the wrong one was tested against nothing. These assert on the
- * spec the route was actually handed.
+ * These assert on the spec the route is handed, which is the seam an
+ * adapter-level fixture cannot cover: a fixture supplies an already-correct
+ * value, so it tests the shape a route expects and not whether `dispatch.ts`
+ * produces it. The installation's registry is a namespace, and no registry
+ * accepts a namespace as a repository.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';

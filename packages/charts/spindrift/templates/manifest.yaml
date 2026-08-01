@@ -1,29 +1,18 @@
 {{/*
-§20's installation manifest, declared by the release.
+The installation manifest, declared by the release. `loadStoredManifest` writes
+this document to the durable row at process start, so a manifest change is a
+pull request. Empty declares nothing and the process reads the row back.
 
-Without this the durable row is the only copy, and it can only ever be seeded:
-`loadStoredManifest` writes a declaration when one is present and otherwise
-reads the row back, and no command writes that row. A value corrected in code
-therefore cannot reach an installation that already has one, and a value nothing
-seeds correctly stays wrong forever. Declaring the document here puts it back
-under ordinary review — a manifest change is a pull request.
-
-Empty declares nothing, which stays a valid installation: the process falls back
-to the durable row exactly as it does today.
-
-**A declaration may not restate what this chart already renders.** The three
-refusals below are the mechanical half of that rule: a release whose manifest
-carries a fact this chart owns fails to render, which is the earliest moment the
-two copies can be compared and the only one where being wrong costs nothing. The
-alternative is a value that agrees today, drifts on the next edit, and surfaces
-as a refusal somewhere else entirely.
+**A declaration may not restate what this chart already renders.** The refusals
+below reject a manifest carrying a fact this chart owns, at render time — the
+earliest the two copies can be compared and the only place being wrong is free.
 */}}
 {{- if .Values.manifest }}
 {{- if dig "cloud" "federation" nil .Values.manifest }}
 {{- fail "manifest.cloud.federation is not a manifest key: federation is read from the external_account credential this chart renders. Set serviceAccount.token.gcpAudience and serviceAccount.token.gcpImpersonationUrl instead." }}
 {{- end }}
 {{- if dig "charts" "installer" nil .Values.manifest }}
-{{- fail "manifest.charts.installer is not a manifest key: it named this chart, and nothing reads it. Remove it." }}
+{{- fail "manifest.charts.installer is not a manifest key: nothing reads it. Remove it." }}
 {{- end }}
 {{- $declaredHostname := dig "controlPlane" "hostname" "" .Values.manifest }}
 {{- if and .Values.hostname $declaredHostname (ne $declaredHostname .Values.hostname) }}

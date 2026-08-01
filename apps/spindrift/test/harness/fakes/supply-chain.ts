@@ -411,9 +411,9 @@ class RecordingSigner implements ArtifactSigner {
 /**
  * Records each admission check, then runs the real one.
  *
- * The default answer used to be `{ ok: true }`, so every deploy test passed
- * §16's signature gate for free. It now runs the pinned verifier over the
- * bundle the signer actually wrote.
+ * The default answer is the pinned verifier's, over the bundle the signer
+ * actually wrote — a stub `{ ok: true }` would pass §16's signature gate for
+ * free in every deploy test.
  */
 export class RecordingSignatureVerifier implements SignatureVerifier {
   readonly admissions: VerifySignatureInput[] = [];

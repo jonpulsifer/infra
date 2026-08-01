@@ -1,15 +1,14 @@
 {{/*
-The route onto the shared gateway's **existing HTTP listener** (§9).
+The route onto the shared gateway's **existing HTTP listener**.
 
-Three things this deliberately is not: it is not a Gateway, not a certificate,
-and not a cross-namespace grant — all three are vessel, and §7 excludes them
-from the release because a `destroy()` that could take the gateway with it is
-not a `destroy()` anybody can run. Private routes delegate authentication to
-the vessel's shared proxy; public routes have no authentication filter.
+Not a Gateway, not a certificate, not a cross-namespace grant: all three are
+vessel resources, kept out of the release so a `destroy()` cannot take the
+gateway with it. Private routes delegate authentication to the vessel's shared
+proxy; public routes have no authentication filter.
 
-An `internal` Component has no route at all. §9 makes internal Target-private,
-authenticated at the workload boundary, and a route onto the shared gateway is
-exactly the alternate origin a non-public state may not leave open.
+An `internal` Component has no route at all — it is Target-private and
+authenticated at the workload boundary, and a route onto the shared gateway
+would be exactly the alternate origin that state may not leave open.
 */}}
 {{- if and (include "spindrift-app.serving" .) (ne .Values.app.exposure "internal") }}
 apiVersion: gateway.networking.k8s.io/v1

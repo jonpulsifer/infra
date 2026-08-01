@@ -1,13 +1,8 @@
 {{/*
-The whole of §13's federation, in one document, in one place.
-
-This is the only copy. The installation manifest used to restate `audience`,
-`token_url`, the token path and the impersonation url by hand, in a document
-this chart does not render — so the two could disagree, and when they did the
-failure arrived as an `iam.serviceAccounts.signBlob` refusal that read as a code
-defect. The process now reads its federation from this file, through
-`GOOGLE_APPLICATION_CREDENTIALS`, which the deployment already sets beside the
-mount.
+The whole of the process's GCP federation, in one document, in one place — the
+audience, the token url, the impersonation url, and the projected token's path.
+The process reads it through `GOOGLE_APPLICATION_CREDENTIALS`, which the
+deployment sets beside the mount.
 
 An ordinary ADC `external_account` document, so any client in the process finds
 the same credential rather than a Spindrift-shaped one only Spindrift reads.

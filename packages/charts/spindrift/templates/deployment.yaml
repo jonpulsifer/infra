@@ -1,22 +1,15 @@
 {{/*
-§19: "One image, two Deployments — `web` (UI, webhooks, log WebSockets) and
-`reconciler` — forced, because the transactional desired-state row assumes a
-loop that owns its own lifecycle."
+Two Deployments off one image — `web` (UI, webhooks, log WebSockets) and
+`reconciler` — rendered from one template so they cannot drift apart in the
+image, the database credential, the manifest bootstrap, or the security context.
 
-They are rendered from one template with one difference each — the command and
-the component label — so the two processes cannot drift apart in the things
-that must not differ: the image, the database credential, the manifest
-bootstrap, and the security context.
-
-The reconciler serves nothing and is therefore given no port and no probe. A
-loop that claims work with `SELECT … FOR UPDATE SKIP LOCKED` has no readiness to
-report, and inventing an endpoint so it could would be inventing the surface §21
-declined to declare.
+The reconciler serves nothing, so it gets no port and no probe: a loop that
+claims work with `SELECT … FOR UPDATE SKIP LOCKED` has no readiness to report.
 */}}
 {{- $top := . -}}
-{{- $processes := list (dict "name" "web" "command" .Values.command "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" true) -}}
+{{- $processes := list (dict "name" "web" "command" "src/web/server.ts" "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" true) -}}
 {{- if .Values.reconciler.enabled -}}
-{{- $processes = append $processes (dict "name" "reconciler" "command" .Values.reconciler.command "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false "federates" true) -}}
+{{- $processes = append $processes (dict "name" "reconciler" "command" "src/reconciler/main.ts" "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false "federates" true) -}}
 {{- end -}}
 {{- range $process := $processes }}
 ---
@@ -34,8 +27,8 @@ metadata:
     app.kubernetes.io/database: {{ include "spindrift.databaseName" $top }}
     {{- end }}
     {{- with $top.Values.envFromSecret }}
-    # Recovery is token rotation. Reloader turns that desired-state Secret
-    # change into the restart needed for the process to read the new value.
+    # A rotated token is a Secret change; Reloader turns it into the restart the
+    # process needs to read the new value.
     secret.reloader.stakater.com/reload: {{ . | quote }}
     {{- end }}
   {{- end }}
@@ -48,10 +41,8 @@ spec:
     metadata:
       {{- if $top.Values.manifest }}
       annotations:
-        # Both processes read the manifest once, at start. Without this the
-        # ConfigMap would change and the running processes would keep the
-        # declaration they booted with — a declared change that does nothing is
-        # the failure this document exists to end.
+        # Both processes read the manifest once, at start, so a ConfigMap change
+        # has to become a rollout.
         checksum/manifest: {{ toYaml $top.Values.manifest | sha256sum }}
       {{- end }}
       labels:
@@ -72,10 +63,7 @@ spec:
         - name: wait-for-schema
           image: {{ $top.Values.image }}
           imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - {{ $top.Values.database.migration.waitCommand | quote }}
+          command: ["bun", "run", "src/db/wait-for-schema.ts"]
           env:
             - name: TMPDIR
               value: /tmp
@@ -104,10 +92,7 @@ spec:
         - name: {{ $process.name }}
           image: {{ $top.Values.image }}
           imagePullPolicy: IfNotPresent
-          command:
-            - sh
-            - -c
-            - {{ $process.command | quote }}
+          command: ["bun", "run", {{ $process.command | quote }}]
           {{- if $process.serves }}
           ports:
             - containerPort: {{ $top.Values.port }}
@@ -133,9 +118,8 @@ spec:
             {{- end }}
             {{- end }}
             {{- if $top.Values.manifest }}
-            # Named explicitly rather than left to the default path, so a
-            # declaration that fails to mount is fatal instead of falling back
-            # to the durable row and serving the value it was meant to replace.
+            # Named explicitly, so a declaration that fails to mount is fatal
+            # rather than falling back to the durable row.
             - name: SPINDRIFT_MANIFEST_PATH
               value: /etc/spindrift/manifest.yaml
             {{- end }}
@@ -161,8 +145,7 @@ spec:
                 name: {{ . }}
           {{- end }}
           {{- if $process.serves }}
-          # No liveness probe, deliberately — the same rule §7 fixes for App
-          # workloads. A liveness probe on a process whose slow path is a
+          # Readiness only. A liveness probe on a process whose slow path is a
           # database query restarts it exactly when it is least able to recover.
           readinessProbe:
             httpGet:

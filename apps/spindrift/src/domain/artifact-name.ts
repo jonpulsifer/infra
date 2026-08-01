@@ -24,9 +24,9 @@
  * **It is unique per (App name, Component name), which is not the same as per
  * Component.** Where two Apps share a name their Components share a repository.
  * That is live today and it is not this module's to fix: `apps.name` carries no
- * unique constraint, which is the defect tracked as ticket 26. Encoding the
- * App's id here would dodge it at the cost of a registry listing no one can
- * read, and would leave the identity bug in place everywhere else.
+ * unique constraint. Encoding the App's id here would dodge it at the cost of a
+ * registry listing no one can read, and would leave the identity gap in place
+ * everywhere else.
  */
 
 /**
