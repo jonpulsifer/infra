@@ -644,13 +644,6 @@ async function revalidate(
         remediation:
           'Wait for default-branch reconciliation, then review this draft again.',
       });
-    } else if ((context.adapters.source?.() ?? null) === null) {
-      blockers.push({
-        code: 'SOURCE_UNAVAILABLE',
-        title: 'Repository source staging is unavailable.',
-        remediation:
-          'Configure the installation source depot, then review this draft again.',
-      });
     }
   }
 
