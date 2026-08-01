@@ -24,6 +24,28 @@ describe('process topology', () => {
   });
 });
 
+describe('the database keep policy', () => {
+  test('keeps the Cluster on uninstall by default, because the PVC dies with it', async () => {
+    const objects = await render({ database: { enabled: true } });
+    expect(
+      one(objects, 'Cluster', 'spindrift-db').metadata.annotations?.[
+        'helm.sh/resource-policy'
+      ],
+    ).toBe('keep');
+  });
+
+  test('lets a release opt into a real teardown', async () => {
+    const objects = await render({
+      database: { enabled: true, keepOnDelete: false },
+    });
+    expect(
+      one(objects, 'Cluster', 'spindrift-db').metadata.annotations?.[
+        'helm.sh/resource-policy'
+      ],
+    ).toBeUndefined();
+  });
+});
+
 describe('declarative schema ordering', () => {
   test('renders the database, migration Job, and both gated healthy processes', async () => {
     const objects = await render({
