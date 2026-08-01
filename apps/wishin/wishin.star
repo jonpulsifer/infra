@@ -1,4 +1,8 @@
-""" Display wishlist stats from wishin.app """
+""" Display wishlist stats from wishin.app
+
+A failed fetch renders a splash saying what broke, rather than ending the
+render: a blank display cannot be told apart from a dead device.
+"""
 
 load("cache.star", "cache")
 load("encoding/base64.star", "base64")
@@ -8,6 +12,11 @@ load("render.star", "canvas", "render")
 load("schema.star", "schema")
 
 DEFAULT_API_URL = "https://www.wishin.app/api/stats"
+CACHE_TTL_SECONDS = 240
+
+SPLASH_FONTS = {1: "tom-thumb", 2: "tb-8"}
+COLOR_LABEL = "#9ab8d8"
+COLOR_WARN = "#ffb300"
 
 def main(config):
     """ This program is called by the device to render the screen.
@@ -21,21 +30,13 @@ def main(config):
 
     api_url = config.str("api_url", DEFAULT_API_URL)
 
-    cache_key = "stats:%s" % api_url
-    stats_cached = cache.get(cache_key)
-    if stats_cached != None:
-        print("Cache hit!")
-        stats = json.decode(stats_cached)
-    else:
-        print("Cache miss! Calling wishin.app API")
-        rep = http.get(api_url)
-        if rep.status_code != 200:
-            fail("wishin.app API request failed with status %d", rep.status_code)
-        stats = rep.json()
-        cache.set(cache_key, json.encode(stats), ttl_seconds = 240)
-
     # the embedded icons are high-res PNGs, so 2x just draws them larger
     scale = 2 if canvas.is2x() else 1
+
+    stats, err = get_stats(api_url)
+    if err != None:
+        return render.Root(child = splash(err, scale))
+
     icon_size = 16 * scale
     font = "6x13" if scale == 2 else "Dina_r400-6"
 
@@ -55,7 +56,7 @@ def main(config):
                         ),
                         render.Column(
                             children = [
-                                render.Marquee(width = canvas.width() - icon_size, child = render.Text("%d gifts, %d claimed" % (stats["gifts"], stats["claimed"]), font = font)),
+                                render.Marquee(width = canvas.width() - icon_size, child = render.Text("%d gifts, %d claimed" % (stats["gifts"], stats.get("claimed", 0)), font = font)),
                             ],
                         ),
                     ],
@@ -77,6 +78,41 @@ def main(config):
                 ),
             ],
         ),
+    )
+
+def get_stats(api_url):
+    """Fetch the wishin.app stats, serving from cache when possible.
+
+    Returns:
+        (stats dict, None) on success, (None, error message) on failure.
+    """
+    cache_key = "stats:%s" % api_url
+    cached = cache.get(cache_key)
+    if cached != None:
+        return json.decode(cached), None
+
+    rep = http.get(api_url)
+    if rep.status_code != 200:
+        return None, "wishin.app API error %d" % rep.status_code
+    stats = rep.json()
+    if stats.get("gifts") == None or stats.get("users") == None:
+        return None, "wishin.app returned no stats"
+    cache.set(cache_key, json.encode(stats), ttl_seconds = CACHE_TTL_SECONDS)
+    return stats, None
+
+def splash(message, scale):
+    font = SPLASH_FONTS[scale]
+    return render.Column(
+        expanded = True,
+        main_align = "center",
+        cross_align = "center",
+        children = [
+            render.Text("WISHIN", font = font, color = COLOR_LABEL),
+            render.Marquee(
+                width = canvas.width() - 2,
+                child = render.Text(message, font = font, color = COLOR_WARN),
+            ),
+        ],
     )
 
 def get_schema():

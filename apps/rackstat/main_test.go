@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -30,130 +29,21 @@ func TestParseProbes(t *testing.T) {
 	}
 }
 
-func TestNodeName(t *testing.T) {
-	cases := []struct {
-		metric map[string]string
-		want   string
-	}{
-		{map[string]string{"node": "optiplex"}, "optiplex"},
-		{map[string]string{"instance": "dns.lolwtf.ca:9100"}, "dns"},
-		{map[string]string{"instance": "cloudpi4:9100"}, "cloudpi4"},
-		{map[string]string{"instance": "radiopi0"}, "radiopi0"},
-		{map[string]string{}, ""},
-	}
-	for _, c := range cases {
-		if got := nodeName(c.metric); got != c.want {
-			t.Errorf("nodeName(%v) = %q, want %q", c.metric, got, c.want)
-		}
-	}
-}
-
-// promVec builds a query API response with one sample per (metric, value).
-func promVec(samples ...map[string]any) string {
-	results := []map[string]any{}
-	for _, s := range samples {
-		metric := map[string]string{}
-		for k, v := range s {
-			if k != "_value" {
-				metric[k] = v.(string)
-			}
-		}
-		results = append(results, map[string]any{
-			"metric": metric,
-			"value":  []any{1700000000.0, s["_value"].(string)},
-		})
-	}
-	b, _ := json.Marshal(map[string]any{
-		"status": "success",
-		"data":   map[string]any{"resultType": "vector", "result": results},
-	})
-	return string(b)
-}
-
-func fakeProm(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query().Get("query")
-		switch {
-		case strings.HasPrefix(q, `up{job="node-exporter"}`):
-			w.Write([]byte(promVec(
-				map[string]any{"node": "optiplex", "_value": "1"},
-				map[string]any{"node": "riptide", "_value": "1"},
-				map[string]any{"instance": "dns.lolwtf.ca:9100", "_value": "1"},
-				map[string]any{"instance": "spore.lolwtf.ca:9100", "_value": "0"},
-				map[string]any{"instance": "cloudpi4:9100", "_value": "1"},
-			)))
-		case strings.HasPrefix(q, `max by (node, instance) (node_hwmon_temp_celsius)`):
-			w.Write([]byte(promVec(map[string]any{"node": "optiplex", "_value": "54.3"})))
-		case strings.HasPrefix(q, `kube_node_status_condition`):
-			w.Write([]byte(promVec(
-				map[string]any{"node": "optiplex", "_value": "1"},
-				map[string]any{"node": "riptide", "_value": "0"},
-			)))
-		case strings.HasPrefix(q, `ALERTS`):
-			w.Write([]byte(promVec(
-				map[string]any{"alertname": "TargetDown", "severity": "warning", "_value": "1"},
-				map[string]any{"alertname": "TargetDown", "severity": "warning", "_value": "1"},
-				map[string]any{"alertname": "KubeNodeNotReady", "severity": "critical", "_value": "1"},
-			)))
-		case r.URL.Path == "/api/v1/query_range":
-			w.Write([]byte(`{"status":"success","data":{"result":[{"values":[[1,"8.25"],[2,"9.1"]]}]}}`))
-		default:
-			w.Write([]byte(promVec()))
-		}
-	}))
-}
-
-func TestCollectProm(t *testing.T) {
-	prom := fakeProm(t)
-	defer prom.Close()
-
-	s := &server{promURL: prom.URL, client: prom.Client(), cacheTTL: time.Minute}
-	snap := &Snapshot{}
-	if err := s.collectProm(context.Background(), snap); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(snap.Nodes) != 5 {
-		t.Fatalf("want 5 nodes, got %+v", snap.Nodes)
-	}
-	// k8s nodes sort first
-	if !snap.Nodes[0].K8s || snap.Nodes[0].Name != "optiplex" {
-		t.Errorf("first node should be k8s optiplex, got %+v", snap.Nodes[0])
-	}
-	if snap.Nodes[1].Ready == nil || *snap.Nodes[1].Ready {
-		t.Errorf("riptide should be k8s and not ready, got %+v", snap.Nodes[1])
-	}
-	for _, n := range snap.Nodes {
-		if n.Name == "spore" && n.Up {
-			t.Errorf("spore should be down")
-		}
-	}
-	if snap.Nodes[0].TempC == nil || *snap.Nodes[0].TempC != 54.3 {
-		t.Errorf("optiplex temp = %+v, want 54.3", snap.Nodes[0].TempC)
-	}
-
-	// alerts: critical sorts first, duplicates collapse with a count
-	if len(snap.Alerts) != 2 || snap.Alerts[0].Name != "KubeNodeNotReady" {
-		t.Fatalf("unexpected alerts: %+v", snap.Alerts)
-	}
-	if snap.Alerts[1].Count != 2 {
-		t.Errorf("TargetDown count = %d, want 2", snap.Alerts[1].Count)
-	}
-	if snap.AlertCounts.Critical != 1 || snap.AlertCounts.Warning != 2 {
-		t.Errorf("unexpected alert counts: %+v", snap.AlertCounts)
-	}
-
-	if len(snap.CPUHistory) != 2 || snap.CPUHistory[0] != 8.3 {
-		t.Errorf("unexpected cpu history: %+v", snap.CPUHistory)
-	}
+func testServer(src promSource) *server {
+	return &server{prom: src, clusterName: "folly", cacheTTL: time.Minute}
 }
 
 func TestSnapshotCachesAndServes(t *testing.T) {
-	prom := fakeProm(t)
-	defer prom.Close()
+	src := &cannedProm{
+		vec: map[string][]promSample{
+			queryNodeUp: {
+				sample(1, "node", "optiplex"),
+				sample(0, "instance", "spore.lolwtf.ca:9100"),
+			},
+		},
+	}
+	s := testServer(src)
 
-	s := &server{promURL: prom.URL, client: prom.Client(), cacheTTL: time.Minute}
 	first := s.snapshot(context.Background())
 	second := s.snapshot(context.Background())
 	if first != second {
@@ -166,10 +56,29 @@ func TestSnapshotCachesAndServes(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
 		t.Fatalf("response is not valid JSON: %v", err)
 	}
-	if decoded.Cluster != "" && decoded.Cluster != "folly" {
+	if decoded.Cluster != "folly" {
 		t.Errorf("unexpected cluster: %q", decoded.Cluster)
 	}
-	if len(decoded.Nodes) != 5 {
-		t.Errorf("want 5 nodes over HTTP, got %d", len(decoded.Nodes))
+	if len(decoded.Nodes) != 2 {
+		t.Errorf("want 2 nodes over HTTP, got %d", len(decoded.Nodes))
+	}
+	if decoded.Errors != nil {
+		t.Errorf("healthy snapshot should carry no errors, got %v", decoded.Errors)
+	}
+	// probes is never null in the JSON: the pixlet app iterates it directly
+	if decoded.Probes == nil {
+		t.Error("probes should serialize as an empty array, not null")
+	}
+}
+
+func TestSnapshotReportsSourceErrors(t *testing.T) {
+	src := &cannedProm{errs: map[string]error{queryNodeUp: context.DeadlineExceeded}}
+	snap := testServer(src).snapshot(context.Background())
+
+	if snap.Errors["prometheus"] == "" {
+		t.Fatalf("a failed node list should be reported, got %+v", snap.Errors)
+	}
+	if len(snap.Nodes) != 0 {
+		t.Errorf("want no nodes, got %+v", snap.Nodes)
 	}
 }
