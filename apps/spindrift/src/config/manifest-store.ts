@@ -22,21 +22,31 @@ import {
 type Env = Record<string, string | undefined>;
 
 /**
- * Reconcile declared configuration into the durable singleton, then load it.
+ * Load the durable singleton, seeding it from a declaration when it is empty.
  *
- * A mounted file or inline env declaration is reconciled first. Without a
- * file/env declaration, Spindrift reads the stored manifest from Postgres.
- * If the Postgres store is unseeded, Spindrift seeds the high-trust default
- * placeholder manifest so the UI can drive all configuration dynamically.
+ * **A declaration seeds; it does not govern.** The stored row wins whenever one
+ * exists, because configuration is the UI's to drive and a rollout must not
+ * revert what an operator just configured. A mounted file or inline env
+ * document is therefore consulted only for an unseeded installation, ahead of
+ * the high-trust placeholder — which is what makes a torn-down installation
+ * come back configured without anyone opening a browser.
+ *
+ * The cost is that editing a declaration does nothing to an installation that
+ * already has a row, so an ignored declaration says so at startup rather than
+ * being quietly skipped. Re-seeding is deliberate: discard the row.
  */
 export async function loadStoredManifest(
   db: Database,
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  const declared =
-    (await loadManifestIfPresent(env)) ??
-    (await readStoredManifest(db)) ??
-    DEFAULT_PLACEHOLDER_MANIFEST;
+  const stored = await readStoredManifest(db);
+  const declaration = await loadManifestIfPresent(env);
+  if (stored !== null && declaration !== null) {
+    console.warn(
+      'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it',
+    );
+  }
+  const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
 
   await db.transaction(async (tx) => {
     await tx

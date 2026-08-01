@@ -18,6 +18,14 @@ metadata:
   namespace: {{ include "spindrift.namespace" . }}
   labels:
     {{- include "spindrift.labels" . | nindent 4 }}
+  {{- if .Values.database.keepOnDelete }}
+  annotations:
+    # The keep policy the comment above describes. CNPG owns the data PVC
+    # through the Cluster, so an uninstall that removes the Cluster garbage
+    # collects the volume with it whatever the storage class reclaims — keeping
+    # the Cluster is what keeps the data.
+    helm.sh/resource-policy: keep
+  {{- end }}
 spec:
   instances: {{ .Values.database.instances }}
   enableSuperuserAccess: false

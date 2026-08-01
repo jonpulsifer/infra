@@ -99,6 +99,15 @@ database:
   size: 2Gi
   name: spindrift
   storageClass: local-path
+  # §19's keep policy. The data PVC is owned by the CNPG Cluster, so removing
+  # the Cluster discards the desired-state rows, the attempt log, and the config
+  # version pins — none of which are in any source, because §12 ships no backups
+  # and the loss story is reconcile-from-sources.
+  #
+  # Turn it off to make an uninstall a real teardown. That is the loop for
+  # working on onboarding itself: every redeploy is then a fresh installation,
+  # which is the only way to exercise seeding and the wizard repeatedly.
+  keepOnDelete: true
   # The Job is part of an installation that owns its database. Its default
   # command is compatible with images that expose applyMigrations before the
   # executable entrypoint exists.
