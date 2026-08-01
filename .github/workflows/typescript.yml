@@ -41,6 +41,9 @@ jobs:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 15
     env:
       NEXT_TELEMETRY_DISABLED: 1
@@ -84,9 +87,15 @@ jobs:
       - name: Cache Turborepo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: .turbo
-          key: turbo-${{ runner.os }}-${{ github.sha }}
+          path: |
+            .turbo
+            node_modules/.cache/turbo
+            apps/*/.turbo
+            packages/*/.turbo
+            apps/*/.next/cache
+          key: turbo-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
           restore-keys: |
+            turbo-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('bun.lock') }}-
             turbo-${{ runner.os }}-${{ github.ref_name }}-
             turbo-${{ runner.os }}-main-
             turbo-${{ runner.os }}-
