@@ -14,7 +14,7 @@ metadata:
   name: spindrift
   namespace: spindrift
 spec:
-  interval: 1h
+  interval: 5m
   chart:
     spec:
       chart: packages/charts/spindrift
