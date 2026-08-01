@@ -28,8 +28,8 @@ import {
   bigserial,
   boolean,
   check,
+  customType,
   integer,
-  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -53,6 +53,43 @@ import type { ConfigEntry } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import type { CoreSignature } from '../supply-chain/sign.ts';
 import type { BackendProvenanceAssessment } from '../supply-chain/verify.ts';
+
+/**
+ * A `jsonb` column that stores a JSON **document**, not a JSON string.
+ *
+ * Drizzle's own `jsonb` encoder hands the driver `JSON.stringify(value)`, and
+ * Bun's SQL client serialises a JS string bound to a `jsonb` parameter *as a
+ * JSON string*. The document is therefore encoded twice, and the column holds a
+ * scalar: `jsonb_typeof(...)` is `'string'` and `draft->>'appName'` is `NULL`.
+ *
+ * Nothing caught it because the read path is symmetric — Bun parses the `jsonb`
+ * back to a JS string and the decoder parses that — so the application always
+ * got its object back. What it costs is every SQL-side use of the document: a
+ * predicate, a GIN index, a generated column, or a data migration reading inside
+ * one of these columns matches nothing rather than erroring.
+ *
+ * Passing the value through untouched is the fix; Bun binds objects and arrays
+ * to `jsonb` correctly on its own. `null` never reaches {@link toDriver} —
+ * Drizzle emits SQL `NULL` for it — so a nullable column still stores SQL `NULL`
+ * rather than a JSON `null`, and `IS NULL` keeps meaning what it meant.
+ *
+ * {@link fromDriver} still parses a string so that rows written before
+ * `0016_jsonb_documents` read correctly during a rollout, when the new image and
+ * the un-migrated rows overlap. It is the same decode Drizzle already did. The
+ * one thing it forbids is a column whose document is legitimately a JSON string;
+ * none is, and a scalar in a `jsonb` column here would be a modelling mistake.
+ */
+const jsonbDocument = customType<{ data: unknown; driverData: unknown }>({
+  dataType() {
+    return 'jsonb';
+  },
+  toDriver(value) {
+    return value;
+  },
+  fromDriver(value) {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  },
+});
 
 // --- Enums -----------------------------------------------------------------
 //
@@ -221,7 +258,7 @@ export const installation = pgTable(
   'installation',
   {
     id: integer('id').primaryKey().default(1),
-    manifest: jsonb('manifest').$type<InstallationManifest>().notNull(),
+    manifest: jsonbDocument('manifest').$type<InstallationManifest>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -457,7 +494,7 @@ export const builds = pgTable(
     artifactType: artifactType('artifact_type').notNull(),
     /** Set once the build produces a digestible artifact. */
     artifactDigest: text('artifact_digest'),
-    artifactRefs: jsonb('artifact_refs').$type<string[]>(),
+    artifactRefs: jsonbDocument('artifact_refs').$type<string[]>(),
     status: buildStatus('status').notNull().default('PENDING'),
     /** §4: the base image digest this build started from, for provenance. */
     baseDigest: text('base_digest'),
@@ -483,7 +520,8 @@ export const builds = pgTable(
     /** Timestamp when the current runner claimed the dispatch lease. */
     leasedAt: timestamp('leased_at', { withTimezone: true }),
     /** §16: the backend envelope plus the facts core verified from it. */
-    provenance: jsonb('provenance').$type<BackendProvenanceAssessment>(),
+    provenance:
+      jsonbDocument('provenance').$type<BackendProvenanceAssessment>(),
     /**
      * The concrete achieved level, normalized for policy queries.
      *
@@ -493,7 +531,7 @@ export const builds = pgTable(
      */
     verifiedBuildLevel: integer('verified_build_level'),
     /** Core's one cosign record, written only after provenance passes (§16). */
-    signature: jsonb('signature').$type<CoreSignature>(),
+    signature: jsonbDocument('signature').$type<CoreSignature>(),
     /**
      * The unsigned BuildKit materials document attached to the artifact.
      *
@@ -565,7 +603,7 @@ export const deploys = pgTable('deploys', {
   /** §6: "`FAILED` carries a closed reason set plus free-text `detail`." */
   detail: text('detail'),
   /** §6: "and a raw `debug` payload." */
-  debug: jsonb('debug'),
+  debug: jsonbDocument('debug'),
   /**
    * §6: the adapter's own handle on what `apply` placed — "opaque to core,
    * which stores it and hands it back to `observe` and `destroy`." This column
@@ -590,7 +628,8 @@ export const deploys = pgTable('deploys', {
    * database that cannot produce a credential is a database whose disclosure
    * does not produce one either.
    */
-  configDocument: jsonb('config_document').$type<readonly ConfigEntry[]>(),
+  configDocument:
+    jsonbDocument('config_document').$type<readonly ConfigEntry[]>(),
   exposure: exposureState('exposure'),
   /**
    * §13: "Disconnect always works: live Deploys go `orphaned`, workloads keep
@@ -735,14 +774,14 @@ export const targets = pgTable(
      * Null means the manifest has established the Target's identity and rank,
      * but neither desired state nor an operator has supplied connection facts.
      */
-    connection: jsonb('connection').$type<TargetConnection>(),
+    connection: jsonbDocument('connection').$type<TargetConnection>(),
     /** §13: the standing checklist's last verdict. */
     health: targetHealth('health').notNull(),
     /** One `PrerequisiteResult` per item, with the sentence behind each. */
     prerequisites:
-      jsonb('prerequisites').$type<readonly PrerequisiteResult[]>(),
+      jsonbDocument('prerequisites').$type<readonly PrerequisiteResult[]>(),
     /** §3's discovered half, as the adapter last reported it. */
-    discovery: jsonb('discovery').$type<TargetDiscovery>(),
+    discovery: jsonbDocument('discovery').$type<TargetDiscovery>(),
     /** When the one loop (§13) last ran against this Target. */
     inspectedAt: timestamp('inspected_at', { withTimezone: true }),
     /**
@@ -804,7 +843,7 @@ export const creationDrafts = pgTable('creation_drafts', {
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   revision: integer('revision').notNull().default(0),
-  draft: jsonb('draft').$type<Draft>().notNull(),
+  draft: jsonbDocument('draft').$type<Draft>().notNull(),
   completedAppId: uuid('completed_app_id').references(() => apps.id, {
     onDelete: 'set null',
   }),
