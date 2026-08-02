@@ -60,9 +60,11 @@ resource "google_iam_workload_identity_pool_provider" "vercel" {
   }
 
   attribute_condition = "assertion.sub.startsWith('owner:jonpulsifer:project:')"
+  # No allowed_audiences: the Vercel project mints its OIDC token with this
+  # provider's full resource name as `aud`, which is exactly what GCP accepts
+  # by default. Setting allowed_audiences replaces that default and rejects it.
   oidc {
-    allowed_audiences = ["https://vercel.com/jonpulsifer"]
-    issuer_uri        = "https://oidc.vercel.com/jonpulsifer"
+    issuer_uri = "https://oidc.vercel.com/jonpulsifer"
   }
 
   depends_on = [time_sleep.workload_identity_org_policy_propagation]
