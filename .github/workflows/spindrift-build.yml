@@ -249,9 +249,20 @@ jobs:
           project_id: homelab-ng
           create_credentials_file: true
 
+      # Pinned to the 2.x line, and the pin is the point. Cosign 3 refuses
+      # `--tlog-upload=false` outright — "not supported with --signing-config or
+      # --use-signing-config", because signing is configured through a signing
+      # config that names a transparency log by default. There is no
+      # transparency log in this trust model: the signer is a KMS key whose
+      # public half the admission policy pins, and the policy says the same
+      # thing from its own side with `ctlog.ignoreTlog`. Cosign 2 is also the
+      # keyed-signature format Kyverno 1.18 reads, so the pin holds two things
+      # at once and should not move without checking both.
       - name: Install cosign
         if: steps.request.outputs.signer != ''
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.6.4
 
       - name: Sign the artifact
         if: steps.request.outputs.signer != ''
