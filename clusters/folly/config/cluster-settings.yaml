@@ -1,0 +1,12 @@
+---
+# Patched onto clusters/base/cluster-settings.yaml. Only what folly does not
+# share with offsite belongs here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-settings
+  namespace: flux-system
+data:
+  # 1Password "oauth2-proxy: folly" — the App whose callback is on
+  # oauth2.${SECRET_DOMAIN}.
+  OAUTH2_PROXY_ITEM: iy4vkwkvbfhvm4kd2g6slnxlca

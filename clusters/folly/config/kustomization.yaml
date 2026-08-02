@@ -4,3 +4,5 @@ resources:
   - ../../base
   - cluster-topology.json
   - cluster-secrets.sops.yaml
+patches:
+  - path: cluster-settings.yaml
