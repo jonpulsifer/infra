@@ -38,10 +38,7 @@ import {
   type RepositoryAuthorizationView,
   RepositoryList,
 } from './views/repos/list.tsx';
-import {
-  SourceStorage,
-  type SourceStorageView,
-} from './views/storage/list.tsx';
+import { Storage, type StorageView } from './views/storage/list.tsx';
 import { TargetList } from './views/targets/list.tsx';
 
 const NAV = [
@@ -970,20 +967,39 @@ function StorageScreen() {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
-    | { type: 'success'; view: SourceStorageView }
+    | { type: 'success'; view: StorageView }
   >({ type: 'loading' });
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
-    command('listSourceBuckets', {})
-      .then((result) => {
+    // Three reads, one screen, one failure state. Two of them answer from the
+    // manifest and the third from the database, so a slow one is the slow one
+    // for everybody — which is the honest cost of the sections being one page.
+    Promise.all([
+      command('listSourceBuckets', {}),
+      command('listArtifactRegistries', {}),
+      command('listStagedBundles', {}),
+    ])
+      .then(([buckets, registries, bundles]) => {
         if (!live) return;
-        setState(
-          result.ok
-            ? { type: 'success', view: result.value }
-            : { type: 'error', message: result.failure.message },
+        const refused = [buckets, registries, bundles].find(
+          (result) => !result.ok,
         );
+        if (refused !== undefined && !refused.ok) {
+          setState({ type: 'error', message: refused.failure.message });
+          return;
+        }
+        if (!buckets.ok || !registries.ok || !bundles.ok) return;
+        setState({
+          type: 'success',
+          view: {
+            source: buckets.value,
+            registries: registries.value.registries,
+            bundles: bundles.value.bundles,
+            bundleLimit: bundles.value.limit,
+          },
+        });
       })
       .catch((cause: unknown) => {
         if (!live) return;
@@ -1019,7 +1035,7 @@ function StorageScreen() {
   }
 
   return (
-    <SourceStorage
+    <Storage
       view={state.view}
       onChanged={() => setReloadToken((token) => token + 1)}
     />

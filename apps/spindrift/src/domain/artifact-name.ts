@@ -90,6 +90,105 @@ export function registryHostOf(reference: string): string {
 }
 
 /**
+ * Whether a string is a registry namespace §16 could push under.
+ *
+ * A host, then at least one path segment — which is the shape
+ * {@link componentRepositories} appends to, and the shape a namespace has to
+ * already be for the result to be a repository a registry accepts. A bare host
+ * is refused here rather than at the first push, for the same reason a bad
+ * component name is: the alternative costs a build every step up to `Build and
+ * push` to discover.
+ *
+ * The host is required to *look* like one — a dot, a port, or `localhost` —
+ * because `alpine/git` is a legal repository path under Docker Hub's implicit
+ * host and an illegal namespace here: §16 names the registries explicitly, so
+ * a namespace that leaves the host to be inferred is one whose destination
+ * depends on which client resolves it.
+ */
+export function isRegistryNamespace(value: string): boolean {
+  const [host, ...path] = value.split('/');
+  if (host === undefined || path.length === 0) return false;
+  if (!isRegistryHost(host)) return false;
+  return path.every((segment) => isPathComponent(segment));
+}
+
+/** A host a registry answers on: DNS name, optional port, or `localhost`. */
+function isRegistryHost(host: string): boolean {
+  const [name, port, ...rest] = host.split(':');
+  if (name === undefined || rest.length > 0) return false;
+  if (port !== undefined && !/^[0-9]{1,5}$/.test(port)) return false;
+  if (name === 'localhost') return true;
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(
+    name,
+  );
+}
+
+/**
+ * Which registry product answers for a host.
+ *
+ * Vendor vocabulary, not installation identity, so it belongs here rather than
+ * in the manifest §20 puts installation-naming values in: `ghcr.io` is the same
+ * host for everybody, and what changes per installation is *which* of them an
+ * operator pushes to — which is `supplyChain.registry` and already a value.
+ *
+ * It carries no behaviour beyond {@link registryApiBase} and a label. A flavour
+ * this list does not know is `other`, which is a registry that works exactly
+ * the same way: the distribution API is the contract, and the flavour is only
+ * ever how a listing reads.
+ */
+export type RegistryFlavour =
+  | 'artifactRegistry'
+  | 'dockerHub'
+  | 'ghcr'
+  | 'other';
+
+/**
+ * Docker Hub, under every name it answers to.
+ *
+ * Three spellings and only one of them is the distribution API. A namespace is
+ * written `docker.io/…`, the canonical index is `index.docker.io`, and the
+ * registry itself is `registry-1.docker.io` — so a probe that used the host as
+ * written would report Docker Hub unreachable on a namespace that pushes fine.
+ */
+const DOCKER_HUB_HOSTS: ReadonlySet<string> = new Set([
+  'docker.io',
+  'index.docker.io',
+  'registry-1.docker.io',
+]);
+
+const DOCKER_HUB_API_HOST = 'registry-1.docker.io';
+
+/** Which registry product a host is, by the only thing available: its name. */
+export function registryFlavour(host: string): RegistryFlavour {
+  const name = host.split(':')[0] ?? host;
+  if (DOCKER_HUB_HOSTS.has(name)) return 'dockerHub';
+  if (name === 'ghcr.io') return 'ghcr';
+  // `gcr.io` and its regional prefixes are served by Artifact Registry now, so
+  // they are the same product under an older name rather than a fourth flavour.
+  if (
+    name.endsWith('.pkg.dev') ||
+    name === 'gcr.io' ||
+    name.endsWith('.gcr.io')
+  )
+    return 'artifactRegistry';
+  return 'other';
+}
+
+/**
+ * The OCI distribution API root a namespace's registry answers on.
+ *
+ * `https` with no fallback. A registry reached over plaintext is one whose
+ * answer to "are you there" can be written by anything on the path, and this
+ * function's only caller is deciding whether to write a destination into the
+ * installation manifest.
+ */
+export function registryApiBase(host: string): string {
+  const name = host.split(':')[0] ?? host;
+  const authority = DOCKER_HUB_HOSTS.has(name) ? DOCKER_HUB_API_HOST : host;
+  return `https://${authority}/v2/`;
+}
+
+/**
  * The tag that names *what was built*, derived from the bundle digest.
  *
  * §12 settles retention as "retain artifacts by **tagging** and let the

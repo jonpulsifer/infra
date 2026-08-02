@@ -284,6 +284,15 @@ export function createAdapterRegistry(
       return repositoryHost;
     },
 
+    /**
+     * §16's registries answer their own distribution API, with no credential
+     * and no adapter of their own. `options.fetch` is what a test substitutes,
+     * exactly as every other far side here takes it.
+     */
+    registryTransport() {
+      return options.fetch ?? fetch;
+    },
+
     source() {
       if (options.source !== undefined) return options.source;
       if (app === null) return null;
