@@ -19,3 +19,4 @@ spec:
           dnsZones:
             - ${SECRET_DOMAIN}
             - ${GATEWAY_ZONE}
+            - ${SPINDRIFT_DOMAIN}

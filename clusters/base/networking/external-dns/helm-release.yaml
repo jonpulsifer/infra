@@ -50,6 +50,7 @@ spec:
     domainFilters:
       - "${SECRET_DOMAIN}"
       - "${GATEWAY_ZONE}"
+      - "${SPINDRIFT_DOMAIN}"
     resources:
       requests:
         memory: 100Mi

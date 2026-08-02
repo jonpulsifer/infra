@@ -19,3 +19,4 @@ spec:
           dnsZones:
             - ${CLOUDFLARE_ZONE}
             - ${GATEWAY_ZONE}
+            - ${SPINDRIFT_DOMAIN}
