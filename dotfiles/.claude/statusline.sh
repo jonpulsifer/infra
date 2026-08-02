@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2154
-# Claude Code status line — receives JSON on stdin; outputs a two-line status bar.
+# Claude Code status line — receives JSON on stdin; outputs a three-line status bar.
 # Line 1: repo · branch · changed files · +additions/-deletions
-# Line 2: model · agent · rank+cost · tokens · context bar · ctx window · duration · fuse
+# Line 2: model · agent · rank+cost · tokens · context meter · duration · fuse
+# Line 3: 5-hour and 7-day plan quotas (omitted when the plan has no rate limits).
+#         Quota meters carry a ╎ pace marker at "% of the window elapsed": fill left
+#         of it means burning under budget, right of it means the quota runs out
+#         before it resets.
 # Requires a Nerd Font for glyph rendering.
 
 input=$(cat)
@@ -23,10 +27,17 @@ eval "$(echo "$input" | jq -r '
   @sh "duration_ms=\(.cost.total_duration_ms // "")",
   @sh "lines_add=\(.cost.total_lines_added // "")",
   @sh "lines_rm=\(.cost.total_lines_removed // "")",
-  @sh "agent_name=\(.agent.name // "")"
-' | tr ',' '\n')"
+  @sh "agent_name=\(.agent.name // "")",
+  @sh "effort=\(.effort.level // "")",
+  @sh "rl_5h_pct=\(.rate_limits.five_hour.used_percentage // "")",
+  @sh "rl_5h_reset=\(.rate_limits.five_hour.resets_at // "")",
+  @sh "rl_7d_pct=\(.rate_limits.seven_day.used_percentage // "")",
+  @sh "rl_7d_reset=\(.rate_limits.seven_day.resets_at // "")"
+')"
 
 dir_name=$(basename "$cwd")
+NOW=$(date +%s)
+QUOTA_W=14
 
 # -- 256-color ANSI palette ----------------------------------------------------
 RST='\033[0m'
@@ -58,6 +69,9 @@ G_PLUS=$'\xEF\x91\x97'         # U+F457 nf-oct-diff_added
 G_MINUS=$'\xEF\x91\x98'        # U+F458 nf-oct-diff_removed
 G_AGENT=$'\xEF\x91\xAA'        # U+F46A nf-oct-hubot
 G_FILE=$'\xEF\x80\x96'         # U+F016 nf-fa-file_o
+G_HOURGLASS=$'\xEF\x89\x92'    # U+F252 nf-fa-hourglass_half
+G_CALENDAR=$'\xEF\x81\xB3'     # U+F073 nf-fa-calendar
+G_GAUGE=$'\xEF\x83\xA4'        # U+F0E4 nf-fa-tachometer
 {%- set is_work = get_env(name="MISE_ENV", default="personal") == "work" %}
 {% if is_work -%}
 G_WALLET='🌕'                 # Full moon for MoonPay
@@ -74,6 +88,80 @@ fmt_tok() {
   else
     echo "$n"
   fi
+}
+
+# -- Helper: meter with sub-cell fill and an optional pace marker --------------
+# Fills in eighths of a cell, so the bar moves on every update instead of
+# jumping a whole block per 1/width. $1 percent (float ok)  $2 width
+# $3 marker cell index (-1 = none). Colored by the caller's $bar_color.
+EIGHTHS=("" "▏" "▎" "▍" "▌" "▋" "▊" "▉")
+mkbar() {
+  local pct=$1 w=$2 mark=$3 eighths full rem i bar=""
+  eighths=$(awk -v p="$pct" -v w="$w" \
+    'BEGIN{v=int(p*w*8/100+0.5); if(v<0)v=0; if(v>w*8)v=w*8; print v}')
+  full=$(( eighths / 8 ))
+  rem=$(( eighths % 8 ))
+  local cell
+  for (( i = 0; i < w; i++ )); do
+    if [ "$i" -lt "$full" ]; then
+      cell="█"
+    elif [ "$i" = "$full" ] && [ "$rem" -gt 0 ]; then
+      cell="${EIGHTHS[$rem]}"
+    else
+      cell="░"
+    fi
+    # The pace marker recolors its cell rather than replacing it, so it never
+    # hides the fill underneath — including the partial cell at the leading edge.
+    if [ "$i" = "$mark" ]; then
+      bar+="${C_SKY}${cell}${RST}${bar_color}"
+    else
+      bar+="$cell"
+    fi
+  done
+  printf '%s' "$bar"
+}
+
+# -- Helper: compact countdown (3d4h / 2h13m / 47m) ---------------------------
+fmt_left() {
+  local s=$1
+  [ "$s" -le 0 ] && { echo "now"; return; }
+  if [ "$s" -ge 86400 ]; then
+    echo "$(( s / 86400 ))d$(( s % 86400 / 3600 ))h"
+  elif [ "$s" -ge 3600 ]; then
+    echo "$(( s / 3600 ))h$(( s % 3600 / 60 ))m"
+  else
+    echo "$(( s / 60 ))m"
+  fi
+}
+
+# -- Helper: quota segment — bar with burn-pace marker, pct, reset countdown ---
+# $1 glyph  $2 used_percentage  $3 resets_at (epoch)  $4 window seconds
+quota_seg() {
+  local glyph=$1 pct_raw=$2 reset=$3 window=$4
+  [ -z "$pct_raw" ] || [ "$pct_raw" = "null" ] && return 0
+
+  local pct left elapsed pace mark
+  pct=$(printf '%.0f' "$pct_raw")
+  left=$(( ${reset:-0} - NOW ))
+  [ "$left" -lt 0 ] && left=0
+
+  # Linear-pace marker: how far through the window we are. Burn left of it =
+  # ahead of budget, right of it = on track to run out before the reset.
+  elapsed=$(( window - left ))
+  [ "$elapsed" -lt 0 ] && elapsed=0
+  pace=$(( elapsed * 100 / window ))
+  mark=$(( pace * QUOTA_W / 100 ))
+  [ "$mark" -ge "$QUOTA_W" ] && mark=$(( QUOTA_W - 1 ))
+
+  if [ "$pct" -ge 90 ]; then bar_color="$C_RED"
+  elif [ "$pct" -gt $(( pace + 15 )) ]; then bar_color="$C_ORANGE"
+  elif [ "$pct" -gt "$pace" ]; then bar_color="$C_GOLD"
+  else bar_color="$C_MINT"; fi
+
+  printf '%s%s %s %s%d%%%s %s%s%s' \
+    "$bar_color" "$glyph" "$(mkbar "$pct_raw" "$QUOTA_W" "$mark")" \
+    "$B" "$pct" "$RST" \
+    "$C_DGRAY" "$(fmt_left "$left")" "$RST"
 }
 
 {% if is_work -%}
@@ -242,10 +330,21 @@ if wallet_data=$(get_wallet_balance 2>/dev/null); then
 fi
 {% endif -%}
 
+# Plan quotas: 5-hour session window and 7-day weekly window
+quota_5h_seg=$(quota_seg "$G_HOURGLASS" "$rl_5h_pct" "$rl_5h_reset" 18000)
+quota_7d_seg=$(quota_seg "$G_CALENDAR" "$rl_7d_pct" "$rl_7d_reset" 604800)
+
 # -- Line 2 segments ----------------------------------------------------------
 
-# Model
+# Model + reasoning effort (absent on models that don't take an effort level)
 model_seg="${C_PURPLE}${B}${G_COG} ${model}${RST}"
+case "$effort" in
+  low)    model_seg+=" ${C_GRAY}${G_GAUGE} low${RST}" ;;
+  medium) model_seg+=" ${C_SKY}${G_GAUGE} med${RST}" ;;
+  high)   model_seg+=" ${C_GOLD}${G_GAUGE} high${RST}" ;;
+  xhigh)  model_seg+=" ${C_ORANGE}${B}${G_GAUGE} xhigh${RST}" ;;
+  max)    model_seg+=" ${C_RED}${B}${G_GAUGE} max${RST}" ;;
+esac
 
 # Agent
 agent_seg=""
@@ -279,28 +378,9 @@ if [ -n "$used_pct" ] && [ "$used_pct" != "null" ]; then
   elif [ "$pct_int" -ge 50 ]; then bar_color="$C_GOLD"
   else bar_color="$C_MINT"; fi
 
-  filled=$(( pct_int * 10 / 100 ))
-  empty=$(( 10 - filled ))
-  bar=""
-  [ "$filled" -gt 0 ] && bar=$(printf "%${filled}s" | tr ' ' '▓')
-  [ "$empty" -gt 0 ] && bar="${bar}$(printf "%${empty}s" | tr ' ' '░')"
-  ctx_seg="${bar_color}${bar} ${pct_int}%${RST}"
+  ctx_seg="${bar_color}$(mkbar "$used_pct" 10 -1) ${B}${pct_int}%${RST}"
 fi
 
-# Context window usage
-ctx_tok_seg=""
-if [ -n "$ctx_in" ] && [ "$ctx_in" != "null" ]; then
-  ctx_total=0
-  [ -n "$ctx_in" ] && [ "$ctx_in" != "null" ] && ctx_total=$((ctx_total + ctx_in))
-  [ -n "$ctx_cache_read" ] && [ "$ctx_cache_read" != "null" ] && ctx_total=$((ctx_total + ctx_cache_read))
-  [ -n "$ctx_cache_create" ] && [ "$ctx_cache_create" != "null" ] && ctx_total=$((ctx_total + ctx_cache_create))
-  [ -n "$ctx_out" ] && [ "$ctx_out" != "null" ] && ctx_total=$((ctx_total + ctx_out))
-  if [ "$ctx_total" -gt 0 ] && [ -n "$ctx_size" ] && [ "$ctx_size" != "null" ] && [ "$ctx_size" -gt 0 ]; then
-    ctx_tok_fmt=$(fmt_tok "$ctx_total")
-    ctx_size_fmt=$(fmt_tok "$ctx_size")
-    ctx_tok_seg="${C_GRAY}${ctx_tok_fmt}/${ctx_size_fmt}${RST}"
-  fi
-fi
 
 # Duration
 dur_seg=""
@@ -351,37 +431,23 @@ fi
 # -- Assemble ------------------------------------------------------------------
 SEP="${C_DGRAY} │ ${RST}"
 
-# Line 1: repo │ branch │ changed files │ +lines/-lines
-l1=()
-l1+=("$repo_seg")
-[ -n "$branch_seg" ] && l1+=("$branch_seg")
-[ -n "$changed_seg" ] && l1+=("$changed_seg")
-[ -n "$lines_seg" ] && l1+=("$lines_seg")
-{% if is_work -%}
-[ -n "$wallet_seg" ] && l1+=("$wallet_seg")
-{% endif -%}
+# Join non-empty segments with SEP
+join_segs() {
+  local out="" s
+  for s in "$@"; do
+    [ -z "$s" ] && continue
+    [ -n "$out" ] && out+="$SEP"
+    out+="$s"
+  done
+  printf '%s' "$out"
+}
 
-line1=""
-for i in "${!l1[@]}"; do
-  [ "$i" -gt 0 ] && line1+="$SEP"
-  line1+="${l1[$i]}"
-done
+[ -n "$rank_seg" ] && [ -n "$cost_seg" ] && cost_seg="${rank_seg} ${cost_seg}"
 
-# Line 2: model │ agent │ rank+cost │ tokens │ context bar │ ctx │ duration │ fuse
-l2=()
-l2+=("$model_seg")
-[ -n "$agent_seg" ] && l2+=("$agent_seg")
-[ -n "$cost_seg" ] && { [ -n "$rank_seg" ] && l2+=("${rank_seg} ${cost_seg}") || l2+=("$cost_seg"); }
-[ -n "$tok_seg" ] && l2+=("$tok_seg")
-[ -n "$ctx_seg" ] && l2+=("$ctx_seg")
-[ -n "$ctx_tok_seg" ] && l2+=("$ctx_tok_seg")
-[ -n "$dur_seg" ] && l2+=("$dur_seg")
-[ -n "$fuse_seg" ] && l2+=("$fuse_seg")
-
-line2=""
-for i in "${!l2[@]}"; do
-  [ "$i" -gt 0 ] && line2+="$SEP"
-  line2+="${l2[$i]}"
-done
+# $wallet_seg is only ever set in the work render; join_segs drops it when unset.
+line1=$(join_segs "$repo_seg" "$branch_seg" "$changed_seg" "$lines_seg" "$wallet_seg")
+line2=$(join_segs "$model_seg" "$agent_seg" "$cost_seg" "$tok_seg" "$ctx_seg" "$dur_seg" "$fuse_seg")
+line3=$(join_segs "$quota_5h_seg" "$quota_7d_seg")
 
 printf '%b\n%b\n' "$line1" "$line2"
+[ -n "$line3" ] && printf '%b\n' "$line3"
