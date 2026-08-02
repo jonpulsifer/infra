@@ -37,10 +37,10 @@ export interface BuildKitProgramInput {
   /** The scope inside the bundle, after §5's unwrap. */
   readonly subpath: string;
   /**
-   * The repository the artifact is pushed to, without a tag. Core chose it; the
-   * route never does (§4).
+   * The repositories the artifact is pushed to, without tags. Core chose them;
+   * the route never does (§4). One build, one digest, every destination.
    */
-  readonly destination: string;
+  readonly destinations: readonly string[];
   /** The tags to push it under (§12). Core chose these too. */
   readonly tags: readonly string[];
   /** The zero-config frontend the installation pinned. */
@@ -73,7 +73,7 @@ export function buildKitProgramFor(
     bundleUrl: source.origin.location,
     bundleDigest: source.bundleDigest,
     subpath: source.origin.subpath,
-    destination: spec.destination,
+    destinations: spec.destinations,
     tags: spec.tags,
     zeroConfigFrontend,
     buildArgs: spec.buildArgs,
@@ -101,7 +101,9 @@ function quote(value: string): string {
  * are needed and neither substitutes for the other.
  */
 function imageNames(input: BuildKitProgramInput): string {
-  const refs = input.tags.map((tag) => `${input.destination}:${tag}`).join(',');
+  const refs = input.destinations
+    .flatMap((destination) => input.tags.map((tag) => `${destination}:${tag}`))
+    .join(',');
   return `"name=${refs}"`;
 }
 
@@ -204,9 +206,17 @@ ${args}
   --metadata-file "$workspace/metadata.json"
 
 digest=$(sed -n 's/.*"containerimage.digest"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$workspace/metadata.json")
-ref=${quote(input.destination)}@"$digest"
-report=$(printf '{"bundleDigest":"%s","digest":"%s","refs":["%s"],"baseDigest":null,"buildkitProvenanceRef":"%s","sbomRef":"%s"}' \\
-  ${quote(input.bundleDigest)} "$digest" "$ref" "$ref" "$ref")
+# One digest, one reference per destination — the same manifest was pushed to
+# each, so the only thing that differs is the repository in front of the "@".
+# The first is what the provenance and SBOM are reported against, because those
+# are one document about one build rather than one per registry.
+refs=""
+for destination in ${input.destinations.map(quote).join(' ')}; do
+  refs="\${refs:+$refs,}\\"\${destination}@\${digest}\\""
+done
+ref=${quote(input.destinations[0] ?? '')}@"$digest"
+report=$(printf '{"bundleDigest":"%s","digest":"%s","refs":[%s],"baseDigest":null,"buildkitProvenanceRef":"%s","sbomRef":"%s"}' \\
+  ${quote(input.bundleDigest)} "$digest" "$refs" "$ref" "$ref")
 echo "${BUILD_REPORT_MARKER} $(printf '%s' "$report" | base64 | tr -d '\\n')"
 `;
 }

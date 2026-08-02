@@ -189,8 +189,17 @@ export interface BuildRequestSpec {
   readonly artifactType: BuildSpec['artifactType'];
   readonly kind: BuildSpec['kind'];
   readonly platform: BuildSpec['platform'];
-  /** The repository, without a tag. */
-  readonly destination: string;
+  /**
+   * The repositories, without tags — one per registry the installation names.
+   *
+   * `destination` (singular) is what every spec carried before two Targets on
+   * one installation turned out not to share a registry. The workflow reads
+   * this and falls back to that, because the caller pins this file by a local
+   * reference that resolves to the default branch while the controller image
+   * waits on a Flux rollout: for the length of that window a spec composed by
+   * the old controller reaches the new workflow.
+   */
+  readonly destinations: readonly string[];
   /** What to push it as (§12); the workflow tags with these and no others. */
   readonly tags: readonly string[];
   readonly buildArgs: Readonly<Record<string, string>>;
@@ -301,7 +310,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       artifactType: spec.artifactType,
       kind: spec.kind,
       platform: spec.platform,
-      destination: spec.destination,
+      destinations: spec.destinations,
       tags: spec.tags,
       buildArgs: spec.buildArgs,
       zeroConfigFrontend: this.options.zeroConfigFrontend,

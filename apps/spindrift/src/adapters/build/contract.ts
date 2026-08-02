@@ -101,15 +101,27 @@ export interface BuildSpec {
   /** What the artifact must run on (§3). */
   platform: Platform;
   /**
-   * The **repository** the artifact is published to, without a tag. Core picks
-   * it from the Target's `reachableRegistries` (§3); an adapter never chooses
-   * its own destination.
+   * The **repositories** the artifact is published to, without tags. Core
+   * composes them from the installation's registries (§16); an adapter never
+   * chooses its own destination.
    *
-   * A repository and not the installation's registry namespace: the namespace
+   * Repositories and not the installation's registry namespaces: a namespace
    * is a prefix, and a registry answers `NAME_INVALID` to a single-segment
-   * path. `componentRepository` composes it.
+   * path. `componentRepositories` composes them.
+   *
+   * **Several, and every one is pushed to.** Two Targets on one installation
+   * cannot always share a registry — the cluster pulls anonymously from GitHub
+   * Container Registry, while Cloud Run pulls through a cache mirror that
+   * could not parse the OCI index pushed there. One build, one digest, N
+   * destinations: the runner pushes the same manifest to each and reports a
+   * reference per registry, and each Target pins the one it can reach.
+   *
+   * Order is the manifest's, and it is the order `refs` comes back in — so the
+   * first stays what a Target with no declared `reachableRegistries` gets.
+   *
+   * Never empty: a build with nowhere to push is refused at dispatch.
    */
-  destination: string;
+  destinations: readonly string[];
   /**
    * The tags to push it under, most specific first (§12).
    *

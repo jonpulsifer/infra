@@ -11,7 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   artifactTags,
   bundleTag,
-  componentRepository,
+  componentRepositories,
   isPathComponent,
   MOVING_TAG,
 } from '../../src/domain/artifact-name.ts';
@@ -23,66 +23,101 @@ const DIGEST =
 describe('a Component’s repository', () => {
   test('nests the App and the Component under the registry', () => {
     expect(
-      componentRepository({
-        registry: REGISTRY,
+      componentRepositories({
+        registries: [REGISTRY],
         app: 'infra',
         component: 'spindrift-demo',
       }),
-    ).toBe('ghcr.io/jonpulsifer/infra/spindrift-demo');
+    ).toEqual(['ghcr.io/jonpulsifer/infra/spindrift-demo']);
   });
 
   test('is a repository and never the bare namespace', () => {
-    const repository = componentRepository({
-      registry: REGISTRY,
+    const repository = componentRepositories({
+      registries: [REGISTRY],
       app: 'infra',
       component: 'web',
     });
     // The defect verbatim: GHCR answers `NAME_INVALID` to a single-segment
     // path, which is what the registry alone is.
-    expect(repository).not.toBe(REGISTRY);
-    expect(repository?.slice(REGISTRY.length)).toBe('/infra/web');
+    expect(repository).not.toContain(REGISTRY);
+    expect(repository?.[0]?.slice(REGISTRY.length)).toBe('/infra/web');
   });
 
   test('is stable — the same Component composes the same name twice', () => {
-    const parts = { registry: REGISTRY, app: 'infra', component: 'web' };
-    expect(componentRepository(parts)).toBe(componentRepository(parts));
+    const parts = { registries: [REGISTRY], app: 'infra', component: 'web' };
+    expect(componentRepositories(parts)).toEqual(componentRepositories(parts));
   });
 
   test('nests rather than joining, so a hyphen in either half is unambiguous', () => {
     // `naming.ts` states the reason for canonical names and it holds here:
     // flattened, these two would both be `my-app-web-api`.
-    const first = componentRepository({
-      registry: REGISTRY,
+    const first = componentRepositories({
+      registries: [REGISTRY],
       app: 'my-app',
       component: 'web-api',
     });
-    const second = componentRepository({
-      registry: REGISTRY,
+    const second = componentRepositories({
+      registries: [REGISTRY],
       app: 'my-app-web',
       component: 'api',
     });
-    expect(first).not.toBe(second);
+    expect(first).not.toEqual(second);
   });
 
   test('refuses a name no registry would accept rather than projecting it', () => {
     // Projecting would push two Components to one repository, which is the
     // quiet failure: the second build overwrites the first's tag.
     expect(
-      componentRepository({
-        registry: REGISTRY,
+      componentRepositories({
+        registries: [REGISTRY],
         app: 'My App',
         component: 'web',
       }),
     ).toBeNull();
     expect(
-      componentRepository({
-        registry: REGISTRY,
+      componentRepositories({
+        registries: [REGISTRY],
         app: 'infra',
         component: 'Web',
       }),
     ).toBeNull();
     expect(
-      componentRepository({ registry: REGISTRY, app: '', component: 'web' }),
+      componentRepositories({
+        registries: [REGISTRY],
+        app: '',
+        component: 'web',
+      }),
+    ).toBeNull();
+  });
+
+  test('composes one repository per registry, in the manifest’s order', () => {
+    // Ticket 39: two Targets on one installation cannot always share a
+    // registry, so the same digest is pushed to each. `refs[0]` stays the
+    // first, which is what a Target declaring no reachability gets.
+    expect(
+      componentRepositories({
+        registries: [
+          REGISTRY,
+          'northamerica-northeast1-docker.pkg.dev/trusted-builds/i',
+        ],
+        app: 'infra',
+        component: 'web',
+      }),
+    ).toEqual([
+      'ghcr.io/jonpulsifer/infra/web',
+      'northamerica-northeast1-docker.pkg.dev/trusted-builds/i/infra/web',
+    ]);
+  });
+
+  test('refuses every registry or none — never a partial push', () => {
+    // A partial answer would push to one destination and silently not to the
+    // other, which reads as "Cloud Run cannot pull what the cluster is running".
+    expect(
+      componentRepositories({
+        registries: [REGISTRY, 'other.example.test/ns'],
+        app: 'My App',
+        component: 'web',
+      }),
     ).toBeNull();
   });
 });

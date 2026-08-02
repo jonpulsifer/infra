@@ -202,8 +202,17 @@ export interface TargetInspection {
 export interface DeployPathReferences {
   /** The App chart every Component renders through (§7). */
   chart: string;
-  /** Where the artifact is pulled from (§16). */
-  image: string;
+  /**
+   * Where the artifact is pulled from (§16) — one entry per registry the
+   * installation pushes to.
+   *
+   * Plural because an installation whose Targets cannot share a registry pushes
+   * to each, and a Target only ever pulls from **one** of them. `offlineDeploy`
+   * is therefore satisfied when any one is served rather than when all are:
+   * requiring every registry would make a Target that mirrors the one it
+   * actually uses report that it cannot deploy offline.
+   */
+  images: readonly string[];
   /** Where signature verification fetches its material (§16). */
   verifier: string;
 }
@@ -214,7 +223,7 @@ export function deployPathReferences(
 ): DeployPathReferences {
   return {
     chart: manifest.charts.app,
-    image: manifest.supplyChain.registry,
+    images: manifest.supplyChain.registry,
     verifier: manifest.supplyChain.verifier,
   };
 }
@@ -307,8 +316,10 @@ export function deriveOfflineDeploy(
   servedHosts: readonly string[],
 ): boolean {
   const served = new Set(servedHosts.map(hostOf));
-  return [references.chart, references.image, references.verifier].every(
-    (reference) => served.has(hostOf(reference)),
+  return (
+    [references.chart, references.verifier].every((reference) =>
+      served.has(hostOf(reference)),
+    ) && references.images.some((reference) => served.has(hostOf(reference)))
   );
 }
 

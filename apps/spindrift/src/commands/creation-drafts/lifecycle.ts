@@ -609,6 +609,7 @@ async function revalidate(
       kind: draft.kind,
       exposure: draft.exposure,
       platform: DEFAULT_PLATFORM,
+      registries: context.manifest.supplyChain.registry,
       resources: {},
       gpu: false,
       persistence: false,

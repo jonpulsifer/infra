@@ -108,7 +108,7 @@ export class FakeBuildAdapter implements BuildAdapter {
       artifact: {
         type: spec.artifactType,
         digest,
-        refs: [`${spec.destination}@${digest}`],
+        refs: [`${spec.destinations[0]}@${digest}`],
       },
       logs,
       provenance: {
@@ -118,13 +118,13 @@ export class FakeBuildAdapter implements BuildAdapter {
         statement: fakeStatement({
           builderId: this.provenanceBuilderId,
           bundleDigest: source.bundleDigest,
-          destination: spec.destination,
+          destination: spec.destinations[0] ?? '',
           digest,
         }),
       },
       baseDigest: scripted.result.baseDigest ?? null,
-      buildkitProvenanceRef: `${spec.destination}@${digest}#buildkit`,
-      sbomRef: `${spec.destination}@${digest}#spdx`,
+      buildkitProvenanceRef: `${spec.destinations[0]}@${digest}#buildkit`,
+      sbomRef: `${spec.destinations[0]}@${digest}#spdx`,
     };
   }
 

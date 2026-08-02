@@ -11,6 +11,7 @@
  * The shape is §6's, field for field. A field this file does not name is a field
  * core does not get to describe.
  */
+import { registryHostOf } from './artifact-name.ts';
 
 /**
  * What a Component is (§3, §5). `website` is not a chart branch — §7 renders it
@@ -47,19 +48,33 @@ export function immutableImageRef(artifact: Artifact): string | null {
 }
 
 /**
- * The address an adapter pulls the artifact by, or `null` when it has none.
+ * The address a Target pulls the artifact by, or `null` when it has none.
  *
- * §4 lets a Build report several — the same digest is reachable at a mirror as
- * well as at the registry it was pushed to — and every backend needs exactly
- * one. The first is taken rather than a preferred one selected, because
- * preference would need a cost model, and §3 declines to have one.
+ * §4 lets a Build report several — the same digest is pushed to every registry
+ * the installation names — and every backend needs exactly one. Which one is
+ * **not** a preference and needs no cost model: it is the one this Target can
+ * actually reach, which §3 already models as `reachableRegistries`.
  *
- * `null` is a real answer, and every adapter treats it as `INTERNAL`: an
- * artifact with no address is a Build that recorded a digest and nowhere to get
- * it, which is core's bug rather than the backend's.
+ * Taking the first instead is what put a `ghcr.io` reference on a Cloud Run
+ * revision that failed at the pull, several layers past IAM and Binary
+ * Authorization, with an artifact that was signed, attested and admitted.
+ *
+ * `reachable` empty means **no declared restriction**, not "reaches nothing" —
+ * which is every Target until an operator says otherwise, and is why the
+ * fallback is the first reference rather than none. A Target that declares
+ * registries and matches none of them is a Deploy that must not be written at
+ * all; {@link import('./placement.ts')} makes that a non-candidate before a
+ * Build is ever dispatched, and `null` here is the backstop for the case that
+ * gets past it.
  */
-export function artifactAddress(artifact: Artifact): string | null {
-  return artifact.refs[0] ?? null;
+export function artifactAddress(
+  artifact: Artifact,
+  reachable: readonly string[] = [],
+): string | null {
+  if (reachable.length === 0) return artifact.refs[0] ?? null;
+  return (
+    artifact.refs.find((ref) => reachable.includes(registryHostOf(ref))) ?? null
+  );
 }
 
 /**

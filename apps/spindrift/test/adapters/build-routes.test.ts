@@ -68,7 +68,7 @@ const spec: BuildSpec = {
   artifactType: 'image',
   kind: 'service',
   platform: { os: 'linux', arch: 'amd64' },
-  destination: 'registry.example.test/app',
+  destinations: ['registry.example.test/app'],
   tags: ['sha256-bundle', 'latest'],
   buildArgs: {},
 };
@@ -238,7 +238,7 @@ describe('the hosted build route', () => {
     const request = JSON.parse(host.dispatches[0]?.inputs.spec ?? '{}');
     expect(request.bundleDigest).toBe('sha256:bundle');
     expect(request.zeroConfigFrontend).toBe(FRONTEND);
-    expect(request.destination).toBe(spec.destination);
+    expect(request.destinations[0]).toBe(spec.destinations[0]);
   });
 
   test('a dispatch that is refused is a failure with the reason in the log', async () => {
@@ -790,7 +790,7 @@ describe('the BuildKit program', () => {
     bundleUrl: 'staged://bundle',
     bundleDigest: 'sha256:bundle',
     subpath: 'apps/web',
-    destination: 'registry.example.test/app',
+    destinations: ['registry.example.test/app'],
     tags: ['sha256-bundle', 'latest'],
     zeroConfigFrontend: FRONTEND,
     buildArgs: { PUBLIC_URL: 'https://app.example.test' },
@@ -850,7 +850,7 @@ describe('the BuildKit program', () => {
       bundleUrl: 'staged://bundle',
       bundleDigest: 'sha256:bundle',
       subpath: '.',
-      destination: 'registry.example.test/app',
+      destinations: ['registry.example.test/app'],
       tags: ['latest'],
       zeroConfigFrontend: 'registry.example.test/zero-config',
       buildArgs: {},
@@ -910,7 +910,7 @@ describe('the BuildKit program', () => {
       bundleUrl: "staged://bundle'; rm -rf /; echo '",
       bundleDigest: 'sha256:bundle',
       subpath: '.',
-      destination: 'registry.example.test/app',
+      destinations: ['registry.example.test/app'],
       tags: ['sha256-bundle', 'latest'],
       zeroConfigFrontend: FRONTEND,
       buildArgs: { EVIL: "'; rm -rf /; echo '" },

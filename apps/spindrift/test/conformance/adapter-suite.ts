@@ -246,7 +246,7 @@ export function buildAdapterSuite(
       artifactType: 'image',
       kind: 'service',
       platform: { os: 'linux', arch: 'amd64' },
-      destination: 'registry.example.test/app',
+      destinations: ['registry.example.test/app'],
       tags: ['sha256-bundle', 'latest'],
       buildArgs: {},
     } as const;

@@ -27,6 +27,16 @@ const REPORT_STEP = 'Report what was built';
 const BUNDLE_DIGEST = `sha256:${'b'.repeat(64)}`;
 const IMAGE_DIGEST = `sha256:${'a'.repeat(64)}`;
 const DESTINATION = 'ghcr.io/jonpulsifer/spindrift/demo/web';
+/**
+ * Two, because an installation whose Targets cannot share a registry pushes to
+ * each and the report has to carry a reference per registry (ticket 39). One
+ * build, one digest, N references — the cluster pulls the first and Cloud Run
+ * the second, and a report that carried only one is a Deploy that pins an
+ * address its Target cannot reach.
+ */
+const AR_DESTINATION =
+  'northamerica-northeast1-docker.pkg.dev/trusted-builds/i/demo/web';
+const DESTINATIONS = [DESTINATION, AR_DESTINATION];
 
 /** The `run:` script of the named step, straight out of the shipped file. */
 async function reportScript(): Promise<string> {
@@ -59,6 +69,7 @@ async function runReportStep() {
         PATH: Bun.env.PATH ?? '',
         BUNDLE_DIGEST,
         DESTINATION,
+        DESTINATIONS: DESTINATIONS.join('\n'),
         DIGEST: IMAGE_DIGEST,
         GITHUB_REPOSITORY: 'jonpulsifer/infra',
         GITHUB_RUN_ID: '12345',
@@ -89,7 +100,12 @@ describe('the hosted route reports a statement admission can read', () => {
     expect(report).not.toBeNull();
     expect(report?.bundleDigest).toBe(BUNDLE_DIGEST);
     expect(report?.digest).toBe(IMAGE_DIGEST);
-    expect(report?.refs).toEqual([`${DESTINATION}@${IMAGE_DIGEST}`]);
+    // One per destination, in the order core sent them — so `refs[0]` is still
+    // the first registry, which is what a Target that declares no reachable
+    // registries gets.
+    expect(report?.refs).toEqual(
+      DESTINATIONS.map((destination) => `${destination}@${IMAGE_DIGEST}`),
+    );
     expect(report?.baseDigest).toBeNull();
   });
 

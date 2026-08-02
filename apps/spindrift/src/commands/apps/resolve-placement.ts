@@ -166,6 +166,7 @@ function derive(
     kind,
     exposure,
     platform: DEFAULT_PLATFORM,
+    registries: context.manifest.supplyChain.registry,
     resources: {},
     gpu: false,
     persistence: false,

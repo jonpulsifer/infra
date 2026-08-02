@@ -63,7 +63,21 @@ jobs:
             printf 'bundleDigest=%s\n' "$(read_key '.bundleDigest')"
             printf 'location=%s\n'     "$(read_key '.origin.location')"
             printf 'subpath=%s\n'      "$(read_key '.origin.subpath')"
-            printf 'destination=%s\n'  "$(read_key '.destination')"
+            # `.destinations` with `.destination` behind it, because this file
+            # and the controller ship on different clocks — the same reason
+            # `tags` carries a default. A caller pins this workflow by a local
+            # reference resolving to the default branch, so a merge here reaches
+            # the next dispatch immediately while the controller image waits on
+            # a Flux rollout. Every spec composed in that window still names one
+            # destination.
+            printf 'destinations<<SPINDRIFT_EOF\n'
+            read_key '(.destinations // [.destination])[]'
+            printf 'SPINDRIFT_EOF\n'
+            # The first, for the one-per-build documents: the provenance and the
+            # SBOM describe a build, not a registry, and the report names one
+            # subject. The signature and the attestation are per destination and
+            # are composed from the list above.
+            printf 'destination=%s\n'  "$(read_key '(.destinations // [.destination])[0]')"
             printf 'frontend=%s\n'     "$(read_key '.zeroConfigFrontend')"
             # `// ""` for the same reason `tags` has a default: a spec composed
             # by a controller that predates this field must still build. Empty
@@ -73,7 +87,21 @@ jobs:
             # signature is the thing that says so.
             printf 'signer=%s\n'       "$(read_key '.signer // ""')"
             printf 'attestor=%s\n'     "$(read_key '.attestor // ""')"
-            printf 'registry=%s\n'     "$(read_key '.destination | split("/")[0]')"
+            # One login per distinct registry host. The GitHub token below only
+            # authenticates to GHCR; anything else is a cloud registry the
+            # `Authenticate to Google Cloud` step already federates for, so the
+            # hosts are split rather than looped over with one credential.
+            printf 'registry=%s\n'     "$(read_key '(.destinations // [.destination])[0] | split("/")[0]')"
+            hosts() {
+              read_key "[(.destinations // [.destination])[] | split(\"/\")[0]] | unique | map(select($1))"
+            }
+            # Two kinds, spelled out rather than abstracted: GHCR takes the run's
+            # own token, and Google Artifact Registry takes the federated
+            # identity the signing steps already establish. A host that is
+            # neither is not silently skipped — it reaches `docker push` with no
+            # credential and fails there, naming itself.
+            printf 'ghcrHosts=%s\n'   "$(hosts '. == "ghcr.io"' | jq -r 'join(",")')"
+            printf 'googleHosts=%s\n' "$(hosts 'endswith("docker.pkg.dev") or . == "gcr.io"' | jq -r 'join(",")')"
             # §12 counts tags, so core sends every tag this push must carry and
             # the runner composes none of its own. Full references, because that
             # is what build-push-action's newline list takes.
@@ -87,8 +115,14 @@ jobs:
             # the bare destination meant to the reader of this file before it
             # did. Absent the default, every dispatch in that window dies here,
             # at the step before anything is recorded.
+            #
+            # Every tag under every destination. One buildx invocation pushes
+            # the same manifest to each — one build, one digest, N registries —
+            # which is what lets a Deploy pin whichever reference its own Target
+            # can pull without anything being built twice.
             printf 'tags<<SPINDRIFT_EOF\n'
-            read_key '.destination + ":" + (.tags // ["latest"])[]'
+            read_key '(.destinations // [.destination])[] as $d
+                      | (.tags // ["latest"])[] | $d + ":" + .'
             printf 'SPINDRIFT_EOF\n'
             printf 'buildArgs<<SPINDRIFT_EOF\n'
             read_key '.buildArgs | to_entries[] | "\(.key)=\(.value)"'
@@ -185,15 +219,41 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
+      # Federation before the push, not just before the signing.
+      #
+      # It used to sit below `Build and push`, because the only thing that
+      # needed a cloud identity was cosign. An installation whose Targets cannot
+      # share one registry pushes to Artifact Registry as well, and that push
+      # needs the same identity — so the step moves up and now runs whenever
+      # *either* wants it.
+      - name: Authenticate to Google Cloud
+        if: >-
+          steps.request.outputs.signer != '' ||
+          steps.request.outputs.googleHosts != ''
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
+          project_id: homelab-ng
+          create_credentials_file: true
+
       # The run's own token, which is the only credential this job can hold
-      # without one being stored somewhere (§13). An installation whose registry
-      # does not accept it uses the cloud route, which federates instead.
-      - name: Log in to the destination registry
+      # without one being stored somewhere (§13).
+      - name: Log in to GitHub Container Registry
+        if: steps.request.outputs.ghcrHosts != ''
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
-          registry: ${{ steps.request.outputs.registry }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+
+      # The federated identity, written to the same Docker config the step above
+      # writes to — which is what lets one `docker buildx build --push` reach
+      # both registries, and lets cosign find a credential for either.
+      - name: Log in to Artifact Registry
+        if: steps.request.outputs.googleHosts != ''
+        env:
+          HOSTS: ${{ steps.request.outputs.googleHosts }}
+        run: gcloud auth configure-docker --quiet "$HOSTS"
 
       - name: Build and push
         id: push
@@ -241,14 +301,6 @@ jobs:
       # is no public transparency log in this trust model, only a KMS key whose
       # public half the policy pins. The policy says the same thing from its own
       # side with `ctlog.ignoreTlog`.
-      - name: Authenticate to Google Cloud
-        if: steps.request.outputs.signer != ''
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
-          project_id: homelab-ng
-          create_credentials_file: true
-
       # Pinned to the 2.x line, and the pin is the point. Cosign 3 refuses
       # `--tlog-upload=false` outright — "not supported with --signing-config or
       # --use-signing-config", because signing is configured through a signing
@@ -264,25 +316,34 @@ jobs:
         with:
           cosign-release: v2.6.4
 
+      # Once per destination. A cosign signature is a `sha256-<digest>.sig`
+      # object pushed to **the repository the artifact is in**, so a signature
+      # made against one registry is not there to be found by a Target pulling
+      # from another — and that Target's admission would refuse a signed
+      # artifact for the one reason that is not true of it.
       - name: Sign the artifact
         if: steps.request.outputs.signer != ''
         env:
           SIGNER: ${{ steps.request.outputs.signer }}
-          DESTINATION: ${{ steps.request.outputs.destination }}
+          DESTINATIONS: ${{ steps.request.outputs.destinations }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          # The registry credential is the one `Log in to the destination
-          # registry` already wrote to the Docker config; cosign reads it from
-          # there, so nothing here holds a credential of its own (§13).
-          cosign sign --yes --tlog-upload=false \
-            --key "$SIGNER" "${DESTINATION}@${DIGEST}"
-          # Verified here as well as at admission, because a signature that
-          # cannot be checked by the key that made it is a build that should
-          # fail now rather than a Deploy that is refused later by a webhook
-          # whose message is about a policy rather than about this build.
-          cosign verify --insecure-ignore-tlog \
-            --key "$SIGNER" "${DESTINATION}@${DIGEST}" > /dev/null
+          # The registry credentials are the ones the login steps already wrote
+          # to the Docker config; cosign reads them from there, so nothing here
+          # holds a credential of its own (§13).
+          while IFS= read -r destination; do
+            [ -n "$destination" ] || continue
+            echo "signing ${destination}@${DIGEST}"
+            cosign sign --yes --tlog-upload=false \
+              --key "$SIGNER" "${destination}@${DIGEST}"
+            # Verified here as well as at admission, because a signature that
+            # cannot be checked by the key that made it is a build that should
+            # fail now rather than a Deploy that is refused later by a webhook
+            # whose message is about a policy rather than about this build.
+            cosign verify --insecure-ignore-tlog \
+              --key "$SIGNER" "${destination}@${DIGEST}" > /dev/null
+          done <<< "$DESTINATIONS"
 
       # The other half of the same key, for the other kind of verifier.
       #
@@ -309,7 +370,7 @@ jobs:
         env:
           ATTESTOR: ${{ steps.request.outputs.attestor }}
           SIGNER: ${{ steps.request.outputs.signer }}
-          DESTINATION: ${{ steps.request.outputs.destination }}
+          DESTINATIONS: ${{ steps.request.outputs.destinations }}
           DIGEST: ${{ steps.push.outputs.digest }}
           # `sign-and-create` lives on the beta surface. Without this, a runner
           # image that does not carry the component stops to ask whether to
@@ -337,16 +398,26 @@ jobs:
           version="${version:-1}"
           echo "attesting with key version ${version}"
 
-          gcloud beta container binauthz attestations sign-and-create \
-            --project="$attestor_project" \
-            --artifact-url="${DESTINATION}@${DIGEST}" \
-            --attestor="$attestor_name" \
-            --attestor-project="$attestor_project" \
-            --keyversion-project="$key_project" \
-            --keyversion-location="$(field locations)" \
-            --keyversion-keyring="$(field keyRings)" \
-            --keyversion-key="$(field cryptoKeys)" \
-            --keyversion="$version"
+          # Once per destination, and for a sharper reason than the signature:
+          # an attestation is an occurrence bound to an **`--artifact-url`**, so
+          # one made against `ghcr.io/…` says nothing about the same digest at
+          # `…-docker.pkg.dev/…`. Binary Authorization would refuse the exact
+          # image it had already attested, because the URL it was asked about is
+          # not the URL it was told about.
+          while IFS= read -r destination; do
+            [ -n "$destination" ] || continue
+            echo "attesting ${destination}@${DIGEST}"
+            gcloud beta container binauthz attestations sign-and-create \
+              --project="$attestor_project" \
+              --artifact-url="${destination}@${DIGEST}" \
+              --attestor="$attestor_name" \
+              --attestor-project="$attestor_project" \
+              --keyversion-project="$key_project" \
+              --keyversion-location="$(field locations)" \
+              --keyversion-keyring="$(field keyRings)" \
+              --keyversion-key="$(field cryptoKeys)" \
+              --keyversion="$version"
+          done <<< "$DESTINATIONS"
 
       # The one line Spindrift reads. Base64 because this stdout goes through
       # the host's log processing on the way back, and a folded or decorated
@@ -372,9 +443,16 @@ jobs:
         env:
           BUNDLE_DIGEST: ${{ steps.request.outputs.bundleDigest }}
           DESTINATION: ${{ steps.request.outputs.destination }}
+          DESTINATIONS: ${{ steps.request.outputs.destinations }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
+          # One reference per destination, in the order core sent them — which
+          # is the manifest's order, and is what makes `refs[0]` still the
+          # registry a Target with no declared reachability gets.
+          refs="$(printf '%s' "$DESTINATIONS" \
+            | jq -R -s -c --arg digest "$DIGEST" \
+                'split("\n") | map(select(length > 0) | . + "@" + $digest)')"
           # Best effort, and null when it is not there: a base is fresh only at
           # build time, so §16 surfaces a stale one and never corrects it — but
           # a builder that cannot report one says so rather than guessing.
@@ -388,12 +466,13 @@ jobs:
             --arg digest "$DIGEST" \
             --arg destination "$DESTINATION" \
             --arg ref "${DESTINATION}@${DIGEST}" \
+            --argjson refs "$refs" \
             --arg base "$base" \
             --arg run "${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
             --arg workflow "$GITHUB_WORKFLOW_REF" \
             '{bundleDigest: $bundleDigest,
               digest: $digest,
-              refs: [$ref],
+              refs: $refs,
               baseDigest: (if $base == "" then null else $base end),
               buildkitProvenanceRef: $ref,
               sbomRef: $ref,
