@@ -49,7 +49,7 @@ export async function loadStoredManifest(
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
   const stored = await readStoredManifest(db);
-  const declaration = await loadManifestIfPresent(env);
+  const declaration = await declaredManifest(stored !== null, env);
   if (stored !== null && declaration !== null) {
     console.warn(
       'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it',
@@ -58,6 +58,47 @@ export async function loadStoredManifest(
   const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
   await writeStoredManifest(db, declared);
   return resolveManifest(declared, env);
+}
+
+/**
+ * The mounted declaration, and `null` for one a **seeded** installation cannot
+ * parse.
+ *
+ * A declaration seeds and does not govern, so on an installation that already
+ * has a row it is read, announced as ignored, and thrown away. Validating it
+ * strictly on that path meant a document this build could not parse took the
+ * process down — over a value it had already decided not to use.
+ *
+ * That is not hypothetical. A manifest key added to the declaration ahead of
+ * the image that understands it is the ordinary shape of a rollout: the
+ * declaration lands with the merge and the image lands with the digest bump,
+ * and between them every replica crash-loops on
+ * `Unrecognized key` for a field the stored row does not have and no reader
+ * would have consulted. Nothing about the running installation was wrong.
+ *
+ * **Unseeded is still fatal**, and has to be: there the declaration is the
+ * whole configuration, and continuing would boot the placeholder manifest as
+ * though the operator had declared nothing.
+ *
+ * The cost, stated: a declaration that has been broken for a while is a
+ * warning nobody reads until a torn-down installation fails to come back
+ * configured. That is the smaller failure. Crashing a healthy installation to
+ * report a document it is ignoring is the larger one.
+ */
+async function declaredManifest(
+  seeded: boolean,
+  env: Env,
+): Promise<AuthoredManifest | null> {
+  try {
+    return await loadManifestIfPresent(env);
+  } catch (cause) {
+    if (!seeded) throw cause;
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    console.warn(
+      `installation manifest: the mounted declaration is not valid for this build and is being ignored, which is what a declaration already is for a seeded installation — re-seeding from it would fail until it is corrected: ${detail}`,
+    );
+    return null;
+  }
 }
 
 /**
