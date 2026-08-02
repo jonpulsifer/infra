@@ -22,6 +22,16 @@
  *   {@link sourceForRerun}'s subject and §15's "stage an immutable source
  *   bundle" read as being about a Build rather than about an App.
  *
+ * `rebuild` is the operator asking for the second act where the first was
+ * available — the one question the button above cannot express, because its
+ * whole design is to answer the deployable case with a Deploy. Without it an
+ * App whose newest Build succeeded has **no path to a new Build at all**: the
+ * branch below is the only caller of {@link sourceForRerun}, and reaching it
+ * meant writing `status = 'FAILED'` onto a Build that genuinely succeeded. It
+ * changes which act runs and nothing else — the same staging, the same row, the
+ * same refusals — and the result still says which of the two happened, so the
+ * substitution this command forbids stays forbidden in both directions.
+ *
  * **This command writes no `deploys` row of its own**, on either branch. That
  * is the point rather than an omission: §6's check-and-set is only a
  * correctness argument if every intent is written through the one pair that
@@ -55,6 +65,14 @@ export const deployAppInput = z
   .object({
     /** The App's id, or its name where that names exactly one App. */
     name: z.string().trim().min(1),
+    /**
+     * Build again rather than deploy what is already built.
+     *
+     * Absent is the one-button decision unchanged, so every existing caller
+     * keeps its behaviour by saying nothing. Set only where the operator asked
+     * for a Build in as many words.
+     */
+    rebuild: z.boolean().optional(),
   })
   .strict();
 
@@ -292,6 +310,7 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   const latestBuild = primaryComponent.builds[0];
 
   if (
+    !input.rebuild &&
     latestBuild &&
     latestBuild.status === 'SUCCEEDED' &&
     latestBuild.artifactDigest !== null

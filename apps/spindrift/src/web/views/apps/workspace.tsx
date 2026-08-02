@@ -39,6 +39,7 @@ import { Releases } from './releases.tsx';
 export function Workspace({
   view,
   onDeploy,
+  onRebuild,
   deploying = false,
   onNavigate,
   deletion,
@@ -47,6 +48,16 @@ export function Workspace({
 }: {
   view: WorkspaceView;
   onDeploy?: () => void;
+  /**
+   * Ask for a Build outright.
+   *
+   * Its own control rather than a mode on the one above, because that button's
+   * whole job is to decide — and a decision an operator can silently flip is
+   * the substitution `deployApp` refuses to make. Always offered, never
+   * conditional on what is built: "Rebuild" does exactly one thing whatever
+   * the state, which is what makes it safe to press next to one that does not.
+   */
+  onRebuild?: () => void;
   deploying?: boolean;
   onNavigate?: (path: string) => void;
   /**
@@ -86,6 +97,11 @@ export function Workspace({
               Open app <ExternalLink aria-hidden="true" />
             </a>
           </Button>
+          {onRebuild ? (
+            <Button variant="outline" onClick={onRebuild} disabled={deploying}>
+              Rebuild
+            </Button>
+          ) : null}
           <Button onClick={onDeploy} disabled={deploying}>
             {deploying
               ? 'Deploying...'

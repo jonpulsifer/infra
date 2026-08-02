@@ -9,7 +9,10 @@ import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import { systemClock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
-import { loadStoredManifest } from '../config/manifest-store.ts';
+import {
+  currentStoredManifest,
+  loadStoredManifest,
+} from '../config/manifest-store.ts';
 import { createClient, createDb } from '../db/client.ts';
 import { type ReconcilerProcessEvent, runReconciler } from './process.ts';
 import { restoreDeclaredTargetConnections } from './target-loop.ts';
@@ -29,6 +32,8 @@ export interface StartReconcilerOptions {
   readonly createAdapters?: (manifest: InstallationManifest) => AdapterRegistry;
   readonly onStarted?: (manifest: InstallationManifest) => void;
   readonly onEvent?: (event: ReconcilerProcessEvent) => void;
+  /** Forwarded to the manifest loop; production takes its default. */
+  readonly manifestIntervalMs?: number;
 }
 
 import { initTelemetry } from '../telemetry/index.ts';
@@ -47,24 +52,61 @@ export async function startReconciler(
 
   try {
     const db = createDb(client);
-    const manifest = await loadStoredManifest(db, env);
     const clock = options.clock ?? systemClock;
-    const adapters =
-      options.createAdapters?.(manifest) ??
-      createAdapterRegistry({ manifest, env, db, clock });
-    await restoreDeclaredTargetConnections({ db, adapters, clock }, manifest);
-    options.onStarted?.(manifest);
+    const assemble = (manifest: InstallationManifest) => ({
+      manifest,
+      adapters:
+        options.createAdapters?.(manifest) ??
+        createAdapterRegistry({ manifest, env, db, clock }),
+    });
+
+    /**
+     * The configuration the loops run against, current as of the last refresh.
+     *
+     * `loadStoredManifest` seeds and reconciles, so it runs once at startup;
+     * every read after it is `currentStoredManifest`, which the manifest store
+     * exports for exactly this — asking whether configuration changed without
+     * paying for a transaction to answer.
+     */
+    let current = assemble(await loadStoredManifest(db, env));
+
+    await restoreDeclaredTargetConnections(
+      { db, adapters: current.adapters, clock },
+      current.manifest,
+    );
+    options.onStarted?.(current.manifest);
 
     await runReconciler(
       {
         db,
-        adapters,
         clock,
-        manifest,
+        // Getters, so a loop holding this object for the life of the process
+        // reads what `refresh` last put in `current` rather than what the
+        // process booted with. The adapters are the half that matters: the
+        // build route bakes in `supplyChain.signer` and `attestor` at
+        // assembly, which is how a Build went out naming an attestor added to
+        // the manifest minutes earlier and skipped the step on the empty value.
+        get manifest() {
+          return current.manifest;
+        },
+        get adapters() {
+          return current.adapters;
+        },
+        refresh: async () => {
+          const stored = await currentStoredManifest(db, env);
+          // Rebuilt only where the document actually changed, so an unchanged
+          // installation costs one `select` per tick and nothing else.
+          if (stored === null || Bun.deepEquals(stored, current.manifest, true))
+            return;
+          current = assemble(stored);
+        },
       },
       {
         signal: options.signal,
         ...(options.onEvent ? { onEvent: options.onEvent } : {}),
+        ...(options.manifestIntervalMs === undefined
+          ? {}
+          : { manifestIntervalMs: options.manifestIntervalMs }),
       },
     );
   } finally {

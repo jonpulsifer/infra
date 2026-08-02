@@ -76,11 +76,17 @@ describe('the bundle a rerun stages', () => {
   /**
    * An App whose only Build failed carrying `location`, placed on a Target —
    * the shape the deploy button acts on, and offsite's shape today.
+   *
+   * `status` and `artifactDigest` default to that shape. Ticket 36 is the one
+   * caller that overrides them, because the act it asks for is only reachable
+   * on the Build the defaults exclude.
    */
   async function seedFailedBuild(options: {
     location: string | null;
     sourceKind?: 'repo' | 'archive';
     connectRepository?: boolean;
+    status?: 'FAILED' | 'SUCCEEDED';
+    artifactDigest?: string;
   }) {
     const name = `rerun-${crypto.randomUUID().slice(0, 8)}`;
     const [repository] = options.connectRepository
@@ -125,7 +131,10 @@ describe('the bundle a rerun stages', () => {
         bundleDigest:
           'sha256:3f5cbbc2ced964573220535fc887677dcb768b9d56b4931c415db44402440b03',
         bundleLocation: options.location,
-        status: 'FAILED',
+        status: options.status ?? 'FAILED',
+        ...(options.artifactDigest === undefined
+          ? {}
+          : { artifactDigest: options.artifactDigest }),
       })
       .returning();
     return { app: app!, component: component!, build: build! };
@@ -295,5 +304,73 @@ describe('the bundle a rerun stages', () => {
     if (!result.ok) return;
     expect(result.value.phase).toBe('BUILDING');
     expect(stager.staged).toHaveLength(0);
+  });
+
+  /**
+   * Ticket 36 — an App whose newest Build succeeded had no path to a new one.
+   * The branch above is the only caller of `sourceForRerun`, and reaching it
+   * meant writing `status = 'FAILED'` onto a Build that genuinely succeeded.
+   */
+  describe('a rebuild asked for against a succeeded Build', () => {
+    const seedSucceeded = () =>
+      seedFailedBuild({
+        location: DURABLE_LOCATION,
+        connectRepository: true,
+        status: 'SUCCEEDED',
+        artifactDigest: `sha256:${'b'.repeat(64)}`,
+      });
+
+    test('writes a new PENDING Build and leaves the succeeded one alone', async () => {
+      const seeded = await seedSucceeded();
+
+      const result = await deployApp(
+        { name: seeded.app.name, rebuild: true },
+        ctx,
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      // The act says which of the two it did: a Build was started, so there is
+      // no intent to navigate to.
+      expect(result.value.phase).toBe('BUILDING');
+      expect(result.value.deployId).toBeNull();
+      expect(result.value.buildId).not.toBe(seeded.build.id);
+
+      const rows = await ctx.db
+        .select()
+        .from(builds)
+        .where(eq(builds.componentId, seeded.component.id));
+      expect(rows).toHaveLength(2);
+
+      const rerun = rows.find((row) => row.id === result.value.buildId);
+      expect(rerun?.status).toBe('PENDING');
+      // Staged for it, not carried from the Build being rerun — the same rule
+      // the failed-Build path follows, and the reason a durable bundle is
+      // inherited rather than fetched twice.
+      expect(rerun?.bundleLocation).toBe(DURABLE_LOCATION);
+      expect(stager.staged).toHaveLength(0);
+
+      // The row edit this ticket exists to end: the succeeded Build still says
+      // it succeeded, and still names what it produced.
+      const succeeded = rows.find((row) => row.id === seeded.build.id);
+      expect(succeeded?.status).toBe('SUCCEEDED');
+      expect(succeeded?.artifactDigest).toBe(`sha256:${'b'.repeat(64)}`);
+    });
+
+    test('is the only thing that reaches it — the button still deploys', async () => {
+      const seeded = await seedSucceeded();
+
+      // Same App, same Build, no `rebuild`. The Target is not connected, so
+      // `createDeploy` refuses — which is the point: the deploy branch was
+      // taken, and it refused with its own sentence rather than building.
+      const result = await deployApp({ name: seeded.app.name }, ctx);
+      expect(result.ok).toBe(false);
+
+      const rows = await ctx.db
+        .select()
+        .from(builds)
+        .where(eq(builds.componentId, seeded.component.id));
+      expect(rows).toHaveLength(1);
+    });
   });
 });
