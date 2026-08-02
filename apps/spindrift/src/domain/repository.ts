@@ -112,6 +112,19 @@ export interface RepositoryReader {
     commit: string,
     path: string,
   ): Promise<string | null>;
+  /**
+   * Every file at one exact commit, root-relative.
+   *
+   * Detection needs to know what is in a directory before anything has been
+   * checked out (§5), and this is the one call that answers it. Files only:
+   * a tree's directories are implied by the paths inside them, and core has no
+   * use for an entry that names a container rather than content.
+   */
+  treePaths(
+    ref: RepositoryRef,
+    fullName: string,
+    commit: string,
+  ): Promise<readonly string[]>;
 }
 
 /**

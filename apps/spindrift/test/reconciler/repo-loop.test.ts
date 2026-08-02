@@ -53,8 +53,9 @@ const NOW = new Date('2026-07-28T12:00:00.000Z');
 const clock = { now: () => NOW };
 
 const proposal: DetectionProposal = {
-  source: 'railpack',
+  source: 'detection',
   kind: 'service',
+  reason: 'a fixture',
   kinds: [{ kind: 'service', available: true }],
   build: {
     frontend: 'railpack',
@@ -178,6 +179,9 @@ describe('adopting the default branch', () => {
         proposal: {
           ...proposal,
           source: 'spindrift-file',
+          // The file that settled it, named — this is what the workspace shows
+          // when it says where a Component's kind came from.
+          reason: 'services/api/spindrift.yaml asserts this scope is a service',
           kinds: [
             {
               kind: 'service',

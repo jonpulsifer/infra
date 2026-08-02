@@ -23,6 +23,7 @@ import {
   targetAdapterSchema,
 } from '../../src/config/manifest.schema.ts';
 import { BUILD_ROUTE_REFUSALS } from '../../src/domain/build-route.ts';
+import { PRESET_DEPENDENCIES } from '../../src/domain/detection/declared.ts';
 import { KUBERNETES_DELIVERY_FLAVOURS } from '../../src/domain/target.ts';
 
 const APP = join(import.meta.dir, '../..');
@@ -72,6 +73,10 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // Why a build route is not usable for a Target — vocabulary again, read from
   // the domain rather than restated, so adding one does not break a test here.
   ...BUILD_ROUTE_REFUSALS,
+  // The package that proves a project uses a given framework. `react-scripts`
+  // wears the project-id shape and names no installation: it is the same
+  // package on npm for everybody, which is exactly why detection can key on it.
+  ...PRESET_DEPENDENCIES,
   // An encoding, a digest algorithm, and a key in a workflow file. None of the
   // three names anything; all wear the shape because they are lowercase words
   // carrying a digit or a hyphen, which is the whole of what this scanner can

@@ -32,8 +32,9 @@ const BUILD_WORKFLOW =
   'example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809';
 
 const railpack: DetectionProposal = {
-  source: 'railpack',
+  source: 'detection',
   kind: 'website',
+  reason: 'a fixture',
   kinds: [{ kind: 'website', available: true }],
   build: {
     frontend: 'railpack',
@@ -44,8 +45,9 @@ const railpack: DetectionProposal = {
 };
 
 const dockerfile: DetectionProposal = {
-  source: 'railpack',
+  source: 'detection',
   kind: 'service',
+  reason: 'a fixture',
   kinds: [{ kind: 'service', available: true }],
   build: { frontend: 'dockerfile', dockerfile: 'Dockerfile' },
   watchPaths: ['services/api'],

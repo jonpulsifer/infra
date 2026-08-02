@@ -5,9 +5,15 @@
  * Other ecosystems degrade honestly to the named scope plus the root manifests
  * and lockfiles that exist, which is still conservative: it can overbuild but
  * cannot silently miss a root toolchain change.
+ *
+ * Reads through a {@link SourceTree} rather than the filesystem, so the same
+ * derivation answers for a repository nobody has checked out. The workspace
+ * walk that used to `scan()` the disk now matches glob patterns against the
+ * tree's listing — the same `Bun.Glob`, asked whether a string matches instead
+ * of asked what is on a disk.
  */
-import { access } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
+import type { SourceTree } from './tree.ts';
 
 const ROOT_WATCH_FILES = [
   'package.json',
@@ -44,21 +50,18 @@ interface WorkspacePackage {
   readonly manifest: PackageManifest;
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
+function joinPath(scope: string, file: string): string {
+  return scope === '.' ? file : `${scope}/${file}`;
 }
 
 async function readPackageManifest(
+  tree: SourceTree,
   path: string,
 ): Promise<PackageManifest | null> {
-  if (!(await exists(path))) return null;
+  const document = await tree.readText(path);
+  if (document === null) return null;
   try {
-    return (await Bun.file(path).json()) as PackageManifest;
+    return JSON.parse(document) as PackageManifest;
   } catch {
     return null;
   }
@@ -76,18 +79,16 @@ function packageWorkspacePatterns(
 }
 
 async function pnpmWorkspacePatterns(
-  repositoryRoot: string,
+  tree: SourceTree,
 ): Promise<readonly string[]> {
-  const path = join(repositoryRoot, 'pnpm-workspace.yaml');
-  if (!(await exists(path))) return [];
+  const document = await tree.readText('pnpm-workspace.yaml');
+  if (document === null) return [];
 
   try {
-    const document = Bun.YAML.parse(await Bun.file(path).text()) as {
-      packages?: unknown;
-    };
-    return Array.isArray(document?.packages) &&
-      document.packages.every((entry) => typeof entry === 'string')
-      ? document.packages
+    const parsed = Bun.YAML.parse(document) as { packages?: unknown };
+    return Array.isArray(parsed?.packages) &&
+      parsed.packages.every((entry) => typeof entry === 'string')
+      ? parsed.packages
       : [];
   } catch {
     return [];
@@ -104,49 +105,67 @@ function dependencyNames(manifest: PackageManifest): string[] {
 }
 
 async function workspacePackages(
-  repositoryRoot: string,
+  tree: SourceTree,
   rootManifest: PackageManifest,
 ): Promise<Map<string, WorkspacePackage>> {
-  const packages = new Map<string, WorkspacePackage>();
   const patterns = new Set([
     ...packageWorkspacePatterns(rootManifest),
-    ...(await pnpmWorkspacePatterns(repositoryRoot)),
+    ...(await pnpmWorkspacePatterns(tree)),
   ]);
+  if (patterns.size === 0) return new Map();
+
+  const manifestPaths = (await tree.paths()).filter((path) =>
+    path.endsWith('package.json'),
+  );
+  const packages = new Map<string, WorkspacePackage>();
   for (const pattern of patterns) {
-    const manifests = new Bun.Glob(
-      `${pattern.replace(/\/+$/, '')}/package.json`,
-    );
-    for await (const path of manifests.scan({
-      cwd: repositoryRoot,
-      onlyFiles: true,
-    })) {
-      const manifest = await readPackageManifest(join(repositoryRoot, path));
+    const glob = new Bun.Glob(`${pattern.replace(/\/+$/, '')}/package.json`);
+    for (const path of manifestPaths) {
+      if (!glob.match(path)) continue;
+      const manifest = await readPackageManifest(tree, path);
       if (manifest?.name) {
-        packages.set(manifest.name, {
-          directory: dirname(path),
-          manifest,
-        });
+        packages.set(manifest.name, { directory: dirname(path), manifest });
       }
     }
   }
   return packages;
 }
 
+/**
+ * Every directory the root manifest declares as a workspace package.
+ *
+ * Exported for discovery (§5's "discover" branch), which needs the same answer
+ * for a different reason: watch paths ask *which packages does this one depend
+ * on*, discovery asks *which packages are there at all*. Both are the workspace
+ * glob walk, and running two of them would be two ways to disagree about what a
+ * monorepo contains.
+ */
+export async function workspaceDirectories(
+  tree: SourceTree,
+): Promise<readonly string[]> {
+  const rootManifest = await readPackageManifest(tree, 'package.json');
+  if (rootManifest === null) return [];
+  const packages = await workspacePackages(tree, rootManifest);
+  return [...packages.values()]
+    .map((entry) => entry.directory)
+    .filter((directory) => directory !== '.')
+    .sort();
+}
+
 async function workspaceDependencyPaths(
-  repositoryRoot: string,
+  tree: SourceTree,
   scope: string,
 ): Promise<string[]> {
   if (scope === '.') return [];
 
-  const rootManifest = await readPackageManifest(
-    join(repositoryRoot, 'package.json'),
-  );
+  const rootManifest = await readPackageManifest(tree, 'package.json');
   const scopeManifest = await readPackageManifest(
-    join(repositoryRoot, scope, 'package.json'),
+    tree,
+    joinPath(scope, 'package.json'),
   );
   if (!rootManifest || !scopeManifest) return [];
 
-  const packages = await workspacePackages(repositoryRoot, rootManifest);
+  const packages = await workspacePackages(tree, rootManifest);
   const paths: string[] = [];
   const queued = dependencyNames(scopeManifest);
   const seen = new Set<string>();
@@ -166,15 +185,13 @@ async function workspaceDependencyPaths(
 }
 
 export async function deriveWatchPaths(
-  repositoryRoot: string,
+  tree: SourceTree,
   scope: string,
 ): Promise<string[]> {
-  const paths = [
-    scope,
-    ...(await workspaceDependencyPaths(repositoryRoot, scope)),
-  ];
+  const paths = [scope, ...(await workspaceDependencyPaths(tree, scope))];
+  const listing = new Set(await tree.paths());
   for (const path of ROOT_WATCH_FILES) {
-    if (await exists(join(repositoryRoot, path))) paths.push(path);
+    if (listing.has(path)) paths.push(path);
   }
   return paths;
 }
