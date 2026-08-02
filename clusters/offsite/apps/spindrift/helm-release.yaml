@@ -68,9 +68,14 @@ spec:
         limits:
           memory: 768Mi
           cpu: 1000m
-    # The installation manifest, declared rather than seeded: the durable row is
-    # written from this document at process start, which is what puts a manifest
-    # change under ordinary review.
+    # The installation manifest. **A declaration seeds; it does not govern.**
+    # The durable row wins whenever one exists, so editing this document does
+    # nothing to an installation that already has one — the process says so at
+    # startup rather than skipping it quietly. Configuration is driven through
+    # the UI; re-seeding from here means discarding the row first.
+    #
+    # What this document is for is bringing a torn-down installation back
+    # configured without anyone opening a browser.
     #
     # Both zones are substituted by the apps Kustomization — `SPINDRIFT_DOMAIN`
     # from cluster-settings, `SECRET_DOMAIN` from cluster-secrets — so the zone
