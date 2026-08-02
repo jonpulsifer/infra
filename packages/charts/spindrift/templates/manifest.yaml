@@ -1,7 +1,9 @@
 {{/*
-The installation manifest, declared by the release. `loadStoredManifest` writes
-this document to the durable row at process start, so a manifest change is a
-pull request. Empty declares nothing and the process reads the row back.
+The installation manifest, declared by the release.
+
+**A declaration seeds; it does not govern.** `loadStoredManifest` takes the
+stored row whenever one exists and this document only when none does, so
+editing it does nothing to a seeded installation. Empty declares nothing.
 
 **A declaration may not restate what this chart already renders.** The refusals
 below reject a manifest carrying a fact this chart owns, at render time — the
