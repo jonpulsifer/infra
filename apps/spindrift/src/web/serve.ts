@@ -50,11 +50,23 @@ import {
   tracer,
 } from '../telemetry/index.ts';
 
-function instrumentRoutes<T extends Record<string, any>>(routes: T): T {
+/**
+ * Wrap every handler in a span and the two HTTP metrics.
+ *
+ * Two things it must not change about a handler, both of which the WebSocket
+ * upgrades depend on: `Bun.serve` calls a route with `(request, server)` and the
+ * upgrade handlers need that second argument, and a handler that upgraded
+ * returns `undefined` rather than a `Response` because Bun has taken the socket.
+ * Dropping either turns every stream into a 500.
+ */
+export function instrumentRoutes<T extends Record<string, any>>(routes: T): T {
   const instrumented: Record<string, any> = {};
   for (const [path, handler] of Object.entries(routes)) {
     if (typeof handler === 'function') {
-      instrumented[path] = async (req: Request) => {
+      instrumented[path] = async (
+        req: Request,
+        server: Bun.Server<StreamSocketData>,
+      ) => {
         const startTime = Date.now();
         return tracer.startActiveSpan(
           `HTTP ${req.method} ${path}`,
@@ -64,10 +76,16 @@ function instrumentRoutes<T extends Record<string, any>>(routes: T): T {
 
             try {
               const res = await (
-                handler as (r: Request) => Promise<Response> | Response
-              )(req);
+                handler as (
+                  r: Request,
+                  s: Bun.Server<StreamSocketData>,
+                ) => Promise<Response | undefined> | Response | undefined
+              )(req, server);
               const durationSec = (Date.now() - startTime) / 1000;
-              const status = res.status ?? 200;
+              // An upgraded WebSocket has no Response to report on. 101 is what
+              // it is, and it keeps the metric honest rather than counting a
+              // successful upgrade as a 200 that never went out.
+              const status = res?.status ?? 101;
 
               httpRequestCounter.add(1, { path, status: String(status) });
               httpRequestDuration.record(durationSec, {
