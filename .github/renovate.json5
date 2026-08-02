@@ -120,6 +120,26 @@
   ],
   packageRules: [
     // ============================================================
+    // cosign is pinned to 2.x deliberately, and must stay there
+    // ============================================================
+    {
+      description: 'cosign: 2.x is a deliberate floor, not a stale pin',
+      matchManagers:    ['github-actions'],
+      matchDepNames:    ['sigstore/cosign'],
+      // Cosign 3 refuses `--tlog-upload=false` outright — signing is configured
+      // through a signing config that names a transparency log, and there is no
+      // transparency log in this trust model: the signer is a KMS key whose
+      // public half `spindrift-verify-images` pins, and that policy says the
+      // same thing from its own side with `ctlog.ignoreTlog`. 2.x is also the
+      // keyed-signature format Kyverno 1.18 reads.
+      //
+      // Renovate bumped this to 3.1.2 and automerged it three minutes after the
+      // pin landed, and the next build failed on the flag again. Moving off 2.x
+      // means writing a signing config and re-checking what Kyverno accepts —
+      // tracked as its own piece of work, not a version bump.
+      enabled: false,
+    },
+    // ============================================================
     // Terraform providers — group by kind, not by stack
     // Keep major+minor together so we don't get PR-per-update-type
     // ============================================================
