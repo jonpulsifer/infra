@@ -29,7 +29,7 @@ const spec: BuildSpec = {
   artifactType: 'image',
   kind: 'service',
   platform: { os: 'linux', arch: 'arm64' },
-  destination: 'registry.example.test/apps',
+  destinations: ['registry.example.test/apps'],
   tags: ['sha256-bundle', 'latest'],
   buildArgs: {},
 };
@@ -191,7 +191,7 @@ describe('the fake route reports what the product would accept', () => {
     if (result.status !== 'SUCCEEDED' || result.artifact === null) return;
     expect(result.artifact.digest).toBe(digest);
     expect(digestPinnedRef(result.artifact)).toBe(
-      `${spec.destination}@${digest}`,
+      `${spec.destinations[0]}@${digest}`,
     );
   });
 

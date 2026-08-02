@@ -171,6 +171,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       gpu: false,
       persistence: false,
       datastores: [],
+      registries: ['registry.example.test'],
       secretStore: 'onepassword',
     });
 

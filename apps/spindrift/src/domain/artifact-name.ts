@@ -1,12 +1,16 @@
 /**
  * Where a Component's artifact is published, and under what tags.
  *
- * §16 names one registry per installation — "every artifact is pushed to and
- * pulled from" it — and that value is a **namespace**. A namespace is not a
- * place an image can be pushed: a registry host followed by one path segment is
- * not a repository, and every registry rejects it as a name before
- * authentication is relevant. Something has to append the rest, and this is
- * that place.
+ * §16 names the registries an installation pushes to — "every artifact is
+ * pushed to and pulled from" them — and each value is a **namespace**. A
+ * namespace is not a place an image can be pushed: a registry host followed by
+ * one path segment is not a repository, and every registry rejects it as a name
+ * before authentication is relevant. Something has to append the rest, and this
+ * is that place.
+ *
+ * **Several registries, one repository path under each.** Two Targets on one
+ * installation cannot always share a registry, so the same Component resolves
+ * to one repository per registry and the same digest is pushed to all of them.
  *
  * This is not a DNS name and `naming.ts` is not its home, for the same reason
  * {@link import('./workload-name.ts')} is not there: §9's names are what a user
@@ -47,26 +51,42 @@ export function isPathComponent(value: string): boolean {
 
 /** What a repository name is assembled from. */
 export interface ArtifactRepositoryParts {
-  /** The installation's registry namespace (§16) — a host and a namespace. */
-  readonly registry: string;
+  /** The installation's registry namespaces (§16) — a host and a namespace each. */
+  readonly registries: readonly string[];
   readonly app: string;
   readonly component: string;
 }
 
 /**
- * The repository one Component's artifacts are pushed to.
+ * The repositories one Component's artifacts are pushed to, one per registry.
  *
  * Returns `null` when either half cannot be a path component, so the caller
  * refuses with the offending name rather than handing a registry something it
  * will answer `NAME_INVALID` to — which is the failure this module exists to
  * end, and which cost a build every step up to `Build and push` to discover.
+ *
+ * All or none, because the App and Component names are what a registry rejects
+ * and they are the same names under every registry. A partial answer would push
+ * to one destination and silently not to another, which reads as "Cloud Run
+ * cannot pull an artifact the cluster is already running".
+ *
+ * Order is the manifest's order, and it is the order `refs` is recorded in — so
+ * `refs[0]` remains the first registry, which is what a Target that declares no
+ * `reachableRegistries` still gets.
  */
-export function componentRepository(
+export function componentRepositories(
   parts: ArtifactRepositoryParts,
-): string | null {
+): readonly string[] | null {
   if (!isPathComponent(parts.app)) return null;
   if (!isPathComponent(parts.component)) return null;
-  return `${parts.registry}/${parts.app}/${parts.component}`;
+  return parts.registries.map(
+    (registry) => `${registry}/${parts.app}/${parts.component}`,
+  );
+}
+
+/** The registry host a reference is pulled from — everything before the first `/`. */
+export function registryHostOf(reference: string): string {
+  return reference.split('/')[0] ?? '';
 }
 
 /**

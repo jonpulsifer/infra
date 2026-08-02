@@ -30,7 +30,7 @@ import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 /** A deploy path served entirely by the Target itself. */
 const LOCAL_PATH = {
   chart: 'oci://registry.cluster.test/charts/app:1.0.0',
-  image: 'registry.cluster.test/artifacts',
+  images: ['registry.cluster.test/artifacts'],
   verifier: 'https://verifier.cluster.test/keys',
 };
 
@@ -117,7 +117,7 @@ describe('offlineDeploy is a static check over three references', () => {
   test('an unparseable reference fails closed', () => {
     // The claim is that a deploy needs nothing off-Target. A reference nobody
     // can read is not evidence for that claim.
-    expect(deriveOfflineDeploy({ ...LOCAL_PATH, image: '' }, SERVED)).toBe(
+    expect(deriveOfflineDeploy({ ...LOCAL_PATH, images: [''] }, SERVED)).toBe(
       false,
     );
   });

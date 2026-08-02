@@ -142,8 +142,11 @@ export function configSecretName(desired: DesiredState): string {
  * immutable. An artifact with no address is a core bug — the adapter says so as
  * `INTERNAL` rather than rendering a release that cannot pull.
  */
-export function imageReference(desired: DesiredState): string | null {
-  return artifactAddress(desired.artifact);
+export function imageReference(
+  desired: DesiredState,
+  reachable: readonly string[] = [],
+): string | null {
+  return artifactAddress(desired.artifact, reachable);
 }
 
 /**

@@ -105,7 +105,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     app: 'packages/charts/spindrift-app',
   },
   supplyChain: {
-    registry: 'ghcr.io/spindrift',
+    registry: ['ghcr.io/spindrift'],
     verifier: 'ghcr.io/spindrift/spindrift-verifier',
     signer:
       'gcpkms://projects/spindrift-artifacts/locations/us-central1/keyRings/keys/cryptoKeys/signer',

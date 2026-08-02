@@ -155,10 +155,15 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         `cloudrun does not accept a ${desired.artifact.type} artifact`,
       );
     }
-    const image = artifactAddress(desired.artifact);
+    const image = artifactAddress(
+      desired.artifact,
+      connection.reachableRegistries ?? [],
+    );
     if (image === null) {
       yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal('the artifact carries no address to pull it by');
+      return this.internal(
+        'the artifact carries no address this Target can pull it by',
+      );
     }
 
     const id = serviceId(desired);

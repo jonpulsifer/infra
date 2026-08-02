@@ -41,7 +41,7 @@ import {
 } from '../../db/schema.ts';
 import {
   artifactTags,
-  componentRepository,
+  componentRepositories,
 } from '../../domain/artifact-name.ts';
 import {
   type BuildAttemptRef,
@@ -547,15 +547,16 @@ export const dispatchBuild = async (
    * Ahead of the signed URL deliberately: a bearer capability minted for a
    * Build that cannot be dispatched is one that exists for no reason.
    */
-  const destination = componentRepository({
-    registry: context.manifest.supplyChain.registry,
+  const registries = context.manifest.supplyChain.registry;
+  const destinations = componentRepositories({
+    registries,
     app: app.name,
     component: component.name,
   });
-  if (destination === null) {
+  if (destinations === null) {
     const sentence =
       `App "${app.name}" / Component "${component.name}" cannot name a ` +
-      `repository under ${context.manifest.supplyChain.registry}: a registry ` +
+      `repository under ${registries.join(' or ')}: a registry ` +
       `path segment is lowercase alphanumerics separated by "-", "_" or "."`;
     // §6's table covers "invalid spec" here, which is what a name no registry
     // will accept is — and it blames the developer, who is the one who can
@@ -621,7 +622,7 @@ export const dispatchBuild = async (
     artifactType: build.artifactType,
     kind: component.kind,
     platform: DEFAULT_PLATFORM,
-    destination,
+    destinations,
     /**
      * §12 counts tags, so a push that carried only the implicit `:latest` would
      * leave retention nothing to act on and a rollback depth of one.

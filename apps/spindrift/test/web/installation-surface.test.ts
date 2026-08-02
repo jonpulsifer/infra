@@ -199,9 +199,13 @@ describe('configuring this installation from the browser', () => {
     const { value } = (await read.json()) as {
       value: { manifest: InstallationManifest };
     };
-    expect(valueAt(value.manifest, ['supplyChain', 'registry'])).toBe(
+    // A list, from a document that wrote a bare string: an installation whose
+    // Targets cannot share a registry names several, and one is the same
+    // document as a one-element list (ticket 39). Nothing stored has to be
+    // rewritten to keep parsing.
+    expect(valueAt(value.manifest, ['supplyChain', 'registry'])).toEqual([
       'registry.example.test/second',
-    );
+    ]);
   });
 
   test('reconciles the Targets the written document declares', async () => {

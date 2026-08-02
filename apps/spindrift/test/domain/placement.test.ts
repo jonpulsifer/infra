@@ -25,7 +25,7 @@ import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 
 const DEPLOY_PATH = {
   chart: 'oci://registry.cluster.test/charts/app:1.0.0',
-  image: 'registry.cluster.test/artifacts',
+  images: ['registry.cluster.test/artifacts'],
   verifier: 'https://verifier.cluster.test/keys',
 };
 
@@ -81,6 +81,7 @@ function requirements(
     gpu: false,
     persistence: false,
     datastores: [],
+    registries: ['registry.example.test'],
     secretStore: 'gcp-secret-manager',
     ...overrides,
   };
@@ -268,6 +269,55 @@ describe('an attached datastore constrains where its App can go', () => {
       }),
     );
     expect(reasons).toEqual(['DATASTORE_ENGINE_MISSING']);
+  });
+});
+
+/**
+ * Ticket 39's third criterion — a Target that can reach none of the registries
+ * an artifact is pushed to is a non-candidate **before the build**, rather than
+ * a failed revision after it.
+ */
+describe('registry reachability at Place', () => {
+  test('a Target reaching none of them is excluded, with a reason', () => {
+    const excluded = exclusionsFor(
+      target({ discovery: { reachableRegistries: ['registry.internal'] } }),
+      requirements({ registries: ['registry.example.test/ns'] }),
+    );
+    expect(excluded).toEqual(['REGISTRY_UNREACHABLE']);
+  });
+
+  test('a Target reaching any one of them is a candidate', () => {
+    // Any, not all: an artifact is pulled once, from one registry.
+    expect(
+      exclusionsFor(
+        target({ discovery: { reachableRegistries: ['ghcr.io'] } }),
+        requirements({
+          registries: ['ghcr.io/ns', 'registry.internal/ns'],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test('declaring nothing is no restriction, not "reaches nothing"', () => {
+    // Every Target on this installation, until an operator says otherwise —
+    // reading an empty list as a refusal would exclude all of them.
+    expect(
+      exclusionsFor(
+        target({ discovery: { reachableRegistries: [] } }),
+        requirements({ registries: ['registry.example.test/ns'] }),
+      ),
+    ).toEqual([]);
+  });
+
+  test('a static Target is not asked the question', () => {
+    // It serves `files`, fetched from the depot, and its discovery reports
+    // `reachableRegistries: []` for that reason rather than as a refusal.
+    expect(
+      exclusionsFor(
+        target({ adapter: 'static', discovery: { reachableRegistries: [] } }),
+        requirements({ kind: 'website', exposure: 'public' }),
+      ),
+    ).toEqual([]);
   });
 });
 

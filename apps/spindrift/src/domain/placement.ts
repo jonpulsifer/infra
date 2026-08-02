@@ -31,6 +31,7 @@ import type {
 } from '../config/manifest.schema.ts';
 import {
   capabilitiesOfRow,
+  hostOf,
   type TargetCapabilities,
   type TargetDiscovery,
 } from './capabilities.ts';
@@ -69,6 +70,7 @@ export const EXCLUSIONS = [
   'DATASTORE_ENGINE_MISSING',
   'DATASTORE_IS_CLUSTER_LOCAL',
   'STORE_UNREACHABLE',
+  'REGISTRY_UNREACHABLE',
   'QUOTA_EXHAUSTED',
   'NO_ADAPTER',
 ] as const;
@@ -110,6 +112,15 @@ export interface DerivedRequirements {
   readonly datastores: readonly RequiredDatastore[];
   /** §10's reach rule: the store must be reachable by the Target chosen. */
   readonly secretStore: TargetCapabilities['reachableSecretStores'][number];
+  /**
+   * The registries this installation pushes every artifact to (§16).
+   *
+   * Here because §3 filters on reachability *before* a Build is dispatched, and
+   * a Target that can pull from none of them is a non-candidate rather than a
+   * failed revision hours later — which is what a `ghcr.io` reference on a
+   * Cloud Run service was, several layers past IAM and Binary Authorization.
+   */
+  readonly registries: readonly string[];
 }
 
 /** One attached Datastore, as a requirement. */
@@ -244,6 +255,8 @@ function sentence(
       return 'an attached datastore is cluster-local and lives elsewhere';
     case 'STORE_UNREACHABLE':
       return 'this Target cannot reach the secret store this App is configured through';
+    case 'REGISTRY_UNREACHABLE':
+      return 'this Target cannot pull from any registry this installation publishes to';
     case 'QUOTA_EXHAUSTED':
       return 'this Target has no quota left';
     case 'NO_ADAPTER':
@@ -366,6 +379,24 @@ export function exclusionsFor(
     !can.reachableSecretStores.includes(requirements.secretStore)
   ) {
     reasons.push('STORE_UNREACHABLE');
+  }
+
+  // Only where an image is what gets pulled: a `files` artifact is fetched from
+  // the depot, and a static Target's discovery says `reachableRegistries: []`
+  // for exactly that reason — reading it as "reaches nothing" would exclude the
+  // one Target the rule does not apply to.
+  //
+  // An empty list is **no declared restriction**, not "reaches nothing", which
+  // is every Target until an operator says otherwise. So this only bites where
+  // a Target names registries and none of them is one an artifact is pushed to.
+  if (
+    artifactTypeFor(requirements.kind, target) === 'image' &&
+    can.reachableRegistries.length > 0 &&
+    !requirements.registries.some((registry) =>
+      can.reachableRegistries.includes(hostOf(registry)),
+    )
+  ) {
+    reasons.push('REGISTRY_UNREACHABLE');
   }
 
   if (target.quotaExhausted === true) reasons.push('QUOTA_EXHAUSTED');

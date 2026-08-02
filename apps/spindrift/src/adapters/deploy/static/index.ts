@@ -149,6 +149,9 @@ export class StaticDeployAdapter implements DeployAdapter {
         `static hosting serves Public only, and this Component is ${desired.exposure} (§9)`,
       );
     }
+    // No registry filter: a static Target serves `files`, and the reachability
+    // §3 models over registries is about pulling an image. Its discovery says
+    // so itself — `reachableRegistries: []`.
     const location = artifactAddress(desired.artifact);
     if (location === null) {
       yield this.status('FAILED', { reason: 'INTERNAL' });

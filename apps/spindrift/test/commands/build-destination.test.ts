@@ -136,8 +136,8 @@ describe('the destination dispatch hands a route', () => {
     // The bug, stated as an assertion: `ghcr.io/jonpulsifer` reached a runner
     // verbatim and GHCR answered `NAME_INVALID` before authentication was
     // relevant, so `Build and push` could not succeed whatever the App built.
-    expect(route.built[0]?.spec.destination).not.toBe(REGISTRY);
-    expect(route.built[0]?.spec.destination).toBe(
+    expect(route.built[0]?.spec.destinations[0]).not.toBe(REGISTRY);
+    expect(route.built[0]?.spec.destinations[0]).toBe(
       `${REGISTRY}/infra/spindrift-demo`,
     );
   });
@@ -155,8 +155,8 @@ describe('the destination dispatch hands a route', () => {
     await dispatchBuild({ buildId: build.id, route: 'hosted' }, context);
 
     expect(route.built).toHaveLength(2);
-    expect(route.built[0]?.spec.destination).toBe(
-      route.built[1]?.spec.destination,
+    expect(route.built[0]?.spec.destinations[0]).toBe(
+      route.built[1]?.spec.destinations[0],
     );
   });
 
@@ -171,8 +171,10 @@ describe('the destination dispatch hands a route', () => {
     const worker = await seedBuild({ app: 'shop2', component: 'worker' });
     await dispatchBuild({ buildId: worker.id, route: 'hosted' }, context);
 
-    expect(route.built[0]?.spec.destination).toBe(`${REGISTRY}/shop/web`);
-    expect(route.built[1]?.spec.destination).toBe(`${REGISTRY}/shop2/worker`);
+    expect(route.built[0]?.spec.destinations[0]).toBe(`${REGISTRY}/shop/web`);
+    expect(route.built[1]?.spec.destinations[0]).toBe(
+      `${REGISTRY}/shop2/worker`,
+    );
   });
 
   test('carries the tags §12 counts, not only an implicit latest', async () => {

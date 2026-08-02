@@ -387,12 +387,29 @@ export const installationManifestSchema = z
     supplyChain: z
       .object({
         /**
-         * Registry every artifact is pushed to and pulled from (§16). Named
-         * here rather than derived from the artifacts project because a
-         * mirror in front of it is a legitimate installation choice, and
-         * `offlineDeploy` (§3, §33) is derived from which host this names.
+         * The registries every artifact is pushed to and pulled from (§16).
+         * Named here rather than derived from the artifacts project because a
+         * mirror in front of one is a legitimate installation choice, and
+         * `offlineDeploy` (§3, §33) is derived from which host the first names.
+         *
+         * **Several, because two Targets on one installation cannot always
+         * share one.** §16 named a single registry and a placement filter over
+         * it, which has no answer for an installation whose cluster pulls
+         * anonymously from GitHub Container Registry while its Cloud Run
+         * Target pulls through a cache mirror that cannot parse what was
+         * pushed there. Each is pushed to; each Target pins the one it can
+         * reach (`artifactAddress`).
+         *
+         * A bare string is the same document as a one-element list and stays
+         * legal, so an installation with one registry says one thing and no
+         * stored manifest needs rewriting to keep parsing. Order is meaningful
+         * only as a tie-break: the first is what a Target with no declared
+         * `reachableRegistries` gets, which is every Target until an operator
+         * says otherwise.
          */
-        registry: nonEmptyString,
+        registry: z
+          .union([nonEmptyString, z.array(nonEmptyString).min(1)])
+          .transform((value) => (typeof value === 'string' ? [value] : value)),
         /**
          * Where signature verification fetches its material (§16) — the third
          * of the deploy path's references `offlineDeploy` is checked over.

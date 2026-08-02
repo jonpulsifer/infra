@@ -68,6 +68,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         kind: 'service',
         exposure: 'private',
         platform: DEFAULT_PLATFORM,
+        registries: context.manifest.supplyChain.registry,
         resources: {},
         gpu: false,
         persistence: false,

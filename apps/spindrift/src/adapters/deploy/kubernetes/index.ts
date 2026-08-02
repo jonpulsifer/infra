@@ -161,7 +161,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         `kubernetes does not accept a ${desired.artifact.type} artifact`,
       );
     }
-    const image = imageReference(desired);
+    const image = imageReference(desired, connection.reachableRegistries ?? []);
     if (image === null) {
       yield this.status('FAILED', { reason: 'INTERNAL' });
       return this.internal('the artifact carries no address to pull it by');
