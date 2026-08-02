@@ -8,8 +8,15 @@ RUN apt-get update && apt-get -qqy upgrade &&\
       libatomic1 \
       unzip \
       wget \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s current
+    && rm -rf /var/lib/apt/lists/*
+# Install node on the LTS line. `n current` tracked the newest release of all, so
+# the version moved on every rebuild with nothing asserting the result still ran.
+# `lts` still moves — it rolls to Node 26 in October — which is why libatomic1
+# above stays: Node 26 links it and this slim base does not carry it otherwise.
+# `node --version` is the assertion, so a node that cannot start fails the build
+# here rather than at `bun install` in CI.
+RUN curl -fsSL https://raw.githubusercontent.com/tj/n/master/bin/n | bash -s lts \
+    && node --version
 # Install kubectl
 RUN curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl \
     && chmod +x /usr/local/bin/kubectl
