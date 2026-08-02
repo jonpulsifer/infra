@@ -46,7 +46,13 @@ async function runReportStep() {
   try {
     const script = join(directory, 'report.sh');
     await writeFile(script, await reportScript());
-    const child = Bun.spawn(['sh', script], {
+    // `bash`, not `sh`: a GitHub Actions `run:` block runs under
+    // `bash --noprofile --norc -e -o pipefail` on a Linux runner, and this step
+    // opens with `set -euo pipefail`. Under a POSIX `sh` — dash on the runner
+    // this test itself runs on — `set -o pipefail` is not a legal option, `-e`
+    // takes the failure, and the step exits before printing anything. Testing
+    // it under the wrong shell is testing a script production never executes.
+    const child = Bun.spawn(['bash', script], {
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
