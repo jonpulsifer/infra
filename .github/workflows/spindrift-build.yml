@@ -211,6 +211,23 @@ jobs:
       # The one line Spindrift reads. Base64 because this stdout goes through
       # the host's log processing on the way back, and a folded or decorated
       # payload is a payload core cannot decode.
+      #
+      # **`statement` is a SLSA v1 provenance document, not a note.** Core does
+      # not treat it as opaque: `supply-chain/verify.ts` hands it to
+      # `spindrift-verifier`, which reads `predicate.runDetails.builder.id`
+      # against the route's `provenanceBuilderId` and `subject[0].digest.sha256`
+      # against the admitted artifact — and core then reads
+      # `predicate.buildDefinition.externalParameters.bundleDigest` back out of
+      # the verified envelope for §16's join. A statement missing any of those
+      # is refused *after* the image is pushed, which reads as a green run whose
+      # Build failed with nothing to deploy.
+      #
+      # It is still the runner's own account of itself, exactly as `route.ts`
+      # says — the builder id here is asserted, not attested. Shaping it
+      # correctly does not make it evidence; it makes it checkable. The builder
+      # id is spelled out because it must equal `GitHubActionsBuildRoute`'s
+      # constant, and `test/adapters/build-report-statement.test.ts` runs this
+      # jq to assert the two still agree.
       - name: Report what was built
         env:
           BUNDLE_DIGEST: ${{ steps.request.outputs.bundleDigest }}
@@ -229,6 +246,7 @@ jobs:
           report="$(jq -nc \
             --arg bundleDigest "$BUNDLE_DIGEST" \
             --arg digest "$DIGEST" \
+            --arg destination "$DESTINATION" \
             --arg ref "${DESTINATION}@${DIGEST}" \
             --arg base "$base" \
             --arg run "${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
@@ -239,5 +257,25 @@ jobs:
               baseDigest: (if $base == "" then null else $base end),
               buildkitProvenanceRef: $ref,
               sbomRef: $ref,
-              statement: {run: $run, workflow: $workflow}}')"
+              statement: {
+                _type: "https://in-toto.io/Statement/v1",
+                subject: [{
+                  name: $destination,
+                  digest: {sha256: ($digest | ltrimstr("sha256:"))}
+                }],
+                predicateType: "https://slsa.dev/provenance/v1",
+                predicate: {
+                  buildDefinition: {
+                    buildType: "https://spindrift.dev/buildtypes/github-actions/v1",
+                    externalParameters: {
+                      bundleDigest: $bundleDigest,
+                      workflow: $workflow
+                    }
+                  },
+                  runDetails: {
+                    builder: {id: "https://github.com/actions/runner/github-hosted"},
+                    metadata: {invocationId: $run}
+                  }
+                }
+              }}')"
           echo "spindrift-result $(printf '%s' "$report" | base64 | tr -d '\n')"
