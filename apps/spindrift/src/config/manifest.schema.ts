@@ -215,6 +215,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
           region: nonEmptyString,
           endpoint: z.url(),
           policyEndpoint: z.url().optional(),
+          /** The identity a revision runs as. See `CloudRunConnection`. */
+          serviceAccount: nonEmptyString.optional(),
           servedHosts: z.array(nonEmptyString).optional(),
           reachableRegistries: z.array(nonEmptyString).optional(),
           logHistorySeconds: z.number().int().nonnegative().optional(),

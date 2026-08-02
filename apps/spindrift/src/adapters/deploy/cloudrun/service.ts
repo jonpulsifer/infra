@@ -44,6 +44,18 @@ export interface CloudRunRenderContext {
   readonly project: string;
   /** The image the revision pulls, pinned by digest where the artifact has one. */
   readonly image: string;
+  /**
+   * The identity the revision runs as (§14), or `null` to let the runtime pick.
+   *
+   * Letting it pick is what the absent case *means*, and it is worth naming
+   * because it does not fail where it is chosen: the runtime substitutes the
+   * project's default compute account, and the apply is then refused for
+   * missing `iam.serviceAccounts.actAs` on an account nobody named. So this is
+   * rendered when the Target supplies one and omitted when it does not, rather
+   * than defaulted here — an adapter that invented an identity would be
+   * choosing what the workload may reach.
+   */
+  readonly serviceAccount: string | null;
 }
 
 /**
@@ -95,6 +107,9 @@ export function cloudRunService(
     ingress: ingressFor(desired.exposure),
     template: {
       labels: { ...labels, 'spindrift-deploy': desired.deploy },
+      ...(context.serviceAccount === null
+        ? {}
+        : { serviceAccount: context.serviceAccount }),
       containers: [
         {
           image: context.image,
