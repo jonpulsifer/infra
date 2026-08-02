@@ -149,6 +149,8 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
   readonly buildWorkflow: string;
   /** The zero-config BuildKit frontend the installation pinned (§4). */
   readonly zeroConfigFrontend: string;
+  /** The installation's signing key (§16). See `BuildRequestSpec.signer`. */
+  readonly signer: string;
   /** Injected so a test can pin the correlation it asserts on. */
   readonly correlation?: () => string;
   /** How long to keep looking for the run a dispatch started. */
@@ -192,6 +194,24 @@ export interface BuildRequestSpec {
   readonly buildArgs: Readonly<Record<string, string>>;
   /** Pinned by the installation, never chosen by the runner. */
   readonly zeroConfigFrontend: string;
+  /**
+   * The installation's signing key, as `supplyChain.signer` names it.
+   *
+   * Sent rather than baked into the workflow because it is this installation's
+   * key and the workflow is not this installation's file — the same reason the
+   * registry and the frontend travel in the spec.
+   *
+   * §16 has core sign the digest, and it still does: the bundle core records
+   * and re-verifies at admission is unchanged. What this adds is a *second*
+   * signature over the same digest, made with the same key, attached to the
+   * artifact **in the registry** — because that is the only place a Target's
+   * own admission can read one. A cluster whose policy engine asks cosign
+   * whether an image is signed is asking about the registry, and core has no
+   * way to answer: a cosign signature is a `sha256-<digest>.sig` object pushed
+   * to the repository, and the controller holds no registry write credential.
+   * The runner does, having just pushed the artifact with it.
+   */
+  readonly signer: string;
 }
 
 export class GitHubActionsBuildRoute implements BuildAdapter {
@@ -269,6 +289,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       tags: spec.tags,
       buildArgs: spec.buildArgs,
       zeroConfigFrontend: this.options.zeroConfigFrontend,
+      signer: this.options.signer,
     };
 
     let repository: string | null = null;

@@ -14,9 +14,12 @@
 #   * It never posts anything back. Logs are read, not pushed (§4), so the
 #     result leaves on the one channel Spindrift already reads — the last line
 #     this workflow prints.
-#   * It never signs. The build adapter returns the artifact and digest exactly
-#     as built and *core* signs that digest (§16), so no backend is
-#     disqualifiable and the claim made is the honest one.
+#   * It never assesses what it built. The build adapter returns the artifact
+#     and digest exactly as built and *core* decides whether that is admissible
+#     (§16), so no backend is disqualifiable and the claim made is the honest
+#     one. It does attach core's signature to the artifact in the registry —
+#     see `Sign the artifact` for why that is a delivery step and not a
+#     judgement, and why core cannot do it itself.
 name: spindrift-build
 run-name: spindrift ${{ inputs.correlation }}
 
@@ -62,6 +65,13 @@ jobs:
             printf 'subpath=%s\n'      "$(read_key '.origin.subpath')"
             printf 'destination=%s\n'  "$(read_key '.destination')"
             printf 'frontend=%s\n'     "$(read_key '.zeroConfigFrontend')"
+            # `// ""` for the same reason `tags` has a default: a spec composed
+            # by a controller that predates this field must still build. Empty
+            # means "this installation named no signing key", and the signing
+            # steps below are skipped rather than failed — the artifact is then
+            # exactly what it was before, and a Target whose admission wants a
+            # signature is the thing that says so.
+            printf 'signer=%s\n'       "$(read_key '.signer // ""')"
             printf 'registry=%s\n'     "$(read_key '.destination | split("/")[0]')"
             # §12 counts tags, so core sends every tag this push must carry and
             # the runner composes none of its own. Full references, because that
@@ -207,6 +217,60 @@ jobs:
           # digest comes from.
           provenance: mode=max
           sbom: true
+
+      # §16's signature, put where a Target's own admission can read it.
+      #
+      # **This does not move signing off core.** Core still signs the digest and
+      # still re-verifies its own bundle at admission; nothing about that
+      # changes. What is added here is a *second* signature over the same digest
+      # with the same key, attached to the artifact **in the registry** — which
+      # is the only place a Target's native policy boundary can look. The
+      # offsite cluster's `spindrift-verify-images` asks cosign for exactly
+      # that, and core cannot put it there: a cosign signature is a
+      # `sha256-<digest>.sig` object pushed to the repository, and the
+      # controller holds no registry write credential. This job does, having
+      # just pushed the artifact with it.
+      #
+      # Before the report deliberately. A signing failure has to fail the build
+      # rather than report an artifact no Target will admit — a green Build
+      # whose Deploy is refused at the admission webhook is the shape this whole
+      # sequence exists to avoid.
+      #
+      # `--tlog-upload=false` matches how core already invokes its signer: there
+      # is no public transparency log in this trust model, only a KMS key whose
+      # public half the policy pins. The policy says the same thing from its own
+      # side with `ctlog.ignoreTlog`.
+      - name: Authenticate to Google Cloud
+        if: steps.request.outputs.signer != ''
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
+          project_id: homelab-ng
+          create_credentials_file: true
+
+      - name: Install cosign
+        if: steps.request.outputs.signer != ''
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign the artifact
+        if: steps.request.outputs.signer != ''
+        env:
+          SIGNER: ${{ steps.request.outputs.signer }}
+          DESTINATION: ${{ steps.request.outputs.destination }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # The registry credential is the one `Log in to the destination
+          # registry` already wrote to the Docker config; cosign reads it from
+          # there, so nothing here holds a credential of its own (§13).
+          cosign sign --yes --tlog-upload=false \
+            --key "$SIGNER" "${DESTINATION}@${DIGEST}"
+          # Verified here as well as at admission, because a signature that
+          # cannot be checked by the key that made it is a build that should
+          # fail now rather than a Deploy that is refused later by a webhook
+          # whose message is about a policy rather than about this build.
+          cosign verify --insecure-ignore-tlog \
+            --key "$SIGNER" "${DESTINATION}@${DIGEST}" > /dev/null
 
       # The one line Spindrift reads. Base64 because this stdout goes through
       # the host's log processing on the way back, and a folded or decorated

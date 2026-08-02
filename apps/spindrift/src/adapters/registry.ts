@@ -421,6 +421,7 @@ function createBuildRoute(
         host: app,
         buildWorkflow: workflow,
         zeroConfigFrontend,
+        signer: manifest.supplyChain.signer,
       });
     }
     case 'cloud-build':
