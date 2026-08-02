@@ -1,29 +1,59 @@
 /**
- * Repository authorization, connection, and durable connection health.
+ * Connecting a repository: one button, and what Spindrift found behind it.
  *
- * GitHub authorization is installation-level; connecting a repository is a
- * second, reviewed act that opens the configuration PR. Keeping those two
- * states visually separate prevents “GitHub can list it” from reading as
- * “Spindrift has adopted it”.
+ * This screen used to ask for seven things — a scope, a kind, a build
+ * frontend, a Dockerfile path, a build command, an output directory, and a
+ * newline-separated list of watch paths — before it would open a pull request.
+ * Every one of those is something §5's detector can read out of the repository,
+ * and asking a person to type them made connecting a repo a form about how
+ * deployment works rather than a decision about their code.
+ *
+ * So the shape is: **press Connect, read what it found, confirm.** The scan is
+ * `inspectRepository`, which writes nothing; the confirm is
+ * `connectRepository`, which detects again against the branch as it is at that
+ * moment and opens the pull request. Nothing detection proposes travels through
+ * the browser on its way into the repository.
+ *
+ * Two things stay visible that a shorter screen would have dropped, both §3's
+ * disabled-with-reasons grammar:
+ *
+ * - **A directory Spindrift could not make sense of is listed anyway**, wearing
+ *   the sentence saying why. "Nothing here" and "nine things here, seven of
+ *   them libraries" are different answers and the screen says which.
+ * - **The override is still reachable**, behind a disclosure, because story 32
+ *   asks for progressive disclosure rather than for the escape hatch to be
+ *   removed.
  */
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  ChevronRight,
   ExternalLink,
+  FileCode,
   GitBranch,
+  Globe,
+  Loader2,
   RefreshCw,
+  Server,
+  Timer,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import type { InputOf } from '../../client.ts';
+import { useState } from 'react';
+import type { ComponentKind } from '../../../domain/desired-state.ts';
+import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type {
   LinkedRepoView,
   RepositoryConnectorView,
   RepositoryOptionView,
 } from '../../model.ts';
-import { Badge } from '../../ui/badge.tsx';
+import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
-import { Field, Label } from '../../ui/field.tsx';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '../../ui/collapsible.tsx';
 import { cn } from '../../ui/utils.ts';
 
 export interface RepositoryAuthorizationView {
@@ -38,7 +68,15 @@ export interface OpenedRepositoryPullRequest {
   readonly number: number;
 }
 
+type Inspection = OutputOf<'inspectRepository'>;
+type InspectedScope = Inspection['scopes'][number];
 type ConnectRepositoryInput = InputOf<'connectRepository'>;
+
+/** What the panel under one repository row is doing. */
+type Scan =
+  | { readonly state: 'reading' }
+  | { readonly state: 'read'; readonly inspection: Inspection }
+  | { readonly state: 'failed'; readonly message: string };
 
 export function RepositoryList({
   repos,
@@ -74,8 +112,9 @@ export function RepositoryList({
             GitHub repositories
           </h1>
           <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-            Authorize GitHub, select an installed repository, then review the
-            configuration pull request Spindrift opens.
+            Pick a repository. Spindrift reads it, writes the configuration it
+            implies, and opens one pull request — merging that is what connects
+            it.
           </p>
         </div>
         <div className="ml-auto flex gap-2">
@@ -102,37 +141,55 @@ export function RepositoryList({
       <ConnectorCard
         connector={connector}
         authorization={authorization}
-        options={options}
-        connecting={connecting}
-        error={error}
-        openedPullRequest={openedPullRequest}
         onAuthorize={onAuthorize}
-        onConnect={onConnect}
+        error={error}
       />
+
+      {connector.state === 'authorized' ? (
+        <AvailableRepositories
+          options={options}
+          connecting={connecting}
+          onConnect={onConnect}
+        />
+      ) : null}
+
+      {openedPullRequest ? (
+        <div className="rounded-md border border-success/40 bg-success-soft px-3 py-2.5 text-sm">
+          Configuration PR opened:{' '}
+          <a
+            className="font-semibold underline underline-offset-2"
+            href={`https://github.com/${openedPullRequest.fullName}/pull/${openedPullRequest.number}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {openedPullRequest.fullName}#{openedPullRequest.number}
+          </a>
+          . Nothing becomes authoritative until it merges.
+        </div>
+      ) : null}
 
       <ConnectedRepositories repos={repos} />
     </div>
   );
 }
 
+/**
+ * Authorization, which is a different act from connecting anything.
+ *
+ * Once authorized this collapses to one line. It is a prerequisite, not a
+ * destination, and a card that stayed the size of the ceremony would keep
+ * spending the top of the screen on a thing that is already done.
+ */
 function ConnectorCard({
   connector,
   authorization,
-  options,
-  connecting,
-  error,
-  openedPullRequest,
   onAuthorize,
-  onConnect,
+  error,
 }: {
   connector: RepositoryConnectorView;
   authorization: RepositoryAuthorizationView | null;
-  options: readonly RepositoryOptionView[];
-  connecting: boolean;
-  error: string | null;
-  openedPullRequest: OpenedRepositoryPullRequest | null;
   onAuthorize: () => void;
-  onConnect: (input: ConnectRepositoryInput) => void;
+  error: string | null;
 }) {
   if (connector.state === 'unavailable') {
     return (
@@ -185,13 +242,14 @@ function ConnectorCard({
 
   return (
     <Card>
-      <CardContent className="flex flex-col gap-5">
+      <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <CheckCircle2 aria-hidden="true" className="size-5 text-success" />
-          <p className="font-semibold">Authorized as @{connector.login}</p>
-          <Badge tone="success">GitHub connected</Badge>
+          <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
+          <p className="text-sm font-semibold">
+            Authorized as @{connector.login}
+          </p>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             className="ml-auto"
             onClick={onAuthorize}
@@ -201,25 +259,6 @@ function ConnectorCard({
         </div>
         {authorization !== null ? (
           <DeviceAuthorization authorization={authorization} />
-        ) : null}
-        <RepositoryConnectionForm
-          options={options}
-          connecting={connecting}
-          onConnect={onConnect}
-        />
-        {openedPullRequest ? (
-          <div className="rounded-md border border-success/40 bg-success-soft px-3 py-2.5 text-sm">
-            Configuration PR opened:{' '}
-            <a
-              className="font-semibold underline underline-offset-2"
-              href={`https://github.com/${openedPullRequest.fullName}/pull/${openedPullRequest.number}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {openedPullRequest.fullName}#{openedPullRequest.number}
-            </a>
-            . Nothing becomes authoritative until it merges.
-          </div>
         ) : null}
         {error ? <ErrorMessage message={error} /> : null}
       </CardContent>
@@ -268,7 +307,8 @@ function DeviceAuthorization({
   );
 }
 
-function RepositoryConnectionForm({
+/** Everything the installation grants, each one row and one button. */
+function AvailableRepositories({
   options,
   connecting,
   onConnect,
@@ -277,158 +317,278 @@ function RepositoryConnectionForm({
   connecting: boolean;
   onConnect: (input: ConnectRepositoryInput) => void;
 }) {
-  const [repository, setRepository] = useState(options[0]?.fullName ?? '');
-  const [scope, setScope] = useState('.');
-  const [kind, setKind] =
-    useState<ConnectRepositoryInput['scopes'][number]['kind']>('service');
-  const [frontend, setFrontend] = useState<'railpack' | 'dockerfile'>(
-    'railpack',
-  );
-  const [dockerfile, setDockerfile] = useState('Dockerfile');
-  const [buildCommand, setBuildCommand] = useState('');
-  const [outputDirectory, setOutputDirectory] = useState('');
-  const [watchPaths, setWatchPaths] = useState('.');
-
-  useEffect(() => {
-    if (!options.some((option) => option.fullName === repository)) {
-      setRepository(options[0]?.fullName ?? '');
-    }
-  }, [options, repository]);
-
-  const submit = () => {
-    const watched = watchPaths
-      .split(/[\n,]/)
-      .map((path) => path.trim())
-      .filter(Boolean);
-    const build: ConnectRepositoryInput['scopes'][number]['build'] =
-      frontend === 'dockerfile'
-        ? { frontend, dockerfile }
-        : {
-            frontend,
-            buildCommand: buildCommand.trim() || null,
-            outputDirectory: outputDirectory.trim() || null,
-          };
-    onConnect({
-      fullName: repository,
-      scopes: [
-        {
-          scope,
-          kind,
-          build,
-          watchPaths: watched.length > 0 ? watched : [scope],
-        },
-      ],
-    });
-  };
+  const [open, setOpen] = useState<string | null>(null);
 
   if (options.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        This App installation exposes no repositories. Select one in GitHub,
-        then refresh.
-      </p>
+      <Card>
+        <CardContent className="py-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            This App installation exposes no repositories. Select one in GitHub,
+            then refresh.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="grid gap-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="repository">Repository</Label>
-          <select
-            id="repository"
-            value={repository}
-            onChange={(event) => setRepository(event.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 font-mono text-sm"
-          >
-            {options.map((option) => (
-              <option key={option.repositoryId} value={option.fullName}>
-                {option.fullName}
-                {option.connected ? ' (connected)' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        <Field
-          name="scope"
-          label="Scope"
-          value={scope}
-          onChange={(event) => setScope(event.target.value)}
-          hint="Repository-relative directory; use . for the root."
-        />
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="kind">Component kind</Label>
-          <select
-            id="kind"
-            value={kind}
-            onChange={(event) => setKind(event.target.value as typeof kind)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="service">service</option>
-            <option value="website">website</option>
-            <option value="job">job</option>
-          </select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="frontend">Build frontend</Label>
-          <select
-            id="frontend"
-            value={frontend}
-            onChange={(event) =>
-              setFrontend(event.target.value as typeof frontend)
+    <section className="flex flex-col gap-2">
+      <Eyebrow>Available on this installation</Eyebrow>
+      <Card className="divide-y divide-border">
+        {options.map((option) => (
+          <RepositoryRow
+            key={option.repositoryId}
+            option={option}
+            open={open === option.fullName}
+            connecting={connecting}
+            onToggle={() =>
+              setOpen((current) =>
+                current === option.fullName ? null : option.fullName,
+              )
             }
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="railpack">Railpack</option>
-            <option value="dockerfile">Dockerfile</option>
-          </select>
-        </div>
-        {frontend === 'dockerfile' ? (
-          <Field
-            name="dockerfile"
-            label="Dockerfile"
-            value={dockerfile}
-            onChange={(event) => setDockerfile(event.target.value)}
+            onConnect={onConnect}
           />
-        ) : (
-          <>
-            <Field
-              name="build-command"
-              label="Build command"
-              value={buildCommand}
-              onChange={(event) => setBuildCommand(event.target.value)}
-              placeholder="Let Railpack choose"
-            />
-            <Field
-              name="output-directory"
-              label="Output directory"
-              value={outputDirectory}
-              onChange={(event) => setOutputDirectory(event.target.value)}
-              placeholder="Not set"
-            />
-          </>
-        )}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="watch-paths">Watch paths</Label>
-        <textarea
-          id="watch-paths"
-          value={watchPaths}
-          onChange={(event) => setWatchPaths(event.target.value)}
-          rows={3}
-          className="rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
+        ))}
+      </Card>
+    </section>
+  );
+}
+
+/**
+ * One repository, and the scan that opens under it.
+ *
+ * The scan starts when the row opens rather than on a second press. A screen
+ * that made you click Connect and then click Scan would be a screen with two
+ * buttons for one intention, and the read is free — nothing is written until
+ * the confirm at the bottom of the panel.
+ */
+function RepositoryRow({
+  option,
+  open,
+  connecting,
+  onToggle,
+  onConnect,
+}: {
+  option: RepositoryOptionView;
+  open: boolean;
+  connecting: boolean;
+  onToggle: () => void;
+  onConnect: (input: ConnectRepositoryInput) => void;
+}) {
+  const [scan, setScan] = useState<Scan | null>(null);
+
+  const toggle = () => {
+    onToggle();
+    if (!open && scan === null) {
+      setScan({ state: 'reading' });
+      command('inspectRepository', { fullName: option.fullName })
+        .then((result) => {
+          setScan(
+            result.ok
+              ? { state: 'read', inspection: result.value }
+              : { state: 'failed', message: result.failure.message },
+          );
+        })
+        .catch((cause: unknown) => {
+          setScan({
+            state: 'failed',
+            message: cause instanceof Error ? cause.message : 'the read failed',
+          });
+        });
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+        <GitBranch
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground"
         />
+        <span className="font-mono text-sm font-medium">{option.fullName}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {option.defaultBranch}
+        </span>
+        {option.connected ? <Badge tone="success">connected</Badge> : null}
+        <Button
+          size="sm"
+          variant={open ? 'ghost' : 'outline'}
+          className="ml-auto"
+          onClick={toggle}
+        >
+          {open ? 'Cancel' : option.connected ? 'Reconnect' : 'Connect'}
+        </Button>
+      </div>
+
+      {open ? (
+        <div className="border-t border-border-soft bg-secondary/40 px-4 py-4">
+          <ScanPanel
+            scan={scan}
+            fullName={option.fullName}
+            connecting={connecting}
+            onConnect={onConnect}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ScanPanel({
+  scan,
+  fullName,
+  connecting,
+  onConnect,
+}: {
+  scan: Scan | null;
+  fullName: string;
+  connecting: boolean;
+  onConnect: (input: ConnectRepositoryInput) => void;
+}) {
+  if (scan === null || scan.state === 'reading') {
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+        Reading {fullName}…
+      </p>
+    );
+  }
+
+  if (scan.state === 'failed') return <ErrorMessage message={scan.message} />;
+
+  const { inspection } = scan;
+  const deployable = inspection.scopes.filter(
+    (scope) => scope.outcome === 'detected',
+  );
+  const passedOver = inspection.scopes.filter(
+    (scope) => scope.outcome === 'unsupported',
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="font-mono">{inspection.defaultBranch}</span>
+        <span className="font-mono">{inspection.commit.slice(0, 7)}</span>
+        <span>
+          {deployable.length === 0
+            ? 'nothing deployable found'
+            : deployable.length === 1
+              ? '1 deployable directory'
+              : `${deployable.length} deployable directories`}
+        </span>
+      </div>
+
+      {deployable.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {deployable.map((scope) => (
+            <li key={scope.scope}>
+              <DetectedScope scope={scope} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {passedOver.length > 0 ? (
+        <Collapsible>
+          <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+            <ChevronRight
+              aria-hidden="true"
+              className="size-3.5 transition-transform group-data-[state=open]:rotate-90"
+            />
+            {passedOver.length} directory passed over
+            {passedOver.length === 1 ? '' : 's'}
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 flex flex-col gap-1.5">
+            {passedOver.map((scope) =>
+              scope.outcome === 'unsupported' ? (
+                <div
+                  key={scope.scope}
+                  className="rounded-md border border-border px-3 py-2"
+                >
+                  <p className="font-mono text-xs font-medium">{scope.scope}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {scope.detail}
+                  </p>
+                </div>
+              ) : null,
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+
+      {!inspection.canConnect ? (
+        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2">
+          <AlertTriangle
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0 text-warning"
+          />
+          <p className="text-xs">
+            This installation has published no build workflow, so connecting
+            writes a repository row but opens no configuration pull request.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          disabled={connecting || deployable.length === 0}
+          onClick={() => onConnect({ fullName })}
+        >
+          {connecting ? 'Opening pull request…' : 'Connect repository'}
+        </Button>
         <p className="text-xs text-muted-foreground">
-          One repository-relative path per line or comma.
+          {deployable.length === 0
+            ? 'Add a spindrift.yaml or a Dockerfile to the directory you want deployed.'
+            : 'Opens one pull request. Nothing takes effect until it merges.'}
         </p>
       </div>
-      <Button
-        className="justify-self-start"
-        disabled={connecting || repository === '' || scope.trim() === ''}
-        onClick={submit}
-      >
-        {connecting ? 'Opening pull request…' : 'Open configuration PR'}
-      </Button>
+    </div>
+  );
+}
+
+const KIND_ICON = {
+  website: Globe,
+  service: Server,
+  job: Timer,
+} as const satisfies Record<ComponentKind, typeof Globe>;
+
+/** One directory Spindrift knows what to do with, and how it knows. */
+function DetectedScope({ scope }: { scope: InspectedScope }) {
+  if (scope.outcome !== 'detected') return null;
+  const Icon = KIND_ICON[scope.kind];
+
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Check aria-hidden="true" className="size-3.5 text-success" />
+        <span className="font-mono text-sm font-medium">{scope.scope}</span>
+        <Badge tone="accent">
+          <Icon aria-hidden="true" className="size-3" />
+          {scope.kind}
+        </Badge>
+        {scope.configured ? (
+          <Badge tone="idle">
+            <FileCode aria-hidden="true" className="size-3" />
+            spindrift.yaml
+          </Badge>
+        ) : null}
+        <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+          {scope.frontend === 'dockerfile' ? scope.dockerfile : 'railpack'}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{scope.reason}</p>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-subtle">
+        <span>
+          {scope.outputDirectory === null
+            ? 'served by a running process'
+            : `static files from ${scope.outputDirectory}`}
+        </span>
+        <span>
+          rebuilds on {scope.watchPaths.length}{' '}
+          {scope.watchPaths.length === 1 ? 'path' : 'paths'}
+        </span>
+      </div>
     </div>
   );
 }
@@ -438,73 +598,70 @@ function ConnectedRepositories({
 }: {
   repos: readonly LinkedRepoView[];
 }) {
-  if (repos.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-10 text-center">
-          <p className="text-sm text-muted-foreground">
-            No repositories connected yet.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (repos.length === 0) return null;
+
   return (
-    <div className="flex flex-col gap-3">
-      {repos.map((repo) => (
-        <Card
-          key={repo.repositoryId}
-          className={cn(
-            repo.health === 'connection_lost' && 'border-destructive/40',
-          )}
-        >
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <GitBranch aria-hidden="true" className="size-4" />
-              <span className="font-mono text-sm font-semibold">
-                {repo.fullName}
-              </span>
-              <Badge tone="idle">{repo.defaultBranch}</Badge>
-              <Badge
-                tone={repo.health === 'connected' ? 'success' : 'destructive'}
-              >
-                {repo.health === 'connected' ? 'connected' : 'connection lost'}
-              </Badge>
-              {repo.lastReconciledSha ? (
-                <span className="ml-auto font-mono text-xs text-muted-foreground">
-                  last reconciled {repo.lastReconciledSha}
-                </span>
-              ) : null}
-            </div>
-            {repo.health === 'connection_lost' && repo.error ? (
-              <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive-soft px-3 py-2">
-                <AlertTriangle
-                  aria-hidden="true"
-                  className="mt-0.5 size-4 text-destructive"
-                />
-                <p className="text-sm">{repo.error}</p>
-              </div>
-            ) : null}
-            {repo.appSubpaths.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {repo.appSubpaths.map((subpath) => (
-                  <span
-                    key={subpath}
-                    className="rounded-md border bg-secondary px-2 py-1 font-mono text-xs"
-                  >
-                    {subpath}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Awaiting the configuration PR merge.
-              </p>
+    <section className="flex flex-col gap-2">
+      <Eyebrow>Connected</Eyebrow>
+      <div className="flex flex-col gap-3">
+        {repos.map((repo) => (
+          <Card
+            key={repo.repositoryId}
+            className={cn(
+              repo.health === 'connection_lost' && 'border-destructive/40',
             )}
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+          >
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <GitBranch aria-hidden="true" className="size-4" />
+                <span className="font-mono text-sm font-semibold">
+                  {repo.fullName}
+                </span>
+                <Badge tone="idle">{repo.defaultBranch}</Badge>
+                <Badge
+                  tone={repo.health === 'connected' ? 'success' : 'destructive'}
+                >
+                  <Dot />
+                  {repo.health === 'connected'
+                    ? 'connected'
+                    : 'connection lost'}
+                </Badge>
+                {repo.lastReconciledSha ? (
+                  <span className="ml-auto font-mono text-xs text-muted-foreground">
+                    {repo.lastReconciledSha.slice(0, 7)}
+                  </span>
+                ) : null}
+              </div>
+              {repo.health === 'connection_lost' && repo.error ? (
+                <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive-soft px-3 py-2">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 text-destructive"
+                  />
+                  <p className="text-sm">{repo.error}</p>
+                </div>
+              ) : null}
+              {repo.appSubpaths.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {repo.appSubpaths.map((subpath) => (
+                    <span
+                      key={subpath}
+                      className="rounded-md border bg-secondary px-2 py-1 font-mono text-xs"
+                    >
+                      {subpath}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Awaiting the configuration PR merge.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
   );
 }
 

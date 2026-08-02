@@ -5,16 +5,22 @@
  * normalized plan instead of duplicating those heuristics, then selects the
  * build frontend independently: a Dockerfile changes how code is built, never
  * what kind of Component it is.
+ *
+ * The ladder reads through a {@link SourceTree}, not a path. That is what lets
+ * the same algorithm answer for an unpacked archive on a disk and for a
+ * repository that has never been checked out — §5 says detection is one
+ * algorithm, and one algorithm that only ran against one of its two sources
+ * was one algorithm in name only.
  */
-import { access } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { ComponentKind } from '../desired-state.ts';
 import type { DetectionSource } from './scope.ts';
 import { resolveDetectionScope } from './scope.ts';
-import { loadSpindriftFile } from './spindrift-file.ts';
+import { parseSpindriftFile } from './spindrift-file.ts';
+import { exists, type SourceTree } from './tree.ts';
 import { deriveWatchPaths } from './watch-paths.ts';
 
 export type { DetectionSource } from './scope.ts';
+export type { SourceTree } from './tree.ts';
 
 export type InferredComponentKind = Exclude<ComponentKind, 'job'>;
 
@@ -35,6 +41,8 @@ export type ZeroConfigPlan =
       readonly outcome: 'detected';
       readonly kind: InferredComponentKind;
       readonly kinds: readonly KindOption[];
+      /** One sentence naming what produced this, in a human's words. */
+      readonly reason: string;
       readonly buildCommand: string | null;
       readonly outputDirectory: string | null;
     }
@@ -44,17 +52,27 @@ export type ZeroConfigPlan =
     };
 
 /**
- * The Railpack-facing seam. A concrete process adapter belongs beside the build
- * routes; the detection ladder depends only on the stable facts it needs.
+ * The planner seam. A concrete implementation belongs beside the thing that
+ * plans; the ladder depends only on the stable facts it needs.
  */
 export interface ZeroConfigPlanner {
-  plan(directory: string): Promise<ZeroConfigPlan>;
+  plan(tree: SourceTree, scope: string): Promise<ZeroConfigPlan>;
 }
 
 export interface DetectionProposal {
-  readonly source: 'railpack' | 'spindrift-file' | 'operator';
+  readonly source: 'detection' | 'spindrift-file' | 'operator';
   readonly kind: ComponentKind;
   readonly kinds: readonly KindOption[];
+  /**
+   * Why this proposal says what it says.
+   *
+   * Not serialized into `spindrift.yaml`, for the same reason `kinds` is not
+   * (see `serializeSpindriftFile`): it is a statement about how the answer was
+   * reached, not about what this scope is, and writing it into the repository
+   * would turn a sentence somebody read once into a value the next run has to
+   * honour.
+   */
+  readonly reason: string;
   readonly build:
     | { readonly frontend: 'dockerfile'; readonly dockerfile: string }
     | {
@@ -80,42 +98,41 @@ export type DetectionResult =
     };
 
 export interface DetectScopeInput {
-  readonly repositoryRoot: string;
+  readonly tree: SourceTree;
   readonly source: DetectionSource;
   readonly planner: ZeroConfigPlanner;
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
+/** The Spindrift file's name inside each scope (§5). */
+const SPINDRIFT_FILE = 'spindrift.yaml';
+
+function joinPath(scope: string, file: string): string {
+  return scope === '.' ? file : `${scope}/${file}`;
 }
 
 export async function detectScope(
   input: DetectScopeInput,
 ): Promise<DetectionResult> {
-  const { scope, directory } = await resolveDetectionScope(
-    input.repositoryRoot,
-    input.source,
-  );
+  const { tree, source, planner } = input;
+  const { scope, prefix } = await resolveDetectionScope(tree, source);
 
-  const spindriftFile = join(directory, 'spindrift.yaml');
-  if (input.source.kind === 'repo' && (await exists(spindriftFile))) {
-    return {
-      outcome: 'detected',
-      scope,
-      proposal: await loadSpindriftFile(spindriftFile),
-    };
+  if (source.kind === 'repo') {
+    const document = await tree.readText(joinPath(prefix, SPINDRIFT_FILE));
+    if (document !== null) {
+      return {
+        outcome: 'detected',
+        scope,
+        proposal: parseSpindriftFile(
+          document,
+          joinPath(prefix, SPINDRIFT_FILE),
+        ),
+      };
+    }
   }
 
   const watchPaths =
-    input.source.kind === 'repo'
-      ? await deriveWatchPaths(input.repositoryRoot, scope)
-      : [];
-  const plan = await input.planner.plan(directory);
+    source.kind === 'repo' ? await deriveWatchPaths(tree, scope) : [];
+  const plan = await planner.plan(tree, prefix);
 
   if (plan.outcome === 'unsupported') {
     return {
@@ -127,14 +144,17 @@ export async function detectScope(
     };
   }
 
-  const dockerfile = await exists(join(directory, 'Dockerfile'));
+  const dockerfile = await exists(tree, joinPath(prefix, 'Dockerfile'));
   return {
     outcome: 'detected',
     scope,
     proposal: {
-      source: 'railpack',
+      source: 'detection',
       kind: plan.kind,
       kinds: plan.kinds,
+      reason: dockerfile
+        ? `${plan.reason}; built from the Dockerfile in this directory`
+        : plan.reason,
       build: dockerfile
         ? { frontend: 'dockerfile', dockerfile: 'Dockerfile' }
         : {

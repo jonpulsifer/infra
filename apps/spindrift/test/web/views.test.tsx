@@ -140,7 +140,16 @@ describe('the GitHub repository connector', () => {
     expect(markup).not.toContain('device-code-secret');
   });
 
-  test('collects reviewed scope configuration after authorization', () => {
+  /**
+   * The whole point of the rebuild, asserted as an absence.
+   *
+   * Connecting a repository asks for nothing. Every field this screen used to
+   * collect — the scope, the kind, the build frontend, the Dockerfile, the
+   * build command, the output directory, the watch paths — is something §5's
+   * detector reads out of the repository, and a regression here would be the
+   * form growing back one field at a time.
+   */
+  test('offers a repository to connect and asks for nothing', () => {
     const markup = renderToStaticMarkup(
       <RepositoryList
         repos={[]}
@@ -166,10 +175,18 @@ describe('the GitHub repository connector', () => {
     );
     expect(markup).toContain('Authorized as @operator');
     expect(markup).toContain('example/app');
-    expect(markup).toContain('Component kind');
-    expect(markup).toContain('Build frontend');
-    expect(markup).toContain('Watch paths');
-    expect(markup).toContain('Open configuration PR');
+    expect(markup).toContain('>Connect<');
+    for (const field of [
+      'Component kind',
+      'Build frontend',
+      'Watch paths',
+      'Output directory',
+      'Build command',
+      '<select',
+      '<textarea',
+    ]) {
+      expect(markup).not.toContain(field);
+    }
   });
 });
 

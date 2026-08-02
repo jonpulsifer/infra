@@ -80,6 +80,10 @@ import {
   connectRepositoryInput,
 } from './repositories/connect.ts';
 import {
+  inspectRepository,
+  inspectRepositoryInput,
+} from './repositories/inspect.ts';
+import {
   listRepositories,
   listRepositoriesInput,
 } from './repositories/list.ts';
@@ -176,6 +180,10 @@ export const commandRegistry = {
   connectRepository: {
     input: connectRepositoryInput,
     handler: connectRepository,
+  },
+  inspectRepository: {
+    input: inspectRepositoryInput,
+    handler: inspectRepository,
   },
   connectTarget: { input: connectTargetInput, handler: connectTarget },
   disconnectTarget: {

@@ -176,6 +176,47 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
     return response === null ? null : await response.text();
   }
 
+  /**
+   * Every blob path at one exact commit.
+   *
+   * One recursive call, which is what makes connect-time detection something
+   * that happens while an operator is looking at the screen rather than a
+   * clone they wait for. GitHub caps the response and says so in `truncated`;
+   * a truncated listing is refused rather than returned, because detection
+   * reading a partial tree would answer "no package.json here" about a
+   * repository that has one, and a wrong answer written into a configuration
+   * pull request is worse than an error the operator can see.
+   *
+   * `tree` entries with a `blob` type are files. Directories (`tree`) and
+   * submodules (`commit`) are dropped: `SourceTree` names content, and a
+   * submodule's content is in another repository this installation may not
+   * even be able to see.
+   */
+  async treePaths(
+    ref: InstallationRef,
+    fullName: string,
+    commit: string,
+  ): Promise<readonly string[]> {
+    const tree = await this.http(ref).json<{
+      truncated?: boolean;
+      tree: readonly { path: string; type: string }[];
+    }>({
+      method: 'GET',
+      path: `/repos/${fullName}/git/trees/${encodeURIComponent(commit)}?recursive=1`,
+    });
+    if (tree === null) {
+      throw new TypeError('the tree endpoint tolerates no status');
+    }
+    if (tree.truncated === true) {
+      throw new Error(
+        `${fullName} has more files at ${commit.slice(0, 7)} than one tree response carries, so detection cannot see all of it`,
+      );
+    }
+    return tree.tree
+      .filter((entry) => entry.type === 'blob')
+      .map((entry) => entry.path);
+  }
+
   // --- The Git data API, which the configuration PR is written through -----
   //
   // These six exist so `openConfigurationPullRequest` can put the whole file

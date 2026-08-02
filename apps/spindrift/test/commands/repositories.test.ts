@@ -12,6 +12,7 @@ import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { dispatch } from '../../src/commands/registry.ts';
 import { connectRepository } from '../../src/commands/repositories/connect.ts';
+import { inspectRepository } from '../../src/commands/repositories/inspect.ts';
 import { listRepositories } from '../../src/commands/repositories/list.ts';
 import type {
   AdapterRegistry,
@@ -34,8 +35,9 @@ const database = withIsolatedDatabase();
 const NOW = new Date('2026-07-28T12:00:00.000Z');
 
 const proposal: DetectionProposal = {
-  source: 'railpack',
+  source: 'detection',
   kind: 'service',
+  reason: 'a fixture',
   kinds: [{ kind: 'service', available: true }],
   build: {
     frontend: 'railpack',
@@ -43,6 +45,12 @@ const proposal: DetectionProposal = {
     outputDirectory: null,
   },
   watchPaths: ['services/api'],
+};
+
+/** A repository whose root is a Go service and nothing else. */
+const GO_SERVICE = {
+  'README.md': 'unconnected',
+  'go.mod': 'module example.com/app\n',
 };
 
 async function context(
@@ -79,9 +87,16 @@ async function context(
   };
 }
 
+/**
+ * The escape hatch, as an input: an operator asserting the proposal.
+ *
+ * Most tests here are about the transaction rather than about detection, and
+ * an override is the way to hold detection still while asserting on what the
+ * pull request wrote. The detection path has its own tests below.
+ */
 const input = (fake: FakeGitHub) => ({
   fullName: fake.fullName,
-  scopes: [
+  overrides: [
     {
       scope: 'services/api',
       kind: proposal.kind,
@@ -219,7 +234,7 @@ describe('connecting a repository', () => {
     const result = await connectRepository(
       {
         fullName: 'example/app',
-        scopes: [
+        overrides: [
           {
             scope: 'services/api',
             kind: proposal.kind,
@@ -258,6 +273,281 @@ describe('connecting a repository', () => {
 
     const accepted = await dispatch('connectRepository', input(fake), loop);
     expect(accepted.ok).toBe(true);
+  });
+});
+
+/**
+ * Connecting with nothing but a name (§5, story 25).
+ *
+ * The point of these is that the *command* detects. A browser that sent back
+ * what a screen showed it would be authoring domain state and would write
+ * whatever was on screen when the tab was opened; the connect resolves the
+ * default branch again and reads the repository at that commit, so the file it
+ * writes is a statement about the code that is there now.
+ */
+describe('connecting a repository without being told what is in it', () => {
+  test('detects the root and writes the Spindrift file it implies', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', GO_SERVICE);
+
+    const result = await connectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.pullRequest).toBe(1);
+
+    const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
+    expect(Object.keys(written).sort()).toEqual(
+      ['README.md', 'go.mod', WORKFLOW_PATH, SPINDRIFT_FILE].sort(),
+    );
+    expect(written[SPINDRIFT_FILE]).toContain('kind: service');
+    // The pull request names the detector, not a person, so a reviewer can tell
+    // which of the two proposed it.
+    expect(fake.pulls[0]?.body).toContain('detection');
+  });
+
+  test('a monorepo yields one pull request carrying every scope it found', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', {
+      'package.json': JSON.stringify({
+        name: 'root',
+        workspaces: ['apps/*'],
+      }),
+      'apps/web/package.json': JSON.stringify({
+        name: 'web',
+        dependencies: { astro: '^5.0.0' },
+      }),
+      'apps/api/go.mod': 'module api\n',
+      'apps/lib/package.json': JSON.stringify({ name: 'lib' }),
+    });
+
+    const result = await connectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(true);
+    const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
+    // `apps/lib` is a library. It is passed over rather than connected, and
+    // passing over seven of nine directories is the ordinary monorepo case —
+    // refusing the whole connect over them would make discovery useless.
+    expect(
+      Object.keys(written)
+        .filter((path) => path.endsWith(SPINDRIFT_FILE))
+        .sort(),
+    ).toEqual([`apps/web/${SPINDRIFT_FILE}`]);
+  });
+
+  test('an in-repo spindrift.yaml is what gets written back, unchanged', async () => {
+    const fake = new FakeGitHub();
+    const authored = [
+      'version: 1',
+      'component:',
+      '  kind: job',
+      'build:',
+      '  frontend: railpack',
+      '  command: bun run nightly',
+      '  outputDirectory: null',
+      'watchPaths:',
+      '  - .',
+      '',
+    ].join('\n');
+    fake.commitFiles('main', {
+      'go.mod': 'module example.com/app\n',
+      [SPINDRIFT_FILE]: authored,
+    });
+
+    await connectRepository({ fullName: fake.fullName }, await context(fake));
+
+    const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
+    // Detection would have said `service`. The file says `job` and the file
+    // wins (§5) — including here, where Spindrift is writing the file back.
+    expect(written[SPINDRIFT_FILE]).toContain('kind: job');
+  });
+
+  test('refuses, and writes no row, when nothing in the repository is buildable', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'just prose' });
+
+    const result = await connectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain('nothing it knows how to build');
+    // A row with no scope is a connection to nothing: the repo loop would
+    // reconcile it forever and never find an App.
+    expect(await database().db.select().from(repositories)).toEqual([]);
+    expect(fake.pulls).toEqual([]);
+  });
+
+  test('a named scope is connected exactly, with no discovery', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', {
+      'package.json': JSON.stringify({ name: 'root', workspaces: ['apps/*'] }),
+      'apps/web/package.json': JSON.stringify({
+        name: 'web',
+        dependencies: { astro: '^5.0.0' },
+      }),
+      'apps/api/go.mod': 'module api\n',
+    });
+
+    await connectRepository(
+      { fullName: fake.fullName, scopes: ['apps/api'] },
+      await context(fake),
+    );
+
+    const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
+    expect(
+      Object.keys(written)
+        .filter((path) => path.endsWith(SPINDRIFT_FILE))
+        .sort(),
+    ).toEqual([`apps/api/${SPINDRIFT_FILE}`]);
+  });
+});
+
+describe('inspecting a repository before connecting it', () => {
+  test('reads the repository and writes nothing', async () => {
+    const fake = new FakeGitHub();
+    const head = fake.commitFiles('main', GO_SERVICE);
+
+    const result = await inspectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toMatchObject({
+      fullName: fake.fullName,
+      defaultBranch: 'main',
+      commit: head,
+      canConnect: true,
+    });
+    expect(result.value.scopes).toEqual([
+      {
+        scope: '.',
+        outcome: 'detected',
+        kind: 'service',
+        reason: 'Go — go.mod is in this directory',
+        frontend: 'railpack',
+        dockerfile: null,
+        outputDirectory: null,
+        watchPaths: ['.', 'go.mod'],
+        configured: false,
+      },
+    ]);
+    // Read-only: no branch was cut, no pull request opened, no row written.
+    expect(fake.head(CONFIG_BRANCH)).toBeUndefined();
+    expect(fake.pulls).toEqual([]);
+    expect(await database().db.select().from(repositories)).toEqual([]);
+  });
+
+  test('a Dockerfile settles how to build and not what the thing is', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', {
+      'package.json': JSON.stringify({
+        name: 'site',
+        dependencies: { astro: '^5.0.0' },
+      }),
+      Dockerfile: 'FROM nginx\n',
+    });
+
+    const result = await inspectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scopes[0]).toMatchObject({
+      outcome: 'detected',
+      // Still a website. An nginx-plus-files image that lost its static
+      // rendering is the exact failure §5 names.
+      kind: 'website',
+      frontend: 'dockerfile',
+      dockerfile: 'Dockerfile',
+    });
+  });
+
+  test('says what it could not make sense of, rather than answering empty', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'just prose' });
+
+    const result = await inspectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scopes).toEqual([
+      {
+        scope: '.',
+        outcome: 'unsupported',
+        detail:
+          'no package.json, go.mod, Cargo.toml, pyproject.toml, requirements.txt or Gemfile in this directory.',
+      },
+    ]);
+  });
+
+  test('warns that this installation cannot open a configuration PR at all', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', GO_SERVICE);
+    const base = await context(fake);
+
+    const result = await inspectRepository(
+      { fullName: fake.fullName },
+      {
+        ...base,
+        manifest: {
+          ...base.manifest,
+          github: { ...base.manifest.github, buildWorkflow: null },
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.canConnect).toBe(false);
+  });
+
+  test('refuses a repository the App installation cannot see', async () => {
+    const fake = new FakeGitHub();
+    fake.accessLost = true;
+
+    const result = await inspectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_FOUND');
+  });
+
+  test('reads the tree once however many scopes it inspects', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', {
+      'package.json': JSON.stringify({ name: 'root', workspaces: ['apps/*'] }),
+      'apps/one/go.mod': 'module one\n',
+      'apps/two/go.mod': 'module two\n',
+      'apps/three/go.mod': 'module three\n',
+    });
+
+    await inspectRepository({ fullName: fake.fullName }, await context(fake));
+
+    // One recursive listing for the whole scan, not one per scope: this is
+    // what makes inspection something a screen can do while somebody watches.
+    expect(
+      fake.requests.filter((request) => request.path.includes('/git/trees/')),
+    ).toHaveLength(1);
   });
 });
 

@@ -153,7 +153,7 @@ describe('listTargets and listRepositories over route boundary', () => {
     await connectRepository(
       {
         fullName: fake.fullName,
-        scopes: [
+        overrides: [
           {
             scope: 'app',
             kind: 'service',
@@ -194,7 +194,7 @@ describe('listTargets and listRepositories over route boundary', () => {
     await connectRepository(
       {
         fullName: fake.fullName,
-        scopes: [
+        overrides: [
           {
             scope: 'app',
             kind: 'service',

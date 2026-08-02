@@ -78,6 +78,7 @@ export function parseSpindriftFile(
   return {
     source: 'spindrift-file',
     kind: component.kind,
+    reason: `${source} asserts this scope is a ${component.kind}`,
     kinds: [
       {
         kind: component.kind,
@@ -95,10 +96,4 @@ export function parseSpindriftFile(
           },
     watchPaths,
   };
-}
-
-export async function loadSpindriftFile(
-  path: string,
-): Promise<DetectionProposal> {
-  return parseSpindriftFile(await Bun.file(path).text(), path);
 }

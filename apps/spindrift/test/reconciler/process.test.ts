@@ -486,6 +486,7 @@ function unusedRepositoryHost(): RepositoryHost {
     repository: unused,
     branchHead: unused,
     readFile: unused,
+    treePaths: unused,
     commitTree: unused,
     createBlob: unused,
     createTree: unused,

@@ -19,7 +19,14 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { repositories } from '../../db/schema.ts';
-import type { repositoryRefOf } from '../../domain/repository.ts';
+import { declaredPlanner } from '../../domain/detection/declared.ts';
+import { scanRepository } from '../../domain/detection/discover.ts';
+import { gitHubTree } from '../../domain/detection/tree.ts';
+import type {
+  RepositoryHost,
+  RepositoryRef,
+  repositoryRefOf,
+} from '../../domain/repository.ts';
 import {
   type ConfigurationScope,
   configurationTransaction,
@@ -66,8 +73,30 @@ const operatorBuild = z.discriminatedUnion('frontend', [
 export const connectRepositoryInput = z
   .object({
     fullName,
-    /** One entry per App subpath the transaction will carry (§5, §15). */
-    scopes: z
+    /**
+     * Which directories the transaction covers, and nothing about them.
+     *
+     * §5's ladder is what turns a directory into a proposal, and it runs
+     * **here**, against the commit this connect resolves — not in the browser.
+     * The screen has already shown the operator what detection found; sending
+     * that answer back to be written would make the browser the author of
+     * domain state and would write whatever was on screen when the tab was
+     * opened, which is not necessarily what is on the default branch now.
+     *
+     * Omitted entirely means the same thing `inspectRepository` means by it:
+     * the root, or what is below it when the root is not itself an App.
+     */
+    scopes: z.array(scopePath).min(1).max(24).optional(),
+    /**
+     * The escape hatch (story 32): assert the proposal instead of detecting it.
+     *
+     * Kept separate from `scopes` rather than making every field optional on
+     * one shape, because these two are different acts. One says "connect what
+     * you found"; the other says "I know better than the detector, and here is
+     * what to write". A half-filled mixture of the two is not a third act, and
+     * the schema declines to represent it.
+     */
+    overrides: z
       .array(
         z.object({
           scope: scopePath,
@@ -76,7 +105,8 @@ export const connectRepositoryInput = z
           watchPaths: z.array(scopePath).min(1),
         }),
       )
-      .min(1, 'a configuration pull request needs at least one scope'),
+      .min(1)
+      .optional(),
   })
   .strict();
 
@@ -90,6 +120,80 @@ export interface ConnectRepositoryResult {
   readonly pullRequest: number | null;
   /** Always null: nothing is authoritative before that merge (§15). */
   readonly authoritativeCommit: null;
+}
+
+/**
+ * What the transaction will carry: detection's answer, or the operator's.
+ *
+ * The two arms are the two acts the input schema separates. An override is
+ * written exactly as asserted and marked `operator`, so the pull request's
+ * "proposed by" column tells a reviewer that a human, not the detector, chose
+ * this — which is the difference that matters when the review is about whether
+ * to trust it.
+ *
+ * Unsupported scopes are dropped rather than refused. A monorepo with nine
+ * directories and two Apps is the ordinary case, and failing the connect
+ * because seven of them are libraries would make discovery useless. The caller
+ * refuses only when *nothing* survived.
+ */
+async function configurationScopes(
+  input: ConnectRepositoryInput,
+  host: RepositoryHost,
+  ref: RepositoryRef,
+  defaultBranch: string,
+): Promise<{
+  readonly scopes: ConfigurationScope[];
+  /** The revision detection read, or null when nothing needed reading. */
+  readonly commit: string | null;
+}> {
+  if (input.overrides !== undefined) {
+    // No commit is resolved on this path, and that is not an optimization: an
+    // asserted proposal is a statement about what the operator wants written,
+    // not about what is currently on the branch. Reading the repository to
+    // write it would add a way for this act to fail that has nothing to do
+    // with what it does.
+    return {
+      commit: null,
+      scopes: input.overrides.map(({ scope, kind, build, watchPaths }) => ({
+        scope,
+        proposal: {
+          source: 'operator' as const,
+          kind,
+          reason: `an operator asserted this scope is a ${kind}`,
+          kinds: (['service', 'website', 'job'] as const).map((candidate) =>
+            candidate === kind
+              ? { kind: candidate, available: true as const }
+              : {
+                  kind: candidate,
+                  available: false as const,
+                  reason: 'the operator selected another kind',
+                },
+          ),
+          build,
+          watchPaths,
+        },
+      })),
+    };
+  }
+
+  // Resolved here rather than taken as a parameter, because it is what
+  // detection reads and what the pull request will be a statement about. A
+  // repository that moved between the operator seeing the inspection and
+  // pressing the button is connected against what is on the branch **now**.
+  const commit = await host.branchHead(ref, input.fullName, defaultBranch);
+  const found = await scanRepository(
+    gitHubTree(host, ref, input.fullName, commit),
+    declaredPlanner(),
+    input.scopes,
+  );
+  return {
+    commit,
+    scopes: found.flatMap((result) =>
+      result.outcome === 'detected'
+        ? [{ scope: result.scope, proposal: result.proposal }]
+        : [],
+    ),
+  };
 }
 
 export const connectRepository: Command<
@@ -152,6 +256,43 @@ export const connectRepository: Command<
     );
   }
 
+  let scopes: ConfigurationScope[];
+  let commit: string | null;
+  try {
+    ({ scopes, commit } = await configurationScopes(
+      input,
+      host,
+      ref,
+      defaultBranch,
+    ));
+  } catch (cause) {
+    if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
+      return failed(
+        'NOT_FOUND',
+        `Spindrift lost access to ${input.fullName} while reading it`,
+      );
+    }
+    return failed(
+      'NOT_DEPLOYABLE',
+      `Spindrift could not read ${input.fullName}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+
+  if (scopes.length === 0) {
+    // Nothing is written, deliberately. A `repositories` row with no scope is a
+    // connection to nothing: the repo loop would adopt it, find no App, and
+    // reconcile forever over a repository that cannot produce a Build. §5 makes
+    // "I do not know how to build this" an outcome to state, and this is where
+    // it gets stated — before a row exists rather than after.
+    const at = commit === null ? '' : ` at ${commit.slice(0, 7)}`;
+    return failed(
+      'NOT_DEPLOYABLE',
+      `Spindrift found nothing it knows how to build in ${input.fullName}${at}. Add a spindrift.yaml or a Dockerfile to the directory you want deployed, then connect it again.`,
+    );
+  }
+
   const now = context.clock.now();
   const [row] = await context.db
     .insert(repositories)
@@ -174,26 +315,6 @@ export const connectRepository: Command<
 
   let pullRequest: number | null = null;
   if (buildWorkflow !== null) {
-    const scopes: ConfigurationScope[] = input.scopes.map(
-      ({ scope, kind, build, watchPaths }) => ({
-        scope,
-        proposal: {
-          source: 'operator',
-          kind,
-          kinds: (['service', 'website', 'job'] as const).map((candidate) =>
-            candidate === kind
-              ? { kind: candidate, available: true }
-              : {
-                  kind: candidate,
-                  available: false,
-                  reason: 'the operator selected another kind',
-                },
-          ),
-          build,
-          watchPaths,
-        },
-      }),
-    );
     const transaction = configurationTransaction({
       scopes,
       buildWorkflow,

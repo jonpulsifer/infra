@@ -46,6 +46,7 @@ export {
   pollRepositoryAuthorization,
 } from './repositories/authorize.ts';
 export { connectRepository } from './repositories/connect.ts';
+export { inspectRepository } from './repositories/inspect.ts';
 export { listRepositories } from './repositories/list.ts';
 export { listSourceBuckets } from './storage/list-buckets.ts';
 export { testBucketPermissions } from './storage/test-bucket.ts';

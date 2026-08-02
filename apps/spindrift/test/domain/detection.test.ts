@@ -1,22 +1,33 @@
 /**
  * Detection is one algorithm over one named directory (§5).
  *
- * The public seam is `detectScope`: a caller supplies the directory and the
- * zero-config builder's normalized plan, then receives either one Component
- * proposal or an honest unknown outcome. Tests stay above the filesystem and
- * planner boundaries; none reaches into the ladder's helpers.
+ * The public seam is `detectScope`: a caller supplies a {@link SourceTree} and
+ * the zero-config builder's normalized plan, then receives either one Component
+ * proposal or an honest unknown outcome. Tests stay above the tree and planner
+ * boundaries; none reaches into the ladder's helpers.
+ *
+ * Every case below runs twice where it can — once over a real directory and
+ * once over an in-memory tree — because "one algorithm over both sources" is
+ * the claim the seam exists to make, and a claim tested against one source is
+ * the claim that was already false.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {
   detectScope,
   type InferredComponentKind,
+  type SourceTree,
   type ZeroConfigPlanner,
 } from '../../src/domain/detection/ladder.ts';
+import { diskTree } from '../../src/domain/detection/tree.ts';
 
 const FIXTURES = join(import.meta.dir, '../fixtures/detection');
 
 type Assert<T extends true> = T;
+
+function fixture(name: string): SourceTree {
+  return diskTree(join(FIXTURES, name));
+}
 
 function planner(
   plan: Awaited<ReturnType<ZeroConfigPlanner['plan']>>,
@@ -37,11 +48,12 @@ describe('the detection ladder', () => {
 
   test('a Dockerfile-wrapped static site is still a website', async () => {
     const result = await detectScope({
-      repositoryRoot: join(FIXTURES, 'dockerfile-website'),
+      tree: fixture('dockerfile-website'),
       source: { kind: 'repo', subpath: '.' },
       planner: planner({
         outcome: 'detected',
         kind: 'website',
+        reason: 'a static site generator',
         kinds: [
           { kind: 'website', available: true },
           {
@@ -78,7 +90,7 @@ describe('the detection ladder', () => {
   test('spindrift.yaml is authoritative and stops the ladder', async () => {
     let plannerCalls = 0;
     const result = await detectScope({
-      repositoryRoot: join(FIXTURES, 'authoritative-file'),
+      tree: fixture('authoritative-file'),
       source: { kind: 'repo', subpath: '.' },
       planner: {
         async plan() {
@@ -86,6 +98,7 @@ describe('the detection ladder', () => {
           return {
             outcome: 'detected',
             kind: 'website',
+            reason: 'must not run',
             kinds: [{ kind: 'website', available: true }],
             buildCommand: 'bun run build',
             outputDirectory: 'dist',
@@ -101,6 +114,7 @@ describe('the detection ladder', () => {
       proposal: {
         source: 'spindrift-file',
         kind: 'job',
+        reason: 'spindrift.yaml asserts this scope is a job',
         kinds: [
           {
             kind: 'job',
@@ -119,13 +133,13 @@ describe('the detection ladder', () => {
   });
 
   test('classifies only the named monorepo scope', async () => {
-    const plannedDirectories: string[] = [];
+    const planned: string[] = [];
     const result = await detectScope({
-      repositoryRoot: join(FIXTURES, 'named-scope'),
+      tree: fixture('named-scope'),
       source: { kind: 'repo', subpath: 'apps/unknown' },
       planner: {
-        async plan(directory) {
-          plannedDirectories.push(directory);
+        async plan(_tree, scope) {
+          planned.push(scope);
           return {
             outcome: 'unsupported',
             detail:
@@ -135,9 +149,7 @@ describe('the detection ladder', () => {
       },
     });
 
-    expect(plannedDirectories).toEqual([
-      join(FIXTURES, 'named-scope/apps/unknown'),
-    ]);
+    expect(planned).toEqual(['apps/unknown']);
     expect(result).toEqual({
       outcome: 'unknown',
       scope: 'apps/unknown',
@@ -150,11 +162,12 @@ describe('the detection ladder', () => {
 
   test('derives transitive workspace watch paths from manifests', async () => {
     const result = await detectScope({
-      repositoryRoot: join(FIXTURES, 'workspace-watch'),
+      tree: fixture('workspace-watch'),
       source: { kind: 'repo', subpath: 'apps/web' },
       planner: planner({
         outcome: 'detected',
         kind: 'service',
+        reason: 'a start command',
         kinds: [
           { kind: 'service', available: true },
           {
@@ -181,16 +194,17 @@ describe('the detection ladder', () => {
   });
 
   test('unwraps an archive once and runs the same classifier without repo state', async () => {
-    const plannedDirectories: string[] = [];
+    const planned: string[] = [];
     const result = await detectScope({
-      repositoryRoot: join(FIXTURES, 'wrapped-archive'),
+      tree: fixture('wrapped-archive'),
       source: { kind: 'archive' },
       planner: {
-        async plan(directory) {
-          plannedDirectories.push(directory);
+        async plan(_tree, scope) {
+          planned.push(scope);
           return {
             outcome: 'detected',
             kind: 'website',
+            reason: 'files to serve',
             kinds: [{ kind: 'website', available: true }],
             buildCommand: null,
             outputDirectory: '.',
@@ -199,15 +213,14 @@ describe('the detection ladder', () => {
       },
     });
 
-    expect(plannedDirectories).toEqual([
-      join(FIXTURES, 'wrapped-archive/site'),
-    ]);
+    expect(planned).toEqual(['site']);
     expect(result).toEqual({
       outcome: 'detected',
       scope: '.',
       proposal: {
-        source: 'railpack',
+        source: 'detection',
         kind: 'website',
+        reason: 'files to serve',
         kinds: [{ kind: 'website', available: true }],
         build: {
           frontend: 'railpack',
@@ -221,7 +234,7 @@ describe('the detection ladder', () => {
 
   test('returns unknown instead of reading foreign build configuration', async () => {
     const result = await detectScope({
-      repositoryRoot: join(FIXTURES, 'foreign-config'),
+      tree: fixture('foreign-config'),
       source: { kind: 'repo', subpath: '.' },
       planner: planner({
         outcome: 'unsupported',
@@ -241,15 +254,12 @@ describe('the detection ladder', () => {
   test('rejects a named scope outside the repository root', async () => {
     let plannerCalls = 0;
     const detection = detectScope({
-      repositoryRoot: join(FIXTURES, 'named-scope'),
+      tree: fixture('named-scope'),
       source: { kind: 'repo', subpath: '../outside' },
       planner: {
         async plan() {
           plannerCalls += 1;
-          return {
-            outcome: 'unsupported',
-            detail: 'must not run',
-          };
+          return { outcome: 'unsupported', detail: 'must not run' };
         },
       },
     });
@@ -263,15 +273,12 @@ describe('the detection ladder', () => {
   test('an invalid authoritative file fails instead of falling through', async () => {
     let plannerCalls = 0;
     const detection = detectScope({
-      repositoryRoot: join(FIXTURES, 'invalid-authority'),
+      tree: fixture('invalid-authority'),
       source: { kind: 'repo', subpath: '.' },
       planner: {
         async plan() {
           plannerCalls += 1;
-          return {
-            outcome: 'unsupported',
-            detail: 'must not run',
-          };
+          return { outcome: 'unsupported', detail: 'must not run' };
         },
       },
     });

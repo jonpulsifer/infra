@@ -445,6 +445,33 @@ export class FakeGitHub {
         : this.json({ object: { sha: commit } });
     }
 
+    // Trees answer for a tree id *or* a commit id, exactly as the real
+    // endpoint does, and only `recursive=1` flattens. A client that forgot the
+    // flag gets the top level here too, so "why is my monorepo one entry" is a
+    // question this fake can be asked rather than one production answers.
+    const gitTree = rest.match(/^\/git\/trees\/(.+)$/);
+    if (gitTree) {
+      const requested = decodeURIComponent(gitTree[1] ?? '');
+      const treeId = this.commits.get(requested)?.tree ?? requested;
+      const tree = this.trees.get(treeId);
+      if (tree === undefined) return this.notFound();
+      const recursive = url.searchParams.get('recursive') !== null;
+      const entries = recursive
+        ? [...tree.keys()].map((path) => ({ path, type: 'blob' }))
+        : [
+            ...new Map(
+              [...tree.keys()].map((path) => {
+                const [head = path, ...rest] = path.split('/');
+                return [
+                  head,
+                  { path: head, type: rest.length === 0 ? 'blob' : 'tree' },
+                ] as const;
+              }),
+            ).values(),
+          ];
+      return this.json({ sha: treeId, truncated: false, tree: entries });
+    }
+
     const gitCommit = rest.match(/^\/git\/commits\/(.+)$/);
     if (gitCommit) {
       const stored = this.commits.get(gitCommit[1] ?? '');
