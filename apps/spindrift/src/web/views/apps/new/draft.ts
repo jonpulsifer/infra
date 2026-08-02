@@ -10,6 +10,7 @@ export {
   CREATION_BLOCKER_CODES,
   type CreationDraftView,
   creationDraftSchema,
+  DECISIONS,
   type Detection,
   type Draft,
   type DraftAction,
@@ -19,6 +20,5 @@ export {
   ENTRIES,
   type EntryId,
   initialCreationDraft,
-  STEPS,
   type Vessel,
 } from '../../../../domain/creation-draft.ts';
