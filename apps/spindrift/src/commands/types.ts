@@ -34,6 +34,7 @@ import type {
 } from '../domain/repository.ts';
 import type { RepositorySourceStager } from '../domain/source-bundle.ts';
 import type { RegistryTransport } from '../storage/registry.ts';
+import type { RegistryCredentialStore } from '../storage/registry-credentials.ts';
 import type { SupplyChain } from '../supply-chain/sign.ts';
 
 /**
@@ -120,6 +121,15 @@ export interface AdapterRegistry {
    * command that finds it absent reports that rather than reaching for a global.
    */
   registryTransport?(): RegistryTransport | null;
+  /**
+   * The registry push credentials this installation holds (§16).
+   *
+   * `null` when there is no keyring to seal them with, which is the same
+   * condition the GitHub connector reports for the same reason: without an
+   * installation Secret to open ciphertext there is nowhere durable to keep a
+   * token, and a command says so rather than storing one in the clear.
+   */
+  registryCredentials?(): RegistryCredentialStore | null;
   /**
    * The user-mediated connector, where this repository integration has one.
    *

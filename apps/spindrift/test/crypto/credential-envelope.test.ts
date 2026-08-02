@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { base64urlEncode } from '../../../src/auth/bytes.ts';
+import { base64urlEncode } from '../../src/auth/bytes.ts';
 import {
   CREDENTIAL_KEYRING_VAR,
   CredentialDecryptError,
   CredentialKeyring,
   CredentialKeyringConfigError,
-} from '../../../src/integrations/github/credential-crypto.ts';
+} from '../../src/crypto/credential-envelope.ts';
 
 const key = (fill: number) => base64urlEncode(new Uint8Array(32).fill(fill));
 

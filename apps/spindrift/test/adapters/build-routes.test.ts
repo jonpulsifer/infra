@@ -71,6 +71,7 @@ const spec: BuildSpec = {
   destinations: ['registry.example.test/app'],
   tags: ['sha256-bundle', 'latest'],
   buildArgs: {},
+  registryAuth: [],
 };
 
 /**

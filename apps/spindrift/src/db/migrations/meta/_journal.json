@@ -127,6 +127,13 @@
       "when": 1785374380761,
       "tag": "0017_build_dispatch_waiting_on",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785374380762,
+      "tag": "0018_registry_credentials",
+      "breakpoints": true
     }
   ]
 }

@@ -361,6 +361,7 @@ describe('creation drafts', () => {
       logFidelity: base.logFidelity,
       buildLevel: base.buildLevel,
       provenanceBuilderId: base.provenanceBuilderId,
+      carriesRegistryCredential: base.carriesRegistryCredential,
       async *build(
         source: Parameters<typeof base.build>[0],
         spec: Parameters<typeof base.build>[1],
@@ -660,6 +661,7 @@ describe('creation drafts', () => {
       logFidelity: 'LIVE_TEXT' as const,
       buildLevel: 2 as const,
       provenanceBuilderId: 'https://builders.example.test/crashing',
+      carriesRegistryCredential: true,
       async *build(): AsyncGenerator<never, never, void> {
         yield* [];
         throw new Error('runner connection vanished');

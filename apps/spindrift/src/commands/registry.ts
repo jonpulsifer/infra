@@ -88,6 +88,10 @@ import {
   listRepositoriesInput,
 } from './repositories/list.ts';
 import {
+  forgetRegistryCredential,
+  forgetRegistryCredentialInput,
+} from './storage/forget-registry-credential.ts';
+import {
   listSourceBuckets,
   listSourceBucketsInput,
 } from './storage/list-buckets.ts';
@@ -99,6 +103,10 @@ import {
   listArtifactRegistries,
   listArtifactRegistriesInput,
 } from './storage/list-registries.ts';
+import {
+  setRegistryCredential,
+  setRegistryCredentialInput,
+} from './storage/set-registry-credential.ts';
 import {
   testBucketPermissions,
   testBucketPermissionsInput,
@@ -238,6 +246,14 @@ export const commandRegistry = {
   listStagedBundles: {
     input: listStagedBundlesInput,
     handler: listStagedBundles,
+  },
+  setRegistryCredential: {
+    input: setRegistryCredentialInput,
+    handler: setRegistryCredential,
+  },
+  forgetRegistryCredential: {
+    input: forgetRegistryCredentialInput,
+    handler: forgetRegistryCredential,
   },
 } as const satisfies Readonly<Record<string, AnyCommandDescriptor>>;
 

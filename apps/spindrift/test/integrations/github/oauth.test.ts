@@ -3,16 +3,16 @@ import { eq } from 'drizzle-orm';
 import { createAdapterRegistry } from '../../../src/adapters/registry.ts';
 import { base64urlEncode } from '../../../src/auth/bytes.ts';
 import {
+  CREDENTIAL_KEYRING_VAR,
+  CredentialKeyring,
+} from '../../../src/crypto/credential-envelope.ts';
+import {
   githubDeviceAuthorizations,
   githubOAuthCredentials,
   users,
 } from '../../../src/db/schema.ts';
 import { RepositoryAuthorizationRequiredError } from '../../../src/domain/repository.ts';
 import { GitHubApp } from '../../../src/integrations/github/app.ts';
-import {
-  CREDENTIAL_KEYRING_VAR,
-  CredentialKeyring,
-} from '../../../src/integrations/github/credential-crypto.ts';
 import type { Fetcher } from '../../../src/integrations/github/http.ts';
 import { GitHubDeviceOAuth } from '../../../src/integrations/github/oauth.ts';
 import { withIsolatedDatabase } from '../../harness/db.ts';

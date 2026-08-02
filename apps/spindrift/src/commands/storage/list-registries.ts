@@ -45,25 +45,53 @@ export interface ArtifactRegistryView {
    * order of the list means anything (§16).
    */
   readonly first: boolean;
+  /**
+   * The account Spindrift holds a push credential for on this host, or `null`
+   * where it holds none and the build route's own identity is what authorizes.
+   *
+   * The username and never the token: `RegistryCredentialStore` has no verb
+   * that returns one, so this field is as much as any listing can say.
+   */
+  readonly credentialUsername: string | null;
+  /** When that credential was last set, for an operator judging a rotation. */
+  readonly credentialUpdatedAt: string | null;
 }
 
 export interface ListArtifactRegistriesResult {
   readonly registries: readonly ArtifactRegistryView[];
+  /**
+   * Whether a credential can be held at all.
+   *
+   * Stated up front rather than discovered by a failed save, the same way
+   * `listSourceBuckets.canVerify` is: without an installation keyring there is
+   * nowhere durable to seal a token, so a form would be a form that can only
+   * ever report the same configuration fact.
+   */
+  readonly canHoldCredentials: boolean;
 }
 
 export const listArtifactRegistries: Command<
   ListArtifactRegistriesInput,
   ListArtifactRegistriesResult
 > = async (_input, context) => {
+  const store = context.adapters.registryCredentials?.() ?? null;
+  const held = new Map(
+    (await store?.list())?.map((one) => [one.host, one]) ?? [],
+  );
+
   return ok({
+    canHoldCredentials: store !== null,
     registries: context.manifest.supplyChain.registry.map(
       (namespace, index) => {
         const host = registryHostOf(namespace);
+        const credential = held.get(host);
         return {
           namespace,
           host,
           flavour: registryFlavour(host),
           first: index === 0,
+          credentialUsername: credential?.username ?? null,
+          credentialUpdatedAt: credential?.updatedAt.toISOString() ?? null,
         };
       },
     ),

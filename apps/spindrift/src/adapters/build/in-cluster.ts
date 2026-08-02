@@ -23,7 +23,11 @@ import type {
   KubernetesApi,
   KubernetesObject,
 } from '../deploy/kubernetes/api.ts';
-import { buildKitProgramFor } from './buildkit.ts';
+import {
+  buildKitProgramFor,
+  dockerConfigFor,
+  REGISTRY_AUTH_VAR,
+} from './buildkit.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -80,6 +84,11 @@ export class InClusterBuildRoute implements BuildAdapter {
   readonly logFidelity: LogFidelity = 'LIVE_TEXT';
   readonly buildLevel: BuildLevel = 1;
   readonly provenanceBuilderId = 'https://spindrift.dev/builders/in-cluster';
+  /**
+   * The Job's container is a place a secret can go. See the ceiling named on
+   * {@link InClusterBuildRoute.job}.
+   */
+  readonly carriesRegistryCredential = true;
 
   constructor(private readonly options: InClusterRouteOptions) {
     this.name = options.name;
@@ -98,6 +107,7 @@ export class InClusterBuildRoute implements BuildAdapter {
     const job = this.job(
       name,
       buildKitProgramFor(source, spec, this.options.zeroConfigFrontend),
+      dockerConfigFor(spec.registryAuth),
     );
 
     try {
@@ -197,8 +207,22 @@ export class InClusterBuildRoute implements BuildAdapter {
    * `backoffLimit: 0` because a retry is core's to decide, not the cluster's: a
    * Job that retried itself would push a second artifact for one Build row, and
    * §4's "no ordinal" rests on a Build recording one artifact.
+   *
+   * ponytail: a registry credential rides as a plain container environment
+   * variable, so it is readable by anyone with `get jobs` in the build
+   * namespace for the Job's TTL. That namespace is platform-owned and already
+   * holds the service account token this build pushes with, so it is the same
+   * trust boundary rather than a new one — but it is a wider blast radius than
+   * the credential needs. Upgrade path: a Secret created with an
+   * `ownerReferences` entry pointing at this Job, mounted at `DOCKER_CONFIG`,
+   * so it is garbage collected with the Job rather than depending on this
+   * route's own cleanup.
    */
-  private job(name: string, program: string): KubernetesObject {
+  private job(
+    name: string,
+    program: string,
+    dockerConfig: string | null,
+  ): KubernetesObject {
     return {
       apiVersion: 'batch/v1',
       kind: 'Job',
@@ -220,6 +244,14 @@ export class InClusterBuildRoute implements BuildAdapter {
                 name: 'build',
                 image: this.options.image,
                 command: ['sh', '-c', program],
+                // Absent entirely when there is no credential, rather than
+                // present and empty: an installation that stores nothing should
+                // leave no trace of the mechanism on its build Jobs.
+                ...(dockerConfig === null
+                  ? {}
+                  : {
+                      env: [{ name: REGISTRY_AUTH_VAR, value: dockerConfig }],
+                    }),
               },
             ],
           },

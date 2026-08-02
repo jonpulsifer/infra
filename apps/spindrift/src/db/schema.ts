@@ -1168,6 +1168,40 @@ export const attemptEvents = pgTable(
   ],
 );
 
+/**
+ * One registry's push credential, sealed (§16).
+ *
+ * **Keyed on the host and not on the declared namespace**, because the host is
+ * what the credential is actually for: a registry login authenticates a
+ * *registry*, and the Docker config a builder reads has one `auths` entry per
+ * host. Keying on the namespace would let an operator set two different
+ * credentials for `ghcr.io/a` and `ghcr.io/b` and then silently honour one of
+ * them, which is a promise the mechanism cannot keep.
+ *
+ * `secret` is a `credential-envelope.ts` envelope, never the token — the same
+ * boundary and the same keyring the GitHub OAuth row uses, so a rotation
+ * covers both. Nothing above the seam returns it: it is opened at dispatch and
+ * handed to the route that pushes, and no command reads it back.
+ *
+ * The username is plain because it is not a secret and is the half an operator
+ * has to be able to see to know which account is configured — Docker Hub and
+ * Artifact Registry both take a fixed one (`_json_key`, `oauth2accesstoken`)
+ * and a listing that hid it would make a wrong one undiagnosable.
+ */
+export const registryCredentials = pgTable('registry_credentials', {
+  /** The registry host, exactly as `registryHostOf` reads it off a namespace. */
+  host: text('host').primaryKey(),
+  username: text('username').notNull(),
+  /** The sealed envelope. Never plaintext, and never returned by a command. */
+  secret: text('secret').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // --- Relations (query-builder convenience; no schema effect) ---------------
 
 export const appsRelations = relations(apps, ({ one, many }) => ({

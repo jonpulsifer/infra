@@ -37,7 +37,12 @@
  *     Target will admit.
  */
 
-import { buildKitProgramFor, quote } from './buildkit.ts';
+import {
+  buildKitProgramFor,
+  dockerConfigFor,
+  quote,
+  REGISTRY_AUTH_VAR,
+} from './buildkit.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -186,6 +191,13 @@ export class CloudBuildRoute implements BuildAdapter {
    * Task 26's question, asked before signing and never taken on trust.
    */
   readonly buildLevel: BuildLevel = 3;
+  /**
+   * The build step's own environment is a place a secret can go: the step runs
+   * in a worker nobody outside the build service reaches, and the value is
+   * scoped to that container rather than to the build's own arguments — which
+   * are what a reader of the build resource sees.
+   */
+  readonly carriesRegistryCredential = true;
 
   constructor(private readonly options: CloudBuildRouteOptions) {
     this.name = options.name;
@@ -325,6 +337,7 @@ export class CloudBuildRoute implements BuildAdapter {
 
   private async submit(program: string, spec: BuildSpec): Promise<CloudBuild> {
     const attest = attestStep(spec.destinations, this.options);
+    const dockerConfig = dockerConfigFor(spec.registryAuth);
     const operation = await this.json<{
       metadata?: { build?: CloudBuild };
     }>(`${this.options.endpoint}/v1/${this.parent}/builds`, {
@@ -338,6 +351,12 @@ export class CloudBuildRoute implements BuildAdapter {
               '-c',
               registryAuth(spec.destinations) + program + exportDigest(attest),
             ],
+            // On the step's environment and never in `args`: the arguments are
+            // the program, and the program is what a reader of this build
+            // resource sees in full. See REGISTRY_AUTH_VAR.
+            ...(dockerConfig === null
+              ? {}
+              : { env: [`${REGISTRY_AUTH_VAR}=${dockerConfig}`] }),
           },
           ...(attest === null ? [] : [attest]),
         ],

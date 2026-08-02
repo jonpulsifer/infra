@@ -42,6 +42,7 @@ import {
 import {
   artifactTags,
   componentRepositories,
+  registryHostOf,
 } from '../../domain/artifact-name.ts';
 import {
   type BuildAttemptRef,
@@ -618,11 +619,52 @@ export const dispatchBuild = async (
     origin: buildOriginOf(source),
   };
 
+  /**
+   * The stored registry credentials the destinations of this build need (§16).
+   *
+   * §13 wants every push authorized by the route that makes it, and where that
+   * works this is empty and nothing is handed over. What it covers is the gap
+   * federation cannot: Docker Hub trusts no federated identity, so a push there
+   * either carries a token or fails at the last step of a green build.
+   *
+   * Opened here and nowhere else. The plaintext exists for the length of this
+   * request, reaches exactly one route, and is never written to the Build row,
+   * the attempt log, or an event — `dispatchWaitingOn` below carries sentences
+   * an operator reads, and none of them can name a secret because none of them
+   * is composed from one.
+   */
+  const credentials = context.adapters.registryCredentials?.() ?? null;
+  const registryAuth =
+    (await credentials?.authFor([
+      ...new Set(destinations.map(registryHostOf)),
+    ])) ?? [];
+
+  // A route that cannot carry one is refused **before** the claim, so nothing
+  // is dispatched that would fail at the push — or, worse, put the credential
+  // where the route puts its inputs. `waits`, because both halves are
+  // configuration: admitting a different route on the Target, or forgetting a
+  // credential this registry did not need, makes the next tick work.
+  if (registryAuth.length > 0 && !adapter.carriesRegistryCredential) {
+    const hosts = registryAuth.map((one) => one.host).join(', ');
+    return refuseDispatch(
+      context,
+      subject,
+      'NOT_BUILDABLE',
+      `this installation holds a registry credential for ${hosts}, and the ` +
+        `"${adapter.name}" route cannot carry one — its dispatch inputs are ` +
+        'readable by anyone who can see the run. Admit a route that runs the ' +
+        'build in a container of its own, or remove the credential if that ' +
+        'registry does not need one.',
+      { kind: 'waits' },
+    );
+  }
+
   const spec: BuildSpec = {
     artifactType: build.artifactType,
     kind: component.kind,
     platform: DEFAULT_PLATFORM,
     destinations,
+    registryAuth,
     /**
      * §12 counts tags, so a push that carried only the implicit `:latest` would
      * leave retention nothing to act on and a rollback depth of one.

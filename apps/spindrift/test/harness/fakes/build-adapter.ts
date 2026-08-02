@@ -47,6 +47,8 @@ export interface FakeBuildAdapterOptions {
   logFidelity?: LogFidelity;
   buildLevel?: BuildLevel;
   provenanceBuilderId?: string;
+  /** Defaults to true; a test asserting the hosted route's refusal sets false. */
+  carriesRegistryCredential?: boolean;
   script?: readonly ScriptedBuild[];
 }
 
@@ -57,6 +59,7 @@ export class FakeBuildAdapter implements BuildAdapter {
   readonly logFidelity: LogFidelity;
   readonly buildLevel: BuildLevel;
   readonly provenanceBuilderId: string;
+  readonly carriesRegistryCredential: boolean;
 
   /** Every `build`, in call order. */
   readonly built: RecordedBuild[] = [];
@@ -70,6 +73,7 @@ export class FakeBuildAdapter implements BuildAdapter {
     this.buildLevel = options.buildLevel ?? 2;
     this.provenanceBuilderId =
       options.provenanceBuilderId ?? 'https://spindrift.dev/builders/fake';
+    this.carriesRegistryCredential = options.carriesRegistryCredential ?? true;
     this.script = options.script?.length ? options.script : [DEFAULT_BUILD];
   }
 
