@@ -146,6 +146,13 @@ in
 
     systemd.tmpfiles.rules = lib.mkIf cfg.clusterCa.enable (
       [
+        # kube-certmgr-bootstrap mkdir's the secrets dir as root inside
+        # kubernetes-owned /var/lib/kubernetes. systemd-tmpfiles calls that
+        # ownership change an unsafe path transition and silently skips every
+        # rule underneath it, so the ca.pem link below never lands and the node
+        # keeps trusting whichever CA was there first. Own the dir to match its
+        # parent to keep the transition safe.
+        "d /var/lib/kubernetes/secrets 0755 kubernetes kubernetes -"
         "L+ /var/lib/kubernetes/secrets/ca.pem - - - - ${fmlClusterCaBundle}"
       ]
       ++ lib.optional (cfg.role == "control-plane") "L+ ${cfsslCaPrefix}.pem - - - - ${fmlClusterCaCert}"
