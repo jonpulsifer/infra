@@ -4,7 +4,5 @@ kind: Kustomization
 resources:
   - ../../../base/apps/oauth2-proxy
   - httproute.yaml
-  # THROWAWAY — ticket 42. Remove with the file.
-  - authtest.yaml
 patches:
   - path: helm-release-patch.yaml
