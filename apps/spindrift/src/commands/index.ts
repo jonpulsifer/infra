@@ -50,6 +50,7 @@ export { inspectRepository } from './repositories/inspect.ts';
 export { listRepositories } from './repositories/list.ts';
 export { listSourceBuckets } from './storage/list-buckets.ts';
 export { testBucketPermissions } from './storage/test-bucket.ts';
+export { useSourceBucket } from './storage/use-bucket.ts';
 export { connectTarget } from './targets/connect.ts';
 export { disconnectTarget } from './targets/disconnect.ts';
 export { listTargets } from './targets/list.ts';

@@ -95,6 +95,7 @@ import {
   testBucketPermissions,
   testBucketPermissionsInput,
 } from './storage/test-bucket.ts';
+import { useSourceBucket, useSourceBucketInput } from './storage/use-bucket.ts';
 import { connectTarget, connectTargetInput } from './targets/connect.ts';
 import {
   disconnectTarget,
@@ -201,6 +202,10 @@ export const commandRegistry = {
   testBucketPermissions: {
     input: testBucketPermissionsInput,
     handler: testBucketPermissions,
+  },
+  useSourceBucket: {
+    input: useSourceBucketInput,
+    handler: useSourceBucket,
   },
 } as const satisfies Readonly<Record<string, AnyCommandDescriptor>>;
 

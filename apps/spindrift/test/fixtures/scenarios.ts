@@ -831,38 +831,85 @@ export const APP_LIST: readonly AppListItem[] = [
   },
 ];
 
+const CLUSTER_CHECKLIST = [
+  { name: 'DELIVERY_OPERATOR', met: true },
+  { name: 'CHART_SOURCE', met: true },
+  { name: 'WRITABLE_STORE', met: true },
+  { name: 'OIDC_FEDERATION', met: true },
+  { name: 'VESSEL', met: true },
+  { name: 'CHART_CONTRACT', met: true },
+] as const;
+
+const CLOUD_CHECKLIST = [
+  { name: 'PLATFORM_API', met: true },
+  { name: 'OIDC_FEDERATION', met: true },
+  { name: 'VESSEL', met: true },
+] as const;
+
 /** Target list demo data. */
 export const TARGET_LIST: readonly TargetListItem[] = [
   {
+    id: 'target-primary',
     name: 'Primary',
     adapter: 'kubernetes',
     rank: 1,
     health: 'healthy',
+    prerequisites: [...CLUSTER_CHECKLIST],
     kinds: ['service', 'website', 'job'],
     canonical: '*.primary.apps.example',
+    status: 'connected',
+    configured: true,
+    inspectedAt: '2026-08-02T12:00:00.000Z',
   },
   {
+    id: 'target-cloudrun',
     name: 'Cloud Run · vessel-a',
     adapter: 'cloudrun',
     rank: 2,
     health: 'healthy',
+    prerequisites: [...CLOUD_CHECKLIST],
     kinds: ['service', 'website', 'job'],
     canonical: '*.northamerica-northeast1.run.app',
+    status: 'connected',
+    configured: true,
+    inspectedAt: '2026-08-02T12:00:00.000Z',
   },
   {
+    id: 'target-static',
     name: 'Firebase · vessel-a',
     adapter: 'static',
     rank: 3,
     health: 'healthy',
+    prerequisites: [...CLOUD_CHECKLIST],
     kinds: ['website'],
     canonical: '*.web.app',
+    status: 'connected',
+    configured: true,
+    inspectedAt: '2026-08-02T12:00:00.000Z',
   },
   {
+    id: 'target-secondary',
     name: 'Secondary',
     adapter: 'kubernetes',
     rank: 4,
     health: 'unhealthy',
+    prerequisiteFailures: ['no Flux controller answers in this cluster'],
+    prerequisites: [
+      {
+        name: 'DELIVERY_OPERATOR',
+        met: false,
+        detail: 'no Flux controller answers in this cluster',
+      },
+      { name: 'CHART_SOURCE', met: true },
+      { name: 'WRITABLE_STORE', met: true },
+      { name: 'OIDC_FEDERATION', met: true },
+      { name: 'VESSEL', met: true },
+      { name: 'CHART_CONTRACT', met: true },
+    ],
     kinds: ['service', 'website', 'job'],
     canonical: '*.secondary.apps.example',
+    status: 'connected',
+    configured: true,
+    inspectedAt: '2026-08-02T12:00:00.000Z',
   },
 ];
