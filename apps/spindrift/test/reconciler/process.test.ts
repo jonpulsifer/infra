@@ -347,7 +347,6 @@ function configuredAdapters(): AdapterRegistry {
     env: {},
     token: async () => 'cluster-token',
     storeToken: () => 'store-token',
-    buildToken: () => 'build-token',
     cloudToken: async () => 'cloud-token',
   });
 }
