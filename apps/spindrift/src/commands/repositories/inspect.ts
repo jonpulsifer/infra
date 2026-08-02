@@ -76,6 +76,16 @@ export type InspectedScope =
       readonly watchPaths: readonly string[];
       /** True when an in-repo `spindrift.yaml` already settled this (§5). */
       readonly configured: boolean;
+      /**
+       * The kinds detection ruled out, each with the sentence that ruled it
+       * out (§3, §5).
+       *
+       * Carried rather than dropped because correcting a proposal should be
+       * reading rather than guessing: the creation flow renders these as
+       * disabled options wearing their reason, which is the only thing that
+       * makes "that is not what this is" a decision somebody can make.
+       */
+      readonly unavailable: Readonly<Partial<Record<ComponentKind, string>>>;
     }
   | {
       readonly scope: string;
@@ -117,6 +127,11 @@ function viewOf(scope: string, proposal: DetectionProposal): InspectedScope {
         : null,
     watchPaths: proposal.watchPaths,
     configured: proposal.source === 'spindrift-file',
+    unavailable: Object.fromEntries(
+      proposal.kinds
+        .filter((option) => !option.available)
+        .map((option) => [option.kind, option.reason]),
+    ),
   };
 }
 
