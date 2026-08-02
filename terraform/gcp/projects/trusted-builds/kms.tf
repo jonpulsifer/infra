@@ -36,3 +36,25 @@ resource "google_kms_crypto_key_iam_binding" "signer" {
   role          = "roles/cloudkms.signerVerifier"
   members       = local.attester_principals
 }
+
+# The third permission signing needs, and the last one: `cloudkms.cryptoKeys.
+# get`.
+#
+# Before it can sign anything, cosign reads the key itself to learn its default
+# hash function — the key is `RSA_SIGN_PKCS1_4096_SHA512`, and nothing on the
+# command line says so. `signerVerifier` grants use of the *versions* and sight
+# of their public halves, and not `get` on the key they hang off, so signing
+# stopped one call short of the one that matters:
+#
+#     signing digest: getting fetching default hash function: rpc error:
+#     code = PermissionDenied desc = Permission 'cloudkms.cryptoKeys.get' denied
+#
+# `roles/cloudkms.viewer` is metadata only — get and list on the key and its
+# versions, no use of either — so this adds reading and no capability. It also
+# makes `cryptoKeyVersions.list` answer, which is how the attestation step finds
+# the enabled version rather than falling back to assuming the first.
+resource "google_kms_crypto_key_iam_binding" "signer_metadata" {
+  crypto_key_id = google_kms_crypto_key.signer.id
+  role          = "roles/cloudkms.viewer"
+  members       = local.attester_principals
+}
