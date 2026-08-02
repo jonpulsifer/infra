@@ -28,6 +28,7 @@ import type {
   ComponentKind,
   Platform,
 } from '../../domain/desired-state.ts';
+import type { RegistryAuth } from '../../storage/registry-credentials.ts';
 import type { FailureReason } from '../deploy/contract.ts';
 
 /**
@@ -143,6 +144,27 @@ export interface BuildSpec {
    * credential (§4, §10).
    */
   buildArgs: Readonly<Record<string, string>>;
+  /**
+   * Registry logins for the destinations whose host the route's own identity
+   * cannot authorize (§16).
+   *
+   * **Empty is the ordinary case and the preferred one.** §13 wants every push
+   * authorized by the route that makes it — a projected service account token
+   * in-cluster, a federated token for the cloud builder, the run's own token
+   * for hosted CI — and where that works nothing is stored and nothing is
+   * handed over. This carries the exception: Docker Hub trusts no federated
+   * identity, so an installation pushing there either hands a token to the
+   * builder or does not push there.
+   *
+   * One entry per *host*, because that is what a registry login authenticates
+   * and what the Docker config a builder reads is keyed on.
+   *
+   * A route that cannot carry one declares so with
+   * {@link BuildAdapter.carriesRegistryCredential}, and `dispatchBuild` refuses
+   * before dispatching rather than sending the field to a route that would put
+   * it somewhere readable.
+   */
+  registryAuth: readonly RegistryAuth[];
 }
 
 /**
@@ -296,6 +318,24 @@ export interface BuildAdapter {
    * verification to authenticate. Evidence never gets to choose its verifier.
    */
   readonly provenanceBuilderId: string;
+  /**
+   * Whether this route can be handed {@link BuildSpec.registryAuth} without
+   * putting it somewhere it should not be.
+   *
+   * A property of the route's *mechanism*, not a policy. The two routes that
+   * run the BuildKit program in a container of their own can take a secret
+   * through an environment variable scoped to that container. The hosted route
+   * cannot: it is dispatched by a `workflow_dispatch` whose inputs GitHub
+   * renders in the run header, so a token in the request would be published to
+   * anyone who can see the run — including a repository the installation does
+   * not own.
+   *
+   * The correct mechanism there is a repository Actions secret, which needs a
+   * libsodium sealed box to write and therefore a dependency §20 has not taken.
+   * Until it exists this is `false` and `dispatchBuild` refuses, which is the
+   * direction being wrong has to fail in.
+   */
+  readonly carriesRegistryCredential: boolean;
 
   build(
     source: BuildSource,

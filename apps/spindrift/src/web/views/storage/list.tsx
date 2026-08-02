@@ -27,16 +27,24 @@
  *
  * **The two checks do not prove the same thing, and the words differ so that is
  * visible.** A bucket is checked with the federated identity that would write
- * to it, so `writable` is the claim. A registry is checked anonymously, because
- * §13 leaves the push credential with the build route that makes it — so the
- * claim is only that it `answers`, and a registry that asks who is calling is
- * reachable rather than broken.
+ * to it, so `writable` is the claim. A registry with no held credential is
+ * checked anonymously, because §13 leaves the push credential with the build
+ * route that makes it — so the claim is only that it `answers`, and a registry
+ * that asks who is calling is reachable rather than broken. Where a credential
+ * *is* held, Verify completes the registry's own challenge with it, and then
+ * the claim is the strong one.
+ *
+ * **A token is write-only from this screen.** The listing carries the username
+ * and never the secret, so the field is empty even where one is stored: a
+ * masked placeholder would suggest the value can be read back, and there is no
+ * verb above the credential store that could.
  */
 import {
   AlertTriangle,
   Archive,
   Check,
   Database,
+  KeyRound,
   Loader2,
   Package,
   Plus,
@@ -73,6 +81,8 @@ export interface StorageView {
   readonly source: SourceStorageView;
   readonly registries: readonly RegistryRow[];
   readonly bundles: readonly BundleRow[];
+  /** Whether this installation has a keyring to seal a registry token with. */
+  readonly canHoldCredentials: boolean;
   /** The cap the bundle listing answered under, so a full page reads as one. */
   readonly bundleLimit: number;
 }
@@ -102,7 +112,11 @@ export function Storage({
 
       <SourceBuckets view={view.source} onChanged={onChanged} />
       <StagedBundles bundles={view.bundles} limit={view.bundleLimit} />
-      <ArtifactRegistries registries={view.registries} onChanged={onChanged} />
+      <ArtifactRegistries
+        registries={view.registries}
+        canHoldCredentials={view.canHoldCredentials}
+        onChanged={onChanged}
+      />
     </div>
   );
 }
@@ -354,9 +368,11 @@ const FLAVOUR_LABEL: Record<RegistryRow['flavour'], string> = {
 
 function ArtifactRegistries({
   registries,
+  canHoldCredentials,
   onChanged,
 }: {
   registries: readonly RegistryRow[];
+  canHoldCredentials: boolean;
   onChanged: () => void;
 }) {
   const [checks, setChecks] = useState<
@@ -477,8 +493,11 @@ function ArtifactRegistries({
             registry={registry}
             check={checks[registry.namespace] ?? { state: 'unchecked' }}
             busy={busy}
+            canHoldCredentials={canHoldCredentials}
             onVerify={() => void verify(registry.namespace)}
             onMakeFirst={() => use(registry.namespace, true)}
+            onCredentialChanged={onChanged}
+            onFailure={setError}
           />
         ))}
       </Card>
@@ -490,15 +509,22 @@ function RegistryRowView({
   registry,
   check,
   busy,
+  canHoldCredentials,
   onVerify,
   onMakeFirst,
+  onCredentialChanged,
+  onFailure,
 }: {
   registry: RegistryRow;
   check: Reachability<RegistryProbe>;
   busy: boolean;
+  canHoldCredentials: boolean;
   onVerify: () => void;
   onMakeFirst: () => void;
+  onCredentialChanged: () => void;
+  onFailure: (message: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
   return (
     <div className="flex flex-col gap-2 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -517,7 +543,24 @@ function RegistryRowView({
           </Badge>
         ) : null}
         <CheckBadge check={check} reachedLabel="answers" />
+        {registry.credentialUsername !== null ? (
+          <Badge tone="success">
+            <KeyRound aria-hidden="true" className="size-3" />
+            {registry.credentialUsername}
+          </Badge>
+        ) : null}
         <div className="ml-auto flex gap-2">
+          {canHoldCredentials ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setEditing((open) => !open)}
+            >
+              {registry.credentialUsername === null
+                ? 'Add a credential'
+                : 'Replace'}
+            </Button>
+          ) : null}
           {!registry.first ? (
             <Button
               size="sm"
@@ -544,6 +587,134 @@ function RegistryRowView({
       ) : null}
       {check.state === 'unreachable' ? (
         <p className="pl-6 text-xs text-destructive">{check.message}</p>
+      ) : null}
+
+      {editing ? (
+        <RegistryCredentialForm
+          registry={registry}
+          onDone={() => {
+            setEditing(false);
+            onCredentialChanged();
+          }}
+          onCancel={() => setEditing(false)}
+          onFailure={onFailure}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Taking a registry token, and the one honest thing to say about it.
+ *
+ * The token is write-only from here: `listArtifactRegistries` answers with the
+ * username and never the secret, so a stored credential can be *replaced* and
+ * never read back. The field is therefore always empty when this opens, even
+ * where one is already held — showing a masked placeholder would suggest the
+ * value is retrievable, and it is not.
+ *
+ * The save proves the credential against the registry's own challenge before
+ * storing it, which is what makes a typo a sentence here rather than an
+ * `unauthorized` twenty minutes into a build.
+ */
+function RegistryCredentialForm({
+  registry,
+  onDone,
+  onCancel,
+  onFailure,
+}: {
+  registry: RegistryRow;
+  onDone: () => void;
+  onCancel: () => void;
+  onFailure: (message: string) => void;
+}) {
+  const [username, setUsername] = useState(registry.credentialUsername ?? '');
+  const [secret, setSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const act = async (run: () => Promise<{ ok: boolean; message?: string }>) => {
+    setBusy(true);
+    try {
+      const result = await run();
+      if (!result.ok) {
+        onFailure(result.message ?? 'the registry refused the credential');
+        return;
+      }
+      setSecret('');
+      onDone();
+    } catch (cause) {
+      onFailure(
+        cause instanceof Error ? cause.message : 'the credential was not saved',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="ml-6 mt-1 flex flex-col gap-3 rounded-md border border-border bg-secondary/40 px-3 py-3">
+      <Field
+        name={`registry-username-${registry.host}`}
+        label="Username"
+        value={username}
+        onChange={(event) => setUsername(event.target.value)}
+        placeholder="an-owner"
+        hint={`Stored in clear — it is not a secret, and it is the half that makes a wrong account visible. This credential authenticates every namespace on ${registry.host}.`}
+      />
+      <Field
+        name={`registry-secret-${registry.host}`}
+        label="Token"
+        type="password"
+        value={secret}
+        onChange={(event) => setSecret(event.target.value)}
+        autoComplete="off"
+        hint="Proved against the registry before it is kept, then encrypted with the installation keyring. It is never shown again — replacing it is the only way to change it."
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={busy || username.trim() === '' || secret === ''}
+          onClick={() =>
+            void act(async () => {
+              const result = await command('setRegistryCredential', {
+                registry: registry.namespace,
+                username: username.trim(),
+                secret,
+              });
+              return result.ok
+                ? { ok: true }
+                : { ok: false, message: result.failure.message };
+            })
+          }
+        >
+          {busy ? 'Checking…' : 'Verify and save'}
+        </Button>
+        {registry.credentialUsername !== null ? (
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() =>
+              void act(async () => {
+                const result = await command('forgetRegistryCredential', {
+                  registry: registry.namespace,
+                });
+                return result.ok
+                  ? { ok: true }
+                  : { ok: false, message: result.failure.message };
+              })
+            }
+          >
+            Forget it
+          </Button>
+        ) : null}
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {registry.credentialUpdatedAt !== null ? (
+        <p className="text-[11px] text-subtle">
+          Set {new Date(registry.credentialUpdatedAt).toLocaleString()}.
+          Forgetting it here does not revoke it at the registry.
+        </p>
       ) : null}
     </div>
   );

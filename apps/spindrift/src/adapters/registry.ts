@@ -29,6 +29,7 @@ import type {
   TargetAdapter,
 } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
+import { CredentialKeyring } from '../crypto/credential-envelope.ts';
 import type { Database } from '../db/client.ts';
 import type { BuildRouteProfile } from '../domain/build-route.ts';
 import type {
@@ -40,10 +41,10 @@ import {
   stageSourceBundle,
 } from '../domain/source-bundle.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
-import { CredentialKeyring } from '../integrations/github/credential-crypto.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
 import { GitHubDeviceOAuth } from '../integrations/github/oauth.ts';
 import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
+import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
@@ -291,6 +292,19 @@ export function createAdapterRegistry(
      */
     registryTransport() {
       return options.fetch ?? fetch;
+    },
+
+    /**
+     * Both halves or nothing, the same condition the OAuth connector is built
+     * under: Postgres for the ciphertext and an installation-Secret keyring to
+     * open it. An installation missing either has nowhere to keep a registry
+     * token durably, and the commands say so rather than keeping one in clear.
+     */
+    registryCredentials() {
+      if (keyring === null || options.db === undefined) return null;
+      return registryCredentialStore(options.db, keyring, () =>
+        (options.clock ?? { now: () => new Date() }).now(),
+      );
     },
 
     source() {

@@ -9,6 +9,7 @@ import { and, eq, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import { equalText } from '../../auth/bytes.ts';
 import type { Clock } from '../../commands/types.ts';
+import type { CredentialKeyring } from '../../crypto/credential-envelope.ts';
 import type { Database } from '../../db/client.ts';
 import {
   githubDeviceAuthorizations,
@@ -20,7 +21,6 @@ import type {
   RepositoryAuthorizationStatus,
 } from '../../domain/repository.ts';
 import { RepositoryAuthorizationRequiredError } from '../../domain/repository.ts';
-import type { CredentialKeyring } from './credential-crypto.ts';
 import type { Fetcher } from './http.ts';
 
 const deviceResponse = z.object({

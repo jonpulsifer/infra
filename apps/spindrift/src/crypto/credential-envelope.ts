@@ -8,13 +8,15 @@
  * then reads opportunistically rewrite old ciphertext.
  */
 import { z } from 'zod';
-import { base64urlDecode, base64urlEncode } from '../../auth/bytes.ts';
+import { base64urlDecode, base64urlEncode } from '../auth/bytes.ts';
 
 export const CREDENTIAL_KEYRING_VAR = 'SPINDRIFT_CREDENTIAL_KEYRING';
 
 export type CredentialPurpose =
   | 'spindrift-github-device-code'
-  | 'spindrift-github-oauth-credential';
+  | 'spindrift-github-oauth-credential'
+  /** A registry push credential — see `storage/registry-credentials.ts`. */
+  | 'spindrift-registry-credential';
 
 const keyId = z
   .string()

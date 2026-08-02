@@ -245,6 +245,19 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
   readonly provenanceBuilderId =
     'https://github.com/actions/runner/github-hosted';
   /**
+   * **No.** This route is dispatched through `workflow_dispatch`, and GitHub
+   * renders a dispatch's inputs in the run header — so a credential travelling
+   * in the spec would be published to everyone who can see the run, in a
+   * repository §15 deliberately does not require the installation to own.
+   *
+   * The right mechanism is a repository Actions secret, which is written
+   * through a libsodium sealed box and therefore wants a dependency this
+   * package has not taken. Until then `dispatchBuild` refuses a build that
+   * needs a stored credential on this route, which is a route an operator can
+   * change rather than a token an operator cannot un-publish.
+   */
+  readonly carriesRegistryCredential = false;
+  /**
    * §16's profile level. A reusable workflow pinned by commit, running on a
    * runner the repository does not control, producing signed provenance — that
    * is L2. It is not L3: the workflow runs with the connected repository's own

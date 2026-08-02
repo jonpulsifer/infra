@@ -249,6 +249,7 @@ export function buildAdapterSuite(
       destinations: ['registry.example.test/app'],
       tags: ['sha256-bundle', 'latest'],
       buildArgs: {},
+      registryAuth: [],
     } as const;
 
     test('declares a fidelity and a level', () => {

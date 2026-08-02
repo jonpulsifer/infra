@@ -41,6 +41,7 @@ const spec: BuildSpec = {
   destinations: ['registry.example.test/app'],
   tags: ['sha256-bundle', 'latest'],
   buildArgs: {},
+  registryAuth: [],
 };
 
 /** A host whose run goes green, reporting whatever web address a test names. */

@@ -996,6 +996,7 @@ function StorageScreen() {
           view: {
             source: buckets.value,
             registries: registries.value.registries,
+            canHoldCredentials: registries.value.canHoldCredentials,
             bundles: bundles.value.bundles,
             bundleLimit: bundles.value.limit,
           },

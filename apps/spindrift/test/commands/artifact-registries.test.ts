@@ -104,6 +104,8 @@ describe('listing the registries', () => {
         host: 'registry.example.test',
         flavour: 'other',
         first: true,
+        credentialUsername: null,
+        credentialUpdatedAt: null,
       },
     ]);
   });

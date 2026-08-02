@@ -117,6 +117,15 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // the places a real installation literal could hide. Naming the specific
   // header keeps the scanner at full strength over the rest of the file.
   'set-cookie',
+  // The header an OCI registry states its authentication challenge in. Same
+  // kind of thing as the one above, read by the registry probe — which lives
+  // outside `src/web/` because it is a far side rather than a browser bundle.
+  'www-authenticate',
+  // The fixed account name Artifact Registry takes in place of a username.
+  // Vendor vocabulary: it is the same string for everybody, which is exactly
+  // why the registry-credential table names it as an example of a username a
+  // typo in would otherwise be undiagnosable.
+  'oauth2accesstoken',
 ]);
 
 /**

@@ -25,8 +25,47 @@
  * drops one will fail loudly on the first build rather than subtly on the
  * hundredth.
  */
+import type { RegistryAuth } from '../../storage/registry-credentials.ts';
 import type { BuildSource, BuildSpec } from './contract.ts';
 import { BUILD_REPORT_MARKER } from './report.ts';
+
+/**
+ * The variable the program reads a Docker config out of.
+ *
+ * **A variable and not a value in the program**, and the distinction is the
+ * whole of the secret handling here. This program is a string that lands in a
+ * Job's `spec.template.spec.containers[0].command` and in a Cloud Build step —
+ * both readable by anyone who can `get` the object, and both kept for as long
+ * as the object is. A token interpolated into it would be a token in an API
+ * object with a TTL measured in hours. Read from the environment instead, it is
+ * a value the route sets on the container and nothing echoes.
+ *
+ * `set -x` is never used in this program for the same reason.
+ */
+export const REGISTRY_AUTH_VAR = 'SPINDRIFT_REGISTRY_AUTH';
+
+/**
+ * A Docker config the BuildKit client and `buildctl` both read.
+ *
+ * `auths[host].auth` is `base64(username:secret)` — the format every registry
+ * client has agreed on, and what `buildctl-daemonless.sh` looks for under
+ * `$DOCKER_CONFIG/config.json` when it pushes.
+ *
+ * Returns `null` for an empty list rather than an empty document, so a route
+ * sets no variable at all when there is no credential — which is the ordinary
+ * case, and the one where nothing should be written anywhere.
+ */
+export function dockerConfigFor(auth: readonly RegistryAuth[]): string | null {
+  if (auth.length === 0) return null;
+  return JSON.stringify({
+    auths: Object.fromEntries(
+      auth.map((one) => [
+        one.host,
+        { auth: btoa(`${one.username}:${one.secret}`) },
+      ]),
+    ),
+  });
+}
 
 /** Everything the program needs to know, all of it already decided by core. */
 export interface BuildKitProgramInput {
@@ -167,6 +206,23 @@ export function buildKitProgram(input: BuildKitProgramInput): string {
 
   return `set -eu
 workspace=$(mktemp -d)
+
+# The registry credentials, if this installation holds any for the destinations
+# below. The variable carries the whole Docker config document rather than a
+# token, so this program never has to know a username from a secret — it moves
+# an opaque blob from the environment to the path buildctl reads and unsets it.
+#
+# \`DOCKER_CONFIG\` is a directory, not a file. Pointing it at the workspace
+# would put credentials beside the build context; its own directory, created
+# with the default umask inside a container this build owns, is as narrow as
+# this gets without a mounted Secret.
+if [ -n "\${${REGISTRY_AUTH_VAR}:-}" ]; then
+  DOCKER_CONFIG=$(mktemp -d)
+  export DOCKER_CONFIG
+  printf '%s' "$${REGISTRY_AUTH_VAR}" > "$DOCKER_CONFIG/config.json"
+  unset ${REGISTRY_AUTH_VAR}
+fi
+
 wget -qO- ${quote(input.bundleUrl)} | tar -xz -C "$workspace"
 
 # §5's unwrap. The subpath is relative to the source root, and a bundle's root

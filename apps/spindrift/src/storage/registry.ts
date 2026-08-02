@@ -48,8 +48,23 @@ export interface RegistryProbe {
    * would refuse the push too.
    */
   readonly requiresAuth: boolean;
+  /**
+   * A supplied credential was accepted by the registry.
+   *
+   * `null` when none was supplied, which is the ordinary case for a registry
+   * the build route's own identity already reaches. The tri-state matters: a
+   * boolean would make "nobody tried" and "the token is wrong" the same answer,
+   * and only one of those is something an operator has to go fix.
+   */
+  readonly authenticated: boolean | null;
   /** The sentence an operator reads under the row. */
   readonly detail: string;
+}
+
+/** A username and token to try against the registry, where one is held. */
+export interface RegistryLogin {
+  readonly username: string;
+  readonly secret: string;
 }
 
 /**
@@ -74,46 +89,38 @@ export type RegistryTransport = (request: Request) => Promise<Response>;
 export async function probeRegistry(
   namespace: string,
   send: RegistryTransport,
+  login?: RegistryLogin | null,
 ): Promise<RegistryProbe> {
   const host = registryHostOf(namespace);
   const flavour = registryFlavour(host);
   const api = registryApiBase(host);
   const base = { namespace, host, flavour, api };
+  const unreachable = (detail: string): RegistryProbe => ({
+    ...base,
+    answers: false,
+    requiresAuth: false,
+    authenticated: login ? false : null,
+    detail,
+  });
 
   // Checked before anything is fetched, not because the far side would accept
   // it, but because this is the point where an operator-supplied string turns
   // into a request this process makes.
   if (!isRegistryNamespace(namespace)) {
-    return {
-      ...base,
-      answers: false,
-      requiresAuth: false,
-      detail:
-        'not a registry namespace: it must be a host and at least one path segment, as in registry.example/namespace',
-    };
+    return unreachable(
+      'not a registry namespace: it must be a host and at least one path segment, as in registry.example/namespace',
+    );
   }
 
   let response: Response;
   try {
     response = await send(new Request(api, { method: 'GET' }));
   } catch (cause) {
-    return {
-      ...base,
-      answers: false,
-      requiresAuth: false,
-      detail: `${api} could not be reached: ${
+    return unreachable(
+      `${api} could not be reached: ${
         cause instanceof Error ? cause.message : 'the request did not complete'
       }`,
-    };
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    return {
-      ...base,
-      answers: true,
-      requiresAuth: true,
-      detail: `${host} answered and asked who is calling; a push authorizes as the build route that makes it`,
-    };
+    );
   }
 
   if (response.ok) {
@@ -121,14 +128,131 @@ export async function probeRegistry(
       ...base,
       answers: true,
       requiresAuth: false,
-      detail: `${host} answered the distribution API anonymously`,
+      // Nothing was proved about the credential either way: an open registry
+      // answers the same however it is asked, so a green tick here would be one
+      // the token never earned and a red one would be a refusal that never
+      // happened. `null` is what "nobody tried" means.
+      authenticated: null,
+      detail: login
+        ? `${host} answered the distribution API anonymously, so the credential was not exercised`
+        : `${host} answered the distribution API anonymously`,
     };
   }
 
-  return {
+  if (response.status !== 401 && response.status !== 403) {
+    return unreachable(
+      `${host} answered ${response.status} at ${api}, which is not the distribution API`,
+    );
+  }
+
+  const challenged = {
     ...base,
-    answers: false,
-    requiresAuth: false,
-    detail: `${host} answered ${response.status} at ${api}, which is not the distribution API`,
+    answers: true,
+    requiresAuth: true,
+  } as const;
+
+  if (!login) {
+    return {
+      ...challenged,
+      authenticated: null,
+      detail: `${host} answered and asked who is calling; a push authorizes as the build route that makes it`,
+    };
+  }
+
+  // The credential exists to be *proved*, not filed. A stored token that the
+  // registry would refuse is exactly the failure this act is placed before the
+  // write to catch, and the only way to know is to complete the challenge.
+  const outcome = await authenticate(api, response, login, send);
+  return {
+    ...challenged,
+    authenticated: outcome.ok,
+    detail: outcome.ok
+      ? `${login.username} authenticated to ${host}`
+      : `${host} refused ${login.username}: ${outcome.detail}`,
   };
+}
+
+/**
+ * Complete the registry's own authentication challenge.
+ *
+ * Two mechanisms, because registries genuinely use both. `Basic` is retried
+ * directly. `Bearer` is the OCI distribution token flow: the challenge names a
+ * `realm` and a `service`, the realm mints a token against basic credentials,
+ * and the API is asked again with it. Docker Hub answers only the second, which
+ * is why a `Basic`-only implementation reports a correct Docker Hub token as
+ * wrong.
+ */
+async function authenticate(
+  api: string,
+  challenge: Response,
+  login: RegistryLogin,
+  send: RegistryTransport,
+): Promise<{ ok: boolean; detail: string }> {
+  const scheme = challenge.headers.get('www-authenticate') ?? '';
+  const basic = `Basic ${btoa(`${login.username}:${login.secret}`)}`;
+
+  let authorization = basic;
+  if (/^\s*bearer/i.test(scheme)) {
+    const realm = challengeParam(scheme, 'realm');
+    if (realm === null) {
+      return { ok: false, detail: 'its Bearer challenge names no realm' };
+    }
+    const service = challengeParam(scheme, 'service');
+    const url = new URL(realm);
+    if (service !== null) url.searchParams.set('service', service);
+
+    let minted: Response;
+    try {
+      minted = await send(
+        new Request(url, { method: 'GET', headers: { Authorization: basic } }),
+      );
+    } catch (cause) {
+      return {
+        ok: false,
+        detail:
+          cause instanceof Error ? cause.message : 'the token request failed',
+      };
+    }
+    if (!minted.ok) {
+      return {
+        ok: false,
+        detail: `the token endpoint answered ${minted.status}`,
+      };
+    }
+
+    const body = (await minted.json().catch(() => null)) as {
+      token?: unknown;
+      access_token?: unknown;
+    } | null;
+    // Two spellings for one field: the distribution spec says `token` and
+    // OAuth2 says `access_token`, and real registries serve each.
+    const token = body?.token ?? body?.access_token;
+    if (typeof token !== 'string' || token === '') {
+      return { ok: false, detail: 'the token endpoint returned no token' };
+    }
+    authorization = `Bearer ${token}`;
+  }
+
+  let retried: Response;
+  try {
+    retried = await send(
+      new Request(api, {
+        method: 'GET',
+        headers: { Authorization: authorization },
+      }),
+    );
+  } catch (cause) {
+    return {
+      ok: false,
+      detail: cause instanceof Error ? cause.message : 'the retry failed',
+    };
+  }
+  return retried.ok
+    ? { ok: true, detail: '' }
+    : { ok: false, detail: `it answered ${retried.status}` };
+}
+
+/** One `key="value"` out of a `WWW-Authenticate` challenge. */
+function challengeParam(header: string, key: string): string | null {
+  return new RegExp(`${key}="([^"]*)"`, 'i').exec(header)?.[1] ?? null;
 }

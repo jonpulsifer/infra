@@ -32,6 +32,7 @@ const spec: BuildSpec = {
   destinations: ['registry.example.test/apps'],
   tags: ['sha256-bundle', 'latest'],
   buildArgs: {},
+  registryAuth: [],
 };
 
 const source: BuildSource = {
@@ -51,6 +52,7 @@ const route: BuildAdapter = {
   logFidelity: 'LIVE_TEXT',
   buildLevel: 2,
   provenanceBuilderId: 'https://spindrift.dev/builders/example',
+  carriesRegistryCredential: true,
   async *build(
     given: BuildSource,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {
