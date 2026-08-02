@@ -36,6 +36,7 @@
  */
 import {
   ArrowLeft,
+  ChevronRight,
   ExternalLink,
   RefreshCw,
   Rocket,
@@ -110,9 +111,16 @@ export function DeployDetail({
       ) : null}
 
       <BuildDrawer view={view} />
-      {view.id !== null && view.build?.status === 'done' ? (
-        <DeployDrawer view={view} />
-      ) : null}
+      {/*
+        Every release has a deploy leg, so every release gets the drawer. It
+        used to be gated on a green build, which hid the log on precisely the
+        screen that needed it: a Deploy over a Build the supply chain refused
+        is red *at the deploy*, and gating on the build meant the only thing on
+        screen was a build log, saying the failure was somewhere it was not.
+        A Build with no intent (`id === null`) still has no deploy leg — that
+        one is an absence, not a hidden pane.
+      */}
+      {view.id !== null ? <DeployDrawer view={view} /> : null}
     </div>
   );
 }
@@ -246,20 +254,26 @@ function Actions({
   const { onRedeploy, onRollback, onDeployBuild, busy } = actions;
   const buttons = [];
 
-  if (view.id === null && onDeployBuild && view.build?.status !== 'failed') {
+  // An artifact that exists is deployable, and the button keys on the artifact
+  // rather than on the Build's status. Those two disagree on the case that
+  // matters: a Build the supply chain refused is FAILED with an image in the
+  // registry, and hiding the act there says the artifact cannot be placed when
+  // it can. Only a Build that ended having produced nothing has nothing to
+  // offer — and that one gets Rebuild, below.
+  const nothingToPlace =
+    view.artifactDigest === null && view.build?.status === 'failed';
+
+  if (view.id === null && onDeployBuild && !nothingToPlace) {
+    const placeable = view.artifactDigest !== null;
     buttons.push(
       <Button
         key="deploy"
         size="sm"
         onClick={onDeployBuild}
-        disabled={busy !== null && busy !== undefined}
+        disabled={!placeable || (busy !== null && busy !== undefined)}
         // A Build still running has nothing to place yet. It is shown disabled
         // rather than hidden so the next act is visible while you wait for it.
-        title={
-          view.build !== null && view.build.status !== 'done'
-            ? 'Available once the build finishes'
-            : undefined
-        }
+        title={placeable ? undefined : 'Available once an artifact exists'}
       >
         <Rocket aria-hidden="true" className="size-3.5" />
         {busy === 'deploy' ? 'Deploying…' : 'Deploy this build'}
@@ -480,18 +494,76 @@ function BuildDrawer({ view }: { view: DeployView }) {
   }
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} asChild>
+    <Stage
+      ordinal="1"
+      name="Build"
+      status={build.status}
+      word={statusWord(build.status)}
+      note={build.duration ?? null}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <Checklist items={build.steps} />
+      <BuildOutput view={view} />
+    </Stage>
+  );
+}
+
+/**
+ * One leg of the pipeline, as a card that looks exactly like the other one.
+ *
+ * Build and Deploy are **two stages, not one story with a tail**: a Build
+ * records an artifact, a Deploy places one, and either can go red while the
+ * other is fine. The screen has to be able to say that, and it can only say it
+ * if the two read as peers — same header, same glyph, its own verdict on each.
+ * A layout that made Deploy a section *inside* Build could not express "the
+ * image is fine, the placement failed", which is the most common red there is.
+ *
+ * The ordinal is what makes the pairing legible at a glance: two numbered
+ * stages, and the reader can see which one stopped.
+ */
+function Stage({
+  ordinal,
+  name,
+  status,
+  word,
+  note,
+  open,
+  onOpenChange,
+  children,
+}: {
+  ordinal: string;
+  name: string;
+  status: 'done' | 'running' | 'failed' | 'waiting';
+  word: string;
+  note: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
       <Card>
         <CollapsibleTrigger className="flex w-full items-center gap-2.5 px-3.5 py-3 text-left text-xs font-semibold uppercase tracking-[0.07em] text-subtle hover:text-foreground">
-          <StepGlyph status={build.status} />
-          Build log · {statusWord(build.status)}
-          {build.duration ? ` · ${build.duration}` : ''}
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {ordinal}
+          </span>
+          <StepGlyph status={status} />
+          <span className="text-foreground">{name}</span>
+          <span>· {word}</span>
+          {note ? (
+            <span className="text-muted-foreground">· {note}</span>
+          ) : null}
+          <ChevronRight
+            aria-hidden="true"
+            className={cn(
+              'ml-auto size-4 transition-transform',
+              open && 'rotate-90',
+            )}
+          />
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="flex flex-col gap-3 px-3.5 pb-3.5">
-            <Checklist items={build.steps} />
-            <BuildOutput view={view} />
-          </div>
+          <div className="flex flex-col gap-3 px-3.5 pb-3.5">{children}</div>
         </CollapsibleContent>
       </Card>
     </Collapsible>
@@ -515,12 +587,7 @@ function BuildOutput({ view }: { view: DeployView }) {
   const build = view.build;
   if (build === null) return null;
   if (build.log !== null) {
-    return (
-      <div className="flex flex-col gap-2">
-        <LogPane lines={build.log} />
-        <RunLink url={build.runUrl} />
-      </div>
-    );
+    return <Transcript build={build} />;
   }
 
   if (build.fidelity === 'LIVE_STATUS') {
@@ -556,6 +623,54 @@ function BuildOutput({ view }: { view: DeployView }) {
 }
 
 /**
+ * The runner's raw text, behind one more click and never the whole of it.
+ *
+ * The checkpoints above are the build. This is the evidence for them, and a
+ * drawer that opened straight onto a thousand lines of BuildKit chatter buried
+ * the seven lines that said what happened. So it stays shut on green — nobody
+ * reads a successful build's transcript — and springs open on red, where the
+ * last lines are the answer.
+ *
+ * `logTotal` is stated whenever it exceeds what is here. A tail presented as
+ * the log is the UI editing evidence; a tail that says how much it is a tail
+ * of, and where the rest lives, is not.
+ */
+function Transcript({ build }: { build: NonNullable<DeployView['build']> }) {
+  const lines = build.log ?? [];
+  const [open, setOpen] = useState(build.status === 'failed');
+  const clipped = build.logTotal > lines.length;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col">
+      <CollapsibleTrigger className="flex items-center gap-2 self-start text-[12.5px] text-subtle hover:text-foreground">
+        <ChevronRight
+          aria-hidden="true"
+          className={cn('size-3.5 transition-transform', open && 'rotate-90')}
+        />
+        {open ? 'Hide' : 'Show'} {build.runner} output
+        <span className="text-muted-foreground">
+          {clipped
+            ? `· last ${lines.length} of ${build.logTotal} lines`
+            : `· ${build.logTotal} lines`}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="flex flex-col gap-2 pt-2">
+          <LogPane lines={lines} />
+          {clipped ? (
+            <p className="text-[11.5px] text-muted-foreground">
+              Only the tail is kept here — a failure is at the end of a log, and
+              the full transcript stays on the runner.
+            </p>
+          ) : null}
+          <RunLink url={build.runUrl} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/**
  * A way out to the runner's own view of this run.
  *
  * Rendered only from a URL the backend reported. Nothing here composes one out
@@ -581,7 +696,15 @@ function RunLink({ url, inline }: { url: string | null; inline?: boolean }) {
   );
 }
 
-/** The deploy leg is separate from build output and opens on deploy red. */
+/**
+ * The deploy leg — stage 2, and never a consequence of stage 1.
+ *
+ * It reads its own phase and nothing else. The Build above it may be green,
+ * red, or still going; what this stage says is what the platform said when the
+ * artifact was placed. That independence is the point: an artifact that exists
+ * is deployable to any supported Target, so a red Build is a fact about an
+ * older artifact and not a reason to stop describing this placement.
+ */
 function DeployDrawer({ view }: { view: DeployView }) {
   const autoOpen = view.phase !== 'LIVE';
   const [open, setOpen] = useState(autoOpen);
@@ -594,33 +717,29 @@ function DeployDrawer({ view }: { view: DeployView }) {
   }, [view.phase]);
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} asChild>
-      <Card>
-        <CollapsibleTrigger className="flex w-full items-center gap-2.5 px-3.5 py-3 text-left text-xs font-semibold uppercase tracking-[0.07em] text-subtle hover:text-foreground">
-          <StepGlyph
-            status={
-              view.phase === 'LIVE'
-                ? 'done'
-                : view.phase === 'FAILED'
-                  ? 'failed'
-                  : 'running'
-            }
-          />
-          Deploy log · {view.phase.toLowerCase()}
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="px-3.5 pb-3.5">
-            {view.deployLog === null ? (
-              <Notice label="LIVE_STATUS">
-                The controller reports deploy status live; no text line has
-                arrived yet.
-              </Notice>
-            ) : (
-              <LogPane lines={view.deployLog} />
-            )}
-          </div>
-        </CollapsibleContent>
-      </Card>
-    </Collapsible>
+    <Stage
+      ordinal="2"
+      name="Deploy"
+      status={
+        view.phase === 'LIVE'
+          ? 'done'
+          : view.phase === 'FAILED'
+            ? 'failed'
+            : 'running'
+      }
+      word={view.phase.toLowerCase()}
+      note={view.target}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {view.deployLog === null ? (
+        <Notice label="LIVE_STATUS">
+          The controller reports deploy status live; no text line has arrived
+          yet.
+        </Notice>
+      ) : (
+        <LogPane lines={view.deployLog} />
+      )}
+    </Stage>
   );
 }

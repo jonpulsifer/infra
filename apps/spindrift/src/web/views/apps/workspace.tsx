@@ -377,18 +377,27 @@ function ReleaseHistory({
   );
 }
 
-const ACTIVITY_TONE = {
-  ok: 'border-l-success',
-  failed: 'border-l-destructive',
-  info: 'border-l-border',
+const MARKER_TONE = {
+  ok: 'border-success bg-success',
+  failed: 'border-destructive bg-destructive',
+  info: 'border-border bg-card',
 } as const satisfies Record<ActivityEntry['status'], string>;
 
 /**
  * The timeline, and a way in from every line of it.
  *
- * `attempt_events` constrains every row to exactly one attempt, so every entry
- * has somewhere to go — `/deploys/:id` or `/builds/:id`. An entry that led
- * nowhere would be the one thing on this screen a reader could not act on.
+ * A **timeline, not a list** — the rows are joined by a rule the markers sit
+ * on, because these entries are one sequence and stacked cards said they were
+ * unrelated events that happened to be near each other. The connector is what
+ * carries the reading down the column, and the newest checkpoint is at the top
+ * where the last thing that happened belongs.
+ *
+ * The stage each row belongs to is on the row, and it is load-bearing rather
+ * than decorative: **Build and Deploy are separate stages**, so a column of red
+ * has to say which of the two went red. `attempt_events` constrains every row
+ * to exactly one attempt, so the lane is always knowable and every entry has
+ * somewhere to go — `/deploys/:id` or `/builds/:id`. An entry that led nowhere
+ * would be the one thing on this screen a reader could not act on.
  */
 function Activity({
   entries,
@@ -399,20 +408,31 @@ function Activity({
 }) {
   return (
     <Card>
-      <SectionHeader eyebrow="Recent activity" title="What happened" />
-      <CardContent className="flex flex-col gap-2.5 pt-0">
+      <SectionHeader eyebrow="Timeline" title="What happened" />
+      <CardContent className="pt-0">
         {entries.length === 0 ? (
           <EmptyState title="Nothing has happened yet.">
-            Build and deploy events land here as they arrive.
+            Build and deploy checkpoints land here as they arrive.
           </EmptyState>
         ) : (
-          entries.map((entry) => (
-            <ActivityRow
-              key={`${entry.title}-${entry.when}-${entry.deployId ?? entry.buildId}`}
-              entry={entry}
-              onNavigate={onNavigate}
+          <ol className="relative flex flex-col">
+            {/*
+              One rule behind every marker, stopped short at both ends so the
+              sequence reads as bounded rather than continuing off the card
+              into checkpoints that are not shown.
+            */}
+            <span
+              aria-hidden="true"
+              className="absolute left-[5px] top-3 bottom-3 w-px bg-border-soft"
             />
-          ))
+            {entries.map((entry) => (
+              <ActivityRow
+                key={`${entry.title}-${entry.when}-${entry.deployId ?? entry.buildId}`}
+                entry={entry}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </ol>
         )}
       </CardContent>
     </Card>
@@ -435,35 +455,53 @@ function ActivityRow({
 
   const body = (
     <>
-      <div className="flex items-baseline gap-2">
-        <p className="text-sm font-medium">{entry.title}</p>
-        <span className="ml-auto font-mono text-xs text-muted-foreground">
-          {entry.when}
-        </span>
+      {/*
+        The marker sits on the rule rather than beside it — `bg-card` on an
+        `info` dot is what punches it through the line, so a checkpoint reads
+        as a point on the sequence instead of a bullet next to one.
+      */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          'relative z-10 mt-[7px] size-[11px] shrink-0 rounded-full border-2',
+          MARKER_TONE[entry.status],
+        )}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <Badge tone={entry.kind === 'deploy' ? 'accent' : 'idle'}>
+            {entry.kind}
+          </Badge>
+          <p className="truncate text-sm font-medium">{entry.title}</p>
+          <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
+            {entry.when}
+          </span>
+        </div>
+        {entry.detail ? (
+          <p className="truncate text-xs text-muted-foreground">
+            {entry.detail}
+          </p>
+        ) : null}
       </div>
-      <p className="text-xs text-muted-foreground">{entry.detail}</p>
     </>
   );
 
-  if (path === null || !onNavigate) {
-    return (
-      <div className={cn('border-l-2 pl-3', ACTIVITY_TONE[entry.status])}>
-        {body}
-      </div>
-    );
-  }
+  const shape = 'flex w-full items-start gap-2.5 py-2 text-left';
 
   return (
-    <button
-      type="button"
-      onClick={() => onNavigate(path)}
-      className={cn(
-        'border-l-2 pl-3 text-left hover:bg-secondary/50',
-        ACTIVITY_TONE[entry.status],
+    <li className="relative">
+      {path === null || !onNavigate ? (
+        <div className={shape}>{body}</div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onNavigate(path)}
+          className={cn(shape, 'rounded-md hover:bg-secondary/50')}
+        >
+          {body}
+        </button>
       )}
-    >
-      {body}
-    </button>
+    </li>
   );
 }
 

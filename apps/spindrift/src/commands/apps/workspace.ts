@@ -118,10 +118,19 @@ export const getAppWorkspace: Command<
     }
   }
 
+  // Status events only — the checkpoints, not the transcript.
+  //
+  // Every log line an adapter emits lands in `attempt_events` too, and reading
+  // the table raw made the timeline the last twenty lines of whatever ran most
+  // recently: three screens of BuildKit chatter where a reader wanted "built,
+  // deployed, went red". A checkpoint is a status event by definition — §6's
+  // `{phase, resource?, reason?}` — so the filter is the whole selection, and
+  // the text stays where it belongs, on the attempt screen each entry links to.
   const events = await context.db.query.attemptEvents.findMany({
-    where: (ev, { eq }) => eq(ev.appId, app.id),
+    where: (ev, { eq, and }) =>
+      and(eq(ev.appId, app.id), eq(ev.eventType, 'status')),
     orderBy: (ev, { desc }) => [desc(ev.id)],
-    limit: 20,
+    limit: 12,
   });
 
   const now = context.clock.now();
@@ -133,17 +142,15 @@ export const getAppWorkspace: Command<
   const activity: ActivityEntry[] = [];
   if (events.length > 0) {
     for (const ev of events) {
-      const title = ev.phase
-        ? `${ev.attemptKind} ${ev.phase.toLowerCase()}`
-        : ev.resource
-          ? ev.resource
-          : `${ev.attemptKind} event`;
-      const detail = ev.resource
-        ? `${ev.resource}${ev.line ? `: ${ev.line}` : ''}`
-        : (ev.line ?? ev.reason ?? '');
       activity.push({
-        title,
-        detail,
+        kind: ev.attemptKind,
+        title: checkpointTitle(
+          ev.attemptKind,
+          ev.phase,
+          ev.deployId,
+          ev.buildId,
+        ),
+        detail: ev.resource ?? ev.reason ?? '',
         when: elapsedSince(ev.createdAt, now),
         status: ev.reason ? 'failed' : ev.phase === 'LIVE' ? 'ok' : 'info',
         deployId: ev.deployId,
@@ -152,6 +159,7 @@ export const getAppWorkspace: Command<
     }
   } else if (latestDeploy) {
     activity.push({
+      kind: 'deploy',
       title: `Deploy ${latestDeploy.id} ${latestDeploy.phase.toLowerCase()}`,
       detail: latestDeploy.detail ?? `Target: ${latestTarget?.name ?? 'none'}`,
       when: elapsedSince(latestDeploy.createdAt, now),
@@ -230,6 +238,31 @@ export const getAppWorkspace: Command<
 
   return ok({ workspace });
 };
+
+/**
+ * What a checkpoint is called on the timeline.
+ *
+ * Named by its attempt — "Build 41", "Deploy 42" — because the two stages are
+ * separate and a reader scanning the column has to be able to tell which one a
+ * line is about. `${kind} ${phase}` alone could not: "failed" appeared on both
+ * legs and read as one pipeline that fell over somewhere.
+ *
+ * A build's step transitions come through here as their own phases (`RUNNING`,
+ * `SUCCEEDED`), which is why the word is lowercased rather than mapped — the
+ * vocabularies differ per §6 and inventing a shared one would mean guessing at
+ * a step name the runner already chose.
+ */
+function checkpointTitle(
+  kind: 'build' | 'deploy',
+  phase: string | null,
+  deployId: number | null,
+  buildId: number | null,
+): string {
+  const id = kind === 'deploy' ? deployId : buildId;
+  const noun = kind === 'deploy' ? 'Deploy' : 'Build';
+  const subject = id === null ? noun : `${noun} ${id}`;
+  return phase ? `${subject} ${phase.toLowerCase()}` : subject;
+}
 
 function phaseFor(
   deploy: DeployPhase | undefined,

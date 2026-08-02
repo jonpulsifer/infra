@@ -108,6 +108,11 @@ const BUILT = {
   fidelity: 'LIVE_TEXT',
   steps: BUILD_STEPS_OK,
   log: LOG_OK,
+  // A real build prints far more than the tail the drawer carries, and the
+  // fixture says so — the "showing the last N of M" sentence only appears when
+  // the two numbers disagree, so a fixture where they agreed would never
+  // exercise it.
+  logTotal: 812,
   runner: 'hosted runner',
   runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
 } as const;
@@ -153,6 +158,7 @@ export const DEPLOY_SCENARIOS = {
         { name: 'push registry', status: 'waiting' },
       ],
       log: null,
+      logTotal: 0,
       runner: 'hosted runner',
       runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
     },
@@ -200,6 +206,10 @@ export const DEPLOY_SCENARIOS = {
         { text: '#9 > 14 |   return <Hello name={viewer.sesion.name} />;' },
         { text: '#9 ERROR: exited with code 1', tone: 'error' },
       ],
+      // The whole of it: a build that failed in eight lines has no tail to cut,
+      // and this is the scenario that proves the sentence stays away when
+      // nothing was left behind.
+      logTotal: 8,
       runner: 'hosted runner',
       runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
     },
@@ -388,6 +398,7 @@ export const WORKSPACE_SCENARIOS = {
     ],
     activity: [
       {
+        kind: 'deploy',
         title: 'Deploy 42 live',
         detail: 'Artifact reconciled on Metal; all resources healthy.',
         when: '8m ago',
@@ -396,6 +407,7 @@ export const WORKSPACE_SCENARIOS = {
         buildId: null,
       },
       {
+        kind: 'build',
         title: 'Build passed',
         detail: 'main · 7f3d2c1 · hosted runner',
         when: '9m ago',
@@ -404,6 +416,7 @@ export const WORKSPACE_SCENARIOS = {
         buildId: 41,
       },
       {
+        kind: 'deploy',
         title: 'Deploy 40 failed',
         detail: 'STARTUP_FAILED · developer · DATABASE_URL missing',
         when: '1d ago',
@@ -484,6 +497,7 @@ export const WORKSPACE_SCENARIOS = {
     datastores: [],
     activity: [
       {
+        kind: 'deploy',
         title: 'Deploy 17 live',
         detail: 'Files released to static hosting.',
         when: '2h ago',
@@ -492,6 +506,7 @@ export const WORKSPACE_SCENARIOS = {
         buildId: null,
       },
       {
+        kind: 'build',
         title: 'Build passed',
         detail: 'main · 91dc4ab · hosted runner',
         when: '2h ago',
@@ -553,6 +568,7 @@ export const WORKSPACE_SCENARIOS = {
     ],
     activity: [
       {
+        kind: 'deploy',
         title: 'Execution 118 passed',
         detail: '02:14 · 1,284 objects copied',
         when: '8m ago',
@@ -561,6 +577,7 @@ export const WORKSPACE_SCENARIOS = {
         buildId: null,
       },
       {
+        kind: 'deploy',
         title: 'Execution 116 failed',
         detail: 'exit 1 · bucket unavailable',
         when: '1d ago',

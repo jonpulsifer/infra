@@ -616,6 +616,14 @@ describe('the workspace as a way into the system', () => {
       {
         appId,
         componentId,
+        attemptKind: 'build',
+        buildId: build!.id,
+        eventType: 'status',
+        phase: 'SUCCEEDED',
+      },
+      {
+        appId,
+        componentId,
         attemptKind: 'deploy',
         deployId: deploy!.id,
         eventType: 'status',
@@ -628,9 +636,21 @@ describe('the workspace as a way into the system', () => {
     if (!result.ok) return;
 
     const { workspace } = result.value;
+    // Two checkpoints, not three rows. Every log line an adapter emits lands in
+    // the same table, and reading it raw made the timeline the last twenty
+    // lines of whatever ran most recently — the transcript belongs on the
+    // attempt screen each entry links to, not on the workspace.
     expect(workspace.activity.length).toBe(2);
+    expect(workspace.activity.map((entry) => entry.title)).toEqual([
+      `Deploy ${deploy!.id} live`,
+      `Build ${build!.id} succeeded`,
+    ]);
     for (const entry of workspace.activity) {
       expect(entry.deployId ?? entry.buildId).not.toBeNull();
+      // The stage a checkpoint belongs to is on the entry: Build and Deploy are
+      // two stages, and a timeline that could not say which one a red row came
+      // from cannot say whether the image or its placement is the problem.
+      expect(entry.kind).toBe(entry.deployId === null ? 'build' : 'deploy');
       // The clock is frozen at the same instant the rows were written, so the
       // relative time is a real one rather than a "recently" placeholder.
       expect(entry.when).not.toBe('recently');
@@ -992,6 +1012,147 @@ describe('getDeployDetail command', () => {
     // And nothing was manufactured from it: `null` is what the deploy-log card
     // reads to render its own LIVE_STATUS notice.
     expect(deploy.deployLog).toBeNull();
+  });
+
+  test('blames the deploy, not the build, when the build produced an image', async () => {
+    // The pairing supply-chain admission produces: the runner pushed an image
+    // and the artifact was refused, so the Build row is FAILED while the Deploy
+    // over it went red for a reason of its own. Reading the Build first meant
+    // that reason lost, and the screen said "Build failed" about a build that
+    // had already done its job.
+    const ctx = context();
+    const { componentId, target } = await scaffold(ctx, {
+      prefix: 'misblamed',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'ddd4444',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'d'.repeat(64)}`,
+        status: 'FAILED',
+        runner: 'hosted runner',
+      })
+      .returning();
+
+    const [failed] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'FAILED',
+        reason: 'ARTIFACT_UNAVAILABLE',
+        blame: 'platform',
+        detail: "the cluster can't pull the image",
+      })
+      .returning();
+
+    const result = await getDeployDetail({ id: failed!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.deploy.phaseWord).toBe('Deploy failed');
+  });
+
+  test('still says Build failed when nothing after the build spoke', async () => {
+    // The other side of the same rule. A Deploy that recorded no reason of its
+    // own never got an answer from the platform, and the Build row is the only
+    // thing that knows anything.
+    const ctx = context();
+    const { componentId, target } = await scaffold(ctx, { prefix: 'redbuild' });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'eee5555',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'FAILED',
+        runner: 'hosted runner',
+      })
+      .returning();
+
+    const [failed] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'FAILED',
+      })
+      .returning();
+
+    const result = await getDeployDetail({ id: failed!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.deploy.phaseWord).toBe('Build failed');
+  });
+
+  test('folds a step’s events into one checkpoint with a duration', async () => {
+    // A route reports `RUNNING` and then a verdict for the same step name, with
+    // log lines under it in between. Projecting each row as its own checklist
+    // line marked everything done because it had been mentioned; folding by
+    // name is what makes the list say what each step is *doing*, and gives it
+    // the duration a reader scans the column for.
+    const ctx = context();
+    const { componentId, appId, target } = await scaffold(ctx, {
+      prefix: 'folded',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'fff6666',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'f'.repeat(64)}`,
+        status: 'FAILED',
+        runner: 'hosted runner',
+      })
+      .returning();
+
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'FAILED',
+      })
+      .returning();
+
+    const at = (offsetSeconds: number) =>
+      new Date(FROZEN.getTime() + offsetSeconds * 1000);
+    const step = (phase: string, seconds: number, reason?: 'BUILD_FAILED') => ({
+      appId,
+      componentId,
+      attemptKind: 'build' as const,
+      buildId: build!.id,
+      eventType: 'status' as const,
+      resource: 'build / run build',
+      phase,
+      ...(reason ? { reason } : {}),
+      createdAt: at(seconds),
+    });
+
+    await ctx.db
+      .insert(attemptEvents)
+      .values([step('RUNNING', 0), step('FAILED', 3, 'BUILD_FAILED')]);
+
+    const result = await getDeployDetail({ id: deploy!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.deploy.build?.steps).toEqual([
+      { name: 'build / run build', status: 'failed', detail: '3.0s' },
+    ]);
   });
 });
 
