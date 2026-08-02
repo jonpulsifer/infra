@@ -302,13 +302,52 @@ describe('the stored installation manifest', () => {
       'installation: ""',
     );
 
-    await expect(
-      loadStoredManifest(database().db, {
+    // Ignored rather than fatal: a declaration does not govern a seeded
+    // installation, so this document was never going to be read. The row is
+    // what boots, unchanged.
+    expect(
+      await loadStoredManifest(database().db, {
         [MANIFEST_INLINE_VAR]: malformed,
       }),
-    ).rejects.toThrow(ManifestError);
+    ).toEqual(first);
 
     expect(await loadStoredManifest(database().db, {})).toEqual(first);
+  });
+
+  test('a declaration this build cannot parse does not stop a seeded boot', async () => {
+    // The ordinary shape of a rollout: a manifest key lands in the declaration
+    // with the merge and in the image with the digest bump, and between them
+    // every replica reads a document carrying a field it has no schema for.
+    // Crashing there takes a healthy control plane down over a value it had
+    // already decided not to use — the same controller/declaration skew the
+    // build workflow's `tags` default exists to absorb.
+    const first = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    const fromTheFuture = fixtureText.replace(
+      'installation: example',
+      'installation: example\nsomethingThisBuildHasNeverHeardOf: true',
+    );
+
+    expect(
+      await loadStoredManifest(database().db, {
+        [MANIFEST_INLINE_VAR]: fromTheFuture,
+      }),
+    ).toEqual(first);
+  });
+
+  test('an unseeded installation still refuses to boot on a bad declaration', async () => {
+    // The other half, and it has to stay fatal: with no row the declaration is
+    // the whole configuration, and continuing would boot the placeholder as
+    // though the operator had declared nothing at all.
+    await expect(
+      loadStoredManifest(database().db, {
+        [MANIFEST_INLINE_VAR]: fixtureText.replace(
+          'installation: example',
+          'installation: ""',
+        ),
+      }),
+    ).rejects.toThrow(ManifestError);
   });
 
   test('an incompatible Target declaration rolls back manifest and rank changes', async () => {
