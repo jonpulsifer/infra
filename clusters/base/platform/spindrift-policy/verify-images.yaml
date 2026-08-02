@@ -34,15 +34,6 @@ spec:
           mutateDigest: false
           required: true
           verifyDigest: true
-          # There is no public transparency log in this trust model — the
-          # signer is a KMS key whose public half is pinned right here, and
-          # `.github/workflows/spindrift-build.yml` signs with
-          # `--tlog-upload=false` for the same reason core's own signer does.
-          # Left at the default, Kyverno looks for a Rekor entry that by
-          # construction does not exist and refuses every signature.
-          ctlog:
-            ignoreTlog: true
-            ignoreSCT: true
           attestors:
             - count: 1
               entries:
@@ -54,6 +45,19 @@ spec:
                     # hashes with SHA-512 and a verifier told sha256 is
                     # verifying with the wrong digest.
                     signatureAlgorithm: sha512
+                    # There is no public transparency log in this trust model —
+                    # the signer is a KMS key whose public half is pinned right
+                    # below, and the build workflow signs with
+                    # `--tlog-upload=false` for the same reason core's own
+                    # signer does. Left at the default, Kyverno looks for a
+                    # Rekor entry that by construction does not exist and
+                    # refuses every signature.
+                    #
+                    # Under `rekor`, and `ctlog` is a different thing: `ctlog`
+                    # carries `ignoreSCT` for certificate timestamps, which a
+                    # keyed signature has none of.
+                    rekor:
+                      ignoreTlog: true
                     publicKeys: |-
                       -----BEGIN PUBLIC KEY-----
                       MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA73ui5ytn67hfYn4/Rizf
