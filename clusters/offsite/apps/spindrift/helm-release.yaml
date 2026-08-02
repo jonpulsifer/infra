@@ -156,7 +156,11 @@ spec:
         endpoint: http://onepassword-connect.external-secrets.svc.cluster.local:8080
         container: homelab
       supplyChain:
-        signer: gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer
+        # northamerica-northeast1, which is where the key is:
+        # `google_kms_crypto_key.signer` takes `local.region`, and
+        # terraform/gcp/projects/trusted-builds/versions.tf sets that to
+        # northamerica-northeast1. There has never been a key in us-central1.
+        signer: gcpkms://projects/trusted-builds/locations/northamerica-northeast1/keyRings/keys/cryptoKeys/signer
         registry: ghcr.io/jonpulsifer
         verifier: ghcr.io/jonpulsifer/spindrift-verifier
         # The authority bluenose's Binary Authorization policy requires an
