@@ -20,6 +20,7 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { apps, components } from '../../db/schema.ts';
+import { AUTH_NEEDS_A_ROUTE } from '../../domain/desired-state.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 /** A DNS-safe label: a Component's name appears in canonical hostnames (§9). */
@@ -57,33 +58,45 @@ const common = {
    * column default so a caller reading the input type sees which state they get
    * by saying nothing.
    */
-  exposure: z.enum(['internal', 'private', 'public']).default('private'),
+  reach: z.enum(['none', 'private', 'public']).default('private'),
+  auth: z.enum(['none', 'proxy']).default('proxy'),
 };
 
-export const createComponentInput = z.discriminatedUnion('kind', [
-  z
-    .object({
-      ...common,
-      kind: z.literal('service'),
-      /** §2: "an unexposed service is a queue worker." */
-      expose: z.boolean().default(true),
-    })
-    .strict(),
-  z
-    .object({
-      ...common,
-      kind: z.literal('website'),
-    })
-    .strict(),
-  z
-    .object({
-      ...common,
-      kind: z.literal('job'),
-      /** Absent means unscheduled — §7 renders that as a suspended CronJob. */
-      schedule: cronExpression.optional(),
-    })
-    .strict(),
-]);
+export const createComponentInput = z
+  .discriminatedUnion('kind', [
+    z
+      .object({
+        ...common,
+        kind: z.literal('service'),
+        /** §2: "an unexposed service is a queue worker." */
+        expose: z.boolean().default(true),
+      })
+      .strict(),
+    z
+      .object({
+        ...common,
+        kind: z.literal('website'),
+      })
+      .strict(),
+    z
+      .object({
+        ...common,
+        kind: z.literal('job'),
+        /** Absent means unscheduled — §7 renders that as a suspended CronJob. */
+        schedule: cronExpression.optional(),
+      })
+      .strict(),
+  ])
+  /**
+   * §9's rule, at the only moment refusing it is free: a filter needs a route to
+   * sit on. Every other cell of the reach/auth grid is expressible, including
+   * the two the old three-state exposure could not say — an unauthenticated
+   * address on your own network, and an authenticated public one.
+   */
+  .refine((input) => !(input.reach === 'none' && input.auth === 'proxy'), {
+    error: AUTH_NEEDS_A_ROUTE,
+    path: ['auth'],
+  });
 
 export type CreateComponentInput = z.infer<typeof createComponentInput>;
 
@@ -118,7 +131,8 @@ export const createComponent: Command<
       // the value is not the developer's to set — it is what the kind means.
       expose: exposeFor(input),
       schedule: input.kind === 'job' ? (input.schedule ?? null) : null,
-      exposure: input.exposure,
+      reach: input.reach,
+      auth: input.auth,
       createdAt: now,
       updatedAt: now,
     })

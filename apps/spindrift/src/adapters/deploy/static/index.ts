@@ -140,13 +140,21 @@ export class StaticDeployAdapter implements DeployAdapter {
         `static hosting does not accept a ${desired.artifact.type} artifact`,
       );
     }
-    if (desired.exposure !== 'public') {
+    if (desired.reach !== 'public') {
       // §9, and see the file header: this backend has no non-bypassable origin
       // to put a boundary in front of, so the rendering is disqualified rather
       // than shipped with a caveat.
       yield this.status('FAILED', { reason: 'INTERNAL' });
       return this.internal(
-        `static hosting serves Public only, and this Component is ${desired.exposure} (§9)`,
+        `static hosting serves a public reach only, and this Component asks for ${desired.reach} (§9)`,
+      );
+    }
+    if (desired.auth === 'proxy') {
+      // Same shape, other axis: there is no edge here to authenticate at, so
+      // claiming one would be the caveat this backend refuses to ship with.
+      yield this.status('FAILED', { reason: 'INTERNAL' });
+      return this.internal(
+        'static hosting has no authenticated edge to put in front of a Component (§9)',
       );
     }
     // No registry filter: a static Target serves `files`, and the reachability

@@ -17,8 +17,9 @@ auth:
   gateway: null
 
 dns:
-  apexZone: apps.example.test
-  vanityZone: example.test
+  zones:
+    private: apps.example.test
+    public: example.test
 
 sources:
   buckets:

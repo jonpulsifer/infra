@@ -13,7 +13,7 @@
  *
  * - **No requirements language.** The developer types nothing. Every
  *   {@link Requirement} below is *derived* from the App — its Component's kind,
- *   its exposure setting, the Datastores attached to it — and there is no field
+ *   its reach and auth, the Datastores attached to it — and there is no field
  *   anywhere a developer can write one in.
  * - **No preferences and no cost model.** "Prefer cheap" is inexpressible. Rank
  *   is one global ordered list an admin sets, and a human breaks the tie.
@@ -37,9 +37,10 @@ import {
 } from './capabilities.ts';
 import type {
   ArtifactType,
+  Auth,
   ComponentKind,
-  Exposure,
   Platform,
+  Reach,
   Resources,
 } from './desired-state.ts';
 
@@ -62,7 +63,9 @@ export const DEFAULT_PLATFORM: Platform = { os: 'linux', arch: 'amd64' };
 export const EXCLUSIONS = [
   'UNHEALTHY',
   'KIND_UNSUPPORTED',
-  'EXPOSURE_UNSUPPORTED',
+  'REACH_UNSUPPORTED',
+  'AUTH_UNSUPPORTED',
+  'NO_GATEWAY',
   'ARCH_UNSUPPORTED',
   'RESOURCES_EXCEED_CEILING',
   'NO_GPU',
@@ -87,6 +90,14 @@ export interface PlacementTarget {
   readonly healthy: boolean;
   readonly capabilities: TargetCapabilities;
   /**
+   * Whether a rendered route has something to attach to on this Target.
+   *
+   * A platform fact rather than a capability: on a cluster it is the gateway the
+   * operator named in `chartValues`, and on a backend that routes its own
+   * workloads there is nothing to name, so it is true by construction.
+   */
+  readonly routesAttachTo: boolean;
+  /**
    * §8: "Quota exhaustion needs no new failure reason (`REJECTED` covers it) but
    * surfaces at **Place time** as a non-candidate." Set by whatever last
    * measured the Target's quota; absent means nothing has said it is full.
@@ -104,7 +115,8 @@ export interface PlacementTarget {
  */
 export interface DerivedRequirements {
   readonly kind: ComponentKind;
-  readonly exposure: Exposure;
+  readonly reach: Reach;
+  readonly auth: Auth;
   readonly platform: Platform;
   readonly resources: Resources;
   readonly gpu: boolean;
@@ -176,7 +188,17 @@ interface RankedTargetRow {
   rank: number;
   health: 'healthy' | 'unhealthy';
   discovery: TargetDiscovery | null;
-  publicExposure: boolean | null;
+  reaches: readonly Reach[] | null;
+  authReaches: readonly Reach[] | null;
+  /**
+   * `adapter` is named here only so this is not a weak type: a shape whose every
+   * property is optional accepts nothing structurally, and the connection
+   * flavours that carry no `chartValues` are most of them.
+   */
+  connection: {
+    readonly adapter: TargetAdapter;
+    readonly chartValues?: Record<string, unknown>;
+  } | null;
 }
 
 /**
@@ -203,7 +225,25 @@ export function placementTargetOf(
     rank: target.rank,
     healthy: target.health === 'healthy',
     capabilities: capabilitiesOfRow(target, options),
+    routesAttachTo: routesAttachTo(target),
   };
+}
+
+/**
+ * Whether a route rendered for this Target attaches to anything.
+ *
+ * Only the chart-rendering adapter can fail this. Cloud Run and static hosting
+ * route their own workloads, so there is no gateway for an operator to name and
+ * nothing for the absence of one to break.
+ */
+function routesAttachTo(target: RankedTargetRow): boolean {
+  if (target.adapter !== 'kubernetes') return true;
+  const platform = target.connection?.chartValues?.platform as
+    | { gateway?: { name?: unknown } }
+    | undefined;
+  return (
+    typeof platform?.gateway?.name === 'string' && platform.gateway.name !== ''
+  );
 }
 
 /**
@@ -237,10 +277,22 @@ function sentence(
       return 'this Target has unmet prerequisites';
     case 'KIND_UNSUPPORTED':
       return `this Target does not run ${requirements.kind}s`;
-    case 'EXPOSURE_UNSUPPORTED':
-      return requirements.exposure === 'public'
+    case 'REACH_UNSUPPORTED':
+      return requirements.reach === 'public'
         ? 'this Target has no way to serve a public address'
-        : `this Target can only serve public workloads, and this one is ${requirements.exposure}`;
+        : requirements.reach === 'private'
+          ? 'this Target has no address on your own network to serve'
+          : 'this Target serves everything it runs, so it cannot hold a Component with no route';
+    case 'AUTH_UNSUPPORTED':
+      // The two ways this fails read nothing alike, and saying so is the whole
+      // point of the reason. A Target may have the mechanism and be unable to
+      // widen it: an edge that admits a single account is an honest answer in
+      // front of a private route and a false one in front of a public address.
+      return requirements.reach === 'public'
+        ? "this Target's authenticated edge admits a single user, so it cannot stand in front of a public address"
+        : 'this Target has no authenticated edge to put in front of this Component';
+    case 'NO_GATEWAY':
+      return 'this Target names no gateway for a route to attach to';
     case 'ARCH_UNSUPPORTED':
       return `this Target does not run ${requirements.platform.arch}`;
     case 'RESOURCES_EXCEED_CEILING':
@@ -319,15 +371,32 @@ export function exclusionsFor(
   if (!target.healthy) reasons.push('UNHEALTHY');
   if (!can.kinds.includes(requirements.kind)) reasons.push('KIND_UNSUPPORTED');
 
-  // §9: "No non-public state may leave a bypassable origin." A Target that can
-  // only serve public traffic cannot hold a private workload, and a Target with
-  // no public path cannot hold a public one. Exposure filters both ways, which
-  // is what makes picking the static Target *mean* public (§13, §28).
-  if (requirements.exposure === 'public' && !can.publicExposure) {
-    reasons.push('EXPOSURE_UNSUPPORTED');
+  // Reach and auth join separately, because they are separate facts: a Target
+  // can serve a reach it cannot authenticate, and the sentence a developer needs
+  // is different in each case. Filtering both ways is what makes picking the
+  // static Target *mean* public (§13, §28) — it asserts `public` and nothing
+  // else, so every other reach is excluded by the ordinary join.
+  if (!can.reaches.includes(requirements.reach)) {
+    reasons.push('REACH_UNSUPPORTED');
   }
-  if (requirements.exposure !== 'public' && onlyPublic(target)) {
-    reasons.push('EXPOSURE_UNSUPPORTED');
+
+  // §9's hard rule, where it binds: a Component asking to be authenticated must
+  // land on a Target whose edge can honestly authenticate *that reach*. The case
+  // this shape exists for is a Target that has the mechanism and an audience too
+  // narrow to stand in front of an address anyone can reach — it answers for
+  // `private` and not for `public`.
+  if (
+    requirements.auth === 'proxy' &&
+    !can.authReaches.includes(requirements.reach)
+  ) {
+    reasons.push('AUTH_UNSUPPORTED');
+  }
+
+  // A route needs something to attach to. Without this the Deploy goes green
+  // with `parentRefs` naming a Gateway that is the empty string, which is a
+  // route attached to nothing and a URL that answers nothing.
+  if (requirements.reach !== 'none' && !target.routesAttachTo) {
+    reasons.push('NO_GATEWAY');
   }
 
   if (can.arch.length > 0 && !can.arch.includes(requirements.platform.arch)) {
@@ -404,14 +473,6 @@ export function exclusionsFor(
   // Deduplicated: two attached datastores missing the same engine is one reason
   // a developer has to act on, not two rows saying the same sentence.
   return [...new Set(reasons)];
-}
-
-/** A Target whose only exposure state is public — §13's static Target. */
-function onlyPublic(target: PlacementTarget): boolean {
-  return (
-    target.adapter === 'static' &&
-    target.capabilities.artifactTypes.includes('files')
-  );
 }
 
 /**

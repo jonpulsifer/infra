@@ -71,12 +71,13 @@ export function desiredState(
           : `registry.example.test/conformance@${digest}`,
       ],
     },
-    // Exposure follows the shape rather than being fixed, because §9 ties the
+    // Reach follows the shape rather than being fixed, because §9 ties the
     // two: a `files` artifact only ever lands on static hosting, which serves
     // `Public` only — so a private one is a state no Target accepts, and a
     // suite that asked for one would be asserting against a placement core
     // would never make.
-    exposure: artifactType === 'files' ? 'public' : 'private',
+    reach: artifactType === 'files' ? 'public' : 'private',
+    auth: artifactType === 'files' ? 'none' : 'proxy',
     config: [],
     requirements: {
       platform: { os: 'linux', arch: 'amd64' },

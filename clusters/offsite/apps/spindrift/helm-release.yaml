@@ -85,8 +85,11 @@ spec:
       controlPlane:
         hostname: spindrift.${SECRET_DOMAIN}
       dns:
-        apexZone: ${SPINDRIFT_DOMAIN}
-        vanityZone: ${SPINDRIFT_DOMAIN}
+        # One zone for both reaches: flipping a Component between private and
+        # public is a record re-point here, and its hostname does not change.
+        zones:
+          private: ${SPINDRIFT_DOMAIN}
+          public: ${SPINDRIFT_DOMAIN}
       auth:
         gateway: null
       build:
@@ -116,6 +119,15 @@ spec:
         defaultBucket: bluenose-spindrift-source
       targets:
         - name: offsite
+          # Every reach: this cluster has a load-balancer address on the lab net
+          # and a Cloudflare tunnel in front of it.
+          reaches: [none, private, public]
+          # Its authenticated edge answers for `private` and not for `public`.
+          # oauth2-proxy here admits one GitHub user (`github-user: jonpulsifer`),
+          # which is honest in front of an address only this network reaches and
+          # a lie in front of one anybody can. Widening it is a `github-org`
+          # swap plus this list — no Spindrift change.
+          authReaches: [private]
           adapter: kubernetes
           connection:
             delivery:
@@ -126,7 +138,32 @@ spec:
                 namespace: flux-system
             apiServer: https://kubernetes.default.svc
             namespace: spindrift-apps
-            chartContract: "2"
+            chartContract: "3"
+            # §7's operator class: what the App chart needs about *this*
+            # cluster. Spindrift never renders into it.
+            chartValues:
+              platform:
+                # The gateway the tunnel already forwards to, which already
+                # admits routes from spindrift-apps.
+                gateway:
+                  name: cluster-gateway
+                  namespace: default
+                externalAuth:
+                  name: oauth2-proxy
+                  namespace: oauth2-proxy
+                  port: 80
+                dns:
+                  # The gateway's LoadBalancer address. RFC1918, so publishing
+                  # it is the private boundary rather than a hole in one.
+                  privateAddress: 10.89.0.67
+                  tunnelHostname: 9d53c07a-8bde-4466-9f99-3a69d06a6325.cfargotunnel.com
+                networkPolicy:
+                  # The chart's ingress is default-deny for every Component, so
+                  # a correctly attached route still reaches nothing until the
+                  # gateway's namespace is named here.
+                  allowedNamespaces:
+                    - default
+                    - oauth2-proxy
         - name: bluenose-cloudrun
           adapter: cloudrun
           connection:

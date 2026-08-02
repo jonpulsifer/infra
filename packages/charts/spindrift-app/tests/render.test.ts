@@ -104,7 +104,7 @@ describe('the three exclusions', () => {
       {},
       { app: { kind: 'job' } },
       { app: { kind: 'website' } },
-      { app: { exposure: 'public' } },
+      { app: { reach: 'public', auth: 'none' } },
     ]) {
       const rendered = kinds(await render(values));
       for (const kind of excluded) expect(rendered).not.toContain(kind);
@@ -281,9 +281,11 @@ describe('the route', () => {
       { name: 'cluster-gateway', namespace: 'gateway' },
     ]);
     expect(route.spec.hostnames).toEqual(['blog-web.apps.example.test']);
+    // The blanket exclude is gone: publishing the address is the mechanism now
+    // rather than a leak, and the bypass concern moved to the NetworkPolicy.
     expect(
       route.metadata.annotations?.['external-dns.alpha.kubernetes.io/exclude'],
-    ).toBe('true');
+    ).toBeUndefined();
   });
 
   test('the vanity name rides the same route as the canonical one', async () => {
@@ -298,17 +300,17 @@ describe('the route', () => {
     expect(route.spec.hostnames).toHaveLength(2);
   });
 
-  test('an internal Component has no route at all', async () => {
-    // §9: no non-public state may leave a bypassable origin, and a route onto
-    // the shared gateway is exactly that for a Target-private workload.
-    const objects = await render({ app: { exposure: 'internal' } });
+  test('a Component with no reach has no route at all', async () => {
+    // Nothing routes to it, so there is no name to publish and no filter to
+    // hang. The Service is still there — a workload boundary is not an absence.
+    const objects = await render({ app: { reach: 'none', auth: 'none' } });
     expect(kinds(objects)).not.toContain('HTTPRoute');
     expect(kinds(objects)).toContain('Service');
   });
 
-  test('a private route delegates authentication to the shared proxy', async () => {
+  test('auth: proxy renders the filter, at either reach', async () => {
     const asPrivate = one(
-      await render({ app: { exposure: 'private' } }),
+      await render({ app: { reach: 'private', auth: 'proxy' } }),
       'HTTPRoute',
     );
     expect(asPrivate.spec.rules[0].filters).toEqual([
@@ -340,12 +342,57 @@ describe('the route', () => {
     ]);
   });
 
-  test('a public route has no authentication filter', async () => {
-    const asPublic = one(
-      await render({ app: { exposure: 'public' } }),
+  test('auth: none renders no filter, at either reach', async () => {
+    for (const reach of ['private', 'public'] as const) {
+      const route = one(
+        await render({ app: { reach, auth: 'none' } }),
+        'HTTPRoute',
+      );
+      expect(route.spec.rules[0].filters).toBeUndefined();
+    }
+  });
+
+  test('the filter renders on a public route too, unmet audience aside', async () => {
+    // Whether a Target *may* serve this cell is placement's question, not the
+    // chart's. The chart's job is that the cell is renderable at all — which is
+    // what makes `{public, proxy}` expressible-and-unmet rather than absent.
+    const route = one(
+      await render({ app: { reach: 'public', auth: 'proxy' } }),
       'HTTPRoute',
     );
-    expect(asPublic.spec.rules[0].filters).toBeUndefined();
+    expect(route.spec.rules[0].filters?.[0]?.type).toBe('ExternalAuth');
+  });
+
+  test('reach decides the record external-dns publishes', async () => {
+    // The record type is the boundary. An RFC1918 address is not reachable from
+    // the internet whatever policy is or is not attached to it, which is what
+    // lets the proxied wildcard be retired without weakening anything.
+    const asPrivate = one(
+      await render({ app: { reach: 'private', auth: 'proxy' } }),
+      'HTTPRoute',
+    );
+    expect(asPrivate.metadata.annotations).toMatchObject({
+      'external-dns.alpha.kubernetes.io/target': '10.89.0.67',
+      'external-dns.alpha.kubernetes.io/cloudflare-proxied': 'false',
+    });
+
+    const asPublic = one(
+      await render({ app: { reach: 'public', auth: 'none' } }),
+      'HTTPRoute',
+    );
+    expect(asPublic.metadata.annotations).toMatchObject({
+      'external-dns.alpha.kubernetes.io/target': 'tunnel.example.test',
+      'external-dns.alpha.kubernetes.io/cloudflare-proxied': 'true',
+    });
+  });
+
+  test('a route with no gateway to attach to fails to render', async () => {
+    // The Deploy that goes green with `parentRefs` naming the empty string is
+    // the failure this refuses: a route attached to nothing, and a URL that
+    // answers nothing. Placement refuses it first; this is the backstop.
+    expect(
+      render({ platform: { gateway: { name: '', namespace: '' } } }),
+    ).rejects.toThrow(/gateway/);
   });
 });
 

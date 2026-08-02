@@ -9,7 +9,7 @@
  *
  * That ordering is deliberate. These types are built out of the domain's own
  * closed vocabularies — {@link FailureReason}, {@link Blame},
- * {@link ComponentKind}, {@link Exposure}, {@link Exclusion} — so a view cannot
+ * {@link ComponentKind}, {@link Reach}, {@link Exclusion} — so a view cannot
  * render a phase, a blame, or an exclusion the domain does not have. When the
  * query commands land they will be typed to return these, and the compiler,
  * not a reviewer, is what will say whether they match.
@@ -22,8 +22,9 @@
 import type { Blame, FailureReason } from '../adapters/deploy/contract.ts';
 import type {
   ArtifactType,
+  Auth,
   ComponentKind,
-  Exposure,
+  Reach,
 } from '../domain/desired-state.ts';
 import type { Exclusion } from '../domain/placement.ts';
 
@@ -385,7 +386,8 @@ export interface ComponentView {
   readonly kind: ComponentKind;
   readonly phase: DeployPhase;
   readonly artifact: string;
-  readonly exposure: Exposure;
+  readonly reach: Reach;
+  readonly auth: Auth;
 }
 
 /**

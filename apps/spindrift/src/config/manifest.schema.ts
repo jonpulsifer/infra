@@ -177,6 +177,8 @@ const kubernetesDeliverySchema = z.discriminatedUnion('flavour', [
     .strict(),
 ]);
 
+const reachSchema = z.enum(['none', 'private', 'public']);
+
 /**
  * A Target declared by installation desired state.
  *
@@ -191,6 +193,13 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       /** Stable identifier, unique within the installation. */
       name: targetNameSchema,
       adapter: z.literal('kubernetes'),
+      /**
+       * §3's asserted half, declared so a torn-down installation comes back
+       * knowing what it can serve rather than waiting for someone to re-state
+       * it. Absent means unasserted, which is not the same as `[]`.
+       */
+      reaches: z.array(reachSchema).optional(),
+      authReaches: z.array(reachSchema).optional(),
       connection: z
         .object({
           apiServer: z.url(),
@@ -200,6 +209,13 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
           reachableRegistries: z.array(nonEmptyString).optional(),
           logHistorySeconds: z.number().int().nonnegative().optional(),
           chartContract: nonEmptyString.optional(),
+          /**
+           * §7's operator class, verbatim. Untyped for the reason
+           * `KubernetesConnection.chartValues` gives: the chart's classes are
+           * the adapter's knowledge, and the boundary is enforced where this is
+           * saved rather than where it is declared.
+           */
+          chartValues: z.record(z.string(), z.unknown()).optional(),
         })
         .strict()
         .optional(),
@@ -261,7 +277,7 @@ export const installationManifestSchema = z
          * (§9) has to tell its own address apart from an App's, which is the
          * only way one process can serve both.
          *
-         * It is not derived from `dns.apexZone`: the control plane is a
+         * It is not derived from `dns.zones`: the control plane is a
          * platform workload (§19) and never one of its own Apps, so it does not
          * live in the zone Apps are named in.
          *
@@ -303,16 +319,22 @@ export const installationManifestSchema = z
     dns: z
       .object({
         /**
-         * Dedicated apex Spindrift mints canonical names under, disjoint from
-         * any hand-managed flat space (§9).
+         * One zone per reach, each dedicated to generated names and disjoint
+         * from any hand-managed flat space (§9).
+         *
+         * They are named separately because they are allowed to diverge, and the
+         * choice is the installation's rather than the product's: a homelab
+         * points both at one zone, so flipping a Component's reach is a record
+         * re-point and its hostname is stable; a work installation points them
+         * at different zones — separate trust boundaries, split-horizon
+         * resolvers — and accepts that changing reach is a rename.
          */
-        apexZone: zone,
-        /**
-         * Zone the flat single-label vanity names are layered on (§9). May be
-         * the same zone as the apex; it is named separately because the two are
-         * allowed to diverge.
-         */
-        vanityZone: zone,
+        zones: z
+          .object({
+            private: zone,
+            public: zone,
+          })
+          .strict(),
       })
       .strict(),
 

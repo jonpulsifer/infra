@@ -15,8 +15,9 @@
  * the feel of failure more than anything else.
  */
 import type {
+  Auth,
   ComponentKind,
-  Exposure,
+  Reach,
 } from '../../src/domain/desired-state.ts';
 import type {
   AppListItem,
@@ -377,7 +378,8 @@ export const WORKSPACE_SCENARIOS = {
         kind: 'service',
         phase: 'LIVE',
         artifact: 'image · sha256:93a7…fe21',
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
       },
     ],
     datastores: [
@@ -490,7 +492,8 @@ export const WORKSPACE_SCENARIOS = {
         kind: 'website',
         phase: 'LIVE',
         artifact: 'files · sha256:b119…02a8',
-        exposure: 'public',
+        reach: 'public',
+        auth: 'none',
       },
     ],
     // §11: a website cannot attach a Datastore.
@@ -554,7 +557,8 @@ export const WORKSPACE_SCENARIOS = {
         kind: 'job',
         phase: 'LIVE',
         artifact: 'image · sha256:7cc2…198f',
-        exposure: 'internal',
+        reach: 'none',
+        auth: 'none',
       },
     ],
     datastores: [
@@ -688,10 +692,10 @@ export const TARGET_OPTIONS: readonly TargetOptionView[] = [
     candidate: false,
     artifactType: null,
     canonical: `almanac.remote.${APEX}`,
-    reasons: ['UNHEALTHY', 'EXPOSURE_UNSUPPORTED'],
+    reasons: ['UNHEALTHY', 'REACH_UNSUPPORTED'],
     detail: [
       'the prerequisite checklist has an unmet item: no writable secret store',
-      'publicExposure is not asserted for this Target',
+      'a public reach is not asserted for this Target',
     ],
   },
 ];
@@ -722,7 +726,8 @@ export const INITIAL_DRAFT: Draft = {
     note: 'the default shared vessel',
   },
   targetId: 'metal',
-  exposure: 'private' satisfies Exposure,
+  reach: 'private' satisfies Reach,
+  auth: 'proxy' satisfies Auth,
   config: [
     { name: 'LOG_LEVEL', supplied: true },
     { name: 'DATABASE_URL', supplied: false },

@@ -134,6 +134,13 @@
       "when": 1785374380762,
       "tag": "0018_registry_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785374380763,
+      "tag": "0019_reach_and_auth",
+      "breakpoints": true
     }
   ]
 }

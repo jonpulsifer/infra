@@ -363,7 +363,7 @@ describe('the real src/', () => {
     const fixture = await Bun.file(
       join(APP, 'test/fixtures/installation.example.yaml'),
     ).text();
-    expect(fixture).toContain('apexZone');
+    expect(fixture).toContain('zones');
     expect(fixture).toContain('artifactsProject');
   });
 });

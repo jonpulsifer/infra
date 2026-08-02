@@ -93,7 +93,8 @@ async function connectEverything(registry: AdapterRegistry) {
 
 async function seedComponent(
   kind: ComponentKind = 'service',
-  exposure: Component['exposure'] = 'private',
+  reach: Component['reach'] = 'private',
+  auth: Component['auth'] = 'proxy',
 ) {
   const db = database().db;
   const [app] = await db
@@ -102,7 +103,7 @@ async function seedComponent(
     .returning();
   const [component] = await db
     .insert(components)
-    .values({ appId: app!.id, name: 'web', kind, exposure })
+    .values({ appId: app!.id, name: 'web', kind, reach, auth })
     .returning();
   return { app: app!, component: component! };
 }
@@ -131,9 +132,12 @@ describe('resolution is derived, and it is a query', () => {
       'vessel-cloudrun',
       'vessel-static',
     ]);
+    // Only the cluster. A `private` reach is an address on the operator's own
+    // network, and neither cloud backend has one to publish — which is a
+    // sharper answer than the old three-state exposure could give.
     expect(placement.options.map((option) => option.candidate)).toEqual([
       true,
-      true,
+      false,
       false,
     ]);
   });
@@ -153,30 +157,33 @@ describe('resolution is derived, and it is a query', () => {
 
   test('a public website reaches the static Target, as files', async () => {
     const registry = fakes();
-    const connected = await connectEverything(registry);
-    // §3's single genuine assertion, stated by the operator (§13).
+    await connectEverything(registry);
+    // A reach the operator states, because §3 says nothing reports one (§13).
     await database()
       .db.update(targets)
-      .set({ publicExposure: true })
+      .set({ reaches: ['none', 'private', 'public'] })
       .where(eq(targets.name, 'vessel-static'));
-    const { component } = await seedComponent('website', 'public');
+    const { component } = await seedComponent('website', 'public', 'none');
 
     const placement = await place(registry, component.id);
     const cdn = placement.options.find((o) => o.name === 'vessel-static')!;
     expect(cdn.candidate).toBe(true);
     expect(cdn.artifactType).toBe('files');
-    // And it is the only candidate: nothing else asserted a public path.
-    expect(placement.suggestedTargetId).toBe(
-      connected.get('vessel-static')!.id,
-    );
+    // The cloud runtime serves a public reach too — its own URL, no tunnel
+    // needed — so what separates the two here is artifact shape rather than
+    // candidacy, and rank is the tie-break §3 leaves to a human.
+    const run = placement.options.find((o) => o.name === 'vessel-cloudrun')!;
+    expect(run.candidate).toBe(true);
+    expect(run.artifactType).toBe('image');
   });
 
   test('nowhere fits is returned, with a reason for every Target', async () => {
     const registry = fakes();
     await connectEverything(registry);
-    const { component } = await seedComponent('service', 'public');
+    const { component } = await seedComponent('job', 'public', 'none');
 
-    // No Target asserted `publicExposure`, so a public service fits nowhere.
+    // A public job: the cluster runs jobs and has no public reach, and neither
+    // cloud backend runs a job at all. Every row has a reason.
     const placement = await place(registry, component.id);
     expect(placement.suggestedTargetId).toBeNull();
     expect(placement.options.every((option) => !option.candidate)).toBe(true);
@@ -212,10 +219,14 @@ describe('resolution is derived, and it is a query', () => {
 });
 
 describe('an attached cluster-local Datastore constrains the App', () => {
+  // A Component with no route, so both the cluster and the cloud runtime can
+  // hold it and the Datastore is the only thing that narrows the field.
+  const unrouted = () => seedComponent('service', 'none', 'none');
+
   test('at attach time, the cloud stops being a candidate', async () => {
     const registry = fakes();
     const connected = await connectEverything(registry);
-    const { app, component } = await seedComponent();
+    const { app, component } = await unrouted();
 
     expect(
       (await place(registry, component.id)).options.filter((o) => o.candidate),
@@ -244,7 +255,7 @@ describe('an attached cluster-local Datastore constrains the App', () => {
   test('a Datastore detached from the App constrains nothing', async () => {
     const registry = fakes();
     const connected = await connectEverything(registry);
-    const { component } = await seedComponent();
+    const { component } = await unrouted();
 
     // §2, §11: deleting an App detaches its Datastores and never cascades, so
     // an orphaned Datastore row must not keep constraining anybody.

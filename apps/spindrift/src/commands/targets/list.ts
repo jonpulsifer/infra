@@ -82,7 +82,8 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
 
       const placement = resolvePlacement([placementTarget], {
         kind: 'service',
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
         platform: DEFAULT_PLATFORM,
         registries: context.manifest.supplyChain.registry,
         resources: {},

@@ -39,11 +39,13 @@ import { Field } from '../../../ui/field.tsx';
 import { blockersFor, type Draft, draftReducer, ENTRIES } from './draft.ts';
 import {
   Advanced,
+  AUTH_NOTE,
+  AUTHS,
   Choice,
-  EXPOSURE_NOTE,
-  EXPOSURES,
   KIND_NOTE,
   KINDS,
+  REACH_NOTE,
+  REACHES,
   Row,
   TargetHealth,
   VesselRow,
@@ -340,23 +342,40 @@ export function NewApp({
 
         <Row label="URL" value={target?.canonical ?? 'pending a Target'} />
 
-        <Row
-          label="Reach"
-          value={draft.exposure}
-          why={EXPOSURE_NOTE[draft.exposure]}
-        >
+        <Row label="Reach" value={draft.reach} why={REACH_NOTE[draft.reach]}>
           <div className="grid gap-2 sm:grid-cols-3">
-            {EXPOSURES.map((exposure) => (
+            {REACHES.map((reach) => (
               <Choice
-                key={exposure}
-                selected={draft.exposure === exposure}
-                title={exposure}
-                note={EXPOSURE_NOTE[exposure]}
-                onClick={() => dispatch({ type: 'exposure', exposure })}
+                key={reach}
+                selected={draft.reach === reach}
+                title={reach}
+                note={REACH_NOTE[reach]}
+                onClick={() => dispatch({ type: 'reach', reach })}
               />
             ))}
           </div>
         </Row>
+
+        {/*
+          Offered separately because it is a separate fact, and hidden at
+          `reach: none` because there is no route to put a filter on — the same
+          refusal validation makes, stated by not asking.
+        */}
+        {draft.reach !== 'none' && (
+          <Row label="Auth" value={draft.auth} why={AUTH_NOTE[draft.auth]}>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {AUTHS.map((auth) => (
+                <Choice
+                  key={auth}
+                  selected={draft.auth === auth}
+                  title={auth}
+                  note={AUTH_NOTE[auth]}
+                  onClick={() => dispatch({ type: 'auth', auth })}
+                />
+              ))}
+            </div>
+          </Row>
+        )}
 
         <VesselRow
           name={draft.vessel.name}

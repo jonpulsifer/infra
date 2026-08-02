@@ -286,7 +286,8 @@ export const completeCreationDraft: Command<
           name: row.draft.componentName,
           kind: row.draft.kind,
           expose: row.draft.kind === 'job' ? null : true,
-          exposure: row.draft.exposure,
+          reach: row.draft.reach,
+          auth: row.draft.auth,
           createdAt: now,
           updatedAt: now,
         })
@@ -607,7 +608,8 @@ async function revalidate(
     ),
     {
       kind: draft.kind,
-      exposure: draft.exposure,
+      reach: draft.reach,
+      auth: draft.auth,
       platform: DEFAULT_PLATFORM,
       registries: context.manifest.supplyChain.registry,
       resources: {},

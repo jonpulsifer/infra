@@ -5,7 +5,7 @@
  * the browser reducer only proposes replacements guarded by a revision.
  */
 import { z } from 'zod';
-import type { ComponentKind, Exposure } from './desired-state.ts';
+import type { Auth, ComponentKind, Reach } from './desired-state.ts';
 import { digestSchema } from './digest.ts';
 
 export const ENTRIES = [
@@ -50,7 +50,8 @@ export const DECISIONS = [
 ] as const;
 
 const componentKind = z.enum(['service', 'website', 'job']);
-const exposure = z.enum(['internal', 'private', 'public']);
+const reach = z.enum(['none', 'private', 'public']);
+const auth = z.enum(['none', 'proxy']);
 const entry = z.enum(['service', 'website', 'upload', 'repo', 'discover']);
 const appName = z
   .string()
@@ -120,7 +121,8 @@ export const creationDraftSchema = z
     kind: componentKind,
     vessel,
     targetId: z.string(),
-    exposure,
+    reach,
+    auth,
     config: z.array(configKey),
     /**
      * Which step of the old rail this draft was left on.
@@ -146,7 +148,8 @@ export type DraftAction =
   | { type: 'field'; field: 'appName' | 'componentName'; value: string }
   | { type: 'kind'; kind: ComponentKind }
   | { type: 'target'; targetId: string }
-  | { type: 'exposure'; exposure: Exposure }
+  | { type: 'reach'; reach: Reach }
+  | { type: 'auth'; auth: Auth }
   | { type: 'repo'; fullName: string; url: string }
   | { type: 'subpath'; subpath: string }
   /**
@@ -242,7 +245,8 @@ export function initialCreationDraft(input: {
       note: 'the installation home vessel',
     },
     targetId: input.targetId ?? '',
-    exposure: 'private',
+    reach: 'private',
+    auth: 'proxy',
     config: [],
   };
 }
@@ -262,8 +266,17 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
       return { ...draft, kind: action.kind };
     case 'target':
       return { ...draft, targetId: action.targetId };
-    case 'exposure':
-      return { ...draft, exposure: action.exposure };
+    // Choosing no route drops the filter with it. The alternative is a draft
+    // that looks complete and is refused at create — the same refusal, moved to
+    // the point where the developer can no longer see what caused it.
+    case 'reach':
+      return {
+        ...draft,
+        reach: action.reach,
+        ...(action.reach === 'none' ? { auth: 'none' as const } : {}),
+      };
+    case 'auth':
+      return { ...draft, auth: action.auth };
     case 'detect': {
       // The kind moves with the proposal. A developer who had already
       // corrected it and then changed the source has changed the thing being

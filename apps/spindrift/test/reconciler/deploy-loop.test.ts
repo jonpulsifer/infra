@@ -9,7 +9,7 @@
  * - **The diagnosis survives the platform forgetting.** §12 stores it precisely
  *   because cluster events expire in about an hour; the test makes the far side
  *   forget and reads the explanation back anyway.
- * - **Exposure never mutates on red** (§9). A failed attempt leaves the App as
+ * - **Reach never mutates on red** (§9). A failed attempt leaves the App as
  *   reachable as it was, because the previous release is still serving.
  * - **The loop converges with `NOTIFY` dropped.** Notifications are lost when no
  *   listener is connected, so the poll has to be the correctness path. Every
@@ -68,7 +68,12 @@ function context(
 
 /** An App, Component, Target, Build, and one PENDING Deploy intent. */
 async function pendingDeploy(
-  options: { exposure?: 'internal' | 'private' | 'public' } = {},
+  options: {
+    reach?: 'none' | 'private' | 'public';
+    auth?: 'none' | 'proxy';
+    /** The backend this lands on, which decides who mints the name (§9). */
+    adapter?: 'kubernetes' | 'cloudrun';
+  } = {},
 ) {
   const db = database().db;
   const [app] = await db
@@ -82,7 +87,8 @@ async function pendingDeploy(
       name: 'web',
       kind: 'service',
       expose: true,
-      exposure: options.exposure ?? 'private',
+      reach: options.reach ?? 'private',
+      auth: options.auth ?? 'proxy',
     })
     .returning();
   const [target] = await db
@@ -90,7 +96,7 @@ async function pendingDeploy(
     .values(
       targetValues({
         name: `cluster-${crypto.randomUUID()}`,
-        adapter: 'kubernetes',
+        adapter: options.adapter ?? 'kubernetes',
       }),
     )
     .returning();
@@ -112,7 +118,8 @@ async function pendingDeploy(
       targetId: target!.id,
       buildId: build!.id,
       phase: 'PENDING',
-      exposure: options.exposure ?? 'private',
+      reach: options.reach ?? 'private',
+      auth: options.auth ?? 'proxy',
     })
     .returning();
   await db.insert(componentTargetDesired).values({
@@ -258,7 +265,7 @@ describe('phases come from the platform, not from core (§6)', () => {
     expect(row?.ref).toBe('hr/apps/web');
     // §9: core minted the canonical name, so the URL is core's and the adapter
     // had nothing to add.
-    expect(row?.url).toBe(`https://web.shop.${manifest.dns.apexZone}`);
+    expect(row?.url).toBe(`https://shop-web.${manifest.dns.zones.private}`);
 
     // The whole timeline landed on the one attempt log the UI subscribes to.
     const events = await database()
@@ -288,8 +295,10 @@ describe('phases come from the platform, not from core (§6)', () => {
     expect(desired.kind).toBe('service');
     expect(desired.artifact.digest).toBe(DIGEST);
     expect(desired.deploy).toBe(String(deploy.id));
+    // Flat, and the App leads: one label under the zone is what a wildcard
+    // certificate binds, and what makes the name resolvable over TLS at all.
     expect(desired.hostname.canonical).toBe(
-      `web.shop.${manifest.dns.apexZone}`,
+      `shop-web.${manifest.dns.zones.private}`,
     );
   });
 });
@@ -385,18 +394,26 @@ describe('§12: the diagnosis outlives the platform', () => {
 });
 
 describe('§9: one vanity name, and never two claimants', () => {
+  // On a backend that names its own workloads. Where core mints the canonical
+  // it now mints a flat name directly, so there is no second layer to contend
+  // for — the contention this describes is real only where the layer survives.
+  const claimant = () =>
+    pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
+  /** The fake standing in for that backend, so the loop has one to call. */
+  const claimantAdapter = () => new FakeDeployAdapter({ adapter: 'cloudrun' });
+
   test('a sole serving Component carries the App’s vanity name', async () => {
-    const { app } = await pendingDeploy();
+    const { app } = await claimant();
     await database()
       .db.update(apps)
       .set({ vanityDomain: 'shop' })
       .where(eq(apps.id, app.id));
 
-    const adapter = new FakeDeployAdapter();
+    const adapter = claimantAdapter();
     await runDeployPass(context(adapter));
 
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
-      `shop.${manifest.dns.vanityZone}`,
+      `shop.${manifest.dns.zones.public}`,
     );
   });
 
@@ -405,7 +422,7 @@ describe('§9: one vanity name, and never two claimants', () => {
     // Handing one name to two Components puts the same hostname on two routes,
     // and the platform resolves that collision arbitrarily — which is worse
     // than the App simply not having a front-door name yet.
-    const { app, component, target, build } = await pendingDeploy();
+    const { app, component, target, build } = await claimant();
     await database()
       .db.update(apps)
       .set({ vanityDomain: 'shop' })
@@ -417,15 +434,14 @@ describe('§9: one vanity name, and never two claimants', () => {
       expose: true,
     });
 
-    const adapter = new FakeDeployAdapter();
+    const adapter = claimantAdapter();
     await runDeployPass(context(adapter));
 
     const desired = adapter.applied[0]?.desired;
     expect(desired?.hostname.vanity).toBeUndefined();
-    // The canonical still resolves — it is per Component and never contended.
-    expect(desired?.hostname.canonical).toBe(
-      `web.shop.${manifest.dns.apexZone}`,
-    );
+    // The canonical is the platform's own here, reported back across the deploy
+    // seam rather than minted — so core hands over an empty one.
+    expect(desired?.hostname.canonical).toBe('');
     expect(component.id).toBeDefined();
     expect(target.id).toBeDefined();
     expect(build.id).toBeDefined();
@@ -434,7 +450,7 @@ describe('§9: one vanity name, and never two claimants', () => {
   test('an unexposed sibling is not a claimant', async () => {
     // §2: an unexposed service is a queue worker, and a job serves nothing.
     // Neither can contend for the App's front door.
-    const { app } = await pendingDeploy();
+    const { app } = await claimant();
     await database()
       .db.update(apps)
       .set({ vanityDomain: 'shop' })
@@ -449,18 +465,21 @@ describe('§9: one vanity name, and never two claimants', () => {
       .db.insert(components)
       .values({ appId: app.id, name: 'nightly', kind: 'job' });
 
-    const adapter = new FakeDeployAdapter();
+    const adapter = claimantAdapter();
     await runDeployPass(context(adapter));
 
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
-      `shop.${manifest.dns.vanityZone}`,
+      `shop.${manifest.dns.zones.public}`,
     );
   });
 });
 
-describe('§9: exposure never mutates on red', () => {
+describe('§9: reach and auth never mutate on red', () => {
   test('a failed attempt leaves the Component and the Deploy as they were', async () => {
-    const { deploy, component } = await pendingDeploy({ exposure: 'public' });
+    const { deploy, component } = await pendingDeploy({
+      reach: 'public',
+      auth: 'none',
+    });
     const adapter = new FakeDeployAdapter({
       script: [{ verdict: { phase: 'FAILED', reason: 'STARTUP_FAILED' } }],
     });
@@ -473,13 +492,15 @@ describe('§9: exposure never mutates on red', () => {
     // The App is exactly as reachable as it was: the previous release is still
     // serving, and quietly tightening this would turn one red deploy into an
     // outage nobody asked for.
-    expect(row?.exposure).toBe('public');
+    expect(row?.reach).toBe('public');
+    expect(row?.auth).toBe('none');
 
     const [after] = await database()
       .db.select()
       .from(components)
       .where(eq(components.id, component.id));
-    expect(after?.exposure).toBe('public');
+    expect(after?.reach).toBe('public');
+    expect(after?.auth).toBe('none');
   });
 });
 

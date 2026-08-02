@@ -595,7 +595,8 @@ describe('concurrency: the locking read (§6)', () => {
     const preconditions = {
       componentId: component.id,
       targetId: target.id,
-      exposure: 'private' as const,
+      reach: 'private' as const,
+      auth: 'proxy' as const,
       // Nothing is configured here, and the empty document still has a version
       // (§10) — "no config" is a state a Deploy is pinned to like any other.
       config: { document: [], version: await configVersionOf([]) },

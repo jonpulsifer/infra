@@ -98,7 +98,8 @@ export interface DeployPreconditions {
   readonly componentId: string;
   readonly targetId: string;
   readonly buildId: number;
-  readonly exposure: 'internal' | 'private' | 'public';
+  readonly reach: 'none' | 'private' | 'public';
+  readonly auth: 'none' | 'proxy';
   /**
    * The pinned config document this attempt delivers (§10).
    *
@@ -210,10 +211,11 @@ export async function placeIntent(
         targetId: checked.targetId,
         buildId: checked.buildId,
         phase: 'PENDING',
-        // §9: exposure is the Component's setting, captured at intent time so a
-        // later change to the Component does not retroactively describe what
-        // this attempt asked for.
-        exposure: checked.exposure,
+        // §9: reach and auth are the Component's settings, captured at intent
+        // time so a later change to the Component does not retroactively
+        // describe what this attempt asked for.
+        reach: checked.reach,
+        auth: checked.auth,
         // §10, for the same reason and with more at stake: the document is what
         // this Deploy delivers, so a rollback to it delivers that document
         // again rather than whatever config was set in the meantime.
@@ -396,7 +398,8 @@ export async function checkDeployable(
       componentId: component.id,
       targetId: target.id,
       buildId: build.id,
-      exposure: component.exposure,
+      reach: component.reach,
+      auth: component.auth,
       config: await readPinnedConfig(context.db, component.id, target.id),
     },
   };

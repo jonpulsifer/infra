@@ -49,6 +49,10 @@ const BASELINE: Values = {
       namespace: 'oauth2-proxy',
       port: 80,
     },
+    dns: {
+      privateAddress: '10.89.0.67',
+      tunnelHostname: 'tunnel.example.test',
+    },
     networkPolicy: { allowedNamespaces: ['gateway', 'monitoring'] },
   },
 };

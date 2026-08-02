@@ -150,7 +150,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       .db.update(targets)
       .set({
         health: 'healthy',
-        publicExposure: true,
+        reaches: ['none', 'private', 'public'],
         discovery: {
           ...CAPABLE_DISCOVERY,
           reachableSecretStores: ['onepassword'],
@@ -165,7 +165,8 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
 
     const ranked = resolvePlacement(placementTargets, {
       kind: 'service',
-      exposure: 'private',
+      reach: 'private',
+      auth: 'proxy',
       platform: DEFAULT_PLATFORM,
       resources: {},
       gpu: false,

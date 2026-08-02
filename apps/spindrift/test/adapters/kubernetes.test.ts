@@ -104,7 +104,8 @@ function desiredState(overrides: Partial<DesiredState> = {}): DesiredState {
       refs: ['registry.example.test/blog/web@sha256:feed'],
     },
     expose: true,
-    exposure: 'private',
+    reach: 'private',
+    auth: 'proxy',
     config: [],
     requirements: {
       platform: { os: 'linux', arch: 'amd64' },

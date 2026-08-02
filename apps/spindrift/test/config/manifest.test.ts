@@ -18,7 +18,7 @@ describe('the fixture installation', () => {
     const manifest = await loadManifest({ [MANIFEST_PATH_VAR]: FIXTURE });
     expect(manifest.installation).toBe('example');
     expect(manifest.auth.gateway).toBeNull();
-    expect(manifest.dns.apexZone).toBe('apps.example.test');
+    expect(manifest.dns.zones.private).toBe('apps.example.test');
     expect(manifest.secretStore.adapter).toBe('gcp-secret-manager');
     expect(manifest.targets.map((t) => t.adapter)).toEqual([
       'kubernetes',

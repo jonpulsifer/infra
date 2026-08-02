@@ -11,7 +11,7 @@
  * - **The document carries an image and nothing that could cause a build.** The
  *   runtime offers a source-to-image path and taking it would give this
  *   installation a second build engine reachable from one backend only (§4).
- * - **Exposure is written before the Service when it tightens** and after it
+ * - **Reach is written before the Service when it tightens** and after it
  *   when it opens, because §9's transitions fail closed.
  * - **Phases come from the revision.** The adapter polls; it never decides that
  *   something is ready.
@@ -38,7 +38,7 @@ import {
   deriveHealth,
   deriveVerifiedDeploy,
 } from '../../src/domain/capabilities.ts';
-import type { DesiredState, Exposure } from '../../src/domain/desired-state.ts';
+import type { DesiredState, Reach } from '../../src/domain/desired-state.ts';
 import type { CloudRunConnection } from '../../src/domain/target.ts';
 import {
   FakeCloudRun,
@@ -76,7 +76,8 @@ function desired(overrides: Partial<DesiredState> = {}): DesiredState {
       digest: 'sha256:abc',
       refs: ['registry.example.test/shop@sha256:abc'],
     },
-    exposure: 'private',
+    reach: 'private',
+    auth: 'proxy',
     config: [],
     requirements: { platform: { os: 'linux', arch: 'amd64' }, resources: {} },
     hostname: { canonical: '' },
@@ -150,18 +151,22 @@ describe('§4: never the build-from-source path', () => {
   });
 });
 
-describe('§9: exposure reaches the runtime as two mechanisms', () => {
-  test('internal is the only state that closes ingress', () => {
-    expect(ingressFor('internal')).toBe(INGRESS.internalOnly);
+describe('§9: reach and auth reach the runtime as two mechanisms', () => {
+  test('only an absent reach closes ingress', () => {
+    expect(ingressFor('none')).toBe(INGRESS.internalOnly);
     expect(ingressFor('private')).toBe(INGRESS.all);
     expect(ingressFor('public')).toBe(INGRESS.all);
   });
 
-  test('only public leaves an unauthenticated invoker', async () => {
-    for (const exposure of ['internal', 'private', 'public'] as const) {
+  test('only a public reach with no auth leaves an open invoker', async () => {
+    for (const [reach, auth] of [
+      ['none', 'none'],
+      ['private', 'proxy'],
+      ['public', 'none'],
+    ] as const) {
       const { api, adapter } = adapterFor();
       const { verdict } = await drain(
-        adapter.apply(target(), desired({ exposure })),
+        adapter.apply(target(), desired({ reach, auth })),
       );
       expect(verdict.phase).toBe('LIVE');
 
@@ -171,7 +176,7 @@ describe('§9: exposure reaches the runtime as two mechanisms', () => {
       const members = policy.policy.bindings.flatMap(
         (binding) => binding.members,
       );
-      expect(members.includes('allUsers')).toBe(exposure === 'public');
+      expect(members.includes('allUsers')).toBe(reach === 'public');
     }
   });
 
@@ -181,7 +186,10 @@ describe('§9: exposure reaches the runtime as two mechanisms', () => {
     // is asserted on the request log rather than on the end state.
     const tightening = adapterFor();
     await drain(
-      tightening.adapter.apply(target(), desired({ exposure: 'private' })),
+      tightening.adapter.apply(
+        target(),
+        desired({ reach: 'private', auth: 'proxy' }),
+      ),
     );
     const beforeApply = tightening.api.requests.findIndex((request) =>
       request.path.endsWith(':setIamPolicy'),
@@ -194,7 +202,10 @@ describe('§9: exposure reaches the runtime as two mechanisms', () => {
 
     const opening = adapterFor();
     await drain(
-      opening.adapter.apply(target(), desired({ exposure: 'public' })),
+      opening.adapter.apply(
+        target(),
+        desired({ reach: 'public', auth: 'none' }),
+      ),
     );
     const grantAt = opening.api.requests.findIndex((request) =>
       request.path.endsWith(':setIamPolicy'),
@@ -208,7 +219,7 @@ describe('§9: exposure reaches the runtime as two mechanisms', () => {
   test('a public deploy whose grant fails is red, not quietly private', async () => {
     const { adapter } = adapterFor({ refuseIam: permissionDenied() });
     const { verdict } = await drain(
-      adapter.apply(target(), desired({ exposure: 'public' })),
+      adapter.apply(target(), desired({ reach: 'public', auth: 'none' })),
     );
     expect(verdict.phase).toBe('FAILED');
     if (verdict.phase === 'FAILED') {
@@ -618,17 +629,17 @@ describe('§16: the Service submits to the project’s own admission policy', ()
   });
 });
 
-describe('the exposure a Target rejects is a state, not a crash', () => {
-  test('every exposure state produces a document', () => {
-    const states: Exposure[] = ['internal', 'private', 'public'];
-    for (const exposure of states) {
-      const document = cloudRunService(desired({ exposure }), {
+describe('the reach a Target rejects is a state, not a crash', () => {
+  test('every reach produces a document', () => {
+    const states: Reach[] = ['none', 'private', 'public'];
+    for (const reach of states) {
+      const document = cloudRunService(desired({ reach }), {
         project: 'example-vessel',
         image: 'registry.example.test/shop@sha256:abc',
         serviceAccount: null,
         useProjectAdmissionPolicy: false,
       });
-      expect(document.ingress).toBe(ingressFor(exposure));
+      expect(document.ingress).toBe(ingressFor(reach));
     }
   });
 });

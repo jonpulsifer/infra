@@ -1,11 +1,11 @@
 /**
  * Naming and DNS (Task 21, §9).
  *
- * §9's two layers differ in a way that is easy to collapse by accident, so both
- * halves are asserted: canonical names **nest freely** because they are not
- * proxied, and vanity names are **flat single-label** because one apex's free
- * certificate covers exactly one subdomain level. A canonical name that had been
- * flattened to fit the vanity rule would work fine and quietly spend the ration.
+ * **Both layers are flat now, and for one reason: a wildcard certificate binds
+ * exactly one label.** `plainboi-web.zone` is covered by `*.zone` and
+ * `web.plainboi.zone` is not, which is what the first LIVE Deploy hit. So the
+ * nesting the canonical layer used to be allowed is gone, and what survives of
+ * the vanity layer is the case where core does not mint the first name at all.
  *
  * The other claim here is negative and therefore needs a test that can fail:
  * **Spindrift holds no Cloudflare credential** (§9 — "Spindrift writes DNS as CRs
@@ -26,28 +26,27 @@ import {
   displayUrl,
   hostnameFor,
   isLabel,
-  VANITY_CEILING,
   VANITY_LEG_LOSSES,
   vanity,
-  vanityCarriesStreams,
-  vanityProxied,
-  vanityRation,
+  zoneForReach,
 } from '../../src/domain/naming.ts';
 
 const APEX = 'apps.example.test';
 const VANITY_ZONE = 'sh.example.test';
+const ZONES = { private: APEX, public: APEX } as const;
 
-describe('§9: two layers, two different rules', () => {
-  test('canonical names nest, because they are not proxied', () => {
+describe('§9: one label under the zone, both layers', () => {
+  test('a minted name is flat, and leads with the App', () => {
     expect(
-      componentCanonical({ app: 'shop', component: 'web', apexZone: APEX }),
-    ).toBe('web.shop.apps.example.test');
+      componentCanonical({ app: 'shop', component: 'web', zone: APEX }),
+    ).toBe('shop-web.apps.example.test');
+    // Flat because a wildcard certificate binds one label. Leading with the App
+    // so an App's Components sort together in a zone listing.
+    expect(isLabel('shop-web')).toBe(true);
   });
 
-  test('a vanity name is one flat label in the vanity zone', () => {
+  test('a vanity name is one flat label in its zone', () => {
     expect(vanity('shop', VANITY_ZONE)).toBe('shop.sh.example.test');
-    // The ration §9 names — "roughly 20" — is a property of one apex's
-    // certificate, and a dotted vanity name would silently need a second one.
     expect(isLabel('shop')).toBe(true);
     expect(isLabel('my-shop')).toBe(true);
     expect(isLabel('shop.web')).toBe(false);
@@ -63,12 +62,37 @@ describe('§9: core mints a name only where the platform gives none', () => {
       app: 'shop',
       component: 'web',
       adapter: 'kubernetes',
-      apexZone: APEX,
-      vanityZone: VANITY_ZONE,
+      reach: 'private',
+      zones: ZONES,
       vanityLabel: null,
     });
-    expect(hostname.canonical).toBe('web.shop.apps.example.test');
+    expect(hostname.canonical).toBe('shop-web.apps.example.test');
     expect(hostname.vanity).toBeUndefined();
+  });
+
+  test('a Component with no reach gets no name at all', () => {
+    // Nothing routes to it, so every name core could mint would resolve to
+    // something unreachable. The absence is the answer, not a gap.
+    expect(zoneForReach('none', ZONES)).toBeNull();
+    for (const adapter of ['kubernetes', 'cloudrun', 'static'] as const) {
+      const hostname = hostnameFor({
+        app: 'shop',
+        component: 'web',
+        adapter,
+        reach: 'none',
+        zones: ZONES,
+        vanityLabel: 'shop',
+      });
+      expect(hostname.canonical).toBe('');
+      expect(hostname.vanity).toBeUndefined();
+      expect(displayUrl(hostname)).toBeNull();
+    }
+  });
+
+  test('each reach picks its own zone', () => {
+    const split = { private: 'lan.example.test', public: 'www.example.test' };
+    expect(zoneForReach('private', split)).toBe('lan.example.test');
+    expect(zoneForReach('public', split)).toBe('www.example.test');
   });
 
   test('the backends that name their own workloads get none from core', () => {
@@ -81,21 +105,21 @@ describe('§9: core mints a name only where the platform gives none', () => {
         app: 'shop',
         component: 'web',
         adapter,
-        apexZone: APEX,
-        vanityZone: VANITY_ZONE,
+        reach: 'public',
+        zones: ZONES,
         vanityLabel: null,
       });
       expect(hostname.canonical).toBe('');
     }
   });
 
-  test('a vanity label is layered on wherever one was chosen', () => {
+  test('a vanity label is layered on only where core mints nothing', () => {
     const hostname = hostnameFor({
       app: 'shop',
       component: 'web',
       adapter: 'cloudrun',
-      apexZone: APEX,
-      vanityZone: VANITY_ZONE,
+      reach: 'public',
+      zones: { private: APEX, public: VANITY_ZONE },
       vanityLabel: 'shop',
     });
     // Vanity is backend-agnostic on purpose: moving an App between backends is
@@ -103,13 +127,27 @@ describe('§9: core mints a name only where the platform gives none', () => {
     expect(hostname.vanity).toBe('shop.sh.example.test');
   });
 
+  test('a minted name is not layered over, because it is already good', () => {
+    // Where core mints, a second flat name in the same zone would be an alias
+    // for something already flat.
+    const hostname = hostnameFor({
+      app: 'shop',
+      component: 'web',
+      adapter: 'kubernetes',
+      reach: 'private',
+      zones: ZONES,
+      vanityLabel: 'shop',
+    });
+    expect(hostname.vanity).toBeUndefined();
+  });
+
   test('the address shown prefers the vanity name, and is null when there is none', () => {
-    expect(displayUrl({ canonical: 'web.shop.apps.example.test' })).toBe(
-      'https://web.shop.apps.example.test',
+    expect(displayUrl({ canonical: 'shop-web.apps.example.test' })).toBe(
+      'https://shop-web.apps.example.test',
     );
     expect(
       displayUrl({
-        canonical: 'web.shop.apps.example.test',
+        canonical: 'shop-web.apps.example.test',
         vanity: 'shop.sh.example.test',
       }),
     ).toBe('https://shop.sh.example.test');
@@ -125,7 +163,7 @@ describe('§9: DNS is a custom resource, not an API call', () => {
       name: 'shop-web',
       namespace: 'app-shop',
       records: recordsFor({
-        canonical: 'web.shop.apps.example.test',
+        canonical: 'shop-web.apps.example.test',
         vanity: 'shop.sh.example.test',
         servedBy: 'tunnel.example.test',
       }),
@@ -141,7 +179,7 @@ describe('§9: DNS is a custom resource, not an API call', () => {
     expect(object.spec).toEqual({
       endpoints: [
         {
-          dnsName: 'web.shop.apps.example.test',
+          dnsName: 'shop-web.apps.example.test',
           recordType: 'CNAME',
           targets: ['tunnel.example.test'],
           recordTTL: DEFAULT_TTL_SECONDS,
@@ -161,18 +199,18 @@ describe('§9: DNS is a custom resource, not an API call', () => {
     // mechanism exists", so an installation without one has an App with one
     // name rather than two names that mean the same thing.
     const records = recordsFor({
-      canonical: 'web.shop.apps.example.test',
+      canonical: 'shop-web.apps.example.test',
       servedBy: 'tunnel.example.test',
     });
     expect(records).toHaveLength(1);
-    expect(records[0]?.dnsName).toBe('web.shop.apps.example.test');
+    expect(records[0]?.dnsName).toBe('shop-web.apps.example.test');
   });
 
   test('records are CNAMEs, never A records at an address core does not own', () => {
     // §9's forcing fact: the metal cluster's load-balancer range is RFC1918, so
     // an A record here would publish an address the internet cannot route to.
     const records = recordsFor({
-      canonical: 'web.shop.apps.example.test',
+      canonical: 'shop-web.apps.example.test',
       servedBy: 'tunnel.example.test',
     });
     expect(records.every((record) => record.recordType === 'CNAME')).toBe(true);
@@ -180,47 +218,24 @@ describe('§9: DNS is a custom resource, not an API call', () => {
 });
 
 describe('§9: the vanity layer, and what it costs', () => {
-  test('the ceiling is a fact about the certificate, reported not enforced', () => {
-    // §9's "hard ceiling: roughly 20 vanity names" is a property of one apex's
-    // free certificate. Nothing here refuses the twenty-first: the UI's job is
-    // to say how many are left, and a limit core imposed would be a policy
-    // somebody chose rather than the one the zone actually has.
-    expect(vanityRation(0)).toEqual({
-      used: 0,
-      ceiling: VANITY_CEILING,
-      remaining: VANITY_CEILING,
-      exhausted: false,
-    });
-    expect(vanityRation(VANITY_CEILING).exhausted).toBe(true);
-    expect(vanityRation(VANITY_CEILING + 5).remaining).toBe(0);
-  });
-
-  test('proxying is per-Target, and follows who mints the canonical name', () => {
-    // §9: "the vanity record is unproxied on that leg, **so** proxying becomes
-    // a per-Target property." The proxy is not a preference — it is the only
-    // way a name reaches a cluster whose load-balancer range is RFC1918.
-    expect(vanityProxied('kubernetes')).toBe(true);
+  test('the layer survives exactly where the platform names its own', () => {
+    // The certificate ration is gone with the Universal-SSL fact that produced
+    // it: a cert-manager wildcard has no such limit. What is left of the layer
+    // is the case it was always best at — putting a flat name over
+    // `plainboi-web-xyz.run.app`.
     for (const adapter of ['cloudrun', 'static'] as const) {
-      expect(vanityProxied(adapter)).toBe(false);
-      // The two are the same question asked twice: a backend that names its
-      // own workloads is a backend the internet already reaches.
       expect(coreMintsCanonical(adapter)).toBe(false);
     }
+    expect(coreMintsCanonical('kubernetes')).toBe(true);
   });
 
-  test('the losses on the unproxied leg are stated, not worked around', () => {
+  test('the losses on the proxied leg are stated, not worked around', () => {
     // §9 absorbs these on purpose, and the reason it can is that the app stays
     // fully capable at its canonical name. Working around them would mean a
     // second edge, which is the external load balancer §9 declines to have.
     expect(VANITY_LEG_LOSSES.buffersResponse).toBe(true);
     expect(VANITY_LEG_LOSSES.streamingProtocols).toBe(false);
     expect(VANITY_LEG_LOSSES.maxRequestSeconds).toBe(60);
-  });
-
-  test('an App that streams keeps its streams only on the proxied leg', () => {
-    expect(vanityCarriesStreams('kubernetes')).toBe(true);
-    expect(vanityCarriesStreams('cloudrun')).toBe(false);
-    expect(vanityCarriesStreams('static')).toBe(false);
   });
 
   test('moving between backends re-points one record and renames nothing', () => {
@@ -230,19 +245,19 @@ describe('§9: the vanity layer, and what it costs', () => {
     // if the adapter appeared in it, a move would change what people had
     // bookmarked.
     const shared = vanity('shop', VANITY_ZONE);
-    for (const adapter of ['kubernetes', 'cloudrun', 'static'] as const) {
+    for (const adapter of ['cloudrun', 'static'] as const) {
       const hostname = hostnameFor({
         app: 'shop',
         component: 'web',
         adapter,
-        apexZone: APEX,
-        vanityZone: VANITY_ZONE,
+        reach: 'public',
+        zones: { private: APEX, public: VANITY_ZONE },
         vanityLabel: 'shop',
       });
       expect(hostname.vanity).toBe(shared);
-      // What does change is the canonical underneath it, and on two of the
-      // three that is the platform's own name arriving across the deploy seam.
-      expect(hostname.canonical === '').toBe(!coreMintsCanonical(adapter));
+      // The canonical underneath it is the platform's own name, arriving across
+      // the deploy seam rather than being minted here.
+      expect(hostname.canonical).toBe('');
     }
   });
 });

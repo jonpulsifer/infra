@@ -80,6 +80,33 @@ const kubernetesDelivery = z.discriminatedUnion('flavour', [
     .strict(),
 ]);
 
+/**
+ * §3's asserted half, which an operator states because nothing reports it.
+ *
+ * Both are optional and both mean "nobody has said": an absent `reaches` falls
+ * back to what the adapter serves by construction, and an absent `authReaches`
+ * is no authenticated edge. Neither is inferred from the other — a Target can
+ * serve a reach it cannot authenticate, which is the whole reason there are two.
+ */
+const assertions = {
+  reaches: z.array(z.enum(['none', 'private', 'public'])).optional(),
+  authReaches: z.array(z.enum(['none', 'private', 'public'])).optional(),
+};
+
+/** The asserted columns, written only where the operator stated one. */
+function assertedBy(input: ConnectTargetInput): {
+  reaches?: ('none' | 'private' | 'public')[];
+  authReaches?: ('none' | 'private' | 'public')[];
+} {
+  if (input.kind !== 'kubernetes') return {};
+  return {
+    ...(input.reaches === undefined ? {} : { reaches: [...input.reaches] }),
+    ...(input.authReaches === undefined
+      ? {}
+      : { authReaches: [...input.authReaches] }),
+  };
+}
+
 export const connectTargetInput = z.discriminatedUnion('kind', [
   z
     .object({
@@ -97,6 +124,7 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       /** §7's per-Target chart-values field, and what the pin declares. */
       chartValues: z.record(z.string(), z.unknown()).optional(),
       chartContract: z.string().trim().min(1).optional(),
+      ...assertions,
     })
     .strict(),
   z
@@ -273,6 +301,7 @@ export const connectTarget: Command<
           rank: next,
           createdAt: now,
           updatedAt: now,
+          ...assertedBy(input),
         })
         .returning();
       registered.push({

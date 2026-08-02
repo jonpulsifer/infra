@@ -434,7 +434,8 @@ async function pendingDeploy() {
       name: 'web',
       kind: 'service',
       expose: true,
-      exposure: 'private',
+      reach: 'private',
+      auth: 'proxy',
     })
     .returning();
   const [target] = await db
@@ -464,7 +465,8 @@ async function pendingDeploy() {
       targetId: target!.id,
       buildId: build!.id,
       phase: 'PENDING',
-      exposure: 'private',
+      reach: 'private',
+      auth: 'proxy',
     })
     .returning();
   await db.insert(componentTargetDesired).values({

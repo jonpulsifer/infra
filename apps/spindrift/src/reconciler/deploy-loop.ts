@@ -266,10 +266,11 @@ export function desiredStateFor(
       refs: build.artifactRefs ?? [],
     },
     ...(component.expose === null ? {} : { expose: component.expose }),
-    // The Deploy's own exposure, not the Component's current one: this attempt
-    // asked for what it asked for, and a Component edited since must not
-    // retroactively change what a running attempt is placing.
-    exposure: deploy.exposure ?? component.exposure,
+    // The Deploy's own reach and auth, not the Component's current ones: this
+    // attempt asked for what it asked for, and a Component edited since must
+    // not retroactively change what a running attempt is placing.
+    reach: deploy.reach ?? component.reach,
+    auth: deploy.auth ?? component.auth,
     ...(component.schedule === null ? {} : { schedule: component.schedule }),
     // §10: the document this Deploy recorded when its intent was written, not
     // whatever config says now. An attempt that re-read the items would deliver
@@ -281,8 +282,8 @@ export function desiredStateFor(
       app: app.name,
       component: component.name,
       adapter: target.adapter,
-      apexZone: manifest.dns.apexZone,
-      vanityZone: manifest.dns.vanityZone,
+      reach: deploy.reach ?? component.reach,
+      zones: manifest.dns.zones,
       vanityLabel: vanityIsUnambiguous ? app.vanityDomain : null,
     }),
   };

@@ -29,7 +29,7 @@ import type { KubernetesConnection } from '../../../domain/target.ts';
  * the values believes the contract to be — and `packages/charts/spindrift-app`
  * declares the same number in its own `Chart.yaml`.
  */
-export const VALUES_CONTRACT = '2';
+export const VALUES_CONTRACT = '3';
 
 /** The three classes §7 names, as the chart's three top-level keys. */
 export const VALUE_CLASSES = {
@@ -105,7 +105,8 @@ export interface AppValues {
   image: string;
   port: number;
   expose: boolean;
-  exposure: DesiredState['exposure'];
+  reach: DesiredState['reach'];
+  auth: DesiredState['auth'];
   schedule: string;
   deployId: string;
   artifactDigest: string;
@@ -167,7 +168,8 @@ export function appValues(desired: DesiredState, image: string): AppValues {
     expose:
       desired.kind === 'website' ||
       (desired.kind === 'service' && desired.expose === true),
-    exposure: desired.exposure,
+    reach: desired.reach,
+    auth: desired.auth,
     // An absent schedule is a suspended CronJob, which is why this is '' and
     // not omitted: the chart branches on emptiness, not on presence.
     schedule: desired.schedule ?? '',
