@@ -540,6 +540,7 @@ describe('§10: config crosses as a pinned reference and never as a value', () =
         project: 'example-vessel',
         image: 'registry.example.test/shop@sha256:abc',
         serviceAccount: null,
+        useProjectAdmissionPolicy: false,
       },
     );
     const template = document.template as {
@@ -564,6 +565,7 @@ describe('the identity a revision runs as', () => {
       project: 'example-vessel',
       image: 'registry.example.test/shop@sha256:abc',
       serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
+      useProjectAdmissionPolicy: false,
     });
     const template = document.template as { serviceAccount?: string };
     expect(template.serviceAccount).toBe(
@@ -581,8 +583,35 @@ describe('the identity a revision runs as', () => {
       project: 'example-vessel',
       image: 'registry.example.test/shop@sha256:abc',
       serviceAccount: null,
+      useProjectAdmissionPolicy: false,
     });
     expect(document.template as object).not.toHaveProperty('serviceAccount');
+  });
+});
+
+describe('§16: the Service submits to the project’s own admission policy', () => {
+  test('a Target that names a policy endpoint declares useDefault', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), desired()));
+
+    // Cloud Run treats Binary Authorization as a property of the Service: one
+    // that names no policy has none, which is what
+    // `run.allowedBinaryAuthorizationPolicies` refuses. Declaring it is how a
+    // Deploy submits to the check rather than how it escapes one.
+    expect(api.service('shop-web')).toHaveProperty('binaryAuthorization', {
+      useDefault: true,
+    });
+  });
+
+  test('a Target that names none says nothing about admission', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(
+      adapter.apply(
+        { ...target(), connection: { ...CONNECTION, policyEndpoint: undefined } },
+        desired(),
+      ),
+    );
+    expect(api.service('shop-web')).not.toHaveProperty('binaryAuthorization');
   });
 });
 
@@ -594,6 +623,7 @@ describe('the exposure a Target rejects is a state, not a crash', () => {
         project: 'example-vessel',
         image: 'registry.example.test/shop@sha256:abc',
         serviceAccount: null,
+        useProjectAdmissionPolicy: false,
       });
       expect(document.ingress).toBe(ingressFor(exposure));
     }
