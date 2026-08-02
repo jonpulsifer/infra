@@ -607,7 +607,10 @@ describe('§16: the Service submits to the project’s own admission policy', ()
     const { api, adapter } = adapterFor();
     await drain(
       adapter.apply(
-        { ...target(), connection: { ...CONNECTION, policyEndpoint: undefined } },
+        {
+          ...target(),
+          connection: { ...CONNECTION, policyEndpoint: undefined },
+        },
         desired(),
       ),
     );

@@ -201,6 +201,20 @@ describe('fixed defaults', () => {
     expect(container.livenessProbe).toBeUndefined();
   });
 
+  test('the port it probes is the port it tells the process about', async () => {
+    // A zero-config build listens on `PORT`. The cloud runtime sets it, which
+    // is why the same image serves there and why nothing here noticed; on a
+    // cluster nobody does, so the image falls back to its own default and the
+    // probe knocks on 8080 until the release times out — with a container that
+    // started perfectly well.
+    const container = one(await render(), 'Deployment').spec.template.spec
+      .containers[0];
+    const port = container.env.find(
+      (variable: { name: string }) => variable.name === 'PORT',
+    );
+    expect(port?.value).toBe(String(container.readinessProbe.tcpSocket.port));
+  });
+
   test('hardening has no per-App opt-out', async () => {
     // §7 fixes these, which is what constrains the zero-config base image to a
     // non-root, read-only-rootfs shape. A value that could relax one would make
