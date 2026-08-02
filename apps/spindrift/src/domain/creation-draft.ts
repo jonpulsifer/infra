@@ -28,7 +28,20 @@ export const ENTRIES = [
   },
 ] as const;
 
-export const STEPS = [
+/**
+ * The five decisions, as the flow used to walk them.
+ *
+ * Kept as vocabulary and no longer as a rail. §18 named the sequence Source →
+ * Component → Place → Configure → Review, and stories 31 and 32 say what that
+ * sequence is *for*: "defaults carrying every step" and "corrections and
+ * configuration hidden behind progressive disclosure". Five screens with a
+ * Continue button under each is one way to render that, and it turned out to
+ * be the way that made every default look like a question.
+ *
+ * So the decisions still exist, in this order, as the order of the summary
+ * rows on one screen. What went away is the walking.
+ */
+export const DECISIONS = [
   'Source',
   'Component',
   'Place',
@@ -109,11 +122,15 @@ export const creationDraftSchema = z
     targetId: z.string(),
     exposure,
     config: z.array(configKey),
-    step: z
-      .number()
-      .int()
-      .min(0)
-      .max(STEPS.length - 1),
+    /**
+     * Which step of the old rail this draft was left on.
+     *
+     * Optional, unread, and still here: drafts are durable rows, and a strict
+     * schema that dropped the key would refuse every draft saved before the
+     * flow became one screen. It costs a line to keep and a migration to
+     * remove.
+     */
+    step: z.number().int().min(0).optional(),
   })
   .strict();
 
@@ -130,9 +147,23 @@ export type DraftAction =
   | { type: 'kind'; kind: ComponentKind }
   | { type: 'target'; targetId: string }
   | { type: 'exposure'; exposure: Exposure }
-  | { type: 'step'; step: number }
   | { type: 'repo'; fullName: string; url: string }
   | { type: 'subpath'; subpath: string }
+  /**
+   * What the detector found, applied.
+   *
+   * This is the action that makes the one screen honest. The draft has always
+   * carried a `detection` block and, until `inspectRepository` existed,
+   * nothing could ever fill it — every new draft started life claiming to be a
+   * service "until detection says otherwise", and detection never said.
+   */
+  | {
+      type: 'detect';
+      scope: string;
+      kind: ComponentKind;
+      reason: string;
+      unavailable: Readonly<Partial<Record<ComponentKind, string>>>;
+    }
   | {
       type: 'archive';
       filename: string;
@@ -213,7 +244,6 @@ export function initialCreationDraft(input: {
     targetId: input.targetId ?? '',
     exposure: 'private',
     config: [],
-    step: 0,
   };
 }
 
@@ -234,11 +264,35 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
       return { ...draft, targetId: action.targetId };
     case 'exposure':
       return { ...draft, exposure: action.exposure };
-    case 'step':
+    case 'detect': {
+      // The kind moves with the proposal. A developer who had already
+      // corrected it and then changed the source has changed the thing being
+      // corrected, so carrying the old correction forward would silently apply
+      // an answer about a different directory.
+      const available = (['service', 'website', 'job'] as const).filter(
+        (kind) => action.unavailable[kind] === undefined,
+      );
       return {
         ...draft,
-        step: Math.min(Math.max(action.step, 0), STEPS.length - 1),
+        kind: action.kind,
+        detection: {
+          kind: action.kind,
+          reason: action.reason,
+          available,
+          unavailable: action.unavailable,
+        },
+        // A detected scope names the Component: `apps/api` is `api`, and a
+        // root scope keeps whatever the repository is called.
+        componentName:
+          action.scope === '.'
+            ? draft.componentName
+            : (action.scope.split('/').pop() ?? draft.componentName),
+        source:
+          draft.source.kind === 'repo'
+            ? { ...draft.source, subpath: action.scope }
+            : draft.source,
       };
+    }
     case 'repo': {
       const name = action.fullName.split('/').pop() ?? action.fullName;
       return {
@@ -302,7 +356,7 @@ export function blockersFor(
       code: 'TARGET_UNAVAILABLE',
       title: 'The chosen Target is not a candidate for this Component.',
       remediation:
-        'Pick a Target listed as a candidate on Place, or clear the reason it was excluded.',
+        'Pick a Target listed as a candidate, or clear the reason this one was excluded. Targets state their own reasons.',
     });
   }
 
@@ -311,7 +365,7 @@ export function blockersFor(
     blockers.push({
       code: 'CONFIG_INCOMPLETE',
       title: `${missing.length} configuration key${missing.length === 1 ? '' : 's'} still needs a value.`,
-      remediation: `Supply ${missing.map((key) => key.name).join(', ')} on Configure. Values are write-only once stored, so they cannot be filled in later from here.`,
+      remediation: `Supply ${missing.map((key) => key.name).join(', ')} under Config. Values are write-only once stored, so they cannot be filled in later from here.`,
     });
   }
 
@@ -320,7 +374,7 @@ export function blockersFor(
       code: 'SOURCE_UNAVAILABLE',
       title: `${draft.source.filename} has not been staged.`,
       remediation:
-        'Upload the archive on Source before Review. The draft is kept while the upload is incomplete.',
+        'Finish the upload before deploying. The draft is kept while it is incomplete.',
     });
   }
 

@@ -7,10 +7,10 @@
  * button with no sentence beside it is the failure mode this rule exists to
  * prevent, because it leaves the developer with nothing to act on.
  *
- * **Not tested here, because it is not built:** the draft is client state, so
- * Task 38's "a browser refresh mid-flow must not lose it" does not hold yet.
- * `draft.ts` says so at the top; this file does not assert a property the code
- * does not have.
+ * The flow is one screen now, so there is no step to put a draft on before
+ * asserting: everything is rendered at once and the assertions are about what
+ * is on it. That is itself a property worth holding — a preflight you have to
+ * navigate to is a preflight somebody can be surprised by.
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -18,7 +18,6 @@ import {
   blockersFor,
   type Draft,
   draftReducer,
-  STEPS,
 } from '../../src/web/views/apps/new/draft.ts';
 import { NewApp } from '../../src/web/views/apps/new/index.tsx';
 import {
@@ -97,14 +96,9 @@ describe('the preflight', () => {
   });
 });
 
-describe('Review shows the preflight rather than only obeying it', () => {
-  const atReview = (draft: Draft): Draft => ({
-    ...draft,
-    step: STEPS.length - 1,
-  });
-
+describe('the screen shows the preflight rather than only obeying it', () => {
   test('a blocked draft states what is wrong and what clears it', () => {
-    const markup = render(atReview(INITIAL_DRAFT));
+    const markup = render(INITIAL_DRAFT);
 
     expect(markup).toContain('Spindrift stops before Build #1');
     expect(markup).toContain('DATABASE_URL');
@@ -115,23 +109,55 @@ describe('Review shows the preflight rather than only obeying it', () => {
   });
 
   test('and the button that would start a Build is off', () => {
-    expect(render(atReview(INITIAL_DRAFT))).toContain('disabled');
+    expect(render(INITIAL_DRAFT)).toContain('disabled');
   });
 
   test('a clean draft offers the Build instead', () => {
-    const markup = render(atReview(clean));
+    const markup = render(clean);
 
-    expect(markup).toContain('Ready to create the App and start Build #1');
-    expect(markup).toContain('Start first Build');
     expect(markup).toContain('locks its vessel');
+    expect(markup).toContain('Deploy');
     expect(markup).not.toContain('Nothing has been created');
   });
 });
 
-describe('Place lists non-candidates rather than hiding them', () => {
+describe('the whole plan is on one screen', () => {
+  const markup = render(clean);
+
+  test('every decision is answered before anything is pressed', () => {
+    // Source, Component, Target, URL, Reach, Vessel — the five §18 decisions,
+    // as rows that already say what will happen.
+    for (const label of [
+      'Source',
+      'Component',
+      'Target',
+      'URL',
+      'Reach',
+      'Vessel',
+    ]) {
+      expect(markup).toContain(label);
+    }
+  });
+
+  test('no step rail survives', () => {
+    // The regression this guards is the flow growing its Continue buttons
+    // back: four presses to accept four answers nobody disagreed with.
+    expect(markup).not.toContain('Continue');
+    expect(markup).not.toContain('aria-current="step"');
+  });
+
+  test('the vessel is marked immutable while it is still a choice', () => {
+    expect(markup).toContain('immutable once created');
+  });
+});
+
+describe('non-candidate Targets are listed rather than hidden', () => {
   // §3's grammar: listed, disabled, and annotated with why. An empty list is
-  // what makes "nowhere fits" unreadable.
-  const markup = render({ ...clean, step: 2 });
+  // what makes "nowhere fits" unreadable — and so is a list behind a
+  // disclosure, which is why the Target row opens itself when the chosen
+  // Target is not one.
+  const excluded = TARGET_OPTIONS.find((target) => !target.candidate)!;
+  const markup = render({ ...clean, targetId: excluded.targetId });
 
   test('every connected Target appears, candidate or not', () => {
     for (const target of TARGET_OPTIONS) {
@@ -146,8 +172,14 @@ describe('Place lists non-candidates rather than hiding them', () => {
     }
   });
 
-  test('the vessel is marked immutable while it is still a choice', () => {
-    expect(markup).toContain('cannot be changed after the App is created');
+  test('a settled Target keeps its alternatives out of the way', () => {
+    // The other half of the same rule: when the answer is fine, the list of
+    // other answers is noise.
+    const settled = render(clean);
+    const other = TARGET_OPTIONS.find(
+      (target) => target.targetId !== clean.targetId,
+    )!;
+    expect(settled).not.toContain(other.canonical);
   });
 });
 
@@ -168,12 +200,37 @@ describe('the draft reducer', () => {
     expect(next.kind).toBe(INITIAL_DRAFT.detection.kind);
   });
 
-  test('steps cannot run off either end', () => {
-    expect(draftReducer(INITIAL_DRAFT, { type: 'step', step: -3 }).step).toBe(
-      0,
-    );
-    expect(draftReducer(INITIAL_DRAFT, { type: 'step', step: 99 }).step).toBe(
-      STEPS.length - 1,
-    );
+  test('a detection replaces the proposal, the kind, and the scope together', () => {
+    const next = draftReducer(INITIAL_DRAFT, {
+      type: 'detect',
+      scope: 'apps/web',
+      kind: 'website',
+      reason: 'Astro — `astro` is a dependency in package.json',
+      unavailable: { job: 'jobs are asserted, never inferred' },
+    });
+
+    expect(next.kind).toBe('website');
+    expect(next.detection.reason).toContain('Astro');
+    expect(next.detection.available).toEqual(['service', 'website']);
+    expect(next.detection.unavailable.job).toBeDefined();
+    // The scope names the Component, and the source follows it.
+    expect(next.componentName).toBe('web');
+    expect(next.source.kind === 'repo' && next.source.subpath).toBe('apps/web');
+  });
+
+  test('a detection overrides a correction, because it is about a new directory', () => {
+    const corrected = draftReducer(INITIAL_DRAFT, {
+      type: 'kind',
+      kind: 'job',
+    });
+    const next = draftReducer(corrected, {
+      type: 'detect',
+      scope: '.',
+      kind: 'website',
+      reason: 'a fresh read',
+      unavailable: {},
+    });
+
+    expect(next.kind).toBe('website');
   });
 });

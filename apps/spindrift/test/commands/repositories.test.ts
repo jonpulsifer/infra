@@ -441,6 +441,12 @@ describe('inspecting a repository before connecting it', () => {
         outputDirectory: null,
         watchPaths: ['.', 'go.mod'],
         configured: false,
+        // The kinds detection ruled out travel with the proposal, so the
+        // creation flow can render them disabled wearing their reason (§3).
+        unavailable: {
+          website: 'Go projects build a program, not a directory of files',
+          job: 'jobs are asserted, never inferred',
+        },
       },
     ]);
     // Read-only: no branch was cut, no pull request opened, no row written.
