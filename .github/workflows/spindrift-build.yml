@@ -295,6 +295,11 @@ jobs:
           ATTESTOR: ${{ steps.request.outputs.attestor }}
           DESTINATION: ${{ steps.request.outputs.destination }}
           DIGEST: ${{ steps.push.outputs.digest }}
+          # `sign-and-create` lives on the beta surface. Without this, a runner
+          # image that does not carry the component stops to ask whether to
+          # install it, and a prompt on a runner is a hang followed by a
+          # timeout. With it, gcloud installs the component and continues.
+          CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
         run: |
           set -euo pipefail
           project="${ATTESTOR%%/attestors/*}"; project="${project#projects/}"
