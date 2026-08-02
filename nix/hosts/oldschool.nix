@@ -1,5 +1,5 @@
 # oldschool: offsite worker node that also carries the site's odd jobs —
-# docker, a GitHub runner, yarr, and the offsite harmonia binary cache.
+# yarr and the offsite harmonia binary cache.
 { ... }:
 {
   imports = [
@@ -12,7 +12,7 @@
 
   homelab.disko.device = "/dev/sda";
   # 200G root (default is 100G) — leaves headroom for the harmonia
-  # binary cache + remote-builder role on top of docker/runner/yarr.
+  # binary cache + remote-builder role on top of yarr.
   homelab.disko.rootSize = "200G";
 
   sops.defaultSopsFile = ../secrets/oldschool.sops.yaml;

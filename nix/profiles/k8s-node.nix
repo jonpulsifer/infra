@@ -40,9 +40,6 @@ in
     nfs-utils
   ];
 
-  virtualisation.docker.enable = true;
-  users.groups.docker.gid = lib.mkForce 123;
-
   services.k8s = {
     enable = true;
     inherit network;
