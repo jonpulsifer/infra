@@ -110,6 +110,16 @@ export interface BuildView {
    * to state, not an empty pane to show.
    */
   readonly log: readonly LogLine[] | null;
+  /**
+   * How many lines the runner actually produced, of which {@link log} is the
+   * tail.
+   *
+   * Carried rather than inferred from `log.length`, because those two numbers
+   * disagreeing is the whole point: a screen that shows sixty lines of eight
+   * hundred and says nothing has silently edited the evidence. The count is
+   * what lets it say so, and say where the rest is.
+   */
+  readonly logTotal: number;
   /** The runner that produced it, for the header. */
   readonly runner: string;
   /**
@@ -297,6 +307,15 @@ export interface DeployListItem {
  * to go — `/deploys/:id` or `/builds/:id`.
  */
 export interface ActivityEntry {
+  /**
+   * Which stage this checkpoint belongs to.
+   *
+   * Build and Deploy are two stages, not one pipeline with a tail, and the
+   * timeline is where that is most easily lost: a column of "failed" lines
+   * cannot say whether the image or its placement is the problem. The lane a
+   * row sits in answers that before the words do.
+   */
+  readonly kind: 'build' | 'deploy';
   readonly title: string;
   readonly detail: string;
   readonly when: string;

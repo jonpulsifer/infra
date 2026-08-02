@@ -33,6 +33,21 @@ const deploy = (view: DeployView) =>
 const workspace = (view: WorkspaceView) =>
   renderToStaticMarkup(<Workspace view={view} />);
 
+/**
+ * The rendered words, with the tags taken out.
+ *
+ * A stage header is assembled from several spans — an ordinal, a glyph, a name,
+ * a verdict — so a claim about the sentence it reads as cannot be made against
+ * raw markup without pinning the element boundaries, which is testing the
+ * layout rather than the sentence. Collapsing to text asserts what a person
+ * sees and survives the next time the header is restyled.
+ */
+const words = (markup: string) =>
+  markup
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&#x27;/g, "'")
+    .replace(/\s+/g, ' ');
+
 const RED = Object.entries(DEPLOY_SCENARIOS).filter(
   ([, view]) => view.phase === 'FAILED',
 );
@@ -246,8 +261,35 @@ describe('the deploy screen, on red', () => {
     expect(markup).toContain('ARTIFACT_UNAVAILABLE');
     expect(markup).toContain('platform');
     expect(markup).not.toContain('compiled successfully');
-    expect(markup).toContain('Deploy log · failed');
+    expect(words(markup)).toContain('Deploy · failed');
     expect(markup).toContain('controller accepted the deploy');
+  });
+
+  test('names the two stages separately and marks only the one that failed', () => {
+    // The whole point of the pair. An artifact that exists is deployable to any
+    // supported Target, so a red placement says nothing about the image — and
+    // the screen has to be able to hold both facts at once rather than
+    // collapsing them into one verdict about "the pipeline".
+    const view = DEPLOY_SCENARIOS.imageUnpullable;
+    const text = words(deploy(view));
+
+    expect(text).toContain('1 Build · done');
+    expect(text).toContain('2 Deploy · failed');
+  });
+
+  test('shows the deploy stage even when the Build row is red', () => {
+    // Supply-chain admission produces exactly this pairing: the runner pushed
+    // an image, the artifact was refused, and the Deploy over it went red on
+    // its own. Gating the deploy stage on a green build hid the log on the one
+    // screen that needed it and left a build log claiming the whole failure.
+    const view: DeployView = {
+      ...DEPLOY_SCENARIOS.imageUnpullable,
+      build: { ...DEPLOY_SCENARIOS.buildFailed.build, status: 'failed' },
+    };
+    const text = words(deploy(view));
+
+    expect(text).toContain('2 Deploy · failed');
+    expect(deploy(view)).toContain('controller accepted the deploy');
   });
 
   test('but not when nothing is serving', () => {
@@ -293,6 +335,47 @@ describe('a red deploy that recorded nothing', () => {
   test('says the deploy log is live status rather than inventing a line', () => {
     expect(markup).toContain('no text line has arrived yet');
     expect(markup).not.toContain('{}');
+  });
+});
+
+describe('the build stage, on the transcript it carries', () => {
+  // The drawer is the checkpoints. The runner's text is evidence behind one
+  // more click, and only ever the tail of it — a drawer that opened onto a
+  // thousand lines of BuildKit chatter buried the seven that said what
+  // happened.
+  test('leads with checkpoints rather than the runner output', () => {
+    const text = words(deploy(DEPLOY_SCENARIOS.buildFailed));
+
+    for (const step of DEPLOY_SCENARIOS.buildFailed.build.steps) {
+      expect(text).toContain(step.name);
+    }
+  });
+
+  test('opens the runner output on red, where the last lines are the answer', () => {
+    expect(deploy(DEPLOY_SCENARIOS.buildFailed)).toContain(
+      'Failed to compile.',
+    );
+  });
+
+  test('says how much of the log it is showing, and how much it is not', () => {
+    // A tail presented as the log is the UI editing evidence. `imageUnpullable`
+    // is the green build, whose drawer is shut — so the claim is made on the
+    // red one, where the reader is actually looking.
+    const clipped: DeployView = {
+      ...DEPLOY_SCENARIOS.buildFailed,
+      build: { ...DEPLOY_SCENARIOS.buildFailed.build, logTotal: 812 },
+    };
+    const text = words(deploy(clipped));
+
+    expect(text).toContain('last 8 of 812 lines');
+    expect(text).toContain('the full transcript stays on the runner');
+  });
+
+  test('claims no tail when it is showing the whole thing', () => {
+    const text = words(deploy(DEPLOY_SCENARIOS.buildFailed));
+
+    expect(text).toContain('8 lines');
+    expect(text).not.toContain('the full transcript stays on the runner');
   });
 });
 
@@ -373,7 +456,7 @@ describe('a release that was extracted rather than built', () => {
   test('says no builder was involved instead of showing an empty log', () => {
     expect(markup).toContain('NO BUILD');
     expect(markup).toContain('No builder was involved');
-    expect(markup).not.toContain('Build log');
+    expect(words(markup)).not.toContain('1 Build ·');
   });
 
   test('leads with the source, which every release has', () => {
@@ -419,7 +502,7 @@ describe('an attempt that is only a Build', () => {
   test('shows no deploy log, because nothing was applied', () => {
     // §6 gives the deploy leg its own drawer. There is no deploy leg here, and
     // rendering an empty one would say the platform was asked and said nothing.
-    expect(markup).not.toContain('Deploy log');
+    expect(words(markup)).not.toContain('2 Deploy ·');
   });
 });
 
@@ -568,6 +651,30 @@ describe('the App workspace', () => {
     // that exists but is not attached still exists.
     const markup = workspace(WORKSPACE_SCENARIOS.service);
     expect(markup).toContain('unattached');
+  });
+
+  describe('the timeline', () => {
+    const view = WORKSPACE_SCENARIOS.service;
+    const markup = workspace(view);
+
+    test('is a sequence, joined by a rule its markers sit on', () => {
+      // Stacked rows said these were unrelated events that happened to be near
+      // each other. The connector is what carries the reading down the column,
+      // and it is the difference between a list and a timeline.
+      expect(markup).toContain('Timeline');
+      expect(markup).toContain('<ol');
+    });
+
+    test('says which stage every checkpoint belongs to', () => {
+      // A column of red cannot say whether the image or its placement is the
+      // problem unless each row carries its lane. Build and Deploy are two
+      // stages, and this is where that is easiest to lose.
+      const text = words(markup);
+      for (const entry of view.activity) {
+        expect(text).toContain(entry.kind);
+        expect(text).toContain(entry.title);
+      }
+    });
   });
 });
 

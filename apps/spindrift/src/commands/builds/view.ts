@@ -115,13 +115,7 @@ export async function buildViewOf(
       tone: event.reason ? ('error' as const) : undefined,
     }));
 
-  const steps: ChecklistItem[] = events
-    .filter((event) => event.resource)
-    .map((event) => ({
-      name: event.resource!,
-      status: event.reason ? ('failed' as const) : ('done' as const),
-      detail: event.line ?? undefined,
-    }));
+  const steps = checkpointsOf(events);
 
   return {
     view: {
@@ -134,12 +128,116 @@ export async function buildViewOf(
       // Null rather than `[]`: §4's `logFidelity` distinguishes "the runner has
       // released nothing yet" from "the runner printed nothing", and the screen
       // states the first rather than rendering the second as an empty pane.
-      log: log.length > 0 ? log : null,
+      log: log.length > 0 ? log.slice(-LOG_TAIL) : null,
+      logTotal: log.length,
       runner: build.runner ?? 'hosted runner',
       runUrl: build.runUrl ?? null,
     },
     events,
   };
+}
+
+/**
+ * How much of the runner's transcript the drawer carries.
+ *
+ * A build prints thousands of lines and the screen is not a terminal — the
+ * checkpoints above it are what says how the build went, and the text is the
+ * evidence for the last thing that happened. The tail is the part that holds
+ * that evidence: a failure is at the end of the log, never in the middle. The
+ * whole transcript stays one click away on the runner's own page, which is what
+ * `runUrl` is for, and `logTotal` says how much was left there.
+ */
+const LOG_TAIL = 60;
+
+/** A step's reported state in the checklist's words. */
+function stepStatusOf(phase: string | null, failed: boolean): StepStatus {
+  if (failed || phase === 'FAILED') return 'failed';
+  if (phase === 'SUCCEEDED') return 'done';
+  if (phase === 'RUNNING') return 'running';
+  return 'waiting';
+}
+
+/**
+ * The named checkpoints of a build, in the order the runner reached them.
+ *
+ * A step is not one event — a route reports `RUNNING` and then a verdict for
+ * the same name (`stepEvents` in the GitHub Actions route emits exactly that
+ * pair), and log lines arrive under it in between. Folding them by name is what
+ * turns a flat event list into a checklist that says what each step *is doing*
+ * rather than marking everything done because it was mentioned. The latest
+ * status event for a name wins; the pair of timestamps around it gives the step
+ * a duration, which is the whole reason a reader scans this list.
+ *
+ * A name carried only by log lines — `dispatch`, `provenance` — never gets a
+ * status event, so it keeps its sentence as its detail instead of a duration.
+ * That is the one thing it has to say, and dropping it would leave a bare word.
+ */
+function checkpointsOf(events: readonly AttemptEvent[]): ChecklistItem[] {
+  interface Checkpoint {
+    status: StepStatus;
+    from: Date;
+    to: Date | null;
+    line: string | null;
+  }
+  const seen = new Map<string, Checkpoint>();
+
+  for (const event of events) {
+    const name = event.resource;
+    if (!name) continue;
+    const isLog = event.eventType === 'log';
+    const prior = seen.get(name);
+
+    if (!prior) {
+      seen.set(name, {
+        status: isLog
+          ? 'running'
+          : stepStatusOf(event.phase, event.reason !== null),
+        from: event.createdAt,
+        to: null,
+        line: isLog ? event.line : null,
+      });
+      continue;
+    }
+
+    if (isLog) {
+      if (event.line) prior.line = event.line;
+      continue;
+    }
+    prior.status = stepStatusOf(event.phase, event.reason !== null);
+    prior.to = prior.status === 'running' ? null : event.createdAt;
+  }
+
+  return Array.from(seen, ([name, checkpoint]) => ({
+    name,
+    status: checkpoint.status,
+    ...detailOf(checkpoint),
+  }));
+}
+
+function detailOf(checkpoint: {
+  from: Date;
+  to: Date | null;
+  line: string | null;
+}): { detail?: string } {
+  if (checkpoint.to !== null) {
+    const seconds = Math.max(
+      0,
+      (checkpoint.to.getTime() - checkpoint.from.getTime()) / 1000,
+    );
+    return { detail: `${seconds.toFixed(1)}s` };
+  }
+  // Cut rather than wrapped: the detail sits at the end of a one-line row (§18
+  // — "per-resource detail is one line, no tree"), and a paragraph there would
+  // push the step name it belongs to off the screen.
+  if (checkpoint.line !== null) {
+    return {
+      detail:
+        checkpoint.line.length > 64
+          ? `${checkpoint.line.slice(0, 63)}…`
+          : checkpoint.line,
+    };
+  }
+  return {};
 }
 
 /**

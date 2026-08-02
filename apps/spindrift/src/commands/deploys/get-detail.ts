@@ -182,8 +182,17 @@ export const getDeployDetail: Command<
   let phaseWord = build === null ? 'Releasing' : 'Building';
   if (deploy.phase === 'LIVE') phaseWord = 'Live';
   else if (deploy.phase === 'FAILED') {
+    // The deploy's own verdict outranks the Build row, and the order is the
+    // fix. A Deploy that recorded a reason failed *here* — it was applied, the
+    // platform answered, and §6 persisted what it said. Reading the Build
+    // first meant that reason lost to a FAILED Build row, which is exactly the
+    // pairing supply-chain admission produces: the runner pushed an image, the
+    // artifact was refused, and the screen blamed a build that had already
+    // done its job. A build is only the failure when nothing after it spoke.
     phaseWord =
-      deploy.build.status === 'FAILED' ? 'Build failed' : 'Deploy failed';
+      deploy.reason === null && deploy.build.status === 'FAILED'
+        ? 'Build failed'
+        : 'Deploy failed';
   } else if (deploy.phase === 'APPLYING') phaseWord = 'Applying';
 
   let headline = `Deployed to ${deploy.target.name}`;
