@@ -6,7 +6,12 @@ import {
   placementTargetOf,
   resolvePlacement,
 } from '../../domain/placement.ts';
-import type { TargetListItem, TargetOptionView } from '../../web/model.ts';
+import { pendingConnections } from '../../domain/target-onboarding.ts';
+import type {
+  PendingTargetConnection,
+  TargetListItem,
+  TargetOptionView,
+} from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
 
 export const listTargetsInput = z.object({});
@@ -15,6 +20,8 @@ export type ListTargetsInput = z.infer<typeof listTargetsInput>;
 export interface ListTargetsResult {
   readonly targets: readonly TargetListItem[];
   readonly options: readonly TargetOptionView[];
+  /** Connect acts this installation is waiting on — the onboarding surface. */
+  readonly pending: readonly PendingTargetConnection[];
 }
 
 export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
@@ -42,6 +49,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
       .map((p) => p.detail!);
 
     targetsList.push({
+      id: target.id,
       name: target.name,
       adapter: target.adapter,
       rank: target.rank,
@@ -50,8 +58,16 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         prereqFailures && prereqFailures.length > 0
           ? prereqFailures
           : undefined,
+      prerequisites: (target.prerequisites ?? []).map((item) => ({
+        name: item.name,
+        met: item.met,
+        ...(item.detail === undefined ? {} : { detail: item.detail }),
+      })),
       kinds,
       canonical,
+      status: target.status,
+      configured: target.connection !== null,
+      inspectedAt: target.inspectedAt?.toISOString() ?? null,
     });
 
     const isConnected = target.status === 'connected';
@@ -139,5 +155,6 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
   return ok({
     targets: targetsList,
     options: optionsList,
+    pending: pendingConnections(allTargets),
   });
 };

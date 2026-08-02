@@ -514,14 +514,91 @@ export interface AppListItem {
 
 /** A Target as the targets management view lists it. */
 export interface TargetListItem {
+  readonly id: string;
   readonly name: string;
   readonly adapter: string;
   readonly rank: number;
   readonly health: 'healthy' | 'unhealthy';
   /** Prerequisite failure details when target is unhealthy. */
   readonly prerequisiteFailures?: readonly string[];
+  /**
+   * The whole standing checklist, met items included (§13).
+   *
+   * Not only the failures: §13 makes health "a standing prerequisite
+   * checklist", and a list that showed only what is broken cannot answer *what
+   * was checked* — which is the question an operator staring at a healthy
+   * Target that will not take their app is actually asking.
+   */
+  readonly prerequisites: readonly {
+    readonly name: string;
+    readonly met: boolean;
+    readonly detail?: string;
+  }[];
   /** Supported component kinds on this target. */
   readonly kinds: readonly ComponentKind[];
   /** The canonical hostname prefix for apps on this target. */
   readonly canonical: string;
+  /** `disconnected` keeps serving; it strands Deploys rather than ending them. */
+  readonly status: 'connected' | 'disconnected';
+  /**
+   * Whether anything has ever supplied this Target's connection facts.
+   *
+   * False is the manifest-seeded state: an identity and a rank exist and
+   * nothing else does. It is a different state from a Target an operator
+   * deliberately disconnected, and the two want opposite words on a button.
+   */
+  readonly configured: boolean;
+  /** When the standing checklist last ran, ISO-8601, or null if never. */
+  readonly inspectedAt: string | null;
+}
+
+/**
+ * A connect act this installation is waiting on (§13).
+ *
+ * One entry per *act*, not per Target: connecting a cloud project registers
+ * both of its Targets, so `bluenose-cloudrun` and `bluenose-static` are one
+ * pending connection named `bluenose`. §13 is explicit that the split is "a
+ * consequence of the model, not a decision", and an onboarding screen that
+ * listed two cards would be making the operator learn the second noun that
+ * decision exists to avoid.
+ */
+export interface PendingTargetConnection {
+  /** What `connectTarget` takes as its `kind`. */
+  readonly kind: 'kubernetes' | 'cloud';
+  /** What `connectTarget` takes as its `name`. */
+  readonly name: string;
+  /** Every Target name this one act would configure. */
+  readonly targets: readonly string[];
+  readonly proposal: TargetConnectionProposal;
+}
+
+/**
+ * Values proposed for a connect, and where each came from.
+ *
+ * Carried from a Target of the same adapter this installation has **already**
+ * configured, never from a literal in this repository. §20 puts every value
+ * naming a far side in the manifest, and a default compiled into `src/` would
+ * be that contract broken quietly — so the only thing that can teach Spindrift
+ * what a Cloud Run endpoint looks like here is a Cloud Run Target that is
+ * already working here.
+ *
+ * What is **not** carried matters as much: an `apiServer`, a `project`, and a
+ * Target's name are per-instance facts, and a plausible wrong default for one
+ * of those is worse than an empty field. A second cluster prefilled with the
+ * first one's in-cluster address would look right and be wrong.
+ */
+export interface TargetConnectionProposal {
+  /** The Target these values were read off, or null when there was none. */
+  readonly carriedFrom: string | null;
+  readonly namespace?: string;
+  readonly deliveryFlavour?: 'flux-helmrelease' | 'argo-application';
+  readonly sourceRef?: {
+    readonly name: string;
+    readonly namespace: string;
+  };
+  readonly chartContract?: string;
+  readonly region?: string;
+  readonly runEndpoint?: string;
+  readonly hostingEndpoint?: string;
+  readonly policyEndpoint?: string;
 }

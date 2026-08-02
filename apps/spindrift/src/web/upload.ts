@@ -109,11 +109,13 @@ export async function handleUpload(
     // One staging call, to one place, so the returned location describes where
     // the bytes actually are. A depot failure is a `500` that says so, because
     // a staged bundle nobody can retrieve is not a staged bundle.
+    //
+    // The place is the installation's, not the request's. This route used to
+    // honour an `x-bucket` header, which made "which bucket" a thing a caller
+    // asserted rather than a thing the manifest declares — see
+    // `sourceDepotFor`.
     const context = await deps.context(authentication.principal);
-    const depot = sourceDepotFor(
-      context.manifest,
-      request.headers.get('x-bucket'),
-    );
+    const depot = sourceDepotFor(context.manifest);
 
     let staged: StagedArchive;
     try {

@@ -19,9 +19,11 @@ import { Workspace } from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
+import { TargetList } from '../../src/web/views/targets/list.tsx';
 import {
   BUILD_ATTEMPT,
   DEPLOY_SCENARIOS,
+  TARGET_LIST,
   WORKSPACE_SCENARIOS,
 } from '../fixtures/scenarios.ts';
 
@@ -566,5 +568,67 @@ describe('the App workspace', () => {
     // that exists but is not attached still exists.
     const markup = workspace(WORKSPACE_SCENARIOS.service);
     expect(markup).toContain('unattached');
+  });
+});
+
+/**
+ * The Targets surface (§13).
+ *
+ * Two claims, and the second is the one that used to have no screen at all:
+ * a Target says what was *checked*, not only what is broken, and a Target the
+ * manifest seeded but nobody connected is something an operator can finish
+ * here rather than only in Git.
+ */
+describe('the Targets surface', () => {
+  const targets = (pending: Parameters<typeof TargetList>[0]['pending'] = []) =>
+    renderToStaticMarkup(
+      <TargetList
+        targets={TARGET_LIST}
+        pending={pending}
+        connecting={false}
+        error={null}
+        onConnect={() => undefined}
+      />,
+    );
+
+  test('shows the whole checklist, met rows included', () => {
+    const markup = targets();
+    // Every prerequisite a cluster is assessed against, not only the failures:
+    // "why can I not deploy here" is answered by what was checked.
+    for (const item of [
+      'DELIVERY_OPERATOR',
+      'CHART_SOURCE',
+      'WRITABLE_STORE',
+      'OIDC_FEDERATION',
+      'VESSEL',
+      'CHART_CONTRACT',
+    ]) {
+      expect(markup).toContain(item);
+    }
+    expect(markup).toContain('no Flux controller answers in this cluster');
+  });
+
+  test('offers to finish a Target the manifest seeded and nobody connected', () => {
+    const markup = targets([
+      {
+        kind: 'cloud',
+        name: 'a-project',
+        targets: ['a-project-cloudrun', 'a-project-static'],
+        proposal: {
+          carriedFrom: 'other-cloudrun',
+          region: 'somewhere',
+          runEndpoint: 'https://run.example.test',
+          hostingEndpoint: 'https://hosting.example.test',
+        },
+      },
+    ]);
+
+    expect(markup).toContain('Waiting to be connected');
+    expect(markup).toContain('a-project');
+    expect(markup).toContain('Finish setup');
+  });
+
+  test('says nothing about connecting when there is nothing left to connect', () => {
+    expect(targets()).not.toContain('Waiting to be connected');
   });
 });

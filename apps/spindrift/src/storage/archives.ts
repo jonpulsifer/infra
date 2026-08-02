@@ -54,13 +54,21 @@ export const ARTIFACTS_BUCKET_VAR = 'SPINDRIFT_ARTIFACTS_BUCKET';
  * installation with no bucket or no federation is a configuration fact callers
  * report — as a refusal, or by falling back to local disk — rather than an
  * exception thrown from inside staging.
+ *
+ * **It takes no per-request override, and that is a rule rather than a
+ * simplification.** The upload route used to pass one straight through from a
+ * request header, so any authenticated caller could stage bytes into any
+ * bucket name they liked — declared in this installation's manifest or not.
+ * §20 puts the set of buckets in the manifest precisely so that the answer to
+ * "where did this get staged" is a value somebody wrote down;
+ * `useSourceBucket` is how that set grows, after checking the bucket is
+ * writable. The environment variable stays, because it is the operator running
+ * this process outside its chart rather than a caller of it.
  */
 export function sourceDepotFor(
   manifest: Pick<InstallationManifest, 'sources' | 'cloud'> | null | undefined,
-  bucketOverride?: string | null,
 ): SourceDepot | null {
   const bucket =
-    bucketOverride?.trim() ||
     process.env[ARTIFACTS_BUCKET_VAR]?.trim() ||
     manifest?.sources?.defaultBucket?.trim() ||
     manifest?.sources?.buckets?.[0]?.trim();

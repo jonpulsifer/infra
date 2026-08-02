@@ -15,6 +15,7 @@ import type {
   DeployListItem,
   DeployView,
   LinkedRepoView,
+  PendingTargetConnection,
   RepositoryConnectorView,
   RepositoryOptionView,
   TargetListItem,
@@ -37,12 +38,17 @@ import {
   type RepositoryAuthorizationView,
   RepositoryList,
 } from './views/repos/list.tsx';
+import {
+  SourceStorage,
+  type SourceStorageView,
+} from './views/storage/list.tsx';
 import { TargetList } from './views/targets/list.tsx';
 
 const NAV = [
   { path: '/apps', label: 'Apps' },
   { path: '/targets', label: 'Targets' },
   { path: '/repos', label: 'Repos' },
+  { path: '/storage', label: 'Storage' },
   { path: '/apps/new', label: 'New App' },
   { path: '/settings', label: 'Settings' },
 ] as const;
@@ -135,6 +141,7 @@ function Screen({
   }
   if (path.startsWith('/targets')) return <TargetsScreen />;
   if (path.startsWith('/repos')) return <RepositoriesScreen />;
+  if (path.startsWith('/storage')) return <StorageScreen />;
   if (path.startsWith('/deploys')) {
     const deployId = path.replace(/^\/deploys\/?/, '');
     return <DeployScreen deployId={deployId} onNavigate={onNavigate} />;
@@ -867,8 +874,16 @@ function TargetsScreen() {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
-    | { type: 'success'; targets: readonly TargetListItem[] }
+    | {
+        type: 'success';
+        targets: readonly TargetListItem[];
+        pending: readonly PendingTargetConnection[];
+      }
   >({ type: 'loading' });
+  const [connecting, setConnecting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  /** Bumped after a connect, because the checklist it produced is the answer. */
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -876,7 +891,11 @@ function TargetsScreen() {
       .then((result) => {
         if (!live) return;
         if (result.ok) {
-          setState({ type: 'success', targets: result.value.targets });
+          setState({
+            type: 'success',
+            targets: result.value.targets,
+            pending: result.value.pending,
+          });
         } else {
           setState({ type: 'error', message: result.failure.message });
         }
@@ -891,7 +910,29 @@ function TargetsScreen() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [reloadToken]);
+
+  const connect = async (input: InputOf<'connectTarget'>) => {
+    setConnecting(true);
+    setActionError(null);
+    try {
+      const result = await command('connectTarget', input);
+      if (!result.ok) {
+        setActionError(result.failure.message);
+        return;
+      }
+      // §13: connect always succeeds, and what it produced is a checklist. The
+      // list is re-read rather than patched because that checklist is the whole
+      // outcome of the act and it came from a pass of the inspection loop.
+      setReloadToken((token) => token + 1);
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Connecting the Target failed',
+      );
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   if (state.type === 'loading') {
     return (
@@ -914,7 +955,75 @@ function TargetsScreen() {
     );
   }
 
-  return <TargetList targets={state.targets} />;
+  return (
+    <TargetList
+      targets={state.targets}
+      pending={state.pending}
+      connecting={connecting}
+      error={actionError}
+      onConnect={connect}
+    />
+  );
+}
+
+function StorageScreen() {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | { type: 'success'; view: SourceStorageView }
+  >({ type: 'loading' });
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    command('listSourceBuckets', {})
+      .then((result) => {
+        if (!live) return;
+        setState(
+          result.ok
+            ? { type: 'success', view: result.value }
+            : { type: 'error', message: result.failure.message },
+        );
+      })
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [reloadToken]);
+
+  if (state.type === 'loading') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading source storage...
+        </p>
+      </div>
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="text-sm font-medium">Failed to load source storage</p>
+          <p className="text-sm mt-1">{state.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SourceStorage
+      view={state.view}
+      onChanged={() => setReloadToken((token) => token + 1)}
+    />
+  );
 }
 
 function RepositoriesScreen() {

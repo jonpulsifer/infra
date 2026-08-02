@@ -112,57 +112,19 @@ export function StepSource({
 }: StepProps & { repos: readonly RepositoryOptionView[] }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [bucketName, setBucketName] = useState<string | null>(null);
-  const [buckets, setBuckets] = useState<readonly string[] | null>(null);
   const [defaultBucket, setDefaultBucket] = useState<string | null>(null);
-  const [customBucket, setCustomBucket] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
-  const [bucketLoadError, setBucketLoadError] = useState(false);
-  const [testingWif, setTestingWif] = useState(false);
-  const [wifStatus, setWifStatus] = useState<string | null>(null);
 
-  const bucketsLoading = buckets === null && !bucketLoadError;
-  const activeBucketName = bucketName ?? '';
-
+  // Read to be *shown*, not to be chosen. Which bucket sources stage to is
+  // installation configuration (§20) and now lives on the Storage screen; a
+  // picker here was how an undeclared bucket could be typed onto a deploy form
+  // and then staged into.
   useEffect(() => {
     command('listSourceBuckets', {})
       .then((res) => {
-        if (res.ok) {
-          setBuckets(res.value.buckets);
-          setDefaultBucket(res.value.defaultBucket ?? null);
-          const selected =
-            res.value.defaultBucket || res.value.buckets[0] || null;
-          setBucketName(selected);
-        } else {
-          setBucketLoadError(true);
-          setBuckets([]);
-        }
+        if (res.ok) setDefaultBucket(res.value.defaultBucket || null);
       })
-      .catch(() => {
-        setBucketLoadError(true);
-        setBuckets([]);
-      });
+      .catch(() => setDefaultBucket(null));
   }, []);
-
-  async function handleTestWif() {
-    if (!activeBucketName.trim()) return;
-    setTestingWif(true);
-    setWifStatus(null);
-    try {
-      const res = await command('testBucketPermissions', {
-        bucketName: activeBucketName.trim(),
-      });
-      if (res.ok) {
-        setWifStatus(`✓ WIF permissions verified for ${res.value.location}`);
-      } else {
-        setWifStatus(`✗ WIF check failed: ${res.failure.message}`);
-      }
-    } catch {
-      setWifStatus('Network error testing bucket permissions');
-    } finally {
-      setTestingWif(false);
-    }
-  }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -175,14 +137,11 @@ export function StepSource({
       const formData = new FormData();
       formData.append('file', file);
 
-      const headers: Record<string, string> = {};
-      if (activeBucketName.trim()) {
-        headers['x-bucket'] = activeBucketName.trim();
-      }
-
+      // No `x-bucket` header. The upload route resolves the installation's
+      // default itself, which is the only bucket this flow was ever entitled
+      // to name.
       const response = await fetch('/internal/upload', {
         method: 'POST',
-        headers,
         body: formData,
       });
 
@@ -291,95 +250,14 @@ export function StepSource({
         </Card>
       )}
 
-      <div className="mt-4 flex flex-col gap-3 rounded border bg-muted/40 p-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-foreground">
-            First-Party Storage Bucket (Source & Artifact Staging)
-          </span>
-          <Badge tone="accent">first-party</Badge>
-        </div>
-        <p className="text-[11.5px] text-muted-foreground">
-          Select from configured first-party Cloud Storage buckets or enter a
-          custom bucket name.
-        </p>
-        {bucketLoadError ? (
-          <p className="text-[11px] text-amber-600 dark:text-amber-400">
-            Could not load configured buckets — showing default. Enter a bucket
-            name manually if needed.
-          </p>
-        ) : null}
-
-        <div className="flex flex-col gap-2">
-          <label
-            htmlFor="source-bucket-select"
-            className="text-xs font-medium text-muted-foreground"
-          >
-            Bucket
-          </label>
-          <select
-            id="source-bucket-select"
-            disabled={bucketsLoading}
-            value={useCustom ? 'custom' : activeBucketName}
-            onChange={(e) => {
-              if (e.target.value === 'custom') {
-                setUseCustom(true);
-                setBucketName(customBucket);
-              } else {
-                setUseCustom(false);
-                setBucketName(e.target.value);
-              }
-            }}
-            className="rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground disabled:opacity-50"
-          >
-            {bucketsLoading ? (
-              <option value="">Loading…</option>
-            ) : (
-              <>
-                {(buckets ?? []).map((b) => (
-                  <option key={b} value={b}>
-                    {b} {b === defaultBucket ? '(default · infra repo)' : ''}
-                  </option>
-                ))}
-                <option value="custom">Custom bucket...</option>
-              </>
-            )}
-          </select>
-
-          {useCustom ? (
-            <input
-              type="text"
-              placeholder="e.g. custom-spindrift-bucket"
-              value={customBucket}
-              onChange={(e) => {
-                setCustomBucket(e.target.value);
-                setBucketName(e.target.value);
-              }}
-              className="rounded border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground"
-            />
-          ) : null}
-        </div>
-
-        <div className="mt-1 flex items-center gap-2">
-          <button
-            type="button"
-            disabled={!activeBucketName.trim() || testingWif}
-            onClick={handleTestWif}
-            className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {testingWif ? 'Testing WIF…' : 'Test WIF Permissions'}
-          </button>
-        </div>
-        {wifStatus ? (
-          <p className="text-xs font-medium text-muted-foreground">
-            {wifStatus}
-          </p>
-        ) : (
-          <p className="text-[11px] text-muted-foreground">
-            Uses credential-less Workload Identity Federation (WIF) token
-            exchange with spindrift-controller service account impersonation.
-          </p>
-        )}
-      </div>
+      <p className="mt-4 text-xs text-muted-foreground">
+        Staged to{' '}
+        <span className="font-mono">
+          {defaultBucket ?? 'this installation’s source bucket'}
+        </span>
+        . Which bucket that is, and whether Spindrift can write to it, lives on
+        the Storage screen.
+      </p>
     </>
   );
 }

@@ -231,7 +231,16 @@ function connectionFromSeed(target: TargetSeed): TargetConnection | null {
   }
 }
 
-async function readStoredManifest(
+/**
+ * The stored document **as authored**, before environment resolution.
+ *
+ * Exported for the one shape of act that changes a single value and writes the
+ * document back. {@link currentStoredManifest} is the wrong input for that: it
+ * has already substituted whatever the environment supplied, so writing its
+ * result would bake this pod's environment into the durable document and make
+ * the next pod's environment stop mattering.
+ */
+export async function readStoredManifest(
   db: Database,
 ): Promise<AuthoredManifest | null> {
   const [stored] = await db
