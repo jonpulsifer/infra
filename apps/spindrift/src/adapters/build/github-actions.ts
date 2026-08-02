@@ -151,6 +151,8 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
   readonly zeroConfigFrontend: string;
   /** The installation's signing key (§16). See `BuildRequestSpec.signer`. */
   readonly signer: string;
+  /** The attestor a cloud Target's admission asks. See `BuildRequestSpec.attestor`. */
+  readonly attestor: string;
   /** Injected so a test can pin the correlation it asserts on. */
   readonly correlation?: () => string;
   /** How long to keep looking for the run a dispatch started. */
@@ -212,6 +214,20 @@ export interface BuildRequestSpec {
    * The runner does, having just pushed the artifact with it.
    */
   readonly signer: string;
+  /**
+   * The attestation authority a cloud Target's own admission asks, as
+   * `projects/<project>/attestors/<name>`, or empty where the installation
+   * named none.
+   *
+   * The second half of the same fact `signer` carries, and separate from it
+   * because the two boundaries want different objects from the same key. A
+   * cluster's policy engine reads a signature off the artifact in the
+   * registry; a cloud runtime's Binary Authorization reads an *attestation* —
+   * a note occurrence in the authority's own project, which is not in the
+   * registry at all and cannot be derived from a signature that is. One key,
+   * two verifiers, two artifacts.
+   */
+  readonly attestor: string;
 }
 
 export class GitHubActionsBuildRoute implements BuildAdapter {
@@ -290,6 +306,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       buildArgs: spec.buildArgs,
       zeroConfigFrontend: this.options.zeroConfigFrontend,
       signer: this.options.signer,
+      attestor: this.options.attestor,
     };
 
     let repository: string | null = null;

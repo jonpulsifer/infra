@@ -72,6 +72,7 @@ jobs:
             # exactly what it was before, and a Target whose admission wants a
             # signature is the thing that says so.
             printf 'signer=%s\n'       "$(read_key '.signer // ""')"
+            printf 'attestor=%s\n'     "$(read_key '.attestor // ""')"
             printf 'registry=%s\n'     "$(read_key '.destination | split("/")[0]')"
             # §12 counts tags, so core sends every tag this push must carry and
             # the runner composes none of its own. Full references, because that
@@ -271,6 +272,50 @@ jobs:
           # whose message is about a policy rather than about this build.
           cosign verify --insecure-ignore-tlog \
             --key "$SIGNER" "${DESTINATION}@${DIGEST}" > /dev/null
+
+      # The other half of the same key, for the other kind of verifier.
+      #
+      # A cluster's policy engine reads a signature off the artifact in the
+      # registry. A cloud runtime's Binary Authorization reads an
+      # *attestation* — an occurrence on a note in the authority's own
+      # project, which is not in the registry at all and cannot be derived
+      # from a signature that is. One key, two verifiers, two artifacts, and
+      # a Target that enforces the second refuses a perfectly signed image
+      # that lacks it.
+      #
+      # The key version is read off the attestor rather than configured,
+      # because the attestor is what decides which version it trusts: it
+      # registered a specific `cryptoKeyVersions/N` as its public key, and an
+      # attestation signed by any other version is one it will not accept.
+      # Asking it is the only way to be right about that without a second
+      # value to keep in step.
+      - name: Attest the artifact
+        if: steps.request.outputs.attestor != '' && steps.request.outputs.signer != ''
+        env:
+          ATTESTOR: ${{ steps.request.outputs.attestor }}
+          DESTINATION: ${{ steps.request.outputs.destination }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          project="${ATTESTOR%%/attestors/*}"; project="${project#projects/}"
+          name="${ATTESTOR##*/attestors/}"
+
+          # //cloudkms.googleapis.com/v1/projects/P/locations/L/keyRings/R/cryptoKeys/K/cryptoKeyVersions/N
+          key="$(gcloud container binauthz attestors describe "$name" \
+            --project="$project" \
+            --format='value(userOwnedGrafeasNote.publicKeys[0].id)')"
+          strip() { printf '%s' "${key#*"/$1/"}" | cut -d/ -f1; }
+
+          gcloud beta container binauthz attestations sign-and-create \
+            --project="$project" \
+            --artifact-url="${DESTINATION}@${DIGEST}" \
+            --attestor="$name" \
+            --attestor-project="$project" \
+            --keyversion-project="$(strip projects)" \
+            --keyversion-location="$(strip locations)" \
+            --keyversion-keyring="$(strip keyRings)" \
+            --keyversion-key="$(strip cryptoKeys)" \
+            --keyversion="$(strip cryptoKeyVersions)"
 
       # The one line Spindrift reads. Base64 because this stdout goes through
       # the host's log processing on the way back, and a folded or decorated

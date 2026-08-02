@@ -153,3 +153,9 @@ spec:
         signer: gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer
         registry: ghcr.io/jonpulsifer
         verifier: ghcr.io/jonpulsifer/spindrift-verifier
+        # The authority bluenose's Binary Authorization policy requires an
+        # attestation from — `google_binary_authorization_policy.spindrift`
+        # is REQUIRE_ATTESTATION / ENFORCED_BLOCK_AND_AUDIT_LOG, so a Cloud
+        # Run deploy of an artifact with no attestation is refused however
+        # well the image is signed.
+        attestor: projects/trusted-builds/attestors/provenance

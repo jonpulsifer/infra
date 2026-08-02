@@ -422,6 +422,7 @@ function createBuildRoute(
         buildWorkflow: workflow,
         zeroConfigFrontend,
         signer: manifest.supplyChain.signer,
+        attestor: manifest.supplyChain.attestor ?? '',
       });
     }
     case 'cloud-build':
