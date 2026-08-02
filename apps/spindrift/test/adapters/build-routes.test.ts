@@ -181,6 +181,27 @@ describe('the hosted build route', () => {
     expect(host.dispatches[0]?.branch).toBe('main');
   });
 
+  test('a repo with no caller falls back to where the workflow lives', async () => {
+    // Connecting a repository grants access; it does not have to also merge a
+    // configuration PR before the first App on it can build. The runner fetches
+    // the staged bundle by URL and never checks the source repository out, so
+    // the build is the same build wherever it runs — only whose minutes pay
+    // for it differs. Without the fallback this is `TARGET_UNREACHABLE` and
+    // the operator is sent to merge a PR to find out whether the thing builds.
+    const { host, route } = hostedRoute({ fullName: PLATFORM_REPO });
+    const { events, result } = await run(
+      route.build(repoSource('someone/never-connected'), spec),
+    );
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(host.dispatches).toHaveLength(1);
+    expect(host.dispatches[0]?.workflow).toBe('spindrift.yml');
+    // The refused attempt is on the log rather than swallowed: it is what
+    // explains why the run appears somewhere other than the App's own
+    // repository.
+    expect(text(events)).toContain('someone/never-connected');
+  });
+
   test('an archive builds where the workflow lives, having no repository', async () => {
     const { host, route } = hostedRoute();
     const { result } = await run(route.build(archiveSource(), spec));
@@ -227,7 +248,10 @@ describe('the hosted build route', () => {
     if (result.status === 'FAILED') {
       expect(result.reason).toBe('TARGET_UNREACHABLE');
     }
-    expect(text(events)).toContain('dispatch failed');
+    // The sentence names the repository the dispatch was refused in, because
+    // the route now has more than one place it may try.
+    expect(text(events)).toContain('could not dispatch');
+    expect(text(events)).toContain('example/platform');
     expect(text(events).length).toBeGreaterThan(0);
   });
 

@@ -223,12 +223,30 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
     const { host } = this.options;
 
-    // A repo App builds where its source lives, on its own minutes (§15); an
-    // archive has no repository, so it builds where the workflow does.
-    const repository =
-      source.origin.type === 'repo'
-        ? source.origin.repository
-        : this.platformRepository;
+    // Where the run happens, in preference order.
+    //
+    // §15 puts a repo App's build on its own repository's minutes, and an
+    // archive has no repository at all so it runs where the reusable workflow
+    // lives. The second entry is the same place for a third reason: a connected
+    // repository that does not carry the caller yet.
+    //
+    // **The fallback is sound because the runner never reads the source
+    // repository.** §15 stages one immutable bundle and the workflow fetches it
+    // by URL — `Fetch the staged bundle` is a `curl`, not a checkout — so the
+    // build is byte-identical wherever it runs. What differs is only whose
+    // Actions minutes pay for it, which is a billing preference and not a
+    // correctness one.
+    //
+    // Without this, connecting a repository and creating an App on it were one
+    // act: the configuration PR had to be merged before the first Build could
+    // be dispatched, so the operator had to name every scope up front and wait
+    // on a merge to find out whether the thing built at all. Connecting grants
+    // access; Apps are created on it afterwards, and the first one builds.
+    const candidates =
+      source.origin.type === 'repo' &&
+      source.origin.repository !== this.platformRepository
+        ? [source.origin.repository, this.platformRepository]
+        : [this.platformRepository];
     // Always a caller, never the reusable workflow itself — a dispatch names a
     // branch, so dispatching the reusable workflow directly would discard the
     // commit §15 pins. The connected repository runs the caller the
@@ -253,28 +271,45 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       zeroConfigFrontend: this.options.zeroConfigFrontend,
     };
 
-    let ref: RepositoryRef;
-    let branch: string;
-    try {
-      ref = await host.installationFor(repository);
-      branch = (await host.repository(ref, repository)).defaultBranch;
-      await host.dispatchWorkflow(ref, repository, {
-        workflow,
-        branch,
-        inputs: { spec: JSON.stringify(request), correlation },
-      });
-    } catch (error) {
-      // §4 story 48: a failure *before* the build step — dispatch refused, the
-      // runner never came up — must be visible as text rather than as an empty
-      // log and a spinner. So it is yielded onto the attempt log first and
-      // becomes the verdict second.
-      const detail = error instanceof Error ? error.message : String(error);
-      yield { type: 'log', at: now(), line: `dispatch failed: ${detail}` };
+    let repository: string | null = null;
+    let ref: RepositoryRef | null = null;
+    let branch = '';
+    let detail = '';
+    for (const candidate of candidates) {
+      try {
+        const candidateRef = await host.installationFor(candidate);
+        const candidateBranch = (await host.repository(candidateRef, candidate))
+          .defaultBranch;
+        await host.dispatchWorkflow(candidateRef, candidate, {
+          workflow,
+          branch: candidateBranch,
+          inputs: { spec: JSON.stringify(request), correlation },
+        });
+        repository = candidate;
+        ref = candidateRef;
+        branch = candidateBranch;
+        break;
+      } catch (error) {
+        // §4 story 48: a failure *before* the build step — dispatch refused,
+        // the runner never came up — must be visible as text rather than as an
+        // empty log and a spinner. Every attempt is yielded, including the one
+        // that is about to be retried elsewhere, because "we tried your
+        // repository and it has no caller" is the sentence that explains why
+        // the run appears somewhere the operator did not expect.
+        detail = error instanceof Error ? error.message : String(error);
+        yield {
+          type: 'log',
+          at: now(),
+          line: `could not dispatch ${workflow} in ${candidate}: ${detail}`,
+        };
+      }
+    }
+    if (ref === null || repository === null) {
       return buildFailed(
         logs,
         'TARGET_UNREACHABLE',
-        `could not dispatch ${workflow} in ${repository}: ${detail}`,
-        { repository, workflow },
+        `could not dispatch ${workflow} in ${candidates.join(' or ')}: ${detail}`,
+        { repositories: candidates, workflow },
       );
     }
 
