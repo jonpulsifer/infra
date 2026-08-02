@@ -133,6 +133,12 @@ spec:
             region: northamerica-northeast1
             project: bluenose
             endpoint: https://run.googleapis.com
+            # Where this project's admission policy is read from. Naming it is
+            # also what makes the Service declare `binaryAuthorization.
+            # useDefault` — Cloud Run treats admission as a property of the
+            # Service, and `run.allowedBinaryAuthorizationPolicies` refuses one
+            # that names no policy.
+            policyEndpoint: https://binaryauthorization.googleapis.com
             # The identity a revision runs as. Named because omitting it is not
             # a default: Cloud Run substitutes the project's default compute
             # account, which the controller has no `actAs` on, and the apply is
@@ -153,3 +159,9 @@ spec:
         signer: gcpkms://projects/trusted-builds/locations/us-central1/keyRings/keys/cryptoKeys/signer
         registry: ghcr.io/jonpulsifer
         verifier: ghcr.io/jonpulsifer/spindrift-verifier
+        # The authority bluenose's Binary Authorization policy requires an
+        # attestation from — `google_binary_authorization_policy.spindrift`
+        # is REQUIRE_ATTESTATION / ENFORCED_BLOCK_AND_AUDIT_LOG, so a Cloud
+        # Run deploy of an artifact with no attestation is refused however
+        # well the image is signed.
+        attestor: projects/trusted-builds/attestors/provenance

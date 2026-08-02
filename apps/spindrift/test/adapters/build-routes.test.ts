@@ -60,6 +60,9 @@ import {
 const PLATFORM_REPO = 'example/platform';
 const WORKFLOW_REF = `${PLATFORM_REPO}/.github/workflows/spindrift-build.yml@${'f'.repeat(40)}`;
 const FRONTEND = 'registry.example.test/zero-config:pinned';
+const SIGNER =
+  'gcpkms://projects/example/locations/global/keyRings/keys/cryptoKeys/signer';
+const ATTESTOR = 'projects/example/attestors/provenance';
 
 const spec: BuildSpec = {
   artifactType: 'image',
@@ -157,6 +160,8 @@ function hostedRoute(
       }),
       buildWorkflow: WORKFLOW_REF,
       zeroConfigFrontend: FRONTEND,
+      signer: SIGNER,
+      attestor: ATTESTOR,
       correlation: () => 'fixed-correlation',
       ...PACING,
       ...pacing,

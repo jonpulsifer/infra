@@ -105,6 +105,16 @@ has no port to probe.
       value: /tmp
     - name: HOME
       value: /tmp
+    {{- if ne .Values.app.kind "job" }}
+    # The port this chart probes, told to the process that has to listen on it.
+    # A zero-config build reads `PORT` — the cloud runtime sets it, which is why
+    # the same image serves there and is why nothing here noticed. On a cluster
+    # nobody sets it, so the image falls back to its own default, the readiness
+    # probe knocks on 8080 forever, and the release times out with a container
+    # that started perfectly well.
+    - name: PORT
+      value: {{ include "spindrift-app.port" . | quote }}
+    {{- end }}
     {{- range .Values.app.env }}
     - name: {{ .name }}
       value: {{ .value | quote }}

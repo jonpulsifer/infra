@@ -85,6 +85,8 @@ function routeOver(host: ActionsHost): GitHubActionsBuildRoute {
     host,
     buildWorkflow: WORKFLOW,
     zeroConfigFrontend: 'ghcr.io/railwayapp/railpack:railpack-frontend',
+    signer: '',
+    attestor: '',
     correlation: () => 'fixed-correlation',
     intervalMs: 1_000,
     timeoutMs: 600_000,

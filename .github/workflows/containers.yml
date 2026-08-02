@@ -177,7 +177,14 @@ jobs:
 
           git push origin "$BRANCH_NAME" --force
 
-          if ! gh pr view "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # An **open** one, not any one. `gh pr view <branch>` answers with the
+          # most recent pull request for that head whatever its state, so once
+          # the first digest bump merged this went on finding it, skipped the
+          # create, and no-opped the auto-merge — leaving the branch force-pushed
+          # with a correct digest and no pull request to carry it. Continuous
+          # delivery stopped silently, with every step green.
+          if [ -z "$(gh pr list --repo "$GITHUB_REPOSITORY" \
+                       --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')" ]; then
             gh pr create \
               --repo "$GITHUB_REPOSITORY" \
               --title "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}" \

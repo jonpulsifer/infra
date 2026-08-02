@@ -56,6 +56,19 @@ export interface CloudRunRenderContext {
    * choosing what the workload may reach.
    */
   readonly serviceAccount: string | null;
+  /**
+   * Whether the Service declares that it uses the project's own admission
+   * policy (§16's second verifier).
+   *
+   * Cloud Run treats Binary Authorization as a property of the Service, not
+   * only of the project: a Service that names no policy is a Service with
+   * none, which is what the `run.allowedBinaryAuthorizationPolicies`
+   * constraint exists to refuse — the vessel's terraform says so in as many
+   * words, "so a deployer cannot opt a service out of verification". So
+   * declaring it is how a Deploy submits to the check rather than how it
+   * escapes one.
+   */
+  readonly useProjectAdmissionPolicy: boolean;
 }
 
 /**
@@ -105,6 +118,9 @@ export function cloudRunService(
   return {
     labels,
     ingress: ingressFor(desired.exposure),
+    ...(context.useProjectAdmissionPolicy
+      ? { binaryAuthorization: { useDefault: true } }
+      : {}),
     template: {
       labels: { ...labels, 'spindrift-deploy': desired.deploy },
       ...(context.serviceAccount === null

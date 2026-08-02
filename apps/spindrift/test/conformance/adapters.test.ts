@@ -169,6 +169,8 @@ buildAdapterSuite('github-actions', () => {
     }),
     buildWorkflow: `${host.fullName}/.github/workflows/spindrift-build.yml@${'f'.repeat(40)}`,
     zeroConfigFrontend: 'registry.example.test/zero-config:pinned',
+    signer: '',
+    attestor: '',
     correlation: () => 'conformance',
     intervalMs: 1,
     sleep: async () => {},

@@ -403,6 +403,19 @@ export const installationManifestSchema = z
          * material; the process authenticates through its workload identity.
          */
         signer: nonEmptyString,
+        /**
+         * The attestation authority a cloud Target's Binary Authorization
+         * asks, as `projects/<project>/attestors/<name>`.
+         *
+         * Optional because not every installation has a cloud Target with an
+         * enforcing admission policy, and naming an authority that nothing
+         * consults would be configuration with no effect. Where a cloud
+         * Target *does* enforce, an artifact with no attestation is refused
+         * at deploy time however well signed it is: the two boundaries want
+         * different objects made with the same key, and one cannot be derived
+         * from the other.
+         */
+        attestor: nonEmptyString.optional(),
       })
       .strict(),
 

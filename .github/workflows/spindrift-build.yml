@@ -14,9 +14,12 @@
 #   * It never posts anything back. Logs are read, not pushed (§4), so the
 #     result leaves on the one channel Spindrift already reads — the last line
 #     this workflow prints.
-#   * It never signs. The build adapter returns the artifact and digest exactly
-#     as built and *core* signs that digest (§16), so no backend is
-#     disqualifiable and the claim made is the honest one.
+#   * It never assesses what it built. The build adapter returns the artifact
+#     and digest exactly as built and *core* decides whether that is admissible
+#     (§16), so no backend is disqualifiable and the claim made is the honest
+#     one. It does attach core's signature to the artifact in the registry —
+#     see `Sign the artifact` for why that is a delivery step and not a
+#     judgement, and why core cannot do it itself.
 name: spindrift-build
 run-name: spindrift ${{ inputs.correlation }}
 
@@ -62,6 +65,14 @@ jobs:
             printf 'subpath=%s\n'      "$(read_key '.origin.subpath')"
             printf 'destination=%s\n'  "$(read_key '.destination')"
             printf 'frontend=%s\n'     "$(read_key '.zeroConfigFrontend')"
+            # `// ""` for the same reason `tags` has a default: a spec composed
+            # by a controller that predates this field must still build. Empty
+            # means "this installation named no signing key", and the signing
+            # steps below are skipped rather than failed — the artifact is then
+            # exactly what it was before, and a Target whose admission wants a
+            # signature is the thing that says so.
+            printf 'signer=%s\n'       "$(read_key '.signer // ""')"
+            printf 'attestor=%s\n'     "$(read_key '.attestor // ""')"
             printf 'registry=%s\n'     "$(read_key '.destination | split("/")[0]')"
             # §12 counts tags, so core sends every tag this push must carry and
             # the runner composes none of its own. Full references, because that
@@ -207,6 +218,124 @@ jobs:
           # digest comes from.
           provenance: mode=max
           sbom: true
+
+      # §16's signature, put where a Target's own admission can read it.
+      #
+      # **This does not move signing off core.** Core still signs the digest and
+      # still re-verifies its own bundle at admission; nothing about that
+      # changes. What is added here is a *second* signature over the same digest
+      # with the same key, attached to the artifact **in the registry** — which
+      # is the only place a Target's native policy boundary can look. The
+      # offsite cluster's `spindrift-verify-images` asks cosign for exactly
+      # that, and core cannot put it there: a cosign signature is a
+      # `sha256-<digest>.sig` object pushed to the repository, and the
+      # controller holds no registry write credential. This job does, having
+      # just pushed the artifact with it.
+      #
+      # Before the report deliberately. A signing failure has to fail the build
+      # rather than report an artifact no Target will admit — a green Build
+      # whose Deploy is refused at the admission webhook is the shape this whole
+      # sequence exists to avoid.
+      #
+      # `--tlog-upload=false` matches how core already invokes its signer: there
+      # is no public transparency log in this trust model, only a KMS key whose
+      # public half the policy pins. The policy says the same thing from its own
+      # side with `ctlog.ignoreTlog`.
+      - name: Authenticate to Google Cloud
+        if: steps.request.outputs.signer != ''
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
+          project_id: homelab-ng
+          create_credentials_file: true
+
+      - name: Install cosign
+        if: steps.request.outputs.signer != ''
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign the artifact
+        if: steps.request.outputs.signer != ''
+        env:
+          SIGNER: ${{ steps.request.outputs.signer }}
+          DESTINATION: ${{ steps.request.outputs.destination }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # The registry credential is the one `Log in to the destination
+          # registry` already wrote to the Docker config; cosign reads it from
+          # there, so nothing here holds a credential of its own (§13).
+          cosign sign --yes --tlog-upload=false \
+            --key "$SIGNER" "${DESTINATION}@${DIGEST}"
+          # Verified here as well as at admission, because a signature that
+          # cannot be checked by the key that made it is a build that should
+          # fail now rather than a Deploy that is refused later by a webhook
+          # whose message is about a policy rather than about this build.
+          cosign verify --insecure-ignore-tlog \
+            --key "$SIGNER" "${DESTINATION}@${DIGEST}" > /dev/null
+
+      # The other half of the same key, for the other kind of verifier.
+      #
+      # A cluster's policy engine reads a signature off the artifact in the
+      # registry. A cloud runtime's Binary Authorization reads an
+      # *attestation* — an occurrence on a note in the authority's own
+      # project, which is not in the registry at all and cannot be derived
+      # from a signature that is. One key, two verifiers, two artifacts, and
+      # a Target that enforces the second refuses a perfectly signed image
+      # that lacks it.
+      #
+      # **The key version has to be named and cannot be read off the
+      # attestor.** Binary Authorization overwrites a PKIX key's `id` with an
+      # API-calculated RFC6920 fingerprint (`ni:///sha-256;…`), so what the
+      # attestor reports is a hash and not the `cryptoKeyVersions/N` that
+      # produced it. The enabled version is asked for instead, and `1` is the
+      # fallback for a caller whose role carries `cloudkms.cryptoKeyVersions.
+      # useToSign` but not `.list` — which is the shape of `roles/cloudkms.
+      # signer`. A key with `prevent_destroy` and no rotation schedule has one
+      # version, and the attestor registered the latest at apply time, so the
+      # fallback is the same answer the query would give.
+      - name: Attest the artifact
+        if: steps.request.outputs.attestor != '' && steps.request.outputs.signer != ''
+        env:
+          ATTESTOR: ${{ steps.request.outputs.attestor }}
+          SIGNER: ${{ steps.request.outputs.signer }}
+          DESTINATION: ${{ steps.request.outputs.destination }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          # `sign-and-create` lives on the beta surface. Without this, a runner
+          # image that does not carry the component stops to ask whether to
+          # install it, and a prompt on a runner is a hang followed by a
+          # timeout. With it, gcloud installs the component and continues.
+          CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+        run: |
+          set -euo pipefail
+          attestor_project="${ATTESTOR%%/attestors/*}"
+          attestor_project="${attestor_project#projects/}"
+          attestor_name="${ATTESTOR##*/attestors/}"
+
+          # gcpkms://projects/P/locations/L/keyRings/R/cryptoKeys/K
+          key="${SIGNER#gcpkms://}"
+          field() { printf '%s' "${key#*"/$1/"}" | cut -d/ -f1; }
+          key_project="${key#projects/}"; key_project="${key_project%%/*}"
+
+          version="$(gcloud kms keys versions list \
+            --project="$key_project" \
+            --location="$(field locations)" \
+            --keyring="$(field keyRings)" \
+            --key="$(field cryptoKeys)" \
+            --filter='state=ENABLED' --sort-by=~name --limit=1 \
+            --format='value(name)' 2>/dev/null | sed 's#.*/##')"
+          version="${version:-1}"
+          echo "attesting with key version ${version}"
+
+          gcloud beta container binauthz attestations sign-and-create \
+            --project="$attestor_project" \
+            --artifact-url="${DESTINATION}@${DIGEST}" \
+            --attestor="$attestor_name" \
+            --attestor-project="$attestor_project" \
+            --keyversion-project="$key_project" \
+            --keyversion-location="$(field locations)" \
+            --keyversion-keyring="$(field keyRings)" \
+            --keyversion-key="$(field cryptoKeys)" \
+            --keyversion="$version"
 
       # The one line Spindrift reads. Base64 because this stdout goes through
       # the host's log processing on the way back, and a folded or decorated

@@ -192,6 +192,10 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       project: connection.project,
       image,
       serviceAccount: connection.serviceAccount ?? null,
+      // §16's "one signature, two verifiers": `policyEndpoint` is where this
+      // project's admission policy is read from, so a Target that names one is
+      // a Target whose project has a policy the Service must submit to.
+      useProjectAdmissionPolicy: connection.policyEndpoint !== undefined,
     });
     const applied = await http.json<unknown>({
       method: 'PATCH',

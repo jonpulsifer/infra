@@ -129,6 +129,8 @@ describe('the hosted route reports a statement admission can read', () => {
       buildWorkflow:
         'jonpulsifer/infra/.github/workflows/spindrift-build.yml@abc',
       zeroConfigFrontend: 'ghcr.io/railwayapp/railpack-frontend:v0.35.0',
+      signer: '',
+      attestor: '',
     });
     expect(statement.predicate.runDetails.builder.id).toBe(
       route.provenanceBuilderId,
