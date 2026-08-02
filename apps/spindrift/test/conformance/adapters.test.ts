@@ -187,6 +187,8 @@ buildAdapterSuite('cloud-build', () => {
     region: 'example-region',
     image: 'registry.example.test/buildkit:pinned',
     zeroConfigFrontend: 'registry.example.test/zero-config:pinned',
+    signer: '',
+    attestor: '',
     token: api.token,
     fetch: api.fetch,
     intervalMs: 1,

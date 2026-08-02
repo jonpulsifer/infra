@@ -65,6 +65,14 @@ export interface FakeCloudBuildOptions {
   token?: string;
 }
 
+/** One step of a submitted build, as much of it as a test reads. */
+export interface BuildStep {
+  name?: string;
+  entrypoint?: string;
+  args?: string[];
+  env?: string[];
+}
+
 /** One ingested log entry, in the shape the log service serves it. */
 interface FakeEntry {
   insertId: string;
@@ -94,6 +102,14 @@ export class FakeCloudBuild {
   readonly requests: RecordedRequest[] = [];
   /** Every program submitted — the assertion surface for what got built. */
   readonly programs: string[] = [];
+  /**
+   * Every submitted build's steps, in order.
+   *
+   * A build is more than its builder: the attestation is a step of its own, and
+   * a route that stopped submitting it would still pass every assertion made
+   * against {@link programs} alone.
+   */
+  readonly steps: BuildStep[][] = [];
 
   private readonly builds = new Map<string, FakeBuild>();
   private readonly searches = new Map<string, FakeSearch>();
@@ -145,7 +161,7 @@ export class FakeCloudBuild {
     if (url.origin !== BUILD_HOST) return json(404, { error: 'no such host' });
 
     if (request.method === 'POST' && url.pathname.endsWith('/builds')) {
-      return this.submit(body as { steps?: { args?: string[] }[] });
+      return this.submit(body as { steps?: BuildStep[] });
     }
 
     const read = url.pathname.match(/\/builds\/([^/]+)$/);
@@ -155,11 +171,13 @@ export class FakeCloudBuild {
     return json(404, { error: 'no such path' });
   };
 
-  private submit(body: { steps?: { args?: string[] }[] }): Response {
+  private submit(body: { steps?: BuildStep[] }): Response {
     if (this.options.refuseSubmit !== undefined) {
       return json(this.options.refuseSubmit, { error: 'refused' });
     }
-    const program = body.steps?.[0]?.args?.[1] ?? '';
+    const steps = body.steps ?? [];
+    const program = steps[0]?.args?.[1] ?? '';
+    this.steps.push(steps);
     this.programs.push(program);
     this.counter += 1;
     const id = `build-${this.counter}`;

@@ -102,6 +102,9 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'platform-verdict',
   'artifact-digest',
   'sign-blob',
+  // The vendor subcommand that writes an attestation. Same kind of thing as
+  // the two below it: a tool's own vocabulary, identical in every installation.
+  'sign-and-create',
   'slsa-verifier',
   'verify-image',
   'verify-signature',

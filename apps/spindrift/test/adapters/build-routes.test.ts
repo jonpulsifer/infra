@@ -73,6 +73,21 @@ const spec: BuildSpec = {
   buildArgs: {},
 };
 
+/**
+ * A destination on the one vendor's registry a cloud build step can authorize
+ * itself against, and a second one it cannot. `spec` above stays on neither, so
+ * every test that does not care about credentials is unaffected by them.
+ */
+const CLOUD_REGISTRY = 'example-region-docker.pkg.dev';
+
+const cloudSpec: BuildSpec = {
+  ...spec,
+  destinations: [
+    `${CLOUD_REGISTRY}/example-builds/i/app`,
+    'registry.example.test/app',
+  ],
+};
+
 function archiveSource(digest = 'sha256:bundle'): BuildSource {
   return {
     bundleDigest: digest,
@@ -416,6 +431,7 @@ describe('the hosted build route', () => {
 function cloudRoute(
   options: FakeCloudBuildOptions = {},
   pacing: { timeoutMs?: number } = {},
+  supplyChain: { signer?: string; attestor?: string } = {},
 ): {
   api: FakeCloudBuild;
   route: CloudBuildRoute;
@@ -431,6 +447,8 @@ function cloudRoute(
       region: 'example-region',
       image: 'registry.example.test/buildkit:pinned',
       zeroConfigFrontend: FRONTEND,
+      signer: supplyChain.signer ?? '',
+      attestor: supplyChain.attestor ?? '',
       token: api.token,
       fetch: api.fetch,
       ...PACING,
@@ -493,6 +511,92 @@ describe('the cloud build route', () => {
     if (result.status === 'FAILED') {
       expect(result.reason).toBe('TARGET_UNREACHABLE');
     }
+    expect(text(events)).toContain('submit failed');
+  });
+
+  // --- What the route adds around the shared program ------------------
+
+  test('the build step authorizes its own push', async () => {
+    // The shared program exports with `push=true` and a build step carries no
+    // registry credential by itself, so without this the build runs to
+    // completion and dies at the export with a `401`. Nothing is *passed* a
+    // credential: the step mints its own identity, because a credential in a
+    // submitted build body is one anybody who can read the build can read.
+    const { api, route } = cloudRoute();
+    await run(route.build(archiveSource(), cloudSpec));
+
+    const program = api.programs[0] ?? '';
+    expect(program).toContain('metadata.google.internal');
+    expect(program).toContain(CLOUD_REGISTRY);
+    expect(program).toContain('DOCKER_CONFIG');
+    // Before the build, not after it — a config written once the export has
+    // already failed is a config nothing reads.
+    expect(program.indexOf('DOCKER_CONFIG')).toBeLessThan(
+      program.indexOf('buildctl-daemonless.sh'),
+    );
+    // The submitted body holds no credential of its own.
+    expect(program).not.toContain('Bearer ');
+    expect(JSON.stringify(api.steps[0])).not.toContain('federated-token');
+  });
+
+  test('a destination the step cannot authorize is left to fail at the push', async () => {
+    // Every host is not one host. This token authenticates to one vendor's
+    // registries; a destination elsewhere reaches the push with no credential
+    // and fails there naming itself, which beats a silently dropped push.
+    const { api, route } = cloudRoute();
+    await run(route.build(archiveSource(), spec));
+
+    expect(api.programs[0]).not.toContain('metadata.google.internal');
+  });
+
+  test('the artifact is attested, so a policy-enforcing Target admits it', async () => {
+    // §16's registry signature is core's and core makes it. The attestation is
+    // the other half of the same key — an occurrence in the authority's
+    // project rather than an object in the registry — and it is what a cloud
+    // runtime's admission reads. Without it a cloud build is an artifact such a
+    // Target refuses for the one reason that is not true of it.
+    const { api, route } = cloudRoute(
+      {},
+      {},
+      { signer: SIGNER, attestor: ATTESTOR },
+    );
+    await run(route.build(archiveSource(), cloudSpec));
+
+    const attest = api.steps[0]?.[1];
+    const program = attest?.args?.[1] ?? '';
+    expect(program).toContain('sign-and-create');
+    // Per destination, because an attestation is bound to an artifact URL: one
+    // made against a repository says nothing about the same digest in another.
+    for (const destination of cloudSpec.destinations) {
+      expect(program).toContain(destination);
+    }
+    // The digest the builder pushed, handed over on the one path two steps of
+    // a build share. A step that re-derived it could disagree about what was
+    // built.
+    expect(api.programs[0]).toContain('/workspace/spindrift-digest');
+    expect(program).toContain('/workspace/spindrift-digest');
+  });
+
+  test('an installation that named no attestor submits no attestation', async () => {
+    const { api, route } = cloudRoute();
+    await run(route.build(archiveSource(), cloudSpec));
+
+    expect(api.steps[0]).toHaveLength(1);
+    expect(api.programs[0]).not.toContain('/workspace/spindrift-digest');
+  });
+
+  test('a malformed signer fails the submit rather than skipping the attestation', async () => {
+    // A quiet skip is a green Build whose Deploy is refused later by a webhook
+    // whose message is about a policy rather than about this manifest.
+    const { events, result } = await run(
+      cloudRoute(
+        {},
+        {},
+        { signer: 'not-a-key', attestor: ATTESTOR },
+      ).route.build(archiveSource(), cloudSpec),
+    );
+
+    expect(result.status).toBe('FAILED');
     expect(text(events)).toContain('submit failed');
   });
 

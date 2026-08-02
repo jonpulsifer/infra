@@ -20,9 +20,24 @@
  * its own frontends, its own defaults, and its own idea of what a website is,
  * and having one would make "one engine, two frontends" false the moment a
  * build moved between routes.
+ *
+ * **Two things the route adds around that program**, both of which the hosted
+ * route gets from its runner and this one has to arrange:
+ *
+ *   * A registry credential. The shared program exports with `push=true`, and
+ *     nothing in a build step authorizes that by itself — so the step mints its
+ *     own identity from the metadata server and writes the Docker config
+ *     BuildKit reads.
+ *   * A Binary Authorization attestation, as a second step. §16's registry
+ *     signature is core's and core makes it; the attestation is the *other*
+ *     half of the same key, an occurrence in the authority's project rather
+ *     than an object in the registry, and a cloud Target's admission reads that
+ *     one. It runs after the report line and before the build concludes, so a
+ *     failure to attest fails the build rather than reporting an artifact no
+ *     Target will admit.
  */
 
-import { buildKitProgramFor } from './buildkit.ts';
+import { buildKitProgramFor, quote } from './buildkit.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -116,6 +131,27 @@ export interface CloudBuildRouteOptions extends PollingOptions {
   readonly image: string;
   /** The zero-config BuildKit frontend the installation pinned (§4). */
   readonly zeroConfigFrontend: string;
+  /**
+   * The installation's signing key, as `supplyChain.signer` names it.
+   *
+   * Here for the attestation and not for a signature: core signs the digest it
+   * admits (`supply-chain/sign.ts`) and puts a cosign signature in the
+   * repository itself. What core cannot do is the *other* half — see
+   * {@link attestor}.
+   */
+  readonly signer: string;
+  /**
+   * `projects/<project>/attestors/<name>`, or empty where the installation
+   * enforces no Binary Authorization policy.
+   *
+   * A cloud runtime's admission reads an **attestation** — an occurrence on a
+   * note in the authority's own project — and not the registry signature core
+   * makes. One key, two verifiers, two artifacts, and a Target that enforces
+   * the second refuses a perfectly signed image that lacks it. The hosted route
+   * has carried this since it was written; without it here a cloud build is an
+   * artifact no such Target will admit.
+   */
+  readonly attestor: string;
   readonly token: TokenProvider;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
@@ -181,7 +217,7 @@ export class CloudBuildRoute implements BuildAdapter {
 
     let build: CloudBuild;
     try {
-      build = await this.submit(program);
+      build = await this.submit(program, spec);
     } catch (error) {
       // §4 story 48: the failure before the build step has to be readable as
       // text, not as an empty log and a spinner.
@@ -287,7 +323,8 @@ export class CloudBuildRoute implements BuildAdapter {
     return `projects/${this.options.project}/locations/${this.options.region}`;
   }
 
-  private async submit(program: string): Promise<CloudBuild> {
+  private async submit(program: string, spec: BuildSpec): Promise<CloudBuild> {
+    const attest = attestStep(spec.destinations, this.options);
     const operation = await this.json<{
       metadata?: { build?: CloudBuild };
     }>(`${this.options.endpoint}/v1/${this.parent}/builds`, {
@@ -297,8 +334,12 @@ export class CloudBuildRoute implements BuildAdapter {
           {
             name: this.options.image,
             entrypoint: 'sh',
-            args: ['-c', program],
+            args: [
+              '-c',
+              registryAuth(spec.destinations) + program + exportDigest(attest),
+            ],
           },
+          ...(attest === null ? [] : [attest]),
         ],
         // Read, never pushed: the build writes to the log service and this
         // route polls it. Nothing is posted back to Spindrift (§4).
@@ -425,6 +466,224 @@ export class CloudBuildRoute implements BuildAdapter {
     }
     return (await response.json()) as Result;
   }
+}
+
+/** One step of a submitted build, as much of it as this route composes. */
+interface BuildStep {
+  readonly name: string;
+  readonly entrypoint: string;
+  readonly args: readonly string[];
+  readonly env?: readonly string[];
+}
+
+/**
+ * Where the metadata server hands a step its own identity as a bearer token.
+ *
+ * `default` is the build's service account, which is the account the writer
+ * grant on the registry names — so the credential the push needs is the one
+ * identity this step already runs as, and no credential is stored anywhere
+ * (§13).
+ */
+const METADATA_TOKEN_URL =
+  'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
+
+/**
+ * The one path two steps of a build share.
+ *
+ * `/workspace` is a volume across a build's steps; everything else a step
+ * writes is its own container's. So a digest produced by the builder and read
+ * by the attestation travels here and nowhere else.
+ */
+const DIGEST_PATH = '/workspace/spindrift-digest';
+
+/**
+ * The tool image the attestation step runs.
+ *
+ * Not an installation choice, which is why it is not a manifest value beside
+ * the BuildKit image: `sign-and-create` is one vendor's subcommand against one
+ * vendor's API, and the vendor ships exactly one image carrying it. The full
+ * image rather than `:slim`, because the subcommand lives on the `beta`
+ * surface and these images have their component manager disabled — a slim
+ * image cannot install what it is missing, it can only fail asking.
+ */
+const ATTEST_IMAGE = 'gcr.io/google.com/cloudsdktool/cloud-sdk:stable';
+
+/**
+ * The registry hosts a build step's own identity can authorize a push to.
+ *
+ * Spelled out rather than "every host", for the same reason the hosted route
+ * splits its logins: this token authenticates to one vendor's registries and
+ * to nothing else. A destination on some other host is **not** silently
+ * dropped — it reaches the push with no credential and fails there, naming
+ * itself, which is the failure an operator can act on.
+ */
+function googleRegistryHosts(destinations: readonly string[]): string[] {
+  const hosts = destinations.map(
+    (destination) => destination.split('/')[0] ?? '',
+  );
+  return [...new Set(hosts)].filter(
+    (host) => host.endsWith('docker.pkg.dev') || host === 'gcr.io',
+  );
+}
+
+/**
+ * The Docker config the build step writes for itself before it builds.
+ *
+ * The shared program exports with `push=true` and BuildKit reads its registry
+ * credentials from a Docker config — so without this the build runs to
+ * completion and dies at the export with a `401`, which reads as a broken
+ * builder rather than as a missing credential. The cloud builder is the route
+ * that has to do this itself: the hosted one logs in with the run's own token,
+ * and the in-cluster one runs as a service account the registry already
+ * trusts.
+ *
+ * Written by the step and not passed to it. A credential composed here would
+ * be a credential in a submitted build body, readable by anyone who can read
+ * the build — and it would be minted at submit time and expire mid-queue.
+ */
+function registryAuth(destinations: readonly string[]): string {
+  const hosts = googleRegistryHosts(destinations);
+  if (hosts.length === 0) return '';
+
+  return `set -eu
+DOCKER_CONFIG=$(mktemp -d)
+export DOCKER_CONFIG
+token=$(wget -qO- --header 'Metadata-Flavor: Google' ${quote(METADATA_TOKEN_URL)} \\
+  | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
+# A token that never arrived becomes an empty password and a \`401\` at the
+# export, half an hour into a build. It is cheaper to say so here.
+[ -n "$token" ] || { echo 'the metadata server issued no access token'; exit 1; }
+# Folded \`base64\` output is a header the registry cannot parse, and whether it
+# folds is an implementation detail of whichever one the image ships.
+auth=$(printf 'oauth2accesstoken:%s' "$token" | base64 | tr -d '\\n')
+printf '{"auths":{' > "$DOCKER_CONFIG/config.json"
+separator=""
+for host in ${hosts.map(quote).join(' ')}; do
+  printf '%s"%s":{"auth":"%s"}' "$separator" "$host" "$auth" \\
+    >> "$DOCKER_CONFIG/config.json"
+  separator=","
+done
+printf '}}' >> "$DOCKER_CONFIG/config.json"
+
+`;
+}
+
+/**
+ * The one line the builder adds for the step after it.
+ *
+ * `$digest` is the shared program's own variable, set from the exporter's
+ * metadata a few lines above — this appends to that program rather than
+ * re-deriving it, because two places parsing one metadata file is two places
+ * that can disagree about what was built. Nothing is written where no second
+ * step will read it.
+ */
+function exportDigest(attest: BuildStep | null): string {
+  return attest === null ? '' : `\nprintf '%s' "$digest" > ${DIGEST_PATH}\n`;
+}
+
+/** A KMS key, as the four flags `sign-and-create` wants it in. */
+interface SignerKey {
+  readonly project: string;
+  readonly location: string;
+  readonly keyRing: string;
+  readonly key: string;
+}
+
+const SIGNER_PATTERN =
+  /^gcpkms:\/\/projects\/([^/]+)\/locations\/([^/]+)\/keyRings\/([^/]+)\/cryptoKeys\/([^/]+)$/;
+const ATTESTOR_PATTERN = /^projects\/([^/]+)\/attestors\/([^/]+)$/;
+
+/**
+ * The attestation step, or `null` where this installation asked for none.
+ *
+ * A malformed value **throws** rather than being skipped. Both halves are one
+ * fact an operator configured, and the two ways of getting this wrong land in
+ * very different places: a submit that fails here is a sentence in the build's
+ * own log, while a quiet skip is a green build whose Deploy is refused later by
+ * an admission webhook whose message is about a policy rather than about this
+ * installation's manifest.
+ */
+function attestStep(
+  destinations: readonly string[],
+  options: Pick<CloudBuildRouteOptions, 'signer' | 'attestor'>,
+): BuildStep | null {
+  if (options.attestor === '' || options.signer === '') return null;
+
+  const signer = SIGNER_PATTERN.exec(options.signer);
+  if (signer === null) {
+    throw new TypeError(
+      `the configured signer is not a KMS key reference: ${options.signer}`,
+    );
+  }
+  const attestor = ATTESTOR_PATTERN.exec(options.attestor);
+  if (attestor === null) {
+    throw new TypeError(
+      `the configured attestor is not an attestor reference: ${options.attestor}`,
+    );
+  }
+
+  const key: SignerKey = {
+    project: signer[1] ?? '',
+    location: signer[2] ?? '',
+    keyRing: signer[3] ?? '',
+    key: signer[4] ?? '',
+  };
+  const attestorProject = quote(attestor[1] ?? '');
+
+  return {
+    name: ATTEST_IMAGE,
+    entrypoint: 'bash',
+    // Without this a component the image does not carry stops to ask whether
+    // to install it, and a prompt in a build step is a hang followed by a
+    // timeout.
+    env: ['CLOUDSDK_CORE_DISABLE_PROMPTS=1'],
+    args: [
+      '-c',
+      `set -euo pipefail
+digest=$(cat ${DIGEST_PATH})
+
+# The key version has to be named and cannot be read off the attestor: Binary
+# Authorization overwrites a PKIX key's id with an API-calculated RFC6920
+# fingerprint, so what the attestor reports is a hash rather than the version
+# that produced it. \`1\` is the fallback for a caller whose role carries
+# \`useToSign\` but not \`list\` — a key with one version and no rotation
+# schedule gives the same answer either way.
+#
+# \`|| true\` is what makes that fallback reachable rather than decorative:
+# under \`pipefail\` a refused \`list\` fails the pipeline, and under \`-e\` a
+# failed command substitution in an assignment ends the step — so without it
+# the caller the fallback exists for dies at this line instead of using it.
+version=$(gcloud kms keys versions list \\
+  --project=${quote(key.project)} \\
+  --location=${quote(key.location)} \\
+  --keyring=${quote(key.keyRing)} \\
+  --key=${quote(key.key)} \\
+  --filter='state=ENABLED' --sort-by=~name --limit=1 \\
+  --format='value(name)' 2>/dev/null | sed 's#.*/##' || true)
+version="\${version:-1}"
+echo "attesting with key version \${version}"
+
+# Once per destination, and for a sharper reason than a signature: an
+# attestation is an occurrence bound to an --artifact-url, so one made against
+# one registry says nothing about the same digest in another. Binary
+# Authorization would refuse the exact image it had already attested, because
+# the URL it was asked about is not the URL it was told about.
+for destination in ${destinations.map(quote).join(' ')}; do
+  echo "attesting \${destination}@\${digest}"
+  gcloud beta container binauthz attestations sign-and-create \\
+    --project=${attestorProject} \\
+    --artifact-url="\${destination}@\${digest}" \\
+    --attestor=${quote(attestor[2] ?? '')} \\
+    --attestor-project=${attestorProject} \\
+    --keyversion-project=${quote(key.project)} \\
+    --keyversion-location=${quote(key.location)} \\
+    --keyversion-keyring=${quote(key.keyRing)} \\
+    --keyversion-key=${quote(key.key)} \\
+    --keyversion="\${version}"
+done
+`,
+    ],
+  };
 }
 
 /**
