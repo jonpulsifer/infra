@@ -123,9 +123,10 @@ export interface RegistryOptions {
   readonly env?: Record<string, string | undefined>;
   /** Likewise for the store's own access path, which authorizes separately. */
   readonly storeToken?: () => string | Promise<string>;
-  /** And for the cloud builder's, which authorizes separately again. */
-  readonly buildToken?: () => string | Promise<string>;
-  /** And for the cloud runtimes a Target is deployed to. */
+  /**
+   * And for the cloud APIs — the runtimes a Target is deployed to and the build
+   * service a cloud build is submitted to, which are one credential.
+   */
   readonly cloudToken?: () => string | Promise<string>;
   /** Source depot wiring, supplied by the live source-ingestion installation. */
   readonly source?: RepositorySourceStager;
@@ -204,11 +205,19 @@ export function createAdapterRegistry(
     }),
   );
 
+  // **Not the projected service account token this cluster is reached with.**
+  // That one is minted for this cluster's own API server and a cloud API
+  // refuses it; the failure would be a `401` on every cloud deploy, blamed on
+  // the Target. What belongs here is a federated token, which is what
+  // `cloudTokenFor` mints — see `cloud/federation.ts`. The cloud build route
+  // submits with it too, so it is resolved before the routes are built.
+  const cloud = cloudTokenFor(options);
+
   // §16's ordered list: the manifest's order *is* the admin rank, so the map is
   // built from it in order and `buildRouteProfiles` reads it back the same way.
   const buildRoutes = new Map<string, BuildAdapter>();
   for (const route of options.manifest.build.routes) {
-    const built = createBuildRoute(route, options, app);
+    const built = createBuildRoute(route, options, app, cloud);
     if (built !== null) buildRoutes.set(route.name, built);
   }
 
@@ -216,13 +225,6 @@ export function createAdapterRegistry(
   // connection carries its own endpoint and project, so one instance drives
   // every connected project the same way the cluster adapter drives every
   // cluster.
-  //
-  // **Not the projected service account token this cluster is reached with.**
-  // That one is minted for this cluster's own API server and a cloud API
-  // refuses it; the failure would be a `401` on every cloud deploy, blamed on
-  // the Target. What belongs here is a federated token, which is what
-  // `cloudTokenFor` mints — see `cloud/federation.ts`.
-  const cloud = cloudTokenFor(options);
   const deployAdapters: Partial<Record<TargetAdapter, DeployAdapter>> = {
     kubernetes,
     cloudrun: new CloudRunDeployAdapter({
@@ -405,6 +407,7 @@ function createBuildRoute(
   route: BuildRouteConfig,
   options: RegistryOptions,
   app: GitHubApp | null,
+  cloud: TokenProvider,
 ): BuildAdapter | null {
   const { manifest } = options;
   const zeroConfigFrontend = manifest.build.zeroConfigFrontend;
@@ -434,7 +437,12 @@ function createBuildRoute(
         region: route.region,
         image: route.image,
         zeroConfigFrontend,
-        token: options.buildToken ?? buildToken(options.env ?? Bun.env),
+        // The same federated token the cloud Targets are reached with, and for
+        // the same §13 reason: the build service is a cloud API in the shared
+        // artifacts project, the workload identity this process already carries
+        // is granted on it, and a second stored credential for it would be a
+        // credential §13 says does not exist.
+        token: cloud,
         ...(options.fetch ? { fetch: options.fetch } : {}),
       });
     case 'in-cluster':
@@ -456,29 +464,8 @@ function createBuildRoute(
 }
 
 /**
- * The bearer token the cloud build route submits with.
- *
- * A second variable rather than the store's, because they are two access paths
- * to two different services and one value good for both would be a value
- * broader than either needs. Read per call for the same reason the store's is:
- * a value captured at boot stops working the moment the Secret is rotated.
- */
-export const BUILD_TOKEN_VARIABLE = 'SPINDRIFT_BUILD_TOKEN';
-
-export function buildToken(env: Record<string, string | undefined> = Bun.env) {
-  return (): string => {
-    const token = env[BUILD_TOKEN_VARIABLE]?.trim();
-    if (!token) {
-      throw new AdapterUnavailableError(
-        `${BUILD_TOKEN_VARIABLE} is not set: this installation cannot submit a cloud build`,
-      );
-    }
-    return token;
-  };
-}
-
-/**
- * How this installation reaches a cloud Target's control API.
+ * How this installation reaches a cloud API — a Target's control plane, and the
+ * build service the cloud build route submits to.
  *
  * **No credential, in either arm.** §13 settles one auth mode — "native OIDC
  * federation, nothing stored" — and `cloud/federation.ts` is the whole of it:
@@ -486,6 +473,15 @@ export function buildToken(env: Record<string, string | undefined> = Bun.env) {
  * configured no federation gets a provider that refuses rather than one that is
  * absent, because §13's "connect always succeeds" means a cloud Target still
  * exists and still has to be able to say why it is unreachable.
+ *
+ * **No `SPINDRIFT_BUILD_TOKEN`, and that is the point.** The cloud build route
+ * once read a bearer token out of the environment under that name, and no
+ * installation ever set it: the chart renders no such Secret key, so a route
+ * configured against a real build service would have refused its first build
+ * with a sentence about a variable nothing writes. The build service is a cloud
+ * API in the shared artifacts project like any other, the workload identity
+ * this process already carries is granted on it, and a second stored credential
+ * beside it is exactly the credential §13 says does not exist.
  */
 function cloudTokenFor(options: RegistryOptions): TokenProvider {
   if (options.cloudToken !== undefined) return options.cloudToken;

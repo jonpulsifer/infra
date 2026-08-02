@@ -1,3 +1,7 @@
+# Nothing in this root writes here: no build step, no workflow, no schedule. The
+# bucket is declared because its objects still exist and `force_destroy = false`
+# means a removal fails on them rather than deleting them. Remove it with its
+# policy once the objects are accounted for.
 resource "google_storage_bucket" "trusted_artifacts" {
   name                        = "trusted-artifacts"
   location                    = local.region
@@ -13,7 +17,6 @@ data "google_iam_policy" "trusted_artifacts" {
     members = [
       "group:cloud@pulsifer.ca",
       format("serviceAccount:%s@cloudbuild.gserviceaccount.com", data.google_project.current.number),
-      google_service_account.base_updater.member,
     ]
   }
 }
