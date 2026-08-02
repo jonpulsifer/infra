@@ -148,7 +148,7 @@ function zeroConfigArm(input: BuildKitProgramInput): string {
   chmod +x "$bin/railpack"
   "$bin"/railpack prepare . --plan-out "$plan/railpack-plan.json"
   set -- --frontend gateway.v0 --opt source=${frontend} \\
-    --local dockerfile="$plan"`;
+    --local dockerfile="$plan" --local context=.`;
 }
 
 /**
@@ -191,14 +191,27 @@ cd "$root"/${quote(input.subpath)}
 # local — that is the mount name the frontend reads, and \`railpack-plan.json\`
 # is the filename it defaults to. It is not a Dockerfile and it carries no
 # syntax directive: the frontend parses this file as JSON.
+#
+# The two arms carry their own \`context\` local rather than sharing one below,
+# because they do not agree on it and the disagreement is the point.
+#
+# The scope names the Dockerfile; the bundle root is what it builds. A monorepo
+# App is one subpath of a tree it shares a lockfile, workspace and sibling
+# packages with, and its Dockerfile is written against the root that
+# \`docker build -f apps/x/Dockerfile .\` gives it — \`COPY . .\` then a path
+# *into* the app. Handing that file the subpath as its context is the one
+# arrangement under which every such Dockerfile fails, and fails deep inside
+# the build with a missing directory rather than here with a reason.
+#
+# The zero-config arm keeps the scope, because railpack detects a single app
+# and a plan built against the root would describe the wrong one.
 if [ -f Dockerfile ]; then
-  set -- --frontend dockerfile.v0 --local dockerfile=.
+  set -- --frontend dockerfile.v0 --local dockerfile=. --local context="$root"
 else
 ${zeroConfigArm(input)}
 fi
 
 buildctl-daemonless.sh build "$@" \\
-  --local context=. \\
 ${args}
   --attest=type=provenance,mode=max \\
   --attest=type=sbom \\

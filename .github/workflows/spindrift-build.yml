@@ -157,10 +157,13 @@ jobs:
           printf 'root=%s\n' "$root" >> "$GITHUB_OUTPUT"
 
       # §5's ladder, and the only decision made here: a Dockerfile settles how
-      # to build and never what the thing is. Where there is none, the same
-      # directory is handed to the pinned zero-config frontend — which is what
-      # makes "one engine, two frontends" true rather than two build systems to
-      # operate (§4).
+      # to build and never what the thing is. Where there is none, the scope is
+      # handed to the pinned zero-config frontend — which is what makes "one
+      # engine, two frontends" true rather than two build systems to operate
+      # (§4).
+      #
+      # The two arms disagree about the context on purpose, and each arm says
+      # why below.
       #
       # The zero-config arm does **not** write a `#syntax=` stub. The railpack
       # frontend reads the file it is given as its *build plan*, so a stub comes
@@ -190,9 +193,21 @@ jobs:
           set -euo pipefail
           scope="${ROOT}/${SUBPATH}"
 
+          # The scope names the Dockerfile; the bundle root is what it builds.
+          # A monorepo App is one subpath of a tree it shares a lockfile,
+          # workspace and sibling packages with, and its Dockerfile is written
+          # against the root that `docker build -f apps/x/Dockerfile .` gives
+          # it — `COPY . .` then a path *into* the app. Handing that file the
+          # subpath as its context is the one arrangement under which every
+          # such Dockerfile fails, and fails deep inside the build with a
+          # missing directory rather than here with a reason.
+          #
+          # Only this arm. The zero-config arm below keeps the scope, because
+          # railpack detects a single app and a plan built against the root
+          # would describe the wrong one.
           if [ -f "${scope}/Dockerfile" ]; then
             {
-              printf 'context=%s\n' "$scope"
+              printf 'context=%s\n' "$ROOT"
               printf 'file=%s\n' "${scope}/Dockerfile"
               printf 'buildArgs=\n'
             } >> "$GITHUB_OUTPUT"
