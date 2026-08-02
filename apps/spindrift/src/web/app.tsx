@@ -375,7 +375,10 @@ function WorkspaceScreen({
     );
   }
 
-  const handleDeploy = async () => {
+  // `rebuild` is passed explicitly rather than defaulted from a bare click
+  // handler: a click hands its event to the first parameter, and an event is
+  // truthy, so `onClick={handleDeploy}` would silently rebuild every press.
+  const handleDeploy = async (rebuild: boolean) => {
     if (state.type !== 'success') return;
     setDeploying(true);
     setDeployError(null);
@@ -384,6 +387,7 @@ function WorkspaceScreen({
       // and the command refuses a name two Apps answer to rather than guessing.
       const result = await command('deployApp', {
         name: state.workspace.appId ?? appName,
+        rebuild,
       });
       if (result.ok) {
         // Both arms navigate. §4 makes "a Build started" a different act from
@@ -449,7 +453,8 @@ function WorkspaceScreen({
       ) : null}
       <Workspace
         view={state.workspace}
-        onDeploy={handleDeploy}
+        onDeploy={() => handleDeploy(false)}
+        onRebuild={() => handleDeploy(true)}
         deploying={deploying}
         onNavigate={onNavigate}
         deletion={deletion}

@@ -13,8 +13,10 @@ import {
   type Clock,
   systemClock,
 } from '../../src/commands/types.ts';
+import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
 import { toAuthoredManifest } from '../../src/config/manifest.schema.ts';
 import { MANIFEST_INLINE_VAR } from '../../src/config/manifest.ts';
+import { writeStoredManifest } from '../../src/config/manifest-store.ts';
 import {
   apps,
   builds,
@@ -188,6 +190,116 @@ describe('reconciler loop composition', () => {
   });
 });
 
+/**
+ * Ticket 38 — the reconciler read the manifest once, at boot.
+ *
+ * `supplyChain.attestor` is the field that caught it: it was added through the
+ * product's own authoring path, and the next Build still dispatched with the
+ * empty value the process had booted with, so the attestation step skipped
+ * itself and the artifact went out unattested with every step green. The row
+ * is the seam — `configureInstallation` writes it and this asserts the
+ * reconciler reads it again — so the write here is the store function that
+ * command calls, without assembling a whole command context to reach it.
+ */
+describe('a manifest saved after boot', () => {
+  test('reaches the loops without restarting the process', async () => {
+    await pendingBuildNoRouteSatisfies();
+    const shutdown = new AbortController();
+    /** Every manifest handed to adapter assembly, in order. */
+    const assembled: InstallationManifest[] = [];
+    /** Which generation of adapters each build pass routed through. */
+    const routedThrough: number[] = [];
+    const ATTESTOR = 'projects/trusted-builds/attestors/spindrift';
+
+    let written = false;
+    await startReconciler({
+      signal: shutdown.signal,
+      client: database().connect(),
+      clock,
+      // Far below the 30s default so the change arrives inside a test.
+      manifestIntervalMs: 5,
+      env: {
+        ...FIXTURE_DEPLOYMENT_ENV,
+        [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(manifest)),
+      },
+      createAdapters(storedManifest) {
+        const generation = assembled.push(storedManifest);
+        return {
+          ...adaptersFor(new FakeDeployAdapter()),
+          // `routeForTarget` asks this per pending Build, per pass, so which
+          // generation answers says which manifest that pass ran against.
+          // Answering `null` leaves the Build PENDING, which is what keeps
+          // the build loop looking at it every idle interval.
+          build: () => {
+            routedThrough.push(generation);
+            return null;
+          },
+        };
+      },
+      async onEvent(event) {
+        if (event.type !== 'pass') return;
+
+        if (event.loop === 'manifest' && !written) {
+          written = true;
+          const authored = toAuthoredManifest(manifest);
+          // The row `configureInstallation` writes, written the way it
+          // writes it — without assembling a command context to reach it.
+          await writeStoredManifest(database().db, {
+            ...authored,
+            supplyChain: { ...authored.supplyChain, attestor: ATTESTOR },
+          });
+          return;
+        }
+
+        // Stop once a build pass has routed through the rebuilt adapters —
+        // the point being that a loop acted on the new manifest, not merely
+        // that the row was re-read.
+        if (routedThrough.includes(2)) shutdown.abort();
+      },
+    });
+
+    // Assembled twice: once at boot, once when the document changed.
+    expect(assembled).toHaveLength(2);
+    expect(assembled[0]?.supplyChain.attestor).toBeUndefined();
+    expect(assembled[1]?.supplyChain.attestor).toBe(ATTESTOR);
+    // And a loop is running against the second one, with no restart between.
+    expect(routedThrough).toContain(2);
+    // Two build-loop idle intervals plus the change between them.
+  }, 20_000);
+
+  test('an unchanged document rebuilds nothing', async () => {
+    const platform = new FakeDeployAdapter();
+    const shutdown = new AbortController();
+    const assembled: InstallationManifest[] = [];
+    let manifestPasses = 0;
+
+    await startReconciler({
+      signal: shutdown.signal,
+      client: database().connect(),
+      clock,
+      manifestIntervalMs: 5,
+      env: {
+        ...FIXTURE_DEPLOYMENT_ENV,
+        [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(manifest)),
+      },
+      createAdapters(storedManifest) {
+        assembled.push(storedManifest);
+        return adaptersFor(platform);
+      },
+      onEvent(event) {
+        if (event.type !== 'pass' || event.loop !== 'manifest') return;
+        manifestPasses += 1;
+        if (manifestPasses >= 3) shutdown.abort();
+      },
+    });
+
+    // Three re-reads, one assembly: the deep comparison is what keeps polling
+    // affordable enough to do every 30 seconds.
+    expect(manifestPasses).toBeGreaterThanOrEqual(3);
+    expect(assembled).toHaveLength(1);
+  });
+});
+
 describe('Deploy convergence through process startup', () => {
   test('polling takes a pending Deploy to the platform’s successful verdict', async () => {
     const platform = new FakeDeployAdapter();
@@ -271,6 +383,45 @@ async function reconcilePendingDeploy(platform: FakeDeployAdapter) {
 }
 
 /** An App, Component, Target, Build, and one PENDING Deploy intent. */
+/**
+ * A PENDING Build placed on a Target, for a registry whose `build()` answers
+ * `null`.
+ *
+ * No route clears the Target's policy, so `runBuildPass` leaves it PENDING and
+ * looks at it again every idle interval — which is what makes the build loop
+ * observable more than once inside a test.
+ */
+async function pendingBuildNoRouteSatisfies() {
+  const db = database().db;
+  const [app] = await db
+    .insert(apps)
+    .values({ name: `app-${crypto.randomUUID()}`, sourceKind: 'archive' })
+    .returning();
+  const [component] = await db
+    .insert(components)
+    .values({ appId: app!.id, name: 'web', kind: 'service' })
+    .returning();
+  const [target] = await db
+    .insert(targets)
+    .values(
+      targetValues({
+        name: `cluster-${crypto.randomUUID()}`,
+        adapter: 'kubernetes',
+      }),
+    )
+    .returning();
+  await db
+    .insert(componentTargetDesired)
+    .values({ componentId: component!.id, targetId: target!.id });
+  await db.insert(builds).values({
+    componentId: component!.id,
+    commit: 'abcdef0',
+    targetShape: 'image',
+    artifactType: 'image',
+    status: 'PENDING',
+  });
+}
+
 async function pendingDeploy() {
   const db = database().db;
   const [app] = await db
