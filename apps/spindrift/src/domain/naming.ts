@@ -11,27 +11,28 @@
  * > the name a developer shares is backend-agnostic and moving an App between
  * > backends is one record re-point.
  *
- * The asymmetry between them is not cosmetic and it is enforced here:
+ * **The second layer survives only where core does not mint the first.** It was
+ * written for a model where canonical was nested, unproxied and LAN-only, and
+ * vanity was the only name with public reach — two layers because they were two
+ * reach mechanisms. Reach is now a record type in a zone chosen per reach, so
+ * where core mints the name it can simply mint a good one, and a second flat
+ * name over it would be an alias for something already flat. Where the platform
+ * names its own workloads that name is opaque and backend-specific, so the layer
+ * still earns its place there: a flat zone name is both prettier and the thing
+ * that makes moving backends one record re-point.
  *
- * - **Canonical names nest freely.** `web.shop.apps.example` is legal because
- *   free universal certificates only bind *proxied* records to one subdomain
- *   level, and a canonical name is not proxied.
- * - **Vanity names are flat, single-label, and rationed.** One apex, one
- *   certificate, and §9's "hard ceiling: roughly 20 vanity names" is a property
- *   of that certificate rather than a policy anyone chose.
- *
- * **Core mints only what the platform will not.** {@link canonicalFor} returns
- * `null` for a Target whose backend names its own workloads, and on those the
- * adapter reports the address back across the deploy seam (§6's
+ * **Core mints only what the platform will not.** {@link hostnameFor} returns an
+ * empty canonical for a Target whose backend names its own workloads, and on
+ * those the adapter reports the address back across the deploy seam (§6's
  * `DeployVerdict.url`). A core that minted a name there would be inventing a
  * second address for something that already had one.
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
-import type { Hostname } from './desired-state.ts';
+import type { Hostname, Reach } from './desired-state.ts';
 
 /**
- * A single DNS label: what a vanity name is allowed to be, and what each
- * segment of a canonical name is built from.
+ * A single DNS label: what a vanity name is allowed to be, and what a minted
+ * name's one label is built from.
  */
 const LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -56,93 +57,69 @@ export function coreMintsCanonical(adapter: TargetAdapter): boolean {
   return !PLATFORM_NAMES_ITS_OWN.includes(adapter);
 }
 
-/** What a canonical name is assembled from. */
+/**
+ * The zone per reach (§9).
+ *
+ * An installation may point both at one zone, so flipping a Component's reach is
+ * a record re-point and its hostname is stable; or at two, for separate trust
+ * boundaries and split-horizon resolvers, accepting that changing reach is a
+ * rename. The product ships neither policy.
+ */
+export interface DnsZones {
+  readonly private: string;
+  readonly public: string;
+}
+
+/**
+ * The zone a Component's name is minted in, or `null` when nothing routes to it.
+ *
+ * `reach: none` has no zone rather than a zone it declines to use, because the
+ * absence is the point: a name that resolves to a Component nothing can reach is
+ * a name that lies.
+ */
+export function zoneForReach(reach: Reach, zones: DnsZones): string | null {
+  return reach === 'none' ? null : zones[reach];
+}
+
+/** What a minted name is assembled from. */
 export interface CanonicalName {
   readonly app: string;
   readonly component: string;
-  /** The installation's dedicated apex, disjoint from any hand-managed space. */
-  readonly apexZone: string;
+  /** The zone for this Component's reach, from {@link zoneForReach}. */
+  readonly zone: string;
 }
 
 /**
  * The name core mints for one Component on a Target that has none (§9).
  *
- * `<component>.<app>.<apex>` — nested rather than flattened to
- * `<component>-<app>`, because nesting is free here (canonical names are
- * unproxied) and a hyphen-joined name is ambiguous the moment either half
- * contains a hyphen, which both are allowed to.
+ * `<app>-<component>.<zone>` — **flat, one label under the zone**. Flatness is
+ * not a style choice: one wildcard certificate binds exactly one label, so
+ * a hyphen-joined single label is covered by `*.<zone>` and a nested one is not.
+ * `<app>` leads so an App's Components sort together in a zone listing.
  */
 export function componentCanonical(name: CanonicalName): string {
-  return `${name.component}.${name.app}.${name.apexZone}`;
+  return `${name.app}-${name.component}.${name.zone}`;
 }
 
-/** §9's flat single-label vanity name, in the installation's vanity zone. */
-export function vanity(label: string, vanityZone: string): string {
-  return `${label}.${vanityZone}`;
-}
-
-/**
- * §9's hard ceiling on vanity names: "roughly 20".
- *
- * **Not a policy anyone chose.** One apex gets one free universal certificate,
- * and that certificate is what caps how many single-label names can be minted
- * under it. So this is a fact about the zone being reported, not a limit being
- * imposed — which is why {@link vanityRation} returns a count rather than
- * throwing, and why the UI's job is to say how many are left rather than to
- * refuse the twenty-first.
- */
-export const VANITY_CEILING = 20;
-
-/** What is left of the ration, for the UI to state rather than enforce. */
-export interface VanityRation {
-  readonly used: number;
-  readonly ceiling: number;
-  readonly remaining: number;
-  /** True once the next name may not get a certificate. */
-  readonly exhausted: boolean;
-}
-
-/** The ration, given how many vanity names this installation has minted. */
-export function vanityRation(used: number): VanityRation {
-  const remaining = Math.max(0, VANITY_CEILING - used);
-  return {
-    used,
-    ceiling: VANITY_CEILING,
-    remaining,
-    exhausted: remaining === 0,
-  };
+/** §9's flat single-label vanity name, in the zone for its Component's reach. */
+export function vanity(label: string, zone: string): string {
+  return `${label}.${zone}`;
 }
 
 /**
- * Whether a Target's vanity name is served through the proxying edge (§9).
- *
- * §9 makes this **a per-Target property**, and the sentence it makes it one in
- * is worth quoting because the causality runs the opposite way to how it reads:
- * "the vanity record is unproxied on that leg, **so** proxying becomes a
- * per-Target property." The proxy is not a preference — it is the only way a
- * name reaches a metal cluster at all, because §9's forcing fact is that the
- * cluster's load-balancer range is RFC1918 and public reach goes through the
- * tunnel. A backend that answers on the public internet by itself needs no such
- * hop, and putting one in front of it would buy nothing and cost the losses in
- * {@link VANITY_LEG_LOSSES}.
- *
- * It is derived from the adapter type rather than stored, which is a per-Target
- * property exactly because a Target has exactly one adapter type (§13). Storing
- * it would let an operator assert something the backend contradicts.
- */
-export function vanityProxied(adapter: TargetAdapter): boolean {
-  return coreMintsCanonical(adapter);
-}
-
-/**
- * What is lost at a vanity name that is not proxied (§9).
+ * What is lost at a vanity name (§9).
  *
  * §9 records these as a **real loss, absorbed on purpose**: "the vanity leg
  * buffers the full response, so WebSockets and SSE die there and requests cap at
- * 60 seconds". Two-layer naming is what makes that absorbable — the app stays
- * fully capable at its canonical name — so the answer is to **state them in the
- * UI, never to work around them**. A workaround would be a second edge, which
- * is the external load balancer §9 declines to have.
+ * 60 seconds". They are properties of the proxying edge, which is why they apply
+ * exactly where the layer still exists — the backends whose vanity name is a
+ * proxied record in front of a platform-minted one. They
+ * are false for the unproxied address a cluster Target now publishes, and there
+ * is no vanity layer there to lose anything anyway.
+ *
+ * The answer is to **state them in the UI, never to work around them**. A
+ * workaround would be a second edge, which is the external load balancer §9
+ * declines to have.
  *
  * They are constants rather than prose in a component so that the screen showing
  * them and the test asserting they are shown read the same values.
@@ -156,25 +133,14 @@ export const VANITY_LEG_LOSSES = {
   maxRequestSeconds: 60,
 } as const;
 
-/**
- * Whether a Component reached at its vanity name still works as intended.
- *
- * The one thing the losses above make a *decision* rather than a caveat: an App
- * that streams is an App whose vanity name is worse than no vanity name, and
- * saying so at the moment a name is chosen is cheaper than saying it after
- * somebody's WebSocket has been failing in production for a week.
- */
-export function vanityCarriesStreams(adapter: TargetAdapter): boolean {
-  return vanityProxied(adapter) || VANITY_LEG_LOSSES.streamingProtocols;
-}
-
 /** What {@link hostnameFor} needs to answer §6's `hostname` field. */
 export interface HostnameContext {
   readonly app: string;
   readonly component: string;
   readonly adapter: TargetAdapter;
-  readonly apexZone: string;
-  readonly vanityZone: string;
+  /** Where this Component can be reached from, which picks the zone. */
+  readonly reach: Reach;
+  readonly zones: DnsZones;
   /** The flat label the developer chose, if any. */
   readonly vanityLabel: string | null;
 }
@@ -182,25 +148,35 @@ export interface HostnameContext {
 /**
  * The `hostname` core hands the adapter (§6).
  *
- * `canonical` is empty exactly when the platform names its own — the adapter
- * fills that gap from its own API and reports the result back on the verdict,
- * which is why {@link Hostname} carries a string rather than a nullable one:
- * every deploy ends with a canonical name, but not every deploy starts with one.
+ * Three cases, and the first is the one that changed: **a Component with no
+ * reach has no name at all.** Nothing routes to it, so every name core could
+ * mint would resolve to something unreachable.
+ *
+ * Otherwise `canonical` is empty exactly when the platform names its own — the
+ * adapter fills that gap from its own API and reports the result back, which is
+ * why {@link Hostname} carries a string rather than a nullable one: every routed
+ * deploy ends with a canonical name, but not every one starts with one. The
+ * vanity layer is layered on only there, for the reason in this module's header.
  */
 export function hostnameFor(context: HostnameContext): Hostname {
-  const canonical = coreMintsCanonical(context.adapter)
-    ? componentCanonical({
+  const zone = zoneForReach(context.reach, context.zones);
+  if (zone === null) return { canonical: '' };
+
+  if (coreMintsCanonical(context.adapter)) {
+    return {
+      canonical: componentCanonical({
         app: context.app,
         component: context.component,
-        apexZone: context.apexZone,
-      })
-    : '';
+        zone,
+      }),
+    };
+  }
 
   return {
-    canonical,
+    canonical: '',
     ...(context.vanityLabel === null
       ? {}
-      : { vanity: vanity(context.vanityLabel, context.vanityZone) }),
+      : { vanity: vanity(context.vanityLabel, zone) }),
   };
 }
 
@@ -210,7 +186,8 @@ export function hostnameFor(context: HostnameContext): Hostname {
  * Vanity first where there is one, because that is the name §9 says a developer
  * shares; the canonical is what always resolves underneath it. `null` when
  * neither exists yet — a Deploy that has not reached a Target has no address,
- * and inventing one for the UI would make a pending deploy look live.
+ * and inventing one for the UI would make a pending deploy look live. It is also
+ * `null` for a Component with no reach, which is not a gap but the answer.
  */
 export function displayUrl(hostname: Hostname): string | null {
   const host = hostname.vanity ?? hostname.canonical;

@@ -14,8 +14,9 @@
 import { ChevronRight, Lock, Pencil } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type {
+  Auth,
   ComponentKind,
-  Exposure,
+  Reach,
 } from '../../../../domain/desired-state.ts';
 import { Badge, Dot } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
@@ -159,16 +160,25 @@ export const KIND_NOTE = {
  */
 export const KINDS = Object.keys(KIND_NOTE) as readonly ComponentKind[];
 
-export const EXPOSURE_NOTE = {
-  internal:
-    'Reachable inside the Target only, authenticated at the workload boundary.',
+export const REACH_NOTE = {
+  none: 'No route. Nothing resolves to it, and it has no address to share.',
   private:
-    'Internet reachable, behind the Target-native authenticated edge. The default.',
-  public: 'Intentionally unauthenticated. Confirmed once, explicitly.',
-} as const satisfies Record<Exposure, string>;
+    'An address on your own network. Not reachable from the internet, whatever is in front of it.',
+  public:
+    'An address the internet reaches. The default is to put nothing in front of it.',
+} as const satisfies Record<Reach, string>;
 
 /** Derived, for the same reason {@link KINDS} is. */
-export const EXPOSURES = Object.keys(EXPOSURE_NOTE) as readonly Exposure[];
+export const REACHES = Object.keys(REACH_NOTE) as readonly Reach[];
+
+export const AUTH_NOTE = {
+  none: 'Nothing authenticates in front of it. Whoever can reach it, can use it.',
+  proxy:
+    "The Target's own authenticated edge stands in front. Only where the Target offers one.",
+} as const satisfies Record<Auth, string>;
+
+/** Derived, for the same reason {@link KINDS} is. */
+export const AUTHS = Object.keys(AUTH_NOTE) as readonly Auth[];
 
 /**
  * The vessel, which is a fact rather than a decision — but only after this

@@ -5,7 +5,6 @@ metadata:
   name: cluster-settings
   namespace: flux-system
 data:
-  SPINDRIFT_DOMAIN: lolwtf.dev
   # 1Password "oauth2-proxy: offsite" — the App whose callback is on
   # oauth2.${SPINDRIFT_DOMAIN}.
   OAUTH2_PROXY_ITEM: 46xuydwpk5vbw2gld2pzn5o4pq

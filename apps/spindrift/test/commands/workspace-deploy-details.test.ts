@@ -95,14 +95,16 @@ async function scaffold(
           appId: app.value.appId,
           name: 'web',
           kind: 'website',
-          exposure: 'public',
+          reach: 'public',
+          auth: 'none',
         }
       : {
           appId: app.value.appId,
           name: 'web',
           kind: 'service',
           expose: true,
-          exposure: 'private',
+          reach: 'private',
+          auth: 'proxy',
         },
     ctx,
   );
@@ -413,7 +415,8 @@ describe('getAppWorkspace command', () => {
         name: 'web',
         kind: 'service',
         expose: true,
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
       },
       ctx,
     );
@@ -472,7 +475,8 @@ describe('getAppWorkspace command', () => {
         appId: createdApp.value.appId,
         name: 'site',
         kind: 'website',
-        exposure: 'public',
+        reach: 'public',
+        auth: 'none',
       },
       ctx,
     );
@@ -527,7 +531,8 @@ describe('getAppWorkspace command', () => {
         appId: createdApp.value.appId,
         name: 'site',
         kind: 'website',
-        exposure: 'public',
+        reach: 'public',
+        auth: 'none',
       },
       ctx,
     );
@@ -746,7 +751,8 @@ describe('getDeployDetail command', () => {
         name: 'web',
         kind: 'service',
         expose: true,
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
       },
       ctx,
     );
@@ -837,7 +843,8 @@ describe('getDeployDetail command', () => {
         name: 'web',
         kind: 'service',
         expose: true,
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
       },
       ctx,
     );
@@ -1185,7 +1192,8 @@ describe('deployApp command', () => {
         name: 'web',
         kind: 'service',
         expose: true,
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
       },
       ctx,
     );
@@ -1258,7 +1266,8 @@ describe('deployApp command', () => {
         name: 'web',
         kind: 'service',
         expose: true,
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
       },
       ctx,
     );
@@ -1377,7 +1386,8 @@ describe('deployApp command', () => {
         name: 'web',
         kind: 'service',
         expose: true,
-        exposure: 'private',
+        reach: 'private',
+        auth: 'proxy',
       },
       ctx,
     );

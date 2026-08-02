@@ -90,7 +90,8 @@ export const getAppWorkspace: Command<
       kind: comp.kind,
       phase: phaseFor(deploy?.phase, build?.status),
       artifact,
-      exposure: comp.exposure,
+      reach: comp.reach,
+      auth: comp.auth,
     };
   });
 

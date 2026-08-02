@@ -174,7 +174,7 @@ describe('what a field knows about itself', () => {
 
   test('a key reads as a sentence, not as an identifier', () => {
     expect(humanize('zeroConfigFrontend')).toBe('Zero config frontend');
-    expect(humanize('apexZone')).toBe('Apex zone');
+    expect(humanize('tunnelHostname')).toBe('Tunnel hostname');
   });
 });
 

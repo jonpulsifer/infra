@@ -9,3 +9,8 @@ data:
   # ConfigMap (cluster-topology.json) — the network single source of truth.
   TIMEZONE: America/Halifax
   CERT_CLUSTER_ISSUER: letsencrypt-production
+  # The zone Spindrift mints App names under. Shared by both clusters because
+  # external-dns and the ACME solver are declared once in base/, and because a
+  # Component's reach is a record type in this zone rather than a zone of its
+  # own. Each cluster only ever deletes records its own txtOwnerId claims.
+  SPINDRIFT_DOMAIN: lolwtf.dev

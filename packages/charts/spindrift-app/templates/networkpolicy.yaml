@@ -1,10 +1,11 @@
 {{/*
 Ingress is default-deny with a fixed exception list.
 
-**Internal is a workload boundary, not a network location.** Without this, any
-pod in any namespace could reach an internal Component directly and skip the
-authenticated gateway — so the policy is on for every Component, whatever its
-exposure, with no per-App opt-out.
+**A workload boundary is not a network location.** Without this, any pod in any
+namespace could reach a Component directly and skip whatever stands in front of
+its route — so the policy is on for every Component, whatever its reach and
+whether or not it claims auth, with no per-App opt-out. It is also what lets
+`reach: private` publish the gateway's address without that being a bypass.
 
 **The shape is fixed; the names are Target configuration.** Same-namespace
 siblings are always allowed, because a release's own pods are the one caller

@@ -242,7 +242,7 @@ describe('configuring this installation from the browser', () => {
     const before = await storedManifest();
     const broken = withValueAt(
       withValueAt(fixture, ['installation'], ''),
-      ['dns', 'apexZone'],
+      ['dns', 'zones', 'private'],
       '',
     );
 
@@ -254,7 +254,7 @@ describe('configuring this installation from the browser', () => {
       failure: { code: string; message: string };
     };
     expect(body.failure.code).toBe('INVALID_INPUT');
-    expect(body.failure.message).toContain('apexZone');
+    expect(body.failure.message).toContain('zones.private');
     expect(await storedManifest()).toEqual(before);
   });
 

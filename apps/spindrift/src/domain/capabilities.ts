@@ -14,7 +14,7 @@
  * discovered              arch[], gpu, resourceCeiling, persistence,
  *                         postgres, redis, egressFiltering,
  *                         verifiedDeploy(enforcing), logHistory, offlineDeploy
- * asserted                publicExposure
+ * asserted                reaches[], authReaches[]
  * derived                 reachableRegistries[], reachableSecretStores[]
  * ```
  *
@@ -24,9 +24,12 @@
  * - **Discovered by default, refreshed on a schedule** (§3): "a connect-time
  *   snapshot rots, and the symptom is a Target disabled long after it stopped
  *   being incapable."
- * - **Asserted only where discovery is impossible.** `publicExposure` is the
- *   single genuine assertion, because no cluster API reports whether a tunnel
- *   exists (§3).
+ * - **Asserted only where discovery is impossible.** §3 gave the reason for the
+ *   one assertion it started with — "no cluster API reports whether a tunnel
+ *   exists" — and the reason is what decides membership, not the count. Nothing
+ *   reports whether an operator wired an authenticating proxy in front of you,
+ *   or how wide its audience is, so `authReaches` is asserted for the same
+ *   reason `reaches` is.
  * - **Derived** values are computed here, from what was discovered. Two of them
  *   are subtle enough that §3 and §32/§33 call them out by name, and both are
  *   derived in core rather than trusted from an adapter:
@@ -40,6 +43,7 @@ import type {
 import type {
   ArtifactType,
   ComponentKind,
+  Reach,
   Resources,
 } from './desired-state.ts';
 
@@ -246,7 +250,8 @@ export interface TargetCapabilities {
   logHistorySeconds: number;
 
   // Asserted.
-  publicExposure: boolean;
+  reaches: readonly Reach[];
+  authReaches: readonly Reach[];
 
   // Derived.
   reachableRegistries: readonly string[];
@@ -277,6 +282,48 @@ export const KINDS_BY_ADAPTER = {
   cloudrun: ['service', 'website'],
   static: ['website'],
 } as const satisfies Record<TargetAdapter, readonly ComponentKind[]>;
+
+/**
+ * What each adapter serves before an operator asserts anything.
+ *
+ * This is the floor, not the answer: an unasserted Target is held to what its
+ * backend does by construction, and an operator widens it. A cluster serves
+ * `private` without being asked because its load-balancer address exists whether
+ * or not anyone says so; it does **not** serve `public` unasserted, because that
+ * needs a tunnel and §3's whole reason for having assertions is that no API
+ * reports one.
+ *
+ * `static` is the row that carries §13's "picking the static Target *means*
+ * public": it serves that reach and no other, so a Component asking for anything
+ * else is a non-candidate by the ordinary join rather than by a special case.
+ */
+export const ASSERTED_REACHES_BY_ADAPTER = {
+  kubernetes: ['none', 'private'],
+  // Cloud Run answers `none` with internal-only ingress and `public` with a
+  // service URL the internet resolves. It has no `private` to offer: there is
+  // no address on the operator's own network for a record to point at.
+  cloudrun: ['none', 'public'],
+  static: ['public'],
+} as const satisfies Record<TargetAdapter, readonly Reach[]>;
+
+/**
+ * The authenticated edge each adapter has before an operator wires one.
+ *
+ * A cluster has none: an authenticating proxy in front of a Gateway is
+ * something someone installed, and §3's reason for assertions is that nothing
+ * reports whether they did. A cloud runtime's invoker check is the opposite —
+ * it is the platform's own identity-aware proxy, on unless it is turned off,
+ * so claiming it needs no operator's word. Static hosting serves files with no
+ * runtime to check anything.
+ *
+ * An operator still widens or narrows this: what they know that the adapter
+ * cannot is the *audience*, which is why an assertion overrides the floor.
+ */
+export const ASSERTED_AUTH_REACHES_BY_ADAPTER = {
+  kubernetes: [],
+  cloudrun: ['none', 'public'],
+  static: [],
+} as const satisfies Record<TargetAdapter, readonly Reach[]>;
 
 /**
  * `verifiedDeploy`, decided in core (§32).
@@ -329,10 +376,14 @@ export interface CapabilityContext {
   adapter: TargetAdapter;
   artifactTypes: readonly ArtifactType[];
   /**
-   * The single genuine assertion (§3). `null` — nobody has stated it — is
-   * treated as `false`: an unasserted tunnel is one that does not exist.
+   * §3's assertions. `null` — nobody has stated it — falls back to
+   * {@link ASSERTED_REACHES_BY_ADAPTER} rather than to nothing, because an
+   * unasserted tunnel is one that does not exist while an unasserted
+   * load-balancer address is one that does.
    */
-  publicExposure: boolean | null;
+  reaches: readonly Reach[] | null;
+  /** `null` or empty both mean no authenticated edge has been claimed. */
+  authReaches: readonly Reach[] | null;
   deployPath: DeployPathReferences;
 }
 
@@ -355,7 +406,9 @@ export function resolveCapabilities(
     verifiedDeploy: deriveVerifiedDeploy(discovery.policyEngine),
     logHistorySeconds: discovery.logHistorySeconds,
 
-    publicExposure: context.publicExposure ?? false,
+    reaches: context.reaches ?? ASSERTED_REACHES_BY_ADAPTER[context.adapter],
+    authReaches:
+      context.authReaches ?? ASSERTED_AUTH_REACHES_BY_ADAPTER[context.adapter],
 
     reachableRegistries: discovery.reachableRegistries,
     reachableSecretStores: discovery.reachableSecretStores,
@@ -422,7 +475,7 @@ export function noCapabilities(context: CapabilityContext): TargetCapabilities {
  * reason, never silently dropped.
  */
 export function capabilitiesOfRow(
-  target: Pick<TargetRow, 'adapter' | 'discovery' | 'publicExposure'>,
+  target: Pick<TargetRow, 'adapter' | 'discovery' | 'reaches' | 'authReaches'>,
   options: {
     /** The adapter instance, or `null` when this installation ships none. */
     readonly artifactTypes: readonly ArtifactType[] | null;
@@ -432,7 +485,8 @@ export function capabilitiesOfRow(
   const context: CapabilityContext = {
     adapter: target.adapter,
     artifactTypes: options.artifactTypes ?? [],
-    publicExposure: target.publicExposure,
+    reaches: target.reaches,
+    authReaches: target.authReaches,
     deployPath: deployPathReferences(options.manifest),
   };
   return target.discovery === null || options.artifactTypes === null
@@ -444,7 +498,8 @@ export function capabilitiesOfRow(
 interface TargetRow {
   adapter: TargetAdapter;
   discovery: TargetDiscovery | null;
-  publicExposure: boolean | null;
+  reaches: readonly Reach[] | null;
+  authReaches: readonly Reach[] | null;
 }
 
 /**

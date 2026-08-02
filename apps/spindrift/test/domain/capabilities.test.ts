@@ -42,7 +42,8 @@ function context(
   return {
     adapter: 'kubernetes',
     artifactTypes: ['image'],
-    publicExposure: null,
+    reaches: null,
+    authReaches: null,
     deployPath: LOCAL_PATH,
     ...overrides,
   };
@@ -133,17 +134,24 @@ describe('the provenances that are not discovered', () => {
     ).toEqual(['website']);
   });
 
-  test('an unasserted publicExposure is treated as absent', () => {
-    // §3 makes this the single genuine assertion. Nobody having made it is not
-    // the same as it being true, and guessing the other way would route a
-    // public workload at a Target with no way to serve it.
-    expect(resolveCapabilities(discovery(), context()).publicExposure).toBe(
-      false,
-    );
+  test('an unasserted reach falls back to what the adapter serves', () => {
+    // Nobody having asserted a tunnel is not the same as there being one — but
+    // it is also not the same as the cluster having no address at all. The
+    // floor is what the backend does by construction, and `public` is not on it.
     expect(
-      resolveCapabilities(discovery(), context({ publicExposure: true }))
-        .publicExposure,
-    ).toBe(true);
+      resolveCapabilities(discovery(), context({ adapter: 'kubernetes' }))
+        .reaches,
+    ).toEqual(['none', 'private']);
+    expect(
+      resolveCapabilities(discovery(), context({ reaches: ['public'] }))
+        .reaches,
+    ).toEqual(['public']);
+  });
+
+  test('an unasserted authenticated edge is no edge', () => {
+    // The direction that fails closed: claiming auth nobody wired would put a
+    // Component behind a filter that is not there.
+    expect(resolveCapabilities(discovery(), context()).authReaches).toEqual([]);
   });
 
   test('a Target nothing could be discovered about is capable of nothing', () => {

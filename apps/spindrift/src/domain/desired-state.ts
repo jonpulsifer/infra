@@ -78,16 +78,39 @@ export function artifactAddress(
 }
 
 /**
- * The three exposure states, with `private` the default (§9).
+ * Where a Component can be reached from (§9).
  *
- * - `internal` — Target-private, authenticated at the workload boundary.
- * - `private` — internet reachable, behind the Target-native authenticated edge.
- * - `public` — intentionally unauthenticated.
+ * - `none` — no route exists, so no name resolves to it.
+ * - `private` — a route on an address only the operator's own network reaches.
+ * - `public` — a route on an address the internet reaches.
  *
- * No non-public state may leave a bypassable origin, which is why exposure both
- * filters Targets and selects the artifact shape (§3, §9).
+ * The record type is the boundary, not a policy attached to it: `private` is an
+ * RFC1918 address, which is unreachable from the internet whatever else is or is
+ * not configured in front of it.
  */
-export type Exposure = 'internal' | 'private' | 'public';
+export type Reach = 'none' | 'private' | 'public';
+
+/**
+ * Whether something authenticates in front of a Component (§9).
+ *
+ * `proxy` means **the Target's native authenticated edge**, never oauth2-proxy
+ * specifically — §9 says "gateway external authentication on Kubernetes, or the
+ * cloud runtime's own identity-aware proxy". The Component asks for the property;
+ * the Target answers with a mechanism or is a non-candidate.
+ */
+export type Auth = 'none' | 'proxy';
+
+/**
+ * §9's hard rule, in the one form that can be checked: **if `auth` is `proxy`,
+ * no unauthenticated path to the workload may exist.**
+ *
+ * It binds only where auth is claimed. `{private, none}` is not a bypassable
+ * origin — it is deliberately unauthenticated on a network the operator owns.
+ * The chart's default-deny NetworkPolicy is what enforces it, for every
+ * Component whatever its reach.
+ */
+export const AUTH_NEEDS_A_ROUTE =
+  'a Component with no route has nothing to authenticate in front of';
 
 /**
  * A pinned reference to one config value in the Target's store (§10).
@@ -179,7 +202,8 @@ export interface DesiredState {
   /** Service only. Forced on for a `website` (§7). */
   expose?: boolean;
 
-  exposure: Exposure;
+  reach: Reach;
+  auth: Auth;
 
   /** Job only. A cron expression; absent means the CronJob is suspended (§7). */
   schedule?: string;

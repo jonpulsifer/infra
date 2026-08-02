@@ -95,14 +95,16 @@ async function seedTwins(ctx: CommandContext, name: string) {
             appId: app.value.appId,
             name: 'web',
             kind: 'website',
-            exposure: 'public',
+            reach: 'public',
+            auth: 'none',
           }
         : {
             appId: app.value.appId,
             name: 'web',
             kind: 'service',
             expose: true,
-            exposure: 'private',
+            reach: 'private',
+            auth: 'proxy',
           },
       ctx,
     );

@@ -9,6 +9,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import {
+  ASSERTED_REACHES_BY_ADAPTER,
   type CapabilityContext,
   resolveCapabilities,
 } from '../../src/domain/capabilities.ts';
@@ -43,7 +44,9 @@ function target(
     adapter?: CapabilityContext['adapter'];
     rank?: number;
     healthy?: boolean;
-    publicExposure?: boolean | null;
+    reaches?: readonly ('none' | 'private' | 'public')[] | null;
+    authReaches?: readonly ('none' | 'private' | 'public')[] | null;
+    routesAttachTo?: boolean;
     quotaExhausted?: boolean;
     discovery?: Partial<typeof CAPABLE_DISCOVERY>;
   } = {},
@@ -55,6 +58,7 @@ function target(
     adapter,
     rank: overrides.rank ?? 0,
     healthy: overrides.healthy ?? true,
+    routesAttachTo: overrides.routesAttachTo ?? true,
     ...(overrides.quotaExhausted === undefined
       ? {}
       : { quotaExhausted: overrides.quotaExhausted }),
@@ -63,7 +67,10 @@ function target(
       {
         adapter,
         artifactTypes: ARTIFACT_TYPES[adapter],
-        publicExposure: overrides.publicExposure ?? true,
+        // Defaulted to what the adapter serves unasserted, so a test that
+        // says nothing about reach gets the honest floor rather than every cell.
+        reaches: overrides.reaches ?? ASSERTED_REACHES_BY_ADAPTER[adapter],
+        authReaches: overrides.authReaches ?? ['none', 'private', 'public'],
         deployPath: DEPLOY_PATH,
       },
     ),
@@ -75,7 +82,8 @@ function requirements(
 ): DerivedRequirements {
   return {
     kind: 'service',
-    exposure: 'private',
+    reach: 'private',
+    auth: 'proxy',
     platform: DEFAULT_PLATFORM,
     resources: {},
     gpu: false,
@@ -94,7 +102,9 @@ describe('the suggestion follows rank', () => {
         target({ id: 'second', name: 'cloud', adapter: 'cloudrun', rank: 5 }),
         target({ id: 'first', name: 'cluster', rank: 1 }),
       ],
-      requirements(),
+      // A reach both serve: rank is what this test is about, and a Target
+      // filtered out on reach would make it pass for the wrong reason.
+      requirements({ reach: 'none', auth: 'none' }),
     );
     // §13: "Rank is one global ordered list." Not the best fit — there is no
     // fit score, and §3 declines to have a cost model.
@@ -174,27 +184,32 @@ describe('exposure filters Targets and selects artifact shape', () => {
   test('public needs a Target that can serve a public address', () => {
     expect(
       exclusionsFor(
-        target({ publicExposure: false }),
-        requirements({ exposure: 'public' }),
+        target({ reaches: ['none', 'private'] }),
+        requirements({ reach: 'public', auth: 'none' }),
       ),
-    ).toEqual(['EXPOSURE_UNSUPPORTED']);
+    ).toEqual(['REACH_UNSUPPORTED']);
   });
 
-  test('a private workload cannot land on the public-only Target', () => {
-    // §9: "no non-public state may leave a bypassable origin."
-    for (const exposure of ['internal', 'private'] as const) {
+  test('a non-public workload cannot land on the public-only Target', () => {
+    // The static Target asserts `public` and nothing else, so this falls out of
+    // the ordinary join rather than a special case about which Target it is.
+    for (const reach of ['none', 'private'] as const) {
       expect(
         exclusionsFor(
           target({ adapter: 'static' }),
-          requirements({ kind: 'website', exposure }),
+          requirements({ kind: 'website', reach, auth: 'none' }),
         ),
-      ).toContain('EXPOSURE_UNSUPPORTED');
+      ).toContain('REACH_UNSUPPORTED');
     }
   });
 
   test('a public website reaches the static Target, as files', () => {
     const cdn = target({ adapter: 'static' });
-    const wanted = requirements({ kind: 'website', exposure: 'public' });
+    const wanted = requirements({
+      kind: 'website',
+      reach: 'public',
+      auth: 'none',
+    });
     expect(exclusionsFor(cdn, wanted)).toEqual([]);
     expect(artifactTypeFor('website', cdn)).toBe('files');
   });
@@ -235,7 +250,7 @@ describe('an attached datastore constrains where its App can go', () => {
         target({ id: 'target-kubernetes', rank: 0 }),
         target({ id: 'cloud', adapter: 'cloudrun', rank: 1 }),
       ],
-      requirements({ datastores: [clusterLocal] }),
+      requirements({ reach: 'none', auth: 'none', datastores: [clusterLocal] }),
     );
     expect(placement.candidates.map((c) => c.target.id)).toEqual([
       'target-kubernetes',
@@ -315,7 +330,7 @@ describe('registry reachability at Place', () => {
     expect(
       exclusionsFor(
         target({ adapter: 'static', discovery: { reachableRegistries: [] } }),
-        requirements({ kind: 'website', exposure: 'public' }),
+        requirements({ kind: 'website', reach: 'public', auth: 'none' }),
       ),
     ).toEqual([]);
   });
@@ -364,7 +379,7 @@ describe('the rest of the derived requirements', () => {
     expect(
       exclusionsFor(
         target({ adapter: 'static' }),
-        requirements({ kind: 'job', exposure: 'public' }),
+        requirements({ kind: 'job', reach: 'public', auth: 'none' }),
       ),
     ).toEqual(['KIND_UNSUPPORTED']);
   });
@@ -391,7 +406,7 @@ describe('§9: a Private website takes the server-image rendering', () => {
         target({ id: 'cdn', name: 'hosting', adapter: 'static', rank: 0 }),
         target({ id: 'cluster', name: 'cluster', rank: 1 }),
       ],
-      requirements({ kind: 'website', exposure: 'private' }),
+      requirements({ kind: 'website', reach: 'private', auth: 'proxy' }),
     );
 
     // Static outranks the cluster and is still not what is suggested.
@@ -404,8 +419,10 @@ describe('§9: a Private website takes the server-image rendering', () => {
     const excluded = placement.nonCandidates.find(
       (one) => one.target.id === 'cdn',
     );
-    expect(excluded?.reasons).toContain('EXPOSURE_UNSUPPORTED');
-    expect(excluded?.detail.join(' ')).toContain('only serve public');
+    expect(excluded?.reasons).toContain('REACH_UNSUPPORTED');
+    expect(excluded?.detail.join(' ')).toContain(
+      'no address on your own network',
+    );
   });
 
   test('the same website going public reaches static hosting as files', () => {
@@ -414,7 +431,7 @@ describe('§9: a Private website takes the server-image rendering', () => {
         target({ id: 'cdn', name: 'hosting', adapter: 'static', rank: 0 }),
         target({ id: 'cluster', name: 'cluster', rank: 1 }),
       ],
-      requirements({ kind: 'website', exposure: 'public' }),
+      requirements({ kind: 'website', reach: 'public', auth: 'none' }),
     );
     expect(placement.suggested?.target.id).toBe('cdn');
     expect(placement.suggested?.artifactType).toBe('files');
@@ -433,7 +450,10 @@ describe('§10: the reach rule does not bind a website', () => {
       discovery: { reachableSecretStores: [] },
     });
     expect(
-      exclusionsFor(cdn, requirements({ kind: 'website', exposure: 'public' })),
+      exclusionsFor(
+        cdn,
+        requirements({ kind: 'website', reach: 'public', auth: 'none' }),
+      ),
     ).toEqual([]);
   });
 
@@ -462,7 +482,108 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
 
   test('a service and a website are both rendered there', () => {
     const cloud = target({ adapter: 'cloudrun' });
-    expect(exclusionsFor(cloud, requirements({ kind: 'service' }))).toEqual([]);
-    expect(exclusionsFor(cloud, requirements({ kind: 'website' }))).toEqual([]);
+    const served = { reach: 'public', auth: 'none' } as const;
+    expect(
+      exclusionsFor(cloud, requirements({ ...served, kind: 'service' })),
+    ).toEqual([]);
+    expect(
+      exclusionsFor(cloud, requirements({ ...served, kind: 'website' })),
+    ).toEqual([]);
+  });
+});
+
+describe('§9: reach and auth join as two independent facts', () => {
+  /** Offsite, as it declares itself: every reach, auth for `private` only. */
+  const offsite = () =>
+    target({
+      reaches: ['none', 'private', 'public'],
+      authReaches: ['private'],
+    });
+
+  test('the four routed cells, three met and one unmet', () => {
+    // The grid the old three-state exposure could not express. Two of these
+    // cells had no name at all before: an unauthenticated address on your own
+    // network, and an authenticated public one.
+    const met: [ReturnType<typeof requirements>['reach'], 'none' | 'proxy'][] =
+      [
+        ['private', 'none'],
+        ['private', 'proxy'],
+        ['public', 'none'],
+      ];
+    for (const [reach, auth] of met) {
+      expect(exclusionsFor(offsite(), requirements({ reach, auth }))).toEqual(
+        [],
+      );
+    }
+
+    // Expressible and unmet, which is the point: the Target has the mechanism
+    // and cannot assert an audience wider than one GitHub user. It lights up
+    // the day it can, with no Spindrift change.
+    expect(
+      exclusionsFor(
+        offsite(),
+        requirements({ reach: 'public', auth: 'proxy' }),
+      ),
+    ).toEqual(['AUTH_UNSUPPORTED']);
+  });
+
+  test('the unroutable cell is refused before it can be placed', () => {
+    // A filter needs a route to sit on. Refused at validation, so placement
+    // never sees it — but if it did, auth would still find nothing to attach to.
+    expect(
+      exclusionsFor(offsite(), requirements({ reach: 'none', auth: 'proxy' })),
+    ).toContain('AUTH_UNSUPPORTED');
+  });
+
+  test('a Component with no reach needs neither a gateway nor an edge', () => {
+    expect(
+      exclusionsFor(
+        target({ reaches: ['none'], authReaches: [], routesAttachTo: false }),
+        requirements({ reach: 'none', auth: 'none' }),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('§3: a Target is refused on each fact it asserts', () => {
+  test('a reach it does not serve', () => {
+    // Folly is `private`-only on purpose — it is on Starlink, so it should be
+    // pulling and not pushing. That is a fact about the site, not a limitation.
+    const folly = target({ reaches: ['none', 'private'] });
+    expect(
+      exclusionsFor(folly, requirements({ reach: 'public', auth: 'none' })),
+    ).toContain('REACH_UNSUPPORTED');
+    expect(
+      exclusionsFor(folly, requirements({ reach: 'private', auth: 'none' })),
+    ).toEqual([]);
+  });
+
+  test('an auth it cannot honestly offer', () => {
+    expect(
+      exclusionsFor(
+        target({ reaches: ['none', 'private'], authReaches: [] }),
+        requirements({ reach: 'private', auth: 'proxy' }),
+      ),
+    ).toContain('AUTH_UNSUPPORTED');
+  });
+
+  test('a gateway it never named', () => {
+    // §3's grammar over the failure that produced this ticket: a green Deploy
+    // whose `parentRefs` named the empty string, and a URL nothing answered.
+    expect(
+      exclusionsFor(
+        target({ routesAttachTo: false }),
+        requirements({ reach: 'private', auth: 'proxy' }),
+      ),
+    ).toContain('NO_GATEWAY');
+  });
+
+  test('and a backend that routes its own workloads never fails that way', () => {
+    expect(
+      exclusionsFor(
+        target({ adapter: 'cloudrun' }),
+        requirements({ kind: 'service', reach: 'public', auth: 'none' }),
+      ),
+    ).not.toContain('NO_GATEWAY');
   });
 });

@@ -31,10 +31,17 @@ app:
   # queue worker.
   expose: true
 
-  # internal | private | public. A route renders for a Component that is exposed
-  # and not `internal`; a private route delegates authentication to the Target's
-  # shared proxy, a public route is filter-free.
-  exposure: private
+  # Where this Component can be reached from: none | private | public. A route
+  # renders for a Component that is exposed and whose reach is not `none`.
+  # `private` publishes the gateway's own address, which is RFC1918 and so is
+  # not reachable from the internet whatever is attached to it; `public`
+  # publishes a proxied record pointing at the Target's tunnel.
+  reach: private
+
+  # Whether the Target's authenticated edge stands in front: none | proxy.
+  # Independent of reach — an unauthenticated address on your own network and an
+  # authenticated public one are both expressible.
+  auth: proxy
 
   # Job only. Empty renders a suspended CronJob, so a manual run and a scheduled
   # run are one object with a field flipped.
@@ -79,12 +86,21 @@ platform:
     name: ""
     namespace: ""
 
-  # Gateway API ExternalAuth backend for private routes. The service and the
-  # cross-namespace ReferenceGrant are vessel resources.
+  # Gateway API ExternalAuth backend, rendered as a filter exactly when
+  # `app.auth` is `proxy`. The service and the cross-namespace ReferenceGrant
+  # are vessel resources.
   externalAuth:
     name: ""
     namespace: ""
     port: 80
+
+  # Where a route's DNS record points, per reach. `privateAddress` is the
+  # gateway's own load-balancer address, published unproxied; `tunnelHostname`
+  # is the Target's Cloudflare tunnel, published as a proxied CNAME. Each is
+  # required only for the reach that uses it.
+  dns:
+    privateAddress: ""
+    tunnelHostname: ""
 
   # The ClusterSecretStore config is fetched through — an admin-chosen Target
   # property. Rendering config without it is refused rather than guessed; see

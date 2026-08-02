@@ -16,9 +16,10 @@
  * document.
  */
 import type {
+  Auth,
   ConfigEntry,
   DesiredState,
-  Exposure,
+  Reach,
 } from '../../../domain/desired-state.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 
@@ -72,21 +73,29 @@ export interface CloudRunRenderContext {
 }
 
 /**
- * How exposure reaches the runtime (§9).
+ * Where a Component can be reached from, as the runtime's ingress (§9).
  *
- * Two mechanisms, because exposure is two questions the runtime answers
- * separately: *who can route to it* is ingress, and *who may invoke it* is IAM.
- * Only `public` relaxes the second, which is what "no non-public mode may have a
- * bypassable origin" means here — the authenticated edge §9 wants on `private`
- * is the runtime's own invoker check, enabled by leaving it on.
+ * The runtime answered reach and auth separately long before core split them:
+ * *who can route to it* is ingress, and *who may invoke it* is IAM. This is the
+ * first half, and it now reads off the field that means it.
  */
-export function ingressFor(exposure: Exposure): string {
-  return exposure === 'internal' ? INGRESS.internalOnly : INGRESS.all;
+export function ingressFor(reach: Reach): string {
+  return reach === 'none' ? INGRESS.internalOnly : INGRESS.all;
 }
 
-/** Whether this exposure means anyone at all may invoke the Service (§9). */
-export function allowsUnauthenticated(exposure: Exposure): boolean {
-  return exposure === 'public';
+/**
+ * Whether anyone at all may invoke the Service (§9).
+ *
+ * Both halves have to say so. `auth: none` alone is not enough, because it is
+ * also what a Component with no route says, and binding `allUsers` on the
+ * strength of that would open the invoker check on the one Component that asked
+ * to be unroutable. Only a deliberately public and deliberately unauthenticated
+ * Component relaxes it; every other cell keeps the runtime's own invoker check,
+ * which is the authenticated edge §9 wants and the reason no non-public cell has
+ * a bypassable origin here.
+ */
+export function allowsUnauthenticated(reach: Reach, auth: Auth): boolean {
+  return reach === 'public' && auth === 'none';
 }
 
 /**
@@ -117,7 +126,7 @@ export function cloudRunService(
 
   return {
     labels,
-    ingress: ingressFor(desired.exposure),
+    ingress: ingressFor(desired.reach),
     ...(context.useProjectAdmissionPolicy
       ? { binaryAuthorization: { useDefault: true } }
       : {}),
@@ -197,10 +206,13 @@ function resourceLimits(desired: DesiredState): Record<string, string> | null {
  * treats the authenticated edge as the largest non-Spindrift dependency (Risk
  * 2), and the audience belongs with it rather than being invented here.
  */
-export function invokerPolicy(exposure: Exposure): Record<string, unknown> {
+export function invokerPolicy(
+  reach: Reach,
+  auth: Auth,
+): Record<string, unknown> {
   return {
     policy: {
-      bindings: allowsUnauthenticated(exposure)
+      bindings: allowsUnauthenticated(reach, auth)
         ? [{ role: 'roles/run.invoker', members: ['allUsers'] }]
         : [],
     },

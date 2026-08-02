@@ -96,6 +96,27 @@ export function clusterInput(
       sourceRef: { name: 'charts', namespace: 'delivery' },
     },
     chartContract: VALUES_CONTRACT,
+    // The edge the ExternalAuth backend below is. Asserted because §3 says
+    // nothing reports it — and `reaches` is left unasserted for the same reason,
+    // so this fixture cluster has an authenticated edge and no tunnel.
+    authReaches: ['private'],
+    // A connected cluster names the gateway its routes attach to. Absent, every
+    // Component with a reach is a non-candidate — which is the point of the
+    // check, and would make every fixture here a Target nothing can land on.
+    chartValues: {
+      platform: {
+        gateway: { name: 'cluster-gateway', namespace: 'gateway' },
+        externalAuth: {
+          name: 'oauth2-proxy',
+          namespace: 'oauth2-proxy',
+          port: 80,
+        },
+        dns: {
+          privateAddress: '10.0.0.1',
+          tunnelHostname: 'tunnel.example.test',
+        },
+      },
+    },
     ...overrides,
   };
 }
@@ -154,6 +175,9 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
         ...(input.chartContract === undefined
           ? {}
           : { chartContract: input.chartContract }),
+        ...(input.chartValues === undefined
+          ? {}
+          : { chartValues: input.chartValues }),
       };
     }
     case 'cloudrun': {
@@ -186,6 +210,10 @@ export function targetValues(overrides: Partial<NewTarget> = {}): NewTarget {
     rank: 0,
     connection: connectionFor(adapter),
     health: 'healthy',
+    // The cluster fixture wires an ExternalAuth backend, so it asserts the edge
+    // that backend is. `private` only, and no `reaches` at all: a tunnel is the
+    // thing §3 says nothing reports, so an unasserted Target does not have one.
+    ...(adapter === 'kubernetes' ? { authReaches: ['private' as const] } : {}),
     ...overrides,
   };
 }

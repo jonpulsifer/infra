@@ -277,7 +277,7 @@ function Components({ components }: { components: readonly ComponentView[] }) {
             key={component.name}
             badge={<Badge tone="accent">{component.kind}</Badge>}
             title={component.name}
-            detail={`${component.phase} · ${component.exposure} · ${component.artifact}`}
+            detail={`${component.phase} · ${component.reach}${component.auth === 'proxy' ? ' + auth' : ''} · ${component.artifact}`}
           />
         ))}
       </CardContent>

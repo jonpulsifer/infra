@@ -68,7 +68,8 @@ function desired(overrides: Partial<DesiredState> = {}): DesiredState {
       digest: 'sha256:bundle',
       refs: [`${DEPOT}/bundles/sha256:bundle`],
     },
-    exposure: 'public',
+    reach: 'public',
+    auth: 'none',
     config: [],
     requirements: { platform: { os: 'linux', arch: 'amd64' }, resources: {} },
     hostname: { canonical: '' },
@@ -109,11 +110,11 @@ async function drain(
 }
 
 describe('§9: static hosting serves Public only', () => {
-  test('a private website is refused, and refused as core’s bug', async () => {
-    for (const exposure of ['internal', 'private'] as const) {
+  test('anything but a public reach is refused, as core’s bug', async () => {
+    for (const reach of ['none', 'private'] as const) {
       const { api, adapter } = adapterFor();
       const { verdict } = await drain(
-        adapter.apply(TARGET, desired({ exposure })),
+        adapter.apply(TARGET, desired({ reach, auth: 'none' })),
       );
       expect(verdict.phase).toBe('FAILED');
       if (verdict.phase === 'FAILED') {
@@ -122,7 +123,7 @@ describe('§9: static hosting serves Public only', () => {
         // is the difference between INTERNAL and REJECTED.
         expect(verdict.reason).toBe('INTERNAL');
         expect(blameFor(verdict.reason)).toBe('platform');
-        expect(verdict.detail).toContain('Public only');
+        expect(verdict.detail).toContain('a public reach only');
       }
       // And nothing was placed on the way to refusing.
       expect(api.hasSite('shop-site')).toBe(false);

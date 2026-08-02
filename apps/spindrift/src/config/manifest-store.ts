@@ -190,6 +190,7 @@ async function reconcileManifestTargets(
             ? ('disconnected' as const)
             : ('connected' as const),
         connection: declaredConnection,
+        ...assertedBySeed(target),
         health: 'unhealthy' as const,
         prerequisites:
           declaredConnection === null
@@ -217,6 +218,26 @@ async function reconcileManifestTargets(
           : { rank },
       });
   }
+}
+
+/**
+ * The asserted columns a seed declares, if it declares any.
+ *
+ * Omitted rather than nulled when absent, so a declaration that says nothing
+ * about reach leaves whatever an operator asserted through the UI standing —
+ * the same "a declaration seeds, it does not govern" rule the connection follows.
+ */
+function assertedBySeed(target: TargetSeed): {
+  reaches?: ('none' | 'private' | 'public')[];
+  authReaches?: ('none' | 'private' | 'public')[];
+} {
+  if (target.adapter !== 'kubernetes') return {};
+  return {
+    ...(target.reaches === undefined ? {} : { reaches: [...target.reaches] }),
+    ...(target.authReaches === undefined
+      ? {}
+      : { authReaches: [...target.authReaches] }),
+  };
 }
 
 function connectionFromSeed(target: TargetSeed): TargetConnection | null {

@@ -36,9 +36,10 @@ import type {
 } from '../../../domain/capabilities.ts';
 import {
   type ArtifactType,
+  type Auth,
   artifactAddress,
   type DesiredState,
-  type Exposure,
+  type Reach,
 } from '../../../domain/desired-state.ts';
 import type { CloudRunConnection } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
@@ -180,12 +181,13 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // call finds no Service and does nothing, which is why the policy is
     // written again after the rollout below: the closed state is **asserted**
     // on every deploy rather than inherited from the platform's default.
-    if (!allowsUnauthenticated(desired.exposure)) {
+    if (!allowsUnauthenticated(desired.reach, desired.auth)) {
       const tightened = await this.setInvoker(
         http,
         connection,
         id,
-        desired.exposure,
+        desired.reach,
+        desired.auth,
       );
       if (tightened !== null) {
         yield this.status('FAILED', { resource: id, reason: tightened.reason });
@@ -230,7 +232,8 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       http,
       connection,
       id,
-      desired.exposure,
+      desired.reach,
+      desired.auth,
     );
     if (written !== null) {
       yield this.status('FAILED', { resource: id, reason: written.reason });
@@ -455,12 +458,13 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     http: CloudHttp,
     connection: CloudRunConnection,
     id: string,
-    exposure: Exposure,
+    reach: Reach,
+    auth: Auth,
   ): Promise<Omit<Extract<DeployVerdict, { phase: 'FAILED' }>, 'ref'> | null> {
     const written = await http.json<unknown>({
       method: 'POST',
       path: `/v2/${parentOf(connection)}/services/${encodeURIComponent(id)}:setIamPolicy`,
-      body: invokerPolicy(exposure),
+      body: invokerPolicy(reach, auth),
     });
     if (written.ok) return null;
     // A Service that does not exist yet cannot have a policy, and on the
@@ -469,7 +473,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     if (
       written.kind === 'status' &&
       written.status === 404 &&
-      !allowsUnauthenticated(exposure)
+      !allowsUnauthenticated(reach, auth)
     ) {
       return null;
     }
@@ -477,7 +481,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     return {
       phase: 'FAILED',
       reason: failure.reason,
-      detail: `the invoker policy for ${exposure} could not be written: ${failure.detail}`,
+      detail: `the invoker policy for {reach: ${reach}, auth: ${auth}} could not be written: ${failure.detail}`,
       debug: failure.debug,
     };
   }

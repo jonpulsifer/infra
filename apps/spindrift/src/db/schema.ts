@@ -125,15 +125,21 @@ export const componentKind = pgEnum('component_kind', [
 ]);
 
 /**
- * §9: "Exposure is three states with `Private` as the default." Shared by a
- * Component's authored setting and a Deploy's rendered `DesiredState.exposure`
- * (§6) — one vocabulary, not two.
+ * §9's exposure, as the two independent facts it always was: where a request can
+ * come from, and whether something authenticates it.
+ *
+ * The three states it replaces picked three of the six cells, and both omitted
+ * routed ones are things people ask for — RFC1918-without-auth is the dashboard
+ * you do not want to log into on your own network, and tunnel-with-auth is
+ * sharing something with people who are not on your tailnet.
+ *
+ * Both are shared by a Component's authored setting and a Deploy's rendered
+ * `DesiredState` (§6) — one vocabulary, not two.
  */
-export const exposureState = pgEnum('exposure_state', [
-  'internal',
-  'private',
-  'public',
-]);
+export const reachState = pgEnum('reach_state', ['none', 'private', 'public']);
+
+/** Whether the Target's native authenticated edge stands in front (§9). */
+export const authMode = pgEnum('auth_mode', ['none', 'proxy']);
 
 /** §6 `DesiredState.artifact.type`: "image | files". */
 export const artifactType = pgEnum('artifact_type', ['image', 'files']);
@@ -461,8 +467,13 @@ export const components = pgTable(
     expose: boolean('expose'),
     /** Job only: a cron expression. */
     schedule: text('schedule'),
-    /** §9: network-serving Components carry an exposure state; default Private. */
-    exposure: exposureState('exposure').notNull().default('private'),
+    /**
+     * §9: network-serving Components carry a reach and an auth. The default is
+     * the old `private` state, unchanged in meaning — reachable on the
+     * operator's own network, behind the Target's authenticated edge.
+     */
+    reach: reachState('reach').notNull().default('private'),
+    auth: authMode('auth').notNull().default('proxy'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -656,7 +667,13 @@ export const deploys = pgTable('deploys', {
    */
   configDocument:
     jsonbDocument('config_document').$type<readonly ConfigEntry[]>(),
-  exposure: exposureState('exposure'),
+  /**
+   * What this attempt asked for, pinned the same way `configDocument` is: a
+   * Component edited mid-attempt must not retroactively change what a running
+   * attempt is placing.
+   */
+  reach: reachState('reach'),
+  auth: authMode('auth'),
   /**
    * §13: "Disconnect always works: live Deploys go `orphaned`, workloads keep
    * running." Set when the Target this Deploy sits on was disconnected, and
@@ -811,10 +828,23 @@ export const targets = pgTable(
     /** When the one loop (§13) last ran against this Target. */
     inspectedAt: timestamp('inspected_at', { withTimezone: true }),
     /**
-     * §3: "`publicExposure` is the single genuine assertion: no cluster API
-     * reports whether a tunnel exists." Null until an operator states it.
+     * §3's assertions, both for the reason §3 gives for the one it started
+     * with: "no cluster API reports whether a tunnel exists." Nothing reports
+     * whether an operator wired an authenticating proxy in front of you either,
+     * so auth is the same shape.
+     *
+     * `reaches` widens what `publicExposure` said. Null on either means nobody
+     * has stated it, and {@link ASSERTED_REACHES_BY_ADAPTER} supplies what the
+     * adapter can be held to without an operator's word.
      */
-    publicExposure: boolean('public_exposure'),
+    reaches: reachState('reaches').array(),
+    /**
+     * Which reaches this Target's authenticated edge can stand in front of —
+     * **not** whether it has one. An edge whose audience is one person can
+     * honestly authenticate a `private` route and cannot honestly authenticate
+     * a `public` one, and that is a difference only an operator knows.
+     */
+    authReaches: reachState('auth_reaches').array(),
     /** §4/§13: "a Target to declare a minimum SLSA Build Level." */
     minBuildLevel: integer('min_build_level'),
     createdAt: timestamp('created_at', { withTimezone: true })

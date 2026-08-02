@@ -18,10 +18,12 @@ tags:: architecture
 	- Spindrift writes config values into the installation's secret store and keeps only pinned references. The App chart renders an `ExternalSecret` per configured Component, and `clusters/base/platform/onepassword-connect/` is the store the offsite Target fetches through.
 	- A Target's `ClusterSecretStore` is operator-stated in that Target's chart-values. The chart refuses to render config without it rather than producing an ExternalSecret that never syncs.
 	- Config that cannot follow a Component to another Target is named and demanded before the move commits, because Spindrift reads no value back and so cannot copy one.
-- ## Exposure
-	- The App chart at `packages/charts/spindrift-app/` renders no route for Internal, an HTTPRoute with the shared oauth2-proxy ExternalAuth filter for Private, and a filter-free route for Public. The cross-namespace grant belongs to the shared proxy platform resources.
-	- The dedicated Cloudflare tunnel is the only published origin for generated App hostnames. Its wildcard Access application is the Target's default Private audience and admits the operator identity.
-	- Public exposure fails closed at the edge: a Component hostname remains covered by wildcard Access until Spindrift's Cloudflare adapter declares a more-specific bypass application. The Kubernetes route can be filter-free without making the App accidentally public while that adapter is absent.
+- ## Reach and auth
+	- A Component states two independent facts: `reach` is `none`, `private`, or `public`; `auth` is `none` or `proxy`. `auth: proxy` with `reach: none` is refused — there is no route to filter.
+	- The App chart at `packages/charts/spindrift-app/` renders an HTTPRoute when `reach` is not `none`, and the Gateway API `ExternalAuth` filter exactly when `auth` is `proxy`. The cross-namespace grant belongs to the shared proxy platform resources; the chart renders no Gateway and no certificate.
+	- The record type is the boundary. `reach: private` publishes an unproxied A record at the shared Gateway's load-balancer address, which is RFC1918 and so is unreachable from the internet whatever is attached to it. `reach: public` publishes a proxied CNAME at the Target's Cloudflare tunnel, whose ingress stays the single static wildcard rule Terraform owns.
+	- Each Target asserts which reaches it serves and which its authenticated edge can stand in front of. A Component asking for something a Target does not assert is a non-candidate at placement with a stated reason, rather than a green Deploy behind a route that answers nothing.
+	- `{reach: public, auth: proxy}` is expressible and unmet on offsite: `clusters/base/apps/oauth2-proxy/` admits a single GitHub user, which is an honest edge in front of a private address and a false one in front of a public one.
 - ## Current control-plane state
 	- The offsite release runs the web process and its CNPG store. The reconciler Deployment stays disabled because its executable entrypoint is not present; the platform prerequisites and delegated identities remain declared for that process.
 	- The installer and App charts are sourced from the `infra` GitRepository. Their OCI publication path is not declared, so a Target cannot claim an independently pinned chart artifact.

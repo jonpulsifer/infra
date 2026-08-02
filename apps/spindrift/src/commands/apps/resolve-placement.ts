@@ -17,7 +17,7 @@
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { apps, components, datastores, targets } from '../../db/schema.ts';
-import type { ArtifactType, Exposure } from '../../domain/desired-state.ts';
+import type { ArtifactType, Auth, Reach } from '../../domain/desired-state.ts';
 import {
   DEFAULT_PLATFORM,
   type DerivedRequirements,
@@ -93,19 +93,27 @@ export const resolveComponentPlacement: Command<
     .innerJoin(targets, eq(datastores.targetId, targets.id))
     .where(and(eq(apps.id, component.appId), isNotNull(datastores.appId)));
 
-  const requirements = derive(context, component.kind, component.exposure, [
-    ...attached.map(
-      (datastore): RequiredDatastore => ({
-        name: datastore.name,
-        engine: datastore.engine,
-        // §11: "In-cluster datastores stay cluster-local in v1." A managed
-        // cloud database is reachable from anywhere its Target's project is;
-        // one running in a cluster is reachable from that cluster only.
-        clusterLocalTargetId:
-          datastore.targetAdapter === 'kubernetes' ? datastore.targetId : null,
-      }),
-    ),
-  ]);
+  const requirements = derive(
+    context,
+    component.kind,
+    component.reach,
+    component.auth,
+    [
+      ...attached.map(
+        (datastore): RequiredDatastore => ({
+          name: datastore.name,
+          engine: datastore.engine,
+          // §11: "In-cluster datastores stay cluster-local in v1." A managed
+          // cloud database is reachable from anywhere its Target's project is;
+          // one running in a cluster is reachable from that cluster only.
+          clusterLocalTargetId:
+            datastore.targetAdapter === 'kubernetes'
+              ? datastore.targetId
+              : null,
+        }),
+      ),
+    ],
+  );
 
   const placement = resolvePlacement(
     connected.map((target) =>
@@ -159,12 +167,14 @@ export const resolveComponentPlacement: Command<
 function derive(
   context: CommandContext,
   kind: DerivedRequirements['kind'],
-  exposure: Exposure,
+  reach: Reach,
+  auth: Auth,
   attached: readonly RequiredDatastore[],
 ): DerivedRequirements {
   return {
     kind,
-    exposure,
+    reach,
+    auth,
     platform: DEFAULT_PLATFORM,
     registries: context.manifest.supplyChain.registry,
     resources: {},

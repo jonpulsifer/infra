@@ -90,8 +90,10 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     gateway: null,
   },
   dns: {
-    apexZone: 'example.com',
-    vanityZone: 'example.com',
+    zones: {
+      private: 'example.com',
+      public: 'example.com',
+    },
   },
   sources: {
     buckets: ['bluenose-spindrift-source'],
@@ -152,7 +154,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
           namespace: 'spindrift-apps',
           sourceRef: { name: 'infra', namespace: 'flux-system' },
         },
-        chartContract: '2',
+        chartContract: '3',
       },
     },
     {
