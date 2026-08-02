@@ -3,7 +3,7 @@
 # Static site demo — build dist/ with build-time git facts, then serve the
 # folder with bun.  The toolchain stays in the builder stage; the runtime
 # image only carries the static files and a bun binary to serve them.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:7c6ec57af3c10127c618448ac3ea460557440602f6af1a3645f979fcbaa8a0a3 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:d543de1e29036a65ab270e2069672aa29fae3999e089bc491a9f9094ad2d6ac2 AS base
 ARG BUN_VERSION=1.3.14
 ENV BUN_INSTALL=/usr/local
 USER root
