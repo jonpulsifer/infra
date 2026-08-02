@@ -87,7 +87,7 @@ export function buildKitProgramFor(
  * build arguments — carry developer-influenced text. Quoting is therefore not
  * tidiness: it is the boundary between a build argument and an extra command.
  */
-function quote(value: string): string {
+export function quote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 

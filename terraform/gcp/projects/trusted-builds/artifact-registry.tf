@@ -70,7 +70,7 @@ resource "google_artifact_registry_repository_iam_member" "writer_builds" {
 #     nothing else that could.
 resource "google_artifact_registry_repository_iam_member" "writer_cloud_build" {
   for_each = toset([
-    format("serviceAccount:%s@cloudbuild.gserviceaccount.com", data.google_project.current.number),
+    local.cloud_build_worker_member,
     local.spindrift_controller_member,
   ])
 

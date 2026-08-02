@@ -437,6 +437,11 @@ function createBuildRoute(
         region: route.region,
         image: route.image,
         zeroConfigFrontend,
+        // The same two the hosted route takes, and for the same §16 reason: an
+        // attestation is not the registry signature core makes, and a cloud
+        // Target's admission reads the one core cannot put there.
+        signer: manifest.supplyChain.signer,
+        attestor: manifest.supplyChain.attestor ?? '',
         // The same federated token the cloud Targets are reached with, and for
         // the same §13 reason: the build service is a cloud API in the shared
         // artifacts project, the workload identity this process already carries
