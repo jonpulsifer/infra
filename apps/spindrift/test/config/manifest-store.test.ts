@@ -415,40 +415,20 @@ describe('the stored installation manifest', () => {
     });
   });
 
-  test('the stored row never holds a fact the deployment declares', async () => {
-    // The keys derived away are dropped on the way in, not merely absent from
-    // the schema — an installation seeded before the removal has them in its
-    // row, and refusing would be a control plane that will not boot.
+  test('a row restating a fact the deployment declares is refused', async () => {
+    // The schema is strict, so the two keys the deployment owns cannot reach a
+    // reader from storage either. The installer chart refuses them at render,
+    // which is where an operator meets this.
     await database().client`
       INSERT INTO installation (manifest)
       VALUES (${JSON.stringify({
         ...fixtureManifest,
-        cloud: {
-          ...fixtureManifest.cloud,
-          federation: {
-            audience: '//iam.stale.test/pools/stale',
-            tokenUrl: 'https://sts.stale.test/v1/token',
-            tokenPath: '/var/run/secrets/stale/token',
-            impersonationUrl: null,
-          },
-        },
         charts: { ...fixtureManifest.charts, installer: 'example/spindrift' },
       })}::jsonb)
     `;
 
-    // The deployment's credential wins outright, because it is the only copy
-    // left: the row's stale audience reaches no reader.
-    const loaded = await loadStoredManifest(
-      database().db,
-      FIXTURE_DEPLOYMENT_ENV,
-    );
-    expect(loaded.cloud.federation?.audience).toBe(
-      '//iam.example.test/projects/1/locations/global/workloadIdentityPools/example/providers/cluster',
-    );
-    expect(loaded.charts).not.toHaveProperty('installer');
-
-    const [row] = await database().db.select().from(installation).limit(1);
-    expect(row?.manifest.cloud).not.toHaveProperty('federation');
-    expect(row?.manifest.charts).not.toHaveProperty('installer');
+    expect(
+      loadStoredManifest(database().db, FIXTURE_DEPLOYMENT_ENV),
+    ).rejects.toThrow(/installer/);
   });
 });

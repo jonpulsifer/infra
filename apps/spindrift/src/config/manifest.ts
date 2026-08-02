@@ -57,69 +57,12 @@ export function parseManifest(
   return validateManifest(parsed, source);
 }
 
-/**
- * Keys the schema does not have, and where the fact lives instead.
- *
- * Read as `[block, key, why]`. Each is a copy of something the deployment
- * declares, so a document carrying one is describing a fact it does not own.
- */
-const DERIVED_AWAY: readonly (readonly [string, string, string])[] = [
-  [
-    'cloud',
-    'federation',
-    'it is read from the credential the deployment mounts',
-  ],
-  ['charts', 'installer', 'nothing reads it'],
-];
-
-/**
- * Drop the derived-away keys before the strict schema sees them.
- *
- * Dropped rather than refused: a durable row holding one of these would
- * otherwise be a control plane that will not boot until someone edits Postgres
- * by hand. The row is rewritten from what this returns, so it self-heals on the
- * first start and the warning fires once.
- *
- * Stripping on the way in is also what keeps a key out of storage from every
- * path, which mere absence from the schema does not.
- */
-function withoutDerivedKeys(manifest: unknown, source: string): unknown {
-  if (
-    typeof manifest !== 'object' ||
-    manifest === null ||
-    Array.isArray(manifest)
-  ) {
-    return manifest;
-  }
-
-  let document = manifest as Record<string, unknown>;
-  for (const [blockName, key, why] of DERIVED_AWAY) {
-    const block = document[blockName];
-    if (
-      typeof block !== 'object' ||
-      block === null ||
-      Array.isArray(block) ||
-      !(key in block)
-    ) {
-      continue;
-    }
-    const { [key]: _dropped, ...rest } = block as Record<string, unknown>;
-    document = { ...document, [blockName]: rest };
-    console.warn(
-      `${source}: ${blockName}.${key} is no longer an installation manifest key — ${why}, so the value in this document is being discarded`,
-    );
-  }
-  return document;
-}
-
 /** Validate a parsed or stored manifest and report every bad field together. */
 export function validateManifest(
   manifest: unknown,
   source: string,
 ): AuthoredManifest {
-  const result = installationManifestSchema.safeParse(
-    withoutDerivedKeys(manifest, source),
-  );
+  const result = installationManifestSchema.safeParse(manifest);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => {

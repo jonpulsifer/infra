@@ -21,10 +21,12 @@ import type {
 import { loadStoredManifest } from '../../src/config/manifest-store.ts';
 import { installation } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import { authoredFixture, fixtureManifest } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
-const manifest = await fixtureManifest();
+// The document an operator writes; `resolved` is what a context carries.
+const manifest = await authoredFixture();
+const resolved = await fixtureManifest();
 
 const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
@@ -34,7 +36,7 @@ function context(): CommandContext {
     principal: { id: crypto.randomUUID(), displayName: 'Operator' },
     clock,
     db: database().db,
-    manifest,
+    manifest: resolved,
     adapters: {
       deploy: () => null,
       build: () => null,
@@ -63,7 +65,7 @@ describe('configuring an installation', () => {
         ...manifest.build,
         zeroConfigFrontend: 'ghcr.io/railwayapp/railpack-frontend:v0.35.0',
       },
-    } satisfies InstallationManifest;
+    } satisfies AuthoredManifest;
 
     const result = await configureInstallation(
       { manifest: retuned },

@@ -263,10 +263,9 @@ export const installationManifestSchema = z
          * platform workload (§19) and never one of its own Apps, so it does not
          * live in the zone Apps are named in.
          *
-         * **Kept when `cloud.federation` and `charts.installer` were derived
-         * away, and here is the justification.** The installer chart has a
-         * `hostname` value that renders the Gateway and the HTTPRoute, which
-         * looks like the same fact restated — and it is not, for two reasons.
+         * **Authored, even though the installer chart has a `hostname` value
+         * that renders the Gateway and the HTTPRoute.** That looks like the
+         * same fact restated, and it is not, for two reasons.
          *
          * The chart's `hostname` may be empty, and the chart says so: an
          * installation that renders no Gateway and no HTTPRoute, reachable only
@@ -366,19 +365,19 @@ export const installationManifestSchema = z
          * Reference to the App chart (§7) — the chart every deployed Component
          * renders through.
          *
-         * Authored, unlike the two keys derived away around it, because no
-         * deployment renders it: the installer chart names itself and its own
-         * release, never the chart an App is deployed through, so there is no
-         * second copy for this one to disagree with. It is also a real
+         * Authored, because no deployment renders it: the installer chart names
+         * itself and its own release, never the chart an App is deployed
+         * through, so there is no second copy for this one to disagree with.
+         * It is also a real
          * installation choice — §7 wants the App chart pinned per Target, and
          * an OCI reference is where that ends up.
          */
         app: nonEmptyString,
         /**
-         * **No `installer` key.** It named the chart this installation was
+         * **No `installer` key.** It would name the chart this installation is
          * installed from — the release restating itself into a document the
-         * release does not render — and nothing in the process ever read it.
-         * A value that can only be wrong is not configuration.
+         * release does not render — and nothing in the process reads it. A
+         * value that can only be wrong is not configuration.
          */
       })
       .strict(),
