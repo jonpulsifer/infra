@@ -92,10 +92,26 @@ import {
   listSourceBucketsInput,
 } from './storage/list-buckets.ts';
 import {
+  listStagedBundles,
+  listStagedBundlesInput,
+} from './storage/list-bundles.ts';
+import {
+  listArtifactRegistries,
+  listArtifactRegistriesInput,
+} from './storage/list-registries.ts';
+import {
   testBucketPermissions,
   testBucketPermissionsInput,
 } from './storage/test-bucket.ts';
+import {
+  testRegistryReachability,
+  testRegistryReachabilityInput,
+} from './storage/test-registry.ts';
 import { useSourceBucket, useSourceBucketInput } from './storage/use-bucket.ts';
+import {
+  useArtifactRegistry,
+  useArtifactRegistryInput,
+} from './storage/use-registry.ts';
 import { connectTarget, connectTargetInput } from './targets/connect.ts';
 import {
   disconnectTarget,
@@ -206,6 +222,22 @@ export const commandRegistry = {
   useSourceBucket: {
     input: useSourceBucketInput,
     handler: useSourceBucket,
+  },
+  listArtifactRegistries: {
+    input: listArtifactRegistriesInput,
+    handler: listArtifactRegistries,
+  },
+  testRegistryReachability: {
+    input: testRegistryReachabilityInput,
+    handler: testRegistryReachability,
+  },
+  useArtifactRegistry: {
+    input: useArtifactRegistryInput,
+    handler: useArtifactRegistry,
+  },
+  listStagedBundles: {
+    input: listStagedBundlesInput,
+    handler: listStagedBundles,
   },
 } as const satisfies Readonly<Record<string, AnyCommandDescriptor>>;
 

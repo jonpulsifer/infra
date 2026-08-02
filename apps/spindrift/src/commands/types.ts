@@ -33,6 +33,7 @@ import type {
   RepositoryHost,
 } from '../domain/repository.ts';
 import type { RepositorySourceStager } from '../domain/source-bundle.ts';
+import type { RegistryTransport } from '../storage/registry.ts';
 import type { SupplyChain } from '../supply-chain/sign.ts';
 
 /**
@@ -107,6 +108,18 @@ export interface AdapterRegistry {
   repository(): RepositoryHost | null;
   /** Immutable repository staging, absent until a source depot is configured. */
   source?(): RepositorySourceStager | null;
+  /**
+   * How an artifact registry's distribution API is reached (§16).
+   *
+   * A transport rather than a client, because that is honestly all it is: the
+   * probe is one unauthenticated `GET /v2/` and there is no credential, no
+   * session, and no second call for a client to hold. Anything richer would be
+   * an interface with one implementation standing in front of `fetch`.
+   *
+   * Optional for the same reason `source` is: a test's registry omits it, and a
+   * command that finds it absent reports that rather than reaching for a global.
+   */
+  registryTransport?(): RegistryTransport | null;
   /**
    * The user-mediated connector, where this repository integration has one.
    *
