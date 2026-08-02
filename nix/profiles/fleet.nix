@@ -68,6 +68,18 @@
     ];
   };
 
+  # The docker package ships its own docker.socket with
+  # ListenStream=/run/docker.sock, and virtualisation.docker layers a NixOS
+  # drop-in on top that sets ListenStream again. systemd treats ListenStream as
+  # a list, so the drop-in appends instead of replacing: two listeners on one
+  # path, and the second bind fails with EADDRINUSE. The leading "" is
+  # systemd's list-reset — the same idiom the module already uses for
+  # docker.service's ExecStart.
+  virtualisation.docker.listenOptions = [
+    ""
+    "/run/docker.sock"
+  ];
+
   programs.zsh.enable = lib.mkDefault true;
 
   security.sudo = {
