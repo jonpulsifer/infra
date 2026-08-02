@@ -1,0 +1,55 @@
+name: ARC Smoke
+
+# The self-hosted scale sets run, but no workflow targets them, so nothing
+# proves they can carry a job. This is that proof, on demand.
+#
+# Two things worth proving, because they are the two that were broken:
+#   - the runner reaches a Docker daemon at all (containerMode: dind)
+#   - a `services:` container is reachable on the job's own localhost, which
+#     is what typescript.yml's postgres needs and what a node-level Docker
+#     socket could never deliver
+#
+# `services:` failing to come up fails the job before any step runs, so the
+# service block is itself half the assertion.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: Which cluster's scale set to run on
+        type: choice
+        options:
+          - folly
+          - offsite
+        default: folly
+
+permissions:
+  contents: read
+
+jobs:
+  dind:
+    runs-on: ${{ inputs.cluster }}
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Runner reaches the dind daemon
+        run: docker version
+
+      - name: Service container answers on the job's localhost
+        run: |
+          timeout 30 bash -c \
+            'until (echo > /dev/tcp/localhost/5432) 2>/dev/null; do sleep 1; done'
+          echo "postgres reachable on localhost:5432"

@@ -29,6 +29,14 @@ spec:
     githubConfigUrl: https://github.com/jonpulsifer/infra
     githubConfigSecret: arc
     minRunners: 1
+    # A workflow's `services:` and `container:` need a Docker daemon the runner
+    # can reach. dind puts one in the runner's own pod, so a published port
+    # lands on the pod's network namespace and the job's localhost:PORT
+    # resolves to it — the reason a node-level socket cannot serve this.
+    # The chart injects the sidecar, wires DOCKER_HOST, and adds the work and
+    # dind-sock volumes; the runner container below is merged into that.
+    containerMode:
+      type: dind
     template:
       spec:
         containers:
