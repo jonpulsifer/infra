@@ -1,0 +1,108 @@
+---
+# THROWAWAY — ticket 42. Proves a Cilium-served GEP-1494 `ExternalAuth` filter
+# returns oauth2-proxy's 302 to the client with `Location` intact, and that an
+# authorized request carries `X-Auth-Request-Email` through to the backend.
+# Revert this file once the observation is recorded.
+#
+# It hangs off `oauth2.${SPINDRIFT_DOMAIN}` because that is the only name with a
+# Cloudflare Access bypass; every other `*.${SPINDRIFT_DOMAIN}` is intercepted at
+# the edge and would never reach the filter.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authtest-echo
+  namespace: oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authtest-echo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: authtest-echo
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: echo
+          # Reflects the request it received — headers included — as JSON, which
+          # is the only way to see what the filter injected upstream.
+          image: ghcr.io/mendhak/http-https-echo:37@sha256:f55000d9196bd3c853d384af7315f509d21ffb85de315c26e9874033b9f83e15
+          env:
+            - name: HTTP_PORT
+              value: "8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authtest-echo
+  namespace: oauth2-proxy
+spec:
+  selector:
+    app.kubernetes.io/name: authtest-echo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authtest
+  namespace: oauth2-proxy
+  annotations:
+    external-dns.alpha.kubernetes.io/exclude: "true"
+spec:
+  parentRefs:
+    - name: cluster-gateway
+      namespace: default
+      sectionName: http-gateway
+  hostnames:
+    - "oauth2.${SPINDRIFT_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /authtest
+      # Copied verbatim from packages/charts/spindrift-app/templates/httproute.yaml
+      # so what is observed here is what `exposure: private` will render.
+      filters:
+        - type: ExternalAuth
+          externalAuth:
+            protocol: HTTP
+            backendRef:
+              name: oauth2-proxy
+              namespace: oauth2-proxy
+              port: 80
+            http:
+              allowedHeaders:
+                - authorization
+                - cookie
+                - x-forwarded-host
+                - x-forwarded-proto
+                - x-forwarded-uri
+              allowedResponseHeaders:
+                - set-cookie
+                - x-auth-request-email
+                - x-auth-request-user
+      backendRefs:
+        - name: authtest-echo
+          port: 8080
