@@ -29,9 +29,10 @@ import type {
   Clock,
   CommandContext,
 } from '../../src/commands/types.ts';
-import type {
-  InstallationManifest,
-  TargetAdapter,
+import {
+  type InstallationManifest,
+  type TargetAdapter,
+  toAuthoredManifest,
 } from '../../src/config/manifest.schema.ts';
 import { MANIFEST_INLINE_VAR } from '../../src/config/manifest.ts';
 import { loadStoredManifest } from '../../src/config/manifest-store.ts';
@@ -467,7 +468,9 @@ describe('reconnect re-adopts via observe', () => {
     } satisfies InstallationManifest;
 
     await loadStoredManifest(database().db, {
-      [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
+      // Declared as an operator writes it: the federation `declared` carries
+      // is the deployment's, and the schema refuses a document restating it.
+      [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(declared)),
     });
     expect((await targetRow('cluster'))?.status).toBe('disconnected');
 

@@ -112,12 +112,10 @@ describe('the manifest cannot restate it', () => {
     ]);
   });
 
-  test('a document that carries one anyway loses it before it is stored', async () => {
-    // Dropped rather than refused, and that is deliberate: an installation
-    // seeded before the removal has one of these in its durable row, and a
-    // refusal would be a control plane that will not boot until someone edits
-    // Postgres by hand. Stripping on the way in also means no write path can
-    // put it back, which is what makes the removal complete.
+  test('a document that carries one anyway is refused', async () => {
+    // The schema is strict, so a document restating what the deployment owns
+    // fails to parse rather than being quietly corrected. The installer chart
+    // refuses the same two keys at render, which is where an operator meets it.
     const document = Bun.YAML.parse(await Bun.file(FIXTURE).text()) as Record<
       string,
       unknown
@@ -139,12 +137,9 @@ describe('the manifest cannot restate it', () => {
       },
     };
 
-    const authored = parseManifest(
-      JSON.stringify(restated),
-      'a stale document',
-    );
-    expect(authored.cloud).not.toHaveProperty('federation');
-    expect(authored.charts).not.toHaveProperty('installer');
+    expect(() =>
+      parseManifest(JSON.stringify(restated), 'a stale document'),
+    ).toThrow(/federation/);
   });
 
   test('what readers get is the deployment’s copy, joined on at resolve', async () => {

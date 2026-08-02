@@ -17,7 +17,11 @@ import { join } from 'node:path';
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
 import type { ConnectTargetInput } from '../../src/commands/targets/connect.ts';
 import { GCP_CREDENTIALS_VAR } from '../../src/config/federation-credential.ts';
-import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
+import {
+  type AuthoredManifest,
+  type TargetAdapter,
+  toAuthoredManifest,
+} from '../../src/config/manifest.schema.ts';
 import {
   type InstallationManifest,
   parseManifest,
@@ -55,6 +59,17 @@ export async function fixtureManifest(): Promise<InstallationManifest> {
     );
   }
   return cached;
+}
+
+/**
+ * The same installation as an operator authors it.
+ *
+ * {@link fixtureManifest} is resolved — the deployment's federation is joined
+ * onto it — and the schema refuses that document on the way in. A test writing
+ * a manifest wants this one; a test carrying a context wants the resolved one.
+ */
+export async function authoredFixture(): Promise<AuthoredManifest> {
+  return toAuthoredManifest(await fixtureManifest());
 }
 
 /**

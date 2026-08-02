@@ -39,10 +39,13 @@ import {
 } from '../../src/web/dispatch.ts';
 import { valueAt, withValueAt } from '../../src/web/forms/document.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import { authoredFixture, fixtureManifest } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
-const fixture = await fixtureManifest();
+// The document an operator writes. `resolved` is the same installation with
+// the deployment's federation joined on, which is what a context carries.
+const fixture = await authoredFixture();
+const resolved = await fixtureManifest();
 
 const OPERATOR: Principal = {
   id: crypto.randomUUID(),
@@ -58,7 +61,7 @@ async function context(): Promise<CommandContext> {
     principal: OPERATOR,
     clock: { now: () => FROZEN },
     db: database().db,
-    manifest: stored ?? fixture,
+    manifest: stored ?? resolved,
     adapters: {
       deploy: () => null,
       build: () => null,

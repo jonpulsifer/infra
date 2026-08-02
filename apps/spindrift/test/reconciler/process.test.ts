@@ -13,6 +13,7 @@ import {
   type Clock,
   systemClock,
 } from '../../src/commands/types.ts';
+import { toAuthoredManifest } from '../../src/config/manifest.schema.ts';
 import { MANIFEST_INLINE_VAR } from '../../src/config/manifest.ts';
 import {
   apps,
@@ -252,7 +253,7 @@ async function reconcilePendingDeploy(platform: FakeDeployAdapter) {
     // document names the federation, and the boot manifest is the two joined.
     env: {
       ...FIXTURE_DEPLOYMENT_ENV,
-      [MANIFEST_INLINE_VAR]: JSON.stringify(manifest),
+      [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(manifest)),
     },
     createAdapters(storedManifest) {
       bootManifest = storedManifest;
