@@ -907,6 +907,21 @@ describe('the BuildKit program', () => {
     expect(program).toContain(`--opt source='${FRONTEND}'`);
   });
 
+  test('builds a Dockerfile against the bundle root, not the scope', () => {
+    // The scope names the Dockerfile; the root is what it builds. A monorepo
+    // App shares a lockfile and sibling packages with the tree above it, and
+    // its Dockerfile is written against the root `docker build -f
+    // apps/web/Dockerfile .` gives it — `COPY . .` then a path *into* the app.
+    // Handed the scope, every such Dockerfile fails deep inside the build on a
+    // missing directory instead of here with a reason.
+    expect(program).toContain(
+      '--frontend dockerfile.v0 --local dockerfile=. --local context="$root"',
+    );
+    // And the two arms disagree on purpose, so neither may share one context
+    // local on the `buildctl` line below them.
+    expect(program).not.toContain('build "$@" \\\n  --local context=.');
+  });
+
   test('hands the zero-config frontend a plan, never a `#syntax=` stub', () => {
     // The railpack frontend reads its input as a build plan: a stub comes back
     // as `invalid character '#' looking for beginning of value`, at every
