@@ -5,6 +5,7 @@ RUN apt-get update && apt-get -qqy upgrade &&\
       curl \
       git \
       jq \
+      libatomic1 \
       unzip \
       wget \
     && rm -rf /var/lib/apt/lists/* \
