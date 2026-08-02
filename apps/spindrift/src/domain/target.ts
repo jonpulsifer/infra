@@ -81,6 +81,23 @@ export interface CloudRunConnection {
    * claim about verification has to fail in.
    */
   policyEndpoint?: string;
+  /**
+   * The identity a revision runs as (§13, §14).
+   *
+   * Connection material rather than a manifest-wide value, for the same reason
+   * `project` is: it is a fact about this Target's project, and two connected
+   * projects have different ones.
+   *
+   * **Absent is a footgun rather than a default**, and the reason it is still
+   * optional is that only the runtime can supply the alternative. Omit it and
+   * Cloud Run runs the revision as the project's default compute account —
+   * which the controller has no `iam.serviceAccounts.actAs` on, because nobody
+   * granted it any, so the apply is refused with an IAM sentence naming an
+   * account the operator never chose. Naming the account here is what turns
+   * that into a deliberate choice; `bluenose` already has a `spindrift-runtime`
+   * account and the `actAs` grant for exactly this.
+   */
+  serviceAccount?: string;
   /** §33's static reachability input, stated by the operator (§3). */
   servedHosts?: readonly string[];
   reachableRegistries?: readonly string[];

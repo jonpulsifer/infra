@@ -133,6 +133,13 @@ spec:
             region: northamerica-northeast1
             project: bluenose
             endpoint: https://run.googleapis.com
+            # The identity a revision runs as. Named because omitting it is not
+            # a default: Cloud Run substitutes the project's default compute
+            # account, which the controller has no `actAs` on, and the apply is
+            # refused naming an account nobody chose. `spindrift-runtime` and
+            # the controller's `actAs` on it are declared in
+            # terraform/gcp/projects/bluenose/iam.tf for exactly this.
+            serviceAccount: spindrift-runtime@bluenose.iam.gserviceaccount.com
         - name: bluenose-static
           adapter: static
           connection:

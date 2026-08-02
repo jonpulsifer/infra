@@ -539,6 +539,7 @@ describe('§10: config crosses as a pinned reference and never as a value', () =
       {
         project: 'example-vessel',
         image: 'registry.example.test/shop@sha256:abc',
+        serviceAccount: null,
       },
     );
     const template = document.template as {
@@ -557,6 +558,34 @@ describe('§10: config crosses as a pinned reference and never as a value', () =
   });
 });
 
+describe('the identity a revision runs as', () => {
+  test('is the Target’s, on the revision template', () => {
+    const document = cloudRunService(desired({}), {
+      project: 'example-vessel',
+      image: 'registry.example.test/shop@sha256:abc',
+      serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
+    });
+    const template = document.template as { serviceAccount?: string };
+    expect(template.serviceAccount).toBe(
+      'runtime@example-vessel.iam.gserviceaccount.com',
+    );
+  });
+
+  test('is absent rather than invented where the Target names none', () => {
+    // Not a default composed here: an adapter that picked an identity would be
+    // choosing what the workload may reach. The runtime substitutes the
+    // project's default compute account, and refuses the apply for missing
+    // `iam.serviceAccounts.actAs` on an account nobody named — which is the
+    // failure this field exists to turn into a deliberate choice.
+    const document = cloudRunService(desired({}), {
+      project: 'example-vessel',
+      image: 'registry.example.test/shop@sha256:abc',
+      serviceAccount: null,
+    });
+    expect(document.template as object).not.toHaveProperty('serviceAccount');
+  });
+});
+
 describe('the exposure a Target rejects is a state, not a crash', () => {
   test('every exposure state produces a document', () => {
     const states: Exposure[] = ['internal', 'private', 'public'];
@@ -564,6 +593,7 @@ describe('the exposure a Target rejects is a state, not a crash', () => {
       const document = cloudRunService(desired({ exposure }), {
         project: 'example-vessel',
         image: 'registry.example.test/shop@sha256:abc',
+        serviceAccount: null,
       });
       expect(document.ingress).toBe(ingressFor(exposure));
     }

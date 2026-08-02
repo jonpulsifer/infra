@@ -191,6 +191,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     const document = cloudRunService(desired, {
       project: connection.project,
       image,
+      serviceAccount: connection.serviceAccount ?? null,
     });
     const applied = await http.json<unknown>({
       method: 'PATCH',
