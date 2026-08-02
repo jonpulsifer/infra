@@ -3,7 +3,6 @@ USER root
 RUN apt-get update && apt-get -qqy upgrade &&\
     apt-get install -qqy --no-install-recommends \
       curl \
-      docker.io \
       git \
       jq \
       unzip \
@@ -18,5 +17,4 @@ RUN curl -fsSL -o /usr/local/bin/argocd "https://github.com/argoproj/argo-cd/rel
     && chmod +x /usr/local/bin/argocd
 # Install helm (often needed for ArgoCD app diffs)
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-# uid=1001(runner) gid=1001(runner) groups=1001(runner),27(sudo),123(docker)
 USER 1001:1001
