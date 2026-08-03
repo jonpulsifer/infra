@@ -5,6 +5,7 @@ icon:: 🚒
 	- [[Runbooks/Deploy a NixOS Host]] — build, deploy, verify, and roll back NixOS hosts
 	- [[Runbooks/Terraform Change]] — Atlantis-first OpenTofu workflow and local validation
 	- [[Runbooks/Kubernetes GitOps Change]] — inspect Flux, reconcile resources, and handle SOPS safely
+	- [[Runbooks/Managed Postgres]] — reach a CloudNativePG database through `kubectl cnpg`, and check whether it has a backup
 	- [[Runbooks/OpenBao Bootstrap]] — initialize and verify the folly OpenBao instance
 	- [[Runbooks/Add Shared Kubernetes Resource]] — use the `clusters/base/` pattern for both clusters
 	- [[Runbooks/Validate Infra Changes]] — validation commands by change area

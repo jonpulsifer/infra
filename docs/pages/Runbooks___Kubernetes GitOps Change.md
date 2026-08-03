@@ -40,6 +40,8 @@ tags:: runbook, kubernetes, gitops
 	  sops -e -i clusters/<cluster>/<path>/<secret>.sops.yaml
 	  ```
 	- Never paste decrypted values into this wiki, issues, PR comments, or logs.
+- # Managed Postgres
+	- Databases are CloudNativePG `Cluster` objects and have their own tooling — reach one with `kubectl cnpg psql`, not `kubectl exec` against an instance pod. See [[Runbooks/Managed Postgres]].
 - # HelmRelease source pattern
 	- Keep `HelmRepository`, `GitRepository`, or `OCIRepository` sources colocated with the resource that consumes them.
 	- Do not centralize sources unless the local pattern changes across the repo.

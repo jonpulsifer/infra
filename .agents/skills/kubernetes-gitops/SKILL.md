@@ -46,4 +46,14 @@ only the agent-specific guidance.
 - SOPS encrypts only `data` and `stringData` in files matching
   `clusters/.*\.sops\.ya?ml`. **Never** put decrypted values in docs, PR
   comments, logs, or commit messages.
+- Postgres is CloudNativePG. Reach one with the plugin, which resolves the
+  primary — an `exec` against `<cluster>-1` names a pod that is only the primary
+  until the next failover:
+  ```bash
+  kubectl --context <site> cnpg psql <cluster> -n <namespace>
+  kubectl --context <site> cnpg status <cluster> -n <namespace>
+  ```
+  Prefer the native tool generally (`kubectl cnpg`, `flux`, `talosctl`) over
+  reassembling what it does out of `kubectl`. Procedure:
+  `docs/pages/Runbooks___Managed Postgres.md`.
 - For changes to `clusters/base/`, also use the `multi-cluster` skill.
