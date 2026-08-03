@@ -66,14 +66,34 @@ export function immutableImageRef(artifact: Artifact): string | null {
  * all; {@link import('./placement.ts')} makes that a non-candidate before a
  * Build is ever dispatched, and `null` here is the backstop for the case that
  * gets past it.
+ *
+ * **A `reachableRegistries` entry is a namespace, not a host**, and getting that
+ * wrong is how this function returned `null` for an artifact that was sitting in
+ * the very registry the Target had named. The vocabulary is `supplyChain.
+ * registry`'s — `ghcr.io/owner`, `<region>-docker.pkg.dev/<project>/<repo>` —
+ * because that is what an operator copies from the manifest into a Target's
+ * connection, and it is what discovery reports back. Comparing it to
+ * `registryHostOf(ref)` compares a namespace to a host and never matches.
+ *
+ * A bare host is still honoured, because it is a legitimate thing to write when
+ * a Target reaches every namespace on one registry and nobody should have to
+ * enumerate them.
  */
 export function artifactAddress(
   artifact: Artifact,
   reachable: readonly string[] = [],
 ): string | null {
   if (reachable.length === 0) return artifact.refs[0] ?? null;
-  return (
-    artifact.refs.find((ref) => reachable.includes(registryHostOf(ref))) ?? null
+  return artifact.refs.find((ref) => pullableFrom(ref, reachable)) ?? null;
+}
+
+/** Whether one reference sits under any of the registries a Target named. */
+function pullableFrom(ref: string, reachable: readonly string[]): boolean {
+  return reachable.some(
+    (registry) =>
+      // The namespace spelling, which is the ordinary one. The trailing slash
+      // is what stops `…/i` from claiming a reference in `…/images`.
+      ref.startsWith(`${registry}/`) || registryHostOf(ref) === registry,
   );
 }
 
