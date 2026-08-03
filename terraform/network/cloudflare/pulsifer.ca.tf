@@ -24,8 +24,13 @@ resource "cloudflare_zone" "pulsifer_ca" {
   name = "pulsifer.ca"
 }
 
+# status is optional and NOT computed, so leaving it unset plans
+# "disabled" -> null on every run and never converges. Declare the desired
+# state; the parent .ca delegation needs the DS record from this resource's
+# `ds` output before any resolver actually validates the zone.
 resource "cloudflare_zone_dnssec" "pulsifer_ca_dnssec" {
   zone_id = cloudflare_zone.pulsifer_ca.id
+  status  = "active"
 }
 
 resource "cloudflare_zone_setting" "pulsifer_ca" {
