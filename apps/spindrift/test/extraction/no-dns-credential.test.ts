@@ -23,9 +23,13 @@
  *
  * That the claim is not satisfied *vacuously* — by there being no DNS at all —
  * is asserted where the records now live, in
- * `packages/charts/spindrift-app/tests/render.test.ts`. There is no allowlist
- * here: nothing in `src/` has any reason to name a zone provider, including to
- * explain that it does not.
+ * `packages/charts/spindrift-app/tests/render.test.ts`.
+ *
+ * One exemption, and it is about naming rather than holding — see
+ * {@link NAMES_A_BRAND}. Everything else under `src/` is scanned, prose
+ * included: a comment explaining that this software holds no zone credential
+ * is still a comment naming a zone provider, and that rule is easier to keep
+ * than to argue with.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
@@ -66,6 +70,21 @@ const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [
 
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
 
+/**
+ * Where a provider's **name** is the subject rather than a credential.
+ *
+ * The logo module maps a platform's name to its mark so the UI can render it,
+ * which is the one legitimate reason this software says a provider's name out
+ * loud: a brand on a button is not a zone token, and the module holds no
+ * client, no endpoint, and nothing to authenticate with. A directory rather
+ * than a file, because the marks are assets beside their index.
+ *
+ * Narrow on purpose. Every other path under `src/` is still scanned, and the
+ * test below proves the exemption does not extend to a file that merely has
+ * "logos" in its name.
+ */
+const NAMES_A_BRAND = 'src/web/client/logos/';
+
 interface SourceFile {
   path: string;
   source: string;
@@ -90,6 +109,7 @@ async function readSource(dir: string): Promise<SourceFile[]> {
 function findCredentials(files: readonly SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
+    if (file.path.startsWith(NAMES_A_BRAND)) continue;
     for (const { pattern, why } of FORBIDDEN) {
       if (pattern.test(file.source)) {
         offenders.push(`${file.path}: ${pattern} — ${why}`);
@@ -128,6 +148,16 @@ describe('the scanner catches a deliberately dirty file', () => {
     const dirty: SourceFile[] = [
       {
         path: 'src/adapters/dns/zone.ts',
+        source: "import Cloudflare from 'cloudflare';\n",
+      },
+    ];
+    expect(findCredentials(dirty)).not.toEqual([]);
+  });
+
+  test('the brand exemption is that directory, not any file naming a logo', () => {
+    const dirty: SourceFile[] = [
+      {
+        path: 'src/web/views/targets/logos.ts',
         source: "import Cloudflare from 'cloudflare';\n",
       },
     ];

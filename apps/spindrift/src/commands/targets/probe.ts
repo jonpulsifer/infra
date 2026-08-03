@@ -72,10 +72,12 @@ export const probeCluster: Command<
     );
   }
 
-  const rows = await context.db.query.targets.findMany();
+  const rows = await context.db.query.targets.findMany({
+    with: { vessel: true },
+  });
   return ok({
     probe: await adapter.probe(input.apiServer),
-    proposal: connectionProposal(rows, 'kubernetes'),
+    proposal: connectionProposal(rows, 'cluster'),
     rendersContract: VALUES_CONTRACT,
   });
 };

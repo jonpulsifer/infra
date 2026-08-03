@@ -39,7 +39,7 @@ import {
   artifactAddress,
   type DesiredState,
 } from '../../../domain/desired-state.ts';
-import type { StaticConnection } from '../../../domain/target.ts';
+import type { StaticAdapterConnection } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import { cloudChecklist } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
@@ -345,7 +345,7 @@ export class StaticDeployAdapter implements DeployAdapter {
   /** The site, created if this is the first deploy to it. */
   private async ensureSite(
     http: CloudHttp,
-    connection: StaticConnection,
+    connection: StaticAdapterConnection,
     site: string,
   ): Promise<Outcome<HostingSite>> {
     const read = await http.json<HostingSite>({
@@ -485,7 +485,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
   // --- inspect's second half -----------------------------------------------
 
-  private discover(connection: StaticConnection): TargetDiscovery {
+  private discover(connection: StaticAdapterConnection): TargetDiscovery {
     return {
       // Files are served, not run. An empty `arch` excludes no Target on
       // architecture, which is right: there is nothing here for an
@@ -519,7 +519,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
   // --- plumbing ------------------------------------------------------------
 
-  private http(connection: StaticConnection): CloudHttp {
+  private http(connection: StaticAdapterConnection): CloudHttp {
     return new CloudHttp({
       baseUrl: connection.endpoint,
       token: this.options.token,
@@ -529,7 +529,7 @@ export class StaticDeployAdapter implements DeployAdapter {
     });
   }
 
-  private connectionOf(target: DeployTarget): StaticConnection | null {
+  private connectionOf(target: DeployTarget): StaticAdapterConnection | null {
     return target.connection.adapter === 'static' ? target.connection : null;
   }
 
@@ -582,12 +582,15 @@ export function siteId(desired: DesiredState): string {
 }
 
 /** The adapter's own handle on what `apply` placed — opaque to core (§6). */
-function refOf(connection: StaticConnection, site: string): DeployRef {
+function refOf(connection: StaticAdapterConnection, site: string): DeployRef {
   return `${connection.project}/sites/${site}`;
 }
 
 /** The site this ref names on this connection, or `null` if it names another. */
-function parseRef(connection: StaticConnection, ref: DeployRef): string | null {
+function parseRef(
+  connection: StaticAdapterConnection,
+  ref: DeployRef,
+): string | null {
   const prefix = `${connection.project}/sites/`;
   if (!ref.startsWith(prefix)) return null;
   const site = ref.slice(prefix.length);

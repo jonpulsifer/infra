@@ -54,6 +54,7 @@ import {
   type Deploy,
   deploys,
   targets,
+  vessels,
 } from '../db/schema.ts';
 import { recordDeployEvent } from '../domain/attempt-log.ts';
 import type { DesiredState } from '../domain/desired-state.ts';
@@ -67,7 +68,9 @@ import { DEFAULT_PLATFORM } from '../domain/placement.ts';
 import {
   deployTargetOf,
   hasTargetConnection,
+  hasVesselLocation,
   type TargetWithConnection,
+  type VesselRef,
 } from '../domain/target.ts';
 
 /** What the loop needs. No principal: nobody asked for it to run. */
@@ -225,6 +228,8 @@ interface AttemptSubject {
   readonly component: typeof components.$inferSelect;
   readonly build: typeof builds.$inferSelect;
   readonly target: TargetWithConnection<typeof targets.$inferSelect>;
+  /** The boundary the Target is a surface on — half of what the adapter gets. */
+  readonly vessel: typeof vessels.$inferSelect & VesselRef;
   readonly adapter: DeployAdapter;
 }
 
@@ -328,7 +333,7 @@ export async function runAttempt(
     context.manifest,
     await soleServingComponent(context, subject),
   );
-  const targetRef = deployTargetOf(subject.target);
+  const targetRef = deployTargetOf(subject.target, subject.vessel);
 
   let verdict: DeployVerdict;
   try {
@@ -516,7 +521,7 @@ export async function observeConverged(
     let state: ObservedState | null = null;
     try {
       state = await subject.adapter.observe(
-        deployTargetOf(subject.target),
+        deployTargetOf(subject.target, subject.vessel),
         deploy.ref,
       );
     } catch {
@@ -582,17 +587,26 @@ async function subjectOf(
       app: apps,
       build: builds,
       target: targets,
+      vessel: vessels,
     })
     .from(deploys)
     .innerJoin(components, eq(deploys.componentId, components.id))
     .innerJoin(apps, eq(components.appId, apps.id))
     .innerJoin(builds, eq(deploys.buildId, builds.id))
     .innerJoin(targets, eq(deploys.targetId, targets.id))
+    // Inner, not left: `vesselId` is NOT NULL, so a Target with no vessel is
+    // not a state that exists — and joining it here is what lets one read
+    // assemble everything the adapter is handed.
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(deploys.id, deploy.id));
 
   if (row === undefined) return null;
   const target = row.target;
-  if (!hasTargetConnection(target)) return null;
+  const vessel = row.vessel;
+  // Addressable means both halves: the surface's own facts and the boundary's
+  // location. They are written by one act, so disagreeing is not a state that
+  // occurs — but nothing enforces that, so it is checked rather than assumed.
+  if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) return null;
 
   const adapter = context.adapters.deploy(target.adapter);
   if (adapter === null) return null;
@@ -601,6 +615,7 @@ async function subjectOf(
     deploy,
     ...row,
     target,
+    vessel,
     adapter,
   };
 }

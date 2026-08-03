@@ -718,7 +718,7 @@ describe('the Targets surface', () => {
   test('offers to finish a Target the manifest seeded and nobody connected', () => {
     const markup = targets([
       {
-        kind: 'cloud',
+        kind: 'gcp-project',
         name: 'a-project',
         targets: ['a-project-cloudrun', 'a-project-static'],
         proposal: {

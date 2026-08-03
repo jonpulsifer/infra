@@ -22,6 +22,7 @@
  *   `observe`, and the confirmation names what it strands."
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
+import { surfacesOf, type VesselKind, type VesselLocation } from './vessel.ts';
 
 /**
  * How to reach one Target, in whatever terms its adapter needs.
@@ -67,8 +68,6 @@ export function hasTargetConnection<
  */
 export interface CloudRunConnection {
   adapter: 'cloudrun';
-  /** The vessel project this Target deploys into (§14). */
-  project: string;
   region: string;
   /** The runtime's API root, without a trailing slash. */
   endpoint: string;
@@ -98,9 +97,6 @@ export interface CloudRunConnection {
    * account and the `actAs` grant for exactly this.
    */
   serviceAccount?: string;
-  /** §33's static reachability input, stated by the operator (§3). */
-  servedHosts?: readonly string[];
-  reachableRegistries?: readonly string[];
   /** §18: how far back a tail can honestly reach, in seconds. */
   logHistorySeconds?: number;
 }
@@ -115,12 +111,8 @@ export interface CloudRunConnection {
  */
 export interface StaticConnection {
   adapter: 'static';
-  /** The vessel project this Target's sites live in (§14). */
-  project: string;
   /** The hosting product's API root, without a trailing slash. */
   endpoint: string;
-  /** §33's static reachability input, stated by the operator (§3). */
-  servedHosts?: readonly string[];
 }
 
 /**
@@ -139,19 +131,9 @@ export interface StaticConnection {
  */
 export interface KubernetesConnection {
   adapter: 'kubernetes';
-  /** The API server endpoint (§13's prerequisite is OIDC against it). */
-  apiServer: string;
   /** The namespace an App's workloads land in. Never created by Spindrift (§7). */
   namespace: string;
   delivery: KubernetesDelivery;
-  /**
-   * §33: hosts this Target serves itself, the input to the static reachability
-   * check `offlineDeploy` is derived from. An operator's statement, because no
-   * cluster API reports what it can reach.
-   */
-  servedHosts?: readonly string[];
-  /** Registries reachable from this Target, likewise stated (§3). */
-  reachableRegistries?: readonly string[];
   /**
    * §18: "how far back a tail can honestly reach", in seconds. Stated rather
    * than discovered, because the log store is beside the cluster and not in it.
@@ -221,19 +203,109 @@ export type KubernetesDelivery =
 export interface DeployTargetRef {
   readonly name: string;
   readonly adapter: TargetAdapter;
-  readonly connection: TargetConnection;
+  readonly connection: AdapterConnection;
 }
 
-/** The narrow view of a Target row the adapter contract takes. */
-export function deployTargetOf(target: {
-  name: string;
-  adapter: TargetAdapter;
-  connection: TargetConnection;
-}): DeployTargetRef {
+/**
+ * The flat connection an adapter receives — surface facts plus its vessel's.
+ *
+ * **This is why splitting the row did not move the adapter seam.** An adapter
+ * has always been handed one object carrying everything it needs to reach a
+ * Target, and it still is; core assembles it from two rows instead of one.
+ * Neither `DeployAdapter` nor any conformance test knows the difference, which
+ * is what made normalizing the storage affordable.
+ */
+export type AdapterConnection =
+  | (KubernetesConnection & VesselFacts & { apiServer: string })
+  | (CloudRunConnection & VesselFacts & { project: string })
+  | (StaticConnection & VesselFacts & { project: string });
+
+/** The boundary's half of the flat view, identical for every surface on it. */
+interface VesselFacts {
+  servedHosts?: readonly string[];
+  reachableRegistries?: readonly string[];
+}
+
+/**
+ * One adapter's arm of the flat view.
+ *
+ * Each adapter narrows `DeployTarget.connection` to its own arm before reading
+ * it, exactly as it did when the connection was one row — the discriminant is
+ * still `adapter`, and the shape it selects now simply includes the vessel's
+ * contribution.
+ */
+export type KubernetesAdapterConnection = Extract<
+  AdapterConnection,
+  { adapter: 'kubernetes' }
+>;
+export type CloudRunAdapterConnection = Extract<
+  AdapterConnection,
+  { adapter: 'cloudrun' }
+>;
+export type StaticAdapterConnection = Extract<
+  AdapterConnection,
+  { adapter: 'static' }
+>;
+
+/** The Vessel columns {@link deployTargetOf} reads, without importing the row. */
+export interface VesselRef {
+  readonly location: VesselLocation;
+  readonly servedHosts: readonly string[] | null;
+  readonly reachableRegistries: readonly string[] | null;
+}
+
+/**
+ * Whether a vessel has been told where it is.
+ *
+ * The mirror of {@link hasTargetConnection}, and used beside it: a Target is
+ * addressable exactly when the surface carries its own facts *and* the boundary
+ * carries its location. Both are set by the same act, so in practice they agree
+ * — but the types do not know that, and a guard is cheaper than an invariant
+ * nobody checks.
+ */
+export function hasVesselLocation<
+  T extends { location: VesselLocation | null },
+>(vessel: T): vessel is T & VesselRef {
+  return vessel.location !== null;
+}
+
+/**
+ * The narrow view of a Target row the adapter contract takes.
+ *
+ * Composes the surface's connection with its vessel's location and reach. The
+ * vessel is a parameter rather than something this reads, because a domain
+ * function that queried would be a domain function the database could break —
+ * every caller already joins the row it needs.
+ */
+export function deployTargetOf(
+  target: {
+    name: string;
+    adapter: TargetAdapter;
+    connection: TargetConnection;
+  },
+  vessel: VesselRef,
+): DeployTargetRef {
+  const reach = {
+    ...(vessel.servedHosts === null ? {} : { servedHosts: vessel.servedHosts }),
+    ...(vessel.reachableRegistries === null
+      ? {}
+      : { reachableRegistries: vessel.reachableRegistries }),
+  };
+  const where =
+    vessel.location.kind === 'cluster'
+      ? { apiServer: vessel.location.apiServer }
+      : { project: vessel.location.project };
+
   return {
     name: target.name,
     adapter: target.adapter,
-    connection: target.connection,
+    // The union is discriminated on `adapter`, and the surface half already
+    // carries it, so the spread lands in exactly one arm.
+    connection: {
+      ...target.connection,
+      ...reach,
+      ...where,
+    } as AdapterConnection,
   };
 }
 
@@ -288,25 +360,29 @@ export function deployState(deploy: DeployStateInput): DeployState {
 export const STRANDABLE_PHASES = ['APPLYING', 'WAITING', 'LIVE'] as const;
 
 /**
- * The connect act's two shapes (§13).
+ * The surfaces one connect act registers, and what to call each (§13).
  *
- * "The connect act is credential-shaped though the noun is flat: one 'connect a
- * cloud project' registers both project-specific Targets, so a `Provider` noun
- * earns nothing." A cluster is one Target; a cloud project is two, and which two
- * is a fact about the cloud rather than a choice the operator makes.
+ * §13's split stands: a cluster is one Target and a cloud project is two, and
+ * which two is a fact about the boundary rather than a choice the operator
+ * makes. What changed is that the boundary is now a row, so this returns the
+ * surfaces of a {@link VesselKind} rather than branching on the word "cloud" —
+ * see `SURFACES_BY_VESSEL_KIND` in `vessel.ts`, which is the whole of that fact.
+ *
+ * **The suffix is now decorative.** It is a readable name for a surface, and
+ * nothing parses it back out: which vessel a Target belongs to is its
+ * `vesselId`. A Target named anything at all groups correctly, which is the
+ * behaviour `cloudProjectOf` used to deny.
+ *
+ * A single-surface vessel takes the vessel's own name unchanged: the suffix
+ * exists to tell siblings apart, and a vessel with one surface has none.
  */
-export const CLOUD_ADAPTERS = ['cloudrun', 'static'] as const;
-
-/** Names for the Targets one connect act registers, from the operator's name. */
-export function targetNames(
-  kind: 'kubernetes' | 'cloud',
-  name: string,
+export function surfaceNames(
+  kind: VesselKind,
+  vessel: string,
 ): { name: string; adapter: TargetAdapter }[] {
-  if (kind === 'kubernetes') return [{ name, adapter: 'kubernetes' }];
-  // Suffixed rather than asked for, because the operator connected one project
-  // and §13 makes the split a consequence of the model, not a decision.
-  return CLOUD_ADAPTERS.map((adapter) => ({
-    name: `${name}-${adapter}`,
+  const surfaces = surfacesOf(kind);
+  return surfaces.map((adapter) => ({
+    name: surfaces.length === 1 ? vessel : `${vessel}-${adapter}`,
     adapter,
   }));
 }

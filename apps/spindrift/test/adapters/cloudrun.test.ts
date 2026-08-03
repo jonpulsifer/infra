@@ -39,7 +39,7 @@ import {
   deriveVerifiedDeploy,
 } from '../../src/domain/capabilities.ts';
 import type { DesiredState, Reach } from '../../src/domain/desired-state.ts';
-import type { CloudRunConnection } from '../../src/domain/target.ts';
+import type { CloudRunAdapterConnection } from '../../src/domain/target.ts';
 import {
   FakeCloudRun,
   type FakeCloudRunOptions,
@@ -48,7 +48,7 @@ import {
 } from '../harness/fakes/cloudrun-api.ts';
 import { CLOUD_ENDPOINTS } from '../harness/installation.ts';
 
-const CONNECTION: CloudRunConnection = {
+const CONNECTION: CloudRunAdapterConnection = {
   adapter: 'cloudrun',
   project: 'example-vessel',
   region: 'somewhere',
@@ -56,7 +56,9 @@ const CONNECTION: CloudRunConnection = {
   policyEndpoint: CLOUD_ENDPOINTS.policy,
 };
 
-function target(overrides: Partial<CloudRunConnection> = {}): DeployTarget {
+function target(
+  overrides: Partial<CloudRunAdapterConnection> = {},
+): DeployTarget {
   return {
     name: 'cloud',
     adapter: 'cloudrun',

@@ -42,6 +42,8 @@ import {
   type Database,
   databaseUrl,
 } from '../../src/db/client.ts';
+import { vessels } from '../../src/db/schema.ts';
+import { VESSEL_KINDS, type VesselKind } from '../../src/domain/vessel.ts';
 
 const MIGRATIONS = join(import.meta.dir, '../../src/db/migrations');
 
@@ -116,6 +118,29 @@ export interface IsolatedDatabase {
 }
 
 /**
+ * The vessel a fixture Target sits on, one per kind, per isolated database.
+ *
+ * `targets.vessel_id` is NOT NULL, so every Target row a test inserts needs a
+ * boundary to reference. Seeding one here rather than asking each of the forty
+ * insert sites to build a pair keeps those tests about what they were about —
+ * and the pair is what production always has, so a fixture without one would be
+ * a row the schema does not permit.
+ *
+ * Read synchronously by `targetValues()`, which is a value builder and cannot
+ * await. Set by {@link createIsolatedDatabase} before any test body runs.
+ */
+let defaultVessels: Readonly<Record<VesselKind, string>> | null = null;
+
+export function defaultVesselId(kind: VesselKind): string {
+  if (defaultVessels === null) {
+    throw new Error(
+      'no isolated database is open — defaultVesselId() was read outside a test',
+    );
+  }
+  return defaultVessels[kind];
+}
+
+/**
  * Create, migrate, and hand back one private schema.
  *
  * Callers that want it around every test should use {@link withIsolatedDatabase};
@@ -142,10 +167,31 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
     await client.unsafe(statement);
   }
 
+  const db = createDb(client);
+  const seeded = await db
+    .insert(vessels)
+    .values(
+      VESSEL_KINDS.map((kind) => ({
+        name: `fixture-${kind}`,
+        kind,
+        location:
+          kind === 'cluster'
+            ? ({
+                kind: 'cluster',
+                apiServer: 'https://cluster.example.test',
+              } as const)
+            : ({ kind: 'gcp-project', project: 'example-vessel' } as const),
+      })),
+    )
+    .returning({ id: vessels.id, kind: vessels.kind });
+  defaultVessels = Object.fromEntries(
+    seeded.map((row) => [row.kind, row.id]),
+  ) as Record<VesselKind, string>;
+
   return {
     schema,
     client,
-    db: createDb(client),
+    db,
     connect,
     async close() {
       for (const open of opened) await open.close();

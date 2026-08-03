@@ -29,7 +29,8 @@ import type {
   PendingTargetConnection,
   TargetConnectionProposal,
 } from '../web/model.ts';
-import { CLOUD_ADAPTERS, type TargetConnection } from './target.ts';
+import { surfaceNames, type TargetConnection } from './target.ts';
+import type { VesselKind } from './vessel.ts';
 
 /** The columns this reasoning reads, without importing the table. */
 export interface OnboardingTargetRow {
@@ -37,12 +38,12 @@ export interface OnboardingTargetRow {
   readonly adapter: TargetAdapter;
   readonly connection: TargetConnection | null;
   readonly health: 'healthy' | 'unhealthy';
-}
-
-/** The project name behind one of a cloud project's two derived Target names. */
-function cloudProjectOf(name: string, adapter: TargetAdapter): string | null {
-  const suffix = `-${adapter}`;
-  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : null;
+  /** The boundary this surface sits on — what groups the rows into acts. */
+  readonly vessel: {
+    readonly id: string;
+    readonly name: string;
+    readonly kind: VesselKind;
+  };
 }
 
 /**
@@ -132,9 +133,9 @@ function cloudProposal(
 /** What a screen would propose for a fresh connect of this shape. */
 export function connectionProposal(
   rows: readonly OnboardingTargetRow[],
-  kind: 'kubernetes' | 'cloud',
+  kind: VesselKind,
 ): TargetConnectionProposal {
-  return kind === 'kubernetes' ? kubernetesProposal(rows) : cloudProposal(rows);
+  return kind === 'cluster' ? kubernetesProposal(rows) : cloudProposal(rows);
 }
 
 /**
@@ -150,41 +151,30 @@ export function pendingConnections(
   rows: readonly OnboardingTargetRow[],
 ): readonly PendingTargetConnection[] {
   const unconfigured = rows.filter((row) => row.connection === null);
-  const pending: PendingTargetConnection[] = [];
-  const cloudProjects = new Set<string>();
+  const byVessel = new Map<string, OnboardingTargetRow[]>();
 
   for (const row of unconfigured) {
-    if (row.adapter === 'kubernetes') {
-      pending.push({
-        kind: 'kubernetes',
-        name: row.name,
-        targets: [row.name],
-        proposal: connectionProposal(rows, 'kubernetes'),
-      });
-      continue;
-    }
-    // A cloud Target whose name does not carry its adapter's suffix cannot be
-    // reached by `connectTarget`, which derives both names from one project
-    // name. Listing it as connectable would offer a button that registers two
-    // Targets neither of which is this row.
-    const project = cloudProjectOf(row.name, row.adapter);
-    if (project === null) continue;
-    cloudProjects.add(project);
+    const group = byVessel.get(row.vessel.id);
+    if (group === undefined) byVessel.set(row.vessel.id, [row]);
+    else group.push(row);
   }
 
-  for (const project of cloudProjects) {
-    pending.push({
-      kind: 'cloud',
-      name: project,
-      // Both names the act will write, whether or not both are unconfigured
-      // today: connecting re-registers the pair, and saying so is what stops
-      // the confirmation from under-reporting what it is about to touch.
-      targets: CLOUD_ADAPTERS.map((adapter) => `${project}-${adapter}`),
-      proposal: connectionProposal(rows, 'cloud'),
-    });
-  }
-
-  return pending;
+  return [...byVessel.values()].map((group) => {
+    const vessel = group[0]!.vessel;
+    return {
+      kind: vessel.kind,
+      name: vessel.name,
+      // Every surface the act will write, whether or not all of them are
+      // unconfigured today: connecting re-registers the whole vessel, and
+      // saying so is what stops the confirmation from under-reporting what it
+      // is about to touch. Read off the vessel's kind rather than recovered
+      // from a name.
+      targets: surfaceNames(vessel.kind, vessel.name).map(
+        (surface) => surface.name,
+      ),
+      proposal: connectionProposal(rows, vessel.kind),
+    };
+  });
 }
 
 // --- Connecting a cluster, one component at a time --------------------------
@@ -233,7 +223,7 @@ export interface ClusterConnectChoices {
 
 /** What `connectTarget` takes for a cluster, assembled from the choices. */
 export interface ClusterConnectPlan {
-  readonly kind: 'kubernetes';
+  readonly kind: 'cluster';
   readonly name: string;
   readonly apiServer: string;
   readonly namespace: string;
@@ -305,7 +295,7 @@ export function clusterConnectPlan(
   ];
 
   return {
-    kind: 'kubernetes',
+    kind: 'cluster',
     name: choices.name,
     apiServer: choices.apiServer,
     namespace: choices.namespace,

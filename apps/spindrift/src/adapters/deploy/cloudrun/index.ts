@@ -41,7 +41,7 @@ import {
   type DesiredState,
   type Reach,
 } from '../../../domain/desired-state.ts';
-import type { CloudRunConnection } from '../../../domain/target.ts';
+import type { CloudRunAdapterConnection } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import { cloudChecklist } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
@@ -386,7 +386,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
 
   private async *awaitVerdict(
     http: CloudHttp,
-    connection: CloudRunConnection,
+    connection: CloudRunAdapterConnection,
     id: string,
     ref: DeployRef,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
@@ -456,7 +456,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   /** Write the invoker policy for one exposure, or say why it could not. */
   private async setInvoker(
     http: CloudHttp,
-    connection: CloudRunConnection,
+    connection: CloudRunAdapterConnection,
     id: string,
     reach: Reach,
     auth: Auth,
@@ -489,7 +489,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   // --- inspect's second half -----------------------------------------------
 
   private async discover(
-    connection: CloudRunConnection,
+    connection: CloudRunAdapterConnection,
   ): Promise<TargetDiscovery> {
     return {
       arch: [...RUNTIME_ARCH],
@@ -534,7 +534,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
    * this has to fail in: nobody said where to look, so nothing was verified.
    */
   private async admissionPolicy(
-    connection: CloudRunConnection,
+    connection: CloudRunAdapterConnection,
   ): Promise<PolicyEngineState> {
     if (connection.policyEndpoint === undefined) {
       return { installed: false, mode: null };
@@ -566,7 +566,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
 
   // --- plumbing ------------------------------------------------------------
 
-  private http(connection: CloudRunConnection): CloudHttp {
+  private http(connection: CloudRunAdapterConnection): CloudHttp {
     return new CloudHttp({
       baseUrl: connection.endpoint,
       token: this.options.token,
@@ -576,14 +576,14 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     });
   }
 
-  private connectionOf(target: DeployTarget): CloudRunConnection | null {
+  private connectionOf(target: DeployTarget): CloudRunAdapterConnection | null {
     return target.connection.adapter === 'cloudrun' ? target.connection : null;
   }
 
   /** One Service, or `null` where there is nothing there. */
   private async read(
     http: CloudHttp,
-    connection: CloudRunConnection,
+    connection: CloudRunAdapterConnection,
     id: string,
   ): Promise<CloudRunService | null> {
     const read = await http.json<CloudRunService>({
@@ -688,7 +688,7 @@ function encodeCloudLogCursor(record: CloudLogRecord): string {
 }
 
 /** `projects/<p>/locations/<r>` — the parent every call hangs off. */
-function parentOf(connection: CloudRunConnection): string {
+function parentOf(connection: CloudRunAdapterConnection): string {
   return `projects/${connection.project}/locations/${connection.region}`;
 }
 
@@ -700,13 +700,13 @@ function parentOf(connection: CloudRunConnection): string {
  * the Service would then be read against the wrong one — reporting a healthy
  * workload that is not the one this Deploy placed.
  */
-function refOf(connection: CloudRunConnection, id: string): DeployRef {
+function refOf(connection: CloudRunAdapterConnection, id: string): DeployRef {
   return `${parentOf(connection)}/services/${id}`;
 }
 
 /** The id this ref names on this connection, or `null` if it names another. */
 function parseRef(
-  connection: CloudRunConnection,
+  connection: CloudRunAdapterConnection,
   ref: DeployRef,
 ): string | null {
   const prefix = `${parentOf(connection)}/services/`;

@@ -22,7 +22,7 @@ import {
   deploys,
   targets,
 } from '../../src/db/schema.ts';
-import { withIsolatedDatabase } from '../harness/db.ts';
+import { defaultVesselId, withIsolatedDatabase } from '../harness/db.ts';
 import {
   SupplyChainHarness,
   testSignature,
@@ -764,11 +764,11 @@ describe('getDeployDetail command', () => {
       .values({
         name: `Metal-${crypto.randomUUID().slice(0, 6)}`,
         adapter: 'kubernetes',
+        vesselId: defaultVesselId('cluster'),
         health: 'healthy',
         rank: 1,
         connection: {
           adapter: 'kubernetes',
-          apiServer: 'https://10.0.0.1:6443',
           namespace: 'default',
           delivery: {
             flavour: 'flux-helmrelease',
@@ -856,11 +856,11 @@ describe('getDeployDetail command', () => {
       .values({
         name: `Metal-${crypto.randomUUID().slice(0, 6)}`,
         adapter: 'kubernetes',
+        vesselId: defaultVesselId('cluster'),
         health: 'healthy',
         rank: 1,
         connection: {
           adapter: 'kubernetes',
-          apiServer: 'https://10.0.0.1:6443',
           namespace: 'default',
           delivery: {
             flavour: 'flux-helmrelease',

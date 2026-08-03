@@ -32,7 +32,7 @@ import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/in
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
 import type {
-  KubernetesConnection,
+  KubernetesAdapterConnection,
   KubernetesDelivery,
 } from '../../src/domain/target.ts';
 import {
@@ -69,8 +69,8 @@ const SERVED = {
 };
 
 function connection(
-  overrides: Partial<KubernetesConnection> = {},
-): KubernetesConnection {
+  overrides: Partial<KubernetesAdapterConnection> = {},
+): KubernetesAdapterConnection {
   return {
     adapter: 'kubernetes',
     apiServer: 'https://cluster.example.test',
@@ -82,7 +82,7 @@ function connection(
 }
 
 function target(
-  connectionOverrides: Partial<KubernetesConnection> = {},
+  connectionOverrides: Partial<KubernetesAdapterConnection> = {},
 ): DeployTarget {
   return {
     name: 'cluster',

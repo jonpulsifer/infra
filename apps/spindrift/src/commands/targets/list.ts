@@ -84,6 +84,9 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
   context,
 ) => {
   const allTargets = await context.db.query.targets.findMany({
+    // The boundary comes with every surface: it is half of what an adapter is
+    // handed, and it is what groups these rows into connect acts.
+    with: { vessel: true },
     orderBy: (targets, { asc }) => [asc(targets.rank)],
   });
 
@@ -140,10 +143,12 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
       // address problem with the Targets the other way round.
       edit:
         target.adapter === 'kubernetes' &&
-        target.connection?.adapter === 'kubernetes'
+        target.connection?.adapter === 'kubernetes' &&
+        target.vessel.location?.kind === 'cluster'
           ? {
-              apiServer: target.connection.apiServer,
-              proposal: connectionProposal([target], 'kubernetes'),
+              // The cluster's address is the vessel's, not the surface's.
+              apiServer: target.vessel.location.apiServer,
+              proposal: connectionProposal([target], 'cluster'),
             }
           : null,
     });

@@ -34,7 +34,7 @@ import type {
   ArtifactType,
   DesiredState,
 } from '../../src/domain/desired-state.ts';
-import { connectionFor } from '../harness/installation.ts';
+import { deployTargetFor } from '../harness/installation.ts';
 
 /** Names the suite has been run over, collected as the suites declare them. */
 const enrolled = {
@@ -116,11 +116,7 @@ export function deployAdapterSuite(
 
   describe(`deploy contract: ${label}`, () => {
     const adapter = make().adapter;
-    const target: DeployTarget = {
-      name: 'target',
-      adapter,
-      connection: connectionFor(adapter),
-    };
+    const target: DeployTarget = deployTargetFor(adapter, 'target');
 
     test('declares at least one artifact type it accepts', () => {
       expect(make().artifactTypes.length).toBeGreaterThan(0);
