@@ -1,13 +1,12 @@
 locals {
-  fml_cidr    = "10.1.0.1/24"
-  fml_domain  = "fml.pulsifer.ca"
-  fml_wlan    = "fml"
-  future_cidr = "10.13.37.1/28"
-  iot_cidr    = "10.66.6.1/26"
-  iot_domain  = "iot.fml.pulsifer.ca"
-  clients     = yamldecode(file("./clients.yaml"))
-  one_day     = "24h0m0s"
-  one_week    = "168h0m0s"
+  fml_cidr   = "10.1.0.1/24"
+  fml_domain = "fml.pulsifer.ca"
+  fml_wlan   = "fml"
+  iot_cidr   = "10.66.6.1/26"
+  iot_domain = "iot.fml.pulsifer.ca"
+  clients    = yamldecode(file("./clients.yaml"))
+  one_day    = "24h0m0s"
+  one_week   = "168h0m0s"
 }
 
 resource "unifi_network" "fml" {

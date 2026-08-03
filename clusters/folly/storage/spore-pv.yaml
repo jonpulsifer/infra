@@ -14,8 +14,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nfs
   nfs:
-    # spore.lolwtf.ca is Terraform-managed to this static Lab Net address.
-    # Use the IP directly so kubelet's NFS mounter does not depend on DNS
-    # resolution while constructing the kernel mount options.
-    server: 10.2.0.11
+    # Use the topology IP directly so kubelet's NFS mounter does not depend on
+    # DNS resolution while constructing the kernel mount options.
+    server: ${SPORE_IP}
     path: /nfs/data/k8s/

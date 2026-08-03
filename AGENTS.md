@@ -94,7 +94,7 @@ Do not restate these values anywhere — read them.
 | Facts | Source |
 | --- | --- |
 | Cluster IPs/CIDRs, API-server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
-| Lab net CIDR and lab host IPs | `terraform/network/unifi/folly/lab.tf.json` |
+| Lab/future CIDRs and lab host IPs | `clusters/folly/config/lab-topology.json` |
 | `bluenose` vessel subnet CIDR | `terraform/gcp/projects/bluenose/config/vessel-topology.json` |
 
 Each cluster topology JSON **is** the Flux ConfigMap, applied as-is — JSON is
@@ -104,8 +104,11 @@ requires it, so lists and numbers are encoded as strings. Flux substitutes
 it through the `terraform/modules/cluster-topology` module. A conftest contract
 (`.github/workflows/topology-contract.yml`) enforces the schema.
 
-`lab.tf.json` is valid Terraform JSON auto-loaded by the folly UniFi root and
-read by `nix/hosts/forge.nix` (and the legacy image-only `nix/hosts/rackpi5.nix`).
+`clusters/folly/config/lab-topology.json` is also a flat-string Flux ConfigMap.
+Flux substitutes its host addresses into folly storage and monitoring; Nix
+projects it through `nix/lib/lab.nix`; the folly UniFi root reads it through the
+same topology helper used for cluster ConfigMaps. Terraform preconditions keep
+its selected host addresses aligned with `clients.yaml` DHCP reservations.
 
 ## Where depth lives
 

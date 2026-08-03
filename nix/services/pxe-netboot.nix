@@ -25,6 +25,10 @@
       enable-tftp = true;
       tftp-root = "/var/lib/tftpboot";
       tftp-max = 100;
+      # TFTP transfers leave UDP/69 and use a server-selected transfer ID.
+      # Bound that data channel so the firewall can admit it explicitly without
+      # relying on a conntrack helper.
+      tftp-port-range = "30000,30099";
     };
   };
 
@@ -57,6 +61,12 @@
 
   networking.firewall = {
     allowedTCPPorts = [ 80 ];
-    allowedUDPPorts = [ 69 ]; # tftp
+    allowedUDPPorts = [ 69 ]; # TFTP request port
+    allowedUDPPortRanges = [
+      {
+        from = 30000;
+        to = 30099;
+      }
+    ];
   };
 }

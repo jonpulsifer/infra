@@ -6,8 +6,7 @@
 { config, ... }:
 let
   fleet = import ../lib/fleet.nix;
-  lab =
-    (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json)).locals.lab;
+  lab = import ../lib/lab.nix;
 in
 {
   imports = [

@@ -5,6 +5,8 @@ on:
     paths:
       - 'clusters/base/**'
       - 'clusters/folly/apps/**'
+      - 'clusters/folly/monitoring/**'
+      - 'clusters/folly/config/lab-topology.json'
       - 'clusters/offsite/apps/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'
@@ -13,6 +15,8 @@ on:
     paths:
       - 'clusters/base/**'
       - 'clusters/folly/apps/**'
+      - 'clusters/folly/monitoring/**'
+      - 'clusters/folly/config/lab-topology.json'
       - 'clusters/offsite/apps/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'

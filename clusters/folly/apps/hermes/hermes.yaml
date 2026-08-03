@@ -76,7 +76,7 @@ spec:
         enabled: true
         storageSize: 5Gi
         # Backed by the dynamic `nfs` StorageClass (provisioned by
-        # clusters/folly/storage/nfs-provisioner) on spore (10.2.0.11).
+        # clusters/folly/storage/nfs-provisioner) on spore.
         # RWX so the agent could be scaled or migrated to another node
         # without losing /opt/data; data survives a node loss.
         storageClassName: nfs

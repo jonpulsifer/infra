@@ -21,7 +21,7 @@ ports:
     port: 9253
     protocol: TCP
 endpoints:
-  - addresses: ["10.2.0.11"]
+  - addresses: ["${SPORE_IP}"]
     nodeName: spore
 --- # trivy:ignore:avd-ksv-0108
 apiVersion: v1
@@ -136,13 +136,13 @@ spec:
             message: PXE TFTP (dnsmasq) on spore is down
             description: "dnsmasq.service is not active on spore. Bare-metal k8s nodes cannot netboot (ipxe.efi via terraform/network/unifi/folly/k8s.tf)."
         - alert: SporePxeHttpDown
-          expr: nginx_up{instance="spore"} == 0
+          expr: (nginx_up{instance="spore"} == 0) or absent(nginx_up{instance="spore"})
           for: 5m
           labels:
             severity: critical
           annotations:
             message: PXE HTTP (nginx) on spore is down
-            description: "nginx on spore is not serving. x86 netboot payloads and rackpi5's sole signed native-boot path are unavailable."
+            description: "nginx on spore is not serving. x86 netboot payloads and forge's signed HTTP/RAM fallback are unavailable."
         - alert: SporeRackpi5PublisherDown
           expr: (node_systemd_unit_state{instance="spore", name="spore-native-boot-rackpi5.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="spore-native-boot-rackpi5.service", state="active"})
           for: 5m
@@ -151,6 +151,14 @@ spec:
           annotations:
             message: rackpi5 signed boot publisher is down
             description: "spore-native-boot-rackpi5.service is not active. Spore cannot expose a complete signed artifact set for the legacy HTTP/RAM boot path -- forge's EEPROM still has it as a secondary boot, so a dead publisher is a silent loss of the last fallback."
+        - alert: SporeNativeBootArtifactUnavailable
+          expr: (spore_native_boot_artifact_available{target="rackpi5"} == 0) or absent(spore_native_boot_artifact_available{target="rackpi5"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            message: "Native-boot artifact {{ $labels.artifact }} is unavailable"
+            description: "Spore's local HTTP probe cannot fetch a current rackpi5 boot image, signature, or digest-addressed squashfs. Forge's signed HTTP/RAM fallback is incomplete."
         - alert: SporeNfsDataNotMounted
           expr: absent(node_filesystem_size_bytes{instance="spore", mountpoint="/nfs/data"})
           for: 5m
