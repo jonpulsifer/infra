@@ -54,6 +54,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
+import { Logo } from '../../ui/logo.tsx';
 import { cn } from '../../ui/utils.ts';
 
 export interface RepositoryAuthorizationView {
@@ -210,7 +211,7 @@ function ConnectorCard({
       <Card>
         <CardContent className="flex flex-col gap-4">
           <div className="flex items-start gap-3">
-            <GitBranch aria-hidden="true" className="mt-0.5 size-5" />
+            <Logo name="github" className="mt-0.5" />
             <div>
               <p className="font-semibold">Authorize the GitHub App</p>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -222,7 +223,7 @@ function ConnectorCard({
           </div>
           {authorization === null ? (
             <Button className="self-start" onClick={onAuthorize}>
-              <GitBranch aria-hidden="true" /> Authorize GitHub
+              <Logo name="github" className="size-4" /> Authorize GitHub
             </Button>
           ) : (
             <>
