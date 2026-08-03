@@ -1,16 +1,25 @@
 /**
- * The confirmation panel ticket 32 slice 2 exists to build.
+ * Cloud facts shown for confirmation rather than typed.
  *
- * Two claims, and neither is about a request:
+ * Four claims:
  *
- * 1. **The two arms read as two different things.** A field the cloud could not
+ * 1. **The panel is on the settings surface.** The whole criterion is that an
+ *    operator confirms rather than types, and a panel nothing mounts confirms
+ *    nothing. Asserted against the real `InstallationSettingsView`, so removing
+ *    the element fails here rather than passing quietly.
+ * 2. **The two arms read as two different things.** A field the cloud could not
  *    answer shows the sentence saying why; a field it answered with nothing
  *    shows that it is empty. A panel that rendered a refusal as a blank would be
  *    the original defect wearing a UI.
- * 2. **Nothing here names a manifest key.** The headings are the schema's own
+ * 3. **Nothing here names a manifest key.** The headings are the schema's own
  *    keys humanized, and applying a candidate writes at the path the command
- *    gave — so ticket 33 removing a key removes it from this panel too, rather
- *    than leaving a control for a field that no longer exists.
+ *    gave — so a key leaving the schema leaves this panel too, rather than
+ *    leaving a control for a field that no longer exists.
+ * 4. **The request carries the narrowing the operator typed, and every way of
+ *    failing comes back as a sentence.** This repo has no DOM, so the assertion
+ *    is against `askInstallationCloud` and `DiscoveryRefusal` directly — the two
+ *    pieces the panel is a shell around — with `fetch` stubbed beneath the real
+ *    typed client.
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -18,10 +27,15 @@ import type {
   DiscoveredCandidate,
   DiscoveredFact,
 } from '../../src/commands/installation/discover.ts';
+import { manifestFields } from '../../src/web/forms/manifest.ts';
 import {
   applyDiscovered,
+  askInstallationCloud,
   DiscoveredFactList,
+  DiscoveryRefusal,
 } from '../../src/web/views/auth/discovery.tsx';
+import { InstallationSettingsView } from '../../src/web/views/auth/installation.tsx';
+import { fixtureManifest } from '../harness/installation.ts';
 
 const FACTS: readonly DiscoveredFact[] = [
   {
@@ -108,5 +122,153 @@ describe('confirming a value edits the document at the path it came with', () =>
     expect(applyDiscovered(document, fact, bucket)).toMatchObject({
       sources: { buckets: ['a-bucket'] },
     });
+  });
+});
+
+const manifest = await fixtureManifest();
+
+describe('the panel is part of the settings surface', () => {
+  const markup = renderToStaticMarkup(
+    <InstallationSettingsView
+      fields={manifestFields()}
+      document={manifest as unknown}
+      errors={new Map()}
+      outcome={null}
+      saving={false}
+      onChange={() => undefined}
+      onSave={() => undefined}
+      onReload={() => undefined}
+    />,
+  );
+
+  test('the screen an operator edits the manifest on offers the ask', () => {
+    // The second half of the criterion, and the half a component test cannot
+    // reach: facts are shown *for confirmation*, which is only true if the
+    // panel is on the screen that edits the manifest. Both inputs are named
+    // here because `manifestFields()` produces no `discovery.` key — nothing
+    // but the panel can satisfy this.
+    expect(markup).toContain('name="discovery.project"');
+    expect(markup).toContain('name="discovery.kmsLocation"');
+  });
+
+  test('it sits above the form, where the value is confirmed before it is typed', () => {
+    // Order, not just presence: a confirmation offered underneath the field it
+    // would have saved a typo in is a confirmation nobody reaches first.
+    expect(markup.indexOf('name="discovery.project"')).toBeLessThan(
+      markup.indexOf('name="cloud.homeVesselProject"'),
+    );
+  });
+});
+
+/** What the stubbed transport recorded of one request. */
+interface Sent {
+  readonly path: string;
+  readonly body: unknown;
+}
+
+const realFetch = globalThis.fetch;
+
+/**
+ * One ask, with a stubbed `fetch` under the real typed client.
+ *
+ * Under the client rather than in place of it: the claim is about the request
+ * that leaves the browser, and a stub of `command` itself would assert only
+ * that the panel calls a function this test also wrote.
+ */
+async function ask(
+  narrowing: { project: string; kmsLocation: string },
+  respond: () => Response,
+): Promise<{
+  readonly sent: readonly Sent[];
+  readonly answer: Awaited<ReturnType<typeof askInstallationCloud>>;
+}> {
+  const sent: Sent[] = [];
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    sent.push({
+      path: String(input),
+      body: JSON.parse(String(init?.body ?? 'null')) as unknown,
+    });
+    return respond();
+  }) as typeof fetch;
+  try {
+    return { sent, answer: await askInstallationCloud(narrowing) };
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+const NO_FACTS = () => Response.json({ ok: true, value: { facts: [] } });
+
+describe('what the panel asks the cloud', () => {
+  test('an empty input is absent from the request, not sent empty', async () => {
+    const { sent, answer } = await ask(
+      { project: '  example-home  ', kmsLocation: '   ' },
+      NO_FACTS,
+    );
+
+    // Exactly this object: the command's input is `.strict()`, so an empty
+    // `kmsLocation` is a rejected request rather than a first pass, and an
+    // untrimmed project is a project id nothing in the cloud is named.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toEqual({ project: 'example-home' });
+    expect(answer).toEqual({ facts: [] });
+  });
+
+  test('both narrowings are sent when both are given', async () => {
+    const { sent } = await ask(
+      { project: 'example-home', kmsLocation: ' a-region ' },
+      NO_FACTS,
+    );
+
+    expect(sent[0]?.body).toEqual({
+      project: 'example-home',
+      kmsLocation: 'a-region',
+    });
+  });
+
+  test('a refused command comes back as its sentence', async () => {
+    const { answer } = await ask({ project: '', kmsLocation: '' }, () =>
+      Response.json({
+        ok: false,
+        failure: {
+          code: 'NOT_DEPLOYABLE',
+          message: 'this installation mounts no cloud federation credential',
+        },
+      }),
+    );
+
+    expect(answer).toEqual({
+      refusal: 'this installation mounts no cloud federation credential',
+    });
+  });
+
+  test('a transport that never reached the command layer is a sentence too', async () => {
+    // The one case `command` throws on: a proxy answering HTML is not the
+    // server answering. Swallowed into `facts: []` it would render as a cloud
+    // that confirmed nothing exists.
+    const { answer } = await ask(
+      { project: '', kmsLocation: '' },
+      () => new Response('<html>a proxy</html>', { status: 502 }),
+    );
+
+    expect(answer).not.toHaveProperty('facts');
+    expect(answer).toHaveProperty('refusal');
+  });
+});
+
+describe('a refusal is shown as a fact about the installation', () => {
+  const markup = renderToStaticMarkup(
+    <DiscoveryRefusal reason="this installation mounts no cloud federation credential" />,
+  );
+
+  test('it is announced, carries its sentence, and is not a field error', () => {
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain(
+      'this installation mounts no cloud federation credential',
+    );
+    expect(markup).toContain('not a field to correct');
   });
 });

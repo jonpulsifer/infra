@@ -94,9 +94,12 @@ export interface DiscoverInstallationFactsResult {
  * a wrong suggestion — which is why it is only ever `suggested`, never asserted
  * as the answer. A URL that does not match at all yields nothing rather than a
  * fragment of one.
+ *
+ * The bounds are GCP's own for a project id: 6 to 30 characters, opening with a
+ * letter — so one leading `[a-z]` and 5 to 29 after it.
  */
 const SERVICE_ACCOUNT_PROJECT =
-  /@([a-z][a-z0-9-]{4,28})\.iam\.gserviceaccount\.com/;
+  /@([a-z][a-z0-9-]{5,29})\.iam\.gserviceaccount\.com/;
 
 export const discoverInstallationFacts: Command<
   DiscoverInstallationFactsInput,
@@ -225,6 +228,13 @@ function mapped(
  * on one bucket and one key is not usually granted `projects.list`. So a
  * suggestion turns a refusal into an answer, and joins a listing it is already
  * part of without being repeated.
+ *
+ * This is the one place the two arms are crossed — a refused listing comes out
+ * `found` — so the candidate carries where it came from in the text an operator
+ * reads. Without that, a `403` on `projects.list` is indistinguishable on the
+ * screen from a project the cloud confirmed, which is the laundering this whole
+ * path exists to prevent. It leads the list rather than merging into it, so the
+ * labelled one is the one shown and the one marked as the suggestion.
  */
 function withSuggestion(
   fact: DiscoveredFact,
@@ -235,19 +245,31 @@ function withSuggestion(
   return {
     path: fact.path,
     kind: 'found',
-    candidates: listed.some((candidate) => candidate.value === suggested.value)
-      ? listed
-      : [suggested, ...listed],
+    candidates: [
+      suggested,
+      ...listed.filter((candidate) => candidate.value !== suggested.value),
+    ],
     suggested,
   };
 }
 
-/** The home vessel this installation's own identity lives in, if it says. */
+/**
+ * The home vessel this installation's own identity lives in, if it says.
+ *
+ * Labelled with its provenance, not with the bare id: what is written is the
+ * project, but what is read is where the answer came from — this deployment's
+ * own credential rather than anything the cloud was asked.
+ */
 function homeVesselOf(
   federation: FederationConfig,
 ): DiscoveredCandidate | null {
   const url = federation.impersonationUrl;
   if (url === null) return null;
   const project = SERVICE_ACCOUNT_PROJECT.exec(url)?.[1];
-  return project === undefined ? null : plain(project);
+  return project === undefined
+    ? null
+    : {
+        label: `${project} — this deployment’s own credential`,
+        value: project,
+      };
 }
