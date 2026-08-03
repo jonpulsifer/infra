@@ -43,6 +43,7 @@ import type {
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import type {
+  ClusterProbe,
   DeployAdapter,
   DeployEvent,
   DeployPhase,
@@ -136,6 +137,18 @@ const SECRET_STORE = {
   apiVersion: 'external-secrets.io/v1',
   kind: 'ClusterSecretStore',
   plural: 'clustersecretstores',
+} as const;
+
+/**
+ * What a route attaches to. Read only by {@link KubernetesDeployAdapter.probe}
+ * — the App chart renders an `HTTPRoute` and never a `Gateway`, so this
+ * adapter's only interest in one is telling an operator which exist and where
+ * each answers.
+ */
+const GATEWAY = {
+  apiVersion: 'gateway.networking.k8s.io/v1',
+  kind: 'Gateway',
+  plural: 'gateways',
 } as const;
 
 export class KubernetesDeployAdapter implements DeployAdapter {
@@ -329,6 +342,85 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       this.discover(api, connection),
     ]);
     return { prerequisites, discovery };
+  }
+
+  /**
+   * Read a cluster that is not a Target yet (§13's connect, one step earlier).
+   *
+   * Every read is independently caught. §13's "connect always succeeds" has a
+   * mirror here: **probing always answers**, and a cluster that serves Flux but
+   * refuses to list its namespaces produces a screen with one field to pick
+   * from and one to type, rather than an error page about a cluster that is
+   * nearly ready. The one thing that is fatal is the address not answering at
+   * all, because then nothing on the screen would mean anything.
+   */
+  async probe(apiServer: string): Promise<ClusterProbe> {
+    const api = new KubernetesApi({
+      apiServer,
+      token: this.options.token,
+      ...(this.options.fetch === undefined
+        ? {}
+        : { fetch: this.options.fetch }),
+    });
+
+    // The liveness read, and the first half of the delivery answer. `servesKind`
+    // reads the discovery API, which every authenticated identity may read, so
+    // a failure here is the address rather than the permissions.
+    let flux: boolean;
+    try {
+      flux = await api.servesKind(HELM_RELEASE.apiVersion, HELM_RELEASE.kind);
+    } catch (cause) {
+      return {
+        reachable: false,
+        because: cause instanceof Error ? cause.message : String(cause),
+        deliveryFlavours: [],
+        namespaces: [],
+        chartSources: [],
+        secretStores: [],
+        gateways: [],
+      };
+    }
+
+    const [argo, namespaces, sources, stores, gateways] = await Promise.all([
+      api
+        .servesKind(APPLICATION.apiVersion, APPLICATION.kind)
+        .catch(() => false),
+      api.list({ apiVersion: 'v1', plural: 'namespaces' }).catch(() => null),
+      api
+        .list({
+          apiVersion: GIT_REPOSITORY.apiVersion,
+          plural: GIT_REPOSITORY.plural,
+        })
+        .catch(() => null),
+      api
+        .list({
+          apiVersion: SECRET_STORE.apiVersion,
+          plural: SECRET_STORE.plural,
+        })
+        .catch(() => null),
+      api
+        .list({ apiVersion: GATEWAY.apiVersion, plural: GATEWAY.plural })
+        .catch(() => null),
+    ]);
+
+    return {
+      reachable: true,
+      deliveryFlavours: [
+        ...(flux ? (['flux-helmrelease'] as const) : []),
+        ...(argo ? (['argo-application'] as const) : []),
+      ],
+      namespaces: (namespaces ?? []).map((item) => item.metadata.name),
+      chartSources: (sources ?? []).map((item) => ({
+        name: item.metadata.name,
+        namespace: item.metadata.namespace ?? '',
+      })),
+      secretStores: (stores ?? []).map((item) => item.metadata.name),
+      gateways: (gateways ?? []).map((item) => ({
+        name: item.metadata.name,
+        namespace: item.metadata.namespace ?? '',
+        address: gatewayAddress(item),
+      })),
+    };
   }
 
   // --- apply's second half -------------------------------------------------
@@ -950,6 +1042,25 @@ function writeFailure(
     reason: 'TARGET_UNREACHABLE',
     detail: cause instanceof Error ? cause.message : String(cause),
   };
+}
+
+/**
+ * The address a Gateway answers on, or null while it has none.
+ *
+ * The first `IPAddress` entry, and deliberately not a `Hostname` one: what
+ * reads this is `platform.dns.privateAddress`, which the App chart publishes as
+ * an A record. A gateway whose only address is a name has nothing to put there,
+ * and saying so leaves the field for the operator rather than filling it with
+ * something the record cannot hold.
+ */
+function gatewayAddress(gateway: KubernetesObject): string | null {
+  const status = gateway.status as
+    | { addresses?: { type?: string; value?: string }[] }
+    | undefined;
+  const address = (status?.addresses ?? []).find(
+    (entry) => entry.type !== 'Hostname' && (entry.value ?? '') !== '',
+  );
+  return address?.value ?? null;
 }
 
 /** What the nodes say this Target can run (§3's discovered half). */

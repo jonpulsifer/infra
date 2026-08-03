@@ -1045,6 +1045,133 @@ describe('a write is an apply only if it says so', () => {
   });
 });
 
+/**
+ * Reading a cluster that is not a Target yet (§13's connect, one step earlier).
+ *
+ * `inspect` cannot answer this — it takes a connection carrying the very facts
+ * an operator is here to choose — so the probe is the read that runs against
+ * nothing but an address, and everything it returns is a list to pick from.
+ *
+ * The behaviour worth pinning is the degradation. A cluster whose
+ * `spindrift-target` RBAC has not merged yet answers some reads and refuses
+ * others, and that is the *ordinary* state of a cluster somebody is connecting.
+ * A probe that gave up on the first refusal would report nothing about a
+ * cluster that is nearly ready, and the screen would have nothing to offer.
+ */
+describe('probing a cluster before it is a Target', () => {
+  const gateway = (
+    namespace: string,
+    name: string,
+    addresses?: { type: string; value: string }[],
+  ): FakeObject => ({
+    apiVersion: 'gateway.networking.k8s.io/v1',
+    kind: 'Gateway',
+    metadata: { name, namespace },
+    ...(addresses === undefined ? {} : { status: { addresses } }),
+  });
+
+  const namespace = (name: string): FakeObject => ({
+    apiVersion: 'v1',
+    kind: 'Namespace',
+    metadata: { name },
+  });
+
+  const source = (namespace: string, name: string): FakeObject => ({
+    apiVersion: 'source.toolkit.fluxcd.io/v1',
+    kind: 'GitRepository',
+    metadata: { name, namespace },
+  });
+
+  const store = (name: string): FakeObject => ({
+    apiVersion: 'external-secrets.io/v1',
+    kind: 'ClusterSecretStore',
+    metadata: { name },
+  });
+
+  const probed = async (options: FakeKubernetesOptions = {}) => {
+    const { adapter, cluster } = adapterFor({
+      servedKinds: {
+        ...SERVED,
+        'source.toolkit.fluxcd.io/v1': ['GitRepository'],
+        'external-secrets.io/v1': ['ClusterSecretStore'],
+        'gateway.networking.k8s.io/v1': ['Gateway'],
+      },
+      ...options,
+    });
+    return adapter.probe(cluster.apiServer);
+  };
+
+  test('offers what the cluster runs, as lists to choose from', async () => {
+    const probe = await probed({
+      lists: {
+        namespaces: [namespace('apps'), namespace('delivery')],
+        gitrepositories: [source('delivery', 'charts')],
+        clustersecretstores: [store('vault')],
+        gateways: [
+          gateway('edge', 'shared', [{ type: 'IPAddress', value: '10.0.0.9' }]),
+        ],
+      },
+    });
+
+    expect(probe.reachable).toBe(true);
+    expect(probe.deliveryFlavours).toEqual([
+      'flux-helmrelease',
+      'argo-application',
+    ]);
+    expect(probe.namespaces).toEqual(['apps', 'delivery']);
+    expect(probe.chartSources).toEqual([
+      { name: 'charts', namespace: 'delivery' },
+    ]);
+    expect(probe.secretStores).toEqual(['vault']);
+    expect(probe.gateways).toEqual([
+      { name: 'shared', namespace: 'edge', address: '10.0.0.9' },
+    ]);
+  });
+
+  test('a gateway with only a hostname offers no address to publish', async () => {
+    // `platform.dns.privateAddress` is published as an A record, so a name is
+    // not a value it can hold — and filling it with one would be worse than
+    // leaving the field to the operator.
+    const probe = await probed({
+      lists: {
+        gateways: [
+          gateway('edge', 'named', [
+            { type: 'Hostname', value: 'edge.invalid' },
+          ]),
+        ],
+      },
+    });
+
+    expect(probe.gateways).toEqual([
+      { name: 'named', namespace: 'edge', address: null },
+    ]);
+  });
+
+  test('a kind this cluster does not serve is an empty list, not a failure', async () => {
+    const probe = await probed({ servedKinds: {} });
+
+    expect(probe.reachable).toBe(true);
+    expect(probe.deliveryFlavours).toEqual([]);
+    expect(probe.chartSources).toEqual([]);
+    expect(probe.gateways).toEqual([]);
+  });
+
+  test('an address that does not answer is the one hard failure', async () => {
+    const adapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: () => 'federated-token',
+      fetch: async () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+    });
+
+    const probe = await adapter.probe('https://nowhere.invalid');
+
+    expect(probe.reachable).toBe(false);
+    expect(probe.because).toContain('ECONNREFUSED');
+  });
+});
+
 function node(arch: string, allocatable: Record<string, string>): FakeObject {
   return {
     apiVersion: 'v1',

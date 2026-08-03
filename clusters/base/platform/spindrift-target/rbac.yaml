@@ -1,23 +1,54 @@
 ---
+# Two reads, not one. The standing checklist asks about the namespace, the
+# store, and this identity's own permissions on a Target that is already
+# configured; connecting a *new* cluster asks the same API what there is to
+# choose from before any of those facts exist. Both are this role, because both
+# are the same federated identity reading the same cluster — and neither writes.
+#
+# Everything below is list-only and names no Secret. A cluster whose operator
+# does not want to be enumerated simply does not bind this role: the probe
+# degrades to empty lists, and every field it would have filled is one an
+# operator types instead.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: spindrift-target-discovery
 rules:
+  # `list` for the connect screen's namespace pickers; the checklist's `get` on
+  # spindrift-apps is subsumed by it. Naming only that one namespace would make
+  # the screen unable to offer any other, which is the whole of what an operator
+  # connecting a second cluster is choosing.
   - apiGroups:
       - ""
     resources:
       - namespaces
-    resourceNames:
-      - spindrift-apps
     verbs:
       - get
+      - list
   - apiGroups:
       - external-secrets.io
     resources:
       - clustersecretstores
     verbs:
       - get
+      - list
+  # Which sources the App chart could be fetched from. The checklist's `get` on
+  # flux-system/infra stays a Role below: reading one named object is the
+  # narrower grant and is what the standing check actually needs.
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+    resources:
+      - gitrepositories
+    verbs:
+      - list
+  # Which Gateways exist and what address each answers on — the input to
+  # `platform.gateway` and to `platform.dns.privateAddress`, which is why an
+  # operator is not asked to type an address the cluster already knows.
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - gateways
+    verbs:
       - list
   - apiGroups:
       - authorization.k8s.io

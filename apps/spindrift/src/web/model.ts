@@ -618,6 +618,19 @@ export interface TargetConnectionProposal {
     readonly namespace: string;
   };
   readonly chartContract?: string;
+  /**
+   * §7's operator class, as an already-working cluster states it.
+   *
+   * Carried whole, and then read apart by the screen rather than by anything
+   * here: `platform.externalAuth` names an authenticated edge that
+   * `clusters/base` puts in the same namespace on every cluster, so the value
+   * a working Target holds is the right proposal for the next one — while
+   * `platform.dns.privateAddress` names one gateway's address and is the
+   * opposite, which is why the screen fills that one from the probe and this
+   * one from here. Untyped for the reason `KubernetesConnection.chartValues`
+   * gives: the chart's classes are the adapter's knowledge.
+   */
+  readonly chartValues?: Record<string, unknown>;
   readonly region?: string;
   readonly runEndpoint?: string;
   readonly hostingEndpoint?: string;

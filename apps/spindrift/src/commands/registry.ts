@@ -127,6 +127,7 @@ import {
   disconnectTargetInput,
 } from './targets/disconnect.ts';
 import { listTargets, listTargetsInput } from './targets/list.ts';
+import { probeCluster, probeClusterInput } from './targets/probe.ts';
 import {
   type Command,
   type CommandContext,
@@ -212,6 +213,7 @@ export const commandRegistry = {
     input: inspectRepositoryInput,
     handler: inspectRepository,
   },
+  probeCluster: { input: probeClusterInput, handler: probeCluster },
   connectTarget: { input: connectTargetInput, handler: connectTarget },
   disconnectTarget: {
     input: disconnectTargetInput,

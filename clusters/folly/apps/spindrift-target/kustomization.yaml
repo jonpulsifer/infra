@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - ../../../base/platform/spindrift-target
   - rbac.yaml
+  - gateway.yaml
