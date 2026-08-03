@@ -42,7 +42,6 @@
     "kernel-builder",
     "openclaw",
     "workstation",
-    "hermes",
-    "slingshot"
+    "hermes"
   ]
 }
