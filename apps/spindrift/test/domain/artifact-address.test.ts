@@ -42,6 +42,38 @@ describe('the address a Target pulls an artifact by', () => {
     expect(artifactAddress(PUSHED, ['ghcr.io'])).toBe(`${GHCR}@${DIGEST}`);
   });
 
+  /**
+   * The spelling every real value uses, and the one this file did not have.
+   *
+   * Every case above passes a bare host, so the comparison could be
+   * `reachable.includes(registryHostOf(ref))` and still come up green — while a
+   * live Target, whose `reachableRegistries` is copied from
+   * `supplyChain.registry` and reported back by discovery, holds
+   * `ghcr.io/jonpulsifer`. That never equals `ghcr.io`, so the artifact was
+   * refused with "carries no address this Target can pull it by" while sitting
+   * in the exact registry the Target had named.
+   */
+  test('matches the namespace spelling an operator actually writes', () => {
+    expect(
+      artifactAddress(PUSHED, [
+        'northamerica-northeast1-docker.pkg.dev/trusted-builds/i',
+      ]),
+    ).toBe(`${AR}@${DIGEST}`);
+    expect(artifactAddress(PUSHED, ['ghcr.io/jonpulsifer'])).toBe(
+      `${GHCR}@${DIGEST}`,
+    );
+  });
+
+  /** The trailing slash, which is the whole of why this is a prefix and not one. */
+  test('does not let one namespace claim a longer one beside it', () => {
+    expect(
+      artifactAddress(PUSHED, [
+        'northamerica-northeast1-docker.pkg.dev/trusted-builds/im',
+      ]),
+    ).toBeNull();
+    expect(artifactAddress(PUSHED, ['ghcr.io/jonpulsifer-two'])).toBeNull();
+  });
+
   test('falls back to the first where a Target declares no restriction', () => {
     // Empty is "nothing was said", not "reaches nothing" — which is every
     // Target on this installation until an operator says otherwise, and is why

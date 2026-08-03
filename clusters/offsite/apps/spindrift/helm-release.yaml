@@ -173,8 +173,12 @@ spec:
             # the kubelet pulls them with no credential at all. Reaching the
             # artifact registry would mean an imagePullSecret in every App
             # namespace, which is a stored credential §13 does not have.
+            #
+            # The host rather than the `ghcr.io/jonpulsifer` namespace, because
+            # the kubelet's anonymous pull is a property of the registry and not
+            # of one owner's packages. `artifactAddress` accepts either.
             reachableRegistries:
-              - ghcr.io/jonpulsifer
+              - ghcr.io
             # §7's operator class: what the App chart needs about *this*
             # cluster. Spindrift never renders into it.
             chartValues:
@@ -298,8 +302,13 @@ spec:
             # pinning a reference it will fail on. `serverless-robot-prod` holds
             # `artifactregistry.reader` on it — see
             # terraform/gcp/projects/trusted-builds/artifact-registry.tf.
+            #
+            # The host, which names this installation's one artifact registry
+            # namespace unambiguously. `artifactAddress` takes the fuller
+            # `…/trusted-builds/i` spelling too, and would need it if a second
+            # namespace on this host were ever added to `supplyChain.registry`.
             reachableRegistries:
-              - northamerica-northeast1-docker.pkg.dev/trusted-builds/i
+              - northamerica-northeast1-docker.pkg.dev
         - name: bluenose-static
           adapter: static
           connection:
