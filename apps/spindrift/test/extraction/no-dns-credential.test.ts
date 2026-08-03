@@ -16,8 +16,16 @@
  * pass the extraction grep and still be exactly the thing §9 ruled out.
  *
  * What it does not claim: that no DNS is written. Plenty is — as `DNSEndpoint`
- * objects, through the cluster API, with the controller doing the publishing.
- * The line is between describing a record and holding the key to a zone.
+ * objects the App chart renders, with the controller doing the publishing.
+ * Core does not write them either: `reach` decides the record type, and only
+ * the chart holds the address that decision resolves to. The line this test
+ * polices is between naming a host and holding the key to a zone.
+ *
+ * That the claim is not satisfied *vacuously* — by there being no DNS at all —
+ * is asserted where the records now live, in
+ * `packages/charts/spindrift-app/tests/render.test.ts`. There is no allowlist
+ * here: nothing in `src/` has any reason to name a zone provider, including to
+ * explain that it does not.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
@@ -56,16 +64,6 @@ const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [
   },
 ];
 
-/**
- * The one file allowed to say the word.
- *
- * `cr.ts` documents *why* there is no Cloudflare client, and a rule that
- * forbids explaining itself is a rule whose reason gets lost. Its exemption is
- * narrow — one file, and the test below proves the scanner still has teeth
- * everywhere else.
- */
-const EXPLAINS_ITSELF = new Set(['src/adapters/dns/cr.ts']);
-
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
 
 interface SourceFile {
@@ -92,7 +90,6 @@ async function readSource(dir: string): Promise<SourceFile[]> {
 function findCredentials(files: readonly SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
-    if (EXPLAINS_ITSELF.has(file.path)) continue;
     for (const { pattern, why } of FORBIDDEN) {
       if (pattern.test(file.source)) {
         offenders.push(`${file.path}: ${pattern} — ${why}`);
@@ -124,12 +121,6 @@ describe('§9: no DNS provider credential lives in src/', () => {
     ).toEqual([]);
   });
 
-  test('DNS is still written — as objects, through the cluster API', async () => {
-    // The negative claim must not be satisfied by there being no DNS at all.
-    const cr = await Bun.file(join(APP, 'src/adapters/dns/cr.ts')).text();
-    expect(cr).toContain('externaldns.k8s.io/v1alpha1');
-    expect(cr).toContain('DNSEndpoint');
-  });
 });
 
 describe('the scanner catches a deliberately dirty file', () => {
@@ -154,13 +145,4 @@ describe('the scanner catches a deliberately dirty file', () => {
     expect(findCredentials(dirty)).not.toEqual([]);
   });
 
-  test('the exemption is one file, not a directory', () => {
-    const dirty: SourceFile[] = [
-      {
-        path: 'src/adapters/dns/other.ts',
-        source: "import Cloudflare from 'cloudflare';\n",
-      },
-    ];
-    expect(findCredentials(dirty)).not.toEqual([]);
-  });
 });

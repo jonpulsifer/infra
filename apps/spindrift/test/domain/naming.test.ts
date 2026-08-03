@@ -1,5 +1,5 @@
 /**
- * Naming and DNS (Task 21, §9).
+ * Naming (Task 21, §9).
  *
  * **Both layers are flat now, and for one reason: a wildcard certificate binds
  * exactly one label.** `plainboi-web.zone` is covered by `*.zone` and
@@ -7,19 +7,14 @@
  * nesting the canonical layer used to be allowed is gone, and what survives of
  * the vanity layer is the case where core does not mint the first name at all.
  *
- * The other claim here is negative and therefore needs a test that can fail:
- * **Spindrift holds no Cloudflare credential** (§9 — "Spindrift writes DNS as CRs
- * the DNS controller publishes"). `test/extraction/no-dns-credential.test.ts` is
- * the grep that notices if one ever arrives.
+ * **What core mints is a name, never a record.** The record each name answers
+ * to is the App chart's `DNSEndpoint`, asserted by
+ * `packages/charts/spindrift-app/tests/render.test.ts`, because `reach` decides
+ * the record type and only the chart holds the values that decision needs.
+ * `test/extraction/no-dns-credential.test.ts` is the grep that keeps the other
+ * half of §9 true — that no zone credential ever arrives here.
  */
 import { describe, expect, test } from 'bun:test';
-import {
-  DEFAULT_TTL_SECONDS,
-  DNS_ENDPOINT_API_VERSION,
-  DNS_ENDPOINT_KIND,
-  dnsEndpointFor,
-  recordsFor,
-} from '../../src/adapters/dns/cr.ts';
 import {
   componentCanonical,
   coreMintsCanonical,
@@ -154,66 +149,6 @@ describe('§9: core mints a name only where the platform gives none', () => {
     // A Deploy that has not reached a Target has no address, and inventing one
     // would make a pending deploy look live.
     expect(displayUrl({ canonical: '' })).toBeNull();
-  });
-});
-
-describe('§9: DNS is a custom resource, not an API call', () => {
-  test('a DNSEndpoint carries the records and nothing else', () => {
-    const object = dnsEndpointFor({
-      name: 'shop-web',
-      namespace: 'app-shop',
-      records: recordsFor({
-        canonical: 'shop-web.apps.example.test',
-        vanity: 'shop.sh.example.test',
-        servedBy: 'tunnel.example.test',
-      }),
-      labels: { 'app.spindrift/app': 'shop' },
-    });
-
-    expect(object.apiVersion).toBe(DNS_ENDPOINT_API_VERSION);
-    expect(object.kind).toBe(DNS_ENDPOINT_KIND);
-    // Namespaced, which is what buys §9's "garbage collection free": deleting
-    // the App's namespace deletes its records, so core keeps no list of names
-    // it once minted.
-    expect(object.metadata.namespace).toBe('app-shop');
-    expect(object.spec).toEqual({
-      endpoints: [
-        {
-          dnsName: 'shop-web.apps.example.test',
-          recordType: 'CNAME',
-          targets: ['tunnel.example.test'],
-          recordTTL: DEFAULT_TTL_SECONDS,
-        },
-        {
-          dnsName: 'shop.sh.example.test',
-          recordType: 'CNAME',
-          targets: ['tunnel.example.test'],
-          recordTTL: DEFAULT_TTL_SECONDS,
-        },
-      ],
-    });
-  });
-
-  test('no vanity name means no vanity record', () => {
-    // Not a record pointing at the canonical: §9 layers vanity on "where a
-    // mechanism exists", so an installation without one has an App with one
-    // name rather than two names that mean the same thing.
-    const records = recordsFor({
-      canonical: 'shop-web.apps.example.test',
-      servedBy: 'tunnel.example.test',
-    });
-    expect(records).toHaveLength(1);
-    expect(records[0]?.dnsName).toBe('shop-web.apps.example.test');
-  });
-
-  test('records are CNAMEs, never A records at an address core does not own', () => {
-    // §9's forcing fact: the metal cluster's load-balancer range is RFC1918, so
-    // an A record here would publish an address the internet cannot route to.
-    const records = recordsFor({
-      canonical: 'shop-web.apps.example.test',
-      servedBy: 'tunnel.example.test',
-    });
-    expect(records.every((record) => record.recordType === 'CNAME')).toBe(true);
   });
 });
 

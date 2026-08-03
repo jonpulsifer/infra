@@ -14,9 +14,11 @@
  * rendering." The origin here is the site's own address, which the product will
  * always answer on; no authenticated edge can be put in front of it that the
  * origin does not bypass. So a non-public exposure reaching `apply` is refused,
- * and refused as `INTERNAL` rather than `REJECTED`: placement excludes this
- * Target for a non-public Component (`onlyPublic` in `domain/placement.ts`), so
- * one arriving here is core's bug and not a developer's.
+ * and refused as `INTERNAL` rather than `REJECTED`: this adapter asserts
+ * `['public']` and nothing else (`ASSERTED_REACHES_BY_ADAPTER` in
+ * `domain/capabilities.ts`), so placement excludes it for a non-public
+ * Component by the ordinary reach join — `REACH_UNSUPPORTED`, not a special
+ * case. One arriving here is therefore core's bug and not a developer's.
  *
  * **The site names itself** (§9). The product mints the address, so the
  * canonical name comes back across this seam on the verdict rather than being
