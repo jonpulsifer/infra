@@ -43,7 +43,13 @@ import {
   targets,
 } from '../../db/schema.ts';
 import { DEFAULT_MINIMUM_BUILD_LEVEL } from '../../domain/build-route.ts';
-import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
+import {
+  artifactTypeFor,
+  DEFAULT_PLATFORM,
+  placementTargetOf,
+  reachExclusions,
+  sentence,
+} from '../../domain/placement.ts';
 import { demandSentence, migrationFor } from '../config/migration.ts';
 import { type PinnedConfig, readPinnedConfig } from '../config/pinned.ts';
 import {
@@ -359,18 +365,44 @@ export async function checkDeployable(
   // carries the shape it was built for, so a `files` artifact reaching a Target
   // that runs images is not a deploy that fails later — it is one that never
   // starts, which is the whole reason resolution runs before the build.
-  const shape = artifactTypeFor(
-    component.kind,
-    placementTargetOf(target, {
-      artifactTypes:
-        context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
-      manifest: context.manifest,
-    }),
-  );
+  const placement = placementTargetOf(target, {
+    artifactTypes:
+      context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+    manifest: context.manifest,
+  });
+  const shape = artifactTypeFor(component.kind, placement);
   if (build.targetShape !== shape) {
     return refuse(
       'NOT_DEPLOYABLE',
       `Build ${build.id} produced ${build.targetShape}, and ${target.name} takes ${shape} — this placement needs a rebuild`,
+    );
+  }
+
+  // §3's asserted half, asked where it binds. Placement filtered on it when the
+  // developer was *offered* this Target, and nothing re-asked when the Deploy
+  // was created — so a Component could be released at a reach its Target
+  // declares it does not serve, which makes that declaration advisory. It is a
+  // boundary: a Target that says it has no public address is stating something
+  // about the network it is on, not a preference.
+  //
+  // Reach and auth only. The rest of `exclusionsFor` belongs to the screen that
+  // offers a placement, not to the act of releasing one — refusing an UNHEALTHY
+  // Target here would block the rollback `./rollback.ts` exists to keep possible
+  // while the Target is unhealthy.
+  const unserved = reachExclusions(placement.capabilities, component);
+  if (unserved.length > 0) {
+    const why = unserved
+      .map((reason) =>
+        sentence(reason, {
+          kind: component.kind,
+          reach: component.reach,
+          platform: DEFAULT_PLATFORM,
+        }),
+      )
+      .join('; ');
+    return refuse(
+      'NOT_DEPLOYABLE',
+      `${target.name} does not serve this Component's ${component.reach} reach — ${why}`,
     );
   }
 

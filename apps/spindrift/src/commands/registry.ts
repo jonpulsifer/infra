@@ -71,6 +71,10 @@ import {
   configureInstallationInput,
 } from './installation/configure.ts';
 import {
+  discoverInstallationFacts,
+  discoverInstallationFactsInput,
+} from './installation/discover.ts';
+import {
   getInstallationManifest,
   getInstallationManifestInput,
 } from './installation/get.ts';
@@ -207,6 +211,10 @@ export const commandRegistry = {
   getInstallationManifest: {
     input: getInstallationManifestInput,
     handler: getInstallationManifest,
+  },
+  discoverInstallationFacts: {
+    input: discoverInstallationFactsInput,
+    handler: discoverInstallationFacts,
   },
   replaceConfig: { input: replaceConfigInput, handler: replaceConfig },
   uploadArchive: { input: uploadArchiveInput, handler: uploadArchive },

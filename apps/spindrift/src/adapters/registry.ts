@@ -53,6 +53,7 @@ import { CloudBuildRoute } from './build/cloud-build.ts';
 import type { BuildAdapter } from './build/contract.ts';
 import { GitHubActionsBuildRoute } from './build/github-actions.ts';
 import { InClusterBuildRoute } from './build/in-cluster.ts';
+import { GcpDiscovery } from './cloud-discovery.ts';
 import type { DatastoreAdapter } from './datastore/contract.ts';
 import { CloudDatastoreAdapter } from './datastore/gcp.ts';
 import { KubernetesDatastoreAdapter } from './datastore/kubernetes.ts';
@@ -217,6 +218,12 @@ export function createAdapterRegistry(
   // `cloudTokenFor` mints — see `cloud/federation.ts`. The cloud build route
   // submits with it too, so it is resolved before the routes are built.
   const cloud = cloudTokenFor(options);
+
+  // A fourth consumer of that one provider rather than a fourth credential.
+  const discovery = new GcpDiscovery({
+    token: cloud,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
 
   // §16's ordered list: the manifest's order *is* the admin rank, so the map is
   // built from it in order and `buildRouteProfiles` reads it back the same way.
@@ -404,6 +411,25 @@ export function createAdapterRegistry(
 
     repositoryAuthorization(): RepositoryAuthorization | null {
       return repositoryAuthorization;
+    },
+
+    /**
+     * The reads that answer what an operator would otherwise type (§20).
+     *
+     * Built on the same `cloud` provider resolved above, not on a second one:
+     * that is what makes discovery share `federation.ts`'s cache — one token
+     * exchange an hour for the whole process — instead of re-running the STS
+     * and impersonation round trip on every question asked.
+     *
+     * Never `null` here, even where this installation configured no federation.
+     * `cloudTokenFor` answers that case with a provider that refuses, and
+     * `CloudHttp` turns a refusing provider into a transport failure carrying
+     * its own sentence — so the screen reads "could not be reached, because…"
+     * rather than a client that is silently absent. `null` remains in the
+     * signature for the registries that do not build one at all.
+     */
+    discovery(): GcpDiscovery {
+      return discovery;
     },
 
     supplyChain() {

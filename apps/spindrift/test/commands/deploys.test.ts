@@ -107,7 +107,21 @@ function context(adapters: AdapterRegistry): CommandContext {
 
 /** An App, a Component, and a connected Target that accepts images. */
 async function fixture(
-  options: { kind?: 'service' | 'website'; adapter?: TargetAdapter } = {},
+  options: {
+    kind?: 'service' | 'website';
+    adapter?: TargetAdapter;
+    /**
+     * The Component's §9 pair, which the deploy path now filters on.
+     *
+     * Defaulted by the column rather than here — `private` behind the Target's
+     * authenticated edge — because that is what the cluster fixture serves. A
+     * test on a `static` Target has to state `public`: static hosting asserts
+     * `public` and nothing else, so a private Component there is a placement
+     * that was never offered and is now refused where it is released too.
+     */
+    reach?: 'none' | 'private' | 'public';
+    auth?: 'none' | 'proxy';
+  } = {},
 ) {
   const db = database().db;
   const [app] = await db
@@ -121,6 +135,8 @@ async function fixture(
       name: 'web',
       kind: options.kind ?? 'service',
       expose: true,
+      ...(options.reach === undefined ? {} : { reach: options.reach }),
+      ...(options.auth === undefined ? {} : { auth: options.auth }),
     })
     .returning();
   const [target] = await db
@@ -258,6 +274,98 @@ describe('createDeploy writes an intent, and only an intent', () => {
     expect(result.failure.message).toContain('rebuild');
   });
 
+  test('a Component is refused at a reach its Target does not assert', async () => {
+    // §3's filter, asked where the release actually happens. Placement excluded
+    // this Target when the developer was offered it; nothing re-asked when the
+    // Deploy was created, so "the Target says it cannot and it happened anyway"
+    // was the whole of the defect — a declared boundary that was advisory.
+    const { component, target } = await fixture();
+    // `auth: 'none'` so this is a claim about reach alone — the authenticated
+    // edge is the test below, and a Component carrying both would be refused
+    // twice and prove neither.
+    await database()
+      .db.update(components)
+      .set({ reach: 'public', auth: 'none' })
+      .where(eq(components.id, component.id));
+    const build = await succeededBuild(component.id, 60);
+    const intent = {
+      componentId: component.id,
+      targetId: target.id,
+      buildId: build.id,
+    };
+
+    const refused = await createDeploy(
+      intent,
+      context(registryOf(capableAdapter())),
+    );
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(refused.failure.message).toContain(target.name);
+    expect(refused.failure.message).toContain(
+      'no way to serve a public address',
+    );
+    expect(await desiredRow(component.id, target.id)).toBeUndefined();
+
+    // Rollback shares this gate, and has to: a Component released at a reach
+    // its Target does not serve is the same defect whichever intent wrote it,
+    // and a guard that lived in `createDeploy` alone would leave rollback and
+    // `setConfig` open.
+    const rolled = await rollbackDeploy(
+      intent,
+      context(registryOf(capableAdapter())),
+    );
+    expect(rolled.ok).toBe(false);
+    if (rolled.ok) return;
+    expect(rolled.failure.message).toContain(
+      'no way to serve a public address',
+    );
+
+    // And it reads the asserted column rather than refusing `public`
+    // categorically: the operator states the tunnel, because §3 says nothing
+    // reports one, and the same call goes through.
+    await database()
+      .db.update(targets)
+      .set({ reaches: ['none', 'private', 'public'] })
+      .where(eq(targets.id, target.id));
+
+    const allowed = await createDeploy(
+      intent,
+      context(registryOf(capableAdapter())),
+    );
+    expect(allowed.ok).toBe(true);
+    if (!allowed.ok) return;
+    expect((await desiredRow(component.id, target.id))?.desiredDeployId).toBe(
+      allowed.value.deployId,
+    );
+  });
+
+  test('a Target with no authenticated edge for a reach refuses a proxied Component', async () => {
+    // §9's half, which no live Component exercises today: the fixture Target
+    // asserts an edge for `private` and serves `public` once the tunnel is
+    // stated, so it can carry a public address and still not authenticate one.
+    const { component, target } = await fixture();
+    await database()
+      .db.update(components)
+      .set({ reach: 'public', auth: 'proxy' })
+      .where(eq(components.id, component.id));
+    await database()
+      .db.update(targets)
+      .set({ reaches: ['none', 'private', 'public'], authReaches: ['private'] })
+      .where(eq(targets.id, target.id));
+    const build = await succeededBuild(component.id, 61);
+
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain('admits a single user');
+  });
+
   test('a disconnected Target takes nothing new', async () => {
     const { component, target } = await fixture();
     await database()
@@ -280,6 +388,10 @@ describe('createDeploy writes an intent, and only an intent', () => {
     const { component, target } = await fixture({
       kind: 'website',
       adapter: 'static',
+      // What a site on static hosting is: a public address with no runtime to
+      // authenticate anything, which is the only placement that Target offers.
+      reach: 'public',
+      auth: 'none',
     });
     const deployAdapter = new FakeDeployAdapter({
       adapter: 'static',
@@ -416,6 +528,10 @@ describe('createDeploy writes an intent, and only an intent', () => {
     const { component, target } = await fixture({
       kind: 'website',
       adapter: 'static',
+      // What a site on static hosting is: a public address with no runtime to
+      // authenticate anything, which is the only placement that Target offers.
+      reach: 'public',
+      auth: 'none',
     });
     const deployAdapter = new FakeDeployAdapter({
       adapter: 'static',

@@ -124,9 +124,8 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       servedHosts: z.array(z.string().trim().min(1)).optional(),
       reachableRegistries: z.array(z.string().trim().min(1)).optional(),
       logHistorySeconds: z.number().int().nonnegative().optional(),
-      /** §7's per-Target chart-values field, and what the pin declares. */
+      /** §7's per-Target chart-values field. */
       chartValues: z.record(z.string(), z.unknown()).optional(),
-      chartContract: z.string().trim().min(1).optional(),
       ...assertions,
     })
     .strict(),
@@ -206,9 +205,6 @@ function connectionFor(
       ...(input.chartValues === undefined
         ? {}
         : { chartValues: input.chartValues }),
-      ...(input.chartContract === undefined
-        ? {}
-        : { chartContract: input.chartContract }),
     };
   }
   if (input.kind !== 'gcp-project') {
@@ -377,6 +373,11 @@ export const connectTarget: Command<
         inspectedAt: now,
         status: 'connected',
         updatedAt: now,
+        // The same assertion the INSERT branch takes. Without it a reconnect
+        // dropped what the operator had just stated on the connect screen —
+        // which derives both from the gateway address and the tunnel — so §3's
+        // asserted half could only ever be set by a Target's very first write.
+        ...assertedBy(input),
       })
       .where(eq(targets.id, existing.id))
       .returning();

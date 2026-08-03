@@ -34,7 +34,6 @@ const BASE: ClusterConnectChoices = {
   namespace: 'apps',
   deliveryNamespace: 'apps',
   sourceRef: { name: 'charts', namespace: 'delivery' },
-  chartContract: '3',
   gateway: null,
   externalAuth: null,
   secretStore: null,

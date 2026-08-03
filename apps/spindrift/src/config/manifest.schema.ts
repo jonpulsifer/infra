@@ -208,7 +208,6 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
           servedHosts: z.array(nonEmptyString).optional(),
           reachableRegistries: z.array(nonEmptyString).optional(),
           logHistorySeconds: z.number().int().nonnegative().optional(),
-          chartContract: nonEmptyString.optional(),
           /**
            * §7's operator class, verbatim. Untyped for the reason
            * `KubernetesConnection.chartValues` gives: the chart's classes are
