@@ -15,8 +15,15 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "this" {
   config     = var.config
 }
 
+# Routing a hostname and publishing a record for it are two decisions, and a
+# wildcard is where they come apart. A wildcard ingress rule is a routing
+# catch-all — it is how the tunnel accepts a name some other controller
+# published. A wildcard proxied CNAME is a claim over every name in the zone,
+# which answers for names nothing serves: the caller authenticates and then
+# meets a 404 at the gateway, and a deleted App keeps resolving. Apps publish
+# their own records now, so the record half of the wildcard has no work left.
 resource "cloudflare_dns_record" "cf" {
-  for_each = { for ingress in var.config.ingress : ingress.hostname => ingress if ingress.hostname != null }
+  for_each = { for ingress in var.config.ingress : ingress.hostname => ingress if ingress.hostname != null && !startswith(ingress.hostname, "*.") }
   zone_id  = var.zone_id
   comment  = "terraform managed"
   name     = each.value.hostname
