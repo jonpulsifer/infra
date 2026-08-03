@@ -13,8 +13,18 @@
 # build.json format (array of build objects):
 #   [{ "image": "name", "context": ".", "file": "path/Dockerfile",
 #      "build-args": "KEY=val", "platforms": "linux/amd64,linux/arm64",
+#      "no-cache-filters": "stage", "gcp-credentials": true,
 #      "watch": ["extra/path"] }]
 # All fields except "image" are optional.
+#
+# An image's own build needs live here rather than in the workflow. A matrix
+# job that branches on `matrix.image == 'x'` is a generic job that has to be
+# edited every time an app grows a requirement — and the branch lands two files
+# away from the Dockerfile that needs it.
+#
+# `gcp-credentials` asks for the workload-identity federation the workflow then
+# mounts as the `gcp_credentials` build secret, which is the id the requesting
+# Dockerfile's `--mount=type=secret` names.
 #
 # Input:  CHANGED_FILES env var — newline-separated list of changed file paths
 # Output: has_changes and matrix written to GITHUB_OUTPUT
@@ -85,6 +95,10 @@ for dockerfile in "${dockerfiles[@]}"; do
     file=$(jq -r '.file        // ""' <<<"$entry")
     build_args=$(jq -r '."build-args" // ""' <<<"$entry")
     platforms=$(jq -r '.platforms   // ""' <<<"$entry")
+    no_cache_filters=$(jq -r '."no-cache-filters" // ""' <<<"$entry")
+    # Emitted as a string rather than a boolean so every matrix field is one
+    # kind of thing and the workflow tests them all the same way — `!= ''`.
+    gcp_credentials=$(jq -r 'if ."gcp-credentials" then "true" else "" end' <<<"$entry")
     deploy_manifests=$(jq -c --arg img "$image" '.deploy[$img] // []' "$manifest")
 
     should_build="$rebuild_all"
@@ -101,8 +115,10 @@ for dockerfile in "${dockerfiles[@]}"; do
     if [[ "$should_build" == "true" ]]; then
       includes=$(jq -cn --argjson a "$includes" \
         --arg img "$image" --arg ctx "$context" --arg f "$file" --arg ba "$build_args" \
-        --arg p "$platforms" --argjson m "$deploy_manifests" \
-        '$a + [{"image":$img,"context":$ctx,"file":$f,"build-args":$ba,"platforms":$p,"manifests":$m}]')
+        --arg p "$platforms" --arg ncf "$no_cache_filters" --arg gcp "$gcp_credentials" \
+        --argjson m "$deploy_manifests" \
+        '$a + [{"image":$img,"context":$ctx,"file":$f,"build-args":$ba,"platforms":$p,
+                "no-cache-filters":$ncf,"gcp-credentials":$gcp,"manifests":$m}]')
     fi
   done
 done

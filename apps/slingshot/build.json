@@ -1,9 +1,11 @@
 [
   {
+    "_comment": "gcp-credentials: the Dockerfile mounts a gcp_credentials build secret (--mount=type=secret,id=gcp_credentials,required=true), so the build job federates for one before it starts.",
     "image": "slingshot",
     "context": ".",
     "file": "apps/slingshot/Dockerfile",
     "platforms": "linux/amd64",
+    "gcp-credentials": true,
     "watch": [
       "apps/slingshot",
       "packages/typescript-config",
