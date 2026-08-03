@@ -32,7 +32,7 @@ export function manifestFields(): readonly FormField[] {
  *
  * Empty when the document is valid. The keying is what lets a Zod issue be
  * rendered against the control that produced it rather than in a list at the
- * bottom of the screen — `dns.apexZone` names one input, and `targets.1.name`
+ * bottom of the screen — `dns.zones.private` names one input, and `targets.1.name`
  * names one row of one array.
  */
 export function manifestIssues(document: unknown): FieldErrors {
