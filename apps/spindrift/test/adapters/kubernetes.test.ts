@@ -30,6 +30,7 @@ import { blameFor } from '../../src/adapters/deploy/contract.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
+import type { PrerequisiteResult } from '../../src/domain/capabilities.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
 import type {
   KubernetesAdapterConnection,
@@ -80,16 +81,35 @@ function connection(
   };
 }
 
-/** A pod as the App chart renders it: stamped with the contract it came from. */
-function podRenderedUnder(contract: string): FakeObject {
+/**
+ * A pod as the App chart renders it: stamped with the contract it came from,
+ * and carrying the Component labels the chart puts on every pod it renders.
+ */
+function podRenderedUnder(
+  contract: string,
+  overrides: { name?: string; createdAt?: string; phase?: string } = {},
+): FakeObject {
   return {
     apiVersion: 'v1',
     kind: 'Pod',
     metadata: {
-      name: 'blog-web-abc',
+      name: overrides.name ?? 'blog-web-abc',
+      labels: POD_LABELS,
+      creationTimestamp: overrides.createdAt ?? '2026-01-01T00:00:00Z',
       annotations: { 'spindrift.dev/values-contract': contract },
     },
+    ...(overrides.phase === undefined
+      ? {}
+      : { status: { phase: overrides.phase } }),
   };
+}
+
+/** What the standing checklist concluded about the value contract. */
+async function contractCheck(
+  adapter: KubernetesDeployAdapter,
+): Promise<PrerequisiteResult | undefined> {
+  const { prerequisites } = await adapter.inspect(target());
+  return prerequisites.find((item) => item.name === 'CHART_CONTRACT');
 }
 
 function target(
@@ -710,11 +730,58 @@ describe('the checklist', () => {
         pods: [{ apiVersion: 'v1', kind: 'Pod', metadata: { name: 'other' } }],
       },
     });
-    expect(
-      (await foreign.adapter.inspect(target())).prerequisites.find(
-        (item) => item.name === 'CHART_CONTRACT',
-      )?.met,
-    ).toBe(true);
+    const nothing = await contractCheck(foreign.adapter);
+    expect(nothing?.met).toBe(true);
+    // And it says nothing, rather than naming a contract nobody rendered.
+    expect(nothing?.detail).toBeUndefined();
+  });
+
+  test('a pod list this identity may not read is not a green contract check', async () => {
+    // The failure mode this whole check exists to remove: a prerequisite that
+    // reports met without having observed the thing it names. A cluster that
+    // refuses the read answers `403`, and an empty result standing in for that
+    // refusal makes "every rendered object agrees" vacuously true — so a
+    // Target whose Role was never bound would read green forever.
+    const { adapter } = adapterFor({ forbidden: ['pods'] });
+
+    const contract = await contractCheck(adapter);
+    expect(contract?.met).toBe(false);
+    expect(contract?.detail).toContain('403');
+  });
+
+  test('a rolling update is not skew, and a finished pod does not outlive its render', async () => {
+    // Both are the same mistake: reading a pod that is not desired state.
+    //
+    // During a rolling update after a contract bump the old ReplicaSet's pod
+    // and the new one coexist, and only the newer of the two says what the
+    // release now renders.
+    const rolling = adapterFor({
+      lists: {
+        pods: [
+          podRenderedUnder('2', {
+            name: 'blog-web-old',
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          podRenderedUnder(VALUES_CONTRACT, {
+            name: 'blog-web-new',
+            createdAt: '2026-01-02T00:00:00Z',
+          }),
+        ],
+      },
+    });
+    expect((await contractCheck(rolling.adapter))?.met).toBe(true);
+
+    // And a job's Completed pod is the residue of a render that is over: a
+    // CronJob upgraded to the current contract but not yet fired again would
+    // otherwise be held red by its own history.
+    const finished = adapterFor({
+      lists: {
+        pods: [
+          podRenderedUnder('2', { name: 'blog-cron-1', phase: 'Succeeded' }),
+        ],
+      },
+    });
+    expect((await contractCheck(finished.adapter))?.met).toBe(true);
   });
 });
 

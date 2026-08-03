@@ -57,6 +57,16 @@ export interface FakeKubernetesOptions {
   objects?: Record<string, FakeObject>;
   /** Collections a list call returns, keyed by plural. */
   lists?: Record<string, FakeObject[]>;
+  /**
+   * Plurals this identity may not list, answered `403`.
+   *
+   * A cluster that serves a kind and refuses to show it is the ordinary state
+   * of a Role that was never bound, and it is a *third* answer alongside the
+   * two above: not an empty list and not an unserved kind. A caller that reads
+   * a refusal as either of those is reporting a fact it never observed, so the
+   * fake has to be able to produce one.
+   */
+  forbidden?: readonly string[];
   /** What an applied delivery object's status becomes over successive reads. */
   status?: StatusScript;
   /** When set, every apply is refused with this status and body. */
@@ -324,6 +334,16 @@ export class FakeKubernetes {
    * inverse — an unseeded kind is absent, not unheard of.
    */
   private listResponse(parsed: ParsedPath, query: URLSearchParams): Response {
+    if (this.options.forbidden?.includes(parsed.plural)) {
+      return json(403, {
+        kind: 'Status',
+        apiVersion: 'v1',
+        status: 'Failure',
+        reason: 'Forbidden',
+        code: 403,
+        message: `${parsed.plural} is forbidden: User "spindrift" cannot list resource "${parsed.plural}" in the namespace "${parsed.namespace ?? ''}"`,
+      });
+    }
     const kinds = this.kindsOf(parsed.apiVersion);
     const serves =
       (kinds ?? []).some((kind) => pluralOf(kind) === parsed.plural) ||

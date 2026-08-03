@@ -17,6 +17,12 @@
  * deliberately sealed off from this package — it "knows about Helm and YAML
  * and nothing else" (`packages/charts/spindrift-app/tests/render.ts`), while
  * `values.ts` reaches into the domain layer.
+ *
+ * Reading across a package boundary means the runner has to be told: Turbo
+ * hashes a task from its own package's files, so `Chart.yaml` is named in
+ * `spindrift#test`'s `inputs` in the root `turbo.json`. Without that, the one
+ * change this guard exists to catch does not invalidate the task and CI serves
+ * a cached pass over a real skew — the same failure as the check it replaced.
  */
 
 import { describe, expect, test } from 'bun:test';
