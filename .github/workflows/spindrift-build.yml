@@ -413,18 +413,11 @@ jobs:
           version="${version:-1}"
           echo "attesting with key version ${version}"
 
-          # Once per destination, and for a sharper reason than the signature:
-          # an attestation is an occurrence bound to an **`--artifact-url`**, so
-          # one made against `ghcr.io/…` says nothing about the same digest at
-          # `…-docker.pkg.dev/…`. Binary Authorization would refuse the exact
-          # image it had already attested, because the URL it was asked about is
-          # not the URL it was told about.
-          while IFS= read -r destination; do
-            [ -n "$destination" ] || continue
-            echo "attesting ${destination}@${DIGEST}"
+          attest() {
+            echo "attesting ${1}@${2}"
             gcloud beta container binauthz attestations sign-and-create \
               --project="$attestor_project" \
-              --artifact-url="${destination}@${DIGEST}" \
+              --artifact-url="${1}@${2}" \
               --attestor="$attestor_name" \
               --attestor-project="$attestor_project" \
               --keyversion-project="$key_project" \
@@ -432,6 +425,37 @@ jobs:
               --keyversion-keyring="$(field keyRings)" \
               --keyversion-key="$(field cryptoKeys)" \
               --keyversion="$version"
+          }
+
+          # Once per destination, and for a sharper reason than the signature:
+          # an attestation is an occurrence bound to an **`--artifact-url`**, so
+          # one made against `ghcr.io/…` says nothing about the same digest at
+          # `…-docker.pkg.dev/…`. Binary Authorization would refuse the exact
+          # image it had already attested, because the URL it was asked about is
+          # not the URL it was told about.
+          #
+          # And once per manifest *under* each destination's index. `provenance`
+          # and `sbom` above make this push an OCI **image index** even at one
+          # platform, so `$DIGEST` names an index — and an index is not what a
+          # runtime runs. Cloud Run resolves it to the child manifest for its own
+          # platform *before* admission, and Binary Authorization is then asked
+          # about a digest nothing attested: `denied by attestor` on an artifact
+          # that was attested, one indirection up. Attesting the children too is
+          # what makes the question the runtime asks one that has an answer.
+          # `imagetools` reads the index with the credentials the login steps
+          # already wrote, so this needs nothing of its own.
+          while IFS= read -r destination; do
+            [ -n "$destination" ] || continue
+            attest "$destination" "$DIGEST"
+            # Assigned before it is looped over, because a failing command
+            # substitution in a `for` list is not what `-e` acts on and one in
+            # an assignment is. A registry having a bad moment must not read as
+            # an index with no children.
+            manifests="$(docker buildx imagetools inspect --raw \
+              "${destination}@${DIGEST}" | jq -r '.manifests[]?.digest')"
+            for child in $manifests; do
+              attest "$destination" "$child"
+            done
           done <<< "$DESTINATIONS"
 
       # The one line Spindrift reads. Base64 because this stdout goes through

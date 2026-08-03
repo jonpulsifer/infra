@@ -578,6 +578,30 @@ describe('the cloud build route', () => {
     expect(program).toContain('/workspace/spindrift-digest');
   });
 
+  test('the manifests under the index are attested too', async () => {
+    // BuildKit's `--attest` makes every push an image index, so the reported
+    // digest names an index rather than the image a runtime runs. Cloud Run
+    // resolves the index to its own platform's child *before* admission, and
+    // Binary Authorization then asks about a digest nothing attested — which
+    // reads as `denied by attestor` on an artifact that was attested.
+    const { api, route } = cloudRoute(
+      {},
+      {},
+      { signer: SIGNER, attestor: ATTESTOR },
+    );
+    await run(route.build(archiveSource(), cloudSpec));
+
+    const program = api.steps[0]?.[1]?.args?.[1] ?? '';
+    expect(program).toContain('manifests');
+    expect(program).toContain('attest "$destination" "$child"');
+    // The vendor's registries and no others: this step holds one metadata
+    // token, and a destination it cannot read a manifest back out of is
+    // attested at the index alone.
+    const children = program.slice(program.indexOf('# The children,'));
+    expect(children).toContain(`${CLOUD_REGISTRY}/example-builds/i/app`);
+    expect(children).not.toContain('registry.example.test');
+  });
+
   test('an installation that named no attestor submits no attestation', async () => {
     const { api, route } = cloudRoute();
     await run(route.build(archiveSource(), cloudSpec));
