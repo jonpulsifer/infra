@@ -7,12 +7,13 @@
 # projected volume cannot merge two ConfigMaps onto one path, so every CA this
 # installation reaches is in this single key.
 #
-# **This cluster's own root, first.** The same value `kube-root-ca.crt` carries,
-# restated only because the projection holds one source. It is the NixOS
-# `easyCerts` CA — `nix/hosts/retrofit.nix` keeps `services.k8s.clusterCa` off,
-# so `terraform/pki/certs/offsite-ca.pem` is issued but not the one this API
-# server serves. When retrofit turns `clusterCa` on, this block is replaced by
-# that file and every certificate here is read from git rather than copied.
+# **This cluster's own anchors, first**, copied from
+# `terraform/pki/certs/offsite-ca-bundle.pem`. offsite runs the repo-managed
+# cluster CA, and the bundle is the overlap pair the migration stages: the FML
+# K8s offsite CA its leaves are reissued from, and the NixOS `easyCerts` CA the
+# ones issued before it still chain to. Both are needed until certmgr has
+# reissued every leaf; when `offsite-ca-prev.pem` is retired this becomes the
+# single `offsite-ca.pem` block.
 #
 # **folly's chain, all three of it.** `folly.lolwtf.ca:6443` serves a leaf
 # issued by the FML K8s folly CA and sends no intermediates, and the runtime
@@ -27,6 +28,28 @@ metadata:
   namespace: spindrift
 data:
   ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIDlTCCA0egAwIBAgIRAOnaEOtL2R5JxKS455AmmR4wBQYDK2VwMDYxNDAyBgNV
+    BAMTK0ZvbGx5IE1vdW50YWluIExhYm9yYXRvcmllcyBJbnRlcm1lZGlhdGUgQ0Ew
+    HhcNMjYwNzE4MjEyMDAxWhcNMjgwNzE4MDkyMDAxWjBDMSQwIgYDVQQKExtGb2xs
+    eSBNb3VudGFpbiBMYWJvcmF0b3JpZXMxGzAZBgNVBAMTEkZNTCBLOHMgb2Zmc2l0
+    ZSBDQTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAN92dwMiLLGpTzW8
+    cysU6uK8z3yIe2plVsDZyRCRP1tMbPDQznldElE6ammP5LZVKCdeveU/giqEvLEz
+    E8nipgXka3k+FGGpELEH2Lw2bLMsOWbNRmGOmKNKGYXdh748eloiOFOihG4UzxoG
+    KWsSVUxuTr4HzQIYqxPxeI/YvYrlpld3k4eYT6D8UTKhoBhfxUtUcaUiDDAQuge5
+    l9ihvhibLjRb1Qt+ZcKtitgb859JjZXej1YW70I6CVs9u9Vsnbto5JlXy6h1Iemy
+    oqEZEVSLKg6EAT60syaqt/KYyqZrJK0XcOisNvtvlnTnGs+H2XcmcYYg6zP5OR0B
+    SXUo7D9VI2m98ReXKt3aDzDh6dwx9Y9DGP8MwP4IxKR9us99fKIMZkRR6KqlPsM6
+    NYdaBWRN4jI1qp7d2Sz9TEjS//vurO+GEFH0jGRC3TT8yWfI6WNFt9YHVTutBCul
+    0REVWiqS+fsgM/18vZYNPE17uOjV4rV5bk7/gPJdjK7wQKjDyg6ZB5QzKIZRNr6r
+    IghXdQsPehM3faFYNtUF/WJqVWuWRs+NMFZdgDPUQ3UnWbr78miOqFy3+ijjpic5
+    Nt3rXeip1+C+HsIoaFqhs4hWIe3syMdzboEUIAToYacsYZxTCIibl1Dt2cBYXI+W
+    XUxtvjArHpFRykjQEwhGIRBbxQRlAgMBAAGjYzBhMA4GA1UdDwEB/wQEAwIBhjAP
+    BgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRdgBy2YXrhX/b3AaGNtEEDav840zAf
+    BgNVHSMEGDAWgBQE4eZ0TSBnmQEKvk26Id8ATiZ+xDAFBgMrZXADQQCf5euKB1l9
+    c332iif7gRqnALxClaOwveNNbcRWIiY5GvKLM2d53A/12v6lH8pPg7KVHCdKhSW3
+    5q4gZV+fDo4K
+    -----END CERTIFICATE-----
     -----BEGIN CERTIFICATE-----
     MIIDdDCCAlygAwIBAgIUX4mYZ8hKoprATjrG9pXkNhTlKjQwDQYJKoZIhvcNAQEL
     BQAwUjEXMBUGA1UEBxMOYXV0by1nZW5lcmF0ZWQxDjAMBgNVBAoTBU5peE9TMScw

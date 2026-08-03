@@ -10,6 +10,8 @@
     ../system/tailscale-disable.nix
   ];
 
+  services.k8s.clusterCa.enable = true;
+
   homelab.disko.device = "/dev/sda";
   # 200G root (default is 100G) — leaves headroom for the harmonia
   # binary cache + remote-builder role on top of yarr.
