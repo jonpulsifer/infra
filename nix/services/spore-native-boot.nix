@@ -86,7 +86,7 @@ let
   artifactChecks = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (id: target: ''
       target_id=${lib.escapeShellArg id}
-      base_url=${lib.escapeShellArg ("http://127.0.0.1" + target.httpPath)}
+      base_url=${lib.escapeShellArg ("http://127.0.0.1" + lib.removeSuffix "/" target.httpPath)}
       digest=$(cat ${lib.escapeShellArg "${stateDir}/${id}/squashfs.sha256"} 2>/dev/null || true)
 
       check_artifact "$target_id" boot_img "$base_url/boot.img"
@@ -248,6 +248,10 @@ in
             }
 
             ${artifactChecks}
+            # mktemp always creates 0600 and this unit runs as root; node_exporter
+            # reads the textfile directory as its own user and would otherwise skip
+            # the file and mark the whole textfile collector as errored.
+            chmod 0644 "$metrics"
             mv "$metrics" ${metricsDir}/spore-native-boot.prom
             trap - EXIT
           '';

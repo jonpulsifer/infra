@@ -37,6 +37,11 @@ in
     # tmpfiles can run before /nfs/data is mounted and create these paths on
     # root, where the data mount then hides them. Create them only after the
     # real filesystem is present, and make NFS depend on that post-mount setup.
+    #
+    # /nfs/data is nofail, so on boot without the NVMe attached nfsd would
+    # otherwise export an empty directory on the root disk. RequiresMountsFor
+    # here plus requiredBy on the upstream static NFS units turns a missing data
+    # mount into a hard failure instead of a silent wrong-export.
     systemd.services.nfs-data-directories = {
       description = "Create NFS export directories on the mounted data filesystem";
       unitConfig.RequiresMountsFor = [ "/nfs/data" ];
@@ -74,12 +79,6 @@ in
         /nfs/data/k8s-provisioned/  ${folly.nodeCidr}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) ${folly.podCidr}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) ${folly.lbRange}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
       '';
     };
-
-    # /nfs/data is nofail, so on boot without the NVMe attached it would
-    # otherwise silently stay an empty directory on the SD card while nfsd
-    # exports it anyway. nfs-data-directories.requiredBy creates dependency
-    # symlinks for the upstream static NFS units, making a missing data mount a
-    # hard failure instead of a silent wrong-export.
 
     networking.firewall = {
       allowedTCPPorts = [
