@@ -76,8 +76,19 @@ function connection(
     apiServer: 'https://cluster.example.test',
     namespace: 'apps',
     delivery: FLUX,
-    chartContract: VALUES_CONTRACT,
     ...overrides,
+  };
+}
+
+/** A pod as the App chart renders it: stamped with the contract it came from. */
+function podRenderedUnder(contract: string): FakeObject {
+  return {
+    apiVersion: 'v1',
+    kind: 'Pod',
+    metadata: {
+      name: 'blog-web-abc',
+      annotations: { 'spindrift.dev/values-contract': contract },
+    },
   };
 }
 
@@ -657,29 +668,53 @@ describe('the checklist', () => {
     expect(federation?.detail).toContain('delivery');
   });
 
-  test('chart-contract skew is a prerequisite failure, not a silent green', async () => {
-    // §7: Helm ignores unknown values silently, so an unrepinned Target would
-    // apply cleanly, report green, and run without config.
-    const { adapter } = adapterFor();
-    const { prerequisites } = await adapter.inspect(
-      target({ chartContract: '99' }),
-    );
+  test('chart-contract skew is read off the cluster, not off the connection', async () => {
+    // §7: Helm ignores unknown values silently, so a release whose values were
+    // written under an older contract applies cleanly, reports green, and runs
+    // without the config it was handed. The only way to notice is to look at
+    // what actually rendered — the chart stamps its contract onto every object
+    // including the pod template.
+    //
+    // This test cannot pass against a comparison between two Spindrift
+    // constants: the Target carries no contract field of any kind, so the pod
+    // list below is the only input that can move the verdict.
+    const { adapter } = adapterFor({
+      lists: { pods: [podRenderedUnder('2')] },
+    });
+
+    const { prerequisites } = await adapter.inspect(target());
     const contract = prerequisites.find(
       (item) => item.name === 'CHART_CONTRACT',
     );
     expect(contract?.met).toBe(false);
+    expect(contract?.detail).toContain('2');
     expect(contract?.detail).toContain(VALUES_CONTRACT);
   });
 
-  test('an unread chart contract is a prerequisite failure', async () => {
-    const { adapter } = adapterFor();
-    const { prerequisites } = await adapter.inspect(
-      target({ chartContract: undefined }),
-    );
-    const contract = prerequisites.find(
-      (item) => item.name === 'CHART_CONTRACT',
-    );
-    expect(contract?.met).toBe(false);
+  test('objects rendered under this contract are met, and so is a Target that has rendered none', async () => {
+    // The mirror of the test above, so the check is not simply always-red.
+    const rendered = adapterFor({
+      lists: { pods: [podRenderedUnder(VALUES_CONTRACT)] },
+    });
+    expect(
+      (await rendered.adapter.inspect(target())).prerequisites.find(
+        (item) => item.name === 'CHART_CONTRACT',
+      )?.met,
+    ).toBe(true);
+
+    // A pod that is not this chart's output carries no such annotation, which
+    // is also how a foreign workload sharing the namespace stays out of the
+    // verdict. Nothing rendered is nothing skewed.
+    const foreign = adapterFor({
+      lists: {
+        pods: [{ apiVersion: 'v1', kind: 'Pod', metadata: { name: 'other' } }],
+      },
+    });
+    expect(
+      (await foreign.adapter.inspect(target())).prerequisites.find(
+        (item) => item.name === 'CHART_CONTRACT',
+      )?.met,
+    ).toBe(true);
   });
 });
 

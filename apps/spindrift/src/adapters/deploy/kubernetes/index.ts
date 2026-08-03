@@ -588,16 +588,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       `namespace ${connection.namespace} does not exist, and Spindrift does not create it (§7)`,
     );
 
-    // §7: the chart declares its own value contract, read at pin time. Until
-    // the OCI swap the pin is a branch, so skew is **detected** here rather
-    // than prevented — the operator states what the pinned chart declares, and
-    // a mismatch becomes a prerequisite failure in the existing grammar.
-    const pinned = connection.chartContract;
-    set(
-      'CHART_CONTRACT',
-      pinned === VALUES_CONTRACT,
-      `the App chart at this Target declares value contract ${pinned}; this Spindrift renders ${VALUES_CONTRACT}`,
-    );
+    set('CHART_CONTRACT', ...(await this.chartContract(api, connection)));
 
     return prerequisitesFor(this.adapter).map(
       (name) =>
@@ -607,6 +598,66 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           detail: 'not assessed',
         },
     );
+  }
+
+  /**
+   * Whether what this Target last rendered speaks the contract this Spindrift
+   * writes.
+   *
+   * §7: "the chart declares its own value contract and version, **read at pin
+   * time**". The chart stamps that declaration onto every object it renders,
+   * pod template included (`spindrift-app.contractAnnotations`), so the
+   * contract a Target is actually running under is readable from the cluster
+   * itself — no second channel, and `list pods` in the App namespace is a grant
+   * Spindrift already holds. That matters because Spindrift's only route to a
+   * remote Target is its API server: the chart's own `Chart.yaml` lives behind
+   * a source-controller artifact URL inside *that* cluster, and the
+   * `argo-application` flavour has no artifact at all.
+   *
+   * Reading the render rather than the chart is also the stronger question.
+   * Skew is not "the chart is wrong" — it is a release whose stored values were
+   * written under an older contract, which a correct chart cannot tell you
+   * about. Helm ignores unknown values silently, so such a release applies
+   * cleanly, reports green, and runs without the config it was handed.
+   *
+   * Pods carrying no annotation are not chart output and are ignored, which
+   * also keeps a foreign pod sharing the namespace out of the verdict. No pods,
+   * or a cluster that does not serve them, is met: zero rendered objects is
+   * zero skew.
+   *
+   * ponytail: this observes the **last** render, not the next — a Target with
+   * nothing deployed reads green and a skew is caught one deploy late. That is
+   * the honest ceiling of a branch-sourced chart. §7's "read at pin time"
+   * becomes reachable when the chart moves to a pinned OCI artifact, whose
+   * annotations can be read before anything is applied.
+   */
+  private async chartContract(
+    api: KubernetesApi,
+    connection: KubernetesAdapterConnection,
+  ): Promise<[boolean, string?]> {
+    const pods = await api
+      .list({
+        apiVersion: 'v1',
+        plural: 'pods',
+        namespace: connection.namespace,
+      })
+      .catch(() => null);
+
+    const found = [
+      ...new Set(
+        (pods ?? [])
+          .map(
+            (pod) =>
+              pod.metadata.annotations?.['spindrift.dev/values-contract'],
+          )
+          .filter((contract) => contract !== undefined),
+      ),
+    ];
+
+    return [
+      found.every((contract) => contract === VALUES_CONTRACT),
+      `this Target is running objects rendered under value contract ${found.join(', ')}; this Spindrift renders ${VALUES_CONTRACT}`,
+    ];
   }
 
   /** Whether the chart's source exists where the Target says it does. */

@@ -41,7 +41,6 @@ const connectedManifest = {
           namespace: 'apps',
           sourceRef: { name: 'infra', namespace: 'flux-system' },
         },
-        chartContract: '2',
       },
     },
     {
@@ -146,7 +145,6 @@ describe('the stored installation manifest', () => {
             namespace: 'apps',
             sourceRef: { name: 'infra', namespace: 'flux-system' },
           },
-          chartContract: '2',
         },
       },
       {
@@ -266,7 +264,6 @@ describe('the stored installation manifest', () => {
         namespace: 'apps',
         sourceRef: { name: 'infra', namespace: 'flux-system' },
       },
-      chartContract: '2',
       chartValues: {
         platform: {
           gateway: { name: 'spindrift-apps', namespace: 'spindrift-apps' },

@@ -323,10 +323,6 @@ function ClusterComponents({
   const [source, setSource] = useState(
     refKey(probe.chartSources, proposal.sourceRef),
   );
-  const [chartContract, setChartContract] = useState(
-    proposal.chartContract ?? probed.rendersContract,
-  );
-
   const [gatewayName, setGatewayName] = useState(
     refKey(probe.gateways, undefined),
   );
@@ -372,7 +368,6 @@ function ClusterComponents({
     namespace,
     deliveryNamespace,
     sourceRef: chosenSource ?? { name: '', namespace: '' },
-    chartContract: chartContract.trim(),
     gateway:
       gatewayOn && chosenGateway !== null
         ? {
@@ -400,8 +395,7 @@ function ClusterComponents({
     name !== '' &&
     namespace !== '' &&
     deliveryNamespace !== '' &&
-    chosenSource !== null &&
-    chartContract.trim() !== '';
+    chosenSource !== null;
 
   return (
     <div className="flex flex-col gap-3 border-t border-border-soft pt-4">
@@ -450,22 +444,13 @@ function ClusterComponents({
         because="Where an App's release lands. Spindrift never creates the namespace (§7)."
         required
       >
-        <div className="grid gap-4 md:grid-cols-2">
-          <Choice
-            name="workload-namespace"
-            label="Namespace"
-            value={namespace}
-            onChange={setNamespace}
-            options={namespaces}
-          />
-          <Field
-            name="chart-contract"
-            label="Chart contract"
-            value={chartContract}
-            onChange={(event) => setChartContract(event.target.value)}
-            hint={`What the App chart here declares. This build renders ${probed.rendersContract}.`}
-          />
-        </div>
+        <Choice
+          name="workload-namespace"
+          label="Namespace"
+          value={namespace}
+          onChange={setNamespace}
+          options={namespaces}
+        />
       </Component>
 
       <Component

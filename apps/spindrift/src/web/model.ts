@@ -706,7 +706,6 @@ export interface TargetConnectionProposal {
     readonly name: string;
     readonly namespace: string;
   };
-  readonly chartContract?: string;
   /**
    * §7's operator class, as an already-working cluster states it.
    *
