@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { one, render } from './render.ts';
+import { one, type RenderedObject, render } from './render.ts';
 
 describe('process topology', () => {
   test('renders the reconciler as an opt-in second process from the same image', async () => {
@@ -484,6 +484,58 @@ describe('the relying party and the front door cannot disagree', () => {
       ),
     ).toMatchObject({
       controlPlane: { hostname: 'spindrift.internal.example.test' },
+    });
+  });
+});
+
+describe('the trust store', () => {
+  const federated = (caConfigMap?: string) => ({
+    reconciler: { enabled: true },
+    serviceAccount: {
+      token: {
+        gcpAudience:
+          '//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite',
+        ...(caConfigMap === undefined ? {} : { caConfigMap }),
+      },
+    },
+  });
+
+  const trustSource = (objects: RenderedObject[], name: string) =>
+    objects
+      .filter((object) => object.kind === 'Deployment')
+      .find((object) => object.metadata.name === name)
+      ?.spec.template.spec.volumes.find(
+        (volume: { name: string }) => volume.name === 'federated-identity',
+      ).projected.sources;
+
+  test('the projected ca.crt follows the configured ConfigMap', async () => {
+    // `NODE_EXTRA_CA_CERTS` names exactly one file and a projected volume
+    // cannot merge two sources onto one path, so an installation holding a
+    // Target on another cluster has to replace the source rather than add one.
+    // Before this was configurable, `folly` failed all six prerequisites with
+    // "unable to verify the first certificate": the in-cluster
+    // `kube-root-ca.crt` carries this cluster's root and nothing else.
+    const objects = await render(federated('spindrift-ca-bundle'));
+    for (const name of ['spindrift-web', 'spindrift-reconciler']) {
+      expect(trustSource(objects, name)).toContainEqual({
+        configMap: {
+          name: 'spindrift-ca-bundle',
+          items: [{ key: 'ca.crt', path: 'ca.crt' }],
+        },
+      });
+    }
+  });
+
+  test('it defaults to the cluster’s own published root', async () => {
+    // An installation whose Targets are all in-cluster needs nothing else, and
+    // must not be made to declare a bundle to keep working.
+    expect(
+      trustSource(await render(federated()), 'spindrift-web'),
+    ).toContainEqual({
+      configMap: {
+        name: 'kube-root-ca.crt',
+        items: [{ key: 'ca.crt', path: 'ca.crt' }],
+      },
     });
   });
 });

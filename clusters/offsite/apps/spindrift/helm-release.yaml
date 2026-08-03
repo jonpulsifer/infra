@@ -48,6 +48,11 @@ spec:
       token:
         gcpAudience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
         gcpImpersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
+        # This installation holds a Target on folly, which is reached across the
+        # network rather than in-cluster, so the trust store needs folly's chain
+        # as well as this cluster's own root. `kube-root-ca.crt` carries only the
+        # latter. See ca-bundle.yaml.
+        caConfigMap: spindrift-ca-bundle
     ingress:
       enabled: true
     # The control plane's own database, including the installation manifest

@@ -196,7 +196,7 @@ spec:
                   expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
                   path: token
               - configMap:
-                  name: kube-root-ca.crt
+                  name: {{ $top.Values.serviceAccount.token.caConfigMap }}
                   items:
                     - key: ca.crt
                       path: ca.crt
