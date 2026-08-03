@@ -93,9 +93,39 @@ spec:
       auth:
         gateway: null
       build:
+        # Rank order. `hosted` stays first, so an App that states no preference
+        # builds where every App already built; `managed` is what an App asks
+        # for by name (`setAppBuildRoute`) and what a Target requiring L3 gets
+        # on rank alone.
         routes:
           - name: hosted
             adapter: github-actions
+          # The cloud builder, in the shared artifacts project beside the
+          # registry. Spindrift is the proxy on the way in: it stages the git
+          # revision (or the uploaded archive) into the source bucket and hands
+          # the build a signed URL for that one object, so nothing here is
+          # connected to a repository and the bundle every route builds is the
+          # same bundle the source receipt describes.
+          #
+          # Every grant this needs is already declared in
+          # terraform/gcp/projects/trusted-builds — `cloudbuild.builds.editor`
+          # and `logging.viewer` for the controller, `artifactregistry.writer`
+          # and the two attestation permissions for the build worker.
+          - name: managed
+            adapter: cloud-build
+            endpoint: https://cloudbuild.googleapis.com
+            logsEndpoint: https://logging.googleapis.com
+            project: trusted-builds
+            # Where the signer is, so the attestation step is not a
+            # cross-region call: terraform/gcp/projects/trusted-builds sets
+            # `local.region` to this and the KMS key takes it.
+            region: northamerica-northeast1
+            # The stock BuildKit image, which is what `buildkit.ts` declares its
+            # program needs — a POSIX sh, wget, tar, sed, base64, chmod, mktemp
+            # and `buildctl-daemonless.sh`. Pinned by digest: the image is the
+            # engine every build on this route runs, and a moving tag is an
+            # engine that changes underneath a reproducible build.
+            image: moby/buildkit:v0.28.0@sha256:37539dd4d60fc70968d164d3850d903a2c56f6402214a1953fbf9fcb81ada731
         # Railpack publishes the frontend as its own repository. Pinned to a
         # version rather than a moving tag: it is the only input to a
         # zero-config build that no digest covers.
@@ -139,6 +169,12 @@ spec:
             apiServer: https://kubernetes.default.svc
             namespace: spindrift-apps
             chartContract: "3"
+            # GHCR and not the artifact registry: these packages are public, so
+            # the kubelet pulls them with no credential at all. Reaching the
+            # artifact registry would mean an imagePullSecret in every App
+            # namespace, which is a stored credential §13 does not have.
+            reachableRegistries:
+              - ghcr.io/jonpulsifer
             # §7's operator class: what the App chart needs about *this*
             # cluster. Spindrift never renders into it.
             chartValues:
@@ -183,6 +219,14 @@ spec:
             # the controller's `actAs` on it are declared in
             # terraform/gcp/projects/bluenose/iam.tf for exactly this.
             serviceAccount: spindrift-runtime@bluenose.iam.gserviceaccount.com
+            # The artifact registry and nothing else. Cloud Run pulls through a
+            # cache mirror that cannot parse the OCI index pushed to GHCR, so
+            # naming the registry it *can* read is what keeps a Deploy here from
+            # pinning a reference it will fail on. `serverless-robot-prod` holds
+            # `artifactregistry.reader` on it — see
+            # terraform/gcp/projects/trusted-builds/artifact-registry.tf.
+            reachableRegistries:
+              - northamerica-northeast1-docker.pkg.dev/trusted-builds/i
         - name: bluenose-static
           adapter: static
           connection:
@@ -198,7 +242,20 @@ spec:
         # terraform/gcp/projects/trusted-builds/versions.tf sets that to
         # northamerica-northeast1. There has never been a key in us-central1.
         signer: gcpkms://projects/trusted-builds/locations/northamerica-northeast1/keyRings/keys/cryptoKeys/signer
-        registry: ghcr.io/jonpulsifer
+        # Both, because two Targets here cannot share one. Every artifact is
+        # pushed to each and every Target pins the one it can reach: the cluster
+        # pulls GHCR anonymously, and Cloud Run cannot pull GHCR at all — it
+        # goes through a cache mirror that could not parse an OCI index carrying
+        # provenance, an SBOM and a signature, so the revision failed at the
+        # pull with a digest that was not the one deployed. Order is the
+        # tie-break: the first is what a Target that declares no
+        # `reachableRegistries` gets.
+        #
+        # `terraform/gcp/projects/trusted-builds` declares every grant on the
+        # second one, and its `registry_namespace` output is this exact value.
+        registry:
+          - ghcr.io/jonpulsifer
+          - northamerica-northeast1-docker.pkg.dev/trusted-builds/i
         verifier: ghcr.io/jonpulsifer/spindrift-verifier
         # The authority bluenose's Binary Authorization policy requires an
         # attestation from — `google_binary_authorization_policy.spindrift`

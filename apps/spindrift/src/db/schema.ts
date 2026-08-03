@@ -437,6 +437,27 @@ export const apps = pgTable('apps', {
   }),
   /** Set when `sourceKind = 'archive'`: the uploaded bundle's digest. */
   sourceArchiveDigest: text('source_archive_digest'),
+  /**
+   * The build route this App has asked to build on, or null for no opinion.
+   *
+   * §16 settles route selection as "the level is a threshold, then admin rank
+   * wins", and this is the App's say inside that — it narrows the candidates
+   * rather than overriding the threshold, so a route below the Target's minimum
+   * is refused here exactly as it is refused anywhere else. Naming one is not a
+   * way around a policy; it is a way to pick among the routes that already
+   * cleared it.
+   *
+   * Null is not "no route". It is the state every App is in until someone says
+   * otherwise, and it means rank order picks — which is the whole of the
+   * behaviour before this column existed.
+   *
+   * A plain string and not a reference: §4 makes the set of routes an
+   * installation's configuration, so a name here may well name a route that has
+   * been retired. That is not an error and never was — `buildRouteCandidates`
+   * already reports a named-but-absent route as unavailable, which is the
+   * honest reading and the one an operator can act on.
+   */
+  buildRoute: text('build_route'),
   /** §14: the cloud project this App's own resources live in, if any. */
   vesselRef: text('vessel_ref'),
   /** §9: the flat single-label vanity name, if the developer chose one. */

@@ -546,7 +546,7 @@ function googleRegistryHosts(destinations: readonly string[]): string[] {
 }
 
 /**
- * The Docker config the build step writes for itself before it builds.
+ * The registry credential the build step mints for itself before it builds.
  *
  * The shared program exports with `push=true` and BuildKit reads its registry
  * credentials from a Docker config — so without this the build runs to
@@ -556,17 +556,26 @@ function googleRegistryHosts(destinations: readonly string[]): string[] {
  * and the in-cluster one runs as a service account the registry already
  * trusts.
  *
- * Written by the step and not passed to it. A credential composed here would
+ * Minted by the step and not passed to it. A credential composed here would
  * be a credential in a submitted build body, readable by anyone who can read
  * the build — and it would be minted at submit time and expire mid-queue.
+ *
+ * **It folds into {@link REGISTRY_AUTH_VAR} rather than writing a Docker config
+ * of its own**, and that is the load-bearing part. This installation pushes to
+ * several registries (§16, `BuildSpec.destinations`), and the two halves of
+ * that push authorize differently: the metadata token covers the vendor's own
+ * registries and a *stored* credential covers the ones no federation reaches.
+ * A prelude that wrote `$DOCKER_CONFIG/config.json` itself was overwritten a
+ * few lines later by the shared program, which does `DOCKER_CONFIG=$(mktemp
+ * -d)` whenever the variable is set — so an installation holding a stored
+ * credential silently lost the vendor half and 401'd on the artifact registry
+ * at the export, after the whole build. One writer, one document, both halves.
  */
 function registryAuth(destinations: readonly string[]): string {
   const hosts = googleRegistryHosts(destinations);
   if (hosts.length === 0) return '';
 
   return `set -eu
-DOCKER_CONFIG=$(mktemp -d)
-export DOCKER_CONFIG
 token=$(wget -qO- --header 'Metadata-Flavor: Google' ${quote(METADATA_TOKEN_URL)} \\
   | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
 # A token that never arrived becomes an empty password and a \`401\` at the
@@ -575,14 +584,20 @@ token=$(wget -qO- --header 'Metadata-Flavor: Google' ${quote(METADATA_TOKEN_URL)
 # Folded \`base64\` output is a header the registry cannot parse, and whether it
 # folds is an implementation detail of whichever one the image ships.
 auth=$(printf 'oauth2accesstoken:%s' "$token" | base64 | tr -d '\\n')
-printf '{"auths":{' > "$DOCKER_CONFIG/config.json"
-separator=""
+entries=""
 for host in ${hosts.map(quote).join(' ')}; do
-  printf '%s"%s":{"auth":"%s"}' "$separator" "$host" "$auth" \\
-    >> "$DOCKER_CONFIG/config.json"
-  separator=","
+  entries="\${entries:+\${entries},}\\"\${host}\\":{\\"auth\\":\\"\${auth}\\"}"
 done
-printf '}}' >> "$DOCKER_CONFIG/config.json"
+# Whatever the route already handed over is kept, because it covers the hosts
+# this token cannot. Spliced rather than parsed: the document on the way in is
+# \`dockerConfigFor\`'s own \`JSON.stringify\` output, so its outer shape is
+# exactly \`{"auths":{…}}\` and there is no jq in a BuildKit image to do better.
+if [ -n "\${${REGISTRY_AUTH_VAR}:-}" ]; then
+  stored=$(printf '%s' "$${REGISTRY_AUTH_VAR}" | sed -e 's/^{"auths":{//' -e 's/}}$//')
+  [ -z "$stored" ] || entries="\${entries},\${stored}"
+fi
+${REGISTRY_AUTH_VAR}="{\\"auths\\":{\${entries}}}"
+export ${REGISTRY_AUTH_VAR}
 
 `;
 }

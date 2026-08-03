@@ -29,6 +29,7 @@
  * nothing left for a route to decide.
  */
 import type { z } from 'zod';
+import { setAppBuildRoute, setAppBuildRouteInput } from './apps/build-route.ts';
 import { deleteApp, deleteAppInput } from './apps/delete.ts';
 import { deployApp, deployAppInput } from './apps/deploy.ts';
 import { listApps, listAppsInput } from './apps/list.ts';
@@ -148,6 +149,7 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 export const commandRegistry = {
   deleteApp: { input: deleteAppInput, handler: deleteApp },
   deployApp: { input: deployAppInput, handler: deployApp },
+  setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
   getBuildDetail: { input: getBuildDetailInput, handler: getBuildDetail },
