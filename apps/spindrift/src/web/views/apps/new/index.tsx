@@ -343,8 +343,17 @@ export function NewApp({
                   </span>
                 </div>
                 {option.candidate ? (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {option.canonical}
+                  <span
+                    className={
+                      option.canonical === null
+                        ? 'text-xs text-subtle'
+                        : 'font-mono text-xs text-muted-foreground'
+                    }
+                  >
+                    {/* §9: `null` means this adapter names its own workloads
+                        — say so rather than showing a suffix core will never
+                        mint. */}
+                    {option.canonical ?? 'platform names its own'}
                   </span>
                 ) : (
                   <ul className="flex flex-col gap-0.5">
@@ -365,7 +374,17 @@ export function NewApp({
           </div>
         </Row>
 
-        <Row label="URL" value={target?.canonical ?? 'pending a Target'} />
+        <Row
+          label="URL"
+          value={
+            target === undefined
+              ? 'pending a Target'
+              : // §9: `null` is not "pending" — it is `cloudrun`/`static`
+                // reporting their own address back after deploy, which this
+                // step cannot show early because nothing has deployed yet.
+                (target.canonical ?? 'platform names its own')
+          }
+        />
 
         <Row label="Reach" value={draft.reach} why={REACH_NOTE[draft.reach]}>
           <div className="grid gap-2 sm:grid-cols-3">

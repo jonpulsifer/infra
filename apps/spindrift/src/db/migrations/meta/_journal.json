@@ -148,6 +148,13 @@
       "when": 1785374380764,
       "tag": "0020_app_build_route",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785374380765,
+      "tag": "0021_drift_detail",
+      "breakpoints": true
     }
   ]
 }

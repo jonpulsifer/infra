@@ -164,6 +164,27 @@ export interface CommandContext {
    * to exist, and a test can run two installations in one process.
    */
   readonly manifest: InstallationManifest;
+  /**
+   * Dotted paths where a mounted declaration disagrees with `manifest`, from
+   * {@link diffManifestPaths}. `undefined` where a caller has not computed
+   * one — every production context does; a test context that does not care is
+   * not required to.
+   *
+   * §6: "drift is detected and surfaced, never silently corrected" applies to
+   * the manifest itself, not only to what it deploys. `loadStoredManifest`
+   * already says this once, in a pod log nobody is watching at the moment a
+   * rollout quietly stops matching what is running; this is the same fact
+   * reachable from a screen an operator actually opens. `getInstallationManifest`
+   * is the one command that answers it — carried on the context, not
+   * recomputed by that command, because it has no server-only import to
+   * recompute it with (`src/commands/installation/get.ts` says why).
+   *
+   * **Paths only, exactly as {@link diffManifestPaths} promises — never a
+   * value.** A command that reads this must not append a value onto a path
+   * before handing it back; doing so would defeat the one property this
+   * field exists to keep.
+   */
+  readonly manifestDivergence?: readonly string[];
 }
 
 /**

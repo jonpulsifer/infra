@@ -268,9 +268,18 @@ function TargetCard({ target }: { target: TargetListItem }) {
                 ) : null}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="font-mono text-xs text-muted-foreground">
-                  {target.canonical}
-                </span>
+                {target.canonical === null ? (
+                  // §9: `cloudrun` and `static` name their own workloads —
+                  // core mints nothing here, so the honest boundary is this
+                  // sentence, not a suffix core will never produce.
+                  <span className="text-xs text-subtle">
+                    platform names its own
+                  </span>
+                ) : (
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {target.canonical}
+                  </span>
+                )}
                 <span className="text-xs text-subtle">rank {target.rank}</span>
               </div>
             </div>

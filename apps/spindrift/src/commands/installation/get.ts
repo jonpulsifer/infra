@@ -27,6 +27,17 @@
  * construction — every adapter's access path is resolved per request, and no
  * variant of any route or connection carries key material — so the document is
  * platform configuration, and the surface is session-authenticated regardless.
+ *
+ * **`manifestDivergence` rides along for the same reason `manifest` does.**
+ * `loadStoredManifest` already detects a mounted declaration that disagrees
+ * with the stored row and says so — once, in a pod log, at boot. §6: "drift is
+ * detected and surfaced, never silently corrected" does not stop at the log;
+ * an operator who opens this screen weeks after the rollout that caused the
+ * disagreement is exactly who needed to see it and exactly who cannot. It is
+ * read off `context.manifestDivergence` rather than recomputed here for the
+ * same reason `manifest` is: recomputing it would mean reading the mounted
+ * declaration a second time, which needs `Bun.file` and puts this command back
+ * in the shape it exists to avoid.
  */
 import { z } from 'zod';
 import {
@@ -43,10 +54,20 @@ export type GetInstallationManifestInput = z.infer<
 
 export interface GetInstallationManifestResult {
   readonly manifest: AuthoredManifest;
+  /**
+   * Dotted paths where a mounted declaration disagrees with the manifest
+   * above, or `[]` when nothing is mounted or the two agree. Paths only —
+   * see `manifest-store.ts`'s `diffManifestPaths` for why a value never rides
+   * along with one.
+   */
+  readonly manifestDivergence: readonly string[];
 }
 
 export const getInstallationManifest: Command<
   GetInstallationManifestInput,
   GetInstallationManifestResult
 > = async (_input, context) =>
-  ok({ manifest: toAuthoredManifest(context.manifest) });
+  ok({
+    manifest: toAuthoredManifest(context.manifest),
+    manifestDivergence: context.manifestDivergence ?? [],
+  });

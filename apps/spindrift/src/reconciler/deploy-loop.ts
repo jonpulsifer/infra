@@ -41,6 +41,7 @@ import type {
   DeployEvent,
   DeployPhase,
   DeployVerdict,
+  ObservedState,
 } from '../adapters/deploy/contract.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
@@ -484,6 +485,8 @@ export interface DriftReport {
   readonly deployId: number;
   readonly drifted: boolean;
   readonly observedDigest: string | null;
+  /** Why the platform will not converge, when that is what drifted. */
+  readonly driftDetail: string | null;
 }
 
 /**
@@ -510,25 +513,33 @@ export async function observeConverged(
     const subject = await subjectOf(context, deploy);
     if (subject === null) continue;
 
-    let observed: string | null = null;
+    let state: ObservedState | null = null;
     try {
-      const state = await subject.adapter.observe(
+      state = await subject.adapter.observe(
         deployTargetOf(subject.target),
         deploy.ref,
       );
-      observed = state?.artifactDigest ?? null;
     } catch {
       // A Target that cannot be reached is not a Target that has drifted. Saying
       // "drifted" here would turn every uplink blip into a false alarm about
       // something a developer did.
       continue;
     }
+    const observed = state?.artifactDigest ?? null;
 
     const drifted = hasDrifted({
       phase: deploy.phase,
       desiredDigest: subject.build.artifactDigest ?? '',
       observedDigest: observed,
+      ...(state === null ? {} : { observedPhase: state.phase }),
     });
+
+    // The platform's own sentence, kept only while it is the reason. §12's
+    // argument for storing a diagnosis applies here for the same cause: a
+    // Helm error naming the value that no longer renders is not recoverable
+    // from anywhere once the object is reconciled again.
+    const driftDetail =
+      drifted && state?.phase === 'FAILED' ? (state.detail ?? null) : null;
 
     // §6 wants drift to be "a visible state", and visible means a row: the UI
     // reads rows, so a finding that lived only for the length of this pass
@@ -536,19 +547,26 @@ export async function observeConverged(
     // somebody fixed out of band stops being reported without a dismissal.
     if (
       drifted !== (deploy.driftedAt !== null) ||
-      observed !== deploy.observedDigest
+      observed !== deploy.observedDigest ||
+      driftDetail !== deploy.driftDetail
     ) {
       await context.db
         .update(deploys)
         .set({
           driftedAt: drifted ? now : null,
           observedDigest: observed,
+          driftDetail,
           updatedAt: now,
         })
         .where(eq(deploys.id, deploy.id));
     }
 
-    reports.push({ deployId: deploy.id, drifted, observedDigest: observed });
+    reports.push({
+      deployId: deploy.id,
+      drifted,
+      observedDigest: observed,
+      driftDetail,
+    });
   }
   return reports;
 }

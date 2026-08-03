@@ -111,6 +111,9 @@ export const getBuildDetail: Command<
     // so in its own log, and inventing a `Diagnosis` here would put a reason
     // from the closed deploy-failure set on something that never deployed.
     diagnosis: null,
+    // Drift is a `LIVE` release the platform stopped agreeing with. A Build has
+    // placed nothing, so there is nothing for a platform to disagree with.
+    drift: null,
     // Nothing has been placed, so there is nothing to check off. An empty list
     // renders no section at all, which is the honest shape.
     resources: [],

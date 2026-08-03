@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { KINDS_BY_ADAPTER } from '../../domain/capabilities.ts';
 import { auth, componentKind, reach } from '../../domain/creation-draft.ts';
 import type { ComponentKind } from '../../domain/desired-state.ts';
+import { coreMintsCanonical, type DnsZones } from '../../domain/naming.ts';
 import {
   DEFAULT_PLATFORM,
   type Exclusion,
@@ -33,6 +35,39 @@ export const listTargetsInput = z.object({
 });
 export type ListTargetsInput = z.infer<typeof listTargetsInput>;
 
+/**
+ * The naming boundary a Target's canonical names would live under (§9).
+ *
+ * Not a minted name — neither call site here has an App or a Component yet,
+ * so there is nothing to run `hostnameFor` on. This states the zone the mint
+ * would land in, which is the honest thing the Targets screen and the Place
+ * step can say before that: `<app>-<component>` is not known, but the zone it
+ * would be joined to is.
+ *
+ * `null` is not "unknown" — it is the correct answer for `cloudrun` and
+ * `static`. `coreMintsCanonical` is false for both: the platform mints its
+ * own workload address, and inventing a Spindrift-owned suffix beside it
+ * would show a naming pattern no Deploy on that Target will ever use. Every
+ * caller must render `null` as "the platform names its own" rather than
+ * fall back to a suffix — a fallback here is exactly the bug this replaced
+ * (`*.<target>.apps.internal`, a zone that appeared nowhere else in the
+ * repo).
+ */
+function canonicalBoundary(
+  adapter: TargetAdapter,
+  zones: DnsZones,
+): string | null {
+  if (!coreMintsCanonical(adapter)) return null;
+  // One zone per reach (§9's `DnsZones`): an installation may point both at
+  // the same name, so collapsing to one pattern is both honest and the common
+  // case; an installation that split them gets both, because a Target minting
+  // into `public` as readily as `private` is not represented by naming only
+  // one.
+  return zones.private === zones.public
+    ? `*.${zones.private}`
+    : `*.${zones.private} (private) · *.${zones.public} (public)`;
+}
+
 export interface ListTargetsResult {
   readonly targets: readonly TargetListItem[];
   readonly options: readonly TargetOptionView[];
@@ -61,10 +96,10 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
   for (const target of allTargets) {
     const kinds: ComponentKind[] = [...KINDS_BY_ADAPTER[target.adapter]];
 
-    const canonical = (target.connection as { canonicalSuffix?: string })
-      ?.canonicalSuffix
-      ? `*.${(target.connection as { canonicalSuffix?: string }).canonicalSuffix}`
-      : `*.${target.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.apps.internal`;
+    const canonical = canonicalBoundary(
+      target.adapter,
+      context.manifest.dns.zones,
+    );
 
     const prereqFailures = target.prerequisites
       ?.filter((p) => !p.met && p.detail)
