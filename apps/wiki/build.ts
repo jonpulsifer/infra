@@ -16,6 +16,18 @@ const OUT = join(import.meta.dir, "dist");
 const SITE = "wiki.lolwtf.ca";
 const REPO = "https://github.com/jonpulsifer/infra";
 
+/**
+ * The platform marks, shared with the spindrift client rather than copied.
+ *
+ * They live inside that app because its Docker build runs `turbo prune
+ * spindrift`, which keeps only spindrift and its declared workspace deps — an
+ * asset its client imports has to be reachable from there. This build has the
+ * whole checkout, so it reads the same directory instead of keeping a second
+ * copy to drift. A move breaks this build loudly, at the `cp` below.
+ */
+const LOGOS = join(ROOT, "apps", "spindrift", "src", "web", "client", "logos");
+const logoNames = new Set<string>();
+
 // ── model ────────────────────────────────────────────────────────────────────
 
 interface Block {
@@ -375,7 +387,13 @@ async function emit(path: string, html: string) {
 async function renderPage(p: Page): Promise<string> {
   const refs = new Set<string>();
   const content = await renderBlocks(p.blocks, p, refs);
-  const icon = p.props["icon"] ? `<span class="picon">${p.props["icon"]}</span>` : "";
+  // `icon::` takes an emoji or the name of a mark in LOGOS — a page about a
+  // thing with its own logo should wear it rather than the nearest emoji.
+  const icon = !p.props["icon"]
+    ? ""
+    : logoNames.has(p.props["icon"])
+      ? `<img class="picon" src="/logos/${p.props["icon"]}.svg" alt="">`
+      : `<span class="picon">${p.props["icon"]}</span>`;
   const meta = Object.entries(p.props)
     .filter(([k]) => k !== "icon")
     .map(([k, v]) => chip(k, v, p))
@@ -422,6 +440,9 @@ ${
 async function build() {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
+
+  await cp(LOGOS, join(OUT, "logos"), { recursive: true, filter: (s) => !s.endsWith(".ts") });
+  for (const f of await readdir(join(OUT, "logos"))) logoNames.add(f.replace(/\.svg$/, ""));
 
   await loadPages();
   await collectRefs();

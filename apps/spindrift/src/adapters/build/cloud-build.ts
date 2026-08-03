@@ -552,8 +552,25 @@ function googleRegistryHosts(destinations: readonly string[]): string[] {
   const hosts = destinations.map(
     (destination) => destination.split('/')[0] ?? '',
   );
-  return [...new Set(hosts)].filter(
-    (host) => host.endsWith('docker.pkg.dev') || host === 'gcr.io',
+  return [...new Set(hosts)].filter(isGoogleRegistryHost);
+}
+
+function isGoogleRegistryHost(host: string): boolean {
+  return host.endsWith('docker.pkg.dev') || host === 'gcr.io';
+}
+
+/**
+ * The destinations the attestation step can read a manifest back out of.
+ *
+ * Same boundary as {@link googleRegistryHosts} and for the same reason — one
+ * metadata token, one vendor's registries — but by destination rather than by
+ * host, because what the step reads is a repository's manifest and not a host.
+ */
+function googleRegistryDestinations(
+  destinations: readonly string[],
+): readonly string[] {
+  return destinations.filter((destination) =>
+    isGoogleRegistryHost(destination.split('/')[0] ?? ''),
   );
 }
 
@@ -709,16 +726,11 @@ version=$(gcloud kms keys versions list \\
 version="\${version:-1}"
 echo "attesting with key version \${version}"
 
-# Once per destination, and for a sharper reason than a signature: an
-# attestation is an occurrence bound to an --artifact-url, so one made against
-# one registry says nothing about the same digest in another. Binary
-# Authorization would refuse the exact image it had already attested, because
-# the URL it was asked about is not the URL it was told about.
-for destination in ${destinations.map(quote).join(' ')}; do
-  echo "attesting \${destination}@\${digest}"
+attest() {
+  echo "attesting \${1}@\${2}"
   gcloud beta container binauthz attestations sign-and-create \\
     --project=${attestorProject} \\
-    --artifact-url="\${destination}@\${digest}" \\
+    --artifact-url="\${1}@\${2}" \\
     --attestor=${quote(attestor[2] ?? '')} \\
     --attestor-project=${attestorProject} \\
     --keyversion-project=${quote(key.project)} \\
@@ -726,8 +738,65 @@ for destination in ${destinations.map(quote).join(' ')}; do
     --keyversion-keyring=${quote(key.keyRing)} \\
     --keyversion-key=${quote(key.key)} \\
     --keyversion="\${version}"
+}
+
+# Every manifest the index names, read off the registry.
+#
+# BuildKit exports an OCI **image index** whenever \`--attest\` is on — which it
+# always is (\`buildkit.ts\`) — even for a single platform. So the digest the
+# builder reported names an index, and an index is not what a runtime runs:
+# Cloud Run resolves it to the child manifest for its own platform *before*
+# admission, and Binary Authorization is then asked about a digest nothing
+# attested. That reads as \`denied by attestor\` on an artifact that was
+# attested, one indirection up, and no amount of re-attesting the index fixes
+# it. The children are attested as well so the question the runtime asks has an
+# answer whichever digest it resolved to.
+#
+# Unfiltered on purpose: the attestation-manifest child is attested too. "Every
+# manifest under the index" is a rule with no exception to get wrong, and a
+# spare occurrence costs nothing.
+#
+# Every media type accepted and not only the index ones, for the same reason: a
+# push with no index has to answer this call rather than 404 it, and
+# \`manifests\` is simply absent from what comes back.
+children() {
+  curl --fail --silent --show-error \\
+    --header "Authorization: Bearer $(gcloud auth print-access-token)" \\
+    --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \\
+    "https://\${1%%/*}/v2/\${1#*/}/manifests/\${2}" \\
+  | "\${CLOUDSDK_PYTHON:-python3}" -c 'import json, sys
+for manifest in json.load(sys.stdin).get("manifests", []):
+    print(manifest["digest"])'
+}
+
+# Once per destination, and for a sharper reason than a signature: an
+# attestation is an occurrence bound to an --artifact-url, so one made against
+# one registry says nothing about the same digest in another. Binary
+# Authorization would refuse the exact image it had already attested, because
+# the URL it was asked about is not the URL it was told about.
+for destination in ${destinations.map(quote).join(' ')}; do
+  attest "$destination" "$digest"
 done
-`,
+${
+  googleRegistryDestinations(destinations).length === 0
+    ? ''
+    : `
+# The children, for the vendor's own registries and not for every destination:
+# this step holds one metadata token and that is what it authenticates to. A
+# destination elsewhere is attested at the index alone, which is all its
+# verifier reads — Binary Authorization is not what admits it.
+for destination in ${googleRegistryDestinations(destinations).map(quote).join(' ')}; do
+  # Assigned before it is looped over, because a failing command substitution
+  # in a \`for\` list is not what \`-e\` acts on and one in an assignment is. A
+  # registry having a bad moment must not read as an index with no children,
+  # which is a green build whose Deploy is refused later by a policy.
+  manifests=$(children "$destination" "$digest")
+  for child in $manifests; do
+    attest "$destination" "$child"
+  done
+done
+`
+}`,
     ],
   };
 }

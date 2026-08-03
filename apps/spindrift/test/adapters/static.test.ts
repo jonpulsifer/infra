@@ -34,7 +34,7 @@ import {
 } from '../../src/adapters/deploy/static/index.ts';
 import { deriveHealth } from '../../src/domain/capabilities.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
-import type { StaticConnection } from '../../src/domain/target.ts';
+import type { StaticAdapterConnection } from '../../src/domain/target.ts';
 import {
   FakeHosting,
   type FakeHostingOptions,
@@ -44,7 +44,7 @@ import { bytes, header, tar, tarball } from '../harness/tar.ts';
 
 const DEPOT = 'https://artifacts.example.test';
 
-const CONNECTION: StaticConnection = {
+const CONNECTION: StaticAdapterConnection = {
   adapter: 'static',
   project: 'example-vessel',
   endpoint: CLOUD_ENDPOINTS.hosting,

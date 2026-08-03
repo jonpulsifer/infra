@@ -1,4 +1,4 @@
-icon:: 🔁
+icon:: flux
 tags:: architecture
 
 - How a change actually ships. Desired state lives in git; an operator applies it after a PR check or a merge to `main`. Nobody applies by hand.

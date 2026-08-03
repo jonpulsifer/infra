@@ -2,10 +2,9 @@
  * `DesiredState` rendered as one Cloud Run Service (§6).
  *
  * §6 settles the direction of the seam: **core describes, the adapter renders.**
- * This file is the rendering, kept apart from the adapter that applies it for
- * the reason `dns/cr.ts` is kept apart from the client that writes it — a pure
- * function returning a plain object is a document a test can assert on exactly,
- * without a fake API standing by to catch it.
+ * This file is the rendering, kept apart from the adapter that applies it: a
+ * pure function returning a plain object is a document a test can assert on
+ * exactly, without a fake API standing by to catch it.
  *
  * **Never the build-from-source path** (§4). The runtime's own convenience path
  * would take a source archive and build it, which is a second engine with its

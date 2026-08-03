@@ -51,6 +51,7 @@ import {
   clusterConnectPlan,
   targetSeedOf,
 } from '../../../domain/target-onboarding.ts';
+import type { VesselKind } from '../../../domain/vessel.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type { TargetConnectionProposal } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
@@ -74,7 +75,7 @@ type Scan =
   | { readonly state: 'failed'; readonly message: string };
 
 export function ConnectTargetForm(props: {
-  kind: 'kubernetes' | 'cloud';
+  kind: VesselKind;
   name: string;
   /** True on the "add a Target" path, where no manifest seed named it. */
   nameEditable?: boolean;
@@ -98,7 +99,7 @@ export function ConnectTargetForm(props: {
   return (
     <div className="flex flex-col gap-4">
       <Heading {...props} />
-      {props.kind === 'kubernetes' ? (
+      {props.kind === 'cluster' ? (
         <ConnectCluster {...props} />
       ) : (
         <ConnectCloud {...props} />
@@ -113,7 +114,7 @@ function Heading({
   targets,
   proposal,
 }: {
-  kind: 'kubernetes' | 'cloud';
+  kind: VesselKind;
   name: string;
   targets: readonly string[];
   proposal: TargetConnectionProposal;
@@ -121,14 +122,14 @@ function Heading({
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        {kind === 'kubernetes' ? (
+        {kind === 'cluster' ? (
           <Server aria-hidden="true" className="size-4 text-muted-foreground" />
         ) : (
           <Layers aria-hidden="true" className="size-4 text-muted-foreground" />
         )}
         <span className="font-mono text-sm font-semibold">{name}</span>
         <Badge tone="idle">
-          {kind === 'kubernetes' ? 'cluster' : 'cloud project'}
+          {kind === 'cluster' ? 'cluster' : 'cloud project'}
         </Badge>
         {proposal.carriedFrom !== null ? (
           <span className="ml-auto text-xs text-muted-foreground">
@@ -711,7 +712,7 @@ function ConnectCloud({
           disabled={!ready || connecting}
           onClick={() =>
             onConnect({
-              kind: 'cloud',
+              kind: 'gcp-project',
               name,
               project: project.trim(),
               region: region.trim(),

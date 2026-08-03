@@ -42,52 +42,10 @@ resource "onepassword_item" "spindrift_cloudflared" {
   ]
 }
 
-# This is the Target's default Private audience. Public exposure requires a
-# more-specific bypass application for the Component hostname; until that
-# exists, the wildcard policy fails closed rather than weakening access.
-resource "cloudflare_zero_trust_access_application" "spindrift_private" {
-  account_id       = local.fml_account_id
-  name             = "Spindrift Private Apps"
-  domain           = "*.${cloudflare_zone.lolwtf_dev.name}"
-  type             = "self_hosted"
-  session_duration = "24h"
-
-  policies = [
-    {
-      name       = "operator"
-      decision   = "allow"
-      precedence = 1
-      include = [
-        {
-          email = {
-            email = "jonathan@pulsifer.ca"
-          }
-        }
-      ]
-    }
-  ]
-}
-
-# OAuth completes on the same parent domain as Spindrift's application
-# cookies. The callback must remain reachable before a user has an Access
-# session, so this exact hostname bypasses the enclosing wildcard policy.
-resource "cloudflare_zero_trust_access_application" "spindrift_oauth_callback" {
-  account_id       = local.fml_account_id
-  name             = "Spindrift OAuth Callback"
-  domain           = "oauth2.${cloudflare_zone.lolwtf_dev.name}"
-  type             = "self_hosted"
-  session_duration = "24h"
-
-  policies = [
-    {
-      name       = "OAuth callback"
-      decision   = "bypass"
-      precedence = 1
-      include = [
-        {
-          everyone = {}
-        }
-      ]
-    }
-  ]
-}
+# Access carries no application over this zone. A Component states its own
+# audience: `reach: private` publishes an RFC1918 address, so the record type
+# is the boundary and no policy has to hold it, and `auth: proxy` is enforced
+# in-cluster by the ExternalAuth filter on the route. An Access application
+# over the whole zone would add a second prompt in front of the first for a
+# Component that already authenticates, and hold nothing closed for one that
+# deliberately does not.

@@ -24,7 +24,13 @@ import { and, eq, isNotNull } from 'drizzle-orm';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
-import { deploys, type Target, targets } from '../db/schema.ts';
+import {
+  deploys,
+  type Target,
+  targets,
+  type Vessel,
+  vessels,
+} from '../db/schema.ts';
 import {
   deriveHealth,
   type PrerequisiteResult,
@@ -35,6 +41,7 @@ import {
   type DeployTargetRef,
   deployTargetOf,
   hasTargetConnection,
+  hasVesselLocation,
   type TargetHealth,
 } from '../domain/target.ts';
 
@@ -116,16 +123,23 @@ export async function restoreDeclaredTargetConnections(
   if (declared.size === 0) return [];
 
   const disconnected = await context.db
-    .select()
+    .select({ target: targets, vessel: vessels })
     .from(targets)
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(targets.status, 'disconnected'));
   const readopted: string[] = [];
 
-  for (const target of disconnected) {
-    if (!declared.has(target.name) || !hasTargetConnection(target)) continue;
+  for (const { target, vessel } of disconnected) {
+    if (
+      !declared.has(target.name) ||
+      !hasTargetConnection(target) ||
+      !hasVesselLocation(vessel)
+    ) {
+      continue;
+    }
 
     const now = context.clock.now();
-    const ref = deployTargetOf(target);
+    const ref = deployTargetOf(target, vessel);
     const { prerequisites, discovery } = await inspectTarget(context, ref);
     const health = deriveHealth(prerequisites, target.adapter);
     await context.db
@@ -212,14 +226,19 @@ export interface TargetRefresh {
 export async function refreshTarget(
   context: TargetLoopContext,
   target: Pick<Target, 'id' | 'name' | 'adapter' | 'health' | 'connection'>,
+  /** The boundary half of what the adapter is handed. */
+  vessel: Pick<Vessel, 'location' | 'servedHosts' | 'reachableRegistries'>,
 ): Promise<TargetRefresh> {
   if (!hasTargetConnection(target)) {
     throw new Error(`Target ${target.name} has no connection to refresh`);
   }
+  if (!hasVesselLocation(vessel)) {
+    throw new Error(`Target ${target.name} sits on a vessel with no location`);
+  }
   const now = context.clock.now();
   const { prerequisites, discovery } = await inspectTarget(
     context,
-    deployTargetOf(target),
+    deployTargetOf(target, vessel),
   );
   const health = deriveHealth(prerequisites, target.adapter);
 
@@ -254,19 +273,20 @@ export async function refreshAllTargets(
   context: TargetLoopContext,
 ): Promise<readonly TargetRefresh[]> {
   const connected = await context.db
-    .select()
+    .select({ target: targets, vessel: vessels })
     .from(targets)
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(targets.status, 'connected'));
 
   const refreshed: TargetRefresh[] = [];
-  for (const target of connected) {
+  for (const { target, vessel } of connected) {
     // A manifest seed is disconnected, so this is defensive against a
     // malformed row rather than part of the ordinary bootstrap path.
-    if (!hasTargetConnection(target)) continue;
+    if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) continue;
     // Sequential rather than concurrent: the far sides are other people's
     // control planes, and a fleet of Targets refreshing in lockstep is a
     // thundering herd against every one of them at once.
-    refreshed.push(await refreshTarget(context, target));
+    refreshed.push(await refreshTarget(context, target, vessel));
   }
   return refreshed;
 }

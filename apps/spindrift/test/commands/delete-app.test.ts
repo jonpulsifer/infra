@@ -40,7 +40,7 @@ import {
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import { fixtureManifest, targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -97,7 +97,7 @@ function context(registry: AdapterRegistry): CommandContext {
 async function seedTarget(name: string) {
   const [target] = await database()
     .db.insert(targets)
-    .values({ name, adapter: 'kubernetes', rank: 0, health: 'healthy' })
+    .values(targetValues({ name, adapter: 'kubernetes', health: 'healthy' }))
     .returning();
   return target!;
 }

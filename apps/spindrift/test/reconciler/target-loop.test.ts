@@ -20,7 +20,7 @@ import type {
   CommandContext,
 } from '../../src/commands/types.ts';
 import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
-import { apps, components, targets } from '../../src/db/schema.ts';
+import { apps, components, targets, vessels } from '../../src/db/schema.ts';
 import { prerequisitesFor } from '../../src/domain/capabilities.ts';
 import {
   refreshAllTargets,
@@ -91,6 +91,15 @@ async function targetRow(name: string) {
     .db.select()
     .from(targets)
     .where(eq(targets.name, name));
+  return rows[0]!;
+}
+
+/** The boundary a Target sits on — half of what `refreshTarget` inspects. */
+async function vesselOf(id: string) {
+  const rows = await database()
+    .db.select()
+    .from(vessels)
+    .where(eq(vessels.id, id));
   return rows[0]!;
 }
 
@@ -172,10 +181,18 @@ describe('one pass over every connected Target', () => {
       .returning();
 
     const down: AdapterRegistry = { ...registry, deploy: () => unreachable };
-    await refreshTarget(context(down, clock), row!);
+    await refreshTarget(
+      context(down, clock),
+      row!,
+      await vesselOf(row!.vesselId),
+    );
     expect((await targetRow('cluster')).health).toBe('unhealthy');
 
-    await refreshTarget(context(registry, clock), await targetRow('cluster'));
+    await refreshTarget(
+      context(registry, clock),
+      await targetRow('cluster'),
+      await vesselOf(row!.vesselId),
+    );
     expect((await targetRow('cluster')).health).toBe('healthy');
   });
 });

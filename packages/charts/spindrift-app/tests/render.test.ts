@@ -19,6 +19,7 @@ describe('kind branches', () => {
     const objects = await render();
     expect(kinds(objects).sort()).toEqual([
       'CiliumNetworkPolicy',
+      'DNSEndpoint',
       'Deployment',
       'HTTPRoute',
       'NetworkPolicy',
@@ -50,6 +51,7 @@ describe('website is not a branch', () => {
     });
     expect(kinds(website).sort()).toEqual([
       'CiliumNetworkPolicy',
+      'DNSEndpoint',
       'Deployment',
       'HTTPRoute',
       'NetworkPolicy',
@@ -404,27 +406,20 @@ describe('the route', () => {
     expect(route.spec.rules[0].filters?.[0]?.type).toBe('ExternalAuth');
   });
 
-  test('reach decides the record external-dns publishes', async () => {
-    // The record type is the boundary. An RFC1918 address is not reachable from
-    // the internet whatever policy is or is not attached to it, which is what
-    // lets the proxied wildcard be retired without weakening anything.
-    const asPrivate = one(
-      await render({ app: { reach: 'private', auth: 'proxy' } }),
-      'HTTPRoute',
-    );
-    expect(asPrivate.metadata.annotations).toMatchObject({
-      'external-dns.alpha.kubernetes.io/target': '10.89.0.67',
-      'external-dns.alpha.kubernetes.io/cloudflare-proxied': 'false',
-    });
-
-    const asPublic = one(
-      await render({ app: { reach: 'public', auth: 'none' } }),
-      'HTTPRoute',
-    );
-    expect(asPublic.metadata.annotations).toMatchObject({
-      'external-dns.alpha.kubernetes.io/target': 'tunnel.example.test',
-      'external-dns.alpha.kubernetes.io/cloudflare-proxied': 'true',
-    });
+  test('the route is held out of DNS, so only one source publishes', async () => {
+    // Without this the `gateway-httproute` source emits its own endpoint for
+    // these hostnames, targeting the parent Gateway's status address: the same
+    // name claimed twice, at two record types, by two sources. The value only
+    // has to differ from `dns-controller` for the source to skip the object.
+    for (const reach of ['private', 'public'] as const) {
+      const route = one(await render({ app: { reach } }), 'HTTPRoute');
+      const controller =
+        route.metadata.annotations?.[
+          'external-dns.alpha.kubernetes.io/controller'
+        ];
+      expect(controller).toBeDefined();
+      expect(controller).not.toBe('dns-controller');
+    }
   });
 
   test('a route with no gateway to attach to fails to render', async () => {
@@ -434,6 +429,125 @@ describe('the route', () => {
     expect(
       render({ platform: { gateway: { name: '', namespace: '' } } }),
     ).rejects.toThrow(/gateway/);
+  });
+});
+
+describe('the published record', () => {
+  test('reach decides the record, and the chart states it', async () => {
+    // The record type is the boundary. An RFC1918 address is not reachable from
+    // the internet whatever policy is or is not attached to it, which is what
+    // lets the proxied wildcard be retired without weakening anything.
+    const asPrivate = one(
+      await render({ app: { reach: 'private', auth: 'proxy' } }),
+      'DNSEndpoint',
+    );
+    expect(asPrivate.spec.endpoints).toEqual([
+      {
+        dnsName: 'blog-web.apps.example.test',
+        recordType: 'A',
+        targets: ['10.89.0.67'],
+        providerSpecific: [
+          {
+            name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
+            value: 'false',
+          },
+        ],
+      },
+    ]);
+
+    const asPublic = one(
+      await render({ app: { reach: 'public', auth: 'none' } }),
+      'DNSEndpoint',
+    );
+    expect(asPublic.spec.endpoints).toEqual([
+      {
+        dnsName: 'blog-web.apps.example.test',
+        recordType: 'CNAME',
+        targets: ['tunnel.example.test'],
+        providerSpecific: [
+          {
+            name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
+            value: 'true',
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("the target is the Target's value, not the gateway it routes onto", async () => {
+    // The defect this chart shipped with was invisible for exactly one reason:
+    // `platform.dns.privateAddress` happened to equal the parent Gateway's own
+    // status address, so a record derived from the gateway and a record derived
+    // from the chart agreed. They are independent inputs and this pins them
+    // apart — a private address that is nothing else in the render.
+    const endpoint = one(
+      await render({
+        platform: {
+          gateway: { name: 'cluster-gateway', namespace: 'gateway' },
+          dns: { privateAddress: '10.99.99.99' },
+        },
+      }),
+      'DNSEndpoint',
+    );
+    expect(endpoint.spec.endpoints[0].targets).toEqual(['10.99.99.99']);
+  });
+
+  test('every hostname on the route is published', async () => {
+    // The canonical name and the vanity name are the same Component at the same
+    // reach, so a record that covered only the first would leave the second
+    // resolving to whatever wildcard still answers for the zone.
+    const endpoint = one(
+      await render({
+        app: {
+          reach: 'public',
+          hostnames: ['blog-web.apps.example.test', 'blog.vanity.example.test'],
+        },
+      }),
+      'DNSEndpoint',
+    );
+    expect(
+      endpoint.spec.endpoints.map((e: { dnsName: string }) => e.dnsName),
+    ).toEqual(['blog-web.apps.example.test', 'blog.vanity.example.test']);
+    for (const e of endpoint.spec.endpoints) {
+      expect(e.recordType).toBe('CNAME');
+      expect(e.targets).toEqual(['tunnel.example.test']);
+    }
+  });
+
+  test("it renders on the route's condition, and never without one", async () => {
+    // A record for a name nothing routes is the failure the wildcard already
+    // was: it resolves, it authenticates, and it 404s.
+    for (const reach of ['private', 'public'] as const) {
+      expect(kinds(await render({ app: { reach } }))).toContain('DNSEndpoint');
+    }
+    for (const values of [
+      { app: { reach: 'none', auth: 'none' } },
+      { app: { kind: 'job' } },
+      { app: { expose: false } },
+    ]) {
+      const objects = await render(values);
+      expect(kinds(objects)).not.toContain('DNSEndpoint');
+      expect(kinds(objects)).not.toContain('HTTPRoute');
+    }
+  });
+
+  test('a reach with nowhere to point fails to render', async () => {
+    // Rendering a record with an empty target publishes a name that resolves to
+    // nothing, which is worse than a Deploy that refuses: it is indistinguishable
+    // from a working App until someone fetches it.
+    await expect(
+      render({
+        app: { reach: 'private' },
+        platform: { dns: { privateAddress: '' } },
+      }),
+    ).rejects.toThrow(/platform\.dns\.privateAddress/);
+
+    await expect(
+      render({
+        app: { reach: 'public' },
+        platform: { dns: { tunnelHostname: '' } },
+      }),
+    ).rejects.toThrow(/platform\.dns\.tunnelHostname/);
   });
 });
 

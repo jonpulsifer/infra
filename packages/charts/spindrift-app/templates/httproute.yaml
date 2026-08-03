@@ -7,19 +7,27 @@ gateway with it. The wildcard TLS listener the vessel carries is what lets a
 flat App name be served without this chart owning a certificate.
 
 Two independent facts render here. `app.reach` decides whether a route exists at
-all and which record external-dns publishes for it; `app.auth` decides whether
-an ExternalAuth filter sits on that route. A Component with `reach: none` has no
-route — it is a workload boundary, and a route onto the shared gateway would be
-exactly the alternate origin it asked not to have.
+all; `app.auth` decides whether an ExternalAuth filter sits on that route. A
+Component with `reach: none` has no route — it is a workload boundary, and a
+route onto the shared gateway would be exactly the alternate origin it asked not
+to have.
 
-The DNS annotations are the mechanism rather than a leak, which is why the
-blanket `external-dns.alpha.kubernetes.io/exclude` this template used to carry
-is gone. `private` publishes the gateway's own load-balancer address: RFC1918,
-so the record type *is* the boundary and no policy has to be attached to it.
-`public` publishes a proxied CNAME at the Target's tunnel, whose ingress stays
-the single static wildcard rule Terraform owns — Spindrift never writes tunnel
-config (§9). The bypass concern the old comment named lives in the NetworkPolicy,
-which covers every Component whatever its reach.
+**Which record gets published is not decided here**, and this route is held out
+of DNS entirely. `templates/dnsendpoint.yaml` carries that decision and explains
+why it cannot live on a route. What matters here is that only one of them
+publishes: external-dns's `gateway-httproute` source would otherwise emit its
+own endpoint for these same hostnames, targeting the parent Gateway's status
+address — the same name claimed twice, at two record types, by two sources.
+
+The hold-out is `…/controller`, which the source honours per object: it skips
+any route whose value is not `dns-controller` (`source/annotations`,
+`IsControllerMismatch`). It is a real annotation, unlike the `…/exclude` this
+template once carried, and it is scoped to the routes this chart renders — no
+cluster-wide source filter, so nothing else in the zone changes shape. The value
+only has to differ from `dns-controller`; it names the lab domain and the object
+that publishes instead, so a `kubectl get -o yaml` says where the record went.
+The bypass concern the old comment named lives in the NetworkPolicy, which
+covers every Component whatever its reach.
 */}}
 {{- if and (include "spindrift-app.serving" .) (ne .Values.app.reach "none") }}
 {{- if not .Values.platform.gateway.name }}
@@ -34,19 +42,7 @@ metadata:
     {{- include "spindrift-app.labels" . | nindent 4 }}
   annotations:
     {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
-    {{- if eq .Values.app.reach "private" }}
-    {{- if not .Values.platform.dns.privateAddress }}
-    {{- fail "platform.dns.privateAddress is required for reach: private" }}
-    {{- end }}
-    external-dns.alpha.kubernetes.io/target: {{ .Values.platform.dns.privateAddress | quote }}
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
-    {{- else }}
-    {{- if not .Values.platform.dns.tunnelHostname }}
-    {{- fail "platform.dns.tunnelHostname is required for reach: public" }}
-    {{- end }}
-    external-dns.alpha.kubernetes.io/target: {{ .Values.platform.dns.tunnelHostname | quote }}
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
-    {{- end }}
+    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
 spec:
   parentRefs:
     - name: {{ .Values.platform.gateway.name }}

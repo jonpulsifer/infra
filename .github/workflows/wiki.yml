@@ -7,6 +7,9 @@ on:
     paths:
       - 'docs/**'
       - 'apps/wiki/**'
+      # The page marks the wiki serves; they live with the spindrift client
+      # because its Docker build prunes to that package. See apps/wiki/build.ts.
+      - 'apps/spindrift/src/web/client/logos/**'
       - 'AGENTS.md'
       - 'README.md'
       - '.github/scripts/docs-contract.sh'
@@ -15,6 +18,9 @@ on:
     paths:
       - 'docs/**'
       - 'apps/wiki/**'
+      # The page marks the wiki serves; they live with the spindrift client
+      # because its Docker build prunes to that package. See apps/wiki/build.ts.
+      - 'apps/spindrift/src/web/client/logos/**'
       - 'AGENTS.md'
       - 'README.md'
       - '.github/scripts/docs-contract.sh'

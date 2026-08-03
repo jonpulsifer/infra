@@ -31,16 +31,18 @@ import {
   type TargetAdapter,
   targetNameSchema,
 } from '../../config/manifest.schema.ts';
-import { targets } from '../../db/schema.ts';
+import { targets, vessels } from '../../db/schema.ts';
 import {
   deriveHealth,
   type PrerequisiteResult,
 } from '../../domain/capabilities.ts';
 import {
+  deployTargetOf,
+  surfaceNames,
   type TargetConnection,
   type TargetHealth,
-  targetNames,
 } from '../../domain/target.ts';
+import type { VesselKind, VesselLocation } from '../../domain/vessel.ts';
 import {
   inspectTarget,
   readoptTargetDeploys,
@@ -98,7 +100,7 @@ function assertedBy(input: ConnectTargetInput): {
   reaches?: ('none' | 'private' | 'public')[];
   authReaches?: ('none' | 'private' | 'public')[];
 } {
-  if (input.kind !== 'kubernetes') return {};
+  if (input.kind !== 'cluster') return {};
   return {
     ...(input.reaches === undefined ? {} : { reaches: [...input.reaches] }),
     ...(input.authReaches === undefined
@@ -110,7 +112,8 @@ function assertedBy(input: ConnectTargetInput): {
 export const connectTargetInput = z.discriminatedUnion('kind', [
   z
     .object({
-      kind: z.literal('kubernetes'),
+      kind: z.literal('cluster'),
+      /** The vessel's name. Its one surface takes it unchanged. */
       name: targetNameSchema,
       /** §13's prerequisite is OIDC against this, not a credential for it. */
       apiServer: z.url(),
@@ -129,8 +132,8 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
-      kind: z.literal('cloud'),
-      /** One name; both of the project's Targets are derived from it. */
+      kind: z.literal('gcp-project'),
+      /** The vessel's name. Both of its surfaces are derived from it. */
       name: targetNameSchema,
       project: z.string().trim().min(1),
       region: z.string().trim().min(1),
@@ -176,26 +179,27 @@ export interface ConnectTargetResult {
   readonly readopted: readonly string[];
 }
 
-/** The connection material for one of the Targets this act registers. */
+/**
+ * The **surface** half of one Target this act registers.
+ *
+ * Where the boundary is, and what it can reach, are not here — they are the
+ * vessel's, stated once by {@link vesselFor}. The operator already supplied
+ * `servedHosts` and `reachableRegistries` once per act rather than once per
+ * Target, which is the shape this split makes honest: they used to be copied
+ * into both connections, where two surfaces of one project could drift apart.
+ */
 function connectionFor(
   input: ConnectTargetInput,
   adapter: TargetAdapter,
 ): TargetConnection {
   if (adapter === 'kubernetes') {
-    if (input.kind !== 'kubernetes') {
+    if (input.kind !== 'cluster') {
       throw new Error('a cloud project does not register a cluster Target');
     }
     return {
       adapter,
-      apiServer: input.apiServer,
       namespace: input.namespace,
       delivery: input.delivery,
-      ...(input.servedHosts === undefined
-        ? {}
-        : { servedHosts: input.servedHosts }),
-      ...(input.reachableRegistries === undefined
-        ? {}
-        : { reachableRegistries: input.reachableRegistries }),
       ...(input.logHistorySeconds === undefined
         ? {}
         : { logHistorySeconds: input.logHistorySeconds }),
@@ -207,36 +211,46 @@ function connectionFor(
         : { chartContract: input.chartContract }),
     };
   }
-  if (input.kind !== 'cloud') {
+  if (input.kind !== 'gcp-project') {
     throw new Error('a cluster does not register a cloud Target');
   }
   if (adapter === 'cloudrun') {
     return {
       adapter,
-      project: input.project,
       region: input.region,
       endpoint: input.runEndpoint,
       ...(input.policyEndpoint === undefined
         ? {}
         : { policyEndpoint: input.policyEndpoint }),
-      ...(input.servedHosts === undefined
-        ? {}
-        : { servedHosts: input.servedHosts }),
-      ...(input.reachableRegistries === undefined
-        ? {}
-        : { reachableRegistries: input.reachableRegistries }),
+      // Only this surface has a runtime to have produced output; static
+      // hosting gets §17's honest empty state rather than a duration.
       ...(input.logHistorySeconds === undefined
         ? {}
         : { logHistorySeconds: input.logHistorySeconds }),
     };
   }
+  return { adapter, endpoint: input.hostingEndpoint };
+}
+
+/** The boundary this act connects, as a row to create or update. */
+function vesselFor(input: ConnectTargetInput): {
+  kind: VesselKind;
+  location: VesselLocation;
+  servedHosts: string[] | null;
+  reachableRegistries: string[] | null;
+} {
   return {
-    adapter,
-    project: input.project,
-    endpoint: input.hostingEndpoint,
-    ...(input.servedHosts === undefined
-      ? {}
-      : { servedHosts: input.servedHosts }),
+    kind: input.kind,
+    location:
+      input.kind === 'cluster'
+        ? { kind: 'cluster', apiServer: input.apiServer }
+        : { kind: 'gcp-project', project: input.project },
+    servedHosts:
+      input.servedHosts === undefined ? null : [...input.servedHosts],
+    reachableRegistries:
+      input.reachableRegistries === undefined
+        ? null
+        : [...input.reachableRegistries],
   };
 }
 
@@ -248,7 +262,7 @@ export const connectTarget: Command<
   // This is that time — the operator who typed these is still here to be told
   // which key was not theirs, which is not true of the deploy that would
   // otherwise discover it.
-  if (input.kind === 'kubernetes') {
+  if (input.kind === 'cluster') {
     const issues = operatorValuesIssues(input.chartValues);
     if (issues.length > 0) {
       return failed(
@@ -266,19 +280,52 @@ export const connectTarget: Command<
   const registered: ConnectedTarget[] = [];
   const readopted: string[] = [];
 
-  for (const { name, adapter } of targetNames(input.kind, input.name)) {
+  // The boundary first, because every surface below is a row that references
+  // it. Idempotent by name for the same reason connect is: reconnecting a
+  // project must reuse its vessel rather than mint a second one that its two
+  // surfaces would then be split across.
+  const desiredVessel = vesselFor(input);
+  const existingVessel = (
+    await context.db.select().from(vessels).where(eq(vessels.name, input.name))
+  )[0];
+  const vessel =
+    existingVessel === undefined
+      ? (
+          await context.db
+            .insert(vessels)
+            .values({
+              name: input.name,
+              ...desiredVessel,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning()
+        )[0]!
+      : (
+          await context.db
+            .update(vessels)
+            .set({ ...desiredVessel, updatedAt: now })
+            .where(eq(vessels.id, existingVessel.id))
+            .returning()
+        )[0]!;
+
+  for (const { name, adapter } of surfaceNames(input.kind, input.name)) {
     const existing = (
       await context.db.select().from(targets).where(eq(targets.name, name))
     )[0];
 
     const connection = connectionFor(input, adapter);
+    // The flat view the adapter takes, composed from the surface just built and
+    // the boundary above it — the same composition the loops perform.
+    const ref = deployTargetOf(
+      { name, adapter, connection },
+      // Built from what was just written rather than re-read: `vesselFor`
+      // always states a location, which the nullable column cannot know.
+      { ...desiredVessel, location: desiredVessel.location },
+    );
     // One pass of the same loop §13 runs on a schedule — not a second notion of
     // what "healthy" means that happens to run at connect time.
-    const { prerequisites, discovery } = await inspectTarget(context, {
-      name,
-      adapter,
-      connection,
-    });
+    const { prerequisites, discovery } = await inspectTarget(context, ref);
     const health = deriveHealth(prerequisites, adapter);
 
     if (existing === undefined) {
@@ -293,6 +340,7 @@ export const connectTarget: Command<
         .values({
           name,
           adapter,
+          vesselId: vessel.id,
           connection,
           health,
           prerequisites,
@@ -318,6 +366,10 @@ export const connectTarget: Command<
     const [row] = await context.db
       .update(targets)
       .set({
+        // A reconnect may move a surface onto a different vessel — connecting
+        // the same name against another project is a correction, not a second
+        // Target.
+        vesselId: vessel.id,
         connection,
         health,
         prerequisites,
@@ -331,12 +383,7 @@ export const connectTarget: Command<
 
     if (existing.status === 'disconnected') {
       readopted.push(
-        ...(await readoptTargetDeploys(
-          context,
-          existing.id,
-          { name, adapter, connection },
-          now,
-        )),
+        ...(await readoptTargetDeploys(context, existing.id, ref, now)),
       );
     }
 

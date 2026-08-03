@@ -20,11 +20,16 @@ import type {
 import type { RequestAuthentication } from '../auth/types.ts';
 import type { CommandContext, Principal } from '../commands/types.ts';
 import { onAttemptEvent } from '../db/notify.ts';
-import { components, deploys, targets } from '../db/schema.ts';
+import { components, deploys, targets, vessels } from '../db/schema.ts';
 import {
   type AttemptLogCursor,
   readAttemptStream,
 } from '../domain/attempt-log.ts';
+import {
+  deployTargetOf,
+  hasTargetConnection,
+  hasVesselLocation,
+} from '../domain/target.ts';
 import {
   ATTEMPT_STREAM_PATH,
   type AttemptStreamMessage,
@@ -197,13 +202,17 @@ async function upgradeRuntime(
     .where(eq(components.id, componentId))
     .limit(1);
   const [target] = await authenticated.context.db
-    .select()
+    .select({ target: targets, vessel: vessels })
     .from(targets)
+    // The boundary carries where this Target is, which the tail needs as much
+    // as the surface's own facts.
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(targets.id, targetId))
     .limit(1);
   if (!component || !target) {
     return refusal(404, 'NOT_FOUND', 'the Component or Target does not exist');
   }
+  const { target: surface, vessel } = target;
   if (component.kind === 'job') {
     return refusal(
       409,
@@ -217,18 +226,18 @@ async function upgradeRuntime(
     .where(
       and(
         eq(deploys.componentId, component.id),
-        eq(deploys.targetId, target.id),
+        eq(deploys.targetId, surface.id),
       ),
     )
     .limit(1);
-  if (!placed || target.connection === null) {
+  if (!placed || !hasTargetConnection(surface) || !hasVesselLocation(vessel)) {
     return refusal(
       409,
       'NO_RUNTIME',
       'this Component has no runtime on that Target',
     );
   }
-  const adapter = authenticated.context.adapters.deploy(target.adapter);
+  const adapter = authenticated.context.adapters.deploy(surface.adapter);
   if (adapter === null) {
     return refusal(
       409,
@@ -248,11 +257,7 @@ async function upgradeRuntime(
     data: {
       kind: 'runtime',
       adapter,
-      target: {
-        name: target.name,
-        adapter: target.adapter,
-        connection: target.connection,
-      },
+      target: deployTargetOf(surface, vessel),
       subject: { app: app.name, component: component.name },
       cursor: after,
       closed: false,

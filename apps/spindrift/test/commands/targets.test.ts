@@ -45,7 +45,7 @@ import {
 } from '../../src/db/schema.ts';
 import { deployState } from '../../src/domain/target.ts';
 import { restoreDeclaredTargetConnections } from '../../src/reconciler/target-loop.ts';
-import { withIsolatedDatabase } from '../harness/db.ts';
+import { defaultVesselId, withIsolatedDatabase } from '../harness/db.ts';
 import {
   FakeDeployAdapter,
   type FakeDeployAdapterOptions,
@@ -225,13 +225,11 @@ describe('the act is credential-shaped though the noun is flat', () => {
     // act asked for both, and neither Target carries the other's.
     expect((await targetRow('vessel-cloudrun'))?.connection).toEqual({
       adapter: 'cloudrun',
-      project: 'example-vessel',
       region: 'here',
       endpoint: CLOUD_ENDPOINTS.run,
     });
     expect((await targetRow('vessel-static'))?.connection).toEqual({
       adapter: 'static',
-      project: 'example-vessel',
       endpoint: CLOUD_ENDPOINTS.hosting,
     });
   });
@@ -263,6 +261,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
       .values({
         name: 'cluster',
         adapter: 'kubernetes',
+        vesselId: defaultVesselId('cluster'),
         rank: 4,
         status: 'disconnected',
         connection: null,
@@ -292,6 +291,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
         {
           name: 'vessel-cloudrun',
           adapter: 'cloudrun',
+          vesselId: defaultVesselId('gcp-project'),
           rank: 2,
           status: 'disconnected',
           connection: null,
@@ -300,6 +300,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
         {
           name: 'vessel-static',
           adapter: 'static',
+          vesselId: defaultVesselId('gcp-project'),
           rank: 3,
           status: 'disconnected',
           connection: null,

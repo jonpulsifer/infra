@@ -1,4 +1,4 @@
-icon:: 🌍
+icon:: opentofu
 tags:: architecture
 
 - Layer 3: cloud and identity resources managed as code under `terraform/`, applied by **Atlantis**. Every root module is standalone — its own state, its own backend.

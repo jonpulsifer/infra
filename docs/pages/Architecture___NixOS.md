@@ -1,4 +1,4 @@
-icon:: ❄️
+icon:: nixos
 tags:: architecture
 
 - **Layer 1: bare metal.** Every host in the fleet is declared as NixOS in one flake at the repo root (`flake.nix`), configured under `nix/`. A few hosts run something else and are being brought across — [[Fleet]] lists the machine inventory and the known divergence. [[Runbooks/Deploy a NixOS Host]] has the build/deploy/rollback commands; this page is architecture only.

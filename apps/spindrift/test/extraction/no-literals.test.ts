@@ -25,6 +25,7 @@ import {
 import { BUILD_ROUTE_REFUSALS } from '../../src/domain/build-route.ts';
 import { PRESET_DEPENDENCIES } from '../../src/domain/detection/declared.ts';
 import { KUBERNETES_DELIVERY_FLAVOURS } from '../../src/domain/target.ts';
+import { VESSEL_KINDS } from '../../src/domain/vessel.ts';
 
 const APP = join(import.meta.dir, '../..');
 
@@ -70,6 +71,10 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // Delivery flavours wear the same shape and are the same kind of thing: the
   // name of a mechanism this software knows, identical in every installation.
   ...KUBERNETES_DELIVERY_FLAVOURS,
+  // The tenancy boundaries a Target can sit on. `gcp-project` names a kind of
+  // place, not a place: every installation with a cloud vessel has one, and the
+  // project it points at is in the row rather than in this source.
+  ...VESSEL_KINDS,
   // Why a build route is not usable for a Target — vocabulary again, read from
   // the domain rather than restated, so adding one does not break a test here.
   ...BUILD_ROUTE_REFUSALS,

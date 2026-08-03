@@ -14,7 +14,12 @@ topology_value() {
 cluster_entry() {
   cluster=$1
   topology="${DIR}/clusters/${cluster}/config/cluster-topology.json"
-  ca="${DIR}/clusters/${cluster}/config/kubernetes-ca.pem"
+  # scripts/pki/post-rotate.sh maintains <cluster>-ca-bundle.pem as the
+  # current-plus-previous anchor consumers are meant to stage, so a CA rotation
+  # reaches Atlantis without a second copy to remember. Clusters still on the
+  # in-cluster NixOS CA have no bundle and keep their own committed pem.
+  ca="${DIR}/terraform/pki/certs/${cluster}-ca-bundle.pem"
+  test -r "${ca}" || ca="${DIR}/clusters/${cluster}/config/kubernetes-ca.pem"
   host=$(topology_value API_SERVER_HOSTNAME "${topology}")
   port=$(topology_value API_SERVER_PORT "${topology}")
 

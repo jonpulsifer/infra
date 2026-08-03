@@ -16,8 +16,20 @@
  * pass the extraction grep and still be exactly the thing §9 ruled out.
  *
  * What it does not claim: that no DNS is written. Plenty is — as `DNSEndpoint`
- * objects, through the cluster API, with the controller doing the publishing.
- * The line is between describing a record and holding the key to a zone.
+ * objects the App chart renders, with the controller doing the publishing.
+ * Core does not write them either: `reach` decides the record type, and only
+ * the chart holds the address that decision resolves to. The line this test
+ * polices is between naming a host and holding the key to a zone.
+ *
+ * That the claim is not satisfied *vacuously* — by there being no DNS at all —
+ * is asserted where the records now live, in
+ * `packages/charts/spindrift-app/tests/render.test.ts`.
+ *
+ * One exemption, and it is about naming rather than holding — see
+ * {@link NAMES_A_BRAND}. Everything else under `src/` is scanned, prose
+ * included: a comment explaining that this software holds no zone credential
+ * is still a comment naming a zone provider, and that rule is easier to keep
+ * than to argue with.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
@@ -56,17 +68,22 @@ const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [
   },
 ];
 
-/**
- * The one file allowed to say the word.
- *
- * `cr.ts` documents *why* there is no Cloudflare client, and a rule that
- * forbids explaining itself is a rule whose reason gets lost. Its exemption is
- * narrow — one file, and the test below proves the scanner still has teeth
- * everywhere else.
- */
-const EXPLAINS_ITSELF = new Set(['src/adapters/dns/cr.ts']);
-
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
+
+/**
+ * Where a provider's **name** is the subject rather than a credential.
+ *
+ * The logo module maps a platform's name to its mark so the UI can render it,
+ * which is the one legitimate reason this software says a provider's name out
+ * loud: a brand on a button is not a zone token, and the module holds no
+ * client, no endpoint, and nothing to authenticate with. A directory rather
+ * than a file, because the marks are assets beside their index.
+ *
+ * Narrow on purpose. Every other path under `src/` is still scanned, and the
+ * test below proves the exemption does not extend to a file that merely has
+ * "logos" in its name.
+ */
+const NAMES_A_BRAND = 'src/web/client/logos/';
 
 interface SourceFile {
   path: string;
@@ -92,7 +109,7 @@ async function readSource(dir: string): Promise<SourceFile[]> {
 function findCredentials(files: readonly SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
-    if (EXPLAINS_ITSELF.has(file.path)) continue;
+    if (file.path.startsWith(NAMES_A_BRAND)) continue;
     for (const { pattern, why } of FORBIDDEN) {
       if (pattern.test(file.source)) {
         offenders.push(`${file.path}: ${pattern} — ${why}`);
@@ -123,13 +140,6 @@ describe('§9: no DNS provider credential lives in src/', () => {
       declared.filter((name) => /cloudflare|route53|clouddns/i.test(name)),
     ).toEqual([]);
   });
-
-  test('DNS is still written — as objects, through the cluster API', async () => {
-    // The negative claim must not be satisfied by there being no DNS at all.
-    const cr = await Bun.file(join(APP, 'src/adapters/dns/cr.ts')).text();
-    expect(cr).toContain('externaldns.k8s.io/v1alpha1');
-    expect(cr).toContain('DNSEndpoint');
-  });
 });
 
 describe('the scanner catches a deliberately dirty file', () => {
@@ -144,21 +154,21 @@ describe('the scanner catches a deliberately dirty file', () => {
     expect(findCredentials(dirty)).not.toEqual([]);
   });
 
-  test('a bare token, with no SDK anywhere, is found', () => {
+  test('the brand exemption is that directory, not any file naming a logo', () => {
     const dirty: SourceFile[] = [
       {
-        path: 'src/config/manifest.schema.ts',
-        source: 'const dnsApiToken = process.env.DNS_API_TOKEN;\n',
+        path: 'src/web/views/targets/logos.ts',
+        source: "import Cloudflare from 'cloudflare';\n",
       },
     ];
     expect(findCredentials(dirty)).not.toEqual([]);
   });
 
-  test('the exemption is one file, not a directory', () => {
+  test('a bare token, with no SDK anywhere, is found', () => {
     const dirty: SourceFile[] = [
       {
-        path: 'src/adapters/dns/other.ts',
-        source: "import Cloudflare from 'cloudflare';\n",
+        path: 'src/config/manifest.schema.ts',
+        source: 'const dnsApiToken = process.env.DNS_API_TOKEN;\n',
       },
     ];
     expect(findCredentials(dirty)).not.toEqual([]);
