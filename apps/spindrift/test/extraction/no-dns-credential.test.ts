@@ -120,7 +120,6 @@ describe('§9: no DNS provider credential lives in src/', () => {
       declared.filter((name) => /cloudflare|route53|clouddns/i.test(name)),
     ).toEqual([]);
   });
-
 });
 
 describe('the scanner catches a deliberately dirty file', () => {
@@ -144,5 +143,4 @@ describe('the scanner catches a deliberately dirty file', () => {
     ];
     expect(findCredentials(dirty)).not.toEqual([]);
   });
-
 });
