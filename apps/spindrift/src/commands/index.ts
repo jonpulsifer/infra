@@ -42,6 +42,7 @@ export { getDeployDetail } from './deploys/get-detail.ts';
 export { listDeploys } from './deploys/list.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';
 export { configureInstallation } from './installation/configure.ts';
+export { discoverInstallationFacts } from './installation/discover.ts';
 export { getInstallationManifest } from './installation/get.ts';
 export {
   beginRepositoryAuthorization,

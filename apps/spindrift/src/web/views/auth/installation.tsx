@@ -48,6 +48,7 @@ import { SchemaFields } from '../../forms/render.tsx';
 import type { FormField } from '../../forms/schema.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
+import { DiscoveryPanel } from './discovery.tsx';
 
 /** What the last save attempt produced. */
 export type SaveOutcome =
@@ -252,6 +253,17 @@ export function InstallationSettingsView({
       }}
     >
       <ManifestDivergenceNotice paths={divergence} />
+
+      {/* Above the form, because it is the step that comes before editing: a
+          value confirmed from the cloud is a value nobody has to type, and one
+          typed here is a value nothing checked. It edits the same document
+          through the same `onChange`, so a discovered value is an unsaved edit
+          like any other until the whole manifest is saved. */}
+      <DiscoveryPanel
+        document={document}
+        disabled={saving}
+        onChange={onChange}
+      />
 
       <Card>
         <CardHeader>
