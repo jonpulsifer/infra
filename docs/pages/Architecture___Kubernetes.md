@@ -1,4 +1,4 @@
-icon:: ☸️
+icon:: kubernetes
 tags:: architecture
 
 - **Layer 2** of [[Architecture]]: two Kubernetes clusters under `clusters/`, reconciled by FluxCD on every merge to `main`. The Terraform bootstrap roots own CoreDNS and Flux itself; Flux owns post-bootstrap cluster state. ArgoCD is installed as a Flux HelmRelease and owns no applications; `terraform/argo/` wires the provider and declares no resources. Reconciliation mechanics and the apply model live on [[Architecture/GitOps]].
