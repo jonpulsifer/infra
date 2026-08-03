@@ -268,10 +268,14 @@ export interface ClusterConnectPlan {
  *   and the claim is not this function's to make. **ponytail:** widening it is a
  *   manifest edit today; give it a control when an installation runs an edge
  *   whose policy actually holds publicly.
- * - **`networkPolicy.allowedNamespaces`** is exactly the namespaces of the
- *   components that were included. The chart's ingress is default-deny, so a
- *   route attached to a gateway in a namespace nobody listed reaches nothing —
- *   which is the failure this derivation exists to make impossible.
+ * - **`networkPolicy.allowedNamespaces`** is the namespaces of the components
+ *   that were included, less the one the workloads are in. The chart's ingress
+ *   is default-deny, so a route attached to a gateway in a namespace nobody
+ *   listed reaches nothing — which is the failure this derivation exists to
+ *   make impossible. Its own namespace is left out because the chart already
+ *   admits same-namespace siblings unconditionally: a gateway beside the
+ *   workloads it serves needs no entry, and writing one would put a name in
+ *   the list that means nothing.
  */
 export function clusterConnectPlan(
   choices: ClusterConnectChoices,
@@ -279,7 +283,8 @@ export function clusterConnectPlan(
   const allowedNamespaces = [
     ...new Set(
       [choices.gateway?.namespace, choices.externalAuth?.namespace].filter(
-        (namespace): namespace is string => (namespace ?? '') !== '',
+        (candidate): candidate is string =>
+          (candidate ?? '') !== '' && candidate !== choices.namespace,
       ),
     ),
   ];

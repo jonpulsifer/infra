@@ -85,6 +85,20 @@ describe('a cluster connect plan', () => {
     });
   });
 
+  test('a gateway beside the workloads needs no entry of its own', () => {
+    // The chart admits same-namespace siblings unconditionally, so naming the
+    // workload namespace here would be a line that means nothing — and the
+    // installation's own manifest says so in the same words.
+    const plan = clusterConnectPlan({
+      ...BLENDED,
+      gateway: { name: 'apps', namespace: 'apps', privateAddress: '10.0.0.9' },
+    });
+
+    expect(platformOf(plan).networkPolicy).toEqual({
+      allowedNamespaces: ['auth'],
+    });
+  });
+
   test('a component left out opens nothing on its behalf', () => {
     const plan = clusterConnectPlan({ ...BASE, gateway: BLENDED.gateway });
 
