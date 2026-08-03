@@ -1,4 +1,4 @@
-icon:: 🔐
+icon:: sops
 tags:: architecture
 
 - This wiki is public (wiki.lolwtf.ca). Nothing decrypted — no secret values, keys, tokens, or recovery material — ever lands in `docs/`.

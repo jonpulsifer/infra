@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
+import type { LogoName } from '../../client/logos/index.ts';
 import type { InputOf } from '../../client.ts';
 import type { PendingTargetConnection, TargetListItem } from '../../model.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
@@ -46,10 +47,27 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
+import { Logo } from '../../ui/logo.tsx';
 import { cn } from '../../ui/utils.ts';
 import { ConnectTargetForm } from './connect.tsx';
 
 type ConnectTargetInput = InputOf<'connectTarget'>;
+
+/**
+ * The mark for a Target's adapter.
+ *
+ * Both cloud adapters get the same one on purpose: §13 makes a cloud Target a
+ * matched `<name>-cloudrun`/`<name>-static` pair on one project, so what a
+ * reader is placing work on is Google Cloud either way. `adapter` is a string
+ * on the view model rather than the enum, so a Target the server grew and this
+ * table has not is a missing key, not a crash — `TargetCard` keeps the generic
+ * health icon for that case.
+ */
+const ADAPTER_LOGO: Record<string, LogoName> = {
+  kubernetes: 'kubernetes',
+  cloudrun: 'google-cloud',
+  static: 'google-cloud',
+};
 
 function kindIcon(kind: ComponentKind) {
   switch (kind) {
@@ -254,21 +272,32 @@ function TargetCard({
   const [checklistOpen, setChecklistOpen] = useState(unhealthy);
   const [editing, setEditing] = useState(false);
   const met = target.prerequisites.filter((item) => item.met).length;
+  const logo = ADAPTER_LOGO[target.adapter];
 
   return (
     <Card className={cn(unhealthy && 'border-destructive/40')}>
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <div className="flex items-center gap-3">
-            <Activity
-              aria-hidden="true"
-              className={cn(
-                'size-5',
-                target.health === 'healthy'
-                  ? 'text-success'
-                  : 'text-destructive',
-              )}
-            />
+            {/*
+              The platform's own mark rather than a health glyph: health is
+              already said twice on the row beside it, as a tone and as a word,
+              and this anchor was the only place saying nothing about *where*
+              the Target is. An adapter with no mark keeps the glyph.
+            */}
+            {logo ? (
+              <Logo name={logo} />
+            ) : (
+              <Activity
+                aria-hidden="true"
+                className={cn(
+                  'size-5',
+                  target.health === 'healthy'
+                    ? 'text-success'
+                    : 'text-destructive',
+                )}
+              />
+            )}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold">{target.name}</span>

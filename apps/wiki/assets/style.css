@@ -136,6 +136,10 @@ article { max-width: 46rem; margin: 0 auto; }
   -webkit-text-fill-color: transparent;
 }
 .picon { margin-right: 0.5rem; -webkit-text-fill-color: initial; }
+/* The same slot as an emoji icon, when `icon::` names a logo instead. Capped by
+   height so a wordmark keeps its own width; the title's gradient clip does not
+   apply to a replaced element, so nothing needs undoing here. */
+img.picon { height: 1em; width: auto; vertical-align: -0.1em; }
 
 .props { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1.3rem; }
 .chip, .tag {
