@@ -350,6 +350,38 @@ describe('the stored installation manifest', () => {
     ).rejects.toThrow(ManifestError);
   });
 
+  test('a stored row this build cannot parse re-seeds from the declaration', async () => {
+    // What actually happened: `dns.zones` replaced `dns.apexZone`, the row
+    // written by the previous image kept the old shape, and every replica
+    // crash-looped on a document whose mounted declaration was already correct.
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    await database()
+      .db.update(installation)
+      .set({
+        manifest: {
+          ...fixtureManifest,
+          dns: { apexZone: 'apps.example.test', vanityZone: 'example.test' },
+        } as unknown as AuthoredManifest,
+      });
+
+    const booted = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    expect(booted.dns.zones.private).toBe('apps.example.test');
+
+    // Nothing honest to boot as without one, so the error stands.
+    await database()
+      .db.update(installation)
+      .set({
+        manifest: { installation: 'broken' } as unknown as AuthoredManifest,
+      });
+    await expect(loadStoredManifest(database().db, {})).rejects.toThrow(
+      ManifestError,
+    );
+  });
+
   test('an incompatible Target declaration rolls back manifest and rank changes', async () => {
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,

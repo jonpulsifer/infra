@@ -43,14 +43,36 @@ type Env = Record<string, string | undefined>;
  * deployment's own facts resolved onto it. The row therefore never holds a
  * second copy of something the deployment declares — which is the whole of why
  * the two types are different.
+ *
+ * **A stored row this build cannot parse is a row this build has no seed in**,
+ * so the declaration takes over rather than the process crash-looping. A
+ * manifest key can be renamed — `dns.zones` replaced `dns.apexZone` — and the
+ * row written by the previous image does not rewrite itself; strictness there
+ * took down an installation whose mounted declaration said, correctly, exactly
+ * what it should have been. The cost is stated in the warning: whatever an
+ * operator configured through the UI that the declaration does not carry is
+ * lost. With no declaration to fall back on there is nothing honest to boot as,
+ * and the error stands.
  */
 export async function loadStoredManifest(
   db: Database,
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  const stored = await readStoredManifest(db);
+  let stored: AuthoredManifest | null = null;
+  let unreadable: ManifestError | null = null;
+  try {
+    stored = await readStoredManifest(db);
+  } catch (cause) {
+    if (!(cause instanceof ManifestError)) throw cause;
+    unreadable = cause;
+  }
   const declaration = await declaredManifest(stored !== null, env);
-  if (stored !== null && declaration !== null) {
+  if (unreadable !== null) {
+    if (declaration === null) throw unreadable;
+    console.warn(
+      `installation manifest: the stored manifest is not valid for this build, so this installation is being re-seeded from the mounted declaration — anything configured through the UI that the declaration does not carry is lost: ${unreadable.message}`,
+    );
+  } else if (stored !== null && declaration !== null) {
     console.warn(
       'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it',
     );
