@@ -417,6 +417,14 @@ export interface DatastoreView {
 
 /** One Component as the workspace lists it. */
 export interface ComponentView {
+  /**
+   * The Component's id, and the only thing on this row an act can be aimed at.
+   *
+   * `setComponentReach` resolves on it. A row that carried only a name could
+   * not, because `components` is unique per App and this list is per App — the
+   * name is enough to read and not enough to write.
+   */
+  readonly id: string;
   readonly name: string;
   readonly kind: ComponentKind;
   readonly phase: DeployPhase;
@@ -617,6 +625,37 @@ export interface TargetListItem {
   readonly configured: boolean;
   /** When the standing checklist last ran, ISO-8601, or null if never. */
   readonly inspectedAt: string | null;
+  /**
+   * Dotted paths where this Target's row and the manifest's entry for it
+   * disagree, from `targetConnectionDivergence` — **paths, never values**.
+   *
+   * The row wins: a boot writes the stored manifest back without re-asserting a
+   * declared connection over it, so an operator's correction survives a
+   * restart. `configureInstallation` still writes the whole document, so this
+   * is what a Target owes an operator before they save Settings and take their
+   * own edit back. Empty is the ordinary case — and is also what a Target the
+   * manifest declares no connection for correctly reports.
+   */
+  readonly manifestDivergence: readonly string[];
+  /**
+   * Where an edit of this Target's connection starts, or `null` on an adapter
+   * the product has no edit surface for.
+   *
+   * Editing is `connectTarget` again — idempotent by name, and already the act
+   * that writes these facts (§13). What it needs that a fresh connect does not
+   * is *this* Target's own address: `TargetConnectionProposal` deliberately
+   * omits `apiServer` because a second cluster prefilled with the first one's
+   * would read as correct and deploy somewhere else, and that reasoning is
+   * exactly inverted here — this is the one Target the address does name.
+   *
+   * `null` for `cloudrun` and `static`: `platform` chart values are a cluster's,
+   * and a cloud project has no probe to read itself back through, so the edit
+   * this field exists for has nothing to offer there.
+   */
+  readonly edit: {
+    readonly apiServer: string;
+    readonly proposal: TargetConnectionProposal;
+  } | null;
 }
 
 /**

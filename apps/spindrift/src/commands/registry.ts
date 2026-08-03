@@ -43,6 +43,10 @@ import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
 import { getBuildDetail, getBuildDetailInput } from './builds/get-detail.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
+import {
+  setComponentReach,
+  setComponentReachInput,
+} from './components/reach.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
 import {
@@ -191,6 +195,10 @@ export const commandRegistry = {
   },
   createComponent: { input: createComponentInput, handler: createComponent },
   placeComponent: { input: placeComponentInput, handler: placeComponent },
+  setComponentReach: {
+    input: setComponentReachInput,
+    handler: setComponentReach,
+  },
   setConfig: { input: setConfigInput, handler: setConfig },
   configureInstallation: {
     input: configureInstallationInput,

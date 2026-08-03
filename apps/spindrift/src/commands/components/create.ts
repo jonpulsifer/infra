@@ -20,7 +20,10 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { apps, components } from '../../db/schema.ts';
-import { AUTH_NEEDS_A_ROUTE } from '../../domain/desired-state.ts';
+import {
+  AUTH_NEEDS_A_ROUTE,
+  authHasARoute,
+} from '../../domain/desired-state.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 /** A DNS-safe label: a Component's name appears in canonical hostnames (§9). */
@@ -89,14 +92,10 @@ export const createComponentInput = z
   ])
   /**
    * §9's rule, at the only moment refusing it is free: a filter needs a route to
-   * sit on. Every other cell of the reach/auth grid is expressible, including
-   * the two the old three-state exposure could not say — an unauthenticated
-   * address on your own network, and an authenticated public one.
+   * sit on. Shared with `setComponentReach` through {@link authHasARoute}, so
+   * the grid an edit may express is the grid a creation may.
    */
-  .refine((input) => !(input.reach === 'none' && input.auth === 'proxy'), {
-    error: AUTH_NEEDS_A_ROUTE,
-    path: ['auth'],
-  });
+  .refine(authHasARoute, { error: AUTH_NEEDS_A_ROUTE, path: ['auth'] });
 
 export type CreateComponentInput = z.infer<typeof createComponentInput>;
 

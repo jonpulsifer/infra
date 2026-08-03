@@ -16,7 +16,8 @@
  *   not a disabled tab.
  */
 import { ChevronRight, ExternalLink } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
+import type { Auth, Reach } from '../../../domain/desired-state.ts';
 import {
   type AppDeletionControls,
   DeleteAppButton,
@@ -34,7 +35,31 @@ import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { cn } from '../../ui/utils.ts';
+import {
+  AUTH_NOTE,
+  AUTHS,
+  Choice,
+  REACH_NOTE,
+  REACHES,
+} from './new/summary.tsx';
 import { Releases } from './releases.tsx';
+
+/**
+ * Saving a Component's reach, as the screen above needs it answered.
+ *
+ * A promise rather than a fire-and-forget callback plus two state props: the
+ * form has exactly one thing to say after the press — the Targets still placing
+ * the old answer, or why it was refused — and threading that back as props
+ * would put this card's transient state on the screen that owns the App.
+ */
+export type SetReach = (change: {
+  readonly componentId: string;
+  readonly reach: Reach;
+  readonly auth: Auth;
+}) => Promise<
+  | { readonly ok: true; readonly pendingRelease: readonly string[] }
+  | { readonly ok: false; readonly message: string }
+>;
 
 export function Workspace({
   view,
@@ -45,6 +70,7 @@ export function Workspace({
   deletion,
   onRollback,
   rollingBack = null,
+  onSetReach,
 }: {
   view: WorkspaceView;
   onDeploy?: () => void;
@@ -68,6 +94,12 @@ export function Workspace({
   deletion?: AppDeletionControls;
   onRollback?: (release: DeployListItem) => void;
   rollingBack?: number | null;
+  /**
+   * Absent where reach is not editable from here — the fixture screens render
+   * this view with no acts wired, and a form whose Save cannot be called is
+   * worse than no form.
+   */
+  onSetReach?: SetReach;
 }) {
   const primary = view.components[0];
 
@@ -115,7 +147,10 @@ export function Workspace({
       <Hero view={view} onNavigate={onNavigate} />
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Components components={view.components} />
+        <Components
+          components={view.components}
+          {...(onSetReach === undefined ? {} : { onSetReach })}
+        />
         <Datastores datastores={view.datastores} />
       </div>
 
@@ -263,7 +298,15 @@ function Row({
   );
 }
 
-function Components({ components }: { components: readonly ComponentView[] }) {
+function Components({
+  components,
+  onSetReach,
+}: {
+  components: readonly ComponentView[];
+  onSetReach?: SetReach;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+
   return (
     <Card>
       <SectionHeader
@@ -273,15 +316,160 @@ function Components({ components }: { components: readonly ComponentView[] }) {
       />
       <CardContent className="pt-0">
         {components.map((component) => (
-          <Row
-            key={component.name}
-            badge={<Badge tone="accent">{component.kind}</Badge>}
-            title={component.name}
-            detail={`${component.phase} · ${component.reach}${component.auth === 'proxy' ? ' + auth' : ''} · ${component.artifact}`}
-          />
+          <div key={component.name}>
+            <Row
+              badge={<Badge tone="accent">{component.kind}</Badge>}
+              title={component.name}
+              detail={`${component.phase} · ${component.reach}${component.auth === 'proxy' ? ' + auth' : ''} · ${component.artifact}`}
+              trailing={
+                onSetReach ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setEditing((current) =>
+                        current === component.id ? null : component.id,
+                      )
+                    }
+                  >
+                    {editing === component.id ? 'Cancel' : 'Reach'}
+                  </Button>
+                ) : undefined
+              }
+            />
+            {onSetReach && editing === component.id ? (
+              <ReachEditor
+                component={component}
+                onSetReach={onSetReach}
+                onDone={() => setEditing(null)}
+              />
+            ) : null}
+          </div>
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Changing how a Component is reached (§9).
+ *
+ * Reach and auth are one decision, so they are one form and one save — the same
+ * shape the creation flow states them in, and literally the same tiles, so a
+ * developer meets the grid once. `auth` disappears at `reach: none` there and
+ * here, which is `AUTH_NEEDS_A_ROUTE` said by not asking rather than by
+ * refusing after the press.
+ *
+ * **What it saves is a Component, not a release.** The chart renders the route,
+ * the DNS annotations and the filter from values written at deploy time, so the
+ * only honest thing this form can do when it succeeds is name the Targets whose
+ * release still places the old answer and point at Deploy. Anything that read
+ * as "done" would be a screen claiming an outcome the platform has not been
+ * asked for yet.
+ *
+ * Exported because it is behind a disclosure: the sentence above is the whole
+ * claim this form makes, and a test that could only reach the button would be
+ * asserting that something opens rather than what it says when it does.
+ */
+export function ReachEditor({
+  component,
+  onSetReach,
+  onDone,
+}: {
+  component: ComponentView;
+  onSetReach: SetReach;
+  onDone: () => void;
+}) {
+  const [reach, setReach] = useState(component.reach);
+  const [auth, setAuth] = useState(component.auth);
+  const [saving, setSaving] = useState(false);
+  const [outcome, setOutcome] = useState<
+    | { readonly kind: 'saved'; readonly pendingRelease: readonly string[] }
+    | { readonly kind: 'refused'; readonly message: string }
+    | null
+  >(null);
+
+  const save = async () => {
+    setSaving(true);
+    setOutcome(null);
+    try {
+      const result = await onSetReach({
+        componentId: component.id,
+        reach,
+        // §9's grid: a Component with no route has nothing to authenticate in
+        // front of, so `none` is not a choice being made for the operator — it
+        // is the only cell that row has.
+        auth: reach === 'none' ? 'none' : auth,
+      });
+      setOutcome(
+        result.ok
+          ? { kind: 'saved', pendingRelease: result.pendingRelease }
+          : { kind: 'refused', message: result.message },
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-border-soft py-3 last:border-b-0">
+      <div className="grid gap-2 sm:grid-cols-3">
+        {REACHES.map((option) => (
+          <Choice
+            key={option}
+            selected={reach === option}
+            title={option}
+            note={REACH_NOTE[option]}
+            onClick={() => setReach(option)}
+          />
+        ))}
+      </div>
+      {reach !== 'none' ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {AUTHS.map((option) => (
+            <Choice
+              key={option}
+              selected={auth === option}
+              title={option}
+              note={AUTH_NOTE[option]}
+              onClick={() => setAuth(option)}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {outcome?.kind === 'refused' ? (
+        <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+          {outcome.message}
+        </p>
+      ) : null}
+      {outcome?.kind === 'saved' ? (
+        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+          {outcome.pendingRelease.length === 0
+            ? 'Saved. Nothing is placing the previous answer, so the next release carries this one.'
+            : `Saved. ${outcome.pendingRelease.join(' and ')} still ${outcome.pendingRelease.length === 1 ? 'serves' : 'serve'} the previous answer — Deploy to place this one.`}
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={saving}
+          onClick={() => {
+            void save();
+          }}
+        >
+          {saving ? 'Saving…' : 'Save reach'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDone} disabled={saving}>
+          {outcome?.kind === 'saved' ? 'Close' : 'Cancel'}
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Reach is rendered into the release, so this takes effect on the next
+          Deploy rather than on the one that is serving.
+        </p>
+      </div>
+    </div>
   );
 }
 

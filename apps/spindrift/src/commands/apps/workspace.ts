@@ -86,6 +86,7 @@ export const getAppWorkspace: Command<
     }
 
     return {
+      id: comp.id,
       name: comp.name,
       kind: comp.kind,
       phase: phaseFor(deploy?.phase, build?.status),

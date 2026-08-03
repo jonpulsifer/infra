@@ -1,15 +1,15 @@
 /**
- * The one assertion `views.test.tsx` cannot make (ticket 08, criterion 3).
+ * The assertions `views.test.tsx` cannot make (ticket 08, criterion 3).
  *
  * That file's own header explains why it renders through
  * `renderToStaticMarkup`: every rule it checks is a statement about what a
- * given state looks like, and SSR is the right depth for that. The bug this
- * file exists for is not that shape — it is React **preserving** `Transcript`'s
- * `open` state across a running→failed transition of the *same mounted
- * instance*, and `renderToStaticMarkup` cannot even observe that class of bug:
+ * given state looks like, and SSR is the right depth for that. The bugs this
+ * file exists for are not that shape — they are React **preserving** state
+ * across a transition of the *same mounted instance*, and
+ * `renderToStaticMarkup` cannot even observe that class of bug:
  * it never keeps a fiber tree alive between calls (no reconciliation happens)
  * and it never runs `useEffect` at all (SSR effects are a no-op by design).
- * Proving the fix means mounting once and re-rendering with a changed prop,
+ * Proving either one means mounting once and re-rendering with a changed prop,
  * which needs a live `react-dom/client` root — and that needs *something*
  * DOM-shaped to render into.
  *
@@ -215,56 +215,63 @@ function findButton(
   return null;
 }
 
-describe('Transcript re-derives open on a build status change', () => {
-  const fakeDocument = new FakeDocument();
-  const previousDocument = (globalThis as { document?: unknown }).document;
-  const previousWindow = (globalThis as { window?: unknown }).window;
-  const previousGetComputedStyle = (
-    globalThis as { getComputedStyle?: unknown }
-  ).getComputedStyle;
-  const previousRaf = (globalThis as { requestAnimationFrame?: unknown })
-    .requestAnimationFrame;
-  const previousCancelRaf = (globalThis as { cancelAnimationFrame?: unknown })
-    .cancelAnimationFrame;
-  const previousActEnv = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown })
-    .IS_REACT_ACT_ENVIRONMENT;
-  const previousHTMLIFrameElement = (
-    globalThis as { HTMLIFrameElement?: unknown }
-  ).HTMLIFrameElement;
+/**
+ * The shim is installed for the whole file rather than one `describe`, because
+ * more than one claim needs a mounted tree and installing it twice would leave
+ * the second restore holding the first shim as its "previous". Restoring at all
+ * is what keeps the rest of the suite honest: a `document` left on `globalThis`
+ * flips every `typeof window !== 'undefined'` feature check in the files that
+ * run after this one.
+ */
+const fakeDocument = new FakeDocument();
+const previousDocument = (globalThis as { document?: unknown }).document;
+const previousWindow = (globalThis as { window?: unknown }).window;
+const previousGetComputedStyle = (globalThis as { getComputedStyle?: unknown })
+  .getComputedStyle;
+const previousRaf = (globalThis as { requestAnimationFrame?: unknown })
+  .requestAnimationFrame;
+const previousCancelRaf = (globalThis as { cancelAnimationFrame?: unknown })
+  .cancelAnimationFrame;
+const previousActEnv = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown })
+  .IS_REACT_ACT_ENVIRONMENT;
+const previousHTMLIFrameElement = (
+  globalThis as { HTMLIFrameElement?: unknown }
+).HTMLIFrameElement;
 
+Object.assign(globalThis, {
+  document: fakeDocument,
+  // `@radix-ui/react-primitive` does a bare `typeof window !== 'undefined'`
+  // feature-check on every mount, and react-dom's own focus-restoration
+  // pass reads `container.ownerDocument.defaultView.document` — both need
+  // `window` to be the same object `document` was installed on.
+  window: globalThis,
+  // `@radix-ui/react-presence` reads this to decide whether an open/close
+  // transition is mid CSS-animation. Nothing here has a stylesheet, so
+  // reporting no `animationName` is correct, not a stub of convenience.
+  getComputedStyle: (node: FakeNode) => node.style,
+  requestAnimationFrame: (cb: () => void) => setTimeout(cb, 0),
+  cancelAnimationFrame: (id: number) => clearTimeout(id),
+  IS_REACT_ACT_ENVIRONMENT: true,
+  // react-dom's focus restoration walks into iframes via
+  // `element instanceof window.HTMLIFrameElement`; nothing here ever is
+  // one, but the right-hand side still has to be a real constructor.
+  HTMLIFrameElement: class {},
+});
+fakeDocument.defaultView = globalThis;
+
+afterAll(() => {
   Object.assign(globalThis, {
-    document: fakeDocument,
-    // `@radix-ui/react-primitive` does a bare `typeof window !== 'undefined'`
-    // feature-check on every mount, and react-dom's own focus-restoration
-    // pass reads `container.ownerDocument.defaultView.document` — both need
-    // `window` to be the same object `document` was installed on.
-    window: globalThis,
-    // `@radix-ui/react-presence` reads this to decide whether an open/close
-    // transition is mid CSS-animation. Nothing here has a stylesheet, so
-    // reporting no `animationName` is correct, not a stub of convenience.
-    getComputedStyle: (node: FakeNode) => node.style,
-    requestAnimationFrame: (cb: () => void) => setTimeout(cb, 0),
-    cancelAnimationFrame: (id: number) => clearTimeout(id),
-    IS_REACT_ACT_ENVIRONMENT: true,
-    // react-dom's focus restoration walks into iframes via
-    // `element instanceof window.HTMLIFrameElement`; nothing here ever is
-    // one, but the right-hand side still has to be a real constructor.
-    HTMLIFrameElement: class {},
+    document: previousDocument,
+    window: previousWindow,
+    getComputedStyle: previousGetComputedStyle,
+    requestAnimationFrame: previousRaf,
+    cancelAnimationFrame: previousCancelRaf,
+    IS_REACT_ACT_ENVIRONMENT: previousActEnv,
+    HTMLIFrameElement: previousHTMLIFrameElement,
   });
-  fakeDocument.defaultView = globalThis;
+});
 
-  afterAll(() => {
-    Object.assign(globalThis, {
-      document: previousDocument,
-      window: previousWindow,
-      getComputedStyle: previousGetComputedStyle,
-      requestAnimationFrame: previousRaf,
-      cancelAnimationFrame: previousCancelRaf,
-      IS_REACT_ACT_ENVIRONMENT: previousActEnv,
-      HTMLIFrameElement: previousHTMLIFrameElement,
-    });
-  });
-
+describe('Transcript re-derives open on a build status change', () => {
   test('a running LIVE_TEXT build that turns failed springs the transcript open', () => {
     // The exact case §4/§18 create: a LIVE_TEXT runner (`buildFailed`'s
     // fixture) has already released log lines while `status` is still
@@ -302,6 +309,88 @@ describe('Transcript re-derives open on a build status change', () => {
     // first render is exactly what a reader would find on the terminal red
     // screen. With the effect, the trigger flips to `open`.
     expect(trigger()?.getAttribute('data-state')).toBe('open');
+
+    act(() => {
+      root.unmount();
+    });
+  });
+});
+
+/**
+ * Ticket 08, item 3, as far as a test can carry it.
+ *
+ * The criterion names four presentations — "phase, diagnosis, checklist, and
+ * log presentation" — and one condition, "without a page refresh". The
+ * condition is what makes it awkward to test: nothing here is a page, so what
+ * a test can prove is the half that is a claim about code. `app.tsx`'s
+ * `DeployScreen` re-issues `getDeployDetail` on every attempt event and hands
+ * the result down as a new `view` prop, and the streaming half of that is
+ * already asserted by `streams.test.ts` and `stream-client.test.ts`. What was
+ * never asserted is the other end: that a **mounted** `DeployDetail` handed a
+ * newer view actually replaces all four, rather than showing the state it was
+ * mounted in.
+ *
+ * That is not a re-statement of "React re-renders on new props". This screen
+ * holds four independent `useState`s that are seeded from the view and are
+ * therefore free to survive it — `BuildDrawer`, `DeployDrawer`, `Transcript`
+ * and the diagnosis evidence — and the test above exists because one of them
+ * did exactly that. Every one of them is between the reader and one of the
+ * four presentations this criterion names.
+ *
+ * **The ticket's own bar is still a real terminal Deploy watched on the real
+ * screen**, which no test replaces. This is the regression guard underneath it.
+ */
+describe('the mounted Deploy screen replaces what a newer view says', () => {
+  test('a running build going red moves phase, diagnosis, checklist and log together', () => {
+    // One transition, chosen because it is the only one that moves all four at
+    // once: `building` is `LIVE_STATUS` with no log text and a full resource
+    // checklist, `buildFailed` is red with a diagnosis, a failed step and eight
+    // lines of runner output.
+    const building: DeployView = DEPLOY_SCENARIOS.building;
+    const failed: DeployView = DEPLOY_SCENARIOS.buildFailed;
+
+    const container = fakeDocument.createElement('div');
+    let root!: Root;
+    act(() => {
+      root = createRoot(container as unknown as Element);
+      root.render(<DeployDetail view={building} />);
+    });
+    const screen = () => container.textContent;
+
+    // Phase, and the headline under it.
+    expect(screen()).toContain(building.phaseWord);
+    expect(screen()).toContain(building.headline);
+    // Diagnosis: there is none while it is building, and an empty panel would
+    // be worse than none.
+    expect(screen()).not.toContain('BUILD_FAILED');
+    // Checklist: the deploy-side one is present and every resource is waiting,
+    // and the build-side one has `run build` still going.
+    expect(screen()).toContain(`Resources on ${building.target}`);
+    expect(screen()).toContain('14s');
+    // Log presentation: §4's `LIVE_STATUS` sentence stands in for text that
+    // this runner will not release until the run ends.
+    expect(screen()).toContain('reports step status live');
+    expect(screen()).not.toContain('Failed to compile');
+
+    act(() => {
+      root.render(<DeployDetail view={failed} />);
+    });
+
+    expect(screen()).toContain(failed.phaseWord);
+    expect(screen()).toContain(failed.headline);
+    expect(screen()).not.toContain(building.headline);
+    expect(screen()).toContain('BUILD_FAILED');
+    expect(screen()).toContain(failed.diagnosis?.detail ?? '');
+    // The resource checklist goes away with the release it described, and the
+    // build checklist reports the step that died.
+    expect(screen()).not.toContain(`Resources on ${failed.target}`);
+    expect(screen()).toContain('2.9s');
+    expect(screen()).not.toContain('14s');
+    // The `LIVE_STATUS` sentence is replaced by the text it was standing in
+    // for — which is only reachable because `Transcript` springs open on red,
+    // the claim the describe above pins.
+    expect(screen()).not.toContain('reports step status live');
+    expect(screen()).toContain('Failed to compile');
 
     act(() => {
       root.unmount();

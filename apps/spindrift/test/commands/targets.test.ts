@@ -321,6 +321,125 @@ describe('the act is credential-shaped though the noun is flat', () => {
   });
 });
 
+/**
+ * 52: the correction an operator makes through the product, and the restart.
+ *
+ * `connectTarget` has always written the row. What made it useless on a
+ * manifest-declared Target is that `loadStoredManifest` writes the stored
+ * document back on every boot, and reconciliation used to re-assert the
+ * document's copy of the connection over the row — so an operator who fixed a
+ * gateway here got it reverted by the next rollout, silently, with the screen
+ * that accepted the edit then showing the old values and no reason why.
+ *
+ * The precedence is now the one this module already applies to a mounted
+ * declaration, one noun down: **the row wins and the divergence is reported.**
+ */
+describe('an operator’s Target correction outlives the next boot', () => {
+  /** The manifest as Git declares it, naming whichever gateway it still names. */
+  function declaredWithGateway(gateway: { name: string; namespace: string }) {
+    const input = clusterInput({ name: 'cluster' });
+    const platform = input.chartValues?.platform as Record<string, unknown>;
+    return {
+      ...toAuthoredManifest(manifest),
+      targets: [
+        {
+          name: 'cluster',
+          adapter: 'kubernetes' as const,
+          connection: {
+            apiServer: input.apiServer,
+            namespace: input.namespace,
+            delivery: input.delivery,
+            chartContract: input.chartContract!,
+            chartValues: { platform: { ...platform, gateway } },
+          },
+        },
+      ],
+    };
+  }
+
+  test('the row still holds what was connected, and the manifest entry it now disagrees with is named', async () => {
+    const { registry } = fakes();
+    const declared = declaredWithGateway({
+      name: 'gateway-that-moved',
+      namespace: 'gateway-that-moved',
+    });
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
+    });
+    expect((await targetRow('cluster'))?.connection).toMatchObject({
+      chartValues: {
+        platform: {
+          gateway: { name: 'gateway-that-moved' },
+        },
+      },
+    });
+
+    // The correction, through the only act there is for it.
+    const connected = await connectTarget(
+      clusterInput({ name: 'cluster' }),
+      context(registry),
+    );
+    expect(connected.ok).toBe(true);
+
+    // The restart. Both pods do this; the reconciler and the web process each
+    // call `loadStoredManifest` once at startup.
+    const booted = await loadStoredManifest(database().db, {});
+
+    const row = await targetRow('cluster');
+    expect(row?.connection).toEqual(connectionFor('kubernetes'));
+    // Not reset to awaiting-inspection either: nothing was declared, so there
+    // is nothing about this Target's assessment for a boot to invalidate.
+    expect(row?.health).toBe('healthy');
+    expect(row?.inspectedAt).not.toBeNull();
+
+    // And the disagreement is on the Target rather than in a pod log: Settings
+    // still writes the whole document, so the operator has to be able to see
+    // which paths saving it would take back — paths, never values.
+    const listed = await listTargets(
+      {},
+      { ...context(registry), manifest: booted },
+    );
+    if (!listed.ok) throw new Error('listTargets refused');
+    const cluster = listed.value.targets.find((t) => t.name === 'cluster');
+    expect(cluster?.manifestDivergence).toEqual([
+      'connection.chartValues.platform.gateway.name',
+      'connection.chartValues.platform.gateway.namespace',
+    ]);
+    expect(JSON.stringify(cluster?.manifestDivergence)).not.toContain(
+      'gateway-that-moved',
+    );
+
+    // The screen that made the correction possible: the edit opens on this
+    // Target's own address, which is the one field a fresh connect refuses to
+    // propose and the one field an edit must not make the operator retype.
+    expect(cluster?.edit?.apiServer).toBe(clusterInput().apiServer);
+    expect(cluster?.edit?.proposal.carriedFrom).toBe('cluster');
+  });
+
+  test('a Target whose row matches its manifest entry reports no divergence', async () => {
+    const { registry } = fakes();
+    // Exactly what `clusterInput` connects, so the two agree.
+    const declared = declaredWithGateway({
+      name: 'cluster-gateway',
+      namespace: 'gateway',
+    });
+    const booted = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
+    });
+    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+
+    const listed = await listTargets(
+      {},
+      { ...context(registry), manifest: booted },
+    );
+    if (!listed.ok) throw new Error('listTargets refused');
+    expect(
+      listed.value.targets.find((t) => t.name === 'cluster')
+        ?.manifestDivergence,
+    ).toEqual([]);
+  });
+});
+
 describe('disconnect strands rather than stops', () => {
   test('live Deploys go orphaned and are named, and nothing is destroyed', async () => {
     const { registry, of } = fakes();

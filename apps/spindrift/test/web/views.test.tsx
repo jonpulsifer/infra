@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
-import { Workspace } from '../../src/web/views/apps/workspace.tsx';
+import { ReachEditor, Workspace } from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
@@ -737,5 +737,71 @@ describe('the Targets surface', () => {
 
   test('says nothing about connecting when there is nothing left to connect', () => {
     expect(targets()).not.toContain('Waiting to be connected');
+  });
+
+  test('a connected cluster can be corrected without submitting the whole manifest', () => {
+    // 52's first criterion. The connect form was reachable only from an
+    // unconfigured seed, so the gateway, the authenticated edge, the config
+    // store and the address a record points at were editable nowhere in the
+    // product once a Target existed — the procedure was to hand-write the whole
+    // installation document for a change of three fields.
+    expect(targets()).toContain('Edit connection');
+  });
+
+  test('a Target whose row and manifest entry disagree says so, in paths', () => {
+    const markup = words(targets());
+    expect(markup).toContain(
+      'connection.chartValues.platform.gateway.name, connection.chartValues.platform.gateway.namespace',
+    );
+    // The row wins, and the sentence has to say which way round that is: a
+    // restart leaves the correction alone and saving Settings does not.
+    expect(markup).toContain('a restart leaves it alone');
+    // Paths, never values — the same promise `diffManifestPaths` makes, kept
+    // all the way onto the screen.
+    expect(markup).not.toContain('spindrift-apps');
+  });
+});
+
+describe('changing how a Component is reached (§9)', () => {
+  const view = WORKSPACE_SCENARIOS.service;
+
+  test('reach is not editable where no act is wired', () => {
+    // The fixture screens render this view with no acts. A form whose Save
+    // cannot be called is worse than no form.
+    expect(workspace(view)).not.toContain('Save reach');
+  });
+
+  test('the affordance is on the Component that has one', () => {
+    const markup = renderToStaticMarkup(
+      <Workspace
+        view={view}
+        onSetReach={async () => ({ ok: true, pendingRelease: [] })}
+      />,
+    );
+    expect(markup).toContain('Reach');
+  });
+
+  test('the edit says it takes effect on the next Deploy, not on the one serving', () => {
+    const markup = words(
+      renderToStaticMarkup(
+        <ReachEditor
+          component={view.components[0]!}
+          onSetReach={async () => ({ ok: true, pendingRelease: [] })}
+          onDone={() => undefined}
+        />,
+      ),
+    );
+
+    // §9 keeps exposure out of the mutable-in-place category, and the App chart
+    // renders the route and the filter from values written at deploy time — so
+    // the one thing this form must never read as is a toggle that took effect.
+    expect(markup).toContain(
+      'takes effect on the next Deploy rather than on the one that is serving',
+    );
+    // Both halves of §9's grid, in the words the creation flow uses — the same
+    // constants, so a developer meets the decision once.
+    for (const cell of ['none', 'private', 'public', 'proxy']) {
+      expect(markup).toContain(cell);
+    }
   });
 });

@@ -428,6 +428,7 @@ export const WORKSPACE_SCENARIOS = {
     release: 'Deploy 42',
     components: [
       {
+        id: 'component-beacon-web',
         name: 'web',
         kind: 'service',
         phase: 'LIVE',
@@ -542,6 +543,7 @@ export const WORKSPACE_SCENARIOS = {
     release: 'Deploy 17',
     components: [
       {
+        id: 'component-almanac-web',
         name: 'web',
         kind: 'website',
         phase: 'LIVE',
@@ -607,6 +609,7 @@ export const WORKSPACE_SCENARIOS = {
     release: 'Execution 118',
     components: [
       {
+        id: 'component-ledger-nightly',
         name: 'nightly',
         kind: 'job',
         phase: 'LIVE',
@@ -936,6 +939,18 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     status: 'connected',
     configured: true,
     inspectedAt: '2026-08-02T12:00:00.000Z',
+    // The state 52 exists for, as a screen meets it: an operator moved this
+    // cluster's gateway through the connect form and the manifest still
+    // declares the old one. The row is what deploys render from, so the notice
+    // is a warning about Settings rather than about the Target.
+    manifestDivergence: [
+      'connection.chartValues.platform.gateway.name',
+      'connection.chartValues.platform.gateway.namespace',
+    ],
+    edit: {
+      apiServer: 'https://primary.example:6443',
+      proposal: { carriedFrom: 'Primary', namespace: 'apps' },
+    },
   },
   {
     id: 'target-cloudrun',
@@ -949,6 +964,10 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     status: 'connected',
     configured: true,
     inspectedAt: '2026-08-02T12:00:00.000Z',
+    manifestDivergence: [],
+    // A cloud project has no `platform` values and no probe to read itself
+    // back through, so there is nothing here for an edit form to open onto.
+    edit: null,
   },
   {
     id: 'target-static',
@@ -962,6 +981,10 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     status: 'connected',
     configured: true,
     inspectedAt: '2026-08-02T12:00:00.000Z',
+    manifestDivergence: [],
+    // A cloud project has no `platform` values and no probe to read itself
+    // back through, so there is nothing here for an edit form to open onto.
+    edit: null,
   },
   {
     id: 'target-secondary',
@@ -987,5 +1010,10 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     status: 'connected',
     configured: true,
     inspectedAt: '2026-08-02T12:00:00.000Z',
+    manifestDivergence: [],
+    edit: {
+      apiServer: 'https://secondary.example:6443',
+      proposal: { carriedFrom: 'Secondary', namespace: 'apps' },
+    },
   },
 ];

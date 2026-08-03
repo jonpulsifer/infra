@@ -163,7 +163,12 @@ export function TargetList({
       ) : (
         <div className="flex flex-col gap-3">
           {configured.map((target) => (
-            <TargetCard key={target.id} target={target} />
+            <TargetCard
+              key={target.id}
+              target={target}
+              connecting={connecting}
+              onConnect={onConnect}
+            />
           ))}
         </div>
       )}
@@ -236,9 +241,18 @@ function PendingConnections({
   );
 }
 
-function TargetCard({ target }: { target: TargetListItem }) {
+function TargetCard({
+  target,
+  connecting,
+  onConnect,
+}: {
+  target: TargetListItem;
+  connecting: boolean;
+  onConnect: (input: ConnectTargetInput) => void;
+}) {
   const unhealthy = target.health !== 'healthy';
   const [checklistOpen, setChecklistOpen] = useState(unhealthy);
+  const [editing, setEditing] = useState(false);
   const met = target.prerequisites.filter((item) => item.met).length;
 
   return (
@@ -285,7 +299,7 @@ function TargetCard({ target }: { target: TargetListItem }) {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-1.5 sm:ml-auto">
+          <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
             {target.kinds.map((kind) => (
               <span
                 key={kind}
@@ -295,8 +309,67 @@ function TargetCard({ target }: { target: TargetListItem }) {
                 {kind}
               </span>
             ))}
+            {/*
+              The gateway, the authenticated edge, the config store and the
+              address a record points at are all on this Target's connection,
+              and until this button there was nowhere to correct one: the connect
+              form was reachable only from an unconfigured seed. It is the same
+              form and the same act — §13 makes connect idempotent by name — so
+              the edit is a re-connect rather than a second way to write these.
+            */}
+            {target.edit ? (
+              <Button
+                variant={editing ? 'ghost' : 'outline'}
+                size="sm"
+                onClick={() => setEditing((open) => !open)}
+              >
+                {editing ? 'Cancel' : 'Edit connection'}
+              </Button>
+            ) : null}
           </div>
         </div>
+
+        {/*
+          §6: "drift is detected and surfaced, never silently corrected",
+          applied to the manifest rather than to what it deploys. The row is what
+          every deploy renders from and it wins over the document a boot writes
+          back — but Settings still submits the whole document, so a Target that
+          has been corrected here says which paths a save would take back.
+          Paths, never values: a connection is credential-free today and this
+          line does not lean on it staying that way.
+        */}
+        {target.manifestDivergence.length > 0 ? (
+          <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+            <AlertTriangle
+              aria-hidden="true"
+              className="mt-0.5 size-3.5 shrink-0 text-warning"
+            />
+            <span>
+              This Target's connection differs from what the installation
+              manifest declares for it, at{' '}
+              <span className="font-mono">
+                {target.manifestDivergence.join(', ')}
+              </span>
+              . The row is what deploys render from and a restart leaves it
+              alone; saving the manifest in Settings replaces it.
+            </span>
+          </div>
+        ) : null}
+
+        {editing && target.edit ? (
+          <div className="rounded-md border border-border-soft bg-secondary/40 px-4 py-4">
+            <ConnectTargetForm
+              kind="kubernetes"
+              name={target.name}
+              apiServer={target.edit.apiServer}
+              targets={[target.name]}
+              proposal={target.edit.proposal}
+              connecting={connecting}
+              onConnect={onConnect}
+              onCancel={() => setEditing(false)}
+            />
+          </div>
+        ) : null}
 
         {target.prerequisites.length > 0 ? (
           <Collapsible open={checklistOpen} onOpenChange={setChecklistOpen}>
