@@ -15,6 +15,10 @@ jq = "latest"
 ripgrep = "latest"
 sd = "latest"
 1password-cli = "latest"
+bun = "latest"
+helix = "latest"
+herdr = "latest"
+worktrunk = "latest"
 
 # cloud stuff
 kubectl = "latest"
@@ -23,7 +27,8 @@ k9s = "latest"
 kubecolor = "latest"
 kubectx = "latest"
 kubens = "latest"
-krew = "latest"
+# kubectl plugins straight from their releases — no krew, no krew index
+"github:cloudnative-pg/cloudnative-pg" = { version = "latest", exe = "kubectl-cnpg" }
 
 {%- if os() == "linux" %}
 btop = "latest"
