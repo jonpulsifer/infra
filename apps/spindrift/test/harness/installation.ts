@@ -27,8 +27,20 @@ import {
   parseManifest,
   resolveManifest,
 } from '../../src/config/manifest.ts';
-import type { NewTarget } from '../../src/db/schema.ts';
-import type { TargetConnection } from '../../src/domain/target.ts';
+import type { Database } from '../../src/db/client.ts';
+import {
+  type NewTarget,
+  type NewVessel,
+  type Vessel,
+  vessels,
+} from '../../src/db/schema.ts';
+import {
+  type DeployTargetRef,
+  deployTargetOf,
+  type TargetConnection,
+} from '../../src/domain/target.ts';
+import { vesselKindFor } from '../../src/domain/vessel.ts';
+import { defaultVesselId } from './db.ts';
 
 const FIXTURE = join(import.meta.dir, '../fixtures/installation.example.yaml');
 
@@ -86,7 +98,7 @@ export function clusterInput(
   overrides: Partial<KubernetesConnectInput> = {},
 ): KubernetesConnectInput {
   return {
-    kind: 'kubernetes',
+    kind: 'cluster',
     name: 'cluster',
     apiServer: 'https://cluster.example.test',
     namespace: 'apps',
@@ -124,7 +136,7 @@ export function clusterInput(
 /** The kubernetes arm of `connectTargetInput`. */
 export type KubernetesConnectInput = Extract<
   ConnectTargetInput,
-  { kind: 'kubernetes' }
+  { kind: 'cluster' }
 >;
 
 /**
@@ -146,7 +158,7 @@ export function cloudInput(
   overrides: Partial<CloudConnectInput> = {},
 ): CloudConnectInput {
   return {
-    kind: 'cloud',
+    kind: 'gcp-project',
     name: 'cloud',
     project: 'example-vessel',
     region: 'somewhere',
@@ -157,16 +169,24 @@ export function cloudInput(
 }
 
 /** The cloud arm of `connectTargetInput`. */
-export type CloudConnectInput = Extract<ConnectTargetInput, { kind: 'cloud' }>;
+export type CloudConnectInput = Extract<
+  ConnectTargetInput,
+  { kind: 'gcp-project' }
+>;
 
-/** A connection of the shape one adapter type needs. */
+/**
+ * The **surface** half of a connection, as its adapter needs it.
+ *
+ * Where the boundary is, and what it can reach, are {@link vesselFor}'s — the
+ * same split the row has. A test that needs the flat view an adapter receives
+ * composes them with `deployTargetOf`, exactly as core does.
+ */
 export function connectionFor(adapter: TargetAdapter): TargetConnection {
   switch (adapter) {
     case 'kubernetes': {
       const input = clusterInput();
       return {
         adapter,
-        apiServer: input.apiServer,
         namespace: input.namespace,
         delivery: input.delivery,
         // Mirrors what the connect act stores, field for field: a helper that
@@ -184,7 +204,6 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
       const input = cloudInput();
       return {
         adapter,
-        project: input.project,
         region: input.region,
         endpoint: input.runEndpoint,
         policyEndpoint: CLOUD_ENDPOINTS.policy,
@@ -192,13 +211,62 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
     }
     case 'static': {
       const input = cloudInput();
-      return {
-        adapter,
-        project: input.project,
-        endpoint: input.hostingEndpoint,
-      };
+      return { adapter, endpoint: input.hostingEndpoint };
     }
   }
+}
+
+/** The boundary one adapter's surfaces sit on. */
+export function vesselFor(adapter: TargetAdapter): NewVessel {
+  const kind = vesselKindFor(adapter);
+  return {
+    name: `vessel-${crypto.randomUUID()}`,
+    kind,
+    location:
+      kind === 'cluster'
+        ? { kind: 'cluster', apiServer: clusterInput().apiServer }
+        : { kind: 'gcp-project', project: cloudInput().project },
+  };
+}
+
+/**
+ * A vessel row a Target can reference, inserted and returned.
+ *
+ * Every Target needs one — `vesselId` is NOT NULL — so this is what most
+ * fixtures reach for rather than building the pair by hand.
+ */
+export async function insertVessel(
+  db: Database,
+  adapter: TargetAdapter = 'kubernetes',
+  overrides: Partial<NewVessel> = {},
+): Promise<Vessel> {
+  const [row] = await db
+    .insert(vessels)
+    .values({ ...vesselFor(adapter), ...overrides })
+    .returning();
+  return row!;
+}
+
+/**
+ * The flat view an adapter receives, composed exactly as core composes it.
+ *
+ * A test that calls an adapter verb wants this rather than {@link connectionFor}
+ * on its own: the surface half alone is not addressable, and building the pair
+ * by hand in each test is how the two drift apart.
+ */
+export function deployTargetFor(
+  adapter: TargetAdapter,
+  name = `target-${adapter}`,
+): DeployTargetRef {
+  const vessel = vesselFor(adapter);
+  return deployTargetOf(
+    { name, adapter, connection: connectionFor(adapter) },
+    {
+      location: vessel.location!,
+      servedHosts: vessel.servedHosts ?? null,
+      reachableRegistries: vessel.reachableRegistries ?? null,
+    },
+  );
 }
 
 /** A complete, healthy Target row, with anything a test cares about overridden. */
@@ -208,6 +276,9 @@ export function targetValues(overrides: Partial<NewTarget> = {}): NewTarget {
     name: `target-${crypto.randomUUID()}`,
     adapter,
     rank: 0,
+    // The isolated database seeds one vessel per kind; a Target that wants its
+    // own passes it. See `defaultVesselId`.
+    vesselId: defaultVesselId(vesselKindFor(adapter)),
     connection: connectionFor(adapter),
     health: 'healthy',
     // The cluster fixture wires an ExternalAuth backend, so it asserts the edge

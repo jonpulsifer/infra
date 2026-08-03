@@ -22,8 +22,8 @@ import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import type { TargetInspection } from '../../domain/capabilities.ts';
 import type { ArtifactType, DesiredState } from '../../domain/desired-state.ts';
 import type {
+  AdapterConnection,
   KubernetesDeliveryFlavour,
-  TargetConnection,
 } from '../../domain/target.ts';
 
 /**
@@ -46,11 +46,17 @@ export interface DeployTarget {
    * factory over live connection state, and would still have to be rebuilt
    * whenever an operator reconnected one.
    *
+   * **One flat object, composed from two rows.** Core stores the surface's
+   * facts on the Target and the boundary's on its Vessel, and `deployTargetOf`
+   * assembles them before the call. An adapter is handed what it always was,
+   * and is deliberately not told which row each field came from — where the
+   * facts are *kept* is core's normalization, not this seam's business.
+   *
    * **Never a credential** (§13: "one auth mode — native OIDC federation,
    * nothing stored"). What authorizes a call is minted per request by whatever
    * federates, and is injected when the adapter is constructed.
    */
-  readonly connection: TargetConnection;
+  readonly connection: AdapterConnection;
 }
 
 /**

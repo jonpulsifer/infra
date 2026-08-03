@@ -140,7 +140,6 @@ describe('the stored installation manifest', () => {
         status: 'connected',
         connection: {
           adapter: 'kubernetes',
-          apiServer: 'https://cluster.example.test',
           namespace: 'apps',
           delivery: {
             flavour: 'flux-helmrelease',
@@ -155,7 +154,6 @@ describe('the stored installation manifest', () => {
         status: 'connected',
         connection: {
           adapter: 'cloudrun',
-          project: 'example-vessel',
           region: 'example-region',
           endpoint: 'https://run.example.test',
         },
@@ -165,8 +163,35 @@ describe('the stored installation manifest', () => {
         status: 'connected',
         connection: {
           adapter: 'static',
-          project: 'example-vessel',
           endpoint: 'https://hosting.example.test',
+        },
+      },
+    ]);
+
+    // The boundary facts the seeds stated per surface are stored once. Both
+    // cloud surfaces are one vessel, named for what the suffix used to encode.
+    const vesselRows = await database().db.query.vessels.findMany({
+      orderBy: (vessels, { asc }) => [asc(vessels.name)],
+    });
+    expect(
+      vesselRows
+        // The harness seeds one vessel per kind for fixtures that insert a
+        // Target directly; what this test is about is the ones the manifest
+        // described.
+        .filter((vessel) => !vessel.name.startsWith('fixture-'))
+        .map(({ name, kind, location }) => ({ name, kind, location })),
+    ).toEqual([
+      {
+        name: 'cloud',
+        kind: 'gcp-project',
+        location: { kind: 'gcp-project', project: 'example-vessel' },
+      },
+      {
+        name: 'cluster',
+        kind: 'cluster',
+        location: {
+          kind: 'cluster',
+          apiServer: 'https://cluster.example.test',
         },
       },
     ]);
@@ -208,7 +233,14 @@ describe('the stored installation manifest', () => {
     const cluster = await database().db.query.targets.findFirst({
       where: (targets, { eq }) => eq(targets.name, 'cluster'),
     });
-    expect(cluster?.connection).toMatchObject({
+    // The address moved to the boundary, so that is where the edit lands —
+    // and the surface it carries is still reassessed, because what changed is
+    // still where this Target is.
+    const clusterVessel = await database().db.query.vessels.findFirst({
+      where: (vessels, { eq }) => eq(vessels.name, 'cluster'),
+    });
+    expect(clusterVessel?.location).toEqual({
+      kind: 'cluster',
       apiServer: 'https://replacement.example.test',
     });
     expect(cluster?.health).toBe('unhealthy');
@@ -226,7 +258,8 @@ describe('the stored installation manifest', () => {
     // Target through the product and the document still declares the old one.
     const corrected = {
       adapter: 'kubernetes' as const,
-      apiServer: 'https://cluster.example.test',
+      // No `apiServer`: where the cluster is belongs to its vessel now, and
+      // this is the surface's half.
       namespace: 'apps',
       delivery: {
         flavour: 'flux-helmrelease' as const,
@@ -348,7 +381,6 @@ describe('the stored installation manifest', () => {
         status: 'connected',
         connection: {
           adapter: 'kubernetes',
-          apiServer: 'https://cluster.example.test',
           namespace: 'apps',
           delivery: {
             flavour: 'flux-helmrelease',
@@ -374,7 +406,6 @@ describe('the stored installation manifest', () => {
     expect(after?.status).toBe('connected');
     expect(after?.connection).toEqual({
       adapter: 'kubernetes',
-      apiServer: 'https://cluster.example.test',
       namespace: 'apps',
       delivery: {
         flavour: 'flux-helmrelease',

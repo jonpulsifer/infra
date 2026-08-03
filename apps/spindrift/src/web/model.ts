@@ -27,6 +27,7 @@ import type {
   Reach,
 } from '../domain/desired-state.ts';
 import type { Exclusion } from '../domain/placement.ts';
+import type { VesselKind } from '../domain/vessel.ts';
 
 /**
  * §6's phases, verbatim: `PENDING → APPLYING → WAITING → LIVE | FAILED`.
@@ -661,16 +662,19 @@ export interface TargetListItem {
 /**
  * A connect act this installation is waiting on (§13).
  *
- * One entry per *act*, not per Target: connecting a cloud project registers
- * both of its Targets, so `bluenose-cloudrun` and `bluenose-static` are one
- * pending connection named `bluenose`. §13 is explicit that the split is "a
- * consequence of the model, not a decision", and an onboarding screen that
- * listed two cards would be making the operator learn the second noun that
- * decision exists to avoid.
+ * **One entry per vessel**, which is the same thing as one per act: connecting
+ * a project registers every surface on it, so `bluenose-cloudrun` and
+ * `bluenose-static` are one pending connection named `bluenose`. §13 is
+ * explicit that the split is "a consequence of the model, not a decision", and
+ * a screen listing two cards would make the operator learn it.
+ *
+ * The grouping is now a read rather than a reconstruction. These rows share a
+ * `vesselId`; nothing recovers the act's name by slicing a suffix off a
+ * Target's, which is what used to make an off-convention name unconnectable.
  */
 export interface PendingTargetConnection {
-  /** What `connectTarget` takes as its `kind`. */
-  readonly kind: 'kubernetes' | 'cloud';
+  /** What `connectTarget` takes as its `kind` — the vessel's kind. */
+  readonly kind: VesselKind;
   /** What `connectTarget` takes as its `name`. */
   readonly name: string;
   /** Every Target name this one act would configure. */

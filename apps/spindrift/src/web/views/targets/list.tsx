@@ -103,7 +103,7 @@ export function TargetList({
    * there is. With no pending entry there is nothing seeded either, and an empty
    * proposal is the honest input: nothing has been learnt to carry.
    */
-  const clusterProposal = pending.find((entry) => entry.kind === 'kubernetes')
+  const clusterProposal = pending.find((entry) => entry.kind === 'cluster')
     ?.proposal ?? { carriedFrom: null };
 
   return (
@@ -140,7 +140,7 @@ export function TargetList({
         <Card>
           <CardContent>
             <ConnectTargetForm
-              kind="kubernetes"
+              kind="cluster"
               name=""
               nameEditable
               targets={[]}
@@ -221,7 +221,7 @@ function PendingConnections({
                 {entry.name}
               </span>
               <Badge tone="idle">
-                {entry.kind === 'kubernetes' ? 'cluster' : 'cloud project'}
+                {entry.kind === 'cluster' ? 'cluster' : 'cloud project'}
               </Badge>
               <span className="text-xs text-muted-foreground">
                 declared in the manifest, never connected
@@ -388,7 +388,7 @@ function TargetCard({
         {editing && target.edit ? (
           <div className="rounded-md border border-border-soft bg-secondary/40 px-4 py-4">
             <ConnectTargetForm
-              kind="kubernetes"
+              kind="cluster"
               name={target.name}
               apiServer={target.edit.apiServer}
               targets={[target.name]}

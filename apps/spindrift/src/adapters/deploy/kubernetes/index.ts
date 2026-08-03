@@ -38,7 +38,7 @@ import type {
   DesiredState,
 } from '../../../domain/desired-state.ts';
 import type {
-  KubernetesConnection,
+  KubernetesAdapterConnection,
   KubernetesDelivery,
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
@@ -435,7 +435,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    */
   private async *awaitVerdict(
     api: KubernetesApi,
-    connection: KubernetesConnection,
+    connection: KubernetesAdapterConnection,
     desired: DesiredState,
     object: KubernetesObject,
     ref: DeployRef,
@@ -497,7 +497,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   /** The read on red, once (§6), and the verdict it produces. */
   private async *failed(
     api: KubernetesApi,
-    connection: KubernetesConnection,
+    connection: KubernetesAdapterConnection,
     desired: DesiredState,
     status: DeliveryStatus,
     ref: DeployRef,
@@ -545,7 +545,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
   private async checklist(
     api: KubernetesApi,
-    connection: KubernetesConnection,
+    connection: KubernetesAdapterConnection,
   ): Promise<readonly PrerequisiteResult[]> {
     const delivery = connection.delivery;
     const results = new Map<string, PrerequisiteResult>();
@@ -702,7 +702,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
   private async discover(
     api: KubernetesApi,
-    connection: KubernetesConnection,
+    connection: KubernetesAdapterConnection,
   ): Promise<TargetDiscovery> {
     const [nodes, storageClasses, postgres, redis, egress, policy, stores] =
       await Promise.all([
@@ -772,7 +772,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
   // --- plumbing ------------------------------------------------------------
 
-  private api(connection: KubernetesConnection): KubernetesApi {
+  private api(connection: KubernetesAdapterConnection): KubernetesApi {
     return new KubernetesApi({
       apiServer: connection.apiServer,
       token: this.options.token,
@@ -782,14 +782,16 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     });
   }
 
-  private connectionOf(target: DeployTarget): KubernetesConnection | null {
+  private connectionOf(
+    target: DeployTarget,
+  ): KubernetesAdapterConnection | null {
     return target.connection.adapter === 'kubernetes'
       ? target.connection
       : null;
   }
 
   private deliveryObject(
-    connection: KubernetesConnection,
+    connection: KubernetesAdapterConnection,
     desired: DesiredState,
     image: string,
   ): KubernetesObject {

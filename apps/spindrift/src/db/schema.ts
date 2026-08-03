@@ -51,6 +51,7 @@ import type {
 import type { Draft } from '../domain/creation-draft.ts';
 import type { ConfigEntry } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
+import { VESSEL_KINDS, type VesselLocation } from '../domain/vessel.ts';
 import type { CoreSignature } from '../supply-chain/sign.ts';
 import type { BackendProvenanceAssessment } from '../supply-chain/verify.ts';
 
@@ -194,6 +195,17 @@ export const targetAdapter = pgEnum('target_adapter', [
   'cloudrun',
   'static',
 ]);
+
+/**
+ * The tenancy boundary a Target is a surface on — `VesselKind` in
+ * `src/domain/vessel.ts`.
+ *
+ * A different axis from {@link targetAdapter}, which names the runtime: a
+ * `gcp-project` carries two adapters, and `kubernetes` is one adapter on a
+ * `cluster`. Kept as an independent enum here for the reason the adapter one
+ * is.
+ */
+export const vesselKind = pgEnum('vessel_kind', VESSEL_KINDS);
 
 /**
  * §13: "Disconnect always works: live Deploys go `orphaned`... reconnect
@@ -835,19 +847,79 @@ export const datastores = pgTable('datastores', {
  * time it reads them. Storing a derived value is storing something that can
  * be stale in a way nothing will notice.
  */
+/**
+ * The tenancy boundary Targets are surfaces on (§13, §14).
+ *
+ * One row per place things deploy into — a cluster, a cloud project, later
+ * whatever other tenancy container a provider offers. What lives here is every
+ * fact that is
+ * true of the boundary rather than of one runtime on it, which is what makes it
+ * impossible for two surfaces to disagree about one of them. See
+ * `src/domain/vessel.ts` for why this noun exists after §13 declined it.
+ */
+export const vessels = pgTable(
+  'vessels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    kind: vesselKind('kind').notNull(),
+    /**
+     * Where the boundary is, in its own kind's terms. Never a credential.
+     *
+     * Null for the same reason `targets.connection` is null: the manifest seeds
+     * a vessel's identity and rank without necessarily stating how to reach it,
+     * and that half-ready state is one §13 intends to be visible rather than
+     * one to fabricate a value for. A Target is addressable exactly when its
+     * own connection **and** its vessel's location are both present.
+     */
+    location: jsonbDocument('location').$type<VesselLocation>(),
+    /** §33's reachability input, stated once for every surface on this vessel. */
+    servedHosts: text('served_hosts').array(),
+    /** §3, and boundary-shaped for the same reason. */
+    reachableRegistries: text('reachable_registries').array(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Connect is idempotent by name at the vessel level too: reconnecting a
+    // project must reuse its vessel rather than minting a second one that its
+    // surfaces would then be split across.
+    unique('vessels_name_unique').on(table.name),
+  ],
+);
+
 export const targets = pgTable(
   'targets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     adapter: targetAdapter('adapter').notNull(),
+    /**
+     * The boundary this Target is a surface on.
+     *
+     * `restrict` rather than `cascade`, matching `apps.repositoryId`: removing
+     * a vessel must never be a way to delete the Targets that reference it,
+     * and a vessel with live surfaces is not a vessel anyone meant to drop.
+     */
+    vesselId: uuid('vessel_id')
+      .notNull()
+      .references(() => vessels.id, { onDelete: 'restrict' }),
     status: targetStatus('status').notNull().default('connected'),
     /** §13: "set a global ordered rank across Targets." */
     rank: integer('rank').notNull(),
     /**
-     * How the adapter reaches this Target — `TargetConnection` in
-     * `src/domain/target.ts`. Never a credential: §13 settles one auth mode,
-     * "native OIDC federation, nothing stored."
+     * The **surface** half of how this Target is reached —
+     * `TargetConnection` in `src/domain/target.ts`. Never a credential: §13
+     * settles one auth mode, "native OIDC federation, nothing stored."
+     *
+     * Only facts true of this runtime and not of its neighbours on the same
+     * vessel: a region, an API root, a namespace, a delivery flavour. Where the
+     * boundary *is*, and what it can reach, belong to {@link vessels} — the
+     * adapter still receives one flat view, composed by `deployTargetOf`.
      *
      * Null means the manifest has established the Target's identity and rank,
      * but neither desired state nor an operator has supplied connection facts.
@@ -1340,9 +1412,17 @@ export const datastoresRelations = relations(datastores, ({ one }) => ({
   }),
 }));
 
-export const targetsRelations = relations(targets, ({ many }) => ({
+export const targetsRelations = relations(targets, ({ one, many }) => ({
+  vessel: one(vessels, {
+    fields: [targets.vesselId],
+    references: [vessels.id],
+  }),
   deploys: many(deploys),
   datastores: many(datastores),
+}));
+
+export const vesselsRelations = relations(vessels, ({ many }) => ({
+  targets: many(targets),
 }));
 
 export const configItemsRelations = relations(configItems, ({ one }) => ({
@@ -1415,6 +1495,8 @@ export type NewComponentTargetDesired =
 export type Datastore = typeof datastores.$inferSelect;
 export type NewDatastore = typeof datastores.$inferInsert;
 export type Target = typeof targets.$inferSelect;
+export type Vessel = typeof vessels.$inferSelect;
+export type NewVessel = typeof vessels.$inferInsert;
 export type NewTarget = typeof targets.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

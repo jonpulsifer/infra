@@ -7,9 +7,16 @@
  */
 import { sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
-import { installation, targets } from '../db/schema.ts';
+import { installation, targets, vessels } from '../db/schema.ts';
 import { unreachablePrerequisites } from '../domain/capabilities.ts';
 import type { TargetConnection } from '../domain/target.ts';
+import {
+  claimsDisagree,
+  unionOfClaims,
+  type VesselKind,
+  type VesselLocation,
+  vesselKindFor,
+} from '../domain/vessel.ts';
 import type {
   AuthoredManifest,
   InstallationManifest,
@@ -332,8 +339,11 @@ async function reconcileManifestTargets(
   manifest: AuthoredManifest,
   write: ManifestWrite,
 ): Promise<void> {
+  const reconciledVessels = await reconcileManifestVessels(db, manifest, write);
+
   for (const [rank, target] of manifest.targets.entries()) {
     const { name, adapter } = target;
+    const vessel = reconciledVessels.get(vesselNameOfSeed(target))!;
     const declaredConnection = connectionFromSeed(target);
     const existing = await db.query.targets.findFirst({
       where: (targets, { eq }) => eq(targets.name, name),
@@ -348,16 +358,20 @@ async function reconcileManifestTargets(
       'Declared Target connection is awaiting inspection',
       adapter,
     );
+    // Either half moving invalidates the assessment: the surface's own facts,
+    // or the boundary they are facts about.
     const hasConnectionChange =
-      write === 'declared' &&
-      declaredConnection !== null &&
-      !Bun.deepEquals(existing?.connection, declaredConnection, true);
+      vessel.moved ||
+      (write === 'declared' &&
+        declaredConnection !== null &&
+        !Bun.deepEquals(existing?.connection, declaredConnection, true));
 
     await db
       .insert(targets)
       .values({
         name,
         adapter,
+        vesselId: vessel.id,
         rank,
         status:
           declaredConnection === null
@@ -416,14 +430,205 @@ function assertedBySeed(target: TargetSeed): {
 
 function connectionFromSeed(target: TargetSeed): TargetConnection | null {
   if (target.connection === undefined) return null;
+  // The boundary's half is stripped out here and lands on the vessel instead.
+  // The seed format still states it per surface — see `vesselNameOfSeed` for
+  // why that is deliberate, and #61 for its removal.
   switch (target.adapter) {
-    case 'kubernetes':
-      return { adapter: 'kubernetes', ...target.connection };
-    case 'cloudrun':
-      return { adapter: 'cloudrun', ...target.connection };
-    case 'static':
-      return { adapter: 'static', ...target.connection };
+    case 'kubernetes': {
+      const {
+        apiServer: _apiServer,
+        servedHosts: _servedHosts,
+        reachableRegistries: _reachableRegistries,
+        ...surface
+      } = target.connection;
+      return { adapter: 'kubernetes', ...surface };
+    }
+    case 'cloudrun': {
+      const {
+        project: _project,
+        servedHosts: _servedHosts,
+        reachableRegistries: _reachableRegistries,
+        ...surface
+      } = target.connection;
+      return { adapter: 'cloudrun', ...surface };
+    }
+    case 'static': {
+      const {
+        project: _project,
+        servedHosts: _servedHosts,
+        ...surface
+      } = target.connection;
+      return { adapter: 'static', ...surface };
+    }
   }
+}
+
+/**
+ * Which vessel a seed is a surface of.
+ *
+ * **The one place left that recovers a boundary from a name**, and it is here
+ * rather than in the domain because the *manifest format* still states a
+ * boundary per surface: two cloud seeds say they share a project by being
+ * called `<name>-cloudrun` and `<name>-static`, which `manifest.schema.ts`
+ * enforces. Everything downstream reads `vesselId`.
+ *
+ * Giving the manifest a `vessels` array — and deleting this — is #61. It was
+ * kept out of the change that introduced the Vessel row because a manifest
+ * schema change has a failure mode where the stored document fails validation
+ * and the installation is silently re-seeded from its declaration, which is
+ * worth landing on its own.
+ */
+function vesselNameOfSeed(target: TargetSeed): string {
+  if (target.adapter === 'kubernetes') return target.name;
+  const suffix = `-${target.adapter}`;
+  return target.name.endsWith(suffix)
+    ? target.name.slice(0, -suffix.length)
+    : target.name;
+}
+
+/** The vessels a manifest's seeds describe between them. */
+function vesselsFromSeeds(manifest: AuthoredManifest): Map<
+  string,
+  {
+    kind: VesselKind;
+    location: VesselLocation | null;
+    servedHosts: string[] | null;
+    reachableRegistries: string[] | null;
+  }
+> {
+  const byName = new Map<
+    string,
+    {
+      kind: VesselKind;
+      location: VesselLocation | null;
+      servedHosts: string[] | null;
+      reachableRegistries: string[] | null;
+      served: (readonly string[] | undefined)[];
+      registries: (readonly string[] | undefined)[];
+    }
+  >();
+
+  for (const target of manifest.targets) {
+    const name = vesselNameOfSeed(target);
+    const kind = vesselKindFor(target.adapter);
+    const entry = byName.get(name) ?? {
+      kind,
+      location: null,
+      servedHosts: null,
+      reachableRegistries: null,
+      served: [],
+      registries: [],
+    };
+
+    if (target.connection !== undefined) {
+      // Either surface of a project states the same project id; the first to
+      // arrive settles it, and the schema's pairing rule is what makes them
+      // agree.
+      if (target.adapter === 'kubernetes') {
+        entry.location ??= {
+          kind: 'cluster',
+          apiServer: target.connection.apiServer,
+        };
+        entry.registries.push(target.connection.reachableRegistries);
+      } else {
+        entry.location ??= {
+          kind: 'gcp-project',
+          project: target.connection.project,
+        };
+        if (target.adapter === 'cloudrun') {
+          entry.registries.push(target.connection.reachableRegistries);
+        }
+      }
+      entry.served.push(target.connection.servedHosts);
+    }
+    byName.set(name, entry);
+  }
+
+  const vesselsByName = new Map<
+    string,
+    {
+      kind: VesselKind;
+      location: VesselLocation | null;
+      servedHosts: string[] | null;
+      reachableRegistries: string[] | null;
+    }
+  >();
+  for (const [name, entry] of byName) {
+    // The union, not a winner: two surfaces of one boundary *can* state
+    // different reach today, and silently taking one would be the bug the
+    // Vessel row exists to prevent.
+    const servedHosts = entry.served.some((claim) => claim !== undefined)
+      ? unionOfClaims(entry.served)
+      : null;
+    const reachableRegistries = entry.registries.some(
+      (claim) => claim !== undefined,
+    )
+      ? unionOfClaims(entry.registries)
+      : null;
+    if (claimsDisagree(entry.served) || claimsDisagree(entry.registries)) {
+      console.warn(
+        `installation manifest: the surfaces of vessel ${name} state different reach; ` +
+          'the union is stored, and stating it once per vessel is #61',
+      );
+    }
+    vesselsByName.set(name, {
+      kind: entry.kind,
+      location: entry.location,
+      servedHosts,
+      reachableRegistries,
+    });
+  }
+  return vesselsByName;
+}
+
+/** One reconciled vessel: its id, and whether this pass moved it. */
+interface ReconciledVessel {
+  readonly id: string;
+  /**
+   * Whether the boundary changed in a way its surfaces have to be reassessed
+   * for.
+   *
+   * A Target's checklist is a set of claims about a place — that the namespace
+   * exists, that the federated identity may act there. Move the place and every
+   * one of those claims is about somewhere else, so the surfaces are reassessed
+   * exactly as they are when their own connection changes. Without this a
+   * re-pointed `apiServer` would leave every Target on it reading `healthy`
+   * against a cluster nobody has looked at.
+   */
+  readonly moved: boolean;
+}
+
+/** Create or update the vessels a manifest describes, and return their ids. */
+async function reconcileManifestVessels(
+  db: Pick<Database, 'insert' | 'query'>,
+  manifest: AuthoredManifest,
+  write: ManifestWrite,
+): Promise<Map<string, ReconciledVessel>> {
+  const reconciled = new Map<string, ReconciledVessel>();
+  for (const [name, vessel] of vesselsFromSeeds(manifest)) {
+    const existing = await db.query.vessels.findFirst({
+      where: (vessels, { eq }) => eq(vessels.name, name),
+    });
+    const moved =
+      write === 'declared' &&
+      vessel.location !== null &&
+      !Bun.deepEquals(existing?.location, vessel.location, true);
+    const [row] = await db
+      .insert(vessels)
+      .values({ name, ...vessel })
+      .onConflictDoUpdate({
+        target: vessels.name,
+        set: {
+          kind: vessel.kind,
+          location: vessel.location,
+          servedHosts: vessel.servedHosts,
+          reachableRegistries: vessel.reachableRegistries,
+        },
+      })
+      .returning({ id: vessels.id });
+    reconciled.set(name, { id: row!.id, moved });
+  }
+  return reconciled;
 }
 
 /**
