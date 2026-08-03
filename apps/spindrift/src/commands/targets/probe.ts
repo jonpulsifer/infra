@@ -26,7 +26,6 @@
  */
 import { z } from 'zod';
 import type { ClusterProbe } from '../../adapters/deploy/contract.ts';
-import { VALUES_CONTRACT } from '../../adapters/deploy/kubernetes/values.ts';
 import { connectionProposal } from '../../domain/target-onboarding.ts';
 import type { TargetConnectionProposal } from '../../web/model.ts';
 import { type Command, failed, ok } from '../types.ts';
@@ -45,16 +44,6 @@ export interface ProbeClusterResult {
   readonly probe: ClusterProbe;
   /** What a Target this installation already has would lend (§13). */
   readonly proposal: TargetConnectionProposal;
-  /**
-   * The value contract this build renders (§7).
-   *
-   * Offered as the default for `chartContract` because until the OCI swap every
-   * Target fetches the App chart from a branch of the same repository, so a
-   * second cluster's chart is this repository's chart. The field stays editable:
-   * the moment a Target pins something else, stating it is what turns skew into
-   * a checklist failure instead of a deploy that renders the wrong values.
-   */
-  readonly rendersContract: string;
 }
 
 export const probeCluster: Command<
@@ -78,6 +67,5 @@ export const probeCluster: Command<
   return ok({
     probe: await adapter.probe(input.apiServer),
     proposal: connectionProposal(rows, 'cluster'),
-    rendersContract: VALUES_CONTRACT,
   });
 };

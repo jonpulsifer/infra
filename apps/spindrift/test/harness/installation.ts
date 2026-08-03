@@ -14,7 +14,6 @@
  * ranks silently deciding what a healthy Target looks like.
  */
 import { join } from 'node:path';
-import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
 import type { ConnectTargetInput } from '../../src/commands/targets/connect.ts';
 import { GCP_CREDENTIALS_VAR } from '../../src/config/federation-credential.ts';
 import {
@@ -107,7 +106,6 @@ export function clusterInput(
       namespace: 'apps',
       sourceRef: { name: 'charts', namespace: 'delivery' },
     },
-    chartContract: VALUES_CONTRACT,
     // The edge the ExternalAuth backend below is. Asserted because §3 says
     // nothing reports it — and `reaches` is left unasserted for the same reason,
     // so this fixture cluster has an authenticated edge and no tunnel.
@@ -192,9 +190,6 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
         // Mirrors what the connect act stores, field for field: a helper that
         // drops one of them makes every "the row holds what was connected"
         // assertion pass for the wrong reason.
-        ...(input.chartContract === undefined
-          ? {}
-          : { chartContract: input.chartContract }),
         ...(input.chartValues === undefined
           ? {}
           : { chartValues: input.chartValues }),

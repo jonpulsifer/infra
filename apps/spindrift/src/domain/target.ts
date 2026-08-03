@@ -146,15 +146,6 @@ export interface KubernetesConnection {
    * Spindrift writes is enforced where this is saved, not where it is stored.
    */
   chartValues?: Record<string, unknown>;
-  /**
-   * The value-contract version the App chart pinned for this Target declares
-   * (§7, read at pin time).
-   *
-   * Stated rather than read, because v1 sources the chart from a branch rather
-   * than from a pinned OCI artifact — so skew is **detected** here rather than
-   * prevented, and detection needs the operator to say what they pinned.
-   */
-  chartContract?: string;
 }
 
 /**

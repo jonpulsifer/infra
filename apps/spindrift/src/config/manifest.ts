@@ -154,7 +154,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
           namespace: 'spindrift-apps',
           sourceRef: { name: 'infra', namespace: 'flux-system' },
         },
-        chartContract: '3',
       },
     },
     {

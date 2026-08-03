@@ -38,7 +38,6 @@ const CLUSTER: OnboardingTargetRow = {
       namespace: 'spindrift-apps',
       sourceRef: { name: 'infra', namespace: 'flux-system' },
     },
-    chartContract: '2',
   },
 };
 
@@ -168,7 +167,6 @@ describe('what a connect may be prefilled with', () => {
       namespace: 'spindrift-apps',
       deliveryFlavour: 'flux-helmrelease',
       sourceRef: { name: 'infra', namespace: 'flux-system' },
-      chartContract: '2',
     });
     // The one field that names a particular cluster.
     expect(proposal).not.toHaveProperty('apiServer');

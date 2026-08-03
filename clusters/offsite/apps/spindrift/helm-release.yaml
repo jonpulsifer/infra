@@ -173,7 +173,6 @@ spec:
                 namespace: flux-system
             apiServer: https://kubernetes.default.svc
             namespace: spindrift-apps
-            chartContract: "3"
             # GHCR and not the artifact registry: these packages are public, so
             # the kubelet pulls them with no credential at all. Reaching the
             # artifact registry would mean an imagePullSecret in every App
@@ -241,7 +240,6 @@ spec:
                 namespace: flux-system
             apiServer: https://folly.lolwtf.ca:6443
             namespace: spindrift-apps
-            chartContract: "3"
             # Public packages, so the kubelet pulls them with no credential —
             # the same reason offsite names GHCR rather than the artifact
             # registry.

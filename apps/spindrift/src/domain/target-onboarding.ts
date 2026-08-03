@@ -82,9 +82,6 @@ function kubernetesProposal(
     ...(connection.delivery.flavour === 'flux-helmrelease'
       ? { sourceRef: connection.delivery.sourceRef }
       : {}),
-    ...(connection.chartContract === undefined
-      ? {}
-      : { chartContract: connection.chartContract }),
     // Carried whole. What the screen takes out of it is `platform.externalAuth`
     // and `platform.secretStore`'s kind — the parts `clusters/base` makes the
     // same on every cluster. What it must not take is `platform.dns`, which
@@ -201,8 +198,6 @@ export interface ClusterConnectChoices {
   readonly deliveryNamespace: string;
   /** The `GitRepository` the App chart is fetched from. */
   readonly sourceRef: { readonly name: string; readonly namespace: string };
-  /** The value contract the App chart pinned here declares (§7). */
-  readonly chartContract: string;
   /** The gateway routes attach to, and the address it answers on. */
   readonly gateway: {
     readonly name: string;
@@ -232,7 +227,6 @@ export interface ClusterConnectPlan {
     readonly namespace: string;
     readonly sourceRef: { readonly name: string; readonly namespace: string };
   };
-  readonly chartContract: string;
   readonly chartValues: Record<string, unknown>;
   readonly reaches: Reach[];
   readonly authReaches: Reach[];
@@ -304,7 +298,6 @@ export function clusterConnectPlan(
       namespace: choices.deliveryNamespace,
       sourceRef: choices.sourceRef,
     },
-    chartContract: choices.chartContract,
     // Only `platform`. §7 gives that key to the operator whole and Spindrift
     // renders `app` and `shared` per deploy, so writing either here would be
     // saving a value the next deploy overwrites.
@@ -366,7 +359,6 @@ export function targetSeedOf(
       apiServer: plan.apiServer,
       namespace: plan.namespace,
       delivery: plan.delivery,
-      chartContract: plan.chartContract,
       chartValues: plan.chartValues,
     },
   };

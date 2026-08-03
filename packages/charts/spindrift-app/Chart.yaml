@@ -9,4 +9,4 @@ annotations:
   # ignores unknown values silently, so a Target pinned to a chart whose
   # contract has moved would apply cleanly, report green, and run without the
   # config it was handed. Core turns that skew into a prerequisite failure.
-  spindrift.dev/values-contract: "2"
+  spindrift.dev/values-contract: "3"
