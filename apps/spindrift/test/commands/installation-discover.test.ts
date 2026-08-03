@@ -149,6 +149,41 @@ describe('a refusal is never an empty answer', () => {
     if (fact.kind !== 'unavailable') return;
     expect(fact.reason).toContain('Cloud Storage');
     expect(fact.reason).toContain(PROJECT);
+    // Which refusal, not just that there was one. A disabled API arrives as a
+    // `403` like a missing grant does, and telling an operator they lack a
+    // permission they already hold sends them to write IAM policy for a switch
+    // in a console. The sentence has to be the console's.
+    expect(fact.reason).toContain('not enabled');
+    expect(fact.reason).not.toContain('may not list');
+  });
+
+  test('a disabled API is still read when only the message says so', async () => {
+    // The other shape the same fact arrives in: these APIs put the reason in
+    // `error.details[].reason` on some calls and only in the message on
+    // others, which is why the fold matches the body as well as the parsed
+    // reason. One of the two halves being unbacked is one half of operators
+    // being told to fix a permission that is correct.
+    const { context } = installation({
+      projects: [PROJECT],
+      refuse: {
+        storage: {
+          status: 403,
+          message:
+            'Cloud Storage API has not been used in project 1 before or it is disabled. SERVICE_DISABLED',
+        },
+      },
+    });
+
+    const fact = factAt(
+      await discover(context, { project: PROJECT }),
+      'sources',
+      'buckets',
+    );
+
+    expect(fact.kind).toBe('unavailable');
+    if (fact.kind !== 'unavailable') return;
+    expect(fact.reason).toContain('not enabled');
+    expect(fact.reason).not.toContain('may not list');
   });
 
   test('a project with no buckets is found, with none', async () => {
@@ -326,6 +361,51 @@ describe('truncation is not silence', () => {
     ]);
     expect(fake.requests).toHaveLength(3);
   });
+
+  test('a listing that will not end is refused, never cut short', async () => {
+    // The cap earns its place only if hitting it says so. A `break` here would
+    // answer twenty projects out of thirty as a complete list — the same defect
+    // as an empty answer, wearing a plausible number.
+    const { context, fake } = installation({
+      projects: Array.from({ length: 30 }, (_, index) => `example-${index}`),
+      pageSize: 1,
+    });
+
+    const fact = factAt(await discover(context), 'cloud', 'artifactsProject');
+
+    expect(fact.kind).toBe('unavailable');
+    if (fact.kind !== 'unavailable') return;
+    expect(fact.reason).toContain('did not finish listing');
+    // And it stopped asking, rather than walking all thirty pages anyway.
+    expect(fake.requests.length).toBeLessThan(30);
+  });
+
+  test('more key rings than one pass will open is refused, not sampled', async () => {
+    // Same rule one API over: `signingKeys` opens each ring with its own call,
+    // so the cap is on rings rather than pages — and a signer list built from
+    // the first twenty rings of thirty is a manifest that validates and then
+    // fails at the first cosign call.
+    const { context } = installation({
+      projects: [PROJECT],
+      buckets: { [PROJECT]: [] },
+      keys: Array.from({ length: 30 }, (_, index) => ({
+        project: PROJECT,
+        location: 'a-region',
+        ring: `ring-${index}`,
+        name: 'signer',
+      })),
+    });
+
+    const fact = factAt(
+      await discover(context, { project: PROJECT, kmsLocation: 'a-region' }),
+      'supplyChain',
+      'signer',
+    );
+
+    expect(fact.kind).toBe('unavailable');
+    if (fact.kind !== 'unavailable') return;
+    expect(fact.reason).toContain('key rings');
+  });
 });
 
 describe('the credential answers what it can without a call', () => {
@@ -342,7 +422,31 @@ describe('the credential answers what it can without a call', () => {
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
-    expect(fact.suggested).toEqual({ label: PROJECT, value: PROJECT });
+    // The project is what gets written; where it came from is what gets read.
+    expect(fact.suggested?.value).toBe(PROJECT);
+    expect(fact.suggested?.label).toContain('credential');
+  });
+
+  test('a project id at GCP’s longest is still read out of the identity', async () => {
+    // The bound, exactly: GCP project ids run 6 to 30 characters, and a regex
+    // one short at the top silently stops suggesting anything for the longest
+    // legal name — a wrong answer that looks like "this credential says
+    // nothing".
+    const longest = 'example-home-with-a-longer-nam';
+    expect(longest).toHaveLength(30);
+    const fake = new FakeGcpDiscovery({ token: TOKEN, refuse: {} });
+    const context = contextFor(
+      fake,
+      manifestWith({
+        impersonationUrl: `https://iamcredentials.example.test/v1/projects/-/serviceAccounts/controller@${longest}.iam.gserviceaccount.com:generateAccessToken`,
+      }),
+    );
+
+    const fact = factAt(await discover(context), 'cloud', 'homeVesselProject');
+
+    expect(fact.kind).toBe('found');
+    if (fact.kind !== 'found') return;
+    expect(fact.suggested?.value).toBe(longest);
   });
 
   test('an identity that is not a service account suggests nothing', async () => {
@@ -376,8 +480,17 @@ describe('the credential answers what it can without a call', () => {
     );
 
     const facts = await discover(context);
+    const home = factAt(facts, 'cloud', 'homeVesselProject');
 
-    expect(factAt(facts, 'cloud', 'homeVesselProject').kind).toBe('found');
+    expect(home.kind).toBe('found');
+    if (home.kind !== 'found') return;
+    // This is the one place the two arms are crossed — a refused listing comes
+    // back `found` — so the candidate has to say where it came from. Without
+    // that, a `403` on `projects.list` reads on the screen exactly like a
+    // project the cloud confirmed, which is the laundering the arms exist for.
+    expect(home.candidates).toHaveLength(1);
+    expect(home.candidates[0]?.label).toContain('credential');
+    expect(home.candidates[0]?.value).toBe(PROJECT);
     // And the key it cannot suggest anything for stays honest about the same
     // refusal, rather than borrowing the answer.
     expect(factAt(facts, 'cloud', 'artifactsProject').kind).toBe('unavailable');
@@ -397,6 +510,25 @@ describe('an installation with no cloud identity', () => {
     expect(result.failure.message).toContain('this installation');
     // Proven rather than described: nothing was asked, so nothing failed.
     expect(fake.requests).toEqual([]);
+  });
+
+  test('a registry that builds no discovery client is refused as a fact too', async () => {
+    // `discovery` is optional on `AdapterRegistry` for the reason the four
+    // lookups above it are — a hand-built registry omits what it has no opinion
+    // about — so the absent case is reachable and is a different sentence from
+    // the absent-federation one above. A process that cannot reach a cloud API
+    // is a fact about the process, not about the manifest.
+    const { context } = installation({ projects: [PROJECT] });
+
+    const result = await discoverInstallationFacts(
+      {},
+      { ...context, adapters: { ...context.adapters, discovery: () => null } },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain('this process');
   });
 });
 

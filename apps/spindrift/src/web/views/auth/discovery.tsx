@@ -1,5 +1,5 @@
 /**
- * Confirming cloud facts instead of typing them (§13, §20, ticket 32 slice 2).
+ * Confirming cloud facts instead of typing them (§13, §20).
  *
  * The settings form below this panel can already edit every manifest key. What
  * it cannot do is tell an operator what the right value *is* — so a project id
@@ -12,8 +12,8 @@
  * requirement `installation.tsx` states for the form itself. Every answer
  * carries its own `path`, the panel titles it with {@link humanize} of the last
  * segment, and applying a candidate is {@link withValueAt} at that path — so
- * the panel keeps working as ticket 33 removes keys from the schema, and a
- * value it cannot place is not a value it can silently misplace.
+ * the panel keeps working as keys leave the schema, and a value it cannot place
+ * is not a value it can silently misplace.
  *
  * **A refusal reads as a fact, not as a field error.** That is the third of the
  * three refusals `installation.tsx` keeps apart: `unavailable` means the cloud
@@ -34,6 +34,51 @@ import { humanize } from '../../forms/schema.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
+
+/** One ask, in the two arms every answer on this path comes back in. */
+export type DiscoveryAnswer =
+  | { readonly facts: readonly DiscoveredFact[] }
+  | { readonly refusal: string };
+
+/**
+ * The request the panel makes, and the fold of everything it can come back as.
+ *
+ * Named and exported rather than living inside the click handler, for the
+ * reason {@link applyDiscovered} is: the two things worth asserting here are
+ * **which narrowing arguments are sent** and **that no way of failing turns
+ * into an empty answer**, and neither needs a browser to observe. The panel
+ * around it is then a shell that puts the result in state.
+ *
+ * Three ways of coming back, one shape: a result, a refusal the server gave,
+ * and a `fetch` or a non-JSON body that never reached the command layer at all.
+ * The last one throws out of `command`, and swallowing it into `facts: []`
+ * would put a blank on a confirmation screen that reads as a confirmed answer.
+ */
+export async function askInstallationCloud(narrowing: {
+  readonly project: string;
+  readonly kmsLocation: string;
+}): Promise<DiscoveryAnswer> {
+  const project = narrowing.project.trim();
+  const kmsLocation = narrowing.kmsLocation.trim();
+  try {
+    const result = await command('discoverInstallationFacts', {
+      // Absent rather than empty: the command's input is `.strict()` and an
+      // empty project is not a project, it is the first pass.
+      ...(project === '' ? {} : { project }),
+      ...(kmsLocation === '' ? {} : { kmsLocation }),
+    });
+    return result.ok
+      ? { facts: result.value.facts }
+      : { refusal: result.failure.message };
+  } catch (cause) {
+    return {
+      refusal:
+        cause instanceof Error
+          ? cause.message
+          : 'This installation could not be asked about its cloud.',
+    };
+  }
+}
 
 /**
  * Ask the cloud, then apply what an operator confirms.
@@ -61,32 +106,10 @@ export function DiscoveryPanel({
 
   const discover = async () => {
     setBusy(true);
-    setRefusal(null);
-    try {
-      const result = await command('discoverInstallationFacts', {
-        // Absent rather than empty: the command's input is `.strict()` and an
-        // empty project is not a project, it is the first pass.
-        ...(project.trim() === '' ? {} : { project: project.trim() }),
-        ...(kmsLocation.trim() === ''
-          ? {}
-          : { kmsLocation: kmsLocation.trim() }),
-      });
-      if (result.ok) {
-        setFacts(result.value.facts);
-      } else {
-        setFacts(null);
-        setRefusal(result.failure.message);
-      }
-    } catch (cause) {
-      setFacts(null);
-      setRefusal(
-        cause instanceof Error
-          ? cause.message
-          : 'This installation could not be asked about its cloud.',
-      );
-    } finally {
-      setBusy(false);
-    }
+    const answer = await askInstallationCloud({ project, kmsLocation });
+    setFacts('facts' in answer ? answer.facts : null);
+    setRefusal('refusal' in answer ? answer.refusal : null);
+    setBusy(false);
   };
 
   return (
@@ -131,24 +154,7 @@ export function DiscoveryPanel({
             {busy ? 'Asking…' : 'Ask this installation’s cloud'}
           </Button>
         </div>
-        {refusal === null ? null : (
-          <div
-            role="alert"
-            className="flex items-start gap-2 rounded-md border border-border bg-secondary p-3 text-sm text-foreground"
-          >
-            <CircleAlert
-              aria-hidden="true"
-              className="mt-0.5 size-4 text-subtle"
-            />
-            <div>
-              <p className="font-medium">Nothing could be discovered.</p>
-              <p className="mt-0.5">{refusal}</p>
-              <p className="mt-1 text-muted-foreground">
-                This is a fact about the installation, not a field to correct.
-              </p>
-            </div>
-          </div>
-        )}
+        {refusal === null ? null : <DiscoveryRefusal reason={refusal} />}
         {facts === null ? null : (
           <DiscoveredFactList
             facts={facts}
@@ -160,6 +166,33 @@ export function DiscoveryPanel({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The whole ask having failed, in the neutral voice.
+ *
+ * Not a field error, and the markup says which: `role="alert"` beside a
+ * sentence about the installation rather than an error class on an input. An
+ * operator cannot fix an absent federation or a `403` by re-typing a value in
+ * the form below, and telling them to would be the third of the three refusals
+ * `installation.tsx` keeps apart, collapsed into the first.
+ */
+export function DiscoveryRefusal({ reason }: { readonly reason: string }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-md border border-border bg-secondary p-3 text-sm text-foreground"
+    >
+      <CircleAlert aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
+      <div>
+        <p className="font-medium">Nothing could be discovered.</p>
+        <p className="mt-0.5">{reason}</p>
+        <p className="mt-1 text-muted-foreground">
+          This is a fact about the installation, not a field to correct.
+        </p>
+      </div>
+    </div>
   );
 }
 
