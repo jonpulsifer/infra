@@ -12,15 +12,15 @@ ports:
     port: 9100
     protocol: TCP
 endpoints:
-  - addresses: ["10.2.0.20"]
+  - addresses: ["${CLOUDPI4_IP}"]
     nodeName: cloudpi4
-  - addresses: ["10.2.0.10"]
+  - addresses: ["${CAPSULE_IP}"]
     nodeName: capsule
-  - addresses: ["10.2.0.24"]
+  - addresses: ["${RADIOPI0_IP}"]
     nodeName: radiopi0
-  - addresses: ["10.2.0.11"]
+  - addresses: ["${SPORE_IP}"]
     nodeName: spore
-  - addresses: ["10.2.0.12"]
+  - addresses: ["${FORGE_IP}"]
     nodeName: forge
 --- # trivy:ignore:avd-ksv-0108
 apiVersion: v1

@@ -1,6 +1,6 @@
 # rackpi5 is now the image-only host config spore's signed-RAM-boot
 # publisher consumes (`services.spore.nativeBootTargets.rackpi5` in
-# flake.nix) while the live host migrates to NVMe as [[Fleet/forge]].
+# nix/lib/registry.nix) while the live host runs from NVMe as [[Fleet/forge]].
 # The full toplevel is still built here -- the kernelboot bootloader,
 # initrd services, and initrd SSH all stay -- so spore can keep signing
 # and serving `boot.img` + `nix-store.squashfs` for the box's EEPROM
@@ -13,7 +13,7 @@
 # by hand with `sudo rpi-eeprom-config --edit`:
 #
 #   BOOT_ORDER=0xf7
-#   HTTP_HOST=10.2.0.11
+#   HTTP_HOST=<SPORE_IP from clusters/folly/config/lab-topology.json>
 #   HTTP_PATH=rackpi5-ram
 #
 # Spore serves the signed artifacts as plain static files under
@@ -32,9 +32,8 @@
   ...
 }:
 let
-  lab =
-    (builtins.fromJSON (builtins.readFile ../../terraform/network/unifi/folly/lab.tf.json)).locals.lab;
-  storeUrl = "http://${lab.hosts.spore}/rackpi5-ram/nix-store.squashfs";
+  lab = import ../lib/lab.nix;
+  storeUrl = "http://${lab.hosts.spore}/rackpi5-ram";
   roStoreMount = "sysroot-nix-.ro\\x2dstore.mount";
   # This key authenticates only the stage-1 debug sshd of a stateless image on
   # the lab VLAN. It is intentionally ephemeral and embedded in boot.img.
@@ -111,7 +110,7 @@ in
         fi
 
         curl --fail --retry 10 --retry-connrefused --retry-delay 2 \
-          -o /nix-store.squashfs.partial "${storeUrl}?sha256=$expected"
+          -o /nix-store.squashfs.partial "${storeUrl}/$expected.squashfs"
         verify_store /nix-store.squashfs.partial
         mv /nix-store.squashfs.partial /nix-store.squashfs
       '';

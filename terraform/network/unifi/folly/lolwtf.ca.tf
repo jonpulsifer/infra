@@ -1,5 +1,5 @@
 locals {
-  # gateway-host (.1) form of lab.tf.json's cidr, same as k8s.tf's node_cidr
+  # Gateway-host (.1) form of the lab-topology ConfigMap's CIDR.
   lab_cidr    = "${cidrhost(local.lab.cidr, 1)}/${split("/", local.lab.cidr)[1]}"
   lab_domain  = "lolwtf.ca"
   lab_wlan    = "lab"
@@ -88,17 +88,19 @@ resource "unifi_network" "lab" {
     }
   }
 
-  # lab.tf.json carries full Lab-net host IPs for the consumers that can't do
-  # CIDR math on clients.yaml's host octets (the spore/forge Nix configs).
-  # Fail the plan if the two ever disagree.
+  # lab-topology.json carries full Lab-net host IPs for Flux, Nix, and this
+  # root. Fail the plan if its selected host IPs disagree with clients.yaml's
+  # DHCP-reservation octets.
   lifecycle {
     precondition {
       condition = alltrue([
         local.lab.hosts.capsule == cidrhost(local.lab_cidr, local.clients.rpis.capsule.ip),
         local.lab.hosts.spore == cidrhost(local.lab_cidr, local.clients.rpis.spore.ip),
         local.lab.hosts.forge == cidrhost(local.lab_cidr, local.clients.rpis.forge.ip),
+        local.lab_topology.CLOUDPI4_IP == cidrhost(local.lab_cidr, local.clients.rpis.cloudpi4.ip),
+        local.lab_topology.RADIOPI0_IP == cidrhost(local.lab_cidr, local.clients.rpis.radiopi0.ip),
       ])
-      error_message = "Host IPs in lab.tf.json disagree with the clients.yaml octets."
+      error_message = "Host IPs in lab-topology.json disagree with the clients.yaml octets."
     }
   }
 }

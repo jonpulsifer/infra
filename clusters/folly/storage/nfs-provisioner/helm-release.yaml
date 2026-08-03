@@ -1,21 +1,13 @@
 ---
 # nfs-subdir-external-provisioner
 #
-# Adds a real `nfs` StorageClass to the cluster, backed by spore (10.2.0.11).
-# The static `spore` PV (clusters/folly/storage/spore-pv.yaml) keeps working
-# unchanged; this provisioner is for new dynamic PVCs that ask for the `nfs`
-# StorageClass by name. The provisioner creates per-PVC subdirectories under
-# the configured `nfs.path` (default: /nfs/data/k8s-provisioned/ on spore),
-# so dynamic and static volumes are isolated.
+# Adds an `nfs` StorageClass to the cluster, backed by spore. NixOS owns the
+# backing mount, export, and required directories in nix/services/nfs-server.nix.
+# The static `spore` PV uses /nfs/data/k8s/; this provisioner creates per-PVC
+# subdirectories under /nfs/data/k8s-provisioned/, keeping the two paths
+# isolated.
 #
-# Required setup on the NFS server (one-time, manual on spore):
-#   1. mkdir -p /nfs/data/k8s-provisioned
-#      chown nobody:nogroup /nfs/data/k8s-provisioned
-#   2. Append to /etc/exports:
-#        /nfs/data/k8s-provisioned/  10.3.0.0/28(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)
-#   3. exportfs -arv
-#
-# After this PR merges and Flux reconciles, any PVC like:
+# Any PVC like:
 #   kind: PersistentVolumeClaim
 #   spec:
 #     storageClassName: nfs
@@ -46,14 +38,13 @@ spec:
     replicaCount: 1
     leaderElection:
       enabled: true
-    # NFS target. The IP is hardcoded (mirrors clusters/folly/storage/spore-pv.yaml)
-    # so kubelet's NFS mounter doesn't depend on DNS during kernel mount option
-    # construction. Keep in sync with the spore.lolwtf.ca Lab Net address.
+    # Use the topology IP directly so kubelet's NFS mounter does not depend on
+    # DNS during kernel mount option construction.
     nfs:
-      server: 10.2.0.11
+      server: ${SPORE_IP}
       path: /nfs/data/k8s-provisioned
-      # Match the static PV's mount options so both paths behave consistently
-      # for pods that mount either.
+      # Dynamic volumes explicitly use NFSv3. The static PV leaves protocol
+      # negotiation to kubelet and carries no mountOptions.
       mountOptions:
         - hard
         - nfsvers=3

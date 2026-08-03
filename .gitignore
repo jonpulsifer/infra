@@ -47,6 +47,7 @@ docs/.trash/
 .agents/*
 !.agents/skills/
 !.agents/skills/**
+.pi-subagents/
 
 # ─── Node / Bun ──────────────────────────────────────────────────────────────
 # Root is a Bun workspace (apps/*, packages/*); bun.lock is tracked.

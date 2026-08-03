@@ -1,21 +1,11 @@
-# spore, reinstalled from Alpine to NixOS in place, keeping its identity
-# (MAC/DNS octet in terraform/network/unifi/folly/clients.yaml, full IP in
-# terraform/network/unifi/folly/lab.tf.json) so
-# clusters/folly/storage/spore-pv.yaml, the nfs-provisioner HelmRelease, and
-# terraform/network/unifi/folly/k8s.tf's PXE tftp_server/boot.server all keep
-# working unchanged -- only the OS underneath changes.
+# spore is an NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, DNS,
+# and NTP. Its network identity comes from clusters/folly/config/lab-topology.json;
+# clients.yaml retains the matching DHCP reservation.
 #
-# spore has no SD card: it boots directly off its single NVMe drive, which
-# is what the sd-image gets flashed onto. That's also the only place to put
-# NFS data, so this needs a THIRD partition carved out of the same MBR disk
-# the sd-image module already partitions into firmware + root. rackpi5 is
-# stateless and consumes none of this storage.
-#
-# The sd-image module's default `expandOnBoot` would grow root to consume
-# the *entire* disk on first boot -- exactly the OS/data commingling this
-# reinstall is meant to fix. So that's disabled here, replaced with a
-# first-boot service that grows root to a fixed cap and gives the rest of
-# the disk to a labeled ext4 partition for /nfs/data.
+# The single NVMe carries firmware + a capped root partition + NFS data. The
+# sd-image module's default expandOnBoot would grow root across the whole disk,
+# so the first-boot service below grows root to a fixed cap and gives the disk
+# tail to a labeled ext4 partition mounted at /nfs/data.
 {
   config,
   pkgs,
@@ -31,9 +21,8 @@
     ../services/spore-native-boot.nix
   ];
 
-  # Alpine already ran this HAT's NVMe stable at Gen 3
-  # (dtparam=pciex1_gen=3 in spore's old /boot/config.txt); carry that over
-  # instead of nvme-hat.nix's conservative Gen 2 default.
+  # Alpine ran this HAT's NVMe at Gen 3; retain that operating mode instead of
+  # nvme-hat.nix's conservative Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
     enable = true;
     value = 3;
@@ -41,10 +30,8 @@
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
-  # Signed native-boot publishing for rackpi5. The target itself is declared in
-  # flake.nix under `crossHostModules` -- it needs rackpi5's boot.img
-  # derivation, which only exists once rackpi5's own configuration has been
-  # evaluated, so it cannot be stated from inside this file.
+  # Signed native-boot publishing for rackpi5. The cross-host target is wired
+  # in nix/lib/registry.nix, where rackpi5's piBootImg derivation is in scope.
   services.spore.enable = true;
 
   sdImage.expandOnBoot = false;
@@ -60,6 +47,7 @@
       "sysinit.target"
       "shutdown.target"
       "register-nix-paths.service"
+      "nfs-data-directories.service"
     ];
     after = [ "local-fs.target" ];
     conflicts = [ "shutdown.target" ];
@@ -69,50 +57,116 @@
       RemainAfterExit = true;
     };
     path = with pkgs; [
+      coreutils
       util-linux
       parted
       e2fsprogs
+      gnugrep
     ];
     script = ''
       set -euo pipefail
 
-      # Idempotent: only the very first boot after flashing has no
-      # nfs-data label yet.
-      if blkid -L nfs-data >/dev/null 2>&1; then
-        echo "nfs-data partition already exists, nothing to do"
-        exit 0
-      fi
-
       rootPart=$(findmnt -n -o SOURCE /)
       diskDev=$(lsblk -rnpo PKNAME "$rootPart")
-      partNum=$(lsblk -rno PARTN "$rootPart")
+      rootPartNum=$(lsblk -rno PARTN "$rootPart")
+      dataPartNum=$((rootPartNum + 1))
+      dataPart=""
 
-      echo "root=$rootPart disk=$diskDev partNum=$partNum"
+      find_data_partition() {
+        local candidate candidatePartNum
+        dataPart=""
+        while read -r candidate candidatePartNum; do
+          if [ "''${candidatePartNum:-}" = "$dataPartNum" ]; then
+            dataPart="$candidate"
+            break
+          fi
+        done < <(lsblk -rnpo NAME,PARTN "$diskDev")
+        [ -n "$dataPart" ]
+      }
 
-      # Grow root to a fixed cap -- NOT "+", which would claim the whole
-      # disk the way the stock expand-root-partition service does.
-      echo ",32G," | sfdisk -N"$partNum" --no-reread "$diskDev"
-      partprobe "$diskDev"
+      echo "root=$rootPart disk=$diskDev rootPartNum=$rootPartNum dataPartNum=$dataPartNum"
+
+      if find_data_partition; then
+        # An interrupted first boot may leave partition 3 present before it has
+        # a filesystem or label. Reuse only the partition immediately after
+        # root; never append a second data partition over existing state.
+        rootStart=$(cat "/sys/class/block/$(basename "$rootPart")/start")
+        rootSize=$(cat "/sys/class/block/$(basename "$rootPart")/size")
+        expectedDataStart=$((rootStart + rootSize))
+        actualDataStart=$(cat "/sys/class/block/$(basename "$dataPart")/start")
+        if [ "$actualDataStart" -ne "$expectedDataStart" ]; then
+          echo "$dataPart starts at $actualDataStart, expected $expectedDataStart after root" >&2
+          exit 1
+        fi
+      else
+        # Grow root to a fixed cap -- NOT "+", which would claim the whole
+        # disk the way the stock expand-root-partition service does.
+        echo ",32G," | sfdisk -N"$rootPartNum" --no-reread "$diskDev"
+        partprobe "$diskDev"
+
+        # Append after root's real geometry. An unspecified start lets sfdisk
+        # choose an earlier reserved gap on this image layout.
+        rootStart=$(cat "/sys/class/block/$(basename "$rootPart")/start")
+        rootSize=$(cat "/sys/class/block/$(basename "$rootPart")/size")
+        dataStart=$((rootStart + rootSize))
+        echo "start=$dataStart,type=L" | sfdisk --append --no-reread "$diskDev"
+        partprobe "$diskDev"
+        find_data_partition || {
+          echo "partition $dataPartNum did not appear on $diskDev" >&2
+          exit 1
+        }
+      fi
+
+      # Safe both after a fresh partition-table grow and after resuming an
+      # interrupted first boot where partition 3 already exists.
       resize2fs "$rootPart"
 
-      # Give everything after that to a new partition for /nfs/data.
-      # NOT "echo ,+,L | sfdisk --append" -- with an unspecified start,
-      # sfdisk fills the first free gap it finds in disk order, which on
-      # this layout is a few reserved sectors *before* partition 1, not
-      # the real free space after root. Compute the real start explicitly
-      # from partition 2's own current geometry instead.
-      rootStart=$(cat "/sys/class/block/$(basename "$rootPart")/start")
-      rootSize=$(cat "/sys/class/block/$(basename "$rootPart")/size")
-      dataStart=$(( rootStart + rootSize ))
-      echo "start=$dataStart,type=L" | sfdisk --append --no-reread "$diskDev"
-      partprobe "$diskDev"
-
-      dataPart=$(lsblk -rnpo NAME "$diskDev" | tail -n1)
       echo "data partition: $dataPart"
-      mkfs.ext4 -F -L nfs-data "$dataPart"
+      fsType=$(blkid -o value -s TYPE "$dataPart" 2>/dev/null || true)
+      fsLabel=$(blkid -o value -s LABEL "$dataPart" 2>/dev/null || true)
+      case "$fsType" in
+        "")
+          if wipefs --noheadings --output TYPE "$dataPart" | grep -q '[^[:space:]]'; then
+            echo "$dataPart has an unrecognized filesystem signature; refusing to format" >&2
+            exit 1
+          fi
+          mkfs.ext4 -L nfs-data "$dataPart"
+          ;;
+        ext4)
+          case "$fsLabel" in
+            nfs-data) ;;
+            "") e2label "$dataPart" nfs-data ;;
+            *)
+              echo "$dataPart is ext4 but has unexpected label $fsLabel" >&2
+              exit 1
+              ;;
+          esac
+          ;;
+        *)
+          echo "$dataPart contains $fsType; refusing to format" >&2
+          exit 1
+          ;;
+      esac
+
+      labeledPart=$(blkid -L nfs-data 2>/dev/null || true)
+      if [ -z "$labeledPart" ] || [ "$(readlink -f "$labeledPart")" != "$(readlink -f "$dataPart")" ]; then
+        echo "nfs-data resolves to $labeledPart, expected $dataPart" >&2
+        exit 1
+      fi
 
       mkdir -p /nfs/data
-      mount -L nfs-data /nfs/data
+      mountpoint -q /nfs/data || mount "$dataPart" /nfs/data
     '';
+  };
+
+  # A failed grow/partition operation must stop Nix registration and NFS setup;
+  # ordering alone would let those units continue after a failed oneshot.
+  systemd.services.register-nix-paths = {
+    requires = [ "grow-root-and-partition-storage.service" ];
+    after = [ "grow-root-and-partition-storage.service" ];
+  };
+  systemd.services.nfs-data-directories = {
+    requires = [ "grow-root-and-partition-storage.service" ];
+    after = [ "grow-root-and-partition-storage.service" ];
   };
 }

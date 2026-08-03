@@ -53,9 +53,9 @@ locals {
     local.topology.CILIUM_POD_CIDR, # pod CIDR
   ]
   nest_k8s_cidrs = [
-    "10.89.0.0/28",  # offsite nodes
-    "10.89.0.64/26", # offsite Cilium LB VIP pool
-    "10.101.0.0/20", # offsite pod CIDR
+    local.offsite_topology.K8S_NODE_CIDR,
+    local.offsite_topology.LB_RANGE,
+    local.offsite_topology.CILIUM_POD_CIDR,
   ]
 }
 

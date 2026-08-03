@@ -21,17 +21,21 @@ assert_targets 'the Nix workflow validates its routing target' \
   '.github/workflows/nix-ci.yaml' \
   'nix:flake-check'
 
-assert_targets 'Spore application changes validate the direct Nix package' \
+assert_targets 'the retired Spore application has no Nix validation route' \
   'apps/spore/lib/catalog.ts' \
-  'nix:flake-check'
+  ''
 
-assert_targets 'the Spore MAC source validates the generated Nix catalog' \
+assert_targets 'the DHCP reservation source validates its Terraform root' \
   'terraform/network/unifi/folly/clients.yaml' \
+  'terraform:terraform/network/unifi/folly'
+
+assert_targets 'the lab topology ConfigMap validates Terraform and Nix consumers' \
+  'clusters/folly/config/lab-topology.json' \
   $'nix:flake-check\nterraform:terraform/network/unifi/folly'
 
-assert_targets 'the lab contract validates its Terraform root and Nix' \
+assert_targets 'the removed Terraform JSON has no stale route' \
   'terraform/network/unifi/folly/lab.tf.json' \
-  $'nix:flake-check\nterraform:terraform/network/unifi/folly'
+  ''
 
 assert_targets 'a Terraform lockfile validates its owning root' \
   'terraform/network/unifi/offsite/.terraform.lock.hcl' \

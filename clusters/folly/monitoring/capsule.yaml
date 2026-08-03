@@ -12,7 +12,7 @@ ports:
     port: 9253
     protocol: TCP
 endpoints:
-  - addresses: ["10.2.0.10"]
+  - addresses: ["${CAPSULE_IP}"]
     nodeName: capsule
 --- # trivy:ignore:avd-ksv-0108
 apiVersion: v1

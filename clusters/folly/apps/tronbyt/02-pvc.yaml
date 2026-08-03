@@ -8,7 +8,7 @@ spec:
   accessModes:
     - ReadWriteMany
   # Backed by the dynamic `nfs` StorageClass (provisioned by
-  # clusters/folly/storage/nfs-provisioner) on spore (10.2.0.11).
+  # clusters/folly/storage/nfs-provisioner) on spore.
   storageClassName: nfs
   resources:
     requests:

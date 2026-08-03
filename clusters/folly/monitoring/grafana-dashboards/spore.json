@@ -890,7 +890,7 @@
     {
       "id": 21,
       "type": "stat",
-      "title": "Spore App",
+      "title": "Native-boot Publisher",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -956,7 +956,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "node_systemd_unit_state{instance=\"spore\", name=\"spore.service\", state=\"active\"}",
+          "expr": "node_systemd_unit_state{instance=\"spore\", name=\"spore-native-boot-rackpi5.service\", state=\"active\"}",
           "refId": "A",
           "instant": true
         }

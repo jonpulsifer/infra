@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Renders the shared app seams for both cluster adapters without touching live
-# state, then templates every in-repo chart the rendered HelmReleases name,
+# Renders the shared app seams for both cluster adapters plus folly monitoring
+# without touching live state, then templates every in-repo chart the rendered HelmReleases name,
 # using the values those HelmReleases set.
 #
 # Rendering the kustomizations alone proves the overlays compose; it says
@@ -19,6 +19,7 @@ OVERLAYS=(
   clusters/offsite/apps
   clusters/folly/apps/arc
   clusters/offsite/apps/arc
+  clusters/folly/monitoring
 )
 
 WORK="$(mktemp -d)"

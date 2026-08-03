@@ -21,18 +21,10 @@ tags:: architecture
 		  | Kubernetes | 2 | `10.89.0.0/28` |
 	- folly isolates Lab Net and Kubernetes together in a custom **`Lab`** firewall zone (`firewall.tf`); offsite's Kubernetes network sits in the default **`Internal`** zone — this split is the root of the cross-site reachability gap below.
 	- Client MACs/DHCP reservations for both sites are declared in `terraform/network/unifi/folly/clients.yaml` (`cameras`, `unmanaged-infra`, `lab`, `k8s`, `rpis`, … groups) — point at that file rather than enumerating hosts here.
-- ## Lab-net SSOT: `lab.tf.json`
-	- `terraform/network/unifi/folly/lab.tf.json` is valid Terraform JSON, auto-loaded by the folly root as `local.lab`. It carries the Lab-net CIDR and full host IPs for the two consumers that can't do CIDR math on `clients.yaml`'s DHCP-reservation octets:
-		- ```json
-		  {
-		    "lab": {
-		      "cidr": "10.2.0.0/24",
-		      "hosts": { "capsule": "10.2.0.10", "spore": "10.2.0.11", "forge": "10.2.0.12" }
-		    }
-		  }
-		  ```
-	- Consumers: `terraform/network/unifi/folly/lolwtf.ca.tf` builds `unifi_network.lab`'s subnet from it, and `nix/hosts/forge.nix` (and the legacy `nix/hosts/rackpi5.nix` image-only config) reads the same file with `builtins.fromJSON` via `.locals.lab`.
-	- A `lifecycle.precondition` on `unifi_network.lab` fails the plan if `lab.tf.json`'s host IPs ever disagree with `clients.yaml`'s `rpis.{capsule,spore,forge}.ip` octets — the two files cannot drift silently.
+- ## Lab-network SSOT: `lab-topology`
+	- `clusters/folly/config/lab-topology.json` **is** the flat-string Flux `lab-topology` ConfigMap. It owns the Lab/future CIDRs and the full host addresses consumed by NixOS, folly storage, and folly monitoring.
+	- `nix/lib/lab.nix` projects the ConfigMap into the attribute shape host and service modules consume. The folly UniFi root reads it through `terraform/modules/cluster-topology`, preserving `local.lab` for network resources and deriving the gateway-host form of the future CIDR.
+	- The `unifi_network.lab` precondition compares every selected ConfigMap host address with its `clients.yaml` DHCP-reservation octet. The ConfigMap owns full addresses; `clients.yaml` owns MACs and reservation octets; disagreement fails the Atlantis plan.
 - ## Cluster network facts
 	- The per-cluster `cluster-topology` ConfigMaps (`clusters/<site>/config/cluster-topology.json`) are the SSOT for every cluster network fact — full mechanism (Flux `substituteFrom`, `conftest` schema check, Nix/Terraform consumers) is on [[Architecture/Kubernetes]]. The current values:
 	- | key | folly | offsite |
