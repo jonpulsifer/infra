@@ -1,0 +1,92 @@
+---
+# The edge Spindrift's Apps are served on here, separate from `cluster-gateway`.
+#
+# The same shape offsite's `apps/spindrift/gateway.yaml` has, and for the same
+# reason: App traffic is developer-controlled, so it gets its own Envoy listener
+# set and its own load-balancer address rather than sharing the one the media
+# stack answers on. An App cannot crowd `jellyfin` off its edge.
+#
+# It lives in `spindrift-apps`, beside the workloads it serves — which costs
+# nothing the App chart's NetworkPolicy was buying, because same-namespace
+# siblings are already an unconditional exception there. That is why the
+# Target's `allowedNamespaces` names `oauth2-proxy` and not this namespace.
+#
+# It is a vessel resource: the App chart renders a route and nothing else, so no
+# release owns the gateway, the certificate, or the address, and a `destroy()`
+# cannot take them with it. Flux owns this file; Spindrift only attaches to what
+# it finds — which is exactly what the connect screen reads off the cluster.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: spindrift-apps
+  namespace: spindrift-apps
+  annotations:
+    cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+spec:
+  gatewayClassName: cilium
+  # Pinned, because the Target's `platform.dns.privateAddress` is the literal
+  # address every `reach: private` App on this cluster publishes an A record to.
+  # An address the pool reassigns on a rebuild would point a whole zone at
+  # nothing.
+  #
+  # Free in this cluster's `LB_RANGE` (`cluster-topology.json`). If the
+  # implementation will not honour the request it must report
+  # `Programmed=False`/`AddressNotAssigned` and assign nothing, so this fails as
+  # a gateway that does not come up rather than as a zone aimed at a stranger.
+  addresses:
+    - type: IPAddress
+      value: 10.3.0.80
+  listeners:
+    # Plain HTTP for the in-cluster leg. folly publishes no tunnel of its own to
+    # Spindrift, so nothing arrives here from the internet today and this
+    # listener carries only what the lab net reaches; it is here so that adding
+    # a tunnel is a `dns.tunnelHostname` away rather than a Gateway edit.
+    - name: http-gateway
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - spindrift-apps
+                  - oauth2-proxy
+        kinds:
+          - kind: HTTPRoute
+    # One wildcard for every App name Spindrift mints here, rather than a
+    # listener per App: the chart renders a route and nothing else, so there is
+    # no release that could own a listener or a certificate. cert-manager's
+    # gateway-shim issues it by DNS-01 from the annotation above. Both clusters
+    # serve this zone — `clusters/base/cluster-settings.yaml` says why, and
+    # external-dns only deletes records its own `txtOwnerId` claims.
+    #
+    # `oauth2-proxy` is admitted alongside the Apps to match offsite. It admits
+    # nothing today: this cluster's authenticated edge answers on
+    # `oauth2.${SECRET_DOMAIN}`, whose route attaches to `cluster-gateway`. The
+    # ExternalAuth filter is a backend reference governed by the ReferenceGrant
+    # in `clusters/base/apps/oauth2-proxy` rather than by this list, so a
+    # `reach: private` App here authenticates against that edge and lands on a
+    # name that resolves — one hop off this gateway rather than a 404.
+    - name: spindrift-apps-tls
+      protocol: HTTPS
+      port: 443
+      hostname: "*.${SPINDRIFT_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: wildcard-${SPINDRIFT_DOMAIN}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - spindrift-apps
+                  - oauth2-proxy
+        kinds:
+          - kind: HTTPRoute

@@ -233,14 +233,26 @@ spec:
             apiServer: https://folly.lolwtf.ca:6443
             namespace: spindrift-apps
             chartContract: "3"
+            # Public packages, so the kubelet pulls them with no credential —
+            # the same reason offsite names GHCR rather than the artifact
+            # registry.
+            reachableRegistries:
+              - ghcr.io/jonpulsifer
             chartValues:
               platform:
-                # Admits routes from every namespace on both listeners, and
-                # `clusters/base/apps/oauth2-proxy` grants spindrift-apps the
-                # cross-namespace reference to the auth backend.
+                # This cluster's own Apps gateway
+                # (`clusters/folly/apps/spindrift-target/gateway.yaml`), not
+                # `cluster-gateway`: App traffic gets its own listener set here
+                # for the same reason it does offsite.
                 gateway:
-                  name: cluster-gateway
-                  namespace: default
+                  name: spindrift-apps
+                  namespace: spindrift-apps
+                # Answers on `oauth2.${SECRET_DOMAIN}` here rather than in the
+                # App zone, so the sign-in redirect leaves this gateway for
+                # `cluster-gateway`. That is one hop rather than a 404: the
+                # ExternalAuth filter is a backend reference, granted by the
+                # ReferenceGrant in `clusters/base/apps/oauth2-proxy`, and is
+                # not affected by which gateway serves the sign-in name.
                 externalAuth:
                   name: oauth2-proxy
                   namespace: oauth2-proxy
@@ -249,15 +261,17 @@ spec:
                   kind: ClusterSecretStore
                   name: onepassword-connect
                 dns:
-                  # Assigned to this Gateway from folly's Cilium LB pool. The
-                  # connect screen reads it off the Gateway's status rather than
-                  # asking; this line is the same fact for a torn-down
-                  # installation that has no screen open.
-                  privateAddress: 10.3.0.78
+                  # That gateway's pinned address, free in this cluster's
+                  # `LB_RANGE`. The connect screen reads it off the Gateway's
+                  # status rather than asking; this line is the same fact for a
+                  # torn-down installation that has no screen open.
+                  privateAddress: 10.3.0.80
                   tunnelHostname: ""
                 networkPolicy:
+                  # The gateway's own namespace is absent for the reason it is
+                  # absent above: it is `spindrift-apps` itself, which the chart
+                  # always admits as a sibling.
                   allowedNamespaces:
-                    - default
                     - oauth2-proxy
         - name: bluenose-cloudrun
           adapter: cloudrun
