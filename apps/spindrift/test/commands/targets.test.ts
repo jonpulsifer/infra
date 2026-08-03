@@ -254,6 +254,32 @@ describe('the act is credential-shaped though the noun is flat', () => {
     expect(rows).toHaveLength(3);
   });
 
+  test('a reconnect updates what the operator asserted about reach', async () => {
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+    expect((await targetRow('cluster'))?.reaches).toBeNull();
+
+    // The connect screen derives both of these — `reaches` from the gateway's
+    // private address and the tunnel hostname, `authReaches` from the
+    // ExternalAuth backend — and posts them with every submission. The update
+    // branch used to set connection, health, prerequisites, discovery,
+    // inspectedAt, status and updatedAt and nothing else, so an operator
+    // correcting a Target that already existed had their assertion silently
+    // discarded and no way to see why.
+    await connectTarget(
+      clusterInput({
+        name: 'cluster',
+        reaches: ['none', 'private', 'public'],
+        authReaches: ['private'],
+      }),
+      context(registry),
+    );
+
+    const row = await targetRow('cluster');
+    expect(row?.reaches).toEqual(['none', 'private', 'public']);
+    expect(row?.authReaches).toEqual(['private']);
+  });
+
   test('connect fills a manifest-seeded Target without changing its rank', async () => {
     const { registry } = fakes();
     const [seed] = await database()

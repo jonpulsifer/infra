@@ -539,6 +539,57 @@ describe('the stored installation manifest', () => {
     expect(cluster?.rank).toBe(99);
   });
 
+  test('a declared write updates an existing Target’s asserted reaches, and a boot does not', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
+    });
+    const seeded = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    // Nobody has said, so the row asserts nothing and the adapter's floor is
+    // the whole answer — §3's asserted half is stated, never reported.
+    expect(seeded?.reaches).toBeNull();
+
+    // The declaration now states one. Before this, `reaches` was written on
+    // INSERT only: a Target that already existed could never be given an
+    // asserted reach through any supported path, so a document that had always
+    // declared `public` never reached the row rendering the deploy.
+    const [cluster, ...rest] = connectedManifest.targets;
+    const asserting = {
+      ...connectedManifest,
+      targets: [
+        {
+          ...cluster!,
+          reaches: ['none', 'private', 'public'],
+          authReaches: ['private'],
+        },
+        ...rest,
+      ],
+    } as AuthoredManifest;
+    await writeStoredManifest(database().db, asserting);
+
+    const declared = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(declared?.reaches).toEqual(['none', 'private', 'public']);
+    expect(declared?.authReaches).toEqual(['private']);
+
+    // And the other half of 52's rule, one noun down: a reach is something an
+    // operator can have set on the row through the connect screen, so a boot —
+    // which declares nothing, it only writes back the document the installation
+    // already had — must leave it exactly where the operator put it.
+    await database()
+      .db.update(targets)
+      .set({ reaches: ['none'] })
+      .where(eq(targets.name, 'cluster'));
+    await writeStoredManifest(database().db, asserting, 'booted');
+
+    const booted = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(booted?.reaches).toEqual(['none']);
+  });
+
   test('repairs a stored Target rank from manifest order', async () => {
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,

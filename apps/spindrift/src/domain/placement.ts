@@ -267,10 +267,18 @@ export function artifactTypeFor(
   return 'image';
 }
 
-/** The sentence behind each exclusion, in the developer's terms. */
-function sentence(
+/**
+ * The sentence behind each exclusion, in the developer's terms.
+ *
+ * Exported, and narrowed to the three fields it actually reads, because the
+ * deploy path refuses with {@link reachExclusions} and has to refuse in the
+ * same words the placement screen offered — a developer told "this Target has
+ * no way to serve a public address" when they picked it, and told something
+ * else when they deployed, is being told about two different systems.
+ */
+export function sentence(
   reason: Exclusion,
-  requirements: DerivedRequirements,
+  requirements: Pick<DerivedRequirements, 'kind' | 'reach' | 'platform'>,
 ): string {
   switch (reason) {
     case 'UNHEALTHY':
@@ -359,6 +367,49 @@ function fits(asked: string | undefined, ceiling: string | undefined): boolean {
   return wanted <= limit;
 }
 
+/**
+ * Whether a Target serves the reach a Component asks for, and can authenticate
+ * it — §3's asserted half, and the only part of {@link exclusionsFor} the
+ * deploy path re-asks.
+ *
+ * Reach and auth join separately, because they are separate facts: a Target can
+ * serve a reach it cannot authenticate, and the sentence a developer needs is
+ * different in each case. Filtering both ways is what makes picking the static
+ * Target *mean* public (§13, §28) — it asserts `public` and nothing else, so
+ * every other reach is excluded by the ordinary join.
+ *
+ * §9's hard rule is the second half, where it binds: a Component asking to be
+ * authenticated must land on a Target whose edge can honestly authenticate
+ * *that reach*. The case that shape exists for is a Target that has the
+ * mechanism and an audience too narrow to stand in front of an address anyone
+ * can reach — it answers for `private` and not for `public`.
+ *
+ * **One implementation for two callers, deliberately.** The screen that offers a
+ * placement and the command that creates the Deploy have to answer this
+ * identically or the boundary is advisory: a Target that declares it cannot
+ * serve the public was excluded on the placement screen and deployed to anyway,
+ * because nothing on the deploy path asked. Only these two exclusions are lifted
+ * — a deploy that re-ran the whole of `exclusionsFor` would newly refuse an
+ * UNHEALTHY Target, which is exactly the rollback `deploys/rollback.ts` exists
+ * to keep possible during an incident.
+ */
+export function reachExclusions(
+  can: Pick<TargetCapabilities, 'reaches' | 'authReaches'>,
+  requirements: Pick<DerivedRequirements, 'reach' | 'auth'>,
+): readonly Exclusion[] {
+  const reasons: Exclusion[] = [];
+  if (!can.reaches.includes(requirements.reach)) {
+    reasons.push('REACH_UNSUPPORTED');
+  }
+  if (
+    requirements.auth === 'proxy' &&
+    !can.authReaches.includes(requirements.reach)
+  ) {
+    reasons.push('AUTH_UNSUPPORTED');
+  }
+  return reasons;
+}
+
 /** Every reason one Target fails one App's derived requirements. */
 export function exclusionsFor(
   target: PlacementTarget,
@@ -371,26 +422,7 @@ export function exclusionsFor(
   if (!target.healthy) reasons.push('UNHEALTHY');
   if (!can.kinds.includes(requirements.kind)) reasons.push('KIND_UNSUPPORTED');
 
-  // Reach and auth join separately, because they are separate facts: a Target
-  // can serve a reach it cannot authenticate, and the sentence a developer needs
-  // is different in each case. Filtering both ways is what makes picking the
-  // static Target *mean* public (§13, §28) — it asserts `public` and nothing
-  // else, so every other reach is excluded by the ordinary join.
-  if (!can.reaches.includes(requirements.reach)) {
-    reasons.push('REACH_UNSUPPORTED');
-  }
-
-  // §9's hard rule, where it binds: a Component asking to be authenticated must
-  // land on a Target whose edge can honestly authenticate *that reach*. The case
-  // this shape exists for is a Target that has the mechanism and an audience too
-  // narrow to stand in front of an address anyone can reach — it answers for
-  // `private` and not for `public`.
-  if (
-    requirements.auth === 'proxy' &&
-    !can.authReaches.includes(requirements.reach)
-  ) {
-    reasons.push('AUTH_UNSUPPORTED');
-  }
+  reasons.push(...reachExclusions(can, requirements));
 
   // A route needs something to attach to. Without this the Deploy goes green
   // with `parentRefs` naming a Gateway that is the empty string, which is a
