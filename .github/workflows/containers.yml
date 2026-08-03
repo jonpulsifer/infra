@@ -141,20 +141,44 @@ jobs:
               echo "::error::$manifest is a deploy target for $IMAGE_NAME but does not exist"
               exit 1
             fi
+            # Anchored on this image's own reference, so a manifest may pin
+            # other images beside it. That is not hypothetical: the in-cluster
+            # build route pins the BuildKit engine in the same document
+            # Spindrift's own image is pinned in, and the blanket rewrite this
+            # replaces refused the whole file rather than stamp Spindrift's
+            # digest onto BuildKit — correctly, but the effect was that every
+            # push stopped rolling out and said so only in a workflow log.
+            #
+            # The name must be followed by `:` or `@` so that a repository whose
+            # path merely starts with this one — `spindrift` and
+            # `spindrift-demo` are both published here — is not rewritten by it.
+            # The registry is deliberately unanchored: these manifests pin from
+            # both ghcr.io and docker.io.
+            ref="[^[:space:]\"']*/${IMAGE_NAME}(:[^@[:space:]]+)?"
+            if grep -qE "${ref}@sha256:[0-9a-f]{64}" "$manifest"; then
+              echo "Updating digest for $IMAGE_NAME in $manifest..."
+              # DIGEST already carries the sha256: prefix, so the capture group
+              # must not be replayed into the replacement.
+              sed -i -E "s|(${ref})@sha256:[0-9a-f]{64}|\1@${DIGEST}|g" "$manifest"
+              continue
+            fi
+
+            # A chart that splits `repository:` from `tag:` puts the digest on a
+            # line that never names the image, so there is nothing to anchor on
+            # and the blanket rewrite is the only thing that reaches it. It is
+            # safe exactly while the file pins one digest, which is what the
+            # count below is for — the same guard this step has always had,
+            # now scoped to the manifests that still need it.
             pins=$(grep -cE '@sha256:[0-9a-f]{64}' "$manifest" || true)
             if [ "$pins" -eq 0 ]; then
               echo "::error::$manifest pins no image digest, so $IMAGE_NAME can never roll from it"
               exit 1
             fi
-            # The rewrite is a blanket one; more than one pin means it would
-            # stamp this image's digest onto some other image.
             if [ "$pins" -gt 1 ]; then
-              echo "::error::$manifest pins $pins digests; rewriting would clobber images other than $IMAGE_NAME"
+              echo "::error::$manifest pins $pins digests and names $IMAGE_NAME in none of them, so there is no way to tell which one to roll"
               exit 1
             fi
-            echo "Updating digest for $IMAGE_NAME in $manifest..."
-            # DIGEST already carries the sha256: prefix, so the capture group
-            # must not be replayed into the replacement.
+            echo "Updating digest for $IMAGE_NAME in $manifest (unanchored)..."
             sed -i -E "s|@sha256:[0-9a-f]{64}|@${DIGEST}|g" "$manifest"
           done
 
