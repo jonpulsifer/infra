@@ -94,8 +94,14 @@ describe('listTargets and listRepositories over route boundary', () => {
     await connectTarget(clusterInput({ name: 'folly-cluster' }), ctx);
 
     const routes = serve(ctx, true);
+    // The requirements travel in the payload, so options over the route
+    // boundary is only exercised when the caller states what it is placing.
     const res = await routes[pathFor('listTargets')]!(
-      post(pathFor('listTargets'), {}),
+      post(pathFor('listTargets'), {
+        kind: 'service',
+        reach: 'private',
+        auth: 'proxy',
+      }),
     );
     expect(res.status).toBe(200);
 

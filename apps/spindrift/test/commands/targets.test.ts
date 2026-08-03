@@ -507,7 +507,10 @@ describe('listTargets', () => {
       context(registry),
     );
 
-    const result = await listTargets({}, context(registry));
+    const result = await listTargets(
+      { kind: 'service', reach: 'private', auth: 'proxy' },
+      context(registry),
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.targets).toHaveLength(3); // 1 k8s + 2 cloud (cloudrun, static)
@@ -516,6 +519,52 @@ describe('listTargets', () => {
       expect(result.value.options.length).toBeGreaterThan(0);
       const option = result.value.options.find((o) => o.name === 'folly-k8s');
       expect(option?.candidate).toBe(true);
+    }
+  });
+
+  test('resolves placement against the requirements it was given, not a default', async () => {
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
+    await connectTarget(
+      cloudInput({ name: 'cloudrun-app' }),
+      context(registry),
+    );
+
+    // The static Target serves `website` and nothing else, so it is a candidate
+    // for one of these two calls and a non-candidate for the other. Resolving
+    // both against the same hardcoded workload is the defect this pins.
+    const asWebsite = await listTargets(
+      { kind: 'website', reach: 'public', auth: 'none' },
+      context(registry),
+    );
+    const asJob = await listTargets(
+      { kind: 'job', reach: 'none', auth: 'none' },
+      context(registry),
+    );
+    expect(asWebsite.ok && asJob.ok).toBe(true);
+    if (!asWebsite.ok || !asJob.ok) return;
+
+    const staticAsWebsite = asWebsite.value.options.find(
+      (o) => o.adapter === 'static',
+    );
+    const staticAsJob = asJob.value.options.find((o) => o.adapter === 'static');
+    expect(staticAsWebsite?.candidate).toBe(true);
+    expect(staticAsJob?.candidate).toBe(false);
+    expect(staticAsJob?.reasons).toContain('KIND_UNSUPPORTED');
+  });
+
+  test('says nothing about placement when it is not told what is being placed', async () => {
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
+
+    // A partial triple is not a partial answer: placement needs all three, and
+    // filling the gaps with plausible values is what made this command answer
+    // for a workload the caller was not creating.
+    const result = await listTargets({ kind: 'website' }, context(registry));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.targets.length).toBeGreaterThan(0);
+      expect(result.value.options).toHaveLength(0);
     }
   });
 });

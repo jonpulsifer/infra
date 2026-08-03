@@ -53,7 +53,7 @@ import {
 
 export function NewApp({
   initial,
-  targets,
+  targets: initialTargets,
   repos,
   onCreated,
 }: {
@@ -63,6 +63,11 @@ export function NewApp({
   onCreated?: (app: { readonly id: string; readonly name: string }) => void;
 }) {
   const [draft, setDraft] = useState(initial.draft);
+  // Placement is derived from kind, reach and auth (§3), so the options are
+  // only true for the draft they were resolved against. Correcting any of the
+  // three re-resolves them; leaving them stale is how a `website` ends up
+  // offered the candidates for a `service`.
+  const [targets, setTargets] = useState(initialTargets);
   const [serverBlockers, setServerBlockers] = useState(initial.blockers);
   const [refusal, setRefusal] = useState<TransportFailure | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -88,9 +93,29 @@ export function NewApp({
   const target = targets.find((option) => option.targetId === draft.targetId);
 
   const dispatch: Dispatch<DraftAction> = (action) => {
-    const next = draftReducer(draftRef.current, action);
+    const previous = draftRef.current;
+    const next = draftReducer(previous, action);
     draftRef.current = next;
     setDraft(next);
+    // Compared rather than keyed off the action type: `entry` and `detect`
+    // change the kind too, and an enumeration here would drift the first time a
+    // new action moves one of the three.
+    if (
+      next.kind !== previous.kind ||
+      next.reach !== previous.reach ||
+      next.auth !== previous.auth
+    ) {
+      void command('listTargets', {
+        kind: next.kind,
+        reach: next.reach,
+        auth: next.auth,
+      }).then((result) => {
+        // Only the newest answer counts: a slower earlier read must not
+        // overwrite the options for the draft as it stands now.
+        if (result.ok && draftRef.current === next)
+          setTargets(result.value.options);
+      });
+    }
     pendingSaves.current += 1;
     setSaving(true);
     saves.current = saves.current
