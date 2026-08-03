@@ -1,6 +1,7 @@
-# Spindrift's generated App names resolve only through this tunnel. The origin
-# is the offsite cluster's internal Gateway service, so no public DNS record
-# exposes its load-balancer address as an alternate path.
+# How a `reach: public` App name arrives at the cluster. The origin is the
+# Apps' own Gateway service, not the cluster's shared one: App traffic gets its
+# own Envoy listener set and its own load-balancer address, so a public App
+# cannot crowd the edge the media stack or the operator UI answer on.
 module "tunnel_spindrift" {
   source     = "./modules/tunnel"
   account_id = local.fml_account_id
@@ -10,7 +11,7 @@ module "tunnel_spindrift" {
     ingress = [
       {
         hostname = "*.${cloudflare_zone.lolwtf_dev.name}"
-        service  = "http://cilium-gateway-cluster-gateway.default.svc.cluster.local"
+        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
       {
         service = "http_status:404"

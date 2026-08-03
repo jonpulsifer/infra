@@ -7,9 +7,15 @@ spec:
   values:
     extraArgs:
       redirect-url: https://oauth2.${SPINDRIFT_DOMAIN}/oauth2/callback
-      # No cookie-domain: the session cookie is host-only, for whatever
-      # x-forwarded-host the filter passed. A zone-wide cookie would be sent to
-      # an `auth: none` App on this same zone — handing the token that unlocks
-      # every authenticated App to the one workload deliberately exposed.
+      # The session cookie is host-only, for whatever x-forwarded-host the
+      # filter passed. A zone-wide cookie would be sent to an `auth: none` App
+      # on this same zone — handing the token that unlocks every authenticated
+      # App to the one workload deliberately exposed.
+      #
+      # Explicitly null rather than absent. `extraArgs` is a map, so a strategic
+      # merge that simply omits the key merges the base's value straight through:
+      # this overlay read as "no cookie-domain" and shipped `.${SECRET_DOMAIN}`,
+      # the *other* cluster's apex, on every session cookie offsite issued.
+      cookie-domain: null
       # whitelist-domain still permits the return trip after sign-in.
       whitelist-domain: .${SPINDRIFT_DOMAIN}
