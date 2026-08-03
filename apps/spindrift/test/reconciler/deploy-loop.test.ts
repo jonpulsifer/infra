@@ -538,6 +538,100 @@ describe('drift is surfaced, never corrected (§6)', () => {
     expect(row?.observedDigest).toBe(`sha256:${'b'.repeat(64)}`);
   });
 
+  test('a release the platform will not apply has drifted, digest or not', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({
+      script: [{ verdict: { phase: 'LIVE', ref: 'hr/apps/web' } }],
+    });
+    await runDeployPass(context(adapter));
+
+    // The shape that went unnoticed for a day in the live installation: the
+    // chart's value contract moved, the stored values no longer render, and
+    // every reconcile fails behind a previous release that keeps serving. The
+    // digest still matches, so comparing digests alone reads this as converged.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      reason: 'INTERNAL',
+      detail:
+        'execution error at (spindrift-app/templates/httproute.yaml:26:4): platform.gateway.name is required',
+    });
+
+    const pass = await runDeployPass(context(adapter));
+    const report = pass.drift.find((entry) => entry.deployId === deploy.id);
+    expect(report?.drifted).toBe(true);
+
+    // Still surfaced and still not corrected: the re-converge stays a click.
+    expect(adapter.applied).toHaveLength(1);
+
+    const row = await deployRow(deploy.id);
+    // The Deploy did not fail — it reached LIVE and the platform stopped
+    // agreeing afterwards. §9's "exposure never mutates on red" is the same
+    // argument: the previous release is up, and calling this FAILED would say
+    // an outage that is not happening.
+    expect(row?.phase).toBe('LIVE');
+    expect(row?.driftedAt).toEqual(FROZEN);
+    // The platform's own sentence, which is the only thing that names the value
+    // the chart rejected. A drift flag without it says something is wrong
+    // without saying that waiting will not fix it.
+    expect(row?.driftDetail).toContain('platform.gateway.name is required');
+  });
+
+  test('an ordinary digest mismatch records no refusal detail', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({
+      script: [{ verdict: { phase: 'LIVE', ref: 'hr/apps/web' } }],
+    });
+    await runDeployPass(context(adapter));
+
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'LIVE',
+      artifactDigest: `sha256:${'b'.repeat(64)}`,
+    });
+    await runDeployPass(context(adapter));
+
+    // Nothing refused anything here — something else is simply serving, which
+    // `observedDigest` already explains. A detail invented for this case would
+    // be the screen claiming the platform said something it did not.
+    const row = await deployRow(deploy.id);
+    expect(row?.driftedAt).toEqual(FROZEN);
+    expect(row?.driftDetail).toBeNull();
+  });
+
+  test('a refusal that is resolved clears its detail with the flag', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({
+      script: [{ verdict: { phase: 'LIVE', ref: 'hr/apps/web' } }],
+    });
+    await runDeployPass(context(adapter));
+
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      reason: 'INTERNAL',
+      detail: 'values rejected by the chart',
+    });
+    await runDeployPass(context(adapter));
+    expect((await deployRow(deploy.id))?.driftDetail).not.toBeNull();
+
+    // A redeploy rewrote the values and the object applies again. The sentence
+    // has to go with the flag: a stale refusal left on the row would keep
+    // explaining a state that no longer exists.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'LIVE',
+      artifactDigest: DIGEST,
+    });
+    await runDeployPass(context(adapter));
+
+    const row = await deployRow(deploy.id);
+    expect(row?.driftedAt).toBeNull();
+    expect(row?.driftDetail).toBeNull();
+  });
+
   test('drift fixed out of band stops being reported, with no dismissal', async () => {
     const { deploy } = await pendingDeploy();
     const adapter = new FakeDeployAdapter({

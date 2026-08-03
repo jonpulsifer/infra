@@ -26,9 +26,9 @@ import type {
   AddPasskeyChallenge,
   CredentialSettings,
 } from '../auth/credential-admin.ts';
-import { AUTH_PATH_PREFIX, type AuthAct } from '../auth/routes.ts';
 import type { AuthFailure } from '../auth/types.ts';
 import type { Principal } from '../commands/types.ts';
+import { AUTH_PATH_PREFIX, type AuthAct } from './auth-path.ts';
 
 export type AuthClientResult<Value> =
   | { readonly ok: true; readonly value: Value }

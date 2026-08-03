@@ -96,6 +96,8 @@ const BASE = {
   },
   when: '40s ago',
   at: '2026-07-29T10:00:00.000Z',
+  // Converged. The `drifted` scenario below is the one that is not.
+  drift: null,
   current: true,
   configVersion: 'sha256:5c1f9e2a44b7',
   artifactDigest: 'sha256:9f2c1a7e30b4',
@@ -317,6 +319,58 @@ export const DEPLOY_SCENARIOS = {
       ].join('\n'),
     },
     resources: resourcesFailingWith('0/2 ready — readiness probe failing'),
+    build: BUILT,
+  },
+
+  /**
+   * Green, and frozen. The release reached Live, the chart's value contract
+   * moved underneath its stored values, and every reconcile since has failed
+   * behind a previous release that is still serving — so the phase, the URL and
+   * the checklist all read healthy. Nothing but the drift panel says otherwise,
+   * which is exactly the state that went unnoticed for a day in the real
+   * installation this fixture is drawn from.
+   */
+  wedged: {
+    ...BASE,
+    phase: 'LIVE',
+    phaseWord: 'Live',
+    headline: 'Deployed 21 hours ago',
+    urlLive: true,
+    previousReleaseServing: false,
+    diagnosis: null,
+    drift: {
+      since: '21h ago',
+      at: '2026-07-28T13:00:00.000Z',
+      // No digest to report: the platform never applied anything new, so there
+      // is no "running instead" — the previous release is the running one.
+      observedDigest: null,
+      detail: [
+        'Helm upgrade failed for release spindrift-apps/almanac-web with chart',
+        'spindrift-app@0.2.0: execution error at (spindrift-app/templates/httproute.yaml:26:4):',
+        'platform.gateway.name is required for a Component whose reach is not none:',
+        'a route with no gateway attaches to nothing',
+      ].join('\n'),
+    },
+    resources: RESOURCES_OK,
+    build: BUILT,
+  },
+
+  /** The other arm: something else is serving, and it can say what. */
+  drifted: {
+    ...BASE,
+    phase: 'LIVE',
+    phaseWord: 'Live',
+    headline: 'Deployed 3 days ago',
+    urlLive: true,
+    previousReleaseServing: false,
+    diagnosis: null,
+    drift: {
+      since: '2h ago',
+      at: '2026-07-29T08:00:00.000Z',
+      observedDigest: 'sha256:1b8e44c07af2',
+      detail: null,
+    },
+    resources: RESOURCES_OK,
     build: BUILT,
   },
 } as const satisfies Record<string, DeployView>;

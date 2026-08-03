@@ -1,6 +1,7 @@
 /**
- * The client bundle's only two edges into the server — command dispatch and
- * streaming — and the ceiling that keeps either from growing back.
+ * The client bundle's three edges into the server — command dispatch,
+ * streaming, and auth — and the ceiling that keeps any of them from growing
+ * back.
  *
  * `.agent/plans/spindrift/issues/32-onboard-an-installation-without-a-manifest.md`
  * (2026-08-01 comment) names the landmine: `client.ts` value-imported
@@ -29,6 +30,19 @@
  * takes `AttemptLogCursor`/`AttemptLogEntry` (from `domain/attempt-log.ts`)
  * and `RuntimeLogPage` (from `adapters/deploy/contract.ts`) as `import type`
  * only. `streams.ts` re-exports from there rather than defining them itself.
+ *
+ * The same ticket's edge 3, found while verifying edge 2: cutting the
+ * streaming edge left the bundle's `drizzle-orm` count unchanged, because
+ * `app.tsx` value-imported `auth-client.ts`, which value-imported
+ * `AUTH_PATH_PREFIX` and `AuthAct` from `src/auth/routes.ts` — and
+ * `routes.ts` value-imports `session.ts`, which value-imports `credentials`,
+ * `sessions`, and `users` from `db/schema.ts`. `db/schema.ts` is one module
+ * declaring every table, so that one edge dragged the whole file, and with it
+ * the whole `drizzle-orm` surface, regardless of which table the importer
+ * wanted. The fix is the same move a third time: `AUTH_PATH_PREFIX`,
+ * `AUTH_ACTS`, `AuthAct`, and `authPathFor` now live in
+ * `src/web/auth-path.ts`, a leaf module with no imports of its own, and
+ * `routes.ts` re-exports from there rather than defining them itself.
  *
  * This runs `build.ts` itself, as a real subprocess — the same command the
  * Dockerfile's `builder` stage runs (`bun run build --filter=spindrift`,
@@ -98,6 +112,27 @@ describe('the client bundle', () => {
     // dependencies) is holding.
     expect(text).not.toContain('web/streams.ts');
     expect(text).not.toContain('db/notify.ts');
+  });
+
+  test('carries no fingerprint of the database layer the auth client used to pull in', async () => {
+    const files = await readdir(DIST);
+    const entry = files.find((file) => file.endsWith('.js'));
+    expect(entry).toBeDefined();
+    const text = await Bun.file(join(DIST, entry!)).text();
+
+    // Ticket 34, edge 3: `auth-client.ts` used to value-import
+    // `AUTH_PATH_PREFIX` and `AuthAct` directly from `src/auth/routes.ts`,
+    // which value-imports `session.ts`, which value-imports `credentials`,
+    // `sessions`, and `users` from `db/schema.ts` — one module declaring
+    // every table, so that edge dragged the whole file, and with it the
+    // whole `drizzle-orm` surface, into the bundle. This is the edge item 2
+    // of the ticket's checklist found unmoved: cutting the streaming edge
+    // left `grep -c "drizzle-orm" dist/chunk-*.js` at 57, because this edge
+    // was still open. Asserting on the literal string rather than a count is
+    // the stronger claim and the one the ticket asks for: zero occurrences,
+    // not merely fewer.
+    expect(text).not.toContain('db/schema.ts');
+    expect(text).not.toContain('drizzle-orm');
   });
 
   test('stays within the ceiling cutting that edge bought back', async () => {

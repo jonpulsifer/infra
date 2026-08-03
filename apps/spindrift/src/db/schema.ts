@@ -726,6 +726,20 @@ export const deploys = pgTable('deploys', {
    * ask, the answer is one poll interval old at best.
    */
   observedDigest: text('observed_digest'),
+  /**
+   * Why the platform will not converge on this release, in its own words.
+   *
+   * The digest answers "what is running instead"; this answers the case where
+   * the digest is not the question. A delivery object can fail every reconcile
+   * while the last good release keeps serving the desired digest — a chart
+   * whose contract moved out from under stored values does exactly that — and
+   * a drift flag with no sentence beside it tells an operator that something
+   * is wrong without telling them it is unfixable by waiting.
+   *
+   * Not `detail`, which §6 reserves for a `FAILED` verdict. This Deploy did not
+   * fail: it reached `LIVE` and the platform has since stopped agreeing.
+   */
+  driftDetail: text('drift_detail'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),

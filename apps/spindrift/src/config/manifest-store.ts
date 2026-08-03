@@ -73,13 +73,83 @@ export async function loadStoredManifest(
       `installation manifest: the stored manifest is not valid for this build, so this installation is being re-seeded from the mounted declaration — anything configured through the UI that the declaration does not carry is lost: ${unreadable.message}`,
     );
   } else if (stored !== null && declaration !== null) {
+    // The generic half of this warning has existed since the rule did — "a
+    // declaration is mounted and ignored" — and it is not enough. Proven live:
+    // a rollout moved a Target's gateway in the declaration; the stored row
+    // never moved because the row wins by design; and this line gave nobody a
+    // reason to go look, right up until the listener that rollout deleted took
+    // the Target's gateway with it. §6: "drift is detected and surfaced, never
+    // silently corrected" — naming the paths is that rule applied to the
+    // manifest itself, not just to what it deploys.
+    const divergentPaths = diffManifestPaths(declaration, stored);
     console.warn(
-      'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it',
+      divergentPaths.length === 0
+        ? 'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it'
+        : `installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it. It now disagrees with the stored row at: ${divergentPaths.join(', ')}`,
     );
   }
   const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
   await writeStoredManifest(db, declared);
   return resolveManifest(declared, env);
+}
+
+/**
+ * Every dotted path where two manifest documents disagree.
+ *
+ * **Paths only, never a value — deliberately, not just today.** §13 keeps
+ * every `TargetConnection` variant credential-free by construction, so
+ * nothing in this schema is secret right now. This walk does not lean on
+ * that: it is generic over whatever the schema is next asked to carry, and a
+ * diff utility that prints what it finds is exactly the code a later
+ * secret-bearing field walks straight through unnoticed. Naming where two
+ * documents disagree costs nothing extra over naming what they disagree
+ * about; only one of the two stays safe if that promise ever slips.
+ *
+ * Recurses through plain objects and arrays and stops at the first point two
+ * branches stop being the same *shape* — a leaf value differs, or a key exists
+ * on one side and not the other — reporting the path to that node rather than
+ * descending further: there is nothing under an absent key to compare, and a
+ * Target that moved from index 2 to index 0 should read as `targets.0`, not
+ * as a page of noise about every field underneath it.
+ */
+export function diffManifestPaths(
+  a: unknown,
+  b: unknown,
+  path: readonly string[] = [],
+): string[] {
+  if (Bun.deepEquals(a, b, true)) return [];
+
+  const left = containerEntries(a);
+  const right = containerEntries(b);
+  if (left === null || right === null) {
+    return [path.length === 0 ? '(root)' : path.join('.')];
+  }
+
+  const leftByKey = new Map(left);
+  const rightByKey = new Map(right);
+  const diffs: string[] = [];
+  for (const key of new Set([...leftByKey.keys(), ...rightByKey.keys()])) {
+    diffs.push(
+      ...diffManifestPaths(leftByKey.get(key), rightByKey.get(key), [
+        ...path,
+        key,
+      ]),
+    );
+  }
+  return diffs;
+}
+
+/** `[key, value]` pairs for a plain object or an array; `null` for anything else. */
+function containerEntries(value: unknown): [string, unknown][] | null {
+  if (Array.isArray(value)) {
+    return value.map(
+      (item, index) => [String(index), item] as [string, unknown],
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>);
+  }
+  return null;
 }
 
 /**

@@ -44,7 +44,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Checklist } from '../../components/checklist.tsx';
-import { DiagnosisPanel } from '../../components/diagnosis.tsx';
+import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
 import type { DeployView, SourceView } from '../../model.ts';
@@ -94,6 +94,23 @@ export function DeployDetail({
           diagnosis={view.diagnosis}
           previousReleaseServing={view.previousReleaseServing}
           url={view.url}
+        />
+      ) : null}
+
+      {/*
+        Below the diagnosis, and never instead of it. The two can both be
+        absent, and only drift can be present on a green release — but a red
+        release that has also drifted leads with why it failed, because that is
+        the older and more actionable fact.
+      */}
+      {view.drift ? (
+        <DriftPanel
+          drift={view.drift}
+          url={view.url}
+          {...(actions.onRedeploy === undefined
+            ? {}
+            : { onRedeploy: actions.onRedeploy })}
+          busy={actions.busy === 'redeploy'}
         />
       ) : null}
 
@@ -634,10 +651,26 @@ function BuildOutput({ view }: { view: DeployView }) {
  * `logTotal` is stated whenever it exceeds what is here. A tail presented as
  * the log is the UI editing evidence; a tail that says how much it is a tail
  * of, and where the rest lives, is not.
+ *
+ * The initial `open` is only half the contract — a `LIVE_TEXT` runner (§4)
+ * releases text as it's written, so `BuildOutput` can hand this a non-null
+ * `log` while the build is still `running`, well before red is known at
+ * mount. Without re-deriving `open` on a status change, React keeps whatever
+ * it picked at that early mount forever, and a running→failed transition
+ * lands on a drawer that never sprang open. Same shape as `BuildDrawer`'s
+ * prior-status effect above, for the same reason.
  */
 function Transcript({ build }: { build: NonNullable<DeployView['build']> }) {
   const lines = build.log ?? [];
   const [open, setOpen] = useState(build.status === 'failed');
+  const priorStatus = useRef(build.status);
+
+  useEffect(() => {
+    if (priorStatus.current === build.status) return;
+    priorStatus.current = build.status;
+    setOpen(build.status === 'failed');
+  }, [build.status]);
+
   const clipped = build.logTotal > lines.length;
 
   return (

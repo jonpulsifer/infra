@@ -182,6 +182,32 @@ export type SourceView =
  * still up, so the view never has to infer "nothing went down" from the absence
  * of something.
  */
+/**
+ * A `LIVE` release the platform has since stopped agreeing with (§6).
+ *
+ * Two shapes reach this one type, because a reader's next move is the same for
+ * both — press re-converge — and the difference is only what to say first:
+ * something else is serving (`observedDigest` differs), or nothing new can
+ * serve at all (`detail` carries the platform's refusal).
+ */
+export interface DriftView {
+  /** When the loop first saw the disagreement, in words — "2h ago". */
+  readonly since: string;
+  /** The instant behind {@link since}, for the title a reader hovers. */
+  readonly at: string;
+  /** The digest actually serving, when that is what differs. */
+  readonly observedDigest: string | null;
+  /**
+   * Why the platform will not converge, in its own words.
+   *
+   * Present for a release whose delivery object is failing every reconcile —
+   * stored values the current chart no longer accepts is the case this exists
+   * for. `null` when the drift is an ordinary digest mismatch, which
+   * {@link observedDigest} already explains.
+   */
+  readonly detail: string | null;
+}
+
 export interface DeployView {
   /**
    * The Deploy this attempt is, or `null` while it is still only a Build.
@@ -222,6 +248,15 @@ export interface DeployView {
    */
   readonly previousReleaseServing: boolean;
   readonly diagnosis: Diagnosis | null;
+  /**
+   * What the platform stopped agreeing with, once this release was `LIVE` (§6).
+   *
+   * Separate from {@link diagnosis}, which belongs to an attempt that failed.
+   * A drifted release succeeded; the disagreement started afterwards, and §6
+   * wants it "a visible state with a one-click re-converge" — so it has to
+   * reach a screen. `null` is the ordinary case: converged.
+   */
+  readonly drift: DriftView | null;
   readonly resources: readonly ChecklistItem[];
   /** Where this release's bytes came from. Always present (§4). */
   readonly source: SourceView;
@@ -446,8 +481,14 @@ export interface TargetOptionView {
   readonly rank: number;
   readonly candidate: boolean;
   readonly artifactType: ArtifactType | null;
-  /** The name this Component would answer on here (§9). */
-  readonly canonical: string;
+  /**
+   * The zone core would mint this Component's canonical name into here (§9),
+   * as `*.<zone>` — not the minted name itself; nothing has been named yet at
+   * Place. `null` on a Target whose adapter names its own workloads
+   * (`coreMintsCanonical` false), which must be rendered as that fact, never
+   * defaulted back to a suffix.
+   */
+  readonly canonical: string | null;
   readonly reasons: readonly Exclusion[];
   readonly detail: readonly string[];
 }
@@ -557,8 +598,13 @@ export interface TargetListItem {
   }[];
   /** Supported component kinds on this target. */
   readonly kinds: readonly ComponentKind[];
-  /** The canonical hostname prefix for apps on this target. */
-  readonly canonical: string;
+  /**
+   * The zone core mints canonical names into on this Target (§9), as
+   * `*.<zone>`. `null` when the adapter names its own workloads instead
+   * (`coreMintsCanonical` false, e.g. `cloudrun`, `static`) — the screen must
+   * say that rather than show a suffix core will never mint.
+   */
+  readonly canonical: string | null;
   /** `disconnected` keeps serving; it strands Deploys rather than ending them. */
   readonly status: 'connected' | 'disconnected';
   /**

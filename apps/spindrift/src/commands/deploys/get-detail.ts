@@ -221,6 +221,15 @@ export const getDeployDetail: Command<
     urlLive: deploy.phase === 'LIVE',
     previousReleaseServing,
     diagnosis,
+    drift:
+      deploy.driftedAt === null
+        ? null
+        : {
+            since: elapsedSince(deploy.driftedAt, context.clock.now()),
+            at: deploy.driftedAt.toISOString(),
+            observedDigest: deploy.observedDigest,
+            detail: deploy.driftDetail,
+          },
     resources,
     source,
     build,

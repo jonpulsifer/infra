@@ -567,4 +567,67 @@ describe('listTargets', () => {
       expect(result.value.options).toHaveLength(0);
     }
   });
+
+  test('states the real naming boundary, never a fabricated domain', async () => {
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
+    await connectTarget(cloudInput({ name: 'vessel' }), context(registry));
+
+    const result = await listTargets(
+      { kind: 'website', reach: 'public', auth: 'none' },
+      context(registry),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // §9: core mints only where the platform will not, and `kubernetes` is
+    // the one Target here that mints. The boundary is the fixture's real
+    // zones — never `*.<target>.apps.internal`, a domain that appeared
+    // nowhere in the repo, which is the defect this pins.
+    const k8s = result.value.targets.find((t) => t.adapter === 'kubernetes');
+    expect(k8s?.canonical).toBe(
+      `*.${manifest.dns.zones.private} (private) · *.${manifest.dns.zones.public} (public)`,
+    );
+    expect(k8s?.canonical).not.toContain('apps.internal');
+
+    // `cloudrun` and `static` name their own workloads (`coreMintsCanonical`
+    // is false for both) — core mints nothing, so the screen must say that
+    // rather than show a suffix no Deploy on either Target will ever use.
+    const cloudrun = result.value.targets.find((t) => t.adapter === 'cloudrun');
+    const staticTarget = result.value.targets.find(
+      (t) => t.adapter === 'static',
+    );
+    expect(cloudrun?.canonical).toBeNull();
+    expect(staticTarget?.canonical).toBeNull();
+
+    // The same fact carries onto the Place step's options: a caller placing a
+    // Component is told the same boundary about the same Target.
+    const cloudrunOption = result.value.options.find(
+      (o) => o.adapter === 'cloudrun',
+    );
+    expect(cloudrunOption?.canonical).toBeNull();
+  });
+
+  test('collapses the boundary to one zone when private and public agree', async () => {
+    // The common, and live, shape (§9's `DnsZones`): an installation may
+    // point both reaches at the same zone. Two identical clauses joined by
+    // " · " would be true but unreadable, so this pins the collapse.
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
+
+    const oneZoneManifest = {
+      ...manifest,
+      dns: {
+        zones: { private: 'apps.example.test', public: 'apps.example.test' },
+      },
+    };
+    const result = await listTargets(
+      {},
+      { ...context(registry), manifest: oneZoneManifest },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const k8s = result.value.targets.find((t) => t.adapter === 'kubernetes');
+    expect(k8s?.canonical).toBe('*.apps.example.test');
+  });
 });

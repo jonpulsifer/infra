@@ -26,9 +26,25 @@
  * The pre-session members are the only acts in the application reachable
  * without a principal. Credential-administration members authenticate again at
  * this boundary, and `test/web/routes.test.ts` protects the closed route set.
+ *
+ * `AUTH_PATH_PREFIX`, `AUTH_ACTS`, `AuthAct`, and `authPathFor` live in
+ * `src/web/auth-path.ts` and are re-exported below rather than defined here,
+ * because those four are the only edge `auth-client.ts` needs into this
+ * file — everything else here pulls in `session.ts`, which value-imports
+ * `credentials`, `sessions`, and `users` from `db/schema.ts`, which drags the
+ * whole database layer into the browser bundle
+ * (`.agent/plans/spindrift/issues/34-keep-the-server-out-of-the-browser-bundle.md`,
+ * edge 3). `test/web/client-bundle.test.ts` guards against that edge coming
+ * back.
  */
 import { z } from 'zod';
 import type { Principal } from '../commands/types.ts';
+import {
+  AUTH_ACTS,
+  AUTH_PATH_PREFIX,
+  type AuthAct,
+  authPathFor,
+} from '../web/auth-path.ts';
 import {
   beginAddPasskey,
   beginCredentialChange,
@@ -58,37 +74,8 @@ import {
 } from './session.ts';
 import { type AuthFailureCode, type AuthResult, authOk } from './types.ts';
 
-/** Unversioned, and named so nobody has to be told it is not an API. */
-export const AUTH_PATH_PREFIX = '/internal/auth';
-
-/**
- * Every act on this surface.
- *
- * A tuple rather than a set of function declarations, so the route table is
- * `Object.fromEntries` over it and there is nowhere to write another path
- * without another member here.
- */
-export const AUTH_ACTS = [
-  'enrol/begin',
-  'enrol/complete',
-  'signin/begin',
-  'signin/complete',
-  'signout',
-  'session',
-  'credentials',
-  'credentials/verify/begin',
-  'passkeys/add/begin',
-  'passkeys/add/complete',
-  'passkeys/remove',
-  'gateway/link',
-  'gateway/unlink',
-] as const;
-
-export type AuthAct = (typeof AUTH_ACTS)[number];
-
-export function authPathFor(act: AuthAct): string {
-  return `${AUTH_PATH_PREFIX}/${act}`;
-}
+export type { AuthAct };
+export { AUTH_ACTS, AUTH_PATH_PREFIX, authPathFor };
 
 /**
  * The HTTP status a refusal reads as. Total over the closed set, so a new code

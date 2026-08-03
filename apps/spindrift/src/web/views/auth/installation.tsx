@@ -65,11 +65,13 @@ export function InstallationSettings() {
   const [errors, setErrors] = useState<FieldErrors>(new Map());
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
   const [saving, setSaving] = useState(false);
+  const [divergence, setDivergence] = useState<readonly string[]>([]);
 
   const load = useCallback(async () => {
     const result = await command('getInstallationManifest', {});
     if (result.ok) {
       setDocument(result.value.manifest);
+      setDivergence(result.value.manifestDivergence);
       setLoadError(null);
     } else {
       setLoadError(result.failure.message);
@@ -161,6 +163,7 @@ export function InstallationSettings() {
       errors={errors}
       outcome={outcome}
       saving={saving}
+      divergence={divergence}
       onChange={(next) => {
         setDocument(next);
         setOutcome(null);
@@ -210,6 +213,7 @@ export function InstallationSettingsView({
   errors,
   outcome,
   saving,
+  divergence = [],
   onChange,
   onSave,
   onReload,
@@ -219,6 +223,14 @@ export function InstallationSettingsView({
   readonly errors: FieldErrors;
   readonly outcome: SaveOutcome | null;
   readonly saving: boolean;
+  /**
+   * Dotted paths where the mounted declaration disagrees with what is shown
+   * below, from `getInstallationManifest`. Optional, and defaulted to `[]`
+   * rather than required, so a test rendering this view for the ordinary case
+   * — no declaration mounted, or nothing seeded yet — states nothing about a
+   * fact it is not exercising.
+   */
+  readonly divergence?: readonly string[];
   onChange(document: unknown): void;
   onSave(): void;
   onReload(): void;
@@ -239,6 +251,8 @@ export function InstallationSettingsView({
         onSave();
       }}
     >
+      <ManifestDivergenceNotice paths={divergence} />
+
       <Card>
         <CardHeader>
           <Sliders aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
@@ -306,6 +320,57 @@ export function InstallationSettingsView({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * The one thing this screen says that is not about the last save: the
+ * mounted declaration and the document below no longer agree.
+ *
+ * `loadStoredManifest` seeds from a declaration and, once seeded, ignores
+ * it — deliberately, so a rollout can never revert what an operator just
+ * configured here. The cost of that rule is that a declaration can drift for
+ * a long time with nothing but a boot-time pod log to say so, which is how
+ * PR #1607 moved a Target's gateway in the declaration while the row this
+ * screen edits kept pointing at the one that PR deleted. This notice is that
+ * same fact, read where an operator actually looks rather than where a
+ * rollout happened to leave it.
+ *
+ * Not a refusal — nothing failed, and nothing here is wrong to fix — so it
+ * renders beside `Outcome` rather than as one of its arms, and it is present
+ * whenever `divergence` is non-empty rather than only after a save.
+ *
+ * **Paths only**, exactly as `getInstallationManifest` answers them: the list
+ * says where the two documents disagree, never what either one says at that
+ * path.
+ */
+function ManifestDivergenceNotice({
+  paths,
+}: {
+  readonly paths: readonly string[];
+}) {
+  if (paths.length === 0) return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-md border border-border bg-secondary p-3 text-sm text-foreground"
+    >
+      <CircleAlert aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
+      <div>
+        <p className="font-medium">
+          The mounted declaration no longer matches this installation.
+        </p>
+        <p className="mt-0.5">
+          Configuration is this screen's to drive, so what is stored below is
+          what is running — the declaration was only ever the seed. Discard the
+          row to re-seed from it instead of editing here.
+        </p>
+        <p className="mt-1 text-muted-foreground">
+          Differs at: {paths.join(', ')}.
+        </p>
+      </div>
+    </div>
   );
 }
 

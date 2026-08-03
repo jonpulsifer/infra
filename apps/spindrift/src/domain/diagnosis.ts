@@ -93,6 +93,13 @@ export function failureColumns(diagnosis: Diagnosis): {
  *
  * Drift is only meaningful for a Deploy that reached `LIVE`. A Deploy still
  * converging has not drifted; it has not arrived.
+ *
+ * **The digest is not the only way to disagree.** A delivery object the platform
+ * is refusing to apply has drifted even while it still serves the digest that
+ * was asked for: the previous release is what is answering, and every reconcile
+ * is failing behind it. Comparing digests alone reads that as converged, which
+ * is how a release whose chart contract moved sat wedged for a day with a green
+ * row in front of it.
  */
 export function hasDrifted(args: {
   readonly phase: DeployPhase;
@@ -100,8 +107,16 @@ export function hasDrifted(args: {
   readonly desiredDigest: string;
   /** The digest `observe` says is actually serving, or `null` when nothing is. */
   readonly observedDigest: string | null;
+  /**
+   * The phase the delivery object itself reports, when the adapter read one.
+   *
+   * Distinct from `phase` above, which is what this Deploy's own attempt ended
+   * on. They agreed when the attempt finished and are free to diverge after.
+   */
+  readonly observedPhase?: DeployPhase;
 }): boolean {
   if (args.phase !== 'LIVE') return false;
   if (args.observedDigest === null) return true;
+  if (args.observedPhase === 'FAILED') return true;
   return args.observedDigest !== args.desiredDigest;
 }

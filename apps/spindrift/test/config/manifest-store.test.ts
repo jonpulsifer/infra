@@ -6,7 +6,10 @@ import {
   MANIFEST_INLINE_VAR,
   ManifestError,
 } from '../../src/config/manifest.ts';
-import { loadStoredManifest } from '../../src/config/manifest-store.ts';
+import {
+  diffManifestPaths,
+  loadStoredManifest,
+} from '../../src/config/manifest-store.ts';
 import { createDb } from '../../src/db/client.ts';
 import { installation, targets } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -501,5 +504,122 @@ describe('the stored installation manifest', () => {
     expect(
       loadStoredManifest(database().db, FIXTURE_DEPLOYMENT_ENV),
     ).rejects.toThrow(/installer/);
+  });
+});
+
+describe('naming where a declaration disagrees with the stored row', () => {
+  test('an identical declaration reports no divergence', () => {
+    expect(diffManifestPaths(connectedManifest, connectedManifest)).toEqual([]);
+  });
+
+  test('names the dotted paths that differ, and only those', () => {
+    // Mirrors the live bug this guards against: PR #1607 moved the offsite
+    // Target's gateway — a value nested inside one Target's connection — in
+    // the declaration, while the row it seeded and every other field of
+    // every other Target stayed exactly where they were.
+    const withGateway = (name: string, namespace: string) => ({
+      ...connectedManifest,
+      targets: connectedManifest.targets.map((target) =>
+        target.adapter === 'kubernetes'
+          ? {
+              ...target,
+              connection: {
+                ...target.connection,
+                chartValues: { platform: { gateway: { name, namespace } } },
+              },
+            }
+          : target,
+      ),
+    });
+    const declared = withGateway(
+      'spindrift-apps',
+      'spindrift-apps',
+    ) satisfies AuthoredManifest;
+    const stored = withGateway(
+      'cluster-gateway',
+      'cluster-gateway',
+    ) satisfies AuthoredManifest;
+
+    expect(diffManifestPaths(declared, stored)).toEqual([
+      'targets.0.connection.chartValues.platform.gateway.name',
+      'targets.0.connection.chartValues.platform.gateway.namespace',
+    ]);
+  });
+
+  test('the report carries the path that differs, never the values', () => {
+    const stored = {
+      ...connectedManifest,
+      targets: connectedManifest.targets.map((target) =>
+        target.adapter === 'kubernetes'
+          ? {
+              ...target,
+              connection: {
+                ...target.connection,
+                apiServer: 'https://replacement.example.test',
+              },
+            }
+          : target,
+      ),
+    } satisfies AuthoredManifest;
+
+    const paths = diffManifestPaths(connectedManifest, stored);
+    expect(paths).toEqual(['targets.0.connection.apiServer']);
+    // Neither the declared value nor the stored value appears anywhere in
+    // what was returned — a path names *where* the two documents disagree,
+    // never *what* they disagree about. That is what keeps a value the
+    // schema has not been written yet — a credential on some future Target
+    // connection — off a startup log line, without this function needing to
+    // know which paths are sensitive.
+    const rendered = JSON.stringify(paths);
+    expect(rendered).not.toContain('cluster.example.test');
+    expect(rendered).not.toContain('replacement.example.test');
+  });
+
+  test('the startup warning names the differing path, and still no value', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
+    });
+    const declared = {
+      ...connectedManifest,
+      targets: connectedManifest.targets.map((target) =>
+        target.adapter === 'kubernetes'
+          ? {
+              ...target,
+              connection: {
+                ...target.connection,
+                apiServer: 'https://declared-elsewhere.example.test',
+              },
+            }
+          : target,
+      ),
+    } satisfies AuthoredManifest;
+
+    // `bun:test`'s `spyOn` does not intercept `console.warn` — verified against
+    // a two-line reproduction outside this suite — so this captures it the
+    // plain way: swap the method out, put it back in `finally`.
+    const original = console.warn;
+    const calls: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      calls.push(args);
+    };
+    try {
+      // A declaration seeds and does not govern (see above), so this write is
+      // ignored — the point here is only what the warning it produces says.
+      await loadStoredManifest(database().db, {
+        [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
+      });
+    } finally {
+      console.warn = original;
+    }
+
+    const messages = calls.map((call) => String(call[0]));
+    expect(
+      messages.some((message) =>
+        message.includes('targets.0.connection.apiServer'),
+      ),
+    ).toBe(true);
+    expect(
+      messages.some((message) => message.includes('declared-elsewhere')),
+    ).toBe(false);
   });
 });
