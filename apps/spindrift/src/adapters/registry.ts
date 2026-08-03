@@ -44,6 +44,7 @@ import { GitHubApp } from '../integrations/github/app.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
 import { GitHubDeviceOAuth } from '../integrations/github/oauth.ts';
 import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
+import { withGitHubRegistryCredential } from '../storage/github-registry-credential.ts';
 import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
@@ -301,10 +302,17 @@ export function createAdapterRegistry(
      * token durably, and the commands say so rather than keeping one in clear.
      */
     registryCredentials() {
-      if (keyring === null || options.db === undefined) return null;
-      return registryCredentialStore(options.db, keyring, () =>
-        (options.clock ?? { now: () => new Date() }).now(),
-      );
+      const now = () => (options.clock ?? { now: () => new Date() }).now();
+      const stored =
+        keyring === null || options.db === undefined
+          ? null
+          : registryCredentialStore(options.db, keyring, now);
+      // GHCR is minted from the credential this installation already refreshes
+      // rather than pasted in and owned forever — see
+      // `storage/github-registry-credential.ts`. A stored row for the same host
+      // still wins, and an installation with no connector gets `stored` back
+      // unchanged.
+      return withGitHubRegistryCredential(stored, oauth, now);
     },
 
     source() {

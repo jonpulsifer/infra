@@ -45,7 +45,8 @@ describe('an App choosing its build route', () => {
   function registryWith(available: readonly string[]): AdapterRegistry {
     return {
       deploy: () => null,
-      build: (name) => (available.includes(name) ? new FakeBuildAdapter() : null),
+      build: (name) =>
+        available.includes(name) ? new FakeBuildAdapter() : null,
       store: () => new FakeSecretStore(),
       supplyChain: () => new SupplyChainHarness(),
       repository: () => null,
@@ -175,6 +176,45 @@ describe('an App choosing its build route', () => {
     } as CommandContext;
 
     expect(await routeForTarget(targetId, without, appId)).toBeNull();
+  });
+
+  /**
+   * The half a level threshold does not cover, and the one the cloud builder
+   * makes real: a route publishes where its own identity reaches, and a Target
+   * pulls from where it can reach. If those do not meet, the Build is green and
+   * the Deploy fails at the pull — so it is refused here instead.
+   */
+  test('refuses a route that publishes nowhere the Target can pull from', async () => {
+    // A route whose identity reaches only the artifact registry, against a
+    // Target that pulls only from GHCR: the cloud builder's exact situation
+    // before a GHCR credential exists.
+    const narrow = {
+      ...ctx,
+      adapters: {
+        ...ctx.adapters,
+        build: (name: string) =>
+          name === 'managed'
+            ? new FakeBuildAdapter({
+                selfAuthorizedRegistries: ['artifactRegistry'],
+              })
+            : new FakeBuildAdapter(),
+      },
+    } as CommandContext;
+    await narrow.db
+      .update(targets)
+      .set({
+        discovery: {
+          reachableRegistries: ['ghcr.io/jonpulsifer'],
+        } as never,
+      })
+      .where(eq(targets.id, targetId));
+
+    const result = await setAppBuildRoute({ appId, route: 'managed' }, narrow);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.failure.message).toContain('cannot pull');
+    expect(result.failure.message).toContain('target-a');
   });
 
   /**

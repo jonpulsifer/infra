@@ -39,6 +39,7 @@ import {
   componentTargetDesired,
   targets,
 } from '../../db/schema.ts';
+import { publishableRegistries } from '../../domain/artifact-name.ts';
 import { buildRouteFor, refusalForChosenRoute } from '../builds/route.ts';
 import { type Command, failed, ok } from '../types.ts';
 
@@ -100,6 +101,24 @@ export const setAppBuildRoute: Command<
     .where(eq(components.appId, app.id));
 
   if (input.route !== null) {
+    const adapter = context.adapters.build(input.route);
+    // Where this route can publish, which is not always everywhere: §13
+    // authorizes each push by the route that makes it, and the three routes do
+    // not reach the same registries. Computed once — it is a property of the
+    // route and the installation, not of any Target.
+    const published =
+      adapter === null
+        ? []
+        : publishableRegistries({
+            registries: context.manifest.supplyChain.registry,
+            selfAuthorized: adapter.selfAuthorizedRegistries,
+            storedHosts: new Set(
+              (await context.adapters.registryCredentials?.()?.list())?.map(
+                (one) => one.host,
+              ) ?? [],
+            ),
+          });
+
     for (const target of placements) {
       const selection = await buildRouteFor(target.id, context);
       const refusal = refusalForChosenRoute(
@@ -109,22 +128,31 @@ export const setAppBuildRoute: Command<
       );
       if (refusal !== null) return failed('NOT_BUILDABLE', refusal);
 
-      // The registry half. Where a Target narrows what it can pull from and
-      // none of this installation's registries are in that set, no route builds
-      // anything it could run — so the sentence names the Target rather than
-      // letting a green Build discover it at the pull.
+      /**
+       * The registry half, and the half a level threshold does not cover.
+       *
+       * A route publishes where its identity reaches; a Target pulls from where
+       * it can reach. If those two sets do not meet, the Build is green, the
+       * artifact is real, and the Deploy fails at the pull with a message about
+       * a manifest nobody can find — which is the worst place for this to be
+       * discovered and the reason it is refused here.
+       *
+       * A Target that declares no reachable registries takes the first one
+       * (§16's tie-break), so the check is against that rather than skipped.
+       */
       const reachable = target.discovery?.reachableRegistries ?? [];
-      if (
-        reachable.length > 0 &&
-        !context.manifest.supplyChain.registry.some((registry) =>
-          reachable.includes(registry),
-        )
-      ) {
+      const pullable =
+        reachable.length > 0
+          ? reachable
+          : context.manifest.supplyChain.registry.slice(0, 1);
+      if (!published.some((registry) => pullable.includes(registry))) {
         return failed(
           'NOT_BUILDABLE',
-          `${target.name} pulls only from ${reachable.join(' or ')}, and this ` +
-            `installation pushes to ${context.manifest.supplyChain.registry.join(' or ')} — ` +
-            `no route can build ${app.name} an artifact it could run`,
+          `${input.route} publishes to ${published.join(' and ') || 'no registry this installation configures'}, ` +
+            `and ${target.name} pulls from ${pullable.join(' or ')} — ` +
+            `so a build of ${app.name} on that route would produce an artifact ` +
+            `${target.name} cannot pull. Store a registry credential for one ` +
+            `${target.name} reaches, or leave ${app.name} on rank order.`,
         );
       }
     }

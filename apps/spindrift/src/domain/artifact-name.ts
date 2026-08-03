@@ -175,6 +175,47 @@ export function registryFlavour(host: string): RegistryFlavour {
 }
 
 /**
+ * The registries one route can actually publish to (§13, §16).
+ *
+ * §16 says every artifact is pushed to every registry, and that sentence has an
+ * unstated precondition: that the pushing thing can authenticate to all of
+ * them. It cannot. §13 wants each push authorized by the route that makes it —
+ * a federated token for the cloud builder, the run's own token for hosted CI —
+ * and those identities do not reach the same set. The cloud builder's metadata
+ * token is good for one vendor's registries and nothing else; the hosted run
+ * logs into GHCR *and* federates to the artifact registry, which is why it has
+ * never had to think about this.
+ *
+ * A push to a registry the route cannot authenticate to does not fail politely.
+ * `buildctl` exports every reference in one operation, so a `401` on one
+ * destination fails the whole export — half an hour into a build, with the
+ * artifact built and nothing published anywhere. Narrowing here is what turns
+ * that into "this route publishes where it can", and what makes an App naming a
+ * route a decision with a legible consequence: the artifact lands in fewer
+ * places, and a Target that cannot pull from any of them is not one this route
+ * can build for. `setAppBuildRoute` refuses exactly that, up front.
+ *
+ * The stored credentials widen it back. That is the whole purpose of §16's
+ * named exception to "nothing stored": a host no federation reaches becomes
+ * reachable the moment an installation holds a login for it.
+ */
+export function publishableRegistries(input: {
+  readonly registries: readonly string[];
+  /** Flavours this route's own identity authorizes, from the adapter. */
+  readonly selfAuthorized: readonly RegistryFlavour[];
+  /** Hosts this installation holds a stored credential for. */
+  readonly storedHosts?: ReadonlySet<string>;
+}): string[] {
+  return input.registries.filter((registry) => {
+    const host = registryHostOf(registry);
+    return (
+      input.selfAuthorized.includes(registryFlavour(host)) ||
+      (input.storedHosts?.has(host) ?? false)
+    );
+  });
+}
+
+/**
  * The OCI distribution API root a namespace's registry answers on.
  *
  * `https` with no fallback. A registry reached over plaintext is one whose

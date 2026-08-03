@@ -53,6 +53,7 @@ const route: BuildAdapter = {
   buildLevel: 2,
   provenanceBuilderId: 'https://spindrift.dev/builders/example',
   carriesRegistryCredential: true,
+  selfAuthorizedRegistries: ['ghcr'],
   async *build(
     given: BuildSource,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {

@@ -19,6 +19,7 @@
  * this process is already connected to, so its log is one more read against an
  * API the adapter already holds (§4's amendment).
  */
+import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type {
   KubernetesApi,
   KubernetesObject,
@@ -89,6 +90,15 @@ export class InClusterBuildRoute implements BuildAdapter {
    * {@link InClusterBuildRoute.job}.
    */
   readonly carriesRegistryCredential = true;
+  /**
+   * The Job runs as a service account, and what that account reaches is a
+   * workload identity binding on one vendor's registries. Anything else the
+   * installation pushes to needs a stored credential, which this route can
+   * carry — see {@link InClusterBuildRoute.carriesRegistryCredential}.
+   */
+  readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [
+    'artifactRegistry',
+  ];
 
   constructor(private readonly options: InClusterRouteOptions) {
     this.name = options.name;

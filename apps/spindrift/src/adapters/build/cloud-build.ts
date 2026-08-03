@@ -37,6 +37,7 @@
  *     Target will admit.
  */
 
+import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import {
   buildKitProgramFor,
   dockerConfigFor,
@@ -198,6 +199,17 @@ export class CloudBuildRoute implements BuildAdapter {
    * are what a reader of the build resource sees.
    */
   readonly carriesRegistryCredential = true;
+  /**
+   * One vendor's registries, because that is what the metadata server issues a
+   * token for. Everything else this route publishes to needs a stored
+   * credential, and without one it is simply not a destination this route has —
+   * see {@link publishableRegistries}. That is why a cloud build lands in the
+   * artifact registry by default: not a preference, but the honest extent of
+   * what its own identity authorizes.
+   */
+  readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [
+    'artifactRegistry',
+  ];
 
   constructor(private readonly options: CloudBuildRouteOptions) {
     this.name = options.name;
