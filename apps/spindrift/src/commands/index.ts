@@ -27,6 +27,7 @@ export { dispatchBuild } from './builds/dispatch.ts';
 export { getBuildDetail } from './builds/get-detail.ts';
 export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
+export { setComponentReach } from './components/reach.ts';
 export { replaceConfig } from './config/replace.ts';
 export { setConfig } from './config/set.ts';
 export {

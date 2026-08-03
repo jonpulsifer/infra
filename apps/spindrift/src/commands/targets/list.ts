@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
+import { targetConnectionDivergence } from '../../config/manifest-store.ts';
 import { KINDS_BY_ADAPTER } from '../../domain/capabilities.ts';
 import { auth, componentKind, reach } from '../../domain/creation-draft.ts';
 import type { ComponentKind } from '../../domain/desired-state.ts';
@@ -10,7 +11,10 @@ import {
   placementTargetOf,
   resolvePlacement,
 } from '../../domain/placement.ts';
-import { pendingConnections } from '../../domain/target-onboarding.ts';
+import {
+  connectionProposal,
+  pendingConnections,
+} from '../../domain/target-onboarding.ts';
 import type {
   PendingTargetConnection,
   TargetListItem,
@@ -125,6 +129,23 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
       status: target.status,
       configured: target.connection !== null,
       inspectedAt: target.inspectedAt?.toISOString() ?? null,
+      manifestDivergence: targetConnectionDivergence(
+        context.manifest.targets.find((seed) => seed.name === target.name),
+        target.connection,
+      ),
+      // Carried from this Target alone, which is the whole difference between
+      // an edit and a connect: `connectionProposal` prefers a healthy donor of
+      // the same adapter, and given a list of one there is only this row to
+      // read. A donor's values on an edit screen would be the second cluster's
+      // address problem with the Targets the other way round.
+      edit:
+        target.adapter === 'kubernetes' &&
+        target.connection?.adapter === 'kubernetes'
+          ? {
+              apiServer: target.connection.apiServer,
+              proposal: connectionProposal([target], 'kubernetes'),
+            }
+          : null,
     });
 
     const isConnected = target.status === 'connected';

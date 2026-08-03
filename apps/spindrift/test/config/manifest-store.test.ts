@@ -9,11 +9,16 @@ import {
 import {
   diffManifestPaths,
   loadStoredManifest,
+  targetConnectionDivergence,
+  writeStoredManifest,
 } from '../../src/config/manifest-store.ts';
 import { createDb } from '../../src/db/client.ts';
 import { installation, targets } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { FIXTURE_DEPLOYMENT_ENV } from '../harness/installation.ts';
+import {
+  connectionFor,
+  FIXTURE_DEPLOYMENT_ENV,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const FIXTURE = new URL(
@@ -192,9 +197,13 @@ describe('the stored installation manifest', () => {
     } satisfies AuthoredManifest;
 
     // Configuration is the UI's to drive, so the trigger for reconciliation is
-    // the stored manifest changing — which is what a settings write is.
-    await database().db.update(installation).set({ manifest: changed });
-    await loadStoredManifest(database().db, {});
+    // an operator submitting a document — which is what a settings write is,
+    // and it is `writeStoredManifest` on both the seed path and
+    // `configureInstallation`. Written through that call rather than by
+    // updating the row and rebooting: a boot writes the stored document back
+    // without re-asserting it (see the test below), so the raw-update spelling
+    // was asserting this behaviour through the one path that no longer has it.
+    await writeStoredManifest(database().db, changed);
 
     const cluster = await database().db.query.targets.findFirst({
       where: (targets, { eq }) => eq(targets.name, 'cluster'),
@@ -205,6 +214,85 @@ describe('the stored installation manifest', () => {
     expect(cluster?.health).toBe('unhealthy');
     expect(cluster?.inspectedAt).toBeNull();
     expect(cluster?.updatedAt.getTime()).toBeGreaterThan(old.getTime());
+  });
+
+  test('a boot leaves an operator’s Target connection alone, and says where it diverges', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
+    });
+
+    // What `connectTarget` writes: the row, and only the row. The manifest is
+    // untouched, which is the state 52 is about — the operator corrected a
+    // Target through the product and the document still declares the old one.
+    const corrected = {
+      adapter: 'kubernetes' as const,
+      apiServer: 'https://cluster.example.test',
+      namespace: 'apps',
+      delivery: {
+        flavour: 'flux-helmrelease' as const,
+        namespace: 'apps',
+        sourceRef: { name: 'infra', namespace: 'flux-system' },
+      },
+      chartContract: '2',
+      chartValues: {
+        platform: {
+          gateway: { name: 'spindrift-apps', namespace: 'spindrift-apps' },
+        },
+      },
+    };
+    await database()
+      .db.update(targets)
+      .set({ connection: corrected, health: 'healthy' })
+      .where(eq(targets.name, 'cluster'));
+
+    // The restart. It used to be the whole defect: `loadStoredManifest` writes
+    // the stored document back on every boot, and reconciliation re-asserted
+    // the manifest's copy of the connection over the row — so a connect-screen
+    // edit lasted exactly until the next pod rolled, silently.
+    await loadStoredManifest(database().db, {});
+
+    const cluster = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(cluster?.connection).toEqual(corrected);
+    // Nothing was re-declared, so nothing about the Target's assessment was
+    // invalidated either — a boot that reset this to unhealthy would make every
+    // rollout re-inspect every Target it had not been asked to change.
+    expect(cluster?.health).toBe('healthy');
+
+    // And the divergence is readable rather than silent: the row won, so what
+    // the manifest still declares has to be somewhere an operator can see it
+    // before they submit that document in Settings and take their own edit back.
+    expect(
+      targetConnectionDivergence(
+        connectedManifest.targets[0],
+        cluster?.connection ?? null,
+      ),
+    ).toEqual(['connection.chartValues']);
+  });
+
+  test('a Target the manifest declares no connection for never diverges', async () => {
+    // §13 lets a seed carry an identity and leave the connection to the
+    // product. That Target's connection is the row's outright, so there is
+    // nothing for it to disagree with — reporting one would put a permanent
+    // warning on every Target connected through the screen it belongs to.
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    await database()
+      .db.update(targets)
+      .set({ connection: connectionFor('kubernetes'), status: 'connected' })
+      .where(eq(targets.name, 'cluster'));
+
+    const cluster = await database().db.query.targets.findFirst({
+      where: (targets, { eq }) => eq(targets.name, 'cluster'),
+    });
+    expect(
+      targetConnectionDivergence(
+        fixtureManifest.targets.find((target) => target.name === 'cluster'),
+        cluster?.connection ?? null,
+      ),
+    ).toEqual([]);
   });
 
   test('a declaration seeds an empty installation and never governs a seeded one', async () => {

@@ -133,6 +133,27 @@ export const AUTH_NEEDS_A_ROUTE =
   'a Component with no route has nothing to authenticate in front of';
 
 /**
+ * The one cell of the reach/auth grid that is unsayable, as a predicate.
+ *
+ * A function rather than a line repeated in each schema because there are now
+ * two acts that decide a Component's exposure — creating one and editing one —
+ * and the whole value of the rule is that it holds for both. Two copies of the
+ * comparison is two places for the grid to be wrong in one of them, which is
+ * exactly the state 54 found: a rule enforced where a Component is born and
+ * nowhere else.
+ *
+ * Every other cell is expressible, including the two the old three-state
+ * exposure could not say — an unauthenticated address on your own network, and
+ * an authenticated public one.
+ */
+export function authHasARoute(state: {
+  readonly reach: Reach;
+  readonly auth: Auth;
+}): boolean {
+  return !(state.reach === 'none' && state.auth === 'proxy');
+}
+
+/**
  * A pinned reference to one config value in the Target's store (§10).
  *
  * Values are write-only: this is a reference core can render into a delivery

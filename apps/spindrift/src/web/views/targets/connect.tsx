@@ -78,6 +78,17 @@ export function ConnectTargetForm(props: {
   name: string;
   /** True on the "add a Target" path, where no manifest seed named it. */
   nameEditable?: boolean;
+  /**
+   * The address to start from, which is only ever *this* Target's own.
+   *
+   * Empty on both connect paths, for the reason {@link TargetConnectionProposal}
+   * gives for having no `apiServer` field: a cluster prefilled with another
+   * cluster's address reads as correct and points somewhere else. Editing a
+   * Target that is already connected is the one case where the address is not
+   * somebody else's, and re-typing it to correct a gateway would be asking the
+   * operator to restate the one fact the row is certain of.
+   */
+  apiServer?: string;
   targets: readonly string[];
   proposal: TargetConnectionProposal;
   connecting: boolean;
@@ -147,6 +158,7 @@ function Heading({
 function ConnectCluster({
   name,
   nameEditable = false,
+  apiServer: knownApiServer = '',
   proposal,
   connecting,
   onConnect,
@@ -154,16 +166,19 @@ function ConnectCluster({
 }: {
   name: string;
   nameEditable?: boolean;
+  apiServer?: string;
   proposal: TargetConnectionProposal;
   connecting: boolean;
   onConnect: (input: ConnectTargetInput) => void;
   onCancel: () => void;
 }) {
   const [targetName, setTargetName] = useState(name);
-  // Per-instance, so never proposed: this is the one field that names *this*
-  // cluster, and a second cluster prefilled with the first one's address would
-  // read as correct and deploy somewhere else.
-  const [apiServer, setApiServer] = useState('');
+  // Per-instance, so never proposed *from another Target*: this is the one field
+  // that names *this* cluster, and a second cluster prefilled with the first
+  // one's address would read as correct and deploy somewhere else. The caller
+  // may still supply the row's own address, which is the same fact rather than
+  // a proposal about it.
+  const [apiServer, setApiServer] = useState(knownApiServer);
   const [scan, setScan] = useState<Scan>({ state: 'idle' });
   /** Counts reads, so a re-read remounts the panel below on the new answer. */
   const [reads, setReads] = useState(0);

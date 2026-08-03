@@ -89,9 +89,49 @@ export async function loadStoredManifest(
     );
   }
   const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
-  await writeStoredManifest(db, declared);
+  // `booted` exactly when the document being written is the one the
+  // installation already had — see {@link ManifestWrite}. A stored row this
+  // build could not parse leaves `stored` null, which is right: that boot is
+  // re-seeding from the declaration, and re-seeding is a declaration.
+  await writeStoredManifest(
+    db,
+    declared,
+    stored === null ? 'declared' : 'booted',
+  );
   return resolveManifest(declared, env);
 }
+
+/**
+ * What a write of the stored manifest **is**, which is what decides whether a
+ * declared Target connection lands on the row.
+ *
+ * `declared` is a manifest *becoming* this installation's: the seed path and
+ * `configureInstallation`, which this module already treats as one act. There a
+ * declared connection is desired state — an operator submitted this document —
+ * so it is asserted over the row and resets that Target's assessment.
+ *
+ * `booted` is {@link loadStoredManifest} writing back the document the
+ * installation already had. Nothing became anything, so nothing was declared,
+ * and re-asserting the manifest's copy of a connection there is this module's
+ * own rule broken one noun down: "the stored row wins whenever one exists,
+ * because configuration is the UI's to drive and a rollout must not revert what
+ * an operator just configured" is the rule a declaration loses to, and a Target
+ * an operator corrected through `connectTarget` is that same operator and that
+ * same rollout. It ran on every process start, so a connect-screen edit to a
+ * manifest-declared Target survived exactly until the next pod restarted, with
+ * the screen that accepted it then showing the old values and no reason why.
+ *
+ * The row therefore wins, and the manifest entry it now disagrees with is
+ * reported by {@link targetConnectionDivergence} rather than silently applied —
+ * the same answer 51 gave the same tension one level up: keep the precedence,
+ * report the divergence.
+ *
+ * A boot still materializes and ranks. A Target the document names and the
+ * table lacks is created, and `rank` is repaired from manifest order; both are
+ * facts the document is the only source of, and neither is something an
+ * operator can have edited on the row.
+ */
+export type ManifestWrite = 'declared' | 'booted';
 
 /**
  * Every dotted path where two manifest documents disagree.
@@ -137,6 +177,38 @@ export function diffManifestPaths(
     );
   }
   return diffs;
+}
+
+/**
+ * Every dotted path where one Target's row disagrees with what the manifest
+ * declares for it.
+ *
+ * {@link diffManifestPaths} with one argument each side of the boundary 52 is
+ * about: the row is what every deploy renders from, the manifest entry is what
+ * a `declared` write resets it to, and until now nothing said which was which.
+ * Boot no longer overwrites the row, but `configureInstallation` still asserts
+ * the whole document — so an operator who corrected a Target through the
+ * connect screen has to be able to see that Settings will take it back, on the
+ * Target, rather than discover it by pressing Save.
+ *
+ * Paths, never values, for exactly the reason {@link diffManifestPaths} gives.
+ * Rooted at `connection.` so a path reads as the key it is under in the
+ * document the operator would go and edit, which is the same spelling the
+ * startup warning uses below `targets.N.`.
+ *
+ * `[]` for a seed that declares no connection: §13 lets the manifest seed an
+ * identity and leave the connection to the product, so that Target's connection
+ * is the row's outright and there is nothing for it to disagree with. Same for
+ * a Target the manifest does not name at all — nothing will ever assert over it.
+ */
+export function targetConnectionDivergence(
+  seed: TargetSeed | undefined,
+  connection: TargetConnection | null,
+): readonly string[] {
+  if (seed === undefined) return [];
+  const declared = connectionFromSeed(seed);
+  if (declared === null) return [];
+  return diffManifestPaths(declared, connection, ['connection']);
 }
 
 /** `[key, value]` pairs for a plain object or an array; `null` for anything else. */
@@ -209,13 +281,19 @@ async function declaredManifest(
 export async function writeStoredManifest(
   db: Database,
   manifest: AuthoredManifest,
+  /**
+   * Defaults to `declared`, because every caller but the boot path is an
+   * operator submitting a document — and a new one that forgot to say so
+   * should get the stricter behaviour rather than the quieter one.
+   */
+  write: ManifestWrite = 'declared',
 ): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.insert(installation).values({ manifest }).onConflictDoUpdate({
       target: installation.id,
       set: { manifest },
     });
-    await reconcileManifestTargets(tx, manifest);
+    await reconcileManifestTargets(tx, manifest, write);
   });
 }
 
@@ -240,16 +318,19 @@ export async function currentStoredManifest(
  * connections.
  *
  * An omitted connection leaves existing product-owned connection state alone.
- * A declared connection is desired state: it creates a connected row and
- * resets changed connection facts to an unhealthy, awaiting-inspection
- * checklist. A disconnected row stays disconnected until reconciler startup
- * can inspect and safely re-adopt its Deploys. Keeping this work in the manifest
- * transaction means an incompatible target cannot poison the durable
- * declaration.
+ * A declared connection is desired state **on a `declared` write**: it creates a
+ * connected row and resets changed connection facts to an unhealthy,
+ * awaiting-inspection checklist. On a `booted` write it does not touch an
+ * existing row at all, because nothing was declared — see {@link ManifestWrite}
+ * for why that distinction is the whole of 52. A disconnected row stays
+ * disconnected until reconciler startup can inspect and safely re-adopt its
+ * Deploys. Keeping this work in the manifest transaction means an incompatible
+ * target cannot poison the durable declaration.
  */
 async function reconcileManifestTargets(
   db: Pick<Database, 'insert' | 'query'>,
   manifest: AuthoredManifest,
+  write: ManifestWrite,
 ): Promise<void> {
   for (const [rank, target] of manifest.targets.entries()) {
     const { name, adapter } = target;
@@ -268,6 +349,7 @@ async function reconcileManifestTargets(
       adapter,
     );
     const hasConnectionChange =
+      write === 'declared' &&
       declaredConnection !== null &&
       !Bun.deepEquals(existing?.connection, declaredConnection, true);
 

@@ -31,7 +31,7 @@ import { cn } from './ui/utils.ts';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { AppList } from './views/apps/list.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
-import { Workspace } from './views/apps/workspace.tsx';
+import { type SetReach, Workspace } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
 import { Settings } from './views/auth/settings.tsx';
 import {
@@ -436,6 +436,23 @@ function WorkspaceScreen({
     }
   };
 
+  // §9: the row is written and the release is not, so the workspace is re-read
+  // rather than patched in place — `Deploy` next to a Component whose reach
+  // just changed has to be reading the same row the next intent will pin.
+  const handleSetReach: SetReach = async (change) => {
+    try {
+      const result = await command('setComponentReach', change);
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true, pendingRelease: result.value.pendingRelease };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Saving reach failed',
+      };
+    }
+  };
+
   return (
     <>
       {deployError ? (
@@ -464,6 +481,7 @@ function WorkspaceScreen({
         deletion={deletion}
         onRollback={handleRollback}
         rollingBack={rollingBack}
+        onSetReach={handleSetReach}
       />
       <DeleteAppDialog deletion={deletion} />
     </>
