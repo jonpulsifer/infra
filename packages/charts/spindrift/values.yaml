@@ -24,6 +24,13 @@ serviceAccount:
     gcpImpersonationUrl: ""
     expirationSeconds: 3600
     mountPath: /var/run/secrets/spindrift
+    # The ConfigMap projected at `ca.crt` — the one file `NODE_EXTRA_CA_CERTS`
+    # names. The cluster's own published root by default, which is all an
+    # installation whose Targets are in-cluster ever needs. An installation
+    # holding a Target on another cluster names a ConfigMap carrying that
+    # cluster's chain as well, because the variable takes exactly one file and a
+    # projected volume cannot merge two sources onto one path.
+    caConfigMap: kube-root-ca.crt
 
 # Where the control plane's own UI is served. Empty renders no Gateway and no
 # HTTPRoute, leaving the UI reachable only in-cluster.

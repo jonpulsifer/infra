@@ -270,12 +270,19 @@ export interface ClusterConnectPlan {
  *   whose policy actually holds publicly.
  * - **`networkPolicy.allowedNamespaces`** is the namespaces of the components
  *   that were included, less the one the workloads are in. The chart's ingress
- *   is default-deny, so a route attached to a gateway in a namespace nobody
- *   listed reaches nothing — which is the failure this derivation exists to
- *   make impossible. Its own namespace is left out because the chart already
- *   admits same-namespace siblings unconditionally: a gateway beside the
- *   workloads it serves needs no entry, and writing one would put a name in
- *   the list that means nothing.
+ *   is default-deny, so a component that reaches a Component from a namespace
+ *   nobody listed reaches nothing. Its own namespace is left out because the
+ *   chart already admits same-namespace siblings unconditionally, and writing
+ *   one would put a name in the list that means nothing.
+ *
+ *   **This list is not what admits a route, and never was.** A gateway's data
+ *   plane need not be a pod in the gateway's namespace — Cilium terminates a
+ *   listener in a host-networked DaemonSet, so the connection arrives with an
+ *   identity rather than from a location, and no namespace written here matches
+ *   it. The chart admits that identity itself (`templates/networkpolicy.yaml`,
+ *   second document). What these names still buy is the other class of
+ *   implementation, where the data plane *is* a pod one can point at — so the
+ *   gateway's namespace stays derived rather than dropped.
  */
 export function clusterConnectPlan(
   choices: ClusterConnectChoices,
