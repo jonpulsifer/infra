@@ -172,10 +172,15 @@ export const deployReason = pgEnum('deploy_reason', FAILURE_REASONS);
  */
 export const blame = pgEnum('blame', BLAMES);
 
-/** §11: "for two wire protocols: `postgres` and `redis`." */
+/**
+ * §11: "for two wire protocols". Named for what this platform runs behind each
+ * — CloudNativePG or Cloud SQL, the Valkey operator or Memorystore for Valkey —
+ * rather than for the protocol's older namesake, so an engine value never names
+ * a product no Target here can provision.
+ */
 export const datastoreEngine = pgEnum('datastore_engine', [
   'postgres',
-  'redis',
+  'valkey',
 ]);
 
 /** §11: "Two provenances, differing only in who authors the URL." */

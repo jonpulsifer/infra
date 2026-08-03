@@ -447,7 +447,7 @@ export const WORKSPACE_SCENARIOS = {
       },
       {
         name: 'cache',
-        engine: 'redis',
+        engine: 'valkey',
         provenance: 'managed',
         attachedTo: null,
         target: 'Metal',

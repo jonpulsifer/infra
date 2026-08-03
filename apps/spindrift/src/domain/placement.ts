@@ -138,7 +138,7 @@ export interface DerivedRequirements {
 /** One attached Datastore, as a requirement. */
 export interface RequiredDatastore {
   readonly name: string;
-  readonly engine: 'postgres' | 'redis';
+  readonly engine: 'postgres' | 'valkey';
   /**
    * §11: "In-cluster datastores stay cluster-local in v1." A cluster-local
    * Datastore names the one Target its App can be placed on.
@@ -455,7 +455,7 @@ export function exclusionsFor(
       reasons.push('DATASTORE_IS_CLUSTER_LOCAL');
       continue;
     }
-    const engine = datastore.engine === 'postgres' ? can.postgres : can.redis;
+    const engine = datastore.engine === 'postgres' ? can.postgres : can.valkey;
     if (!engine) reasons.push('DATASTORE_ENGINE_MISSING');
   }
 

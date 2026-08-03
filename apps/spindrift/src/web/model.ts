@@ -408,7 +408,7 @@ export type Runtime =
 /** One Datastore as the workspace lists it (§11). */
 export interface DatastoreView {
   readonly name: string;
-  readonly engine: 'postgres' | 'redis';
+  readonly engine: 'postgres' | 'valkey';
   readonly provenance: 'managed' | 'external';
   /** The Component it is attached to, or `null` while it is unattached. */
   readonly attachedTo: string | null;

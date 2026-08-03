@@ -42,6 +42,7 @@ import type {
   KubernetesDelivery,
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
+import { ENGINE_KINDS as DATASTORE_ENGINE_KINDS } from '../../datastore/kubernetes.ts';
 import type {
   ClusterProbe,
   DeployAdapter,
@@ -114,11 +115,16 @@ const STORE_PROVIDERS: Record<string, StoreAdapter> = {
   gcpsm: 'gcp-secret-manager',
 };
 
-/** The CRDs a datastore engine is discovered by (§3, §11). */
-const ENGINE_KINDS = {
-  postgres: { apiVersion: 'postgresql.cnpg.io/v1', kind: 'Cluster' },
-  redis: { apiVersion: 'redis.redis.opstreelabs.in/v1beta2', kind: 'Redis' },
-} as const;
+/**
+ * The CRDs a datastore engine is discovered by (§3, §11).
+ *
+ * Imported rather than declared, because the kind a cluster is asked about and
+ * the kind Spindrift writes to provision one must be the same kind. A second
+ * table here could name an operator no cluster in the fleet installs, and the
+ * symptom is silent: the engine discovers `false` everywhere and every Datastore
+ * asking for it is a non-candidate for a reason no operator can act on.
+ */
+const ENGINE_KINDS = DATASTORE_ENGINE_KINDS;
 
 /** The policy engine `verifiedDeploy` is derived from (§32). */
 const POLICY = {
@@ -755,7 +761,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     api: KubernetesApi,
     connection: KubernetesAdapterConnection,
   ): Promise<TargetDiscovery> {
-    const [nodes, storageClasses, postgres, redis, egress, policy, stores] =
+    const [nodes, storageClasses, postgres, valkey, egress, policy, stores] =
       await Promise.all([
         api.list({ apiVersion: 'v1', plural: 'nodes' }).catch(() => null),
         api
@@ -765,7 +771,10 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           ENGINE_KINDS.postgres.apiVersion,
           ENGINE_KINDS.postgres.kind,
         ),
-        api.servesKind(ENGINE_KINDS.redis.apiVersion, ENGINE_KINDS.redis.kind),
+        api.servesKind(
+          ENGINE_KINDS.valkey.apiVersion,
+          ENGINE_KINDS.valkey.kind,
+        ),
         api.servesKind(EGRESS_POLICY.apiVersion, EGRESS_POLICY.kind),
         this.policyEngine(api),
         this.reachableSecretStores(api),
@@ -778,7 +787,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       resourceCeiling: capacity.ceiling,
       persistence: (storageClasses ?? []).length > 0,
       postgres,
-      redis,
+      valkey,
       egressFiltering: egress,
       policyEngine: policy,
       // §18: how far back a tail can honestly reach. The log store sits beside

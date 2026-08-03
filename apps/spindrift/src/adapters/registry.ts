@@ -54,6 +54,9 @@ import type { BuildAdapter } from './build/contract.ts';
 import { GitHubActionsBuildRoute } from './build/github-actions.ts';
 import { InClusterBuildRoute } from './build/in-cluster.ts';
 import { GcpDiscovery } from './cloud-discovery.ts';
+import type { DatastoreAdapter } from './datastore/contract.ts';
+import { CloudDatastoreAdapter } from './datastore/gcp.ts';
+import { KubernetesDatastoreAdapter } from './datastore/kubernetes.ts';
 import { workloadIdentityToken } from './deploy/cloud/federation.ts';
 import { CloudRunDeployAdapter } from './deploy/cloudrun/index.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
@@ -246,9 +249,27 @@ export function createAdapterRegistry(
     }),
   };
 
+  // §11's lifecycle, keyed the way the deploy adapters are. `static` is absent
+  // rather than mapped to a refusing adapter: static hosting has no runtime to
+  // dial a datastore from, so a Datastore placed there is not an unfinished path
+  // but a placement that never made sense — and `null` already says exactly that.
+  const datastoreAdapters: Partial<Record<TargetAdapter, DatastoreAdapter>> = {
+    kubernetes: new KubernetesDatastoreAdapter({
+      token:
+        options.token ??
+        installationServiceAccountToken(options.env ?? Bun.env),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    }),
+    cloudrun: new CloudDatastoreAdapter(),
+  };
+
   return {
     deploy(adapter: TargetAdapter): DeployAdapter | null {
       return deployAdapters[adapter] ?? null;
+    },
+
+    datastore(adapter: TargetAdapter): DatastoreAdapter | null {
+      return datastoreAdapters[adapter] ?? null;
     },
 
     /**

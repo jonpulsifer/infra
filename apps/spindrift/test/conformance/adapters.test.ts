@@ -78,7 +78,7 @@ deployAdapterSuite(
       servedKinds: {
         'helm.toolkit.fluxcd.io/v2': ['HelmRelease'],
         'postgresql.cnpg.io/v1': ['Cluster'],
-        'redis.redis.opstreelabs.in/v1beta2': ['Redis'],
+        'valkey.io/v1alpha1': ['ValkeyCluster'],
         'cilium.io/v2': ['CiliumNetworkPolicy'],
         'kyverno.io/v1': ['ClusterPolicy'],
       },
