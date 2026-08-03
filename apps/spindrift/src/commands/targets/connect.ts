@@ -377,6 +377,11 @@ export const connectTarget: Command<
         inspectedAt: now,
         status: 'connected',
         updatedAt: now,
+        // The same assertion the INSERT branch takes. Without it a reconnect
+        // dropped what the operator had just stated on the connect screen —
+        // which derives both from the gateway address and the tunnel — so §3's
+        // asserted half could only ever be set by a Target's very first write.
+        ...assertedBy(input),
       })
       .where(eq(targets.id, existing.id))
       .returning();

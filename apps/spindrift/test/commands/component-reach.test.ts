@@ -239,6 +239,14 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     const { component, target, build } = await fixture('private', 'proxy');
     const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
     const adapters = registryOf(adapter);
+    // The tunnel an operator states, because §3 says nothing reports one. This
+    // test moves the Component to `public` and presses Deploy, and the deploy
+    // path now filters on the asserted reach — so a Target that claims no
+    // public address would refuse the second release rather than render it.
+    await database()
+      .db.update(targets)
+      .set({ reaches: ['none', 'private', 'public'] })
+      .where(eq(targets.id, target.id));
 
     // The intent, pinned at `private` + `proxy` — and then the edit, before
     // the loop has claimed it. This is the window `deploys.reach` exists for.

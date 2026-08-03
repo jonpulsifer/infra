@@ -390,20 +390,33 @@ async function reconcileManifestTargets(
       })
       .onConflictDoUpdate({
         target: targets.name,
-        set: hasConnectionChange
-          ? {
-              rank,
-              ...(existing?.status === 'disconnected'
-                ? {}
-                : { status: 'connected' as const }),
-              connection: declaredConnection,
-              health: 'unhealthy' as const,
-              prerequisites: awaitingInspection,
-              discovery: null,
-              inspectedAt: null,
-              updatedAt: sql`now()`,
-            }
-          : { rank },
+        set: {
+          rank,
+          // §3's asserted half follows the connection, not the rank: a reach is
+          // something an operator can have set on the row — the connect screen
+          // derives one from the gateway and the tunnel and posts it — so a
+          // `booted` write must not re-assert the document's copy over it, for
+          // the reason {@link ManifestWrite} records. A `declared` write is an
+          // operator submitting this document, so there it is desired state.
+          //
+          // Outside the `hasConnectionChange` branch deliberately: a
+          // declaration can correct a reach without touching the connection,
+          // and folded in there that edit would land nothing.
+          ...(write === 'declared' ? assertedBySeed(target) : {}),
+          ...(hasConnectionChange
+            ? {
+                ...(existing?.status === 'disconnected'
+                  ? {}
+                  : { status: 'connected' as const }),
+                connection: declaredConnection,
+                health: 'unhealthy' as const,
+                prerequisites: awaitingInspection,
+                discovery: null,
+                inspectedAt: null,
+                updatedAt: sql`now()`,
+              }
+            : {}),
+        },
       });
   }
 }
@@ -414,6 +427,8 @@ async function reconcileManifestTargets(
  * Omitted rather than nulled when absent, so a declaration that says nothing
  * about reach leaves whatever an operator asserted through the UI standing —
  * the same "a declaration seeds, it does not govern" rule the connection follows.
+ * That rule is why this is spread on update only for a `declared` write: see the
+ * set clause above and {@link ManifestWrite}.
  */
 function assertedBySeed(target: TargetSeed): {
   reaches?: ('none' | 'private' | 'public')[];
