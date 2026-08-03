@@ -13,6 +13,7 @@ import {
   installationServiceAccountToken,
 } from '../../src/adapters/registry.ts';
 import { parseManifest, resolveManifest } from '../../src/config/manifest.ts';
+import { FakeGcpDiscovery } from '../harness/fakes/gcp-discovery-api.ts';
 
 test('the installation token provider follows the projected path', async () => {
   const path = join('/tmp', `spindrift-identity-token-${crypto.randomUUID()}`);
@@ -63,4 +64,45 @@ test('source adapter returns explicitly passed source stager when provided', asy
   });
 
   expect(registry.source?.()).toBe(customStager);
+});
+
+/**
+ * Discovery is a fourth consumer of the one federated provider, not a fourth
+ * credential.
+ *
+ * The property worth asserting is not that the lookup answers something — it is
+ * *which* token the request carries. `src/storage/cloud.ts` shows the other
+ * shape: a second `workloadIdentityToken` constructed per call, which re-runs
+ * the STS and impersonation exchange every time and defeats the cache in
+ * `deploy/cloud/federation.ts`. A discovery client wired that way would pass
+ * every fold assertion in `test/commands/installation-discover.test.ts` and
+ * still be the wrong wiring.
+ */
+test('discovery reaches the cloud with the registry-wide token', async () => {
+  const yaml = await Bun.file(
+    join(import.meta.dir, '../fixtures/installation.example.yaml'),
+  ).text();
+  const manifest = await resolveManifest(parseManifest(yaml, 'test'), {});
+  const fake = new FakeGcpDiscovery({
+    token: 'the-registry-token',
+    projects: ['example-home'],
+  });
+
+  const registry = createAdapterRegistry({
+    manifest,
+    env: {},
+    cloudToken: () => 'the-registry-token',
+    fetch: fake.fetch,
+  });
+
+  const discovery = registry.discovery?.() ?? null;
+  expect(discovery).not.toBeNull();
+  expect(await discovery?.projects()).toEqual({
+    kind: 'found',
+    candidates: ['example-home'],
+    suggested: 'example-home',
+  });
+  expect(fake.requests.map((request) => request.authorization)).toEqual([
+    'Bearer the-registry-token',
+  ]);
 });

@@ -20,6 +20,7 @@
  * of them can be replaced.
  */
 import type { BuildAdapter } from '../adapters/build/contract.ts';
+import type { GcpDiscovery } from '../adapters/cloud-discovery.ts';
 import type { DeployAdapter } from '../adapters/deploy/contract.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
 import type {
@@ -138,6 +139,21 @@ export interface AdapterRegistry {
    * ceremony.
    */
   repositoryAuthorization?(): RepositoryAuthorization | null;
+  /**
+   * Reading the cloud this installation already runs in (§13, §20).
+   *
+   * Answers what an operator would otherwise type into the manifest by hand —
+   * projects, buckets, signing keys — over the same federated provider the
+   * cloud deploy adapters and the cloud build route are given, so the token
+   * exchange is made once per process rather than once per question.
+   *
+   * Optional for the reason the four lookups above it are: a registry that
+   * cannot reach a cloud API is an ordinary installation, and every hand-built
+   * test registry that has no opinion about discovery stays honest by omitting
+   * it. A command that finds it absent says so rather than reaching for a
+   * global.
+   */
+  discovery?(): GcpDiscovery | null;
   /**
    * Core's verifier and signer (§16).
    *
