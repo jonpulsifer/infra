@@ -31,6 +31,7 @@ import {
   targets,
   users,
 } from '../../src/db/schema.ts';
+import type { RegistryFlavour } from '../../src/domain/artifact-name.ts';
 import type {
   RegistryAuth,
   RegistryCredentialStore,
@@ -111,13 +112,29 @@ describe('a build whose destination needs a stored credential', () => {
     return build!;
   }
 
-  /** The context, with a credential store and a route of a given disposition. */
+  /**
+   * The context, with a credential store and a route of a given disposition.
+   *
+   * `selfAuthorized` omits `other` — the flavour of the fixture's registry —
+   * because that is what this whole block is about. A destination only *needs*
+   * a stored credential where the route's own identity cannot reach it, so a
+   * route that self-authorized this host would make every case below vacuous.
+   * The `selfAuthorized` block at the end is the other half of that statement.
+   */
   function withCredentials(
     held: readonly RegistryAuth[],
     carries = true,
+    selfAuthorized: readonly RegistryFlavour[] = [
+      'artifactRegistry',
+      'dockerHub',
+      'ghcr',
+    ],
   ): { context: CommandContext; asked: string[][] } {
     const { store, asked } = credentialStore(held);
-    route = new FakeBuildAdapter({ carriesRegistryCredential: carries });
+    route = new FakeBuildAdapter({
+      carriesRegistryCredential: carries,
+      selfAuthorizedRegistries: selfAuthorized,
+    });
     return {
       asked,
       context: {
@@ -191,7 +208,15 @@ describe('a build whose destination needs a stored credential', () => {
   });
 
   test('hands over nothing when none is held', async () => {
-    const { context } = withCredentials([]);
+    // Self-authorized here, because with nothing held and nothing the route can
+    // reach on its own there is no publishable registry at all — that is a
+    // different refusal, tested elsewhere.
+    const { context } = withCredentials([], true, [
+      'artifactRegistry',
+      'dockerHub',
+      'ghcr',
+      'other',
+    ]);
     const build = await seedBuild();
 
     const result = await dispatchBuild(
@@ -251,5 +276,57 @@ describe('a build whose destination needs a stored credential', () => {
       .from(builds)
       .where(eq(builds.id, build.id));
     expect(JSON.stringify(row)).not.toContain(HELD.secret);
+  });
+
+  /**
+   * The regression that stopped every build on the hosted route.
+   *
+   * GHCR's credential is *minted per dispatch* from the GitHub OAuth the
+   * installation already holds, so the store answers for `ghcr.io` whenever the
+   * connector is authorized — there is no row to delete and no way to "not hold
+   * one". Dispatch asked about every destination host, got that credential
+   * back, and refused, on the one route whose own workflow logs into GHCR with
+   * the run's token and needs nothing from here.
+   *
+   * The fix is that a host the route self-authorizes is never asked about, so
+   * the store's willingness to answer stops being what decides.
+   */
+  test('never asks about a host the route authorizes itself', async () => {
+    const { context, asked } = withCredentials([HELD], false, [
+      'artifactRegistry',
+      'dockerHub',
+      'ghcr',
+      'other',
+    ]);
+    const build = await seedBuild();
+
+    const result = await dispatchBuild(
+      { buildId: build.id, route: 'hosted' },
+      context,
+    );
+
+    // Dispatched, on a route that cannot carry a credential, while the store
+    // holds one for exactly this host. Before the fix this was the refusal.
+    expect(result.ok).toBe(true);
+    expect(asked).toEqual([[]]);
+    expect(route.built[0]?.spec.registryAuth).toEqual([]);
+  });
+
+  /** A route that self-authorizes *some* flavours still needs the others. */
+  test('asks only about the hosts it cannot reach on its own', async () => {
+    const { context, asked } = withCredentials([HELD], true, [
+      'artifactRegistry',
+      'ghcr',
+    ]);
+    const build = await seedBuild();
+
+    const result = await dispatchBuild(
+      { buildId: build.id, route: 'hosted' },
+      context,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(asked).toEqual([[HELD.host]]);
+    expect(route.built[0]?.spec.registryAuth).toEqual([HELD]);
   });
 });
