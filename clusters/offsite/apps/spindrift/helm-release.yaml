@@ -143,26 +143,29 @@ spec:
             # cluster. Spindrift never renders into it.
             chartValues:
               platform:
-                # The gateway the tunnel already forwards to, which already
-                # admits routes from spindrift-apps.
+                # The Apps' own gateway (`gateway.yaml`), not the cluster's
+                # shared one: the tunnel forwards this zone to it and it carries
+                # the wildcard listener every minted name is served on.
                 gateway:
-                  name: cluster-gateway
-                  namespace: default
+                  name: spindrift-apps
+                  namespace: spindrift-apps
                 externalAuth:
                   name: oauth2-proxy
                   namespace: oauth2-proxy
                   port: 80
                 dns:
-                  # The gateway's LoadBalancer address. RFC1918, so publishing
-                  # it is the private boundary rather than a hole in one.
-                  privateAddress: 10.89.0.67
+                  # That gateway's pinned LoadBalancer address. RFC1918, so
+                  # publishing it is the private boundary rather than a hole in
+                  # one.
+                  privateAddress: 10.89.0.69
                   tunnelHostname: 9d53c07a-8bde-4466-9f99-3a69d06a6325.cfargotunnel.com
                 networkPolicy:
                   # The chart's ingress is default-deny for every Component, so
                   # a correctly attached route still reaches nothing until the
-                  # gateway's namespace is named here.
+                  # caller's namespace is named here. The gateway's own
+                  # namespace is not in the list because it is `spindrift-apps`
+                  # itself, which the chart always admits as a sibling.
                   allowedNamespaces:
-                    - default
                     - oauth2-proxy
         - name: bluenose-cloudrun
           adapter: cloudrun

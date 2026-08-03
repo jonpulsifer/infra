@@ -20,8 +20,6 @@ spec:
                 operator: In
                 values:
                   - agents-sandbox
-                  - oauth2-proxy
-                  - spindrift-apps
         kinds:
           - kind: HTTPRoute
     - name: dave-tls
@@ -80,25 +78,3 @@ spec:
         certificateRefs:
           - kind: Secret
             name: *hostname
-    # One wildcard for every App name Spindrift mints, rather than a listener
-    # per App: the App chart renders a route and nothing else, so there is no
-    # release that could own a listener or a certificate. cert-manager's
-    # gateway-shim issues it by DNS-01 from the annotation at the top of this
-    # Gateway. A wildcard binds exactly one label, which is why App names are
-    # flat — `plainboi-web` is covered, `web.plainboi` is not.
-    - name: spindrift-apps-tls
-      protocol: HTTPS
-      port: 443
-      hostname: "*.${SPINDRIFT_DOMAIN}"
-      tls:
-        certificateRefs:
-          - kind: Secret
-            name: wildcard-${SPINDRIFT_DOMAIN}
-      allowedRoutes:
-        namespaces:
-          from: Selector
-          selector:
-            matchLabels:
-              kubernetes.io/metadata.name: spindrift-apps
-        kinds:
-          - kind: HTTPRoute
