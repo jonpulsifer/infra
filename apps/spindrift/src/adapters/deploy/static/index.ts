@@ -495,7 +495,7 @@ export class StaticDeployAdapter implements DeployAdapter {
       resourceCeiling: {},
       persistence: false,
       postgres: false,
-      redis: false,
+      valkey: false,
       egressFiltering: false,
       // §16's verifiers check images at admission. Nothing is admitted here —
       // there is no image and no runtime — so there is nothing to enforce, and

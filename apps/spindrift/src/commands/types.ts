@@ -20,6 +20,7 @@
  * of them can be replaced.
  */
 import type { BuildAdapter } from '../adapters/build/contract.ts';
+import type { DatastoreAdapter } from '../adapters/datastore/contract.ts';
 import type { DeployAdapter } from '../adapters/deploy/contract.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
 import type {
@@ -95,6 +96,19 @@ export interface AdapterRegistry {
    * path to, and a Target that reaches only those cannot hold config.
    */
   store(adapter: StoreAdapter): SecretStore | null;
+  /**
+   * §11's datastore lifecycle, for a Target's one adapter type (§13).
+   *
+   * Keyed the same way `deploy` is, because a Datastore lives on a Target —
+   * "delivery follows the Datastore's placement" — and a second key would only
+   * be able to disagree with the first.
+   *
+   * Optional on the registry rather than required, following `source` and
+   * `registryTransport`: a command that finds it absent reports that a Datastore
+   * cannot be provisioned here, which is the same kind of configuration fact
+   * every other `null` on this interface carries.
+   */
+  datastore?(adapter: TargetAdapter): DatastoreAdapter | null;
   /**
    * §15's repository host. `null` when this installation has no repository
    * integration configured — which is a legitimate installation, not a fault:

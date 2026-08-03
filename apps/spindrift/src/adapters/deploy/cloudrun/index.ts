@@ -505,7 +505,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       // `external` provenance rather than something discovered here.
       persistence: false,
       postgres: false,
-      redis: false,
+      valkey: false,
       // §8: advertised as absent, deliberately. See the file's header.
       egressFiltering: false,
       policyEngine: await this.admissionPolicy(connection),

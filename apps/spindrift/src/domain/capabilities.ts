@@ -12,7 +12,7 @@
  * ```
  * from the adapter type   kinds[], artifactTypes[]
  * discovered              arch[], gpu, resourceCeiling, persistence,
- *                         postgres, redis, egressFiltering,
+ *                         postgres, valkey, egressFiltering,
  *                         verifiedDeploy(enforcing), logHistory, offlineDeploy
  * asserted                reaches[], authReaches[]
  * derived                 reachableRegistries[], reachableSecretStores[]
@@ -169,7 +169,7 @@ export interface TargetDiscovery {
   resourceCeiling: Resources;
   persistence: boolean;
   postgres: boolean;
-  redis: boolean;
+  valkey: boolean;
   egressFiltering: boolean;
   policyEngine: PolicyEngineState;
   /**
@@ -244,7 +244,7 @@ export interface TargetCapabilities {
   resourceCeiling: Resources;
   persistence: boolean;
   postgres: boolean;
-  redis: boolean;
+  valkey: boolean;
   egressFiltering: boolean;
   verifiedDeploy: boolean;
   logHistorySeconds: number;
@@ -401,7 +401,7 @@ export function resolveCapabilities(
     resourceCeiling: discovery.resourceCeiling,
     persistence: discovery.persistence,
     postgres: discovery.postgres,
-    redis: discovery.redis,
+    valkey: discovery.valkey,
     egressFiltering: discovery.egressFiltering,
     verifiedDeploy: deriveVerifiedDeploy(discovery.policyEngine),
     logHistorySeconds: discovery.logHistorySeconds,
@@ -446,7 +446,7 @@ export function noCapabilities(context: CapabilityContext): TargetCapabilities {
       resourceCeiling: {},
       persistence: false,
       postgres: false,
-      redis: false,
+      valkey: false,
       egressFiltering: false,
       policyEngine: { installed: false, mode: null },
       logHistorySeconds: 0,

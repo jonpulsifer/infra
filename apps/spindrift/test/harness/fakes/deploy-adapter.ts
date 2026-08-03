@@ -88,7 +88,7 @@ export const CAPABLE_DISCOVERY: TargetDiscovery = {
   resourceCeiling: { cpu: '8', memory: '32Gi' },
   persistence: true,
   postgres: true,
-  redis: true,
+  valkey: true,
   egressFiltering: true,
   policyEngine: { installed: true, mode: 'ENFORCE' },
   logHistorySeconds: 7 * 24 * 60 * 60,
