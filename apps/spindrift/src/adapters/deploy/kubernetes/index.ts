@@ -627,9 +627,9 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * cleanly, reports green, and runs without the config it was handed.
    *
    * Pods carrying no annotation are not chart output and are ignored, which
-   * also keeps a foreign pod sharing the namespace out of the verdict. No pods,
-   * or a cluster that does not serve them, is met: zero rendered objects is
-   * zero skew.
+   * also keeps a foreign pod sharing the namespace out of the verdict. An
+   * empty read is met — zero rendered objects is zero skew — but a read that
+   * did not happen is **not**: see below.
    *
    * ponytail: this observes the **last** render, not the next — a Target with
    * nothing deployed reads green and a skew is caught one deploy late. That is
@@ -641,24 +641,67 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     api: KubernetesApi,
     connection: KubernetesAdapterConnection,
   ): Promise<[boolean, string?]> {
-    const pods = await api
-      .list({
+    // "Nothing is rendered here yet" and "I was not allowed to look" are
+    // different facts and only the first one is zero skew. Collapsing them —
+    // an empty array standing in for a refusal, `every` over it vacuously
+    // true — is a check reporting met without ever having observed the thing
+    // it names, which is the exact shape this check replaced. So an unreadable
+    // pod list is a prerequisite failure naming why, and the operator whose
+    // Role was never bound is told to bind it rather than told everything is
+    // fine.
+    const unreadable = (why: string): [boolean, string] => [
+      false,
+      `Spindrift could not read the pods in ${connection.namespace} (${why}), so the value contract this Target renders under is unknown`,
+    ];
+
+    let pods: KubernetesObject[] | null;
+    try {
+      pods = await api.list({
         apiVersion: 'v1',
         plural: 'pods',
         namespace: connection.namespace,
-      })
-      .catch(() => null);
+      });
+    } catch (cause) {
+      return unreadable(
+        cause instanceof KubernetesRequestError
+          ? `the API server answered ${cause.status}`
+          : String(cause),
+      );
+    }
+    if (pods === null) return unreadable('the API server does not serve them');
 
-    const found = [
-      ...new Set(
-        (pods ?? [])
-          .map(
-            (pod) =>
-              pod.metadata.annotations?.['spindrift.dev/values-contract'],
-          )
-          .filter((contract) => contract !== undefined),
-      ),
-    ];
+    // Only what is desired *now* counts. A terminated pod is the residue of a
+    // render that is over, so a Completed run of a job would otherwise hold a
+    // Target red until the CronJob next fired; and of what is left only the
+    // newest pod of each Component counts, so a rolling update reads the
+    // render that is replacing the old one rather than reading both at once
+    // and calling the overlap skew.
+    //
+    // Filtered here rather than by `fieldSelector` because the grouping has to
+    // happen in this process anyway and a vessel namespace holds tens of pods,
+    // not thousands.
+    const newest = new Map<string, { contract: string; at: string }>();
+    for (const pod of pods) {
+      const contract =
+        pod.metadata.annotations?.['spindrift.dev/values-contract'];
+      if (contract === undefined) continue;
+      const phase = (pod.status as { phase?: string } | undefined)?.phase;
+      if (phase === 'Succeeded' || phase === 'Failed') continue;
+      // `spindrift-app.selectorLabels` — one App's one Component, and the one
+      // grouping the chart itself guarantees is on every pod it renders.
+      const labels = pod.metadata.labels ?? {};
+      const component = `${labels['app.kubernetes.io/part-of']}/${labels['app.kubernetes.io/name']}`;
+      const at = String(pod.metadata.creationTimestamp ?? '');
+      const seen = newest.get(component);
+      if (seen === undefined || at > seen.at) {
+        newest.set(component, { contract, at });
+      }
+    }
+
+    const found = [...new Set([...newest.values()].map((pod) => pod.contract))];
+    // Met with nothing to say, rather than a sentence about a contract nobody
+    // named: this Target has rendered nothing under the App chart.
+    if (found.length === 0) return [true];
 
     return [
       found.every((contract) => contract === VALUES_CONTRACT),

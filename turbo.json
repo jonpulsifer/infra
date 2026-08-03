@@ -41,6 +41,15 @@
       "env": ["DATABASE_URL"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
+    "spindrift#test": {
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/charts/spindrift-app/Chart.yaml"
+      ],
+      "env": ["DATABASE_URL"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "outputs": []
