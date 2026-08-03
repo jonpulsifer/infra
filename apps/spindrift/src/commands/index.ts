@@ -61,3 +61,4 @@ export { useArtifactRegistry } from './storage/use-registry.ts';
 export { connectTarget } from './targets/connect.ts';
 export { disconnectTarget } from './targets/disconnect.ts';
 export { listTargets } from './targets/list.ts';
+export { probeCluster } from './targets/probe.ts';

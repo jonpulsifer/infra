@@ -29,6 +29,7 @@ import {
   Check,
   ChevronRight,
   Globe,
+  Plus,
   Server,
   X,
   Zap,
@@ -75,20 +76,64 @@ export function TargetList({
   onConnect: (input: ConnectTargetInput) => void;
 }) {
   const configured = targets.filter((target) => target.configured);
+  const [adding, setAdding] = useState(false);
+  /**
+   * Carried into the add flow from whatever this installation already has.
+   *
+   * The pending entries hold the same proposal — it is derived per adapter kind,
+   * not per Target — so taking the first cluster one is taking the only one
+   * there is. With no pending entry there is nothing seeded either, and an empty
+   * proposal is the honest input: nothing has been learnt to carry.
+   */
+  const clusterProposal = pending.find((entry) => entry.kind === 'kubernetes')
+    ?.proposal ?? { carriedFrom: null };
 
   return (
     <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-      <header>
-        <Eyebrow>Targets</Eyebrow>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-          Deployment targets
-        </h1>
-        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-          Where Spindrift can deploy apps. Identities and rank come from the
-          installation manifest; connecting one is what fills in how to reach
-          it, and health is the standing checklist afterwards.
-        </p>
+      <header className="flex flex-wrap items-end gap-4">
+        <div>
+          <Eyebrow>Targets</Eyebrow>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+            Deployment targets
+          </h1>
+          <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+            Where Spindrift can deploy apps. Give a cluster's address and
+            Spindrift reads what it runs; what you include is what an App's
+            release blends into. The installation manifest declares the same
+            thing, and health is the standing checklist afterwards.
+          </p>
+        </div>
+        <Button
+          className="ml-auto"
+          variant={adding ? 'ghost' : 'default'}
+          onClick={() => setAdding((open) => !open)}
+        >
+          {adding ? (
+            'Cancel'
+          ) : (
+            <>
+              <Plus aria-hidden="true" className="size-4" /> Add a cluster
+            </>
+          )}
+        </Button>
       </header>
+
+      {adding ? (
+        <Card>
+          <CardContent>
+            <ConnectTargetForm
+              kind="kubernetes"
+              name=""
+              nameEditable
+              targets={[]}
+              proposal={clusterProposal}
+              connecting={connecting}
+              onConnect={onConnect}
+              onCancel={() => setAdding(false)}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {error ? (
         <div className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-sm text-destructive">
@@ -108,7 +153,10 @@ export function TargetList({
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-sm text-muted-foreground">
-              No Targets are configured for this installation.
+              No Targets are configured for this installation. Add a cluster
+              above, or declare one under{' '}
+              <span className="font-mono">targets:</span> in the installation
+              manifest — the two write the same thing.
             </p>
           </CardContent>
         </Card>

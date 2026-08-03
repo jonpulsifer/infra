@@ -21,7 +21,10 @@
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import type { TargetInspection } from '../../domain/capabilities.ts';
 import type { ArtifactType, DesiredState } from '../../domain/desired-state.ts';
-import type { TargetConnection } from '../../domain/target.ts';
+import type {
+  KubernetesDeliveryFlavour,
+  TargetConnection,
+} from '../../domain/target.ts';
 
 /**
  * What the verbs need to name a Target. The Target model (§13) carries
@@ -290,6 +293,48 @@ export type RuntimeLogPage =
     };
 
 /**
+ * What a cluster says about itself **before** it is a Target (§13).
+ *
+ * `inspect` cannot answer this: it takes a `DeployTarget`, and a `DeployTarget`
+ * carries the very connection facts — namespace, delivery flavour, chart source
+ * — an operator is here to choose. So a probe is the read that runs one step
+ * earlier, against nothing but an address, and everything it returns is a
+ * **list to pick from** rather than a verdict.
+ *
+ * Every field degrades to empty rather than throwing. A cluster that answers
+ * some reads and refuses others is the ordinary state of a cluster whose
+ * `spindrift-target` RBAC has not been merged yet, and a probe that gave up on
+ * the first `403` would report nothing about a cluster that is nearly ready.
+ * The screen says what was found; what was not found is the operator's to type.
+ */
+export interface ClusterProbe {
+  /** False when the address did not answer at all — the one hard failure. */
+  readonly reachable: boolean;
+  /** Why it did not answer. Present exactly when `reachable` is false. */
+  readonly because?: string;
+  /** Delivery flavours this cluster serves a CRD for (§6). */
+  readonly deliveryFlavours: readonly KubernetesDeliveryFlavour[];
+  /** Namespaces that exist. Spindrift never creates one (§7). */
+  readonly namespaces: readonly string[];
+  /** Sources the App chart could be fetched from — Flux `GitRepository`s. */
+  readonly chartSources: readonly { name: string; namespace: string }[];
+  /** `ClusterSecretStore`s config could be delivered through (§10). */
+  readonly secretStores: readonly string[];
+  /**
+   * Gateways routes could attach to, with the address each answers on.
+   *
+   * The address is the same fact `platform.dns.privateAddress` needs, which is
+   * why it is read here rather than asked for: an operator who picks a gateway
+   * has already said where private traffic lands.
+   */
+  readonly gateways: readonly {
+    name: string;
+    namespace: string;
+    address: string | null;
+  }[];
+}
+
+/**
  * One backend, one artifact shape family, three verbs.
  *
  * `apply` is written as a generator because §6's contract is literally a stream
@@ -350,4 +395,16 @@ export interface DeployAdapter {
    * this, not by asking every adapter to.
    */
   inspect(target: DeployTarget): Promise<TargetInspection>;
+
+  /**
+   * Read a backend that is not a Target yet, so a connect can offer choices.
+   *
+   * Optional, and absent is the honest answer for two of the three adapters: a
+   * cloud project's connection facts are a project id and two API roots, none
+   * of which the project can be asked for before it is named. Only a cluster
+   * has a discovery API to enumerate itself with, so only the cluster adapter
+   * implements this — and an optional method with one implementation is
+   * smaller than a second registry that could only ever hold the same one.
+   */
+  probe?(apiServer: string): Promise<ClusterProbe>;
 }

@@ -84,6 +84,15 @@ function kubernetesProposal(
     ...(connection.chartContract === undefined
       ? {}
       : { chartContract: connection.chartContract }),
+    // Carried whole. What the screen takes out of it is `platform.externalAuth`
+    // and `platform.secretStore`'s kind — the parts `clusters/base` makes the
+    // same on every cluster. What it must not take is `platform.dns`, which
+    // names one cluster's gateway address; the screen reads that off the probe
+    // instead, and the split is stated here rather than performed here so a
+    // second consumer cannot get it the other way round.
+    ...(connection.chartValues === undefined
+      ? {}
+      : { chartValues: connection.chartValues }),
   };
 }
 
@@ -176,4 +185,187 @@ export function pendingConnections(
   }
 
   return pending;
+}
+
+// --- Connecting a cluster, one component at a time --------------------------
+
+/** §3's reach vocabulary, as both the seed and the connect act spell it. */
+type Reach = 'none' | 'private' | 'public';
+
+/**
+ * What an operator picked on the connect screen.
+ *
+ * Three of these are required because a Target without them is not addressable,
+ * and the rest are **components**: each one is a thing this cluster already runs
+ * that an App's release can be made to blend into, and each is `null` when the
+ * operator left it out. Leaving one out is a supported answer everywhere — a
+ * cluster with no gateway serves nothing but in-cluster traffic, which §3 spells
+ * `none` and is a real Target.
+ */
+export interface ClusterConnectChoices {
+  readonly name: string;
+  readonly apiServer: string;
+  /** Where App workloads land. Never created by Spindrift (§7). */
+  readonly namespace: string;
+  /** Where the `HelmRelease` object itself is created. */
+  readonly deliveryNamespace: string;
+  /** The `GitRepository` the App chart is fetched from. */
+  readonly sourceRef: { readonly name: string; readonly namespace: string };
+  /** The value contract the App chart pinned here declares (§7). */
+  readonly chartContract: string;
+  /** The gateway routes attach to, and the address it answers on. */
+  readonly gateway: {
+    readonly name: string;
+    readonly namespace: string;
+    readonly privateAddress: string | null;
+  } | null;
+  /** The authenticated edge that stands in front, where there is one. */
+  readonly externalAuth: {
+    readonly name: string;
+    readonly namespace: string;
+    readonly port: number;
+  } | null;
+  /** The `ClusterSecretStore` config is fetched through (§10). */
+  readonly secretStore: string | null;
+  /** The tunnel this Target answers public traffic through, where it has one. */
+  readonly tunnelHostname: string | null;
+}
+
+/** What `connectTarget` takes for a cluster, assembled from the choices. */
+export interface ClusterConnectPlan {
+  readonly kind: 'kubernetes';
+  readonly name: string;
+  readonly apiServer: string;
+  readonly namespace: string;
+  readonly delivery: {
+    readonly flavour: 'flux-helmrelease';
+    readonly namespace: string;
+    readonly sourceRef: { readonly name: string; readonly namespace: string };
+  };
+  readonly chartContract: string;
+  readonly chartValues: Record<string, unknown>;
+  readonly reaches: Reach[];
+  readonly authReaches: Reach[];
+}
+
+/**
+ * Turn the operator's choices into one connect act.
+ *
+ * This is the whole of the screen's reasoning and it is here rather than in the
+ * view for the reason the top of this file gives: three of the values below are
+ * **derived from what was included**, and a browser deriving them is a browser
+ * that can derive them differently from the next screen that needs to.
+ *
+ * The three:
+ *
+ * - **`reaches`** follows from the components. `none` is always true — a
+ *   Component reachable only in-cluster needs nothing. `private` is true exactly
+ *   when a gateway with an address was included, because that address *is* the
+ *   private reach. `public` is true exactly when a tunnel was named.
+ * - **`authReaches`** is `private` and never `public`, whatever the edge could
+ *   technically front. An authenticated proxy admitting one account is honest in
+ *   front of an RFC1918 address and a claim in front of one anybody can reach,
+ *   and the claim is not this function's to make. **ponytail:** widening it is a
+ *   manifest edit today; give it a control when an installation runs an edge
+ *   whose policy actually holds publicly.
+ * - **`networkPolicy.allowedNamespaces`** is exactly the namespaces of the
+ *   components that were included. The chart's ingress is default-deny, so a
+ *   route attached to a gateway in a namespace nobody listed reaches nothing —
+ *   which is the failure this derivation exists to make impossible.
+ */
+export function clusterConnectPlan(
+  choices: ClusterConnectChoices,
+): ClusterConnectPlan {
+  const allowedNamespaces = [
+    ...new Set(
+      [choices.gateway?.namespace, choices.externalAuth?.namespace].filter(
+        (namespace): namespace is string => (namespace ?? '') !== '',
+      ),
+    ),
+  ];
+  const privateAddress = choices.gateway?.privateAddress ?? '';
+  const tunnelHostname = choices.tunnelHostname ?? '';
+
+  const reaches: Reach[] = [
+    'none',
+    ...(privateAddress === '' ? [] : (['private'] as const)),
+    ...(tunnelHostname === '' ? [] : (['public'] as const)),
+  ];
+
+  return {
+    kind: 'kubernetes',
+    name: choices.name,
+    apiServer: choices.apiServer,
+    namespace: choices.namespace,
+    delivery: {
+      flavour: 'flux-helmrelease',
+      namespace: choices.deliveryNamespace,
+      sourceRef: choices.sourceRef,
+    },
+    chartContract: choices.chartContract,
+    // Only `platform`. §7 gives that key to the operator whole and Spindrift
+    // renders `app` and `shared` per deploy, so writing either here would be
+    // saving a value the next deploy overwrites.
+    chartValues: {
+      platform: {
+        ...(choices.gateway === null
+          ? {}
+          : {
+              gateway: {
+                name: choices.gateway.name,
+                namespace: choices.gateway.namespace,
+              },
+            }),
+        ...(choices.externalAuth === null
+          ? {}
+          : { externalAuth: choices.externalAuth }),
+        ...(choices.secretStore === null
+          ? {}
+          : {
+              secretStore: {
+                kind: 'ClusterSecretStore',
+                name: choices.secretStore,
+              },
+            }),
+        dns: { privateAddress, tunnelHostname },
+        networkPolicy: { allowedNamespaces },
+      },
+    },
+    reaches,
+    authReaches:
+      choices.externalAuth === null || !reaches.includes('private')
+        ? []
+        : ['private'],
+  };
+}
+
+/**
+ * The same act, as the installation manifest declares it.
+ *
+ * §13's connect and `targets[]` in the manifest are two spellings of one thing,
+ * and this function is the proof — the screen renders what it is about to do as
+ * the document that would do it, so an operator connecting a cluster through the
+ * UI can put the identical connection in Git and a torn-down installation comes
+ * back with it. That is the whole of "connectable both ways": not two code
+ * paths, one shape with two entry points.
+ *
+ * Returned as an object rather than as text. JSON is valid YAML, so a caller
+ * that wants a document has `JSON.stringify` and no emitter to maintain.
+ */
+export function targetSeedOf(
+  plan: ClusterConnectPlan,
+): Record<string, unknown> {
+  return {
+    name: plan.name,
+    adapter: 'kubernetes',
+    ...(plan.reaches.length > 0 ? { reaches: plan.reaches } : {}),
+    ...(plan.authReaches.length > 0 ? { authReaches: plan.authReaches } : {}),
+    connection: {
+      apiServer: plan.apiServer,
+      namespace: plan.namespace,
+      delivery: plan.delivery,
+      chartContract: plan.chartContract,
+      chartValues: plan.chartValues,
+    },
+  };
 }
