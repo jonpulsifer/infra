@@ -1,9 +1,7 @@
 # retrofit: offsite control-plane node.
 #
-# The offsite cluster does not run the repo-managed FML cluster CA yet
-# (services.k8s.clusterCa stays off, so kubernetes' easyCerts path issues its
-# own), but the API server still signs service-account tokens with the FML
-# issuer key from sops.
+# Runs the repo-managed FML cluster CA, so it carries both the service-account
+# signing key and the cluster CA private key from sops.
 { ... }:
 {
   imports = [
@@ -12,7 +10,10 @@
     ../system/tailscale-disable.nix
   ];
 
-  services.k8s.role = "control-plane";
+  services.k8s = {
+    role = "control-plane";
+    clusterCa.enable = true;
+  };
 
   homelab.disko.device = "/dev/sda";
 
@@ -25,5 +26,12 @@
       "kube-apiserver.service"
       "kube-controller-manager.service"
     ];
+  };
+  sops.secrets."k8s-cluster-ca-key" = {
+    owner = "cfssl";
+    group = "cfssl";
+    mode = "0400";
+    path = "/var/lib/cfssl/ca-key.pem";
+    restartUnits = [ "cfssl.service" ];
   };
 }
