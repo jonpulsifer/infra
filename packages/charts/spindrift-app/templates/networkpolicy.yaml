@@ -15,6 +15,11 @@ operator set on the Target.
 Egress is not here: it wants an FQDN allowlist, which a portable NetworkPolicy
 cannot express, so egress filtering is a discovered capability of a Target
 rather than something a portable chart ships.
+
+The gateway is not here either, for the same reason and with the opposite
+answer: its data plane has an identity rather than a location, no selector in
+this object can name it, and a routed Component that does not admit it is not
+degraded but unreachable. The second document below admits it.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -44,4 +49,52 @@ spec:
       ports:
         - port: {{ include "spindrift-app.port" . }}
           protocol: TCP
+{{- end }}
+{{- if and (include "spindrift-app.serving" .) (ne .Values.app.reach "none") }}
+---
+{{/*
+The gateway's own admission, which the policy above cannot express.
+
+**A gateway's data plane is not a pod in the gateway's namespace.** Cilium
+terminates a Gateway listener in the host-networked `cilium-envoy` DaemonSet, so
+the connection to a routed Component arrives carrying the `ingress` identity
+rather than from any namespace a selector can name. `allowedNamespaces` lists
+the gateway's namespace precisely so that a route can be served, and it never
+did: no `podSelector` or `namespaceSelector` matches an identity, so the one
+caller the route exists for was the one the policy denied. The listener answers
+503 with the backend healthy and every other signal — route `Accepted`, endpoint
+`ready`, record published — reading correct.
+
+Rendered on exactly the condition the route is, because it admits the route's
+traffic and nothing else: a `reach: none` Component has no gateway in front of
+it and gets no entry. The port stays the serving port, so this widens the
+*source* the policy accepts rather than what the Component exposes.
+
+ponytail: `fromEntities` is Cilium vocabulary, and this is the only
+implementation-specific object the chart renders. Every Target today is Cilium,
+and one that is not fails loudly on an unresolvable CRD instead of silently
+serving 503 — which is the failure this object exists to end. Make it a
+discovered Target capability, the way egress filtering already is, when a
+non-Cilium Target is real.
+*/}}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "spindrift-app.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spindrift-app.labels" . | nindent 4 }}
+  annotations:
+    {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "spindrift-app.selectorLabels" . | nindent 6 }}
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: {{ include "spindrift-app.port" . | quote }}
+              protocol: TCP
 {{- end }}

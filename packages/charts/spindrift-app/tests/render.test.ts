@@ -18,6 +18,7 @@ describe('kind branches', () => {
   test('a service renders a Deployment, a Service, and a route', async () => {
     const objects = await render();
     expect(kinds(objects).sort()).toEqual([
+      'CiliumNetworkPolicy',
       'Deployment',
       'HTTPRoute',
       'NetworkPolicy',
@@ -48,6 +49,7 @@ describe('website is not a branch', () => {
       app: { kind: 'website', expose: true, port: 8080 },
     });
     expect(kinds(website).sort()).toEqual([
+      'CiliumNetworkPolicy',
       'Deployment',
       'HTTPRoute',
       'NetworkPolicy',
@@ -271,6 +273,45 @@ describe('fixed defaults', () => {
         },
       },
     ]);
+  });
+
+  test('a routed Component admits the gateway’s identity, not its namespace', async () => {
+    // The regression this exists for: a gateway's data plane is host-networked
+    // and reaches the pod carrying Cilium's `ingress` identity, which no
+    // `namespaceSelector` matches — so naming the gateway's namespace in
+    // `allowedNamespaces` never admitted a route, and the listener answered 503
+    // with the backend healthy. Asserted here because every other signal in the
+    // cluster reads correct while this one is wrong.
+    const objects = await render();
+    const admission = one(objects, 'CiliumNetworkPolicy');
+    expect(admission.apiVersion).toBe('cilium.io/v2');
+    expect(admission.spec.endpointSelector.matchLabels).toEqual(
+      one(objects, 'NetworkPolicy').spec.podSelector.matchLabels,
+    );
+    expect(admission.spec.ingress).toEqual([
+      {
+        fromEntities: ['ingress'],
+        // A string: Cilium's port is not the integer a NetworkPolicy takes.
+        toPorts: [{ ports: [{ port: '8080', protocol: 'TCP' }] }],
+      },
+    ]);
+  });
+
+  test('it renders for either routed reach, and never without a route', async () => {
+    // Same condition as the route itself: `reach: none` has no gateway in front
+    // of it, so admitting one would widen a boundary nothing asked to cross.
+    for (const reach of ['private', 'public'] as const) {
+      expect(kinds(await render({ app: { reach } }))).toContain(
+        'CiliumNetworkPolicy',
+      );
+    }
+    for (const values of [
+      { app: { reach: 'none', auth: 'none' } },
+      { app: { kind: 'job' } },
+      { app: { expose: false } },
+    ]) {
+      expect(kinds(await render(values))).not.toContain('CiliumNetworkPolicy');
+    }
   });
 });
 
