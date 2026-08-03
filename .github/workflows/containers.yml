@@ -48,8 +48,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Authenticate Slingshot build to Google Cloud
-        if: matrix.image == 'slingshot'
+      # Which images need what is declared in each app's build.json, not here.
+      # This job knows how to run a build; it does not know any app's name.
+      - name: Authenticate build to Google Cloud
+        if: matrix.gcp-credentials != ''
         id: gcp_auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -100,11 +102,8 @@ jobs:
             type=gha,scope=${{ matrix.image }}-main
             type=gha,scope=${{ matrix.image }}-push
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ github.ref_name }}
-          # The Spindrift runner is cheap and is the layer that packages its
-          # two entrypoints. Always rebuild it; dependency/build stages remain
-          # cached.
-          no-cache-filters: ${{ matrix.image == 'spindrift' && 'runner' || '' }}
-          secret-files: ${{ matrix.image == 'slingshot' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
+          no-cache-filters: ${{ matrix.no-cache-filters }}
+          secret-files: ${{ matrix.gcp-credentials != '' && format('gcp_credentials={0}', steps.gcp_auth.outputs.credentials_file_path) || '' }}
           sbom: true
           provenance: true
       - name: Scan ${{ matrix.image }} image with Trivy

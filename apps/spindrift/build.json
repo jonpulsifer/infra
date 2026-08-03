@@ -1,9 +1,11 @@
 [
   {
+    "_comment": "no-cache-filters: the runner stage is cheap and is the layer that packages the two entrypoints, so it is always rebuilt. The dependency and build stages stay cached.",
     "image": "spindrift",
     "context": ".",
     "file": "apps/spindrift/Dockerfile",
     "platforms": "linux/amd64",
+    "no-cache-filters": "runner",
     "watch": [
       "apps/spindrift",
       "packages/typescript-config",
