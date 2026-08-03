@@ -1266,38 +1266,47 @@ function NewAppScreen({
       draftId === null
         ? command('startCreationDraft', { id: startId })
         : command('getCreationDraft', { id: draftId });
-    Promise.all([
-      command('listTargets', {}),
-      command('listRepositories', {}),
-      draftRequest,
-    ])
-      .then(([targetRes, repoRes, draftRes]) => {
-        if (!live) return;
-        if (!targetRes.ok) {
-          setState({ type: 'error', message: targetRes.failure.message });
-        } else if (!repoRes.ok) {
-          setState({ type: 'error', message: repoRes.failure.message });
-        } else if (!draftRes.ok) {
-          setState({ type: 'error', message: draftRes.failure.message });
-        } else {
-          setState({
-            type: 'success',
-            targetOptions: targetRes.value.options,
-            repoOptions: repoRes.value.options,
-            draft: draftRes.value,
-          });
-          if (draftId === null) {
-            onNavigate(`/apps/new/${draftRes.value.id}`);
-          }
-        }
-      })
-      .catch((e: unknown) => {
-        if (!live) return;
-        setState({
-          type: 'error',
-          message: e instanceof Error ? e.message : 'Server failure',
-        });
+    // The Targets read follows the draft rather than racing it: placement is
+    // derived from what is being created (§3), so asking before the draft
+    // exists is asking about a different workload. Repositories still load
+    // alongside it — that read depends on nothing.
+    (async () => {
+      const draftRes = await draftRequest;
+      if (!live) return;
+      if (!draftRes.ok) {
+        setState({ type: 'error', message: draftRes.failure.message });
+        return;
+      }
+      const { kind, reach, auth } = draftRes.value.draft;
+      const [targetRes, repoRes] = await Promise.all([
+        command('listTargets', { kind, reach, auth }),
+        command('listRepositories', {}),
+      ]);
+      if (!live) return;
+      if (!targetRes.ok) {
+        setState({ type: 'error', message: targetRes.failure.message });
+        return;
+      }
+      if (!repoRes.ok) {
+        setState({ type: 'error', message: repoRes.failure.message });
+        return;
+      }
+      setState({
+        type: 'success',
+        targetOptions: targetRes.value.options,
+        repoOptions: repoRes.value.options,
+        draft: draftRes.value,
       });
+      if (draftId === null) {
+        onNavigate(`/apps/new/${draftRes.value.id}`);
+      }
+    })().catch((e: unknown) => {
+      if (!live) return;
+      setState({
+        type: 'error',
+        message: e instanceof Error ? e.message : 'Server failure',
+      });
+    });
     return () => {
       live = false;
     };

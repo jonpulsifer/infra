@@ -49,9 +49,12 @@ export const DECISIONS = [
   'Review',
 ] as const;
 
-const componentKind = z.enum(['service', 'website', 'job']);
-const reach = z.enum(['none', 'private', 'public']);
-const auth = z.enum(['none', 'proxy']);
+// Exported because §3's requirements are derived from exactly these three, so
+// any command that resolves placement validates them against the same words the
+// draft does.
+export const componentKind = z.enum(['service', 'website', 'job']);
+export const reach = z.enum(['none', 'private', 'public']);
+export const auth = z.enum(['none', 'proxy']);
 const entry = z.enum(['service', 'website', 'upload', 'repo', 'discover']);
 const appName = z
   .string()

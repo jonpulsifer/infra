@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { KINDS_BY_ADAPTER } from '../../domain/capabilities.ts';
+import { auth, componentKind, reach } from '../../domain/creation-draft.ts';
 import type { ComponentKind } from '../../domain/desired-state.ts';
 import {
   DEFAULT_PLATFORM,
@@ -14,7 +16,21 @@ import type {
 } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
 
-export const listTargetsInput = z.object({});
+/**
+ * The three requirements placement is derived from (§3).
+ *
+ * Optional, and their absence is not a default: a caller that does not say what
+ * it is placing gets no `options` at all. The alternative — resolving against a
+ * plausible-looking workload — is what made this command answer for a
+ * `service`/`private`/`proxy` App no matter what the caller was actually
+ * creating, so a `website` was offered Targets that were candidates for
+ * something else.
+ */
+export const listTargetsInput = z.object({
+  kind: componentKind.optional(),
+  reach: reach.optional(),
+  auth: auth.optional(),
+});
 export type ListTargetsInput = z.infer<typeof listTargetsInput>;
 
 export interface ListTargetsResult {
@@ -25,19 +41,25 @@ export interface ListTargetsResult {
 }
 
 export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
-  _input,
+  input,
   context,
 ) => {
   const allTargets = await context.db.query.targets.findMany({
     orderBy: (targets, { asc }) => [asc(targets.rank)],
   });
 
+  const requirements =
+    input.kind === undefined ||
+    input.reach === undefined ||
+    input.auth === undefined
+      ? null
+      : { kind: input.kind, reach: input.reach, auth: input.auth };
+
   const targetsList: TargetListItem[] = [];
   const optionsList: TargetOptionView[] = [];
 
   for (const target of allTargets) {
-    const kinds: ComponentKind[] =
-      target.adapter === 'static' ? ['website'] : ['service', 'website', 'job'];
+    const kinds: ComponentKind[] = [...KINDS_BY_ADAPTER[target.adapter]];
 
     const canonical = (target.connection as { canonicalSuffix?: string })
       ?.canonicalSuffix
@@ -73,7 +95,11 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
     const isConnected = target.status === 'connected';
     const isHealthy = target.health === 'healthy';
 
-    if (isConnected && isHealthy) {
+    if (requirements === null) {
+      // Nothing to place, so nothing to say about placement. The Targets screen
+      // reads `targets` and never `options`, which is why this is silence
+      // rather than a guess.
+    } else if (isConnected && isHealthy) {
       const placementTarget = placementTargetOf(target, {
         artifactTypes:
           context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
@@ -81,9 +107,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
       });
 
       const placement = resolvePlacement([placementTarget], {
-        kind: 'service',
-        reach: 'private',
-        auth: 'proxy',
+        ...requirements,
         platform: DEFAULT_PLATFORM,
         registries: context.manifest.supplyChain.registry,
         resources: {},
