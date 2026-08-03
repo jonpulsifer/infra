@@ -36,7 +36,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: iperf3
-          image: docker.io/jonpulsifer/netbench:latest@sha256:976fd576e5131ae2dd2ecdab119f7811f208b60df9e495c4ba64b4da7bbc720e
+          image: docker.io/jonpulsifer/netbench:latest@sha256:4643b75a96d7e60bb5acf4e9d9c18d3b593e12a3183edfe6e674ac966e44cc01
           imagePullPolicy: IfNotPresent
           command: ["iperf3", "--server", "--port", "5201"]
           env:
