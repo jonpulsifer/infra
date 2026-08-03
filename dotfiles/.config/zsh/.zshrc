@@ -160,7 +160,6 @@ if command -v kubectl >/dev/null 2>&1 && [[ -n "$ZPLUG_KUBE_PS1" && -r "$ZPLUG_K
   export RPS1='$(kube_ps1)'
 fi
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
-export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
 
 logs() {
   FZF_DEFAULT_COMMAND="kubectl get pods --all-namespaces" \

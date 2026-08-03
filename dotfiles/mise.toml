@@ -15,8 +15,15 @@ dotfiles.root = "."
 "~/.zshenv" = { mode = "copy" }
 "~/.config/.bunfig.toml" = { mode = "copy" }
 "~/.config/git/ignore" = { mode = "copy" }
+# `lazy-lock.json` is deliberately absent from the source: lazy.nvim rewrites it on every
+# plugin update, so shipping a copy only produces permanent drift. Copy mode doesn't prune,
+# so each machine keeps its own lock.
 "~/.config/nvim" = { mode = "copy" }
 "~/.local/bin" = { mode = "copy" }
+# Distributes pi's prompts, extensions, agents, and theme. `agent/settings.json` is
+# deliberately absent from the source: pi rewrites it at runtime (lastChangelogVersion,
+# defaultModel), so shipping a copy only produces permanent drift. Copy mode doesn't
+# prune, so the live one is left alone.
 "~/.pi/agent" = { mode = "copy" }
 "~/.claude/settings.json" = { mode = "copy" }
 

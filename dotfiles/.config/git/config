@@ -112,3 +112,10 @@
 
 [commit]
 	gpgSign = true
+
+# What `gh auth setup-git` writes, but resolved off PATH instead of the absolute
+# versioned mise install path it hardcodes (which rots on every gh upgrade).
+[credential "https://github.com"]
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = !gh auth git-credential
