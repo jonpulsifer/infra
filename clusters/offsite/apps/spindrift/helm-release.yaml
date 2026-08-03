@@ -189,6 +189,12 @@ spec:
                   name: oauth2-proxy
                   namespace: oauth2-proxy
                   port: 80
+                # The chart requires this whenever a Component has config: the
+                # ExternalSecret names the store, and an unset name renders an
+                # object that never syncs behind a workload that waits forever.
+                secretStore:
+                  kind: ClusterSecretStore
+                  name: onepassword-connect
                 dns:
                   # That gateway's pinned LoadBalancer address. RFC1918, so
                   # publishing it is the private boundary rather than a hole in
@@ -202,6 +208,56 @@ spec:
                   # namespace is not in the list because it is `spindrift-apps`
                   # itself, which the chart always admits as a sibling.
                   allowedNamespaces:
+                    - oauth2-proxy
+        # The on-site cluster, reached across the peer OIDC trust rather than
+        # in-cluster: `nix/services/k8s` admits this installation's service
+        # account as `federated:system:serviceaccount:spindrift:spindrift`, and
+        # `clusters/folly/apps/spindrift-target` binds it the discovery,
+        # delivery, and chart-source roles. Nothing here is a credential — the
+        # projected token is minted per request for the `api` audience.
+        - name: folly
+          # No tunnel of its own is named to Spindrift, so this Target serves
+          # what its gateway's RFC1918 address reaches and nothing beyond it.
+          # Adding one is this list plus `dns.tunnelHostname`, either here or on
+          # the connect screen, which reads the same fields.
+          reaches: [none, private]
+          authReaches: [private]
+          adapter: kubernetes
+          connection:
+            delivery:
+              flavour: flux-helmrelease
+              namespace: spindrift-apps
+              sourceRef:
+                name: infra
+                namespace: flux-system
+            apiServer: https://folly.lolwtf.ca:6443
+            namespace: spindrift-apps
+            chartContract: "3"
+            chartValues:
+              platform:
+                # Admits routes from every namespace on both listeners, and
+                # `clusters/base/apps/oauth2-proxy` grants spindrift-apps the
+                # cross-namespace reference to the auth backend.
+                gateway:
+                  name: cluster-gateway
+                  namespace: default
+                externalAuth:
+                  name: oauth2-proxy
+                  namespace: oauth2-proxy
+                  port: 80
+                secretStore:
+                  kind: ClusterSecretStore
+                  name: onepassword-connect
+                dns:
+                  # Assigned to this Gateway from folly's Cilium LB pool. The
+                  # connect screen reads it off the Gateway's status rather than
+                  # asking; this line is the same fact for a torn-down
+                  # installation that has no screen open.
+                  privateAddress: 10.3.0.78
+                  tunnelHostname: ""
+                networkPolicy:
+                  allowedNamespaces:
+                    - default
                     - oauth2-proxy
         - name: bluenose-cloudrun
           adapter: cloudrun
