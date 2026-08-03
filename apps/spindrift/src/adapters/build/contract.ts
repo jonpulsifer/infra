@@ -22,6 +22,7 @@
  *   specified and core signs that digest, so no backend is disqualifiable and
  *   the claim made is the honest one.
  */
+import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type {
   Artifact,
   ArtifactType,
@@ -336,6 +337,25 @@ export interface BuildAdapter {
    * direction being wrong has to fail in.
    */
   readonly carriesRegistryCredential: boolean;
+  /**
+   * The registry flavours this route's own identity can push to unaided.
+   *
+   * §13's "nothing stored" is the rule, and this is what the rule actually
+   * buys per route — which is not the same set for all three. A route pushes
+   * to the registries in here without a credential existing anywhere; for
+   * anything else the installation either holds a login (§16's exception) or
+   * that registry is not a destination this route can publish to.
+   *
+   * Declared rather than probed, for the same reason `buildLevel` is: core has
+   * to know where a route can publish *before* dispatching it, and finding out
+   * by trying costs a whole build to learn.
+   *
+   * Flavours and not hosts, because that is what the identity is scoped to: a
+   * federated token authenticates one vendor's registries, every regional
+   * endpoint of them, and a route that listed hosts would be a route that
+   * broke when someone added a region.
+   */
+  readonly selfAuthorizedRegistries: readonly RegistryFlavour[];
 
   build(
     source: BuildSource,

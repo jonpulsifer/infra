@@ -362,6 +362,14 @@ describe('creation drafts', () => {
       buildLevel: base.buildLevel,
       provenanceBuilderId: base.provenanceBuilderId,
       carriesRegistryCredential: base.carriesRegistryCredential,
+      // Every flavour, matching `FakeBuildAdapter`'s default: these fakes stand in
+      // for a route, not for one route's reach.
+      selfAuthorizedRegistries: [
+        'artifactRegistry',
+        'dockerHub',
+        'ghcr',
+        'other',
+      ] as const,
       async *build(
         source: Parameters<typeof base.build>[0],
         spec: Parameters<typeof base.build>[1],
@@ -664,6 +672,14 @@ describe('creation drafts', () => {
       buildLevel: 2 as const,
       provenanceBuilderId: 'https://builders.example.test/crashing',
       carriesRegistryCredential: true,
+      // Every flavour, matching `FakeBuildAdapter`'s default: these fakes stand in
+      // for a route, not for one route's reach.
+      selfAuthorizedRegistries: [
+        'artifactRegistry',
+        'dockerHub',
+        'ghcr',
+        'other',
+      ] as const,
       async *build(): AsyncGenerator<never, never, void> {
         yield* [];
         throw new Error('runner connection vanished');

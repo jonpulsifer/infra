@@ -6,6 +6,7 @@
  * handed — so a test can assert that the bundle digest reached the route, which
  * is §16's whole join — and replays a scripted result.
  */
+
 import { createHash } from 'node:crypto';
 import type {
   BuildAdapter,
@@ -16,6 +17,7 @@ import type {
   BuildSpec,
   LogFidelity,
 } from '../../../src/adapters/build/contract.ts';
+import type { RegistryFlavour } from '../../../src/domain/artifact-name.ts';
 
 /** What the fake was asked to build, in order. */
 export interface RecordedBuild {
@@ -49,6 +51,8 @@ export interface FakeBuildAdapterOptions {
   provenanceBuilderId?: string;
   /** Defaults to true; a test asserting the hosted route's refusal sets false. */
   carriesRegistryCredential?: boolean;
+  /** Defaults to every flavour, so a test narrows only when that is its point. */
+  selfAuthorizedRegistries?: readonly RegistryFlavour[];
   script?: readonly ScriptedBuild[];
 }
 
@@ -60,6 +64,7 @@ export class FakeBuildAdapter implements BuildAdapter {
   readonly buildLevel: BuildLevel;
   readonly provenanceBuilderId: string;
   readonly carriesRegistryCredential: boolean;
+  readonly selfAuthorizedRegistries: readonly RegistryFlavour[];
 
   /** Every `build`, in call order. */
   readonly built: RecordedBuild[] = [];
@@ -74,6 +79,12 @@ export class FakeBuildAdapter implements BuildAdapter {
     this.provenanceBuilderId =
       options.provenanceBuilderId ?? 'https://spindrift.dev/builders/fake';
     this.carriesRegistryCredential = options.carriesRegistryCredential ?? true;
+    this.selfAuthorizedRegistries = options.selfAuthorizedRegistries ?? [
+      'artifactRegistry',
+      'dockerHub',
+      'ghcr',
+      'other',
+    ];
     this.script = options.script?.length ? options.script : [DEFAULT_BUILD];
   }
 

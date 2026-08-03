@@ -11,7 +11,7 @@ import {
   dispatchBuild,
   recordDispatchWait,
 } from '../commands/builds/dispatch.ts';
-import { routeForTarget } from '../commands/builds/route.ts';
+import { buildRouteFor } from '../commands/builds/route.ts';
 import {
   builds,
   components,
@@ -62,12 +62,21 @@ export async function runBuildPass(
   for (const row of rows) {
     if (visited.has(row.buildId)) continue;
     visited.add(row.buildId);
-    const route = await routeForTarget(row.targetId, context);
-    if (route === null) {
-      // A Target whose policy no configured route satisfies. Configuring a
+    const selection = await buildRouteFor(row.targetId, context, row.appId);
+    if (selection.route === null) {
+      // A Target whose policy no available route satisfies. Configuring a
       // route is an operator act that makes the next tick work, so the Build
       // stays PENDING — and says so once, because a Build PENDING forever with
       // nothing anywhere saying why is the failure worth spending a row on.
+      //
+      // Every candidate's own sentence is carried, because since an App may
+      // name its route the general sentence is no longer the whole truth: "this
+      // Target does not admit this route" is a thing the developer did and can
+      // undo, and it reads nothing like an installation that configured none.
+      const reasons = selection.candidates
+        .filter((candidate) => !candidate.eligible)
+        .map((candidate) => `${candidate.route} (${candidate.reason})`)
+        .join('; ');
       await recordDispatchWait(
         context,
         {
@@ -78,10 +87,13 @@ export async function runBuildPass(
           },
           waitingOn: row.waitingOn,
         },
-        'no build route this installation configures meets the policy of the Target this Build is placed on, so nothing can run it',
+        reasons === ''
+          ? 'no build route this installation configures meets the policy of the Target this Build is placed on, so nothing can run it'
+          : `no build route can run this Build for the Target it is placed on: ${reasons}`,
       );
       continue;
     }
+    const route = selection.route;
     const result = await dispatchBuild(
       {
         buildId: row.buildId,

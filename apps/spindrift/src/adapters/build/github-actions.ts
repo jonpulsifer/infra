@@ -30,6 +30,7 @@
  * the Build rather than hidden, because a checklist-only log is a property of
  * where it ran and not a bug in Spindrift.
  */
+import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type { RepositoryRef } from '../../domain/repository.ts';
 import {
   CALLER_WORKFLOW_FILE,
@@ -257,6 +258,18 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
    * change rather than a token an operator cannot un-publish.
    */
   readonly carriesRegistryCredential = false;
+  /**
+   * Both, because the run holds two identities at once and the pinned workflow
+   * uses each: `docker/login-action` against `ghcr.io` with the run's own
+   * token, and `google-github-actions/auth` federating into the artifact
+   * registry. So the hosted route is the one that publishes everywhere this
+   * installation pushes, and it is why nothing here has ever needed a stored
+   * credential.
+   */
+  readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [
+    'ghcr',
+    'artifactRegistry',
+  ];
   /**
    * §16's profile level. A reusable workflow pinned by commit, running on a
    * runner the repository does not control, producing signed provenance — that

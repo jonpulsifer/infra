@@ -42,6 +42,7 @@ import {
 import {
   artifactTags,
   componentRepositories,
+  publishableRegistries,
   registryHostOf,
 } from '../../domain/artifact-name.ts';
 import {
@@ -548,7 +549,54 @@ export const dispatchBuild = async (
    * Ahead of the signed URL deliberately: a bearer capability minted for a
    * Build that cannot be dispatched is one that exists for no reason.
    */
-  const registries = context.manifest.supplyChain.registry;
+  const allRegistries = context.manifest.supplyChain.registry;
+  /**
+   * The registries **this route** can publish to, which is not always all of
+   * them (§13).
+   *
+   * §16 pushes every artifact to every registry, and that reads as unconditional
+   * until you ask what authorizes each push. §13 answers "the route that makes
+   * it", and the three routes do not reach the same set: the hosted run logs
+   * into GHCR and federates to the artifact registry, while the cloud builder's
+   * metadata token is good for one vendor's registries and nothing else.
+   *
+   * `buildctl` exports every reference in one operation, so an unauthorized
+   * destination is not a destination that gets skipped — it is a `401` that
+   * fails the whole export, with the image built and nothing published
+   * anywhere. Narrowing is what makes a cloud build land in the artifact
+   * registry by default instead of failing at the last step, and stored
+   * credentials widen it back for a host no federation reaches.
+   *
+   * The consequence is deliberate and is the one an App choosing a route signs
+   * up for: an artifact in fewer registries is an artifact fewer Targets can
+   * pull. `setAppBuildRoute` refuses that combination up front rather than
+   * letting a green Build discover it at the deploy.
+   */
+  const storedHosts = new Set(
+    (await context.adapters.registryCredentials?.()?.list())?.map(
+      (one) => one.host,
+    ) ?? [],
+  );
+  const registries = publishableRegistries({
+    registries: allRegistries,
+    selfAuthorized: adapter.selfAuthorizedRegistries,
+    storedHosts,
+  });
+  if (registries.length === 0) {
+    return refuseDispatch(
+      context,
+      subject,
+      'NOT_BUILDABLE',
+      `the "${adapter.name}" route can authorize a push to none of the ` +
+        `registries this installation publishes to (${allRegistries.join(', ')}), ` +
+        'so a build on it would have nowhere to put the artifact. Store a ' +
+        'registry credential for one of them, or build on a route whose own ' +
+        'identity reaches one.',
+      // Both halves are configuration an operator can supply, and the next tick
+      // then works without anyone pressing Deploy again.
+      { kind: 'waits' },
+    );
+  }
   const destinations = componentRepositories({
     registries,
     app: app.name,
