@@ -58,11 +58,144 @@ spec:
       ping-path: ""
       ready-path: ""
 
+    # The ext_authz shim, and the whole reason it exists.
+    #
+    # oauth2-proxy needs an absolute origin to send the browser back to after
+    # sign-in. Behind the ExternalAuth filter it is shown the App's `Host` but
+    # no origin it will use: `pkg/app/redirect/getters.go` reaches
+    # `getXForwardedHeadersRedirect` only when `req.Host != GetRequestHost(req)`,
+    # and with nothing setting `X-Forwarded-Host` those are the same string by
+    # construction. It falls through to `getURIRedirect` and answers with a bare
+    # path, which the callback host then resolves against *itself*.
+    #
+    # Gateway API's ExternalAuth filter has no field that injects a header into
+    # its check request — `allowedHeaders` permits, it does not create — so the
+    # origin is composed one hop later instead. nginx listens on 4181, builds
+    # `X-Auth-Request-Redirect` out of the `Host` Envoy's ext_authz client
+    # already forwards, and proxies to oauth2-proxy on 4180.
+    # `getXAuthRequestRedirect` is consulted ahead of the `X-Forwarded-*` pair
+    # and carries no trusted-proxy gate, so it answers on every request rather
+    # than on the subset that arrives from a trusted address.
+    #
+    # `proxy_set_header` replaces, so a browser cannot smuggle its own
+    # `X-Auth-Request-Redirect` through this hop. The filter not listing that
+    # header in `allowedHeaders` is the other half of the same guard;
+    # `packages/charts/spindrift-app/tests/render.test.ts` pins both.
+    #
+    # `?rd=` is covered by neither. `getRdQuerystringRedirect` runs first, reads
+    # the query string of the request as it arrives, and is gated only by
+    # `whitelist-domain` — so a caller can still pick any host in this zone as
+    # its own post-sign-in destination.
+    #
+    # Only the check path goes through the shim. oauth2-proxy's own endpoints
+    # stay on port 80: `getXAuthRequestRedirect` does not strip the proxy
+    # prefix, so an origin injected in front of `/oauth2/start` points the proxy
+    # at itself.
+    extraContainers:
+      - name: authz-shim
+        image: docker.io/nginxinc/nginx-unprivileged:1.29-alpine@sha256:0c79d56aee561a1d81c63f00eee5fb5fe29279560cdc55e91425133104c7fbe6
+        command: [nginx, -c, /etc/nginx/shim/nginx.conf, -g, "daemon off;"]
+        ports:
+          - name: authz
+            containerPort: 4181
+            protocol: TCP
+        volumeMounts:
+          - name: authz-shim
+            mountPath: /etc/nginx/shim
+            readOnly: true
+          - name: authz-tmp
+            mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 101
+          runAsGroup: 101
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 32Mi
+
+    extraVolumes:
+      - name: authz-shim
+        configMap:
+          name: oauth2-proxy-authz
+      # nginx writes a pid file and creates its temp paths at startup, and the
+      # root filesystem is read-only, so both are pointed here.
+      - name: authz-tmp
+        emptyDir: {}
+
+    extraObjects:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: oauth2-proxy-authz
+        data:
+          # nginx's `$var` passes through Flux's postBuild substitution
+          # untouched — only `${var}` is a substitution token. The nginx config
+          # in `clusters/folly/apps/dump` renders `$uri` through the same
+          # mechanism and arrives intact.
+          nginx.conf: |
+            worker_processes 1;
+            pid /tmp/nginx.pid;
+            error_log stderr warn;
+            events {}
+            http {
+              # oauth2-proxy logs every check with the App's host on it; a
+              # second copy of the same line here says nothing new.
+              access_log off;
+              client_body_temp_path /tmp/client_body;
+              proxy_temp_path /tmp/proxy;
+              fastcgi_temp_path /tmp/fastcgi;
+              uwsgi_temp_path /tmp/uwsgi;
+              scgi_temp_path /tmp/scgi;
+              server {
+                listen 4181;
+                location / {
+                  proxy_pass http://127.0.0.1:4180;
+                  # Preserved so the proxy's own log still names the App the
+                  # check was for; the default sends 127.0.0.1:4180 instead.
+                  proxy_set_header Host $http_host;
+                  # The scheme is literal rather than $http_x_forwarded_proto.
+                  # Envoy sets that from the listener that accepted the request
+                  # and the tunnel reaches this gateway over plain HTTP, so a
+                  # browser on https would be handed back an http origin — one
+                  # the Secure session cookie is never sent to.
+                  proxy_set_header X-Auth-Request-Redirect https://$http_host$request_uri;
+                }
+              }
+            }
+      # The filter's backendRef. `service.portNumber` is a single port, so the
+      # shim's is its own Service over the same pods.
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: oauth2-proxy-authz
+        spec:
+          type: ClusterIP
+          selector:
+            app.kubernetes.io/name: oauth2-proxy
+            app.kubernetes.io/instance: oauth2-proxy
+          ports:
+            - name: authz
+              port: 4181
+              targetPort: authz
+              protocol: TCP
+              appProtocol: http
+
     replicaCount: 2
     enableServiceLinks: false
 
     podAnnotations:
       secret.reloader.stakater.com/reload: oauth2-proxy
+      configmap.reloader.stakater.com/reload: oauth2-proxy-authz
 
     serviceAccount:
       enabled: true

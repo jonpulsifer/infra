@@ -147,13 +147,74 @@ cookie_scope_contract() {
   ' "$rendered")
 }
 
+# Where the browser is sent after it signs in.
+#
+# Nothing on the ExternalAuth check path hands oauth2-proxy an origin: the
+# filter has no field that injects a header, and the `Host` Envoy forwards is
+# equal to the one the proxy already has, which is the comparison
+# `getXForwardedHeadersRedirect` refuses on. The proxy then answers with a bare
+# path, and the callback — on a different host — resolves it against itself. So
+# the origin is composed by the shim beside the proxy, and this is the assertion
+# that it still is.
+#
+# The failure it catches is silent: the check keeps passing, every App keeps
+# serving, and only a browser completing a sign-in lands on the wrong host.
+# `proxy_set_header` is named rather than any header directive because
+# replacing, not appending, is what stops a client's own copy at this hop.
+authz_checks=0
+authz_redirect_contract() {
+  local rendered="$1" overlay="$2"
+  local conf="$WORK/authz-${overlay//\//_}.conf" target
+
+  yq eval-all '
+    select(.kind == "HelmRelease")
+    | .spec.values.extraObjects[]?
+    | select(.kind == "ConfigMap")
+    | .data."nginx.conf"
+  ' "$rendered" >"$conf" 2>/dev/null || true
+
+  grep -q '[^[:space:]]' "$conf" || return 0
+  authz_checks=$((authz_checks + 1))
+
+  target="$(sed -n \
+    's/^[[:space:]]*proxy_set_header[[:space:]]\{1,\}X-Auth-Request-Redirect[[:space:]]\{1,\}\(.*\);[[:space:]]*$/\1/p' \
+    "$conf")"
+
+  # Absolute, and built from the host the request arrived on. Anything else —
+  # a dropped scheme, a bare `$request_uri`, a deleted directive — is the
+  # host-relative target this whole arrangement exists to replace.
+  #
+  # shellcheck disable=SC2016  # `$http_host` is nginx's variable, not the shell's
+  case "$target" in
+    'https://$http_host'*)
+      printf '  authz redirect %s: "%s"\n' "$overlay" "$target"
+      ;;
+    *)
+      printf '  FAILED %s: the ext_authz shim sets X-Auth-Request-Redirect to "%s",\n' \
+        "$overlay" "$target"
+      printf '    not an absolute origin composed from the request host\n'
+      failures=$((failures + 1))
+      ;;
+  esac
+}
+
 for overlay in "${OVERLAYS[@]}"; do
   rendered="$WORK/${overlay//\//_}.yaml"
   kubectl kustomize "$overlay" >"$rendered"
   printf 'rendered %s\n' "$overlay"
   template_releases "$rendered" "$overlay"
   cookie_scope_contract "$rendered" "$overlay"
+  authz_redirect_contract "$rendered" "$overlay"
 done
+
+# Same silence problem as the cookie contract below: an `extraObjects` rename
+# or a deleted ConfigMap would leave nothing to check and read green.
+if [ "$authz_checks" -eq 0 ]; then
+  printf '\nNo rendered HelmRelease carries an extraObjects ConfigMap with an\n'
+  printf 'nginx.conf, so the ext_authz redirect contract checked nothing. Either\n'
+  printf 'the shim moved or an overlay is missing from OVERLAYS in %s.\n' "${BASH_SOURCE[0]}"
+  failures=$((failures + 1))
+fi
 
 # The contract above has to have looked at something. `redirect-url` is what
 # selects a release into it, so a rename or a deleted key would otherwise turn

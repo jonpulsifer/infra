@@ -19,24 +19,29 @@ publishes: external-dns's `gateway-httproute` source would otherwise emit its
 own endpoint for these same hostnames, targeting the parent Gateway's status
 address — the same name claimed twice, at two record types, by two sources.
 
-**`allowedHeaders` permits, it does not create.** The three it names are what
+**`allowedHeaders` permits, it does not create.** The two it names are what
 oauth2-proxy is shown of the original request, on top of the `Host`, method and
-path Envoy's ext_authz client includes on its own. Only `x-forwarded-proto` is
-real: Cilium's gateway sets it and overwrites whatever the client sent. Nothing
-sets `x-forwarded-host` or `x-forwarded-uri`, so listing them permitted a header
-no hop was producing — and left the **client** free to produce it, choosing its
-own post-sign-in destination inside the zone. They are not listed for that
-reason.
+path Envoy's ext_authz client includes on its own. `cookie` carries the session
+the check is about. `x-forwarded-proto` is the one header of its family this
+gateway composes — Cilium's Envoy sets it and overwrites whatever the client
+sent, beside the `x-forwarded-for` it appends to.
 
-Adding them back does not buy the return trip either, and that is the part worth
-knowing before trying. oauth2-proxy treats a request as forwarded only when
-`req.Host != GetRequestHost(req)` — the `Host` Envoy already forwards against the
-`x-forwarded-host` it does not — so a header set to this Component's own hostname
-is equal to the one beside it and changes nothing. Measured, not reasoned:
-`x-forwarded-host` equal to the real host yields a host-relative target every
-time. The header that would work is `x-auth-request-redirect`, built from
-`:authority` and injected by the filter itself, and `ExternalAuth` has no field
-that injects anything.
+Nothing sets `x-forwarded-host` or `x-forwarded-uri`, and oauth2-proxy reads
+neither to any effect: it treats a request as forwarded only when
+`req.Host != GetRequestHost(req)`, so a header holding this Component's own
+hostname equals the `Host` beside it and yields a host-relative target every
+time. Measured, not reasoned. They are absent because they are inert — not
+because listing them would open anything. `?rd=` lets a caller name its own
+post-sign-in destination anywhere in the zone with no `allowedHeaders` entry at
+all, and that stays open.
+
+`x-auth-request-redirect` is the header oauth2-proxy honours without any trust
+gate, and its absence here is load-bearing rather than incidental: a browser
+that sets one would otherwise choose where the sign-in returns to. The value the
+flow uses is composed inside the auth pod instead, by the shim
+`platform.externalAuth` points at
+(`clusters/base/apps/oauth2-proxy/helm-release.yaml`), whose `proxy_set_header`
+replaces any inbound copy. Both halves are pinned in `tests/render.test.ts`.
 
 The hold-out is `…/controller`, which the source honours per object: it skips
 any route whose value is not `dns-controller` (`source/annotations`,
@@ -86,7 +91,6 @@ spec:
               port: {{ .Values.platform.externalAuth.port }}
             http:
               allowedHeaders:
-                - authorization
                 - cookie
                 - x-forwarded-proto
               allowedResponseHeaders:

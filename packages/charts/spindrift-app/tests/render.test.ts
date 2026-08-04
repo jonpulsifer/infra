@@ -364,15 +364,15 @@ describe('the route', () => {
             port: 80,
           },
           http: {
-            // Exactly three, and the exactness is the point. `allowedHeaders`
+            // Exactly two, and the exactness is the point. `allowedHeaders`
             // permits a header through to oauth2-proxy; it does not create one.
-            // Cilium's gateway sets `x-forwarded-proto` and nothing else of
-            // this family, so `x-forwarded-host` and `x-forwarded-uri` admitted
-            // a value only a *client* could supply — letting the caller pick
-            // where its own sign-in returns to, anywhere in the zone. Re-adding
-            // either fails here, which is the guard: the template comment
-            // carries the measurement, this carries the assertion.
-            allowedHeaders: ['authorization', 'cookie', 'x-forwarded-proto'],
+            // `x-forwarded-proto` is the one header of its family Cilium's
+            // Envoy composes; `x-forwarded-host` and `x-forwarded-uri` reach
+            // the proxy only if a client supplies them and change nothing when
+            // it does, and `authorization` is read by no provider this
+            // deployment configures. The template comment carries the
+            // measurement, this carries the assertion.
+            allowedHeaders: ['cookie', 'x-forwarded-proto'],
             allowedResponseHeaders: [
               'set-cookie',
               'x-auth-request-email',
@@ -382,6 +382,25 @@ describe('the route', () => {
         },
       },
     ]);
+  });
+
+  test('the filter never forwards the header that names the return target', async () => {
+    // `getXAuthRequestRedirect` (oauth2-proxy `pkg/app/redirect/getters.go`)
+    // reads `X-Auth-Request-Redirect` with no trusted-proxy gate at all, so
+    // whoever puts that header on the check request decides where a sign-in
+    // returns to. The value the flow uses is composed inside the auth pod, by
+    // the shim `platform.externalAuth` points at; the only thing keeping a
+    // *browser* from composing one instead is that Envoy is never told to
+    // forward it. That absence is the guard, so it is asserted rather than
+    // left to the list above happening not to mention it.
+    const route = one(
+      await render({ app: { reach: 'private', auth: 'proxy' } }),
+      'HTTPRoute',
+    );
+    const { allowedHeaders } = route.spec.rules[0].filters[0].externalAuth.http;
+    expect(
+      (allowedHeaders as string[]).map((header) => header.toLowerCase()),
+    ).not.toContain('x-auth-request-redirect');
   });
 
   test('auth: none renders no filter, at either reach', async () => {

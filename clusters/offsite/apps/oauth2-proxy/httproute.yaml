@@ -25,26 +25,24 @@ spec:
   hostnames:
     - "oauth2.${SPINDRIFT_DOMAIN}"
   rules:
-    # The whole hostname, not just `/oauth2`. A sign-in that starts at an App
-    # ends here on a path that belongs to the App: the `state` oauth2-proxy
-    # mints behind the ExternalAuth filter is host-relative — it cannot be
-    # anything else, see the measurement on the App chart's route — so the
-    # callback resolves it against its own host and sends the browser to
-    # `oauth2.${SPINDRIFT_DOMAIN}/whatever/the/App/served`. Matched only against
-    # `/oauth2`, that request fell off the route table and Envoy answered 404
-    # before oauth2-proxy ever saw it, which is why nothing in the proxy's log
-    # named it.
+    # The whole hostname, not just `/oauth2`. A browser can reach this host on a
+    # path that belongs to an App: the `state` a sign-in carries is whatever
+    # oauth2-proxy resolved as its return target, and a host-relative one — the
+    # answer whenever nothing hands the proxy an origin — is resolved by the
+    # callback against *this* host. `?rd=` is the other way in, and it needs no
+    # header at all. Matching only `/oauth2` leaves such a request off the route
+    # table entirely, so Envoy answers 404 and the proxy's log never names it.
     #
-    # Matching `/` sends it to the proxy instead, where it becomes a blank 200
-    # off the `static://200` upstream — or a sign-in, for a browser that has no
-    # session yet. That is not the browser landing back on the App and it does
-    # not pretend to be; the App's identity is gone by then. It is the honest
-    # answer available at this host: the operator is signed in, and the page
-    # says so by not being an error.
+    # Matching `/` sends it to the proxy instead, where it is a blank 200 off
+    # the `static://200` upstream — or a sign-in, for a browser with no session
+    # yet. That is not the browser landing back on the App and does not pretend
+    # to be; the App's identity is gone by then. It is the honest answer
+    # available at this host: the operator is signed in, and the page says so by
+    # not being an error.
     #
     # Nothing is widened by this. The proxy's only upstream is `static://200`,
     # so there is no origin behind it to reach, and its own `/oauth2/*`
-    # endpoints were already served here.
+    # endpoints are served here either way.
     - matches:
         - path:
             type: PathPrefix
