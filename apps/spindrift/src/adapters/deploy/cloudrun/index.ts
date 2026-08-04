@@ -115,7 +115,7 @@ export interface CloudRunAdapterOptions {
   readonly schedulerEndpoint?: string;
 }
 
-const DEFAULT_POLL_MS = 2_000;
+const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_LOGS_ENDPOINT = 'https://logging.googleapis.com';
 const DEFAULT_SCHEDULER_ENDPOINT = 'https://cloudscheduler.googleapis.com';
@@ -765,6 +765,11 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // phase: a Service whose terminal condition has not appeared yet must not
     // put a second identical event on the timeline.
     let reported: DeployPhase = 'APPLYING';
+    // The condition message last put on the timeline. A revision says several
+    // different things while staying in one phase — provisioning, pulling,
+    // routing traffic — and those sentences are the only progress a reader gets
+    // between "applying" and a verdict.
+    let said: string | undefined;
 
     for (;;) {
       const service = await this.read(http, connection, collection, id);
@@ -778,6 +783,18 @@ export class CloudRunDeployAdapter implements DeployAdapter {
           ...(status.reason === undefined ? {} : { reason: status.reason }),
           ...(status.detail === undefined ? {} : { detail: status.detail }),
         });
+      }
+
+      // Terminal phases are excluded: their detail travels on the verdict, and
+      // repeating it here would put the same sentence on the timeline twice.
+      if (
+        status.detail !== undefined &&
+        status.detail !== said &&
+        status.phase !== 'LIVE' &&
+        status.phase !== 'FAILED'
+      ) {
+        said = status.detail;
+        yield this.log(status.detail, id);
       }
 
       if (status.phase === 'LIVE') {

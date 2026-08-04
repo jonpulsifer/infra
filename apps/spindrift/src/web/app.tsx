@@ -25,6 +25,7 @@ import type {
   TargetOptionView,
   WorkspaceView,
 } from './model.ts';
+import { isInFlight } from './model.ts';
 import { useRoute } from './router.ts';
 import { subscribeAttempt, subscribeRuntime } from './stream-client.ts';
 import { type Theme, useTheme } from './theme.ts';
@@ -932,6 +933,61 @@ function WorkspaceScreen({
       live = false;
     };
   }, [appName, reloadToken]);
+
+  /**
+   * Keep the workspace current while something is moving.
+   *
+   * The attempt screen has the event stream; this screen has no such edge — it
+   * read once at mount and then sat on whatever the phase was at that instant,
+   * so a deploy started from here converged entirely off-screen. §18 puts the
+   * running App first, and an App-first screen that cannot notice its App
+   * coming up is the one that most needs to.
+   *
+   * Two cadences for the same reason the reconciler has two: while a release is
+   * in flight the reader is watching, and once it settles the read is only
+   * catching acts from elsewhere.
+   */
+  const inFlight =
+    state.type === 'success' && isInFlight(state.workspace.phase);
+  useEffect(() => {
+    if (!appName) return;
+    const timer = setInterval(
+      () => {
+        void command('getAppWorkspace', { name: appName })
+          .then((result) => {
+            if (!result.ok) return;
+            const fresh = result.value.workspace;
+            setState((current) => {
+              // The runtime tail is accumulated by a socket, not by this read —
+              // a fresh workspace carries only the server's first page of it,
+              // so taking it wholesale would wipe the log every few seconds.
+              if (
+                current.type === 'success' &&
+                current.workspace.runtime.kind === 'stream' &&
+                fresh.runtime.kind === 'stream'
+              ) {
+                return {
+                  type: 'success',
+                  workspace: {
+                    ...fresh,
+                    runtime: {
+                      ...fresh.runtime,
+                      lines: current.workspace.runtime.lines,
+                    },
+                  },
+                };
+              }
+              return { type: 'success', workspace: fresh };
+            });
+          })
+          // A failed refresh is not a reason to replace a workspace that is on
+          // screen and readable with an error page. The next tick tries again.
+          .catch(() => {});
+      },
+      inFlight ? 2_000 : 20_000,
+    );
+    return () => clearInterval(timer);
+  }, [appName, inFlight]);
 
   const runtime =
     state.type === 'success' && state.workspace.runtime.kind === 'stream'
