@@ -364,13 +364,15 @@ describe('the route', () => {
             port: 80,
           },
           http: {
-            allowedHeaders: [
-              'authorization',
-              'cookie',
-              'x-forwarded-host',
-              'x-forwarded-proto',
-              'x-forwarded-uri',
-            ],
+            // Exactly three, and the exactness is the point. `allowedHeaders`
+            // permits a header through to oauth2-proxy; it does not create one.
+            // Cilium's gateway sets `x-forwarded-proto` and nothing else of
+            // this family, so `x-forwarded-host` and `x-forwarded-uri` admitted
+            // a value only a *client* could supply — letting the caller pick
+            // where its own sign-in returns to, anywhere in the zone. Re-adding
+            // either fails here, which is the guard: the template comment
+            // carries the measurement, this carries the assertion.
+            allowedHeaders: ['authorization', 'cookie', 'x-forwarded-proto'],
             allowedResponseHeaders: [
               'set-cookie',
               'x-auth-request-email',
