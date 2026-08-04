@@ -36,28 +36,43 @@
  * wizard that saved per step would run reconciliation four times over four
  * documents that were each missing something.
  *
+ * **The four are the same four the predicate reads**, which is not a
+ * coincidence and is what keeps this screen coherent:
+ * `isUnconfiguredInstallation` answers over the genuine choices, so answering
+ * them here is what ends onboarding, and a step asking something the predicate
+ * ignores would be a question whose answer changed nothing. Discovery is the
+ * exception and is the reason it is a step rather than a fifth ask: it writes
+ * cloud facts, which are nobody's choice — it is here because confirming them is
+ * cheapest while the operator is already looking at the document.
+ * `secretStore.adapter` is the fourth genuine choice and is deliberately *not*
+ * asked: it is one of two values, both wrong for an installation that has not
+ * decided, and answering the other three is already enough to leave this screen.
+ *
  * **What an operator can authenticate as before any of this.** Nothing here is
  * reachable without a session, and a session is a passkey ceremony scoped to
- * `controlPlane.hostname` — bound once at boot, deliberately (`serve.ts`), and
- * on an unconfigured installation that value is the placeholder's. A browser
- * refuses a ceremony whose relying party is not a suffix of the origin it is
- * on, so an installation that has nothing but the placeholder cannot enrol
- * anybody, and this screen sits behind a door that installation cannot open.
- * That is a real gap and it is not this screen's to close: the hostname is a
- * deployment fact the chart already knows and the manifest is not given, and
- * moving where the relying party resolves from changes which origins ceremonies
- * are accepted at — a change whose only honest proof is a live enrolment. Until
- * that lands, onboarding is reachable exactly for an installation whose
- * hostname is already right and whose remaining values are not.
+ * `controlPlane.hostname` — bound once at boot, deliberately (`serve.ts`). An
+ * installation holding nothing but the placeholder has `spindrift.example.com`
+ * there, and a browser refuses a ceremony whose relying party is not a suffix of
+ * the origin it is on, so *that* installation cannot enrol anybody and this
+ * screen sits behind a door it cannot open. The chart's own default —
+ * `manifest: {}`, which renders no ConfigMap — is exactly that installation.
+ * Closing it is not this screen's: the hostname is a deployment fact the chart
+ * already knows and the manifest is not given, and moving where the relying
+ * party resolves from changes which origins ceremonies are accepted at, a change
+ * whose only honest proof is a live enrolment.
+ *
+ * So what is reachable today is the installation whose declaration seeds the
+ * deployment facts — a real hostname above all — and leaves the genuine choices
+ * at their stand-ins. That one can enrol somebody, and this is what it shows
+ * them first.
  */
 import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { command } from '../../client.ts';
 import type { Path } from '../../forms/document.ts';
-import { manifestFields, manifestIssues } from '../../forms/manifest.ts';
+import { manifestFieldAt, manifestIssues } from '../../forms/manifest.ts';
 import type { FieldErrors } from '../../forms/render.tsx';
 import { SchemaFields } from '../../forms/render.tsx';
-import type { FormField } from '../../forms/schema.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { DiscoveryPanel } from './discovery.tsx';
@@ -131,21 +146,26 @@ export const ONBOARDING_ASKS: readonly OnboardingAsk[] = [
 ];
 
 /**
- * The schema's description of one key, by path.
+ * The step that asks about a value, or `-1` for a value no step asks about.
  *
- * `null` for a path this build's schema does not have, which is rendered as a
- * refusal rather than skipped: a wizard that quietly dropped a question would
- * finish having configured less than it said it did.
+ * A wizard shows one control at a time, so an issue is only actionable on the
+ * step that mounts the control it belongs to. Prefix rather than equality
+ * because an issue names the value that is wrong and a step names the key it
+ * asks for: a bad element of `supplyChain.registry` is reported at
+ * `supplyChain.registry.0`, and the step that can fix it is the one asking for
+ * `supplyChain.registry`.
+ *
+ * `-1` is a real answer and not a miss. Discovery applies cloud facts this
+ * screen never asks for, so a document can be refused over a value with no
+ * control on any step; {@link Onboarding} names those keys in the refusal
+ * instead of navigating to a screen that would not show them.
  */
-export function manifestFieldAt(at: Path): FormField | null {
-  let fields: readonly FormField[] = manifestFields();
-  let found: FormField | null = null;
-  for (const step of at) {
-    found = fields.find((field) => field.key === step) ?? null;
-    if (found === null) return null;
-    fields = found.node.kind === 'object' ? found.node.fields : [];
-  }
-  return found;
+export function stepAsking(path: string): number {
+  return ONBOARDING_ASKS.findIndex((ask) => {
+    if (ask.kind !== 'field') return false;
+    const at = ask.at.join('.');
+    return path === at || path.startsWith(`${at}.`);
+  });
 }
 
 /**
@@ -180,10 +200,26 @@ export function Onboarding({
     // again regardless and is the authority.
     const issues = manifestIssues(document);
     if (issues.size > 0) {
+      const paths = [...issues.keys()];
       setErrors(issues);
+      // Back to the step that asks about the first refused value. This screen
+      // mounts one control at a time, so an issue against `installation` raised
+      // on the last step is an issue rendered against a control three steps
+      // back — the operator is told the manifest was refused and shown nothing
+      // that says what to do. The settings form has no equivalent problem
+      // because every field is mounted at once.
+      //
+      // An issue may still belong to no step: discovery applies cloud facts
+      // this screen never asks for. Naming the keys is what that case has
+      // instead of a control to point at.
+      const asked = paths
+        .map(stepAsking)
+        .filter((at) => at >= 0)
+        .sort((first, second) => first - second);
+      if (asked[0] !== undefined) setStep(asked[0]);
       setOutcome({
         kind: 'invalid',
-        message: 'This installation was not written, because it is not valid.',
+        message: `This installation was not written, because ${paths.join(', ')} ${paths.length === 1 ? 'is' : 'are'} not valid.`,
       });
       return;
     }

@@ -39,12 +39,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { Principal } from '../../src/commands/types.ts';
 import { DEFAULT_PLACEHOLDER_MANIFEST } from '../../src/config/manifest.ts';
 import { SignedIn } from '../../src/web/app.tsx';
+import { manifestFieldAt } from '../../src/web/forms/manifest.ts';
 import type { FieldErrors } from '../../src/web/forms/render.tsx';
 import type { SaveOutcome } from '../../src/web/views/auth/installation.tsx';
 import {
-  manifestFieldAt,
   ONBOARDING_ASKS,
   OnboardingView,
+  stepAsking,
 } from '../../src/web/views/auth/onboarding.tsx';
 
 /** The document an unconfigured installation actually holds. */
@@ -194,6 +195,22 @@ describe('a refusal is the same three things it is on the settings screen', () =
       errors: new Map([['installation', ['Too small: expected string']]]),
     });
     expect(markup).toContain('Too small: expected string');
+  });
+
+  test('a refused value is traced to the step that can fix it', () => {
+    // The settings form mounts every field at once and can render an issue
+    // wherever it belongs. This one shows a single control, so an issue against
+    // `installation` raised on the last step is an issue rendered against a
+    // control three steps back — the operator is told the manifest was refused
+    // and shown nothing that says what to do. `finish` navigates on this.
+    expect(stepAsking('installation')).toBe(0);
+    expect(stepAsking('github.clientId')).toBe(1);
+    // By prefix: an issue names the value that is wrong, a step names the key it
+    // asks for, and an array control's elements are neither of the other's.
+    expect(stepAsking('supplyChain.registry.0')).toBe(3);
+    // And a value no step asks about is not forced onto one. Discovery writes
+    // cloud facts this screen never offers a control for.
+    expect(stepAsking('sources.defaultBucket')).toBe(-1);
   });
 });
 

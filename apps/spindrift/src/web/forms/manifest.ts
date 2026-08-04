@@ -11,6 +11,7 @@
  * Nothing here lists a key. Both functions are the schema applied to something.
  */
 import { installationManifestSchema } from '../../config/manifest.schema.ts';
+import type { Path } from './document.ts';
 import type { FieldErrors } from './render.tsx';
 import { describeObject, type FormField } from './schema.ts';
 
@@ -25,6 +26,28 @@ const FIELDS: readonly FormField[] = describeObject(installationManifestSchema);
 
 export function manifestFields(): readonly FormField[] {
   return FIELDS;
+}
+
+/**
+ * The schema's description of one key, by path — `null` for a path this build's
+ * schema does not have.
+ *
+ * Here rather than beside either caller because both of them are asking the same
+ * question about the same schema and neither owns it: the wizard asks it to
+ * render a named key and to refuse visibly when that key has gone, and
+ * discovery's test asks it to prove that every path the cloud proposes is a path
+ * the document can hold. Two walks would be two answers about one schema, and
+ * the one that drifted would be the one nobody was reading.
+ */
+export function manifestFieldAt(at: Path): FormField | null {
+  let fields: readonly FormField[] = FIELDS;
+  let found: FormField | null = null;
+  for (const step of at) {
+    found = fields.find((field) => field.key === step) ?? null;
+    if (found === null) return null;
+    fields = found.node.kind === 'object' ? found.node.fields : [];
+  }
+  return found;
 }
 
 /**

@@ -80,6 +80,15 @@ export type Configuration =
   | { readonly state: 'unconfigured'; readonly manifest: unknown }
   | { readonly state: 'configured' };
 
+/**
+ * How long the whole product waits on the read below before rendering anyway.
+ *
+ * Generous, because the answer decides which application an operator is looking
+ * at and guessing early on a merely-slow installation would replace the product
+ * with a wizard for no reason. It is a ceiling on a hang, not a latency budget.
+ */
+const ASK_TIMEOUT_MS = 10_000;
+
 export function App() {
   const route = useRoute();
   const [gate, setGate] = useState<Gatekeeping>({ state: 'asking' });
@@ -126,6 +135,15 @@ export function App() {
    * more disruptive answer — it replaces the whole application — so a transport
    * failure resolves to the state that takes nothing away, and Settings still
    * reaches everything this screen would have asked.
+   *
+   * **And a read that never answers means the same thing**, which needs the
+   * deadline below because a rejection is not the failure mode this one has. A
+   * request a proxy is holding open, or one issued into a pod mid-rollout, does
+   * not reject — it hangs, and `SignedIn` renders nothing while the answer is
+   * outstanding. Without a deadline that is a blank document with no chrome and
+   * no way to sign out, for as long as the socket stays up. The whole product is
+   * behind this one read, so the read is not allowed to be the thing that never
+   * finishes.
    */
   useEffect(() => {
     if (gate.state !== 'signed-in') {
@@ -137,20 +155,28 @@ export function App() {
       return;
     }
     let live = true;
-    command('getInstallationManifest', {})
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    Promise.race([
+      command('getInstallationManifest', {}),
+      new Promise<null>((resolve) => {
+        deadline = setTimeout(() => resolve(null), ASK_TIMEOUT_MS);
+      }),
+    ])
       .then((result) => {
         if (!live) return;
         setInstallation(
-          result.ok && !result.value.configured
+          result !== null && result.ok && !result.value.configured
             ? { state: 'unconfigured', manifest: result.value.manifest }
             : { state: 'configured' },
         );
       })
       .catch(() => {
         if (live) setInstallation({ state: 'configured' });
-      });
+      })
+      .finally(() => clearTimeout(deadline));
     return () => {
       live = false;
+      clearTimeout(deadline);
     };
   }, [gate.state]);
 

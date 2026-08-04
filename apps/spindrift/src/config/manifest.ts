@@ -217,24 +217,55 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * copy of a fact the row already carries whole, and it would go stale the first
  * time somebody edited the row by hand or restored a database.
  *
- * So the answer is the document compared against the constant above. Two
- * properties follow that a flag would not have: it is current the moment the
- * row changes, which is what lets a wizard's save stop the wizard being shown;
- * and it is the same answer in the reconciler, in the web process, and in a
- * test, because it is a pure function of the document.
+ * **The four values below and not the whole document**, which is the difference
+ * between a predicate with a reachable `true` and one without. The manifest is
+ * three kinds of value: deployment facts the chart already knows, cloud facts
+ * discovery can ask for, and the genuine choices — what this installation is
+ * called, whose GitHub App it speaks as, where its artifacts are published, and
+ * which store it delivers config through. Comparing the *whole* document made
+ * `true` reachable for exactly one document, the placeholder verbatim, and that
+ * document names `spindrift.example.com` as its control plane. `serve.ts` binds
+ * the passkey relying party to that hostname at boot, so a browser refuses every
+ * ceremony against it and nobody can sign in — and onboarding renders only after
+ * a session exists. A predicate whose one `true` sits behind a door that cannot
+ * open is a wizard nobody can be shown.
  *
- * **A mounted declaration therefore configures an installation**, which is
- * right: an operator who wrote a manifest has configured this installation by
- * definition, and offering them onboarding would be offering to redo work they
- * already did.
+ * Reading only the genuine choices makes the reachable state the ordinary one: a
+ * declaration that seeds the deployment facts — a real hostname above all — and
+ * leaves the operator's own answers at their stand-ins. That installation can
+ * enrol somebody, and what they are shown first is the four questions.
  *
- * The named cost: an operator who saves this exact document unchanged is still
- * unconfigured, and will be shown onboarding again. That is honest — they
- * confirmed nothing — but it does mean "configured" is not a record of a
- * *ceremony*, only of a document.
+ * **All four, not any**, and a false positive here replaces the whole product
+ * with a wizard, so the direction matters. Two of the four are legitimately the
+ * stand-in on a configured installation — this repo's own deployment speaks as
+ * the same GitHub App the placeholder names, and `onepassword` is one of two
+ * adapters — so "any is a stand-in" would answer unconfigured for a live
+ * installation. `test/config/installation-configured.test.ts` pins the live
+ * document against this.
+ *
+ * **A mounted declaration that answers all four therefore configures an
+ * installation**, which is right: an operator who chose them has configured this
+ * installation by definition, and offering them onboarding would be offering to
+ * redo work they already did.
+ *
+ * The named cost: an operator who confirms all four unchanged is still
+ * unconfigured, and will be shown onboarding again on the next load. That is
+ * honest — they chose nothing — but it does mean "configured" is a record of a
+ * document, not of a ceremony.
  */
-export function isPlaceholderInstallation(manifest: AuthoredManifest): boolean {
-  return Bun.deepEquals(manifest, DEFAULT_PLACEHOLDER_MANIFEST, true);
+export function isUnconfiguredInstallation(
+  manifest: AuthoredManifest,
+): boolean {
+  const stand = DEFAULT_PLACEHOLDER_MANIFEST;
+  return (
+    manifest.installation === stand.installation &&
+    manifest.github.clientId === stand.github.clientId &&
+    manifest.secretStore.adapter === stand.secretStore.adapter &&
+    // The one that is a list. A bare string is the same document as a
+    // one-element list by the time it is parsed (`manifest.schema.ts`), so both
+    // sides are arrays here and neither spelling changes the answer.
+    Bun.deepEquals(manifest.supplyChain.registry, stand.supplyChain.registry)
+  );
 }
 
 /**
