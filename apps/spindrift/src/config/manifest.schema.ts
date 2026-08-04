@@ -21,11 +21,23 @@
  */
 import { z } from 'zod';
 import type { FederationConfig } from '../adapters/deploy/cloud/federation.ts';
+// `src/domain/vessel.ts` imports `TargetAdapter` back from here, and that is a
+// type-only edge, so the cycle is erased at runtime. Restating the table here
+// to avoid it would be the duplication that table exists to end.
+import { surfacesOf } from '../domain/vessel.ts';
 
 /** A non-empty string with no surrounding whitespace. */
 const nonEmptyString = z.string().trim().min(1);
 
-/** A Target identifier accepted by both the manifest and the connect act. */
+/**
+ * A Target or Vessel identifier accepted by both the manifest and the connect
+ * act.
+ *
+ * One spelling for both nouns because a Target name and a Vessel name land in
+ * the same places — a DNS-shaped label in a URL path and a column with a unique
+ * index — and two regexes that had to agree would be two regexes that could
+ * disagree.
+ */
 export const targetNameSchema = nonEmptyString
   .max(63)
   .regex(
@@ -180,18 +192,88 @@ const kubernetesDeliverySchema = z.discriminatedUnion('flavour', [
 const reachSchema = z.enum(['none', 'private', 'public']);
 
 /**
+ * The facts every kind of vessel states about itself, whatever it is.
+ *
+ * Both are properties of the **boundary** — of the network a cluster or a
+ * project sits on — so they are true for every surface on it and impossible for
+ * two of those surfaces to disagree about. That is the whole reason they are
+ * here rather than on a Target: `src/domain/vessel.ts` records what it cost
+ * when they were stated per surface.
+ *
+ * Optional rather than defaulted, matching the row: absent means unstated, and
+ * `[]` means stated-and-empty. A Target with no declared `reachableRegistries`
+ * gets the first of `supplyChain.registry`, which is not the same answer as one
+ * that reaches none.
+ */
+const vesselFacts = {
+  name: targetNameSchema,
+  servedHosts: z.array(nonEmptyString).optional(),
+  reachableRegistries: z.array(nonEmptyString).optional(),
+};
+
+/**
+ * A Vessel declared by installation desired state — §13's tenancy boundary,
+ * named rather than spelled as a shared prefix of two Target names.
+ *
+ * Discriminated on `kind` for the reason `VesselLocation` is: a `cluster` with
+ * a project id is not a state the domain has a name for, and the location's
+ * shape follows from the kind rather than being a bag of optional keys beside
+ * it. The `kind` inside {@link VesselLocation} is therefore not restated here —
+ * it is this key, and a document that carried both could carry two answers.
+ *
+ * `location` is optional for exactly the reason the column is nullable: a
+ * declaration may seed a boundary's identity and rank without stating how to
+ * reach it, leaving the connect act to supply that. A Target is addressable
+ * when its own connection **and** its vessel's location are both present.
+ */
+export const vesselSeedSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      ...vesselFacts,
+      kind: z.literal('cluster'),
+      location: z
+        .object({
+          /** §13's prerequisite is OIDC against this endpoint. */
+          apiServer: z.url(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...vesselFacts,
+      kind: z.literal('gcp-project'),
+      location: z
+        .object({
+          /** The project every surface on this vessel deploys into (§14). */
+          project: nonEmptyString,
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+]);
+
+/**
  * A Target declared by installation desired state.
  *
  * Connection facts are optional so an operator may still seed an identity and
  * connect it through the product. When supplied, they are ordinary,
  * credential-free platform configuration and make the connection reproducible
  * from Git.
+ *
+ * **Only facts true of this runtime surface and not of its neighbours.** Where
+ * the boundary is, and what it can reach, are declared once on the vessel this
+ * names.
  */
 export const targetSeedSchema = z.discriminatedUnion('adapter', [
   z
     .object({
       /** Stable identifier, unique within the installation. */
       name: targetNameSchema,
+      /** The vessel this Target is a surface on, by name (§13). */
+      vessel: targetNameSchema,
       adapter: z.literal('kubernetes'),
       /**
        * §3's asserted half, declared so a torn-down installation comes back
@@ -202,11 +284,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       authReaches: z.array(reachSchema).optional(),
       connection: z
         .object({
-          apiServer: z.url(),
           namespace: nonEmptyString,
           delivery: kubernetesDeliverySchema,
-          servedHosts: z.array(nonEmptyString).optional(),
-          reachableRegistries: z.array(nonEmptyString).optional(),
           logHistorySeconds: z.number().int().nonnegative().optional(),
           /**
            * §7's operator class, verbatim. Untyped for the reason
@@ -223,17 +302,15 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
   z
     .object({
       name: targetNameSchema,
+      vessel: targetNameSchema,
       adapter: z.literal('cloudrun'),
       connection: z
         .object({
-          project: nonEmptyString,
           region: nonEmptyString,
           endpoint: z.url(),
           policyEndpoint: z.url().optional(),
           /** The identity a revision runs as. See `CloudRunConnection`. */
           serviceAccount: nonEmptyString.optional(),
-          servedHosts: z.array(nonEmptyString).optional(),
-          reachableRegistries: z.array(nonEmptyString).optional(),
           logHistorySeconds: z.number().int().nonnegative().optional(),
         })
         .strict()
@@ -243,12 +320,11 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
   z
     .object({
       name: targetNameSchema,
+      vessel: targetNameSchema,
       adapter: z.literal('static'),
       connection: z
         .object({
-          project: nonEmptyString,
           endpoint: z.url(),
-          servedHosts: z.array(nonEmptyString).optional(),
         })
         .strict()
         .optional(),
@@ -573,6 +649,30 @@ export const installationManifestSchema = z
       .strict(),
 
     /**
+     * The tenancy boundaries this installation deploys into (§13, §14).
+     *
+     * Declared rather than derived. Before this key existed, a vessel was
+     * spelled as the shared prefix of `<name>-cloudrun` and `<name>-static`,
+     * enforced here by a rule that made a naming convention load-bearing and
+     * left the boundary's own facts — where it is, what it can reach — stated
+     * twice, once per surface, where the two could disagree. Naming it is what
+     * makes the next backend additive: every one worth adding is a boundary
+     * hosting several runtimes, so the convention would only get more
+     * load-bearing, never less.
+     *
+     * Target names keep their suffixes. They are decorative now, which is the
+     * point: nothing parses them.
+     */
+    vessels: z
+      .array(vesselSeedSchema)
+      .min(1)
+      .refine(
+        (vessels) =>
+          new Set(vessels.map((v) => v.name)).size === vessels.length,
+        'vessel names must be unique',
+      ),
+
+    /**
      * Targets in rank order. A Target with connection facts is reconciled as
      * connected; one without them exists for an operator to connect in-product.
      * Rank is one global ordered list (§13), so array order is placement order.
@@ -584,41 +684,54 @@ export const installationManifestSchema = z
         (targets) =>
           new Set(targets.map((t) => t.name)).size === targets.length,
         'target names must be unique',
-      )
-      .superRefine((targets, context) => {
-        const seeds = new Map(targets.map((target) => [target.name, target]));
-        targets.forEach((target, index) => {
-          if (target.adapter === 'kubernetes') return;
-
-          const suffix = `-${target.adapter}`;
-          const base = target.name.endsWith(suffix)
-            ? target.name.slice(0, -suffix.length)
-            : '';
-          const counterpart =
-            target.adapter === 'cloudrun' ? 'static' : 'cloudrun';
-          const counterpartName = `${base}-${counterpart}`;
-          if (
-            base.length === 0 ||
-            seeds.get(counterpartName)?.adapter !== counterpart
-          ) {
-            context.addIssue({
-              code: 'custom',
-              path: [index, 'name'],
-              message:
-                'cloud Targets must be a matched <name>-cloudrun and ' +
-                '<name>-static pair',
-            });
-          }
-        });
-      }),
+      ),
   })
-  .strict();
+  .strict()
+  /**
+   * Every Target names a declared vessel, and one whose kind carries its
+   * surface.
+   *
+   * At the document level rather than on `targets`, because it is the one rule
+   * in this schema that reads two keys at once. It replaces the
+   * `<name>-cloudrun` / `<name>-static` pairing rule, and it is a stronger
+   * check than that one was: the pairing rule could only say that two names
+   * looked related, while this one refuses a reference that does not resolve —
+   * which is what `reconcileManifestTargets` needs, since it looks a vessel up
+   * by name and has nothing honest to do with a Target whose boundary is not
+   * in the document.
+   *
+   * The kind check is what keeps `SURFACES_BY_VESSEL_KIND` the single statement
+   * of which runtimes a boundary carries: a `cloudrun` Target on a `cluster` is
+   * refused here rather than reaching an adapter that has no way to place it.
+   */
+  .superRefine((manifest, context) => {
+    const kinds = new Map(manifest.vessels.map((v) => [v.name, v.kind]));
+    manifest.targets.forEach((target, index) => {
+      const kind = kinds.get(target.vessel);
+      if (kind === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['targets', index, 'vessel'],
+          message: `no vessel named ${target.vessel} is declared`,
+        });
+        return;
+      }
+      if (!(surfacesOf(kind) as readonly string[]).includes(target.adapter)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['targets', index, 'vessel'],
+          message: `a ${kind} vessel does not carry a ${target.adapter} surface`,
+        });
+      }
+    });
+  });
 
 export type TargetAdapter = z.infer<typeof targetAdapterSchema>;
 export type StoreAdapter = z.infer<typeof storeAdapterSchema>;
 export type BuildRouteAdapter = z.infer<typeof buildRouteAdapterSchema>;
 export type BuildRouteConfig = z.infer<typeof buildRouteSchema>;
 export type TargetSeed = z.infer<typeof targetSeedSchema>;
+export type VesselSeed = z.infer<typeof vesselSeedSchema>;
 export type GatewayAuthConfig = z.infer<typeof gatewayAuthSchema>;
 
 /**

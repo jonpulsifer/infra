@@ -368,12 +368,19 @@ describe('an operator’s Target correction outlives the next boot', () => {
     const platform = input.chartValues?.platform as Record<string, unknown>;
     return {
       ...toAuthoredManifest(manifest),
+      vessels: [
+        {
+          name: 'cluster',
+          kind: 'cluster' as const,
+          location: { apiServer: input.apiServer },
+        },
+      ],
       targets: [
         {
           name: 'cluster',
+          vessel: 'cluster',
           adapter: 'kubernetes' as const,
           connection: {
-            apiServer: input.apiServer,
             namespace: input.namespace,
             delivery: input.delivery,
             chartValues: { platform: { ...platform, gateway } },
@@ -598,12 +605,19 @@ describe('reconnect re-adopts via observe', () => {
     });
     const declared = {
       ...manifest,
+      vessels: [
+        {
+          name: input.name,
+          kind: 'cluster',
+          location: { apiServer: input.apiServer },
+        },
+      ],
       targets: [
         {
           name: input.name,
+          vessel: input.name,
           adapter: 'kubernetes',
           connection: {
-            apiServer: input.apiServer,
             namespace: input.namespace,
             delivery: input.delivery,
           },

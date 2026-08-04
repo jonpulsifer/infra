@@ -133,9 +133,41 @@ describe('boot fails loudly', () => {
     expect(() => parseManifest(document, 'test')).toThrow(/unique/);
   });
 
-  test('when cloud Targets are not a connectable pair', () => {
-    const document = fixtureText.replace('name: cloud-static', 'name: hosting');
-    expect(() => parseManifest(document, 'test')).toThrow(/matched/);
+  test('when a Target names a vessel the document does not declare', () => {
+    // What replaced the `<name>-cloudrun` / `<name>-static` pairing rule, and a
+    // stronger check than it was: that rule could only say two names looked
+    // related, and this one refuses a reference that resolves to nothing —
+    // which is what `reconcileManifestTargets` needs, since it looks a vessel
+    // up by name and has nothing honest to do without one.
+    const document = fixtureText.replace(
+      '    vessel: cloud\n    adapter: static',
+      '    vessel: hosting\n    adapter: static',
+    );
+    expect(() => parseManifest(document, 'test')).toThrow(
+      /targets\.2\.vessel: no vessel named hosting is declared/,
+    );
+  });
+
+  test('when a Target names a vessel whose kind cannot carry its surface', () => {
+    // `SURFACES_BY_VESSEL_KIND` is the one statement of which runtimes a
+    // boundary carries, and this is where the document is held to it — a
+    // `cloudrun` surface on a cluster is refused here rather than reaching an
+    // adapter that has no way to place it.
+    const document = fixtureText.replace(
+      '    vessel: cloud\n    adapter: cloudrun',
+      '    vessel: cluster\n    adapter: cloudrun',
+    );
+    expect(() => parseManifest(document, 'test')).toThrow(
+      /a cluster vessel does not carry a cloudrun surface/,
+    );
+  });
+
+  test('on duplicate vessel names', () => {
+    const document = fixtureText.replace(
+      '  - name: cloud\n',
+      '  - name: cluster\n',
+    );
+    expect(() => parseManifest(document, 'test')).toThrow(/unique/);
   });
 
   test('with no targets at all', () => {

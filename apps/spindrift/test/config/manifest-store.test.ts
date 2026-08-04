@@ -29,12 +29,24 @@ const fixtureText = await Bun.file(FIXTURE).text();
 const fixtureManifest = Bun.YAML.parse(fixtureText) as AuthoredManifest;
 const connectedManifest = {
   ...fixtureManifest,
+  vessels: [
+    {
+      name: 'cluster',
+      kind: 'cluster',
+      location: { apiServer: 'https://cluster.example.test' },
+    },
+    {
+      name: 'cloud',
+      kind: 'gcp-project',
+      location: { project: 'example-vessel' },
+    },
+  ],
   targets: [
     {
       name: 'cluster',
+      vessel: 'cluster',
       adapter: 'kubernetes',
       connection: {
-        apiServer: 'https://cluster.example.test',
         namespace: 'apps',
         delivery: {
           flavour: 'flux-helmrelease',
@@ -45,18 +57,18 @@ const connectedManifest = {
     },
     {
       name: 'cloud-cloudrun',
+      vessel: 'cloud',
       adapter: 'cloudrun',
       connection: {
-        project: 'example-vessel',
         region: 'example-region',
         endpoint: 'https://run.example.test',
       },
     },
     {
       name: 'cloud-static',
+      vessel: 'cloud',
       adapter: 'static',
       connection: {
-        project: 'example-vessel',
         endpoint: 'https://hosting.example.test',
       },
     },
@@ -206,16 +218,13 @@ describe('the stored installation manifest', () => {
       .where(eq(targets.name, 'cluster'));
     const changed = {
       ...connectedManifest,
-      targets: connectedManifest.targets.map((target) =>
-        target.adapter === 'kubernetes'
+      vessels: connectedManifest.vessels.map((vessel) =>
+        vessel.kind === 'cluster'
           ? {
-              ...target,
-              connection: {
-                ...target.connection,
-                apiServer: 'https://replacement.example.test',
-              },
+              ...vessel,
+              location: { apiServer: 'https://replacement.example.test' },
             }
-          : target,
+          : vessel,
       ),
     } satisfies AuthoredManifest;
 
@@ -516,8 +525,8 @@ describe('the stored installation manifest', () => {
       ...fixtureManifest,
       installation: 'incompatible',
       targets: [
-        { name: 'cluster', adapter: 'kubernetes' },
-        { name: 'cloud-cloudrun', adapter: 'kubernetes' },
+        { name: 'cluster', vessel: 'cluster', adapter: 'kubernetes' },
+        { name: 'cloud-cloudrun', vessel: 'cluster', adapter: 'kubernetes' },
       ],
     } satisfies AuthoredManifest;
 
@@ -716,21 +725,18 @@ describe('naming where a declaration disagrees with the stored row', () => {
   test('the report carries the path that differs, never the values', () => {
     const stored = {
       ...connectedManifest,
-      targets: connectedManifest.targets.map((target) =>
-        target.adapter === 'kubernetes'
+      vessels: connectedManifest.vessels.map((vessel) =>
+        vessel.kind === 'cluster'
           ? {
-              ...target,
-              connection: {
-                ...target.connection,
-                apiServer: 'https://replacement.example.test',
-              },
+              ...vessel,
+              location: { apiServer: 'https://replacement.example.test' },
             }
-          : target,
+          : vessel,
       ),
     } satisfies AuthoredManifest;
 
     const paths = diffManifestPaths(connectedManifest, stored);
-    expect(paths).toEqual(['targets.0.connection.apiServer']);
+    expect(paths).toEqual(['vessels.0.location.apiServer']);
     // Neither the declared value nor the stored value appears anywhere in
     // what was returned — a path names *where* the two documents disagree,
     // never *what* they disagree about. That is what keeps a value the
@@ -748,16 +754,15 @@ describe('naming where a declaration disagrees with the stored row', () => {
     });
     const declared = {
       ...connectedManifest,
-      targets: connectedManifest.targets.map((target) =>
-        target.adapter === 'kubernetes'
+      vessels: connectedManifest.vessels.map((vessel) =>
+        vessel.kind === 'cluster'
           ? {
-              ...target,
-              connection: {
-                ...target.connection,
+              ...vessel,
+              location: {
                 apiServer: 'https://declared-elsewhere.example.test',
               },
             }
-          : target,
+          : vessel,
       ),
     } satisfies AuthoredManifest;
 
@@ -782,7 +787,7 @@ describe('naming where a declaration disagrees with the stored row', () => {
     const messages = calls.map((call) => String(call[0]));
     expect(
       messages.some((message) =>
-        message.includes('targets.0.connection.apiServer'),
+        message.includes('vessels.0.location.apiServer'),
       ),
     ).toBe(true);
     expect(

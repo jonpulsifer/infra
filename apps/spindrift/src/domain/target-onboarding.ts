@@ -352,14 +352,34 @@ export function targetSeedOf(
 ): Record<string, unknown> {
   return {
     name: plan.name,
+    // A connected cluster's one surface takes the vessel's name unchanged —
+    // the same rule `vesselFor` applies on the connect path, so the document
+    // and the act name the same boundary.
+    vessel: plan.name,
     adapter: 'kubernetes',
     ...(plan.reaches.length > 0 ? { reaches: plan.reaches } : {}),
     ...(plan.authReaches.length > 0 ? { authReaches: plan.authReaches } : {}),
     connection: {
-      apiServer: plan.apiServer,
       namespace: plan.namespace,
       delivery: plan.delivery,
       chartValues: plan.chartValues,
     },
+  };
+}
+
+/**
+ * The boundary half of the same act, under `vessels:`.
+ *
+ * Separate from {@link targetSeedOf} because the two land in different arrays
+ * of one document, and one act now writes to both: where the cluster is is a
+ * fact about the boundary, not about the surface deployed onto it.
+ */
+export function vesselSeedOf(
+  plan: ClusterConnectPlan,
+): Record<string, unknown> {
+  return {
+    name: plan.name,
+    kind: 'cluster',
+    location: { apiServer: plan.apiServer },
   };
 }

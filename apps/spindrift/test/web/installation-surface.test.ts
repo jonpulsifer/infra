@@ -216,7 +216,7 @@ describe('configuring this installation from the browser', () => {
     await seed();
     const declared = [
       ...fixture.targets,
-      { name: 'spare', adapter: 'kubernetes' },
+      { name: 'spare', vessel: 'cluster', adapter: 'kubernetes' },
     ];
     const edited = withValueAt(fixture, ['targets'], declared);
 
@@ -267,8 +267,8 @@ describe('configuring this installation from the browser', () => {
       fixture,
       ['targets'],
       [
-        { name: 'cluster', adapter: 'kubernetes' },
-        { name: 'cloud-cloudrun', adapter: 'kubernetes' },
+        { name: 'cluster', vessel: 'cluster', adapter: 'kubernetes' },
+        { name: 'cloud-cloudrun', vessel: 'cluster', adapter: 'kubernetes' },
       ],
     );
 

@@ -76,11 +76,25 @@ secretStore:
   endpoint: https://secrets.example.test
   container: example-secrets
 
+# The tenancy boundaries. Named, so nothing has to recover one from the shared
+# prefix of two Target names — the cloud vessel below carries two surfaces and
+# says so once. No `location` on either: this fixture seeds identity and rank
+# and leaves how to reach them to the connect act, which is the half-ready state
+# §13 intends to be visible.
+vessels:
+  - name: cluster
+    kind: cluster
+  - name: cloud
+    kind: gcp-project
+
 # Rank order: placement considers these top to bottom.
 targets:
   - name: cluster
+    vessel: cluster
     adapter: kubernetes
   - name: cloud-cloudrun
+    vessel: cloud
     adapter: cloudrun
   - name: cloud-static
+    vessel: cloud
     adapter: static

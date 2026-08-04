@@ -16,6 +16,7 @@ import {
   type InstallationManifest,
   installationManifestSchema,
 } from './manifest.schema.ts';
+import { upgradeManifestDocument } from './manifest-upgrade.ts';
 
 /** Path to a YAML or JSON manifest document. */
 export const MANIFEST_PATH_VAR = 'SPINDRIFT_MANIFEST_PATH';
@@ -57,12 +58,29 @@ export function parseManifest(
   return validateManifest(parsed, source);
 }
 
-/** Validate a parsed or stored manifest and report every bad field together. */
+/**
+ * Validate a parsed or stored manifest and report every bad field together.
+ *
+ * **Upgrade first, then validate — and that order is the whole of it.** The
+ * stored row governs, and `loadStoredManifest` treats a row it cannot parse as
+ * a row with no seed in it, re-seeding from the mounted declaration and
+ * discarding whatever an operator configured through the UI. Validating a
+ * document written under the previous schema before bringing it forward is
+ * therefore not a stricter read: it is that discard, fired on a document that
+ * was merely old rather than wrong.
+ *
+ * Here rather than at either call site because both need it and neither should
+ * have to remember: the row and the mounted declaration are written by
+ * different acts at different times, and a rollout routinely has one of them
+ * older than the running build. See `manifest-upgrade.ts`.
+ */
 export function validateManifest(
   manifest: unknown,
   source: string,
 ): AuthoredManifest {
-  const result = installationManifestSchema.safeParse(manifest);
+  const result = installationManifestSchema.safeParse(
+    upgradeManifestDocument(manifest),
+  );
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => {
@@ -142,12 +160,24 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
     container: 'spindrift-vault',
   },
+  vessels: [
+    {
+      name: 'primary',
+      kind: 'cluster',
+      location: { apiServer: 'https://kubernetes.default.svc' },
+    },
+    {
+      name: 'spindrift',
+      kind: 'gcp-project',
+      location: { project: 'spindrift-vessel' },
+    },
+  ],
   targets: [
     {
       name: 'primary',
+      vessel: 'primary',
       adapter: 'kubernetes',
       connection: {
-        apiServer: 'https://kubernetes.default.svc',
         namespace: 'spindrift-apps',
         delivery: {
           flavour: 'flux-helmrelease',
@@ -158,18 +188,18 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     },
     {
       name: 'spindrift-cloudrun',
+      vessel: 'spindrift',
       adapter: 'cloudrun',
       connection: {
-        project: 'spindrift-vessel',
         region: 'spindrift-region',
         endpoint: 'https://run.googleapis.com',
       },
     },
     {
       name: 'spindrift-static',
+      vessel: 'spindrift',
       adapter: 'static',
       connection: {
-        project: 'spindrift-vessel',
         endpoint: 'https://firebasehosting.googleapis.com',
       },
     },
