@@ -28,7 +28,6 @@ import type {
   ActivityEntry,
   ComponentView,
   DatastoreView,
-  DeployListItem,
   WorkspaceView,
 } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
@@ -42,7 +41,6 @@ import {
   REACH_NOTE,
   REACHES,
 } from './new/summary.tsx';
-import { Releases } from './releases.tsx';
 
 /**
  * Saving a Component's reach, as the screen above needs it answered.
@@ -68,8 +66,6 @@ export function Workspace({
   deploying = false,
   onNavigate,
   deletion,
-  onRollback,
-  rollingBack = null,
   onSetReach,
 }: {
   view: WorkspaceView;
@@ -92,8 +88,6 @@ export function Workspace({
    * question does not offer the act.
    */
   deletion?: AppDeletionControls;
-  onRollback?: (release: DeployListItem) => void;
-  rollingBack?: number | null;
   /**
    * Absent where reach is not editable from here — the fixture screens render
    * this view with no acts wired, and a form whose Save cannot be called is
@@ -154,15 +148,8 @@ export function Workspace({
         <Datastores datastores={view.datastores} />
       </div>
 
-      <ReleaseHistory
-        deploys={view.deploys}
-        onNavigate={onNavigate}
-        onRollback={onRollback}
-        rollingBack={rollingBack}
-      />
-
       <div className="grid gap-4 md:grid-cols-2">
-        <Activity entries={view.activity} onNavigate={onNavigate} />
+        <Activity entries={view.activity.slice(0, 3)} onNavigate={onNavigate} />
         <Runtime view={view} onNavigate={onNavigate} />
       </div>
     </div>
@@ -522,49 +509,6 @@ function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
   );
 }
 
-/**
- * Every release of this App, newest first (§2).
- *
- * A full-width section rather than a card in the two-column grid: it is the
- * history of the thing the whole screen is about, and §2's "one Build → many
- * Deploys" is only legible when the many are listed.
- */
-function ReleaseHistory({
-  deploys,
-  onNavigate,
-  onRollback,
-  rollingBack,
-}: {
-  deploys: readonly DeployListItem[];
-  onNavigate?: (path: string) => void;
-  onRollback?: (release: DeployListItem) => void;
-  rollingBack: number | null;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <div>
-          <Eyebrow>Deploy history</Eyebrow>
-          <h2 className="text-base font-semibold tracking-tight">Releases</h2>
-        </div>
-        <p className="ml-auto max-w-[46ch] text-right text-xs text-muted-foreground">
-          Each release is immutable — its Build, its commit, and the
-          configuration it pinned. Rolling back deploys an older one; it never
-          rebuilds.
-        </p>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <Releases
-          deploys={deploys}
-          onNavigate={onNavigate}
-          onRollback={onRollback}
-          rollingBack={rollingBack}
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
 const MARKER_TONE = {
   ok: 'border-success bg-success',
   failed: 'border-destructive bg-destructive',
@@ -596,7 +540,32 @@ function Activity({
 }) {
   return (
     <Card>
-      <SectionHeader eyebrow="Timeline" title="What happened" />
+      <CardHeader>
+        <div>
+          <Eyebrow>Recent checkpoints</Eyebrow>
+          <h2 className="text-base font-semibold tracking-tight">
+            What happened
+          </h2>
+        </div>
+        {onNavigate ? (
+          <div className="ml-auto flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onNavigate('/builds')}
+            >
+              Browse Builds
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onNavigate('/deploys')}
+            >
+              Browse Deploys
+            </Button>
+          </div>
+        ) : null}
+      </CardHeader>
       <CardContent className="pt-0">
         {entries.length === 0 ? (
           <EmptyState title="Nothing has happened yet.">

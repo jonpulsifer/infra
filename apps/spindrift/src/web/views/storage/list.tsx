@@ -90,18 +90,26 @@ export interface StorageView {
 export function Storage({
   view,
   onChanged,
+  embedded = false,
 }: {
   view: StorageView;
   /** Re-read after the manifest moved: this screen does not own that state. */
   onChanged: () => void;
+  embedded?: boolean;
 }) {
+  const Heading = embedded ? 'h2' : 'h1';
   return (
-    <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-8 px-5 py-6">
+    <div
+      className={cn(
+        'flex w-full flex-col gap-8',
+        !embedded && 'mx-auto max-w-[1040px] px-5 py-6',
+      )}
+    >
       <header>
         <Eyebrow>Storage</Eyebrow>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+        <Heading className="mt-1 text-2xl font-semibold tracking-tight">
           Sources and artifacts
-        </h1>
+        </Heading>
         <p className="mt-1 max-w-prose text-sm text-muted-foreground">
           Where source is staged before a builder fetches it, what has been
           staged, and where the artifacts a build produced are pushed. A source

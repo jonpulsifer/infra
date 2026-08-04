@@ -474,6 +474,30 @@ describe('an operator’s Target correction outlives the next boot', () => {
 });
 
 describe('disconnect strands rather than stops', () => {
+  test('an impact review names Deploys without changing state', async () => {
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+    const target = (await targetRow('cluster'))!;
+    const { app, component } = await seedLiveDeploy(target.id, 'preview-ref');
+
+    const result = await disconnectTarget(
+      { name: 'cluster', confirm: false },
+      context(registry),
+    );
+    if (!result.ok) throw new Error('disconnect review refused');
+
+    expect(result.value).toMatchObject({
+      disconnected: false,
+      stranded: [{ app: app.name, component: component.name }],
+    });
+    const [row] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.targetId, target.id));
+    expect(row?.orphanedAt).toBeNull();
+    expect((await targetRow('cluster'))?.status).toBe('connected');
+  });
+
   test('live Deploys go orphaned and are named, and nothing is destroyed', async () => {
     const { registry, of } = fakes();
     await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
@@ -486,6 +510,7 @@ describe('disconnect strands rather than stops', () => {
     );
 
     if (!result.ok) throw new Error('disconnect refused');
+    expect(result.value.disconnected).toBe(true);
     expect(result.value.stranded).toEqual([
       {
         deployId: expect.any(String),

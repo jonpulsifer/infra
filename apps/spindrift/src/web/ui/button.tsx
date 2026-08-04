@@ -15,7 +15,7 @@ import { cn } from './utils.ts';
 const button = cva(
   cn(
     'inline-flex items-center justify-center gap-2 whitespace-nowrap',
-    'rounded-md font-medium transition-colors',
+    'rounded-sm font-medium transition-colors',
     'disabled:pointer-events-none disabled:opacity-50',
     '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4',
   ),

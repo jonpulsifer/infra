@@ -37,7 +37,7 @@ import {
 import { useState } from 'react';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
 import type { LogoName } from '../../client/logos/index.ts';
-import type { InputOf } from '../../client.ts';
+import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type { PendingTargetConnection, TargetListItem } from '../../model.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
@@ -86,12 +86,18 @@ export function TargetList({
   connecting,
   error,
   onConnect,
+  onChanged,
+  onNavigate,
+  embedded = false,
 }: {
   targets: readonly TargetListItem[];
   pending: readonly PendingTargetConnection[];
   connecting: boolean;
   error: string | null;
   onConnect: (input: ConnectTargetInput) => void;
+  onChanged?: () => void;
+  onNavigate?: (path: string) => void;
+  embedded?: boolean;
 }) {
   const configured = targets.filter((target) => target.configured);
   const [adding, setAdding] = useState(false);
@@ -105,6 +111,96 @@ export function TargetList({
    */
   const clusterProposal = pending.find((entry) => entry.kind === 'cluster')
     ?.proposal ?? { carriedFrom: null };
+
+  if (embedded) {
+    const clusters = configured.filter(
+      (target) => target.adapter === 'kubernetes',
+    );
+    const cloud = configured.filter(
+      (target) => target.adapter !== 'kubernetes',
+    );
+    const clusterPending = pending.filter((entry) => entry.kind === 'cluster');
+    const cloudPending = pending.filter(
+      (entry) => entry.kind === 'gcp-project',
+    );
+
+    return (
+      <>
+        {error ? (
+          <section className="py-4 text-sm text-destructive">{error}</section>
+        ) : null}
+        <ProviderTargets
+          name="Google Cloud"
+          logo="google-cloud"
+          description="Declared projects become explicit Cloud Run and static Targets. Consent and project discovery are not configured in this build."
+          targets={cloud}
+          pending={cloudPending}
+          connecting={connecting}
+          onConnect={onConnect}
+          onChanged={onChanged}
+          empty="Declare a cloud project in Installation to make its real connection workflow available here."
+        />
+        <ProviderTargets
+          name="Kubernetes"
+          logo="kubernetes"
+          description="Declared clusters use explicit control-plane connection facts today. An automated GitOps bootstrap handoff is not configured in this build."
+          targets={clusters}
+          pending={clusterPending}
+          connecting={connecting}
+          onConnect={onConnect}
+          onChanged={onChanged}
+          empty="Add a cluster with the connection facts Spindrift can verify, or declare it in Installation first."
+          adding={adding}
+          onAddingChange={setAdding}
+          clusterProposal={clusterProposal}
+        />
+        <section className="grid gap-5 py-6 xl:grid-cols-[240px_minmax(0,1fr)] xl:gap-8">
+          <div>
+            <h3 className="font-semibold">Target suggestion order</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Lower ranks are suggested first. Placement requirements can still
+              select another eligible Target.
+            </p>
+          </div>
+          <div>
+            <ol className="divide-y divide-border-soft border-y border-border-soft">
+              {[...configured]
+                .sort((left, right) => left.rank - right.rank)
+                .map((target) => (
+                  <li
+                    key={target.id}
+                    className="flex items-center gap-3 py-2.5 text-sm"
+                  >
+                    <span className="grid size-6 place-items-center rounded-sm bg-secondary font-mono text-xs text-muted-foreground">
+                      {target.rank}
+                    </span>
+                    <span className="font-medium">{target.name}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {target.adapter}
+                    </span>
+                  </li>
+                ))}
+            </ol>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                Ranking is installation policy; it is not changed by a runtime
+                connection command.
+              </p>
+              {onNavigate ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onNavigate('/settings/installation')}
+                >
+                  Edit installation policy
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      </>
+    );
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
@@ -121,22 +217,112 @@ export function TargetList({
             thing, and health is the standing checklist afterwards.
           </p>
         </div>
-        <Button
-          className="ml-auto"
-          variant={adding ? 'ghost' : 'default'}
-          onClick={() => setAdding((open) => !open)}
-        >
-          {adding ? (
-            'Cancel'
-          ) : (
-            <>
-              <Plus aria-hidden="true" className="size-4" /> Add a cluster
-            </>
-          )}
-        </Button>
       </header>
 
-      {adding ? (
+      {error ? (
+        <div className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      <TargetCollection
+        targets={configured}
+        pending={pending}
+        connecting={connecting}
+        onConnect={onConnect}
+        onChanged={onChanged}
+        empty="No Targets are configured. Add a cluster above, or declare one under targets: in the installation manifest."
+        adding={adding}
+        onAddingChange={setAdding}
+        clusterProposal={clusterProposal}
+      />
+    </div>
+  );
+}
+
+function ProviderTargets({
+  name,
+  logo,
+  description,
+  ...collection
+}: {
+  readonly name: string;
+  readonly logo: LogoName;
+  readonly description: string;
+} & Parameters<typeof TargetCollection>[0]) {
+  const connected = collection.targets.filter(
+    (target) => target.status === 'connected',
+  ).length;
+  const needsAction = collection.pending.length > 0;
+  const status = needsAction
+    ? 'action needed'
+    : connected > 0
+      ? `${connected} connected`
+      : 'not configured';
+
+  return (
+    <section className="grid gap-5 py-6 xl:grid-cols-[240px_minmax(0,1fr)] xl:gap-8">
+      <div>
+        <div className="flex items-center gap-2">
+          <Logo name={logo} />
+          <h3 className="font-semibold">{name}</h3>
+        </div>
+        <Badge
+          className="mt-3"
+          tone={needsAction ? 'warning' : connected > 0 ? 'success' : 'idle'}
+        >
+          <Dot /> {status}
+        </Badge>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <TargetCollection {...collection} />
+    </section>
+  );
+}
+
+function TargetCollection({
+  targets,
+  pending,
+  connecting,
+  onConnect,
+  onChanged,
+  empty,
+  adding = false,
+  onAddingChange,
+  clusterProposal,
+}: {
+  readonly targets: readonly TargetListItem[];
+  readonly pending: readonly PendingTargetConnection[];
+  readonly connecting: boolean;
+  readonly onConnect: (input: ConnectTargetInput) => void;
+  readonly onChanged?: () => void;
+  readonly empty: string;
+  readonly adding?: boolean;
+  readonly onAddingChange?: (adding: boolean) => void;
+  readonly clusterProposal?: PendingTargetConnection['proposal'];
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      {onAddingChange ? (
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            variant={adding ? 'ghost' : 'outline'}
+            onClick={() => onAddingChange(!adding)}
+          >
+            {adding ? (
+              'Cancel'
+            ) : (
+              <>
+                <Plus aria-hidden="true" /> Add a cluster
+              </>
+            )}
+          </Button>
+        </div>
+      ) : null}
+      {adding && clusterProposal ? (
         <Card>
           <CardContent>
             <ConnectTargetForm
@@ -147,18 +333,11 @@ export function TargetList({
               proposal={clusterProposal}
               connecting={connecting}
               onConnect={onConnect}
-              onCancel={() => setAdding(false)}
+              onCancel={() => onAddingChange?.(false)}
             />
           </CardContent>
         </Card>
       ) : null}
-
-      {error ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      ) : null}
-
       {pending.length > 0 ? (
         <PendingConnections
           pending={pending}
@@ -166,26 +345,19 @@ export function TargetList({
           onConnect={onConnect}
         />
       ) : null}
-
-      {configured.length === 0 && pending.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-sm text-muted-foreground">
-              No Targets are configured for this installation. Add a cluster
-              above, or declare one under{' '}
-              <span className="font-mono">targets:</span> in the installation
-              manifest — the two write the same thing.
-            </p>
-          </CardContent>
-        </Card>
+      {targets.length === 0 && pending.length === 0 ? (
+        <div className="border-y border-border-soft py-5 text-sm leading-6 text-muted-foreground">
+          {empty}
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {configured.map((target) => (
+          {targets.map((target) => (
             <TargetCard
               key={target.id}
               target={target}
               connecting={connecting}
               onConnect={onConnect}
+              onChanged={onChanged}
             />
           ))}
         </div>
@@ -263,10 +435,12 @@ function TargetCard({
   target,
   connecting,
   onConnect,
+  onChanged,
 }: {
   target: TargetListItem;
   connecting: boolean;
   onConnect: (input: ConnectTargetInput) => void;
+  onChanged?: () => void;
 }) {
   const unhealthy = target.health !== 'healthy';
   const [checklistOpen, setChecklistOpen] = useState(unhealthy);
@@ -354,6 +528,9 @@ function TargetCard({
               >
                 {editing ? 'Cancel' : 'Edit connection'}
               </Button>
+            ) : null}
+            {target.status === 'connected' ? (
+              <DisconnectTargetControl target={target} onChanged={onChanged} />
             ) : null}
           </div>
         </div>
@@ -454,5 +631,145 @@ function TargetCard({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+type DisconnectImpact = OutputOf<'disconnectTarget'>;
+type DisconnectState =
+  | { readonly type: 'idle' }
+  | { readonly type: 'reviewing' }
+  | { readonly type: 'review'; readonly impact: DisconnectImpact }
+  | { readonly type: 'disconnecting'; readonly impact: DisconnectImpact }
+  | { readonly type: 'done'; readonly impact: DisconnectImpact }
+  | { readonly type: 'error'; readonly message: string };
+
+/** Inline impact review: disconnect strands Deploys and destroys no workload. */
+function DisconnectTargetControl({
+  target,
+  onChanged,
+}: {
+  readonly target: TargetListItem;
+  readonly onChanged?: () => void;
+}) {
+  const [state, setState] = useState<DisconnectState>({ type: 'idle' });
+
+  const review = async () => {
+    setState({ type: 'reviewing' });
+    try {
+      const result = await command('disconnectTarget', {
+        name: target.name,
+        confirm: false,
+      });
+      setState(
+        result.ok
+          ? { type: 'review', impact: result.value }
+          : { type: 'error', message: result.failure.message },
+      );
+    } catch (cause) {
+      setState({
+        type: 'error',
+        message: cause instanceof Error ? cause.message : 'Review failed',
+      });
+    }
+  };
+
+  const confirm = async (impact: DisconnectImpact) => {
+    setState({ type: 'disconnecting', impact });
+    try {
+      const result = await command('disconnectTarget', {
+        name: target.name,
+        confirm: true,
+      });
+      if (!result.ok) {
+        setState({ type: 'error', message: result.failure.message });
+        return;
+      }
+      setState({ type: 'done', impact: result.value });
+      onChanged?.();
+    } catch (cause) {
+      setState({
+        type: 'error',
+        message: cause instanceof Error ? cause.message : 'Disconnect failed',
+      });
+    }
+  };
+
+  if (state.type === 'idle') {
+    return (
+      <Button size="sm" variant="outline" onClick={() => void review()}>
+        Disconnect
+      </Button>
+    );
+  }
+  if (state.type === 'reviewing') {
+    return (
+      <Button size="sm" variant="outline" disabled>
+        Reviewing impact…
+      </Button>
+    );
+  }
+  if (state.type === 'error') {
+    return (
+      <div className="basis-full rounded-sm border border-destructive/40 bg-destructive-soft p-3 text-sm text-destructive">
+        {state.message}{' '}
+        <button
+          type="button"
+          className="underline"
+          onClick={() => void review()}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const count = state.impact.stranded.length;
+  return (
+    <div className="basis-full rounded-sm border border-warning/50 bg-warning-soft p-3 text-sm">
+      <p className="font-semibold">
+        {state.type === 'done'
+          ? `${target.name} is disconnected.`
+          : `Disconnecting will orphan ${count} current Deploy${count === 1 ? '' : 's'}.`}
+      </p>
+      {count > 0 ? (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          {state.impact.stranded.map((deploy) => (
+            <li key={deploy.deployId}>
+              {deploy.app} / {deploy.component} · Deploy #{deploy.deployId}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          No current Deploys will be orphaned.
+        </p>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">
+        Workloads keep serving. Spindrift stops reconciling them and marks the
+        Target disconnected.
+      </p>
+      {state.type === 'review' ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setState({ type: 'idle' })}
+          >
+            Keep connected
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => void confirm(state.impact)}
+          >
+            Disconnect and orphan {count}
+          </Button>
+        </div>
+      ) : state.type === 'disconnecting' ? (
+        <Button className="mt-3" size="sm" variant="destructive" disabled>
+          Disconnecting…
+        </Button>
+      ) : null}
+    </div>
   );
 }

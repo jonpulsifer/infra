@@ -38,8 +38,12 @@ import {
   type AppDeletionControls,
   DeleteAppButton,
 } from '../../src/web/components/delete-app.tsx';
+import {
+  type ExplorerItem,
+  ObjectExplorer,
+} from '../../src/web/components/object-explorer.tsx';
 import type { AppListItem } from '../../src/web/model.ts';
-import { AppList } from '../../src/web/views/apps/list.tsx';
+import { AppList, appHref } from '../../src/web/views/apps/list.tsx';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { fixtureManifest } from '../harness/installation.ts';
 
@@ -269,12 +273,21 @@ describe('the list renders two same-named rows as two Apps', () => {
     onNavigate: () => undefined,
     deletion: idleDeletion,
   });
-  const rows = [...elements(tree)].filter((element) => element.key !== null);
+  const explorer = [...elements(tree)].find(
+    (element) => element.type === ObjectExplorer,
+  );
+  if (!explorer) throw new Error('the App list offered no object explorer');
+  const explorerProps = explorer.props as {
+    items: readonly ExplorerItem[];
+    renderInspector: (item: ExplorerItem) => ReactNode;
+  };
 
   test('there are two rows, keyed by id rather than by name', () => {
     // Keyed by name, React sees one key twice and reconciles two Apps into one
     // row — before any of the rest of this can even be asked.
-    expect(rows.map((row) => row.key)).toEqual([...IDS]);
+    expect(explorerProps.items.map((row) => row.id)).toEqual(
+      IDS.map((id) => `app:${id}`),
+    );
   });
 
   test('each row navigates to its own App', () => {
@@ -284,12 +297,20 @@ describe('the list renders two same-named rows as two Apps', () => {
       onNavigate: (path) => visited.push(path),
       deletion: idleDeletion,
     });
-    for (const element of elements(navigating)) {
-      if (element.key === null) continue;
-      for (const inner of elements(element)) {
-        const props = inner.props as { onClick?: () => void };
-        if (inner.type === 'button' && props.onClick) {
-          props.onClick();
+    const navigatingExplorer = [...elements(navigating)].find(
+      (element) => element.type === ObjectExplorer,
+    );
+    if (!navigatingExplorer) throw new Error('no navigating object explorer');
+    const props = navigatingExplorer.props as {
+      items: readonly ExplorerItem[];
+      renderInspector: (item: ExplorerItem) => ReactNode;
+    };
+    for (const item of props.items) {
+      const inspector = props.renderInspector(item);
+      for (const inner of elements(inspector)) {
+        const control = inner.props as { onClick?: () => void };
+        if (control.onClick) {
+          control.onClick();
           break;
         }
       }
@@ -298,8 +319,8 @@ describe('the list renders two same-named rows as two Apps', () => {
   });
 
   test('each row hands its own id to the trash affordance', () => {
-    const targets = rows.map((row) => {
-      for (const inner of elements(row)) {
+    const targets = explorerProps.items.map((item) => {
+      for (const inner of elements(explorerProps.renderInspector(item))) {
         if (inner.type === DeleteAppButton) {
           return inner.props as { appId: string; name: string };
         }
@@ -329,6 +350,21 @@ describe('the list renders two same-named rows as two Apps', () => {
       }
     }
     expect(reviewed).toEqual([{ id: IDS[1]!, name: 'twins' }]);
+  });
+});
+
+describe('App links preserve the stored URL contract', () => {
+  test('keeps absolute HTTP URLs and prefixes hostnames only', () => {
+    expect(appHref('https://already.example/path')).toBe(
+      'https://already.example/path',
+    );
+    expect(appHref('http://local.example')).toBe('http://local.example');
+    expect(appHref('app.example')).toBe('https://app.example');
+  });
+
+  test('does not turn an empty address into a live link', () => {
+    expect(appHref('')).toBeNull();
+    expect(appHref('   ')).toBeNull();
   });
 });
 

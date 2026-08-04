@@ -117,6 +117,25 @@ describe('the GitHub repository connector', () => {
     onRefresh: () => undefined,
   };
 
+  test('uses a provider row and no second page heading inside Settings', () => {
+    const markup = renderToStaticMarkup(
+      <RepositoryList
+        repos={[]}
+        options={[]}
+        connector={{ state: 'unauthorized' }}
+        authorization={null}
+        connecting={false}
+        error={null}
+        openedPullRequest={null}
+        embedded
+        {...actions}
+      />,
+    );
+    expect(markup).toContain('<h3 class="font-semibold">GitHub</h3>');
+    expect(markup).toContain('Repository discovery, source events');
+    expect(markup).not.toContain('<h1');
+  });
+
   test('starts with user authorization and names no private key', () => {
     const markup = renderToStaticMarkup(
       <RepositoryList
@@ -506,46 +525,25 @@ describe('an attempt that is only a Build', () => {
   });
 });
 
-describe('the releases list', () => {
+describe('the compact App history', () => {
   const view = WORKSPACE_SCENARIOS.service;
   const markup = renderToStaticMarkup(
     <Workspace view={view} onNavigate={() => undefined} />,
   );
 
-  test('lists every release, not only the one that is live', () => {
-    // §2: "one Build → many Deploys — this is what makes rollback-without-
-    // rebuild possible." The many have to be visible for that to be reachable.
-    expect(view.deploys.length).toBeGreaterThan(1);
-    for (const release of view.deploys) {
-      expect(markup).toContain(`Deploy ${release.id}`);
+  test('shows only the three newest checkpoints', () => {
+    for (const entry of view.activity.slice(0, 3)) {
+      expect(markup).toContain(entry.title);
     }
+    for (const entry of view.activity.slice(3)) {
+      expect(markup).not.toContain(entry.title);
+    }
+    expect(markup).toContain('Recent checkpoints');
   });
 
-  test('marks which release is current, separately from its phase', () => {
-    // A LIVE Deploy that a newer intent superseded is still LIVE. Only §6's
-    // desired row knows which one should be running.
-    expect(markup).toContain('current');
-    expect(view.deploys.filter((release) => release.current)).toHaveLength(1);
-  });
-
-  test('states that a release is immutable and that rollback rebuilds nothing', () => {
-    expect(markup).toContain('Each release is immutable');
-    expect(markup).toContain('it never');
-  });
-
-  test('offers rollback only where §6 would accept it', () => {
-    const rollbackable = view.deploys.filter((release) => release.rollbackable);
-    expect(rollbackable.length).toBeGreaterThan(0);
-    const withAction = renderToStaticMarkup(
-      <Workspace
-        view={view}
-        onNavigate={() => undefined}
-        onRollback={() => undefined}
-      />,
-    );
-    expect(withAction).toContain('Roll back');
-    // Without a handler there is no button at all, rather than one that refuses.
-    expect(markup).not.toContain('Roll back');
+  test('links to the complete global ledgers', () => {
+    expect(markup).toContain('Builds');
+    expect(markup).toContain('Deploys');
   });
 });
 
@@ -559,14 +557,14 @@ describe('the App workspace', () => {
       <Workspace view={view} onNavigate={() => undefined} />,
     );
 
-    for (const entry of view.activity) {
+    for (const entry of view.activity.slice(0, 3)) {
       expect(entry.deployId ?? entry.buildId).not.toBeNull();
       expect(markup).toContain(entry.title);
     }
-    // Rendered as buttons rather than static rows — one per entry, plus the
-    // release link in the hero and the rows of the releases list.
+    // Rendered as buttons rather than static rows — one per visible checkpoint,
+    // plus the global ledger links and release link in the hero.
     const buttons = markup.split('<button').length - 1;
-    expect(buttons).toBeGreaterThanOrEqual(view.activity.length);
+    expect(buttons).toBeGreaterThanOrEqual(Math.min(view.activity.length, 3));
   });
 
   test('a website states that it has no runtime', () => {
@@ -661,7 +659,7 @@ describe('the App workspace', () => {
       // Stacked rows said these were unrelated events that happened to be near
       // each other. The connector is what carries the reading down the column,
       // and it is the difference between a list and a timeline.
-      expect(markup).toContain('Timeline');
+      expect(markup).toContain('Recent checkpoints');
       expect(markup).toContain('<ol');
     });
 
@@ -713,6 +711,24 @@ describe('the Targets surface', () => {
       expect(markup).toContain(item);
     }
     expect(markup).toContain('no Flux controller answers in this cluster');
+  });
+
+  test('groups real Target workflows into ruled Settings provider rows', () => {
+    const markup = renderToStaticMarkup(
+      <TargetList
+        targets={TARGET_LIST}
+        pending={[]}
+        connecting={false}
+        error={null}
+        onConnect={() => undefined}
+        embedded
+      />,
+    );
+    expect(markup).toContain('Google Cloud');
+    expect(markup).toContain('Kubernetes');
+    expect(markup).toContain('Target suggestion order');
+    expect(markup).toContain('Disconnect');
+    expect(markup).not.toContain('<h1');
   });
 
   test('offers to finish a Target the manifest seeded and nobody connected', () => {

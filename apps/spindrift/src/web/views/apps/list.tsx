@@ -27,11 +27,16 @@ import {
   type AppDeletionControls,
   DeleteAppButton,
 } from '../../components/delete-app.tsx';
+import {
+  DefinitionGrid,
+  type ExplorerItem,
+  ExplorerPageHeader,
+  ObjectExplorer,
+} from '../../components/object-explorer.tsx';
 import type { AppListItem, DeployPhase } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
-import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
-import { cn } from '../../ui/utils.ts';
+import { Eyebrow } from '../../ui/card.tsx';
 
 function kindIcon(kind: string) {
   switch (kind) {
@@ -67,6 +72,13 @@ function phaseTone(
   }
 }
 
+/** A stored App address may be either a hostname or an absolute HTTP URL. */
+export function appHref(url: string): string | null {
+  const value = url.trim();
+  if (value === '') return null;
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
 export function AppList({
   apps,
   onNavigate,
@@ -76,97 +88,101 @@ export function AppList({
   onNavigate: (path: string) => void;
   deletion: AppDeletionControls;
 }) {
+  const byId = new Map(apps.map((app) => [`app:${app.id}`, app]));
+  const items: ExplorerItem[] = apps.map((app) => ({
+    id: `app:${app.id}`,
+    title: app.name,
+    detail: `${app.kind} · ${app.target}`,
+    status: app.phase.toLowerCase(),
+    tone: phaseTone(app.phase),
+    search: `${app.source} ${app.url} ${app.vessel} ${app.release}`,
+    active:
+      app.phase === 'PENDING' ||
+      app.phase === 'APPLYING' ||
+      app.phase === 'WAITING',
+  }));
+
   return (
-    <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-      <header className="flex flex-wrap items-end gap-4">
-        <div>
-          <Eyebrow>Apps</Eyebrow>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-            Your apps
-          </h1>
-          <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-            Every App the control plane knows about, with its current state.
-          </p>
-        </div>
-        <div className="ml-auto">
+    <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <ExplorerPageHeader
+        eyebrow="Application catalog"
+        title="Apps"
+        description="Inspect each App's current contract, placement, source, and release without leaving the catalog."
+        actions={
           <Button onClick={() => onNavigate('/apps/new')}>
             <Plus aria-hidden="true" className="size-4" /> New App
           </Button>
-        </div>
-      </header>
-
-      {apps.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
+        }
+      />
+      <ObjectExplorer
+        items={items}
+        filterPlaceholder={`Filter ${apps.length} Apps…`}
+        empty={
+          <div className="rounded-sm border border-border bg-card px-6 py-12 text-center">
             <p className="text-sm text-muted-foreground">
-              No apps yet. Deploy your first one to get started.
+              No Apps yet. Create one to establish its first deployment
+              contract.
             </p>
             <Button className="mt-4" onClick={() => onNavigate('/apps/new')}>
-              <Plus aria-hidden="true" className="size-4" /> Deploy a new app
+              <Plus aria-hidden="true" className="size-4" /> Create App
             </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {apps.map((app) => (
-            // A row is a navigation and a delete, so the row itself is not the
-            // button: an interactive control inside a `<button>` is neither
-            // valid HTML nor reachable by keyboard.
-            <div
-              key={app.id}
-              className={cn(
-                'group flex items-center gap-2 rounded-lg border border-border bg-card pr-2 transition-colors',
-                'focus-within:border-primary hover:border-primary hover:bg-secondary/60',
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => onNavigate(`/apps/${app.id}`)}
-                className="flex min-w-0 flex-1 items-center gap-4 px-4 py-3.5 text-left"
-              >
+          </div>
+        }
+        renderInspector={(item) => {
+          const app = byId.get(item.id)!;
+          const href = app.urlLive ? appHref(app.url) : null;
+          return (
+            <>
+              <Eyebrow>App / {app.kind}</Eyebrow>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
                 {kindIcon(app.kind)}
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold">{app.name}</span>
-                    <Badge tone={phaseTone(app.phase)}>
-                      {app.phase.toLowerCase()}
-                    </Badge>
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {app.target}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {app.source}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="hidden flex-col items-end gap-0.5 sm:flex">
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {app.url}
-                  </span>
-                  <span className="text-xs text-subtle">{app.release}</span>
-                </div>
-
-                {app.urlLive ? (
-                  <ExternalLink
-                    aria-hidden="true"
-                    className="size-3.5 shrink-0 text-muted-foreground"
-                  />
-                ) : null}
-              </button>
-
-              <DeleteAppButton
-                appId={app.id}
-                name={app.name}
-                deletion={deletion}
+                <h2 className="text-2xl font-semibold tracking-tight">
+                  {app.name}
+                </h2>
+                <Badge tone={phaseTone(app.phase)}>
+                  {app.phase.toLowerCase()}
+                </Badge>
+              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                {app.source} is placed on {app.target} in the immutable vessel{' '}
+                <span className="font-mono">{app.vessel}</span>.
+              </p>
+              <DefinitionGrid
+                entries={[
+                  { label: 'State', value: app.phase.toLowerCase() },
+                  { label: 'Target', value: app.target },
+                  { label: 'Release', value: app.release, mono: true },
+                  { label: 'Source', value: app.source, mono: true },
+                  { label: 'Vessel', value: app.vessel, mono: true },
+                  {
+                    label: 'URL',
+                    value: app.url || 'not allocated',
+                    mono: true,
+                  },
+                ]}
               />
-            </div>
-          ))}
-        </div>
-      )}
+              <div className="mt-6 flex flex-wrap gap-2">
+                <Button onClick={() => onNavigate(`/apps/${app.id}`)}>
+                  Open App
+                </Button>
+                {href !== null ? (
+                  <Button variant="outline" asChild>
+                    <a href={href}>
+                      Open URL <ExternalLink aria-hidden="true" />
+                    </a>
+                  </Button>
+                ) : null}
+                <DeleteAppButton
+                  appId={app.id}
+                  name={app.name}
+                  deletion={deletion}
+                  label
+                />
+              </div>
+            </>
+          );
+        }}
+      />
     </div>
   );
 }

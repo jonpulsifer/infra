@@ -310,7 +310,7 @@
     .context-row span { display: block; color: #718b92; font-size: 9px; text-transform: uppercase; }
     .context-row b { display: block; margin-top: 4px; font-size: 11px; }
 
-    /* Variant C — quiet object explorer in Spindrift's cold-water palette. */
+    /* Variant C — dark object explorer in Spindrift's cold-water palette. */
     .prototype-c { grid-template-columns: 74px minmax(0,1fr); background: #edf3f4; color: #10272d; }
     .c-rail { position: sticky; top: 0; display: flex; flex-direction: column; align-items: center; gap: 9px; height: 100vh; border-right: 1px solid #24484f; background: #102f35; color: #d8e8ea; padding: 17px 10px; }
     .c-logo { display: grid; place-items: center; width: 37px; height: 37px; margin-bottom: 15px; border: 2px solid #76c1cc; border-radius: 50%; color: #d8f4f7; font: italic 900 19px Georgia, serif; }
@@ -383,6 +383,135 @@
     .c-connection-detail .rank-list { margin-top: 0; }
     .c-connection-detail .rank-item { border: 0; border-top: 1px solid #d4e1e3; border-radius: 0; padding-inline: 0; }
     .c-connection-detail .rank-item:first-child { border-top: 0; }
+
+    /* Chosen direction — dark by default, with a legible Inter-first type scale. */
+    .prototype-c {
+      color-scheme: dark;
+      --ink: #eaf4f5;
+      --muted: #91aab0;
+      --line: #29474e;
+      --paper: #0d2228;
+      --ground: #07171b;
+      --teal: #59b8c6;
+      background: var(--ground);
+      color: var(--ink);
+      font-family: Inter, "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .prototype-c .mono,
+    .prototype-c time,
+    .prototype-c kbd,
+    .prototype-c .c-top .operator,
+    .prototype-c .c-ledger-row > span:first-child {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .c-rail { border-color: #17343b; background: #051216; }
+    .c-rail button { width: 42px; height: 42px; color: #82a8ae; font-size: 13px; }
+    .c-rail button:hover { background: #123039; color: #eefcfd; }
+    .c-rail button[aria-current="page"] { background: #17414a; box-shadow: inset 0 0 0 1px #2c6974; }
+    .c-rail button span { background: #102b32; padding: 7px 9px; font: 700 12px/1.2 Inter, ui-sans-serif, system-ui, sans-serif; }
+    .c-main { background: radial-gradient(circle at 82% -12%, rgba(60,163,180,.12), transparent 36%), #07171b; }
+    .c-top { min-height: 72px; border-color: #203c43; background: rgba(7,23,27,.88); }
+    .c-search { max-width: 680px; color: #91aab0; font-size: 14px; }
+    .c-search kbd { border-color: #33535b; background: #10272d; padding: 3px 7px; color: #bdd0d4; font-size: 11px; }
+    .c-top .operator { color: #a8bec3; font-size: 12px; }
+    .c-content { padding-top: 34px; }
+    .prototype-c .section-head { margin-bottom: 28px; }
+    .prototype-c .section-head h1 {
+      margin-top: 8px;
+      color: #f2f9fa;
+      font-family: Inter, "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+      font-size: clamp(34px, 4vw, 48px);
+      font-weight: 680;
+      line-height: 1.05;
+      letter-spacing: -.045em;
+    }
+    .prototype-c .section-head p { max-width: 760px; color: #9ab1b6; font-size: 16px; line-height: 1.6; }
+    .prototype-c .prototype-note { padding: 6px 10px; color: #84cbd5; font-size: 11px; }
+    .prototype-c .eyebrow { color: #82a9af; font-size: 11px; line-height: 1.3; }
+    .prototype-c .bar-button { border-color: #315159; background: #10272d; color: #e2eff1; padding: 10px 14px; font-size: 14px; }
+    .prototype-c .bar-button:hover { border-color: #59b8c6; background: #143039; }
+    .prototype-c .bar-button.primary { border-color: #59b8c6; background: #318a99; color: #f7ffff; }
+    .prototype-c .bar-button.danger { border-color: #70413e; background: #2b1c1c; color: #f1a09a; }
+    .prototype-c .bar-button.ghost { border-color: transparent; background: transparent; }
+    .prototype-c .status { padding: 5px 9px; font-size: 12px; }
+    .prototype-c .status.good { color: #91ddb6; background: #15392c; }
+    .prototype-c .status.warn { color: #f0bd72; background: #3a2b16; }
+    .prototype-c .status.bad { color: #ef9a94; background: #3b201f; }
+    .prototype-c .status.info { color: #80d4df; background: #153740; }
+    .prototype-c .status.neutral { color: #b0c2c6; background: #24363b; }
+    .prototype-c .provider-logo.gcp { color: #8bb3ff; background: #172c4b; }
+    .prototype-c .provider-logo.k8s { color: #9bb9ff; background: #172b4c; }
+    .prototype-c .provider-logo.github { color: #f0f4f5; background: #252d30; }
+    .c-sheet { border-color: #29474e; background: #0d2228; box-shadow: 0 18px 55px rgba(0,0,0,.28); }
+    .c-explorer { min-height: 620px; }
+    .c-list { border-color: #29474e; }
+    .c-list-head { padding: 18px; border-color: #29474e; }
+    .c-list-head input { background: #102b32; padding: 11px 12px; color: #e4f0f2; font-size: 14px; }
+    .c-list-head input::placeholder { color: #78949a; }
+    .c-object { border-color: #233f46; padding: 17px 18px; color: #dcebed; }
+    .c-object:hover, .c-object.selected { background: #133139; }
+    .c-object.selected { box-shadow: inset 3px 0 #59b8c6; }
+    .c-object strong { font-size: 15px; }
+    .c-object small { color: #91aab0; font-size: 12px; line-height: 1.45; }
+    .c-inspector { padding: 30px; }
+    .c-inspector h2 {
+      margin-top: 8px;
+      color: #f0f8f9;
+      font-family: Inter, "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+      font-size: 32px;
+      font-weight: 650;
+      letter-spacing: -.035em;
+    }
+    .c-inspector > p { color: #9ab1b6; font-size: 15px; line-height: 1.6; }
+    .c-definition { margin-top: 28px; border-color: #29474e; background: #29474e; }
+    .c-definition div { background: #10272d; padding: 15px; }
+    .c-definition span { color: #87a2a8; font-size: 11px; letter-spacing: .06em; }
+    .c-definition b { margin-top: 7px; color: #e5f0f2; font-size: 14px; }
+    .c-ledger { margin-top: 28px; }
+    .c-ledger h3 { margin-bottom: 10px; color: #a6bbc0; font-size: 12px; }
+    .c-ledger-row { grid-template-columns: 92px 96px minmax(0,1fr) auto; padding: 14px 0; border-color: #29474e; font-size: 13px; }
+    .c-ledger-row .kind { color: #8da7ad; font-size: 12px; }
+    .c-settings { grid-template-columns: 240px minmax(0,1fr); }
+    .c-settings aside { border-color: #29474e; padding: 22px; }
+    .c-settings aside button { padding: 11px 12px; color: #94abb0; font-size: 14px; }
+    .c-settings aside button:hover { background: #112b32; color: #deedef; }
+    .c-settings aside button:first-of-type { background: #173840; color: #edf8f9; }
+    .c-settings article { padding: 30px; }
+    .c-page-title { margin: 8px 0 6px; color: #f0f8f9; font-size: 30px; font-weight: 650; letter-spacing: -.035em; }
+    .c-page-lede { margin: 0 0 24px; color: #9ab1b6; font-size: 15px; line-height: 1.6; }
+    .c-setting-row { border-color: #29474e; }
+    .c-setting-row h3 { color: #e5f0f2; font-size: 15px; }
+    .c-setting-row p { color: #91aab0; font-size: 13px; }
+    .c-connection-list { border-color: #29474e; }
+    .c-connection-row { grid-template-columns: 260px minmax(0,1fr); gap: 30px; padding: 25px 0; border-color: #29474e; }
+    .c-connection-summary h3 { color: #e8f2f3; font-size: 16px; }
+    .c-connection-summary p { color: #91aab0; font-size: 13px; line-height: 1.55; }
+    .c-connection-detail .rank-item { border-color: #29474e; }
+    .prototype-c .connector-body h4 { color: #e8f2f3; font-size: 16px; }
+    .prototype-c .connector-body > p { color: #9ab1b6; font-size: 14px; line-height: 1.6; }
+    .prototype-c .connector-actions .quiet { color: #89a2a8; font-size: 12px; }
+    .prototype-c .grant-row,
+    .prototype-c .check-row,
+    .prototype-c .candidate-row,
+    .prototype-c .created-row { background: #112b32; color: #a8bdc1; padding: 11px 12px; font-size: 13px; }
+    .prototype-c .grant-row b,
+    .prototype-c .candidate-row b,
+    .prototype-c .created-row b { color: #e6f1f2; }
+    .prototype-c .check-row .step-mark { background: #263f45; color: #a8bec3; }
+    .prototype-c .check-row.done .step-mark { background: #15392c; color: #91ddb6; }
+    .prototype-c .check-row.working .step-mark { background: #153740; color: #80d4df; }
+    .prototype-c .search { border-color: #315159; background: #0a1d22; color: #e4f0f2; font-size: 14px; }
+    .prototype-c .rank-card { border-color: #29474e; background: #10272d; }
+    .prototype-c .rank-card h3 { font-size: 15px; }
+    .prototype-c .rank-card p { color: #91aab0; font-size: 13px; }
+    .prototype-c .rank-item { border-color: #315159; font-size: 13px; }
+    .prototype-c .rank-number { background: #1b373e; color: #a6bcc1; font-size: 11px; }
+    .prototype-c .impact { border-color: #70413e; background: #2b1c1c; }
+    .prototype-c .impact strong { color: #f1a09a; font-size: 14px; }
+    .prototype-c .impact ul { color: #dba29d; font-size: 13px; }
 
     .prototype-switcher {
       position: fixed;
@@ -786,8 +915,8 @@
               <aside><span class="eyebrow">Sections</span><button type="button">Connections</button><button type="button">Identity</button><button type="button">Installation</button><button type="button">Artifact policy</button><button type="button">Notifications</button><button type="button">Danger zone</button></aside>
               <article>
                 <span class="eyebrow">Settings / connections</span>
-                <h2 style="font:500 27px Georgia,serif;margin:7px 0 5px">Connected systems</h2>
-                <p class="muted" style="margin:0 0 20px;font-size:11px">Authorize once, choose what Spindrift discovered, and keep the concrete wiring in the provider's ruled row.</p>
+                <h2 class="c-page-title">Connected systems</h2>
+                <p class="c-page-lede">Authorize once, choose what Spindrift discovered, and keep the concrete wiring in the provider's ruled row.</p>
                 <div class="c-connection-list">
                   <section class="c-connection-row" data-connector-card="gcp">
                     <div class="c-connection-summary"><div class="provider-logo gcp">G</div><div><h3>Google Cloud</h3><p>Discover projects and create Cloud Run + static Target shapes.</p></div><span class="status neutral" data-connector-status="gcp">not connected</span></div>
