@@ -66,11 +66,12 @@ spec:
       #
       # Trusting nothing loses no behaviour, because nothing on the way in
       # composes `X-Forwarded-Host` or `X-Forwarded-Uri`. Envoy's ext_authz
-      # client forwards only what a route's `allowedHeaders` names, and
-      # `packages/charts/spindrift-app/templates/httproute.yaml` names neither —
-      # on the check's way to port 80 and on its way through the shim below
-      # alike. `redirect-url` further down is absolute, so `getOAuthRedirectURI`
-      # returns it without consulting either.
+      # client carries no header a route's `allowedHeaders` has not named,
+      # beyond the `Host`, method and path it includes on its own, and
+      # `packages/charts/spindrift-app/templates/httproute.yaml` names neither
+      # of those two — on the check's way to port 80 and on its way through the
+      # shim below alike. `redirect-url` further down is absolute, so
+      # `getOAuthRedirectURI` returns it without consulting either.
       #
       # It does change one thing, and the change is in the log rather than the
       # decision. `pkg/validation` installs
