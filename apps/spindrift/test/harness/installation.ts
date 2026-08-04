@@ -149,6 +149,8 @@ export const CLOUD_ENDPOINTS = {
   run: 'https://run.example.test',
   hosting: 'https://hosting.example.test',
   policy: 'https://admission.example.test',
+  /** What fires a scheduled job — not the Target's own control plane. */
+  scheduler: 'https://scheduler.example.test',
 } as const;
 
 /** The connect input a cloud project takes, with anything overridden. */

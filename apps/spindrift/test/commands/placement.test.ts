@@ -178,7 +178,7 @@ describe('resolution is derived, and it is a query', () => {
     expect(run.artifactType).toBe('image');
   });
 
-  test("a job's schedule is derived, and refuses the backend that fires none", async () => {
+  test("a job's schedule is derived, and both runtimes keep one", async () => {
     const registry = fakes();
     await connectEverything(registry);
     const { component } = await seedComponent(
@@ -188,20 +188,24 @@ describe('resolution is derived, and it is a query', () => {
       '0 3 * * *',
     );
 
-    // The Cloud Run adapter renders the Job and nothing fires it, so the
-    // schedule is what excludes it — and it is excluded here rather than after
-    // a build, which is what §3 puts resolution before the build for.
+    // Two machineries, one row: the cluster's own controller fires the CronJob
+    // the chart renders, and the Cloud Run adapter puts a Cloud Scheduler job
+    // in front of the Job it renders. What the schedule still decides is the
+    // *static* Target, which renders no job at all.
     const placement = await place(registry, component.id);
     const run = placement.options.find((o) => o.name === 'vessel-cloudrun')!;
-    expect(run.candidate).toBe(false);
-    expect(run.reasons).toEqual(['NO_SCHEDULER']);
-    expect(run.detail).toEqual([
-      'this Target runs a job but has nothing to fire it on a schedule',
-    ]);
-    // The cluster's own controller fires the CronJob the chart renders.
-    expect(placement.suggestedTargetId).toBe(
-      placement.options.find((o) => o.name === 'cluster')!.targetId,
-    );
+    expect(run.candidate).toBe(true);
+    expect(run.reasons).toEqual([]);
+    const cluster = placement.options.find((o) => o.name === 'cluster')!;
+    expect(cluster.candidate).toBe(true);
+    // Rank is the tie-break §3 leaves to a human, and the cluster ranks first.
+    expect(placement.suggestedTargetId).toBe(cluster.targetId);
+    const cdn = placement.options.find((o) => o.name === 'vessel-static')!;
+    expect(cdn.candidate).toBe(false);
+    expect(cdn.reasons).toContain('KIND_UNSUPPORTED');
+    // NO_SCHEDULER's sentence opens by granting that this Target runs a job, so
+    // it never rides along beside the reason that says it does not.
+    expect(cdn.reasons).not.toContain('NO_SCHEDULER');
   });
 
   test('nowhere fits is returned, with a reason for every Target', async () => {

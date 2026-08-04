@@ -221,6 +221,24 @@ function resourceLimits(desired: DesiredState): Record<string, string> | null {
 }
 
 /**
+ * A whole IAM policy, as `:setIamPolicy` takes one.
+ *
+ * Typed rather than `Record<string, unknown>` because one property of it is
+ * load-bearing at the call site: a policy with **no** bindings asserts nothing
+ * about a resource that is not there, so writing one at a resource that does
+ * not exist is already true and its `404` is not a failure. That rule reads as
+ * arbitrary against an opaque blob and obvious against this.
+ */
+export interface InvokerPolicy {
+  readonly policy: {
+    readonly bindings: readonly {
+      readonly role: string;
+      readonly members: readonly string[];
+    }[];
+  };
+}
+
+/**
  * The IAM policy that matches one exposure state.
  *
  * A whole policy rather than a binding to add, because the verb this is handed
@@ -237,10 +255,7 @@ function resourceLimits(desired: DesiredState): Record<string, string> | null {
  * treats the authenticated edge as the largest non-Spindrift dependency (Risk
  * 2), and the audience belongs with it rather than being invented here.
  */
-export function invokerPolicy(
-  reach: Reach,
-  auth: Auth,
-): Record<string, unknown> {
+export function invokerPolicy(reach: Reach, auth: Auth): InvokerPolicy {
   return {
     policy: {
       bindings: allowsUnauthenticated(reach, auth)
