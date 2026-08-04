@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:24-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3 AS base
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS base
 ARG BUN_VERSION=1.3.10
 RUN apk add --no-cache bash curl libc6-compat \
   && curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
@@ -23,7 +23,7 @@ RUN --mount=type=secret,id=gcp_credentials,required=true \
   GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcp_credentials \
   bun run build --filter=slingshot
 
-FROM node:24-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3 AS runner
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS runner
 ENV HOSTNAME=0.0.0.0 \
   NODE_ENV=production \
   NEXT_TELEMETRY_DISABLED=1 \
