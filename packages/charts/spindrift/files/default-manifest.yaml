@@ -1,0 +1,87 @@
+# The chart's own copy of `DEFAULT_PLACEHOLDER_MANIFEST`
+# (apps/spindrift/src/config/manifest.ts), templated with this release's own
+# `controlPlane.hostname` in place of the code's `spindrift.example.com`.
+#
+# `spindrift.manifest.content` (templates/_helpers.tpl) renders this file
+# through `tpl` in place of an operator declaration when a release sets no
+# `manifest` value but does set `hostname` — the chart-only install path
+# ticket 77 exists for. Every key below except `controlPlane.hostname` must
+# stay byte-for-byte the placeholder the code seeds an unseeded installation
+# with, because `isUnconfiguredInstallation` (manifest.ts) reads four of these
+# keys against that exact document to decide whether the first operator lands
+# on onboarding or an Overview of nothing — a value changed here without its
+# twin changing there is a wizard nobody can reach, silently. The conformance
+# test at apps/spindrift/test/conformance/chart-only-enrolment.test.ts diffs
+# this file against the code's copy so that drift is a red test rather than a
+# live surprise.
+installation: default
+controlPlane:
+  hostname: {{ .Values.hostname | quote }}
+auth:
+  gateway: null
+dns:
+  zones:
+    private: example.com
+    public: example.com
+sources:
+  buckets:
+    - bluenose-spindrift-source
+  defaultBucket: bluenose-spindrift-source
+cloud:
+  artifactsProject: spindrift-artifacts
+  homeVesselProject: spindrift-vessel
+charts:
+  app: packages/charts/spindrift-app
+supplyChain:
+  registry:
+    - ghcr.io/spindrift
+  verifier: ghcr.io/spindrift/spindrift-verifier
+  signer: gcpkms://projects/spindrift-artifacts/locations/us-central1/keyRings/keys/cryptoKeys/signer
+github:
+  clientId: Iv1.918d699f36ee7afc
+  oauthBaseUrl: https://github.com
+  apiBaseUrl: https://api.github.com
+  buildWorkflow: spindrift/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
+build:
+  routes:
+    - name: hosted
+      adapter: github-actions
+  # The one value in this document that is not a placeholder — see the doc
+  # comment on `DEFAULT_PLACEHOLDER_MANIFEST.build.zeroConfigFrontend`.
+  zeroConfigFrontend: ghcr.io/railwayapp/railpack-frontend:v0.35.0
+secretStore:
+  adapter: onepassword
+  endpoint: http://onepassword-connect.external-secrets.svc.cluster.local:8080
+  container: spindrift-vault
+vessels:
+  - name: primary
+    kind: cluster
+    location:
+      apiServer: https://kubernetes.default.svc
+  - name: spindrift
+    kind: gcp-project
+    location:
+      project: spindrift-vessel
+targets:
+  - name: primary
+    vessel: primary
+    adapter: kubernetes
+    connection:
+      namespace: spindrift-apps
+      delivery:
+        flavour: flux-helmrelease
+        namespace: spindrift-apps
+        sourceRef:
+          name: infra
+          namespace: flux-system
+  - name: spindrift-cloudrun
+    vessel: spindrift
+    adapter: cloudrun
+    connection:
+      region: spindrift-region
+      endpoint: https://run.googleapis.com
+  - name: spindrift-static
+    vessel: spindrift
+    adapter: static
+    connection:
+      endpoint: https://firebasehosting.googleapis.com
