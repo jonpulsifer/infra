@@ -78,6 +78,7 @@ import {
   helmRelease,
   helmReleaseStatus,
   helmReleaseValues,
+  OCI_REPOSITORY,
 } from './flux-helmrelease.ts';
 import type { DeliveryStatus } from './status.ts';
 import { chartValues, imageReference, VALUES_CONTRACT } from './values.ts';
@@ -635,10 +636,13 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * did not happen is **not**: see below.
    *
    * ponytail: this observes the **last** render, not the next — a Target with
-   * nothing deployed reads green and a skew is caught one deploy late. That is
-   * the honest ceiling of a branch-sourced chart. §7's "read at pin time"
-   * becomes reachable when the chart moves to a pinned OCI artifact, whose
-   * annotations can be read before anything is applied.
+   * nothing deployed reads green and a skew is caught one deploy late. §7's
+   * "read at pin time" wants the chart's own declaration *before* anything is
+   * applied, and the artifact that carries it is pinned
+   * (`clusters/base/platform/spindrift-target/oci-repository.yaml`) — but only
+   * source-controller inside the Target fetches it, and the
+   * `argo-application` flavour has no artifact at all. Upgrade path: pull the
+   * `charts.app` artifact from the registry here and read its annotations.
    */
   private async chartContract(
     api: KubernetesApi,
@@ -712,7 +716,10 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ];
   }
 
-  /** Whether the chart's source exists where the Target says it does. */
+  /**
+   * Whether the chart's source exists where the Target says it does, and
+   * serves the chart this installation declares.
+   */
   private async chartSource(
     api: KubernetesApi,
     delivery: KubernetesDelivery,
@@ -738,10 +745,28 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       namespace: delivery.sourceRef.namespace,
       name: delivery.sourceRef.name,
     });
-    return [
-      source !== null,
-      `this cluster has no ${kind.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} to fetch the App chart from`,
-    ];
+    if (source === null) {
+      return [
+        false,
+        `this cluster has no ${kind.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} to fetch the App chart from`,
+      ];
+    }
+    // In the artifact form the reference the installation *declares* and the
+    // artifact every Component *pulls* live in two places: `charts.app` names
+    // the first, the source object's own `url` names the second, and the
+    // rendered `chartRef` carries only the object. So a Target whose
+    // `OCIRepository` points at another registry deploys a different chart
+    // under this installation's declaration, and nothing else would say so.
+    // The repository form has no such gap — the path is written into the
+    // release itself.
+    const url = (source.spec as { url?: string } | undefined)?.url;
+    if (kind === OCI_REPOSITORY && url !== this.options.chart) {
+      return [
+        false,
+        `${kind.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} serves ${url ?? 'no artifact'}, not the ${this.options.chart} this installation declares`,
+      ];
+    }
+    return [true];
   }
 
   /**

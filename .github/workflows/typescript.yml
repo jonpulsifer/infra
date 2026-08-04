@@ -24,11 +24,19 @@ jobs:
       - id: changed-paths
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
+          # The two `clusters/` paths are here because spindrift's conformance
+          # tests read those declarations rather than a fixture: `charts.app`,
+          # a Target's delivery `sourceRef`, and an `OCIRepository` tag are all
+          # things the suite asserts and all things that change only there.
+          # `turbo.json`'s `spindrift#test` inputs name the same files — a path
+          # missing from either list is a guard that cannot run in CI.
           files: |
             apps/hub/**
             apps/slingshot/**
             apps/spindrift/**
             packages/charts/**
+            clusters/base/platform/spindrift-target/**
+            clusters/offsite/apps/spindrift/**
             packages/k6/**
             packages/typescript-config/**
             package.json

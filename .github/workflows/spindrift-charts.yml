@@ -15,7 +15,15 @@ name: spindrift-charts
 #
 # **Bumping a chart's version without bumping its consumer's tag ships
 # nothing**, and bumping the consumer's tag before this workflow has pushed
-# that version leaves the source object failing to pull. Move the two together.
+# that version leaves the source object failing to pull. The conformance suite
+# holds the pair together (apps/spindrift/test/conformance/), so the drift is a
+# red test rather than a silent no-op.
+#
+# **A chart added here needs one manual step the first time.** GHCR creates the
+# package private on its first push and neither consumer carries a secretRef,
+# so the new package has to be flipped to public on its settings page once —
+# GITHUB_TOKEN cannot do it. Until then the OCIRepository sits at
+# OCIArtifactPullFailed with a 401.
 on:
   push:
     branches:

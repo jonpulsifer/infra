@@ -425,6 +425,35 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     expect(path.spec?.chart?.spec?.sourceRef?.kind).toBe('GitRepository');
   });
 
+  test('each chart consumer pins the version its Chart.yaml carries', async () => {
+    // `.github/workflows/spindrift-charts.yml` pushes each chart under the
+    // version its own Chart.yaml names, and each consumer pins that version by
+    // tag. Bumping one without the other is silent both ways: a version ahead
+    // of the tag ships nothing, and a tag ahead of the push leaves the source
+    // object failing to pull. This is the only thing holding the pair together.
+    const consumers: [string, string][] = [
+      ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
+      [
+        'spindrift-app',
+        'clusters/base/platform/spindrift-target/oci-repository.yaml',
+      ],
+    ];
+    for (const [chart, consumer] of consumers) {
+      const { version } = Bun.YAML.parse(
+        await Bun.file(
+          join(REPO_ROOT, `packages/charts/${chart}/Chart.yaml`),
+        ).text(),
+      ) as { version?: string };
+      const source = Bun.YAML.parse(
+        await Bun.file(join(REPO_ROOT, consumer)).text(),
+      ) as { spec?: { url?: string; ref?: { tag?: string } } };
+      expect(source.spec?.url).toBe(
+        `oci://ghcr.io/jonpulsifer/charts/${chart}`,
+      );
+      expect(source.spec?.ref?.tag).toBe(version);
+    }
+  });
+
   test('Status, diagnosis, and logs identify the second Target while preserving App-first product view', async () => {
     const primaryAdapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
     const secondaryAdapter = new FakeDeployAdapter({ adapter: 'kubernetes' });

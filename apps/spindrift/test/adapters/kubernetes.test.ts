@@ -739,6 +739,7 @@ describe('the checklist', () => {
             apiVersion: 'source.toolkit.fluxcd.io/v1',
             kind: 'OCIRepository',
             metadata: { name: 'charts', namespace: 'delivery' },
+            spec: { url: OCI_CHART },
           },
         },
       },
@@ -748,6 +749,42 @@ describe('the checklist', () => {
     expect(
       prerequisites.find((item) => item.name === 'CHART_SOURCE')?.met,
     ).toBe(true);
+  });
+
+  test('a source object serving another artifact is named, not deployed to', async () => {
+    // The rendered `chartRef` carries the source object and nothing else, so
+    // what a Component pulls is whatever that object's `url` says — an
+    // installation declaring one artifact while a Target's source serves
+    // another deploys a chart nobody asked for, and every other check reads
+    // green. This is the only place the two references meet.
+    const { adapter } = adapterFor(
+      {
+        objects: {
+          'ocirepositories/delivery/charts': {
+            apiVersion: 'source.toolkit.fluxcd.io/v1',
+            kind: 'OCIRepository',
+            metadata: { name: 'charts', namespace: 'delivery' },
+            spec: { url: 'oci://registry.example.test/charts/somebody-else' },
+          },
+          'namespaces//apps': {
+            apiVersion: 'v1',
+            kind: 'Namespace',
+            metadata: { name: 'apps' },
+          },
+        },
+      },
+      OCI_CHART,
+    );
+
+    const { prerequisites } = await adapter.inspect(target());
+    const chartSource = prerequisites.find(
+      (item) => item.name === 'CHART_SOURCE',
+    );
+    expect(chartSource?.met).toBe(false);
+    expect(chartSource?.detail).toContain(
+      'oci://registry.example.test/charts/somebody-else',
+    );
+    expect(chartSource?.detail).toContain(OCI_CHART);
   });
 
   test('a cluster running neither operator cannot deliver anything', async () => {
