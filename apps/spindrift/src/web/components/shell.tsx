@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Boxes,
   Hammer,
   LayoutDashboard,
@@ -58,6 +59,7 @@ export function AppShell({
   onNavigate,
   onSignOut,
   themeControl,
+  declarationDivergence = [],
   children,
 }: {
   readonly path: string;
@@ -65,6 +67,19 @@ export function AppShell({
   readonly onNavigate: (path: string) => void;
   readonly onSignOut: () => void;
   readonly themeControl: ReactNode;
+  /**
+   * Dotted paths where the mounted declaration disagrees with this
+   * installation (`views/auth/installation.tsx` says why a value never rides
+   * along with one). Optional and defaulted to `[]` so every existing caller
+   * — none of which had an opinion about a declaration — keeps asserting
+   * nothing about a fact it does not exercise.
+   *
+   * Rendered here, under the header rather than only on the Settings screen,
+   * because this is the one component every screen in the product passes
+   * through: an installation nobody opens Settings on otherwise never learns
+   * a merge did not reach the row.
+   */
+  readonly declarationDivergence?: readonly string[];
   readonly children: ReactNode;
 }) {
   const navigation = (
@@ -141,6 +156,28 @@ export function AppShell({
             </Button>
           </div>
         </header>
+        {declarationDivergence.length > 0 ? (
+          <div
+            role="alert"
+            className="flex items-center gap-2 border-b border-warning/40 bg-warning-soft px-4 py-2 text-xs sm:px-6"
+          >
+            <AlertTriangle
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-warning"
+            />
+            <span>
+              The mounted declaration no longer matches this installation.{' '}
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:no-underline"
+                onClick={() => onNavigate('/settings/installation')}
+              >
+                Review it in Settings
+              </button>
+              .
+            </span>
+          </div>
+        ) : null}
         <main className="min-w-0 pb-20 md:pb-0">{children}</main>
       </div>
 

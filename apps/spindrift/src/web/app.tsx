@@ -83,7 +83,24 @@ type Gatekeeping =
 export type Configuration =
   | { readonly state: 'asking' }
   | { readonly state: 'unconfigured'; readonly manifest: unknown }
-  | { readonly state: 'configured' };
+  | {
+      readonly state: 'configured';
+      /**
+       * Dotted paths where the mounted declaration disagrees with this
+       * installation, from the same read that decided this state — never
+       * recomputed, so it is only as fresh as the sign-in that fetched it.
+       *
+       * Carried this far up rather than left to the Settings screen alone
+       * (`views/auth/installation.tsx`) so a disagreement is visible on every
+       * screen `AppShell` wraps, not only one an operator has to think to
+       * open — an installation nobody opens Settings on otherwise never
+       * learns a merge did not reach the row. `[]` for every path that
+       * resolved this state without a real answer: a failed or timed-out
+       * read, or the write onboarding just made, none of which has an
+       * opinion sharper than "nothing to report".
+       */
+      readonly declarationDivergence: readonly string[];
+    };
 
 /**
  * How long the whole product waits on the read below before rendering anyway.
@@ -172,11 +189,18 @@ export function App() {
         setInstallation(
           result?.ok && !result.value.configured
             ? { state: 'unconfigured', manifest: result.value.manifest }
-            : { state: 'configured' },
+            : {
+                state: 'configured',
+                declarationDivergence: result?.ok
+                  ? result.value.declarationDivergence
+                  : [],
+              },
         );
       })
       .catch(() => {
-        if (live) setInstallation({ state: 'configured' });
+        if (live) {
+          setInstallation({ state: 'configured', declarationDivergence: [] });
+        }
       })
       .finally(() => clearTimeout(deadline));
     return () => {
@@ -203,7 +227,11 @@ export function App() {
       installation={installation}
       path={route.path}
       onNavigate={route.navigate}
-      onConfigured={() => setInstallation({ state: 'configured' })}
+      onConfigured={() =>
+        // Onboarding's own write just seeded this installation, so there is
+        // nothing yet for a declaration to disagree with — see `Configuration`.
+        setInstallation({ state: 'configured', declarationDivergence: [] })
+      }
       onSignOut={() => {
         void signOut().then(() =>
           setGate({
@@ -270,6 +298,7 @@ export function SignedIn({
       principal={principal}
       themeControl={<ThemeToggle />}
       onSignOut={onSignOut}
+      declarationDivergence={installation.declarationDivergence}
     >
       <Screen path={path} onNavigate={onNavigate} />
     </AppShell>

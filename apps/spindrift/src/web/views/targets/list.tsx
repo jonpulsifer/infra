@@ -544,7 +544,7 @@ function TargetCard({
           Paths, never values: a connection is credential-free today and this
           line does not lean on it staying that way.
         */}
-        {target.manifestDivergence.length > 0 ? (
+        {target.connectionDivergence.length > 0 ? (
           <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
             <AlertTriangle
               aria-hidden="true"
@@ -554,7 +554,7 @@ function TargetCard({
               This Target's connection differs from what the installation
               manifest declares for it, at{' '}
               <span className="font-mono">
-                {target.manifestDivergence.join(', ')}
+                {target.connectionDivergence.join(', ')}
               </span>
               . The row is what deploys render from and a restart leaves it
               alone; saving the manifest in Settings replaces it.
