@@ -8,7 +8,6 @@ import type {
   Runtime,
   WorkspaceView,
 } from '../../web/model.ts';
-import { releasesOf } from '../deploys/list.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const getAppWorkspaceInput = z.object({
@@ -132,7 +131,7 @@ export const getAppWorkspace: Command<
     where: (ev, { eq, and }) =>
       and(eq(ev.appId, app.id), eq(ev.eventType, 'status')),
     orderBy: (ev, { desc }) => [desc(ev.id)],
-    limit: 12,
+    limit: 3,
   });
 
   const now = context.clock.now();
@@ -175,11 +174,6 @@ export const getAppWorkspace: Command<
       buildId: latestDeploy.buildId,
     });
   }
-
-  const releases = await releasesOf(
-    context,
-    app.components.map((component) => component.id),
-  );
 
   let runtime: Runtime;
   if (
@@ -234,7 +228,6 @@ export const getAppWorkspace: Command<
     components,
     datastores: Array.from(datastoresMap.values()),
     activity,
-    deploys: releases,
     runtime,
   };
 

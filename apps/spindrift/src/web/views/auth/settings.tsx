@@ -11,14 +11,13 @@ import {
 } from '../../auth-client.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
-import { InstallationSettings } from './installation.tsx';
 
 type CredentialAction =
   | { readonly kind: 'add' }
   | { readonly kind: 'gateway' }
   | { readonly kind: 'remove'; readonly credentialId: string };
 
-export function Settings() {
+export function IdentitySettings() {
   const [settings, setSettings] = useState<CredentialSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState<CredentialAction | null>(null);
@@ -59,31 +58,28 @@ export function Settings() {
 
   if (settings === null) {
     return (
-      <main className="mx-auto w-full max-w-[760px] px-5 py-8">
+      <div>
         <p className="text-sm text-muted-foreground">
-          Loading platform & credential settings…
+          Loading credential settings…
         </p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-5 py-8">
-      <InstallationSettings />
-      <CredentialSettingsView
-        settings={settings}
-        error={error}
-        running={running}
-        onAdd={() => change({ kind: 'add' }, addPasskey)}
-        onRemove={(credentialId) =>
-          change({ kind: 'remove', credentialId }, () =>
-            removePasskey(credentialId),
-          )
-        }
-        onLink={() => change({ kind: 'gateway' }, linkGateway)}
-        onUnlink={() => change({ kind: 'gateway' }, unlinkGateway)}
-      />
-    </main>
+    <CredentialSettingsView
+      settings={settings}
+      error={error}
+      running={running}
+      onAdd={() => change({ kind: 'add' }, addPasskey)}
+      onRemove={(credentialId) =>
+        change({ kind: 'remove', credentialId }, () =>
+          removePasskey(credentialId),
+        )
+      }
+      onLink={() => change({ kind: 'gateway' }, linkGateway)}
+      onUnlink={() => change({ kind: 'gateway' }, unlinkGateway)}
+    />
   );
 }
 

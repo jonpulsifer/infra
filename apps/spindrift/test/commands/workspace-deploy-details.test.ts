@@ -168,9 +168,8 @@ describe('getBuildDetail command', () => {
     expect(attempt.rollbackable).toBe(false);
   });
 
-  test('hands over to the Deploy once an intent names this Build', async () => {
-    // A Build that reached an intent has a better screen than the build page,
-    // and the client follows this id rather than rendering half the story.
+  test('reports a related Deploy without changing the Build identity', async () => {
+    // Build and Deploy remain independently inspectable after placement.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, { prefix: 'handover' });
 
@@ -578,7 +577,7 @@ describe('getAppWorkspace command', () => {
 });
 
 describe('the workspace as a way into the system', () => {
-  test('lists releases and gives every activity entry an attempt to open', async () => {
+  test('caps at three checkpoints and gives each one an attempt to open', async () => {
     // `attempt_events` constrains every row to exactly one attempt, so every
     // entry has somewhere to go. An entry that led nowhere would be the one
     // thing on the screen a reader could not act on.
@@ -624,7 +623,23 @@ describe('the workspace as a way into the system', () => {
         attemptKind: 'build',
         buildId: build!.id,
         eventType: 'status',
+        phase: 'RUNNING',
+      },
+      {
+        appId,
+        componentId,
+        attemptKind: 'build',
+        buildId: build!.id,
+        eventType: 'status',
         phase: 'SUCCEEDED',
+      },
+      {
+        appId,
+        componentId,
+        attemptKind: 'deploy',
+        deployId: deploy!.id,
+        eventType: 'status',
+        phase: 'APPLYING',
       },
       {
         appId,
@@ -641,13 +656,14 @@ describe('the workspace as a way into the system', () => {
     if (!result.ok) return;
 
     const { workspace } = result.value;
-    // Two checkpoints, not three rows. Every log line an adapter emits lands in
-    // the same table, and reading it raw made the timeline the last twenty
-    // lines of whatever ran most recently — the transcript belongs on the
-    // attempt screen each entry links to, not on the workspace.
-    expect(workspace.activity.length).toBe(2);
+    // Three checkpoints, not the log or the fourth status. Every log line an
+    // adapter emits lands in the same table, and reading it raw made the
+    // timeline the last twenty lines of whatever ran most recently — the
+    // transcript belongs on the attempt screen each entry links to, not here.
+    expect(workspace.activity.length).toBe(3);
     expect(workspace.activity.map((entry) => entry.title)).toEqual([
       `Deploy ${deploy!.id} live`,
+      `Deploy ${deploy!.id} applying`,
       `Build ${build!.id} succeeded`,
     ]);
     for (const entry of workspace.activity) {
@@ -660,9 +676,6 @@ describe('the workspace as a way into the system', () => {
       // relative time is a real one rather than a "recently" placeholder.
       expect(entry.when).not.toBe('recently');
     }
-    expect(workspace.deploys.map((release) => release.id)).toEqual([
-      deploy!.id,
-    ]);
   });
 });
 

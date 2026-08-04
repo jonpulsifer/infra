@@ -91,6 +91,7 @@ export function RepositoryList({
   onAuthorize,
   onConnect,
   onRefresh,
+  embedded = false,
 }: {
   repos: readonly LinkedRepoView[];
   options: readonly RepositoryOptionView[];
@@ -103,42 +104,32 @@ export function RepositoryList({
   onAuthorize: () => void;
   onConnect: (input: ConnectRepositoryInput) => void;
   onRefresh: () => void;
+  embedded?: boolean;
 }) {
-  return (
-    <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-      <header className="flex flex-wrap items-end gap-4">
-        <div>
-          <Eyebrow>Repositories</Eyebrow>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-            GitHub repositories
-          </h1>
-          <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-            Pick a repository. Spindrift reads it, writes the configuration it
-            implies, and opens one pull request — merging that is what connects
-            it.
-          </p>
-        </div>
-        <div className="ml-auto flex gap-2">
-          <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
-            <RefreshCw
-              aria-hidden="true"
-              className={cn('size-4', refreshing && 'animate-spin')}
-            />{' '}
-            {refreshing ? 'Refreshing...' : 'Refresh'}
-          </Button>
-          <Button variant="outline" asChild>
-            <a
-              href="https://github.com/settings/installations"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Manage installation{' '}
-              <ExternalLink aria-hidden="true" className="size-3.5" />
-            </a>
-          </Button>
-        </div>
-      </header>
-
+  const controls = (
+    <div className="flex flex-wrap justify-end gap-2">
+      <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
+        <RefreshCw
+          aria-hidden="true"
+          className={cn('size-4', refreshing && 'animate-spin')}
+        />{' '}
+        {refreshing ? 'Refreshing...' : 'Refresh'}
+      </Button>
+      <Button variant="outline" asChild>
+        <a
+          href="https://github.com/settings/installations"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Manage installation{' '}
+          <ExternalLink aria-hidden="true" className="size-3.5" />
+        </a>
+      </Button>
+    </div>
+  );
+  const workflow = (
+    <>
+      {controls}
       <ConnectorCard
         connector={connector}
         authorization={authorization}
@@ -169,6 +160,74 @@ export function RepositoryList({
         </div>
       ) : null}
 
+      <ConnectedRepositories repos={repos} />
+    </>
+  );
+
+  if (embedded) {
+    const connected = connector.state === 'authorized';
+    return (
+      <section className="grid gap-5 py-6 xl:grid-cols-[240px_minmax(0,1fr)] xl:gap-8">
+        <div>
+          <div className="flex items-center gap-2">
+            <Logo name="github" />
+            <h3 className="font-semibold">GitHub</h3>
+          </div>
+          <Badge className="mt-3" tone={connected ? 'success' : 'warning'}>
+            <Dot /> {connected ? 'connected' : connector.state}
+          </Badge>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Repository discovery, source events, and build dispatch.
+          </p>
+        </div>
+        <div className="flex min-w-0 flex-col gap-5">{workflow}</div>
+      </section>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
+      <header className="flex flex-wrap items-end gap-4">
+        <div>
+          <Eyebrow>Repositories</Eyebrow>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+            GitHub repositories
+          </h1>
+          <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+            Pick a repository. Spindrift reads it, writes the configuration it
+            implies, and opens one pull request — merging that is what connects
+            it.
+          </p>
+        </div>
+        <div className="ml-auto">{controls}</div>
+      </header>
+      <ConnectorCard
+        connector={connector}
+        authorization={authorization}
+        onAuthorize={onAuthorize}
+        error={error}
+      />
+      {connector.state === 'authorized' ? (
+        <AvailableRepositories
+          options={options}
+          connecting={connecting}
+          onConnect={onConnect}
+        />
+      ) : null}
+      {openedPullRequest ? (
+        <div className="rounded-md border border-success/40 bg-success-soft px-3 py-2.5 text-sm">
+          Configuration PR opened:{' '}
+          <a
+            className="font-semibold underline underline-offset-2"
+            href={`https://github.com/${openedPullRequest.fullName}/pull/${openedPullRequest.number}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {openedPullRequest.fullName}#{openedPullRequest.number}
+          </a>
+          . Nothing becomes authoritative until it merges.
+        </div>
+      ) : null}
       <ConnectedRepositories repos={repos} />
     </div>
   );

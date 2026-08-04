@@ -25,6 +25,7 @@ export { uploadArchive } from './apps/upload-archive.ts';
 export { getAppWorkspace } from './apps/workspace.ts';
 export { dispatchBuild } from './builds/dispatch.ts';
 export { getBuildDetail } from './builds/get-detail.ts';
+export { listBuilds } from './builds/list.ts';
 export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
 export { setComponentReach } from './components/reach.ts';
@@ -40,6 +41,7 @@ export {
 export { createDeploy } from './deploys/create.ts';
 export { getDeployDetail } from './deploys/get-detail.ts';
 export { listDeploys } from './deploys/list.ts';
+export { listAllDeploys } from './deploys/list-all.ts';
 export { rollbackDeploy } from './deploys/rollback.ts';
 export { configureInstallation } from './installation/configure.ts';
 export { discoverInstallationFacts } from './installation/discover.ts';

@@ -12,10 +12,9 @@
  * removed from the platform is exactly when tearing down what is running on it
  * would be the most destructive possible reading of the request.
  *
- * What the operator gets instead is the list. §13 asks the confirmation to name
- * what it strands, so the result is the stranded Deploys with the App and
- * Component each belongs to — enough to go and clean them up by hand, which is
- * the only thing that can clean them up now.
+ * What the operator gets first is the list. `confirm: false` performs the same
+ * read without the write so the UI can name the impact in place; confirmation
+ * returns the stranded Deploys with the App and Component each belongs to.
  */
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -27,6 +26,8 @@ export const disconnectTargetInput = z
   .object({
     /** Targets are addressed by name; the id is core's, not the operator's. */
     name: z.string().trim().min(1),
+    /** False previews the Deploys that confirmation would orphan. */
+    confirm: z.boolean().optional(),
   })
   .strict();
 
@@ -44,6 +45,8 @@ export interface StrandedDeploy {
 export interface DisconnectTargetResult {
   readonly targetId: string;
   readonly name: string;
+  /** False for an impact review; true once the Target was disconnected. */
+  readonly disconnected: boolean;
   /** Named, per §13 — this list is the whole point of the confirmation. */
   readonly stranded: readonly StrandedDeploy[];
 }
@@ -53,6 +56,7 @@ export const disconnectTarget: Command<
   DisconnectTargetResult
 > = async (input, context) => {
   const now = context.clock.now();
+  const confirmed = input.confirm ?? true;
 
   const target = (
     await context.db.select().from(targets).where(eq(targets.name, input.name))
@@ -82,7 +86,7 @@ export const disconnectTarget: Command<
       ),
     );
 
-  if (strandable.length > 0) {
+  if (confirmed && strandable.length > 0) {
     await context.db
       .update(deploys)
       .set({ orphanedAt: now, updatedAt: now })
@@ -94,14 +98,17 @@ export const disconnectTarget: Command<
       );
   }
 
-  await context.db
-    .update(targets)
-    .set({ status: 'disconnected', updatedAt: now })
-    .where(eq(targets.id, target.id));
+  if (confirmed) {
+    await context.db
+      .update(targets)
+      .set({ status: 'disconnected', updatedAt: now })
+      .where(eq(targets.id, target.id));
+  }
 
   return ok({
     targetId: target.id,
     name: target.name,
+    disconnected: confirmed,
     stranded: strandable.map((deploy) => ({
       deployId: String(deploy.deployId),
       app: deploy.app,

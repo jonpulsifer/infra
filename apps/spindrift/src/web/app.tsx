@@ -1,18 +1,20 @@
 /**
  * The shell, and the client's whole route table.
  *
- * §18's surfaces are the three screens below; everything else here is chrome
- * that exists to reach them.
+ * The object-first operational surfaces and their route table. Everything else
+ * here is chrome that exists to reach them.
  */
-import { LogOut, Monitor, Moon, Sun } from 'lucide-react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
 import { command, type InputOf } from './client.ts';
 import { DeleteAppDialog, useAppDeletion } from './components/delete-app.tsx';
+import { AppShell } from './components/shell.tsx';
 import type {
   AppListItem,
-  DeployListItem,
+  BuildListItem,
+  DeployLedgerItem,
   DeployView,
   LinkedRepoView,
   PendingTargetConnection,
@@ -33,22 +35,22 @@ import { AppList } from './views/apps/list.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
 import { type SetReach, Workspace } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
-import { Settings } from './views/auth/settings.tsx';
+import { InstallationSettings } from './views/auth/installation.tsx';
+import { IdentitySettings } from './views/auth/settings.tsx';
+import { BuildLedger } from './views/operations/builds.tsx';
+import { DeployLedger } from './views/operations/deploys.tsx';
+import { Overview } from './views/operations/overview.tsx';
 import {
   type RepositoryAuthorizationView,
   RepositoryList,
 } from './views/repos/list.tsx';
+import {
+  EmptySettingsSection,
+  SettingsLayout,
+  type SettingsSection,
+} from './views/settings/layout.tsx';
 import { Storage, type StorageView } from './views/storage/list.tsx';
 import { TargetList } from './views/targets/list.tsx';
-
-const NAV = [
-  { path: '/apps', label: 'Apps' },
-  { path: '/targets', label: 'Targets' },
-  { path: '/repos', label: 'Repos' },
-  { path: '/storage', label: 'Storage' },
-  { path: '/apps/new', label: 'New App' },
-  { path: '/settings', label: 'Settings' },
-] as const;
 
 /**
  * Nobody, somebody, or not asked yet.
@@ -104,23 +106,23 @@ export function App() {
   }
 
   return (
-    <div className="min-h-dvh">
-      <TopBar
-        path={route.path}
-        onNavigate={route.navigate}
-        principal={gate.principal}
-        onSignOut={() => {
-          void signOut().then(() =>
-            setGate({
-              state: 'anonymous',
-              claimed: true,
-              gatewayUnlinked: false,
-            }),
-          );
-        }}
-      />
+    <AppShell
+      path={route.path}
+      onNavigate={route.navigate}
+      principal={gate.principal}
+      themeControl={<ThemeToggle />}
+      onSignOut={() => {
+        void signOut().then(() =>
+          setGate({
+            state: 'anonymous',
+            claimed: true,
+            gatewayUnlinked: false,
+          }),
+        );
+      }}
+    >
       <Screen path={route.path} onNavigate={route.navigate} />
-    </div>
+    </AppShell>
   );
 }
 
@@ -131,32 +133,441 @@ function Screen({
   path: string;
   onNavigate: (path: string) => void;
 }) {
-  if (path.startsWith('/settings')) return <Settings />;
+  if (path.startsWith('/settings'))
+    return <SettingsScreen path={path} onNavigate={onNavigate} />;
+  if (path.startsWith('/targets') || path.startsWith('/repos'))
+    return (
+      <SettingsScreen path="/settings/connections" onNavigate={onNavigate} />
+    );
+  if (path.startsWith('/storage'))
+    return (
+      <SettingsScreen path="/settings/artifacts" onNavigate={onNavigate} />
+    );
   if (path.startsWith('/apps/new')) {
     const draftId = path.replace(/^\/apps\/new\/?/, '') || null;
     return <NewAppScreen draftId={draftId} onNavigate={onNavigate} />;
   }
-  if (path.startsWith('/targets')) return <TargetsScreen />;
-  if (path.startsWith('/repos')) return <RepositoriesScreen />;
-  if (path.startsWith('/storage')) return <StorageScreen />;
   if (path.startsWith('/deploys')) {
     const deployId = path.replace(/^\/deploys\/?/, '');
-    return <DeployScreen deployId={deployId} onNavigate={onNavigate} />;
+    return deployId ? (
+      <DeployScreen deployId={deployId} onNavigate={onNavigate} />
+    ) : (
+      <DeploysScreen onNavigate={onNavigate} />
+    );
   }
   // §4: pressing Deploy with nothing deployable starts a Build and writes no
   // intent, so the act has a durable id but no release. This is where that
   // press lands until an intent exists.
   if (path.startsWith('/builds')) {
     const buildId = path.replace(/^\/builds\/?/, '');
-    return <BuildScreen buildId={buildId} onNavigate={onNavigate} />;
+    return buildId ? (
+      <BuildScreen buildId={buildId} onNavigate={onNavigate} />
+    ) : (
+      <BuildsScreen onNavigate={onNavigate} />
+    );
   }
-  if (path === '/apps' || path === '')
-    return <AppsScreen onNavigate={onNavigate} />;
+  if (path === '/' || path === '')
+    return <OverviewScreen onNavigate={onNavigate} />;
+  if (path === '/apps') return <AppsScreen onNavigate={onNavigate} />;
   if (path.startsWith('/apps/')) {
     const appName = path.replace(/^\/apps\//, '');
     return <WorkspaceScreen appName={appName} onNavigate={onNavigate} />;
   }
   return <WorkspaceScreen appName={path.slice(1)} onNavigate={onNavigate} />;
+}
+
+function SettingsScreen({
+  path,
+  onNavigate,
+}: {
+  path: string;
+  onNavigate: (path: string) => void;
+}) {
+  const requested = path.replace(/^\/settings\/?/, '').split('/')[0] ?? '';
+  const section: SettingsSection = [
+    'connections',
+    'identity',
+    'installation',
+    'artifacts',
+    'notifications',
+    'danger',
+  ].includes(requested)
+    ? (requested as SettingsSection)
+    : 'connections';
+
+  return (
+    <SettingsLayout section={section} onNavigate={onNavigate}>
+      {section === 'connections' ? (
+        <ConnectionsSettings onNavigate={onNavigate} />
+      ) : section === 'identity' ? (
+        <IdentitySettings />
+      ) : section === 'installation' ? (
+        <InstallationSettings />
+      ) : section === 'artifacts' ? (
+        <StorageScreen embedded />
+      ) : section === 'notifications' ? (
+        <EmptySettingsSection
+          eyebrow="Settings / notifications"
+          title="Notifications"
+        >
+          No notification destinations are configured. Operational state stays
+          visible in Overview until this installation gains a delivery command.
+        </EmptySettingsSection>
+      ) : (
+        <EmptySettingsSection
+          eyebrow="Settings / danger zone"
+          title="Destructive controls"
+        >
+          Destructive acts remain beside the objects they affect, where their
+          impact can be named precisely. There is no installation-wide delete.
+        </EmptySettingsSection>
+      )}
+    </SettingsLayout>
+  );
+}
+
+function ConnectionsSettings({
+  onNavigate,
+}: {
+  readonly onNavigate: (path: string) => void;
+}) {
+  return (
+    <section>
+      <Eyebrow>Settings / connections</Eyebrow>
+      <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+        Connected systems
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+        Authorize source access and connect deployment Targets. Each provider
+        keeps its concrete state and actions in one ruled row.
+      </p>
+      <div className="mt-6 divide-y divide-border border-y border-border">
+        <RepositoriesScreen embedded />
+        <TargetsScreen embedded onNavigate={onNavigate} />
+      </div>
+    </section>
+  );
+}
+
+function OverviewScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | {
+        type: 'success';
+        apps: readonly AppListItem[];
+        builds: readonly BuildListItem[];
+        deploys: readonly DeployLedgerItem[];
+        targets: readonly TargetListItem[];
+      }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    const read = () =>
+      Promise.all([
+        command('listApps', {}),
+        command('listBuilds', { limit: 12 }),
+        command('listAllDeploys', { limit: 12 }),
+        command('listTargets', {}),
+      ]).then(([apps, builds, deploys, targets]) => {
+        if (!live) return;
+        if (!apps.ok) {
+          setState({ type: 'error', message: apps.failure.message });
+          return;
+        }
+        if (!builds.ok) {
+          setState({ type: 'error', message: builds.failure.message });
+          return;
+        }
+        if (!deploys.ok) {
+          setState({ type: 'error', message: deploys.failure.message });
+          return;
+        }
+        if (!targets.ok) {
+          setState({ type: 'error', message: targets.failure.message });
+          return;
+        }
+        setState({
+          type: 'success',
+          apps: apps.value.apps,
+          builds: builds.value.builds,
+          deploys: deploys.value.deploys,
+          targets: targets.value.targets,
+        });
+      });
+    const fail = (cause: unknown) => {
+      if (!live) return;
+      setState({
+        type: 'error',
+        message: cause instanceof Error ? cause.message : 'Server failure',
+      });
+    };
+    void read().catch(fail);
+    const refresh = setInterval(() => void read().catch(fail), 15_000);
+    return () => {
+      live = false;
+      clearInterval(refresh);
+    };
+  }, []);
+
+  if (state.type === 'loading') {
+    return <ScreenLoading>Loading Overview…</ScreenLoading>;
+  }
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure title="Failed to load Overview">
+        {state.message}
+      </ScreenFailure>
+    );
+  }
+  return <Overview {...state} onNavigate={onNavigate} />;
+}
+
+function BuildsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | {
+        type: 'success';
+        builds: readonly BuildListItem[];
+        nextBefore: number | null;
+      }
+  >({ type: 'loading' });
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const readNewest = () =>
+      command('listBuilds', {}).then((result) => {
+        if (!live) return;
+        if (!result.ok) {
+          setState({ type: 'error', message: result.failure.message });
+          return;
+        }
+        setState((current) =>
+          current.type === 'success'
+            ? {
+                type: 'success',
+                builds: mergeLedger(result.value.builds, current.builds),
+                nextBefore: current.nextBefore,
+              }
+            : {
+                type: 'success',
+                builds: result.value.builds,
+                nextBefore: result.value.nextBefore,
+              },
+        );
+      });
+    const fail = (cause: unknown) => {
+      if (live) {
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      }
+    };
+    void readNewest().catch(fail);
+    const refresh = setInterval(() => void readNewest().catch(fail), 15_000);
+    return () => {
+      live = false;
+      clearInterval(refresh);
+    };
+  }, []);
+
+  const loadOlder = async () => {
+    if (state.type !== 'success' || state.nextBefore === null) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const result = await command('listBuilds', {
+        before: state.nextBefore,
+      });
+      if (!result.ok) {
+        setOlderError(result.failure.message);
+        return;
+      }
+      setState((current) =>
+        current.type === 'success'
+          ? {
+              type: 'success',
+              builds: mergeLedger(current.builds, result.value.builds),
+              nextBefore: result.value.nextBefore,
+            }
+          : current,
+      );
+    } catch (cause) {
+      setOlderError(
+        cause instanceof Error ? cause.message : 'Loading older Builds failed',
+      );
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  if (state.type === 'loading') {
+    return <ScreenLoading>Loading Builds…</ScreenLoading>;
+  }
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure title="Failed to load Builds">
+        {state.message}
+      </ScreenFailure>
+    );
+  }
+  return (
+    <BuildLedger
+      builds={state.builds}
+      onNavigate={onNavigate}
+      hasMore={state.nextBefore !== null}
+      loadingMore={loadingOlder}
+      loadError={olderError}
+      onLoadMore={() => void loadOlder()}
+    />
+  );
+}
+
+function DeploysScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | {
+        type: 'success';
+        deploys: readonly DeployLedgerItem[];
+        nextBefore: number | null;
+      }
+  >({ type: 'loading' });
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const readNewest = () =>
+      command('listAllDeploys', {}).then((result) => {
+        if (!live) return;
+        if (!result.ok) {
+          setState({ type: 'error', message: result.failure.message });
+          return;
+        }
+        setState((current) =>
+          current.type === 'success'
+            ? {
+                type: 'success',
+                deploys: mergeLedger(result.value.deploys, current.deploys),
+                nextBefore: current.nextBefore,
+              }
+            : {
+                type: 'success',
+                deploys: result.value.deploys,
+                nextBefore: result.value.nextBefore,
+              },
+        );
+      });
+    const fail = (cause: unknown) => {
+      if (live) {
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      }
+    };
+    void readNewest().catch(fail);
+    const refresh = setInterval(() => void readNewest().catch(fail), 15_000);
+    return () => {
+      live = false;
+      clearInterval(refresh);
+    };
+  }, []);
+
+  const loadOlder = async () => {
+    if (state.type !== 'success' || state.nextBefore === null) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const result = await command('listAllDeploys', {
+        before: state.nextBefore,
+      });
+      if (!result.ok) {
+        setOlderError(result.failure.message);
+        return;
+      }
+      setState((current) =>
+        current.type === 'success'
+          ? {
+              type: 'success',
+              deploys: mergeLedger(current.deploys, result.value.deploys),
+              nextBefore: result.value.nextBefore,
+            }
+          : current,
+      );
+    } catch (cause) {
+      setOlderError(
+        cause instanceof Error ? cause.message : 'Loading older Deploys failed',
+      );
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  if (state.type === 'loading') {
+    return <ScreenLoading>Loading Deploys…</ScreenLoading>;
+  }
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure title="Failed to load Deploys">
+        {state.message}
+      </ScreenFailure>
+    );
+  }
+  return (
+    <DeployLedger
+      deploys={state.deploys}
+      onNavigate={onNavigate}
+      hasMore={state.nextBefore !== null}
+      loadingMore={loadingOlder}
+      loadError={olderError}
+      onLoadMore={() => void loadOlder()}
+    />
+  );
+}
+
+function mergeLedger<T extends { readonly id: number }>(
+  first: readonly T[],
+  second: readonly T[],
+): readonly T[] {
+  const byId = new Map(second.map((item) => [item.id, item]));
+  for (const item of first) byId.set(item.id, item);
+  return [...byId.values()].sort((left, right) => right.id - left.id);
+}
+
+function ScreenLoading({ children }: { children: string }) {
+  return (
+    <div className="mx-auto w-full max-w-[1320px] px-6 py-8">
+      <p className="animate-pulse text-sm text-muted-foreground">{children}</p>
+    </div>
+  );
+}
+
+function ScreenFailure({
+  title,
+  children,
+}: {
+  title: string;
+  children: string;
+}) {
+  return (
+    <div className="mx-auto w-full max-w-[1320px] px-6 py-8">
+      <div className="rounded-sm border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-sm">{children}</p>
+      </div>
+    </div>
+  );
 }
 
 function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
@@ -251,7 +662,6 @@ function WorkspaceScreen({
   >({ type: 'loading' });
   const [deploying, setDeploying] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
-  const [rollingBack, setRollingBack] = useState<number | null>(null);
   /** Bumped when an act changed state the workspace has already read. */
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -416,26 +826,6 @@ function WorkspaceScreen({
     }
   };
 
-  const handleRollback = async (release: DeployListItem) => {
-    setRollingBack(release.id);
-    setDeployError(null);
-    try {
-      const result = await rollback({
-        componentId: release.componentId,
-        targetId: release.targetId,
-        buildId: release.buildId,
-      });
-      if (result.ok) {
-        onNavigate(`/deploys/${result.deployId}`);
-      } else {
-        setDeployError(result.message);
-        setReloadToken((token) => token + 1);
-      }
-    } finally {
-      setRollingBack(null);
-    }
-  };
-
   // §9: the row is written and the release is not, so the workspace is re-read
   // rather than patched in place — `Deploy` next to a Component whose reach
   // just changed has to be reading the same row the next intent will pin.
@@ -479,8 +869,6 @@ function WorkspaceScreen({
         deploying={deploying}
         onNavigate={onNavigate}
         deletion={deletion}
-        onRollback={handleRollback}
-        rollingBack={rollingBack}
         onSetReach={handleSetReach}
       />
       <DeleteAppDialog deletion={deletion} />
@@ -710,17 +1098,10 @@ function DeployScreen({
 }
 
 /**
- * The attempt screen for a Build that has no Deploy (§4).
+ * One Build as an artifact-production attempt (§4).
  *
- * The Deploy button has two outcomes and this is the screen for the second one:
- * "nothing was deployable, so a Build started" is a real act with a durable id
- * and a live event stream. Leaving the operator on the workspace would make the
- * press look like it did nothing.
- *
- * The screen resolves itself. A Build that reaches an intent has a better page
- * than this one, so when `getBuildDetail` reports a Deploy naming this Build
- * the screen hands over to `/deploys/:id` rather than continuing to render the
- * half of the story it can see.
+ * It stays a Build after placement: a related Deploy answers a different
+ * question, so this screen links across without replacing artifact evidence.
  */
 function BuildScreen({
   buildId,
@@ -733,7 +1114,7 @@ function BuildScreen({
     | { type: 'loading' }
     | { type: 'not-found'; message: string }
     | { type: 'error'; message: string }
-    | { type: 'success'; attempt: DeployView }
+    | { type: 'success'; attempt: DeployView; deployId: number | null }
   >({ type: 'loading' });
   const [busy, setBusy] = useState<'redeploy' | 'deploy' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -757,11 +1138,11 @@ function BuildScreen({
         });
         return;
       }
-      if (result.value.deployId !== null) {
-        onNavigate(`/deploys/${result.value.deployId}`);
-        return;
-      }
-      setState({ type: 'success', attempt: result.value.attempt });
+      setState({
+        type: 'success',
+        attempt: result.value.attempt,
+        deployId: result.value.deployId,
+      });
     };
 
     read()
@@ -785,7 +1166,7 @@ function BuildScreen({
       live = false;
       stopStream?.();
     };
-  }, [buildId, onNavigate]);
+  }, [buildId]);
 
   const act = async (kind: 'redeploy' | 'deploy') => {
     if (state.type !== 'success') return;
@@ -855,6 +1236,19 @@ function BuildScreen({
 
   return (
     <>
+      {state.deployId !== null ? (
+        <div className="mx-auto mt-4 flex w-full max-w-[1040px] items-center justify-between gap-4 px-5">
+          <p className="text-sm text-muted-foreground">
+            This artifact is related to Deploy #{state.deployId}.
+          </p>
+          <Button
+            variant="outline"
+            onClick={() => onNavigate(`/deploys/${state.deployId}`)}
+          >
+            Open related Deploy
+          </Button>
+        </div>
+      ) : null}
       {actionError ? (
         <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
@@ -885,7 +1279,13 @@ function BuildScreen({
   );
 }
 
-function TargetsScreen() {
+function TargetsScreen({
+  embedded = false,
+  onNavigate,
+}: {
+  embedded?: boolean;
+  onNavigate?: (path: string) => void;
+}) {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
@@ -977,11 +1377,14 @@ function TargetsScreen() {
       connecting={connecting}
       error={actionError}
       onConnect={connect}
+      onChanged={() => setReloadToken((token) => token + 1)}
+      onNavigate={onNavigate}
+      embedded={embedded}
     />
   );
 }
 
-function StorageScreen() {
+function StorageScreen({ embedded = false }: { embedded?: boolean }) {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
@@ -1057,11 +1460,12 @@ function StorageScreen() {
     <Storage
       view={state.view}
       onChanged={() => setReloadToken((token) => token + 1)}
+      embedded={embedded}
     />
   );
 }
 
-function RepositoriesScreen() {
+function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
@@ -1253,6 +1657,7 @@ function RepositoriesScreen() {
       onAuthorize={authorize}
       onConnect={connect}
       onRefresh={handleRefresh}
+      embedded={embedded}
     />
   );
 }
@@ -1359,57 +1764,6 @@ function NewAppScreen({
       repos={state.repoOptions}
       onCreated={(app) => onNavigate(`/apps/${app.id}`)}
     />
-  );
-}
-
-function TopBar({
-  path,
-  onNavigate,
-  principal,
-  onSignOut,
-}: {
-  path: string;
-  onNavigate: (path: string) => void;
-  principal: Principal;
-  onSignOut: () => void;
-}) {
-  return (
-    <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border bg-card px-5 py-3">
-      <span className="font-mono text-sm font-bold tracking-[0.18em]">
-        SPINDRIFT
-      </span>
-      <nav className="flex gap-1">
-        {NAV.map((item) => (
-          <button
-            key={item.path}
-            type="button"
-            onClick={() => onNavigate(item.path)}
-            aria-current={path === item.path ? 'page' : undefined}
-            className={cn(
-              'rounded-md px-2.5 py-1.5 text-sm',
-              path === item.path
-                ? 'bg-secondary font-medium text-foreground'
-                : 'text-subtle hover:text-foreground',
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-      <div className="ml-auto flex items-center gap-3">
-        <ThemeToggle />
-        <span className="text-sm text-subtle">{principal.displayName}</span>
-        <Button
-          size="icon"
-          variant="ghost"
-          title="Sign out"
-          aria-label="Sign out"
-          onClick={onSignOut}
-        >
-          <LogOut aria-hidden="true" />
-        </Button>
-      </div>
-    </header>
   );
 }
 

@@ -9,19 +9,19 @@
  * screen exists to say, and a UI that renders them in an arbitrary hue is a UI
  * that has to explain itself in words.
  *
- * Every token is declared twice — once as a raw CSS variable that flips with
- * the theme, once mapped into Tailwind's namespace by `@theme inline` so
+ * Every token starts as a raw CSS variable that flips with the theme, then is
+ * mapped into Tailwind's namespace by `@theme inline` so
  * `bg-card` and `text-muted-foreground` resolve to it. The mapping is `inline`
  * on purpose: the utilities reference the variable rather than copying its
  * value, which is what lets one attribute on `<html>` re-theme the whole page
  * with no second stylesheet.
  *
  * Theme resolution has three inputs, in increasing precedence: the shipped
- * default (light), the reader's OS preference, and an explicit choice stamped
+ * default (dark), the reader's OS preference, and an explicit choice stamped
  * on the root as `data-theme`. The explicit choice has to win in **both**
- * directions — forcing light on a dark OS is as real a request as the reverse —
- * which is why the OS block excludes `[data-theme="light"]` rather than a
- * fourth block restating the light values to beat it.
+ * directions — forcing light on a dark OS is as real a request as the reverse.
+ * The system choice is the absence of an attribute, so the light OS block
+ * excludes `[data-theme="dark"]` and leaves an explicit dark choice alone.
  */
 
 @import "tailwindcss";
@@ -29,76 +29,95 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  --ground: #f6f8f9;
-  --surface: #ffffff;
-  --surface-2: #eef2f4;
-  --line: #d5dee1;
-  --line-soft: #e4ebed;
-  --ink: #10191d;
-  --ink-2: #40565e;
-  --ink-3: #6e858e;
-  --accent: #2b8ba0;
-  --accent-soft: #d9edf1;
-  --good: #3d8a60;
-  --good-soft: #dcefe4;
-  --warn: #a97a26;
-  --warn-soft: #f6ebd6;
-  --bad: #b94b3f;
-  --bad-soft: #f8e2df;
-  --terminal: #0e1619;
+  color-scheme: dark;
+  --ground: #07171b;
+  --surface: #0d2228;
+  --surface-2: #10272d;
+  --inspector: #0a1d22;
+  --topbar: #07171b;
+  --line: #29474e;
+  --line-soft: #233f46;
+  --ink: #eaf4f5;
+  --ink-2: #a8bec3;
+  --ink-3: #91aab0;
+  --accent: #59b8c6;
+  --accent-soft: #153740;
+  --good: #91ddb6;
+  --good-soft: #15392c;
+  --warn: #f0bd72;
+  --warn-soft: #3a2b16;
+  --bad: #ef9a94;
+  --bad-soft: #3b201f;
+  --terminal: #051216;
   --terminal-ink: #c3d3d8;
   --terminal-bad: #f0938a;
   --terminal-dim: #6d838b;
+  --rail: #051216;
+  --rail-active: #17414a;
+  --rail-line: #17343b;
+  --rail-foreground: #eefcfd;
+  --rail-muted: #82a8ae;
 }
 
-/*
- * The OS preference, unless an explicit choice overrules it. The
- * `:not([data-theme='light'])` is what lets the light values live in `:root`
- * alone: without it, a reader forcing light on a dark OS would need a third
- * block restating every value a fourth time.
- */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --ground: #0e1619;
-    --surface: #141f23;
-    --surface-2: #1b282d;
-    --line: #2a3a40;
-    --line-soft: #223036;
-    --ink: #e6eef0;
-    --ink-2: #a3b7bd;
-    --ink-3: #718890;
-    --accent: #5fb8c9;
-    --accent-soft: #17323a;
-    --good: #5eb083;
-    --good-soft: #163024;
-    --warn: #d0a052;
-    --warn-soft: #322614;
-    --bad: #d97668;
-    --bad-soft: #351e1b;
-    --terminal: #0a1113;
-    --terminal-ink: #b6c8ce;
+/* Explicit light, and the system choice when the OS asks for light. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ground: #f4f7f7;
+  --surface: #ffffff;
+  --surface-2: #edf1f2;
+  --inspector: #f9fbfb;
+  --topbar: #ffffff;
+  --line: #dce5e6;
+  --line-soft: #e7edef;
+  --ink: #102229;
+  --ink-2: #43585f;
+  --ink-3: #697b82;
+  --accent: #238ca0;
+  --accent-soft: #def1f4;
+  --good: #20784f;
+  --good-soft: #dff3e9;
+  --warn: #96631d;
+  --warn-soft: #faefd9;
+  --bad: #a43e37;
+  --bad-soft: #f9e4e1;
+  --terminal: #0e1619;
+  --terminal-ink: #c3d3d8;
+  --rail: #092126;
+  --rail-active: #17414a;
+  --rail-line: #1c444c;
+  --rail-foreground: #eefcfd;
+  --rail-muted: #9fc1c6;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --ground: #f4f7f7;
+    --surface: #ffffff;
+    --surface-2: #edf1f2;
+    --inspector: #f9fbfb;
+    --topbar: #ffffff;
+    --line: #dce5e6;
+    --line-soft: #e7edef;
+    --ink: #102229;
+    --ink-2: #43585f;
+    --ink-3: #697b82;
+    --accent: #238ca0;
+    --accent-soft: #def1f4;
+    --good: #20784f;
+    --good-soft: #dff3e9;
+    --warn: #96631d;
+    --warn-soft: #faefd9;
+    --bad: #a43e37;
+    --bad-soft: #f9e4e1;
+    --terminal: #0e1619;
+    --terminal-ink: #c3d3d8;
+    --rail: #092126;
+    --rail-active: #17414a;
+    --rail-line: #1c444c;
+    --rail-foreground: #eefcfd;
+    --rail-muted: #9fc1c6;
   }
-}
-
-:root[data-theme="dark"] {
-  --ground: #0e1619;
-  --surface: #141f23;
-  --surface-2: #1b282d;
-  --line: #2a3a40;
-  --line-soft: #223036;
-  --ink: #e6eef0;
-  --ink-2: #a3b7bd;
-  --ink-3: #718890;
-  --accent: #5fb8c9;
-  --accent-soft: #17323a;
-  --good: #5eb083;
-  --good-soft: #163024;
-  --warn: #d0a052;
-  --warn-soft: #322614;
-  --bad: #d97668;
-  --bad-soft: #351e1b;
-  --terminal: #0a1113;
-  --terminal-ink: #b6c8ce;
 }
 
 @theme inline {
@@ -134,12 +153,21 @@
   --color-terminal-destructive: var(--terminal-bad);
   --color-terminal-muted: var(--terminal-dim);
 
+  --color-inspector: var(--inspector);
+  --color-topbar: var(--topbar);
+  --color-rail: var(--rail);
+  --color-rail-active: var(--rail-active);
+  --color-rail-line: var(--rail-line);
+  --color-rail-foreground: var(--rail-foreground);
+  --color-rail-muted: var(--rail-muted);
+
   --radius-sm: 4px;
   --radius-md: 5px;
   --radius-lg: 7px;
 
   --font-sans:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    Inter, "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui,
+    -apple-system, sans-serif;
   --font-mono:
     ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
     monospace;
@@ -151,11 +179,17 @@
   }
 
   html {
-    color-scheme: light dark;
+    min-height: 100%;
   }
 
   body {
     background-color: var(--color-background);
+    background-image: radial-gradient(
+      circle at 82% -12%,
+      rgb(60 163 180 / 12%),
+      transparent 36%
+    );
+    background-attachment: fixed;
     color: var(--color-foreground);
     font-family: var(--font-sans);
     font-size: 15px;
@@ -180,23 +214,4 @@
     outline: 2px solid var(--color-ring);
     outline-offset: 2px;
   }
-}
-
-/*
- * Cyber Glassmorphism & Micro-animations
- */
-.glass-card {
-  background: rgba(20, 31, 35, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(95, 184, 201, 0.2);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-}
-
-.glow-accent {
-  box-shadow: 0 0 20px -3px rgba(95, 184, 201, 0.3);
-}
-
-.glow-good {
-  box-shadow: 0 0 20px -3px rgba(94, 176, 131, 0.3);
 }

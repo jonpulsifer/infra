@@ -217,8 +217,8 @@ export interface DeployView {
    * flight has no intent row and therefore no id — and §6 will not let one be
    * invented, because an intent naming a Build that has not succeeded could not
    * pass `checkDeployable`. The screen is addressable either way: `/builds/:id`
-   * renders the same view with this null, and swaps itself for `/deploys/:id`
-   * the moment an intent exists.
+   * keeps this artifact attempt inspectable, while a related `/deploys/:id`
+   * holds placement state.
    */
   readonly id: number | null;
   readonly buildId: number;
@@ -333,6 +333,34 @@ export interface DeployListItem {
    * rather than offering it everywhere and refusing half the presses.
    */
   readonly rollbackable: boolean;
+}
+
+/** The lifecycle of one Build attempt, kept distinct from Deploy phases. */
+export type BuildStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+/** One Build as the global artifact ledger presents it. */
+export interface BuildListItem {
+  readonly id: number;
+  readonly appId: string;
+  readonly app: string;
+  readonly componentId: string;
+  readonly component: string;
+  readonly commit: string;
+  readonly targetShape: string;
+  readonly artifactType: ArtifactType;
+  readonly artifactDigest: string | null;
+  readonly status: BuildStatus;
+  readonly runner: string | null;
+  readonly when: string;
+  readonly at: string;
+  /** The newest Deploy created from this Build, when placement has begun. */
+  readonly deployId: number | null;
+}
+
+/** One Deploy in the global placement ledger, including its owning App. */
+export interface DeployLedgerItem extends DeployListItem {
+  readonly appId: string;
+  readonly app: string;
 }
 
 /**
@@ -458,14 +486,6 @@ export interface WorkspaceView {
   readonly components: readonly ComponentView[];
   readonly datastores: readonly DatastoreView[];
   readonly activity: readonly ActivityEntry[];
-  /**
-   * The releases of this App, newest first (§2).
-   *
-   * On the workspace rather than behind a link because "what is live" and "what
-   * was live before it" are the same question asked twice, and a workspace that
-   * showed only the first makes the second an archaeology exercise.
-   */
-  readonly deploys: readonly DeployListItem[];
   /**
    * The Component's output surface (§17) — one of three, never a nullable log.
    * A `website` on a static Target is the case that forced the union: §17 gives

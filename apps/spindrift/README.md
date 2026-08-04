@@ -61,7 +61,7 @@ One image, two processes (§19): `web` serves the product surface and
 | `src/supply-chain/` | provenance verification, core signing, and derived posture |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
 | `src/web/ui/` | shadcn primitives, in this installation's palette |
-| `src/web/views/` | the three screens (§18) |
+| `src/web/views/` | the object explorers, detail views, creation flow, and Settings surfaces (§18) |
 | `build.ts` | `Bun.build` over the client HTML entry → `dist/` |
 
 There is no framework, no bundler beyond Bun, and no test runner beyond
@@ -91,8 +91,13 @@ tokens the prototypes settled, bound to shadcn's token names so `bg-card` and
 `text-muted-foreground` resolve to them. Light and dark both ship; the toggle
 stamps `data-theme` on the root, and its absence means "follow the OS".
 
-Four screens, each implementing rules §18 and identity settled rather than choices made
-while building them:
+The operational rail separates Overview, Apps, Builds, and Deploys. Each list
+uses the object-explorer pattern: stable objects on the left and evidence for
+the selection on the right. Settings owns Connections, identity, installation,
+artifact policy, notifications, and destructive controls.
+
+The detail surfaces implement rules §18 and identity settled rather than
+choices made while building them:
 
 - **Attempt** (`views/apps/deploy-detail.tsx`) — App-first, not attempt-first.
   State and URL, then diagnosis, then what the release is made of, then a dense
@@ -100,13 +105,13 @@ while building them:
   log opens only when the *build* is what failed, and **the red screen says the
   previous release is still serving**. It serves two routes, because pressing
   Deploy has two outcomes: `/deploys/:id` for an intent, and `/builds/:id` for a
-  Build that has not produced one yet — same screen with a null release id,
-  handing over to the deploy the moment an intent names that Build.
+  a Build — same evidence structure with a null release id. A placed Build stays
+  inspectable as artifact production and links to its related Deploy.
 - **Workspace** (`views/apps/workspace.tsx`) — live state and URL lead; Target
   and the immutable vessel are visible; Components and Datastores are peer
-  sections; every release is listed and every activity entry opens the attempt
-  it came from. A website states that it has no runtime instead of showing an
-  empty log.
+  sections; its three newest Build/Deploy checkpoints link to the attempts they
+  came from, while the global ledgers retain the complete cursor-paged history.
+  A website states that it has no runtime instead of showing an empty log.
 - **Create** (`views/apps/new/`) — Source → Component → Place → Configure →
   Review, defaults carrying every step, preflight folded into Review. The
   server-owned draft survives refresh and rejects stale concurrent edits. An

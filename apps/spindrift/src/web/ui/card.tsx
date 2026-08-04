@@ -13,7 +13,7 @@ import { cn } from './utils.ts';
 export function Card({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
-      className={cn('rounded-lg border border-border bg-card', className)}
+      className={cn('rounded-sm border border-border bg-card', className)}
       {...props}
     />
   );

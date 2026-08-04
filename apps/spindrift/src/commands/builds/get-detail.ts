@@ -1,5 +1,5 @@
 /**
- * `getBuildDetail` — the attempt screen for a Build that has no Deploy yet.
+ * `getBuildDetail` — one artifact-production attempt, whether placed or not.
  *
  * §4: "a build records an artifact rather than deploying one", so pressing
  * Deploy on an App with nothing deployable starts a Build and writes no intent
@@ -8,10 +8,9 @@
  * everything an attempt screen needs — the only thing it lacks is the intent
  * row, and that absence is what {@link DeployView.id} being `null` says.
  *
- * The result also carries {@link GetBuildDetailResult.deployId}. A Build that
- * has since been deployed has a better screen than this one, and the client
- * follows that id rather than leaving a reader on an attempt page that has been
- * superseded by a release.
+ * The result also carries {@link GetBuildDetailResult.deployId}. Placement does
+ * not supersede the Build: the client keeps this artifact evidence inspectable
+ * and offers the related Deploy as a separate destination.
  */
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
@@ -25,7 +24,7 @@ export const getBuildDetailInput = z.object({
 export type GetBuildDetailInput = z.infer<typeof getBuildDetailInput>;
 
 export interface GetBuildDetailResult {
-  /** The Build as an attempt, with `id: null` — no intent has been written. */
+  /** The Build as an attempt, with `id: null` because it is not a Deploy. */
   readonly attempt: DeployView;
   /**
    * The newest Deploy naming this Build, once one exists.

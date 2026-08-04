@@ -1,5 +1,6 @@
 /**
- * Theme selection: OS preference by default, an explicit choice when made.
+ * Theme selection: the chosen dark direction by default, with OS or explicit
+ * light available when the operator asks for it.
  *
  * The stylesheet already answers `prefers-color-scheme`, so `system` is not a
  * third theme — it is the absence of the attribute, which is why choosing it
@@ -21,12 +22,12 @@ function isTheme(value: string | null): value is Theme {
 
 function read(): Theme {
   const stored = localStorage.getItem(KEY);
-  return isTheme(stored) ? stored : 'system';
+  return isTheme(stored) ? stored : 'dark';
 }
 
 /** The server render has no `localStorage`, and no reader to have a preference. */
 function readOnServer(): Theme {
-  return 'system';
+  return 'dark';
 }
 
 function subscribe(onChange: () => void): () => void {

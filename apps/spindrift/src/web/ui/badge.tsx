@@ -12,7 +12,7 @@ import { cn } from './utils.ts';
 
 const badge = cva(
   cn(
-    'inline-flex items-center gap-1.5 rounded-md',
+    'inline-flex items-center gap-1.5 rounded-full',
     'px-2 py-1 text-[11.5px] font-semibold uppercase leading-none tracking-[0.04em]',
   ),
   {
