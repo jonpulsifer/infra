@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   DefinitionGrid,
   type ExplorerItem,
@@ -13,13 +14,16 @@ import type {
 } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
-import { Eyebrow } from '../../ui/card.tsx';
+import { Card, Eyebrow } from '../../ui/card.tsx';
+import { cn } from '../../ui/utils.ts';
 
 interface Concern extends ExplorerItem {
+  readonly category: 'deploy' | 'build' | 'target' | 'app';
   readonly eyebrow: string;
   readonly summary: string;
   readonly path: string;
   readonly appPath?: string;
+  readonly buildPath?: string;
   readonly facts: readonly {
     readonly label: string;
     readonly value: string;
@@ -45,6 +49,8 @@ function appTone(phase: AppListItem['phase']): ExplorerTone {
   return 'warning';
 }
 
+type CategoryFilter = 'all' | 'attention' | 'inflight' | 'apps' | 'targets';
+
 export function Overview({
   apps,
   builds,
@@ -58,92 +64,119 @@ export function Overview({
   readonly targets: readonly TargetListItem[];
   readonly onNavigate: (path: string) => void;
 }) {
+  const [category, setCategory] = useState<CategoryFilter>('all');
+
+  const liveApps = apps.filter((a) => a.phase === 'LIVE').length;
+  const failedApps = apps.filter((a) => a.phase === 'FAILED').length;
+  const inFlightApps = apps.filter(
+    (a) => a.phase !== 'LIVE' && a.phase !== 'FAILED',
+  ).length;
+
+  const inFlightDeploys = deploys.filter(
+    (d) => d.phase !== 'LIVE' && d.phase !== 'FAILED',
+  ).length;
+  const failedDeploys = deploys.filter((d) => d.phase === 'FAILED').length;
+
+  const runningBuilds = builds.filter(
+    (b) => b.status === 'RUNNING' || b.status === 'PENDING',
+  ).length;
+  const succeededBuilds = builds.filter((b) => b.status === 'SUCCEEDED').length;
+
+  const healthyTargets = targets.filter(
+    (t) => t.configured && t.status === 'connected' && t.health === 'healthy',
+  ).length;
+  const setupTargets = targets.filter(
+    (t) =>
+      !t.configured || t.status === 'disconnected' || t.health === 'unhealthy',
+  ).length;
+
   const concerns: Concern[] = [
-    ...deploys
-      .filter((deploy) => deploy.phase !== 'LIVE')
-      .map(
-        (deploy): Concern => ({
-          id: `deploy:${deploy.id}`,
-          title: `Deploy ${deploy.id}`,
-          detail: `${deploy.app} / ${deploy.component} · ${deploy.target}`,
-          status: deploy.phase.toLowerCase(),
-          tone: deployTone(deploy.phase),
-          when: deploy.when,
-          at: deploy.at,
-          active: deploy.phase !== 'FAILED',
-          eyebrow: `Deploy / ${deploy.id}`,
-          summary: `Build ${deploy.buildId} is being placed on ${deploy.target}.`,
-          path: `/deploys/${deploy.id}`,
-          appPath: `/apps/${deploy.appId}`,
-          search: `${deploy.commit} ${deploy.app}`,
-          facts: [
-            { label: 'Build', value: String(deploy.buildId), mono: true },
-            { label: 'Target', value: deploy.target },
-            { label: 'Started', value: deploy.when, mono: true },
-          ],
-        }),
-      ),
-    ...builds
-      .filter((build) => build.status !== 'SUCCEEDED')
-      .map(
-        (build): Concern => ({
-          id: `build:${build.id}`,
-          title: `Build ${build.id}`,
-          detail: `${build.app} / ${build.component} · ${build.runner ?? 'queued'}`,
-          status: build.status.toLowerCase(),
-          tone: buildTone(build.status),
-          when: build.when,
-          at: build.at,
-          active: build.status !== 'FAILED',
-          eyebrow: `Build / ${build.id}`,
-          summary: `Commit ${build.commit} is becoming a ${build.artifactType} artifact.`,
-          path: `/builds/${build.id}`,
-          appPath: `/apps/${build.appId}`,
-          search: `${build.commit} ${build.app}`,
-          facts: [
-            { label: 'Runner', value: build.runner ?? 'waiting' },
-            { label: 'Shape', value: build.targetShape, mono: true },
-            { label: 'Created', value: build.when, mono: true },
-          ],
-        }),
-      ),
-    ...targets
-      .filter(
-        (target) =>
-          !target.configured ||
-          target.status === 'disconnected' ||
-          target.health === 'unhealthy',
-      )
-      .map(
-        (target): Concern => ({
-          id: `target:${target.id}`,
-          title: target.name,
-          detail: `${target.adapter} Target · prerequisite attention`,
-          status: target.configured ? target.health : 'setup',
-          tone: 'warning',
-          eyebrow: 'Target concern',
-          summary:
-            target.prerequisiteFailures?.[0] ??
-            'This Target still needs its connection completed.',
-          path: '/settings/connections',
-          search: `${target.adapter} ${target.prerequisiteFailures?.join(' ') ?? ''}`,
-          facts: [
-            { label: 'Adapter', value: target.adapter },
-            { label: 'Connection', value: target.status },
-            { label: 'Rank', value: String(target.rank), mono: true },
-          ],
-        }),
-      ),
-    ...apps.slice(0, 6).map(
+    ...deploys.map(
+      (deploy): Concern => ({
+        id: `deploy:${deploy.id}`,
+        category: 'deploy',
+        title: `Deploy ${deploy.id}`,
+        detail: `${deploy.app} / ${deploy.component} · ${deploy.target}`,
+        status: deploy.phase.toLowerCase(),
+        tone: deployTone(deploy.phase),
+        when: deploy.when,
+        at: deploy.at,
+        active: deploy.phase !== 'LIVE' && deploy.phase !== 'FAILED',
+        eyebrow: `Deploy / ${deploy.id}`,
+        summary: `Build ${deploy.buildId} is placed on ${deploy.target}.`,
+        path: `/deploys/${deploy.id}`,
+        appPath: `/apps/${deploy.appId}`,
+        buildPath: `/builds/${deploy.buildId}`,
+        search: `${deploy.commit} ${deploy.app} ${deploy.target}`,
+        facts: [
+          { label: 'Build', value: String(deploy.buildId), mono: true },
+          { label: 'Target', value: deploy.target },
+          { label: 'Started', value: deploy.when, mono: true },
+        ],
+      }),
+    ),
+    ...builds.map(
+      (build): Concern => ({
+        id: `build:${build.id}`,
+        category: 'build',
+        title: `Build ${build.id}`,
+        detail: `${build.app} / ${build.component} · ${build.runner ?? 'queued'}`,
+        status: build.status.toLowerCase(),
+        tone: buildTone(build.status),
+        when: build.when,
+        at: build.at,
+        active: build.status === 'RUNNING' || build.status === 'PENDING',
+        eyebrow: `Build / ${build.id}`,
+        summary: `Commit ${build.commit} is becoming a ${build.artifactType} artifact.`,
+        path: `/builds/${build.id}`,
+        appPath: `/apps/${build.appId}`,
+        search: `${build.commit} ${build.app}`,
+        facts: [
+          { label: 'Runner', value: build.runner ?? 'waiting' },
+          { label: 'Shape', value: build.targetShape, mono: true },
+          { label: 'Created', value: build.when, mono: true },
+        ],
+      }),
+    ),
+    ...targets.map(
+      (target): Concern => ({
+        id: `target:${target.id}`,
+        category: 'target',
+        title: target.name,
+        detail: `${target.adapter} Target · ${target.status}`,
+        status: target.configured ? target.health : 'setup',
+        tone:
+          target.configured &&
+          target.status === 'connected' &&
+          target.health === 'healthy'
+            ? 'success'
+            : 'warning',
+        eyebrow: 'Target',
+        summary:
+          target.prerequisiteFailures?.[0] ??
+          (target.configured
+            ? `Target ${target.name} connected via ${target.adapter}.`
+            : 'This Target still needs its connection completed.'),
+        path: '/settings/connections',
+        search: `${target.adapter} ${target.prerequisiteFailures?.join(' ') ?? ''}`,
+        facts: [
+          { label: 'Adapter', value: target.adapter },
+          { label: 'Connection', value: target.status },
+          { label: 'Rank', value: String(target.rank), mono: true },
+        ],
+      }),
+    ),
+    ...apps.map(
       (app): Concern => ({
         id: `app:${app.id}`,
+        category: 'app',
         title: app.name,
         detail: `${app.kind} · ${app.target}`,
         status: app.phase.toLowerCase(),
         tone: appTone(app.phase),
         active: app.phase !== 'LIVE' && app.phase !== 'FAILED',
         eyebrow: `App / ${app.kind}`,
-        summary: `${app.source} · ${app.url || 'no URL yet'}`,
+        summary: `${app.source} · ${app.url || 'no URL allocated'}`,
         path: `/apps/${app.id}`,
         search: `${app.source} ${app.url}`,
         facts: [
@@ -153,28 +186,174 @@ export function Overview({
         ],
       }),
     ),
-  ].slice(0, 18);
+  ];
+
+  const attentionCount = concerns.filter(
+    (c) => c.tone === 'destructive' || c.tone === 'warning',
+  ).length;
+  const inFlightCount = concerns.filter((c) => c.active).length;
+
+  const filteredConcerns = concerns.filter((concern) => {
+    if (category === 'attention') {
+      return concern.tone === 'destructive' || concern.tone === 'warning';
+    }
+    if (category === 'inflight') {
+      return concern.active;
+    }
+    if (category === 'apps') {
+      return concern.category === 'app';
+    }
+    if (category === 'targets') {
+      return concern.category === 'target';
+    }
+    return true;
+  });
+
   const byId = new Map(concerns.map((concern) => [concern.id, concern]));
 
   return (
-    <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <ExplorerPageHeader
         eyebrow="Operating view"
         title="Object explorer"
-        description="Scan active work and current contracts, then inspect one object without losing your place."
+        description="Scan active work, infrastructure state, and operational contracts across all targets."
         actions={
-          <Button onClick={() => onNavigate('/apps/new')}>Create App</Button>
+          <>
+            <Button
+              variant="outline"
+              onClick={() => onNavigate('/settings/connections')}
+            >
+              Connect Target
+            </Button>
+            <Button variant="outline" onClick={() => onNavigate('/deploys')}>
+              Deploy Ledger
+            </Button>
+            <Button onClick={() => onNavigate('/apps/new')}>Create App</Button>
+          </>
         }
       />
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="flex flex-col justify-between p-4">
+          <div>
+            <Eyebrow>Applications</Eyebrow>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold tracking-tight text-foreground">
+                {apps.length}
+              </span>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            <span className="font-semibold text-success">{liveApps} Live</span>
+            {inFlightApps > 0 ? ` · ${inFlightApps} In-Flight` : ''}
+            {failedApps > 0 ? ` · ${failedApps} Failed` : ''}
+          </p>
+        </Card>
+
+        <Card className="flex flex-col justify-between p-4">
+          <div>
+            <Eyebrow>Deploys</Eyebrow>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold tracking-tight text-foreground">
+                {deploys.length}
+              </span>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {inFlightDeploys > 0 ? (
+              <span className="font-semibold text-warning">
+                {inFlightDeploys} In-Flight
+              </span>
+            ) : (
+              '0 In-Flight'
+            )}
+            {failedDeploys > 0 ? ` · ${failedDeploys} Failed` : ''}
+          </p>
+        </Card>
+
+        <Card className="flex flex-col justify-between p-4">
+          <div>
+            <Eyebrow>Build Pipeline</Eyebrow>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold tracking-tight text-foreground">
+                {builds.length}
+              </span>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {runningBuilds > 0 ? (
+              <span className="font-semibold text-accent-foreground">
+                {runningBuilds} Running
+              </span>
+            ) : (
+              `${succeededBuilds} Succeeded`
+            )}
+          </p>
+        </Card>
+
+        <Card className="flex flex-col justify-between p-4">
+          <div>
+            <Eyebrow>Infrastructure Targets</Eyebrow>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold tracking-tight text-foreground">
+                {targets.length}
+              </span>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            <span className="font-semibold text-success">
+              {healthyTargets} Healthy
+            </span>
+            {setupTargets > 0 ? ` · ${setupTargets} Attention` : ''}
+          </p>
+        </Card>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border pb-3">
+        {[
+          { id: 'all', label: `All (${concerns.length})` },
+          { id: 'attention', label: `Attention Required (${attentionCount})` },
+          { id: 'inflight', label: `In-Flight (${inFlightCount})` },
+          { id: 'apps', label: `Applications (${apps.length})` },
+          { id: 'targets', label: `Targets (${targets.length})` },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setCategory(tab.id as CategoryFilter)}
+            className={cn(
+              'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
+              category === tab.id
+                ? 'bg-accent text-accent-foreground shadow-xs'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       <ObjectExplorer
-        items={concerns}
+        items={filteredConcerns}
         filterPlaceholder="Filter active objects…"
         empty={
           <div className="rounded-sm border border-success/40 bg-card p-10 text-center">
             <p className="font-semibold text-success">Everything is steady.</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Create an App to put the first object in motion.
+              No objects match the selected filter. Create an App or connect a
+              Target to expand your system.
             </p>
+            <div className="mt-4 flex justify-center gap-3">
+              <Button onClick={() => onNavigate('/apps/new')}>
+                Create App
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => onNavigate('/settings/connections')}
+              >
+                Connect Target
+              </Button>
+            </div>
           </div>
         }
         renderInspector={(item) => {
@@ -201,7 +380,15 @@ export function Overview({
                     variant="outline"
                     onClick={() => onNavigate(concern.appPath!)}
                   >
-                    Open App
+                    Open App Workspace
+                  </Button>
+                ) : null}
+                {concern.buildPath ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => onNavigate(concern.buildPath!)}
+                  >
+                    View Build
                   </Button>
                 ) : null}
               </div>
