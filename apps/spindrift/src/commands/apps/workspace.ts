@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { artifactSummary } from '../../domain/artifact-name.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import type {
   ActivityEntry,
@@ -77,19 +78,13 @@ export const getAppWorkspace: Command<
   const components: ComponentView[] = app.components.map((comp) => {
     const deploy = comp.deploys[0];
     const build = deploy?.build ?? comp.builds[0];
-    let artifact = 'none';
-    if (build?.artifactDigest) {
-      artifact = `${build.artifactType} · ${build.artifactDigest.slice(0, 12)}`;
-    } else if (build?.commit) {
-      artifact = `${build.artifactType} from ${build.commit.slice(0, 7)}`;
-    }
 
     return {
       id: comp.id,
       name: comp.name,
       kind: comp.kind,
       phase: phaseFor(deploy?.phase, build?.status),
-      artifact,
+      artifact: artifactSummary(build),
       reach: comp.reach,
       auth: comp.auth,
     };
