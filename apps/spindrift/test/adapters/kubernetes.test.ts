@@ -1433,3 +1433,255 @@ function node(arch: string, allocatable: Record<string, string>): FakeObject {
     status: { allocatable },
   };
 }
+
+/**
+ * A job's runs (§7, §17).
+ *
+ * The chart renders every job as a CronJob — suspended when unscheduled — so a
+ * run is a Job created from that CronJob's own `jobTemplate` and owned by it.
+ * Both halves have a failure mode a plausible implementation walks into: a run
+ * built from anything other than the template runs the wrong image, and a run
+ * with no owner outlives every execution beside it because nothing prunes it.
+ */
+describe('a job is run, and its runs are read', () => {
+  const RUN_AT = Date.UTC(2026, 7, 4, 12, 0, 0);
+  const JOB_LABELS = {
+    'app.kubernetes.io/name': 'nightly',
+    'app.kubernetes.io/part-of': 'blog',
+  };
+  const REF = 'flux-helmrelease:delivery/blog-nightly';
+
+  /** The release the chart rendered from, as the adapter reads it back. */
+  const release: FakeObject = {
+    apiVersion: 'helm.toolkit.fluxcd.io/v2',
+    kind: 'HelmRelease',
+    metadata: { name: 'blog-nightly', namespace: 'delivery' },
+    spec: {
+      values: {
+        app: { name: 'blog', component: 'nightly', kind: 'job' },
+      },
+    },
+  };
+
+  const jobTemplate = {
+    metadata: { labels: JOB_LABELS },
+    spec: { backoffLimit: 0, template: { spec: { containers: [] } } },
+  };
+
+  const cronJob: FakeObject = {
+    apiVersion: 'batch/v1',
+    kind: 'CronJob',
+    metadata: {
+      name: 'blog-nightly',
+      namespace: 'apps',
+      uid: 'cron-uid-1',
+      labels: JOB_LABELS,
+    },
+    spec: { suspend: true, schedule: '0 0 31 2 *', jobTemplate },
+  };
+
+  function ranJob(
+    name: string,
+    overrides: { startTime?: string; conditions?: unknown[] } = {},
+  ): FakeObject {
+    return {
+      apiVersion: 'batch/v1',
+      kind: 'Job',
+      metadata: { name, namespace: 'apps', labels: JOB_LABELS },
+      status: {
+        ...(overrides.startTime === undefined
+          ? {}
+          : { startTime: overrides.startTime }),
+        ...(overrides.conditions === undefined
+          ? {}
+          : { conditions: overrides.conditions }),
+      },
+    };
+  }
+
+  function cluster(objects: Record<string, FakeObject> = {}): FakeKubernetes {
+    return new FakeKubernetes({
+      servedKinds: { ...SERVED, 'batch/v1': ['CronJob', 'Job'] },
+      objects: {
+        'helmreleases/delivery/blog-nightly': release,
+        'cronjobs/apps/blog-nightly': cronJob,
+        ...objects,
+      },
+      // Nothing here polls for readiness, and the default script would
+      // otherwise stamp a ready HelmRelease's status onto every Job read.
+      status: () => null,
+    });
+  }
+
+  function adapterFor(far: FakeKubernetes): KubernetesDeployAdapter {
+    return new KubernetesDeployAdapter({
+      chart: CHART,
+      token: far.token,
+      fetch: far.fetch,
+      now: () => RUN_AT,
+    });
+  }
+
+  test('starts a Job from the CronJob template, owned by the CronJob', async () => {
+    const far = cluster();
+    const started = await adapterFor(far).run(target(), REF);
+
+    expect(started.kind).toBe('started');
+    if (started.kind !== 'started') return;
+    expect(started.execution.outcome).toBe('running');
+
+    const created = far.get(`jobs/apps/${started.execution.name}`);
+    expect(created?.kind).toBe('Job');
+    // The template's spec, verbatim: a run that assembled its own would run
+    // something other than what the chart rendered.
+    expect(created?.spec).toEqual(jobTemplate.spec);
+    expect(created?.metadata.labels).toEqual(JOB_LABELS);
+    expect(created?.metadata.annotations).toEqual({
+      'cronjob.kubernetes.io/instantiate': 'manual',
+    });
+    // Owned, so the CronJob's history limits prune it like any other run.
+    expect(created?.metadata.ownerReferences).toEqual([
+      {
+        apiVersion: 'batch/v1',
+        kind: 'CronJob',
+        name: 'blog-nightly',
+        uid: 'cron-uid-1',
+        controller: true,
+      },
+    ]);
+  });
+
+  test('leaves the CronJob suspended — running now is not scheduling', async () => {
+    const far = cluster();
+    await adapterFor(far).run(target(), REF);
+
+    expect(far.get('cronjobs/apps/blog-nightly')?.spec).toEqual({
+      suspend: true,
+      schedule: '0 0 31 2 *',
+      jobTemplate,
+    });
+  });
+
+  test('a second press in the same second is the same run, not a second one', async () => {
+    const far = cluster();
+    const adapter = adapterFor(far);
+    const first = await adapter.run(target(), REF);
+    const second = await adapter.run(target(), REF);
+
+    expect(second.kind).toBe('started');
+    if (first.kind !== 'started' || second.kind !== 'started') return;
+    expect(second.execution.name).toBe(first.execution.name);
+    expect(far.all('jobs')).toHaveLength(1);
+  });
+
+  test('refuses a Component that is not a job, in a sentence', async () => {
+    const far = new FakeKubernetes({
+      servedKinds: { ...SERVED, 'batch/v1': ['CronJob', 'Job'] },
+      objects: {
+        'helmreleases/delivery/blog-web': {
+          apiVersion: 'helm.toolkit.fluxcd.io/v2',
+          kind: 'HelmRelease',
+          metadata: { name: 'blog-web', namespace: 'delivery' },
+          spec: {
+            values: {
+              app: { name: 'blog', component: 'web', kind: 'service' },
+            },
+          },
+        },
+      },
+      status: () => null,
+    });
+    const refused = await adapterFor(far).run(
+      target(),
+      'flux-helmrelease:delivery/blog-web',
+    );
+
+    expect(refused).toEqual({
+      kind: 'none',
+      because: 'this Component is not a job, so it has no runs',
+    });
+  });
+
+  test('lists the runs that happened, newest first, with their outcome', async () => {
+    const far = cluster({
+      'jobs/apps/blog-nightly-1': ranJob('blog-nightly-1', {
+        startTime: '2026-08-01T00:00:00Z',
+        conditions: [
+          {
+            type: 'Complete',
+            status: 'True',
+            reason: 'CompletionsReached',
+            message: 'all tasks completed',
+          },
+        ],
+      }),
+      'jobs/apps/blog-nightly-2': ranJob('blog-nightly-2', {
+        startTime: '2026-08-02T00:00:00Z',
+        conditions: [
+          {
+            type: 'Failed',
+            status: 'True',
+            reason: 'BackoffLimitExceeded',
+            message: 'the container exited 1',
+          },
+        ],
+      }),
+      'jobs/apps/blog-nightly-3': ranJob('blog-nightly-3', {
+        startTime: '2026-08-03T00:00:00Z',
+        // `SuccessCriteriaMet` is the controller narrating, not a verdict.
+        conditions: [{ type: 'SuccessCriteriaMet', status: 'True' }],
+      }),
+    });
+
+    const runs = await adapterFor(far).executions(target(), REF);
+
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(
+      runs.executions.map((execution) => [execution.name, execution.outcome]),
+    ).toEqual([
+      ['blog-nightly-3', 'running'],
+      ['blog-nightly-2', 'failed'],
+      ['blog-nightly-1', 'passed'],
+    ]);
+    expect(runs.executions[1]?.detail).toBe('the container exited 1');
+  });
+
+  test("reads one run's logs rather than the Component's whole output", async () => {
+    const far = new FakeKubernetes({
+      servedKinds: { ...SERVED, 'batch/v1': ['CronJob', 'Job'] },
+      lists: {
+        pods: [
+          runPod('blog-nightly-2-xyz', 'blog-nightly-2'),
+          runPod('blog-nightly-1-abc', 'blog-nightly-1'),
+        ],
+      },
+      logs: (name) => `2026-08-04T12:00:00Z from ${name}\n`,
+    });
+    const page = await adapterFor(far).tail(target(), {
+      app: 'blog',
+      component: 'nightly',
+      execution: 'blog-nightly-2',
+    });
+
+    expect(page.kind).toBe('stream');
+    if (page.kind !== 'stream') return;
+    // The cluster filters, not the caller: only the named run's pod comes back.
+    expect(page.entries.map((entry) => entry.line)).toEqual([
+      'from blog-nightly-2-xyz',
+    ]);
+  });
+
+  /** A pod of one run, labelled the way the Job controller labels one. */
+  function runPod(name: string, run: string): FakeObject {
+    return {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: {
+        name,
+        namespace: 'apps',
+        labels: { ...JOB_LABELS, 'batch.kubernetes.io/job-name': run },
+      },
+    };
+  }
+});

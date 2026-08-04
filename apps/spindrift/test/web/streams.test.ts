@@ -15,6 +15,7 @@ import {
 } from '../../src/domain/attempt-log.ts';
 import {
   ATTEMPT_STREAM_PATH,
+  RUNTIME_STREAM_PATH,
   readStreamPage,
   type StreamSocketData,
   streamRoutes,
@@ -446,5 +447,115 @@ describe('in-process attempt event notifications', () => {
 
     expect(wakes).toEqual(['woke']);
     unsub();
+  });
+});
+
+/**
+ * §17's second pipe, aimed at a job.
+ *
+ * A job's output belongs to a run, so the subject the socket carries has to say
+ * which one. Both directions are asserted, because the failure of each is
+ * silent: a job with no run named would tail every run at once, and a service
+ * with one named would drop the name and hand back the Component's whole tail
+ * under it.
+ */
+describe('a job tails one run rather than the Component', () => {
+  async function seedJob(): Promise<{
+    user: { id: string; displayName: string };
+    componentId: string;
+    serviceId: string;
+    targetId: string;
+  }> {
+    const seeded = await seedAttempt();
+    const [job] = await database()
+      .db.insert(components)
+      .values({ appId: seeded.app.id, name: 'nightly', kind: 'job' })
+      .returning();
+    await database()
+      .db.insert(deploys)
+      .values({
+        componentId: job?.id as string,
+        targetId: seeded.target.id,
+        buildId: seeded.build.id,
+      });
+    return {
+      user: seeded.user,
+      componentId: job?.id as string,
+      serviceId: seeded.component.id,
+      targetId: seeded.target.id,
+    };
+  }
+
+  function runtimeRequest(query: string): Request {
+    return new Request(
+      `https://spindrift.example.test${RUNTIME_STREAM_PATH}?${query}`,
+      { headers: { upgrade: 'websocket' } },
+    );
+  }
+
+  async function upgrade(
+    user: { id: string; displayName: string },
+    query: string,
+  ): Promise<{ response: Response | undefined; upgraded: StreamSocketData[] }> {
+    const upgraded: StreamSocketData[] = [];
+    const ctx = await context(user);
+    const response = await streamRoutes({
+      authenticate: async () => ({ kind: 'authenticated', principal: user }),
+      context: () => ctx,
+    })[RUNTIME_STREAM_PATH]?.(runtimeRequest(query), {
+      upgrade: (_request: Request, options: { data: StreamSocketData }) => {
+        upgraded.push(options.data);
+        return true;
+      },
+    } as unknown as Bun.Server<StreamSocketData>);
+    return { response, upgraded };
+  }
+
+  test('a named run becomes the subject the adapter is asked about', async () => {
+    const { user, componentId, targetId } = await seedJob();
+
+    const { response, upgraded } = await upgrade(
+      user,
+      `componentId=${componentId}&targetId=${targetId}&execution=nightly-2`,
+    );
+
+    expect(response).toBeUndefined();
+    const socket = upgraded[0];
+    expect(socket?.kind).toBe('runtime');
+    if (socket?.kind !== 'runtime') return;
+    expect(socket.subject).toEqual({
+      app: 'live-app',
+      component: 'nightly',
+      execution: 'nightly-2',
+    });
+  });
+
+  test('a job with no run named still refuses, and says how to ask', async () => {
+    const { user, componentId, targetId } = await seedJob();
+
+    const { response } = await upgrade(
+      user,
+      `componentId=${componentId}&targetId=${targetId}`,
+    );
+
+    expect(response?.status).toBe(409);
+    const body = (await response?.json()) as {
+      failure: { code: string; message: string };
+    };
+    expect(body.failure.code).toBe('NO_RUNTIME');
+    expect(body.failure.message).toContain('name one to read it');
+  });
+
+  test('a service is refused a run, rather than quietly given its tail', async () => {
+    const { user, serviceId, targetId } = await seedJob();
+
+    const { response } = await upgrade(
+      user,
+      `componentId=${serviceId}&targetId=${targetId}&execution=nightly-2`,
+    );
+
+    expect(response?.status).toBe(409);
+    const body = (await response?.json()) as { failure: { message: string } };
+    expect(body.failure.message).toContain('only a job has runs');
   });
 });

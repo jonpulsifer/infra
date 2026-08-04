@@ -76,7 +76,12 @@ export function subscribeAttempt(
 }
 
 export function subscribeRuntime(
-  input: { readonly componentId: string; readonly targetId: string },
+  input: {
+    readonly componentId: string;
+    readonly targetId: string;
+    /** One run of a job, whose output is that run's rather than the tail (§17). */
+    readonly execution?: string;
+  },
   onMessage: (message: RuntimeStreamMessage) => void,
   options: SubscribeOptions = {},
 ): () => void {
@@ -92,6 +97,7 @@ export function subscribeRuntime(
       componentId: input.componentId,
       targetId: input.targetId,
     });
+    if (input.execution !== undefined) query.set('execution', input.execution);
     if (cursor !== null) query.set('after', cursor);
     socket = createSocket(streamUrl(`${RUNTIME_STREAM_PATH}?${query}`));
     socket.onmessage = (event) => {

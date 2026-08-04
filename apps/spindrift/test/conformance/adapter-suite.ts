@@ -209,6 +209,25 @@ export function deployAdapterSuite(
       expect(Array.isArray(discovery.arch)).toBe(true);
     });
 
+    test('answers both run verbs about a ref it never placed', async () => {
+      // §17's run verbs are part of what every adapter answers, and "throws" is
+      // not an answer this contract accepts: core holds a `DeployAdapter`
+      // without knowing which backend is behind it, so a caller that reached
+      // for a run on a website would crash rather than read a sentence. Every
+      // backend has this case — the ref names nothing, or names something that
+      // is not a job — and every backend has to have words for it.
+      const adapter = make();
+      const answers = [
+        await adapter.run(target, 'never-placed'),
+        await adapter.executions(target, 'never-placed'),
+      ];
+      for (const answer of answers) {
+        expect(answer.kind).toBe('none');
+        if (answer.kind !== 'none') continue;
+        expect(answer.because.length).toBeGreaterThan(0);
+      }
+    });
+
     test('refuses an artifact type it did not declare', async () => {
       const adapter = make();
       expect(adapter.artifactTypes).not.toContain(foreign);

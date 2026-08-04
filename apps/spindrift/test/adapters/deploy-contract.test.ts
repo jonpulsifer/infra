@@ -146,6 +146,12 @@ const refuses: DeployAdapter = {
   async tail() {
     return { kind: 'stream', entries: [], cursor: null, reach: 0 };
   },
+  async run() {
+    return { kind: 'none', because: 'nothing was placed here to run' };
+  },
+  async executions() {
+    return { kind: 'none', because: 'nothing was placed here to run' };
+  },
   async inspect() {
     return {
       prerequisites: prerequisitesFor('kubernetes').map((name) => ({

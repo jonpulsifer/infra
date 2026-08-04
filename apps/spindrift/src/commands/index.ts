@@ -29,6 +29,7 @@ export { listBuilds } from './builds/list.ts';
 export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
 export { setComponentReach } from './components/reach.ts';
+export { runComponent } from './components/run.ts';
 export { replaceConfig } from './config/replace.ts';
 export { setConfig } from './config/set.ts';
 export {

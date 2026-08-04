@@ -445,6 +445,17 @@ export type Runtime =
     }
   | {
       readonly kind: 'executions';
+      /**
+       * The two ids a run is acted on by: `runComponent` starts one here, and
+       * the runtime stream reads one run's logs by naming it beside them.
+       *
+       * On this arm as well as on `stream` because a job has both — an act and
+       * a tail — while a `none` has neither. Absent where the Component has
+       * never been placed: there is no Target to run it on, and a button that
+       * could not resolve one would be a button that only ever fails.
+       */
+      readonly componentId?: string;
+      readonly targetId?: string;
       readonly executions: readonly Execution[];
       readonly retained: number;
     }

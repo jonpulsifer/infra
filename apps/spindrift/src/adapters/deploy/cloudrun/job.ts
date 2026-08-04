@@ -11,8 +11,9 @@
  * `suspend: true` and a date that never occurs for an unscheduled job — the
  * object has to exist for anything to have something to trigger. Cloud Run
  * reaches the same state by having no scheduler in front of it, because a Job
- * carries no schedule of its own: firing one is a separate service (**72**) and
- * running one on demand is a `DeployAdapter` verb that does not exist (**73**).
+ * carries no schedule of its own: firing one on a cadence is a separate service
+ * (**72**), and running one on demand is `DeployAdapter.run`, which here is the
+ * runtime's own `jobs.run`.
  *
  * **The template nests twice.** `Job.template` is an `ExecutionTemplate` and
  * `ExecutionTemplate.template` is a `TaskTemplate`; the containers live in the

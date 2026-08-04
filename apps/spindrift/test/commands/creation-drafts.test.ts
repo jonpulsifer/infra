@@ -53,6 +53,14 @@ const adapters: AdapterRegistry = {
       throw new Error('creation drafts do not inspect the far side');
     },
     tail: async () => ({ kind: 'stream', entries: [], cursor: null, reach: 0 }),
+    run: async () => ({
+      kind: 'none',
+      because: 'creation drafts do not run anything',
+    }),
+    executions: async () => ({
+      kind: 'none',
+      because: 'creation drafts do not run anything',
+    }),
   }),
   build: (name) => (name === builder.name ? builder : null),
   store: () => null,

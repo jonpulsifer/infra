@@ -91,6 +91,28 @@ rules:
       - pods/log
     verbs:
       - get
+  # A job's runs. The App chart renders every job as a CronJob, so the CronJob
+  # is what a run is created from — its own `jobTemplate`, read here — and the
+  # Jobs are the runs themselves, listed to answer "did last night's run work".
+  #
+  # `create` on jobs and nothing more: Spindrift starts a run and never edits or
+  # deletes one. The CronJob owns what this creates and prunes it under its own
+  # history limits, which is why no `delete` is needed for the history to stay
+  # bounded.
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
   # `CHART_SOURCE`, for the artifact form. The App chart's `OCIRepository` is
   # this namespace's own object (`oci-repository.yaml`), so the grant to read it
   # belongs to the Role this namespace already binds rather than to a second one

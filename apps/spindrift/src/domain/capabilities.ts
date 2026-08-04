@@ -278,12 +278,11 @@ export interface TargetCapabilities {
  * state by having no scheduler in front of the Job rather than by suspending
  * it, since a Job carries no schedule of its own.
  *
- * Two things a job here does not have, and each is a filed ticket rather than
- * a silence: **a schedule**, which needs Cloud Scheduler standing in front of
- * the Job and an API this vessel has not enabled (**72**) and is therefore a
- * non-candidate at Place — see {@link FIRES_SCHEDULES_BY_ADAPTER} — and **an
- * on-demand run**, which needs a verb `DeployAdapter` does not have and every
- * adapter would have to answer (**73**).
+ * One thing a job here does not have, and it is a filed ticket rather than a
+ * silence: **a schedule**, which needs Cloud Scheduler standing in front of the
+ * Job and an API this vessel has not enabled (**72**) and is therefore a
+ * non-candidate at Place — see {@link FIRES_SCHEDULES_BY_ADAPTER}. An on-demand
+ * run is `DeployAdapter.run`, which both backends answer.
  */
 export const KINDS_BY_ADAPTER = {
   kubernetes: ['service', 'website', 'job'],

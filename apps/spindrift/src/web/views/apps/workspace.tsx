@@ -28,6 +28,7 @@ import type {
   ActivityEntry,
   ComponentView,
   DatastoreView,
+  LogLine,
   WorkspaceView,
 } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
@@ -59,6 +60,18 @@ export type SetReach = (change: {
   | { readonly ok: false; readonly message: string }
 >;
 
+/**
+ * Starting one run of a job, as the screen above needs it answered (§17).
+ *
+ * The same shape {@link SetReach} takes and for the same reason: the press has
+ * exactly one thing to say afterwards — it started, or here is the sentence the
+ * command refused with — and threading that back as two props would put this
+ * card's transient state on the screen that owns the App.
+ */
+export type RunJob = () => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
 export function Workspace({
   view,
   onDeploy,
@@ -67,6 +80,9 @@ export function Workspace({
   onNavigate,
   deletion,
   onSetReach,
+  onRunJob,
+  onFollowExecution,
+  executionLines,
 }: {
   view: WorkspaceView;
   onDeploy?: () => void;
@@ -94,6 +110,16 @@ export function Workspace({
    * worse than no form.
    */
   onSetReach?: SetReach;
+  /**
+   * Start one run of this App's job (§17). Absent where the screen wires no
+   * acts, and absent for every Component that is not a job — the runtime card
+   * is what decides, because it is the only branch with runs to start.
+   */
+  onRunJob?: RunJob;
+  /** Follow one run's output, or nothing when the name is `null`. */
+  onFollowExecution?: (execution: string | null) => void;
+  /** The lines of whichever run is being followed. */
+  executionLines?: readonly LogLine[];
 }) {
   const primary = view.components[0];
 
@@ -128,12 +154,15 @@ export function Workspace({
               Rebuild
             </Button>
           ) : null}
+          {/*
+            "Deploy" whatever the kind. This button writes an intent, and for a
+            job that places a CronJob triggered by nothing — it has never made
+            anything run, and calling it `Run now` beside a button that does is
+            the one label a reader cannot recover from. Running is on the
+            runtime card, where the runs are (§17).
+          */}
           <Button onClick={onDeploy} disabled={deploying}>
-            {deploying
-              ? 'Deploying...'
-              : primary?.kind === 'job'
-                ? 'Run now'
-                : 'Deploy'}
+            {deploying ? 'Deploying...' : 'Deploy'}
           </Button>
         </div>
       </header>
@@ -156,7 +185,13 @@ export function Workspace({
           not here reads as applied and is not.
         */}
         <Activity entries={view.activity} onNavigate={onNavigate} />
-        <Runtime view={view} onNavigate={onNavigate} />
+        <Runtime
+          view={view}
+          onNavigate={onNavigate}
+          {...(onRunJob ? { onRun: onRunJob } : {})}
+          {...(onFollowExecution ? { onFollowExecution } : {})}
+          {...(executionLines ? { executionLines } : {})}
+        />
       </div>
     </div>
   );
@@ -686,12 +721,48 @@ function ActivityRow({
 function Runtime({
   view,
   onNavigate,
+  onRun,
+  onFollowExecution,
+  executionLines,
 }: {
   view: WorkspaceView;
   onNavigate?: (path: string) => void;
+  /**
+   * Start one run (§17). Absent where the screen has no act wired — the
+   * fixture renders, and any Component that is not a placed job.
+   */
+  onRun?: RunJob;
+  /**
+   * Follow one run's output, or nothing when the name is `null`.
+   *
+   * The lines come back as {@link executionLines} rather than through this
+   * callback, because the socket outlives any one render and the screen above
+   * owns it — the same split the service tail already has.
+   */
+  onFollowExecution?: (execution: string | null) => void;
+  executionLines?: readonly LogLine[];
 }) {
   const runtime = view.runtime;
   const latestDeployId = view.latestDeployId;
+  /** Which run's output is open. One at a time: this is a list, not a tree. */
+  const [following, setFollowing] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const follow = (execution: string) => {
+    const next = following === execution ? null : execution;
+    setFollowing(next);
+    onFollowExecution?.(next);
+  };
+
+  const start = async () => {
+    if (!onRun) return;
+    setStarting(true);
+    setRunError(null);
+    const result = await onRun();
+    setStarting(false);
+    if (!result.ok) setRunError(result.message);
+  };
 
   return (
     <Card>
@@ -712,17 +783,61 @@ function Runtime({
           </EmptyState>
         ) : runtime.kind === 'executions' ? (
           <>
+            {/*
+              §17's other half of `apply` for a job: the chart renders a
+              CronJob that is triggered by nothing, so an unscheduled job is
+              only ever run because somebody asked. The button is what asking
+              is, and it sits with the runs rather than beside Deploy because
+              running is not deploying — nothing about what is placed changes.
+            */}
+            {onRun ? (
+              <div className="flex items-center gap-3 pb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={starting}
+                  onClick={() => void start()}
+                >
+                  {starting ? 'Starting...' : 'Run now'}
+                </Button>
+                {runError ? (
+                  <p className="text-xs text-destructive">{runError}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {runtime.executions.length === 0 ? (
+              <EmptyState title="This job has not run yet.">
+                A run started here, or by the schedule, appears in this list.
+              </EmptyState>
+            ) : null}
             {runtime.executions.map((execution) => (
-              <Row
-                key={execution.name}
-                badge={
-                  <Badge tone={EXECUTION_TONE[execution.outcome]}>
-                    {execution.outcome}
-                  </Badge>
-                }
-                title={execution.name}
-                detail={`${execution.detail} · ${execution.when}`}
-              />
+              <div key={execution.name}>
+                {/*
+                  A run's logs are read by naming the run, so the row is what
+                  names it. Pressing it again closes the pane rather than
+                  leaving the screen holding a socket nobody is reading.
+                */}
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  onClick={
+                    onFollowExecution ? () => follow(execution.name) : undefined
+                  }
+                >
+                  <Row
+                    badge={
+                      <Badge tone={EXECUTION_TONE[execution.outcome]}>
+                        {execution.outcome}
+                      </Badge>
+                    }
+                    title={execution.name}
+                    detail={`${execution.detail} · ${execution.when}`}
+                  />
+                </button>
+                {following === execution.name ? (
+                  <LogPane lines={executionLines ?? []} />
+                ) : null}
+              </div>
             ))}
             <p className="pt-2 text-xs text-muted-foreground">
               The last {runtime.retained} executions are kept. Depth is

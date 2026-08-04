@@ -183,6 +183,8 @@ async function upgradeRuntime(
   const componentId = url.searchParams.get('componentId');
   const targetId = url.searchParams.get('targetId');
   const after = url.searchParams.get('after');
+  /** Which run, for the one kind whose output belongs to a run (§17). */
+  const execution = url.searchParams.get('execution');
   if (!componentId || !targetId) {
     return refusal(
       400,
@@ -213,11 +215,26 @@ async function upgradeRuntime(
     return refusal(404, 'NOT_FOUND', 'the Component or Target does not exist');
   }
   const { target: surface, vessel } = target;
-  if (component.kind === 'job') {
+  // §17: a job has executions rather than a runtime tail, and the refusal that
+  // used to end here is now answered by the executions it names — one of them
+  // is the subject. Without one there is still nothing to follow: a job is not
+  // running most of the time, and merging every run's output into one stream
+  // would answer a question nobody asked.
+  if (component.kind === 'job' && execution === null) {
     return refusal(
       409,
       'NO_RUNTIME',
-      'a job has executions rather than a runtime tail',
+      'a job has executions rather than a runtime tail: name one to read it',
+    );
+  }
+  // And the other direction: a service has one output and it is not a run's.
+  // Serving a named execution here would hand back the Component's whole tail
+  // under a name that had been silently dropped.
+  if (component.kind !== 'job' && execution !== null) {
+    return refusal(
+      409,
+      'NO_RUNTIME',
+      `${component.name} is a ${component.kind}, and only a job has runs`,
     );
   }
   const [placed] = await authenticated.context.db
@@ -258,7 +275,11 @@ async function upgradeRuntime(
       kind: 'runtime',
       adapter,
       target: deployTargetOf(surface, vessel),
-      subject: { app: app.name, component: component.name },
+      subject: {
+        app: app.name,
+        component: component.name,
+        ...(execution === null ? {} : { execution }),
+      },
       cursor: after,
       closed: false,
     },

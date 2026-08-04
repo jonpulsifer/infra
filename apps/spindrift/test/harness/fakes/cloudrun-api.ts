@@ -60,6 +60,14 @@ export interface FakeCloudRunOptions {
   /** The admission policy this project reports, or `null` for none at all. */
   readonly admissionPolicy?: Record<string, unknown> | null;
   /**
+   * Runs each Job already has, newest first, by job id.
+   *
+   * Seeded rather than only produced by `:run`, because most of a job's history
+   * was written before Spindrift asked for anything — a fake that could only
+   * report what this process started could not test reading one at all.
+   */
+  readonly executions?: Readonly<Record<string, readonly unknown[]>>;
+  /**
    * Reads a newly created Service `404`s for before it becomes readable.
    *
    * One by default rather than zero, because the create-then-`404` window is
@@ -208,6 +216,9 @@ const SCHEMAS: Record<string, ServiceSchema> = {
   jobs: JOB_SCHEMA,
 };
 
+/** The one collection that has runs. Named, because `:run` is refused elsewhere. */
+const JOBS_COLLECTION = 'jobs';
+
 /**
  * The first member the document names that the schema does not, if any.
  *
@@ -313,10 +324,26 @@ export class FakeCloudRun {
   /** Reads a just-created Service still owes before it can be seen. */
   private readonly creating = new Map<string, number>();
   private nextOperation = 1;
+  private nextRun = 1;
+  /** Each Job's runs, newest first — the sub-collection `:run` appends to. */
+  private readonly executions = new Map<string, unknown[]>();
   private readonly options: FakeCloudRunOptions;
 
   constructor(options: FakeCloudRunOptions = {}) {
     this.options = options;
+    for (const [job, runs] of Object.entries(options.executions ?? {})) {
+      this.executions.set(job, [...runs]);
+    }
+  }
+
+  /** `projects/<p>/locations/<r>` — what every name here hangs off. */
+  private parent(): string {
+    return `projects/${this.project}/locations/${this.region}`;
+  }
+
+  /** The runs one Job holds, newest first. */
+  private runsOf(job: string): unknown[] {
+    return this.executions.get(job) ?? [];
   }
 
   get project(): string {
@@ -404,9 +431,48 @@ export class FakeCloudRun {
       return json(200, { [collection]: [...this.held(collection)] });
     }
 
+    // A Job's runs are a sub-collection rather than a resource of their own,
+    // so they are routed before the `<name>[:verb]` split — which would
+    // otherwise read `jobs/<id>/executions` as a resource nobody named.
+    const runs = rest.match(/^([^/:]+)\/executions$/);
+    if (runs !== null) {
+      if (request.method !== 'GET') {
+        return json(405, {
+          error: { message: 'runs are listed, not written' },
+        });
+      }
+      if (!this.resources.has(`${collection}/${runs[1]}`)) {
+        return json(404, notFound());
+      }
+      return json(200, { executions: this.runsOf(runs[1] as string) });
+    }
+
     const [name, verb] = rest.split(':', 2);
     if (name === undefined || name === '') return json(404, notFound());
     const key = `${collection}/${name}`;
+
+    // `jobs.run` is the runtime's own verb: it answers with an `Operation`
+    // whose metadata **is** the Execution being created, and the execution
+    // appears in the job's sub-collection behind it. A fake that only answered
+    // the call would let an adapter that never read the name back pass.
+    if (verb === 'run') {
+      if (collection !== JOBS_COLLECTION || !this.resources.has(key)) {
+        return json(404, notFound());
+      }
+      const started = `${name}-${this.nextRun++}`;
+      this.executions.set(name, [
+        { name: `${this.parent()}/jobs/${name}/executions/${started}` },
+        ...this.runsOf(name),
+      ]);
+      return json(200, {
+        name: `${this.parent()}/operations/op-${this.nextOperation++}`,
+        done: false,
+        metadata: {
+          '@type': 'type.googleapis.com/google.cloud.run.v2.Execution',
+          name: `${this.parent()}/jobs/${name}/executions/${started}`,
+        },
+      });
+    }
 
     if (verb === 'setIamPolicy') {
       if (this.options.refuseIam !== undefined) {

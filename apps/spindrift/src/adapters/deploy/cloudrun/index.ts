@@ -62,10 +62,13 @@ import type {
   DeployTarget,
   DeployVerdict,
   FailureReason,
+  JobExecution,
+  JobRuns,
   ObservedState,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
+  StartedRun,
 } from '../contract.ts';
 import { cloudRunJob } from './job.ts';
 import {
@@ -112,6 +115,26 @@ const SERVICE_ID_LIMIT = 63;
 const SERVICES = 'services';
 const JOBS = 'jobs';
 type Collection = typeof SERVICES | typeof JOBS;
+
+/** The sub-collection a Job's runs live in — the executions §17 names. */
+const EXECUTIONS = 'executions';
+
+/**
+ * What a job's log entries carry where a service's carry a revision (§17).
+ *
+ * A Job's entries are typed `cloud_run_job`, keyed on `job_name`, and labelled
+ * with the execution and task that wrote them — none of which a
+ * `cloud_run_revision` filter matches. That is why a run's logs are a different
+ * question from "what is this Component saying now" rather than the same query
+ * with a different name in it.
+ */
+const JOB_RESOURCE = 'cloud_run_job';
+const SERVICE_RESOURCE = 'cloud_run_revision';
+const EXECUTION_LABEL = 'run.googleapis.com/execution_name';
+const TASK_INDEX_LABEL = 'run.googleapis.com/task_index';
+
+/** How many runs `executions` asks for when nothing says otherwise. */
+const DEFAULT_EXECUTION_PAGE = 20;
 
 /** How the operator would name the service in the sentence about enabling it. */
 const SERVICE_NAME = 'Cloud Run';
@@ -357,7 +380,13 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       return { kind: 'stream', entries: [], cursor: null, reach: 0 };
     }
     const after = cloudLogCursor(options.after);
-    const service = workloadName(subject, SERVICE_ID_LIMIT);
+    const id = workloadName(subject, SERVICE_ID_LIMIT);
+    // A run's entries are keyed on the Job and labelled with the execution, so
+    // naming one narrows the filter twice: to this Component's Job rather than
+    // its Service, and to that run rather than every run it has ever had. The
+    // Component-wide question a service answers has no answer for a job, which
+    // is why there is no third branch here.
+    const run = subject.execution;
     const response = await new CloudHttp({
       baseUrl: this.options.logsEndpoint ?? DEFAULT_LOGS_ENDPOINT,
       token: this.options.token,
@@ -368,9 +397,14 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       body: {
         resourceNames: [`projects/${connection.project}`],
         filter: [
-          'resource.type="cloud_run_revision"',
-          `resource.labels.service_name="${service}"`,
+          `resource.type="${run === undefined ? SERVICE_RESOURCE : JOB_RESOURCE}"`,
+          run === undefined
+            ? `resource.labels.service_name="${id}"`
+            : `resource.labels.job_name="${id}"`,
           `resource.labels.location="${connection.region}"`,
+          ...(run === undefined
+            ? []
+            : [`labels."${EXECUTION_LABEL}"="${run}"`]),
           ...(after === null ? [] : [`timestamp>="${after.at}"`]),
         ].join(' AND '),
         orderBy: 'timestamp asc',
@@ -405,6 +439,126 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       entries,
       cursor: entries.at(-1)?.cursor ?? options.after ?? null,
       reach: connection.logHistorySeconds ?? 0,
+    };
+  }
+
+  /**
+   * Start one run of the job this ref names, now (§17).
+   *
+   * `jobs.run` is the runtime's own verb and the only one there is: a Job here
+   * carries no schedule and nothing stands in front of it, so an execution
+   * exists exactly when something asked for one. The call answers with an
+   * `Operation` whose `metadata` **is** the Execution being created, which is
+   * where the name comes from — an execution named by the runtime rather than
+   * by this adapter, for the same reason a Service's `uri` comes back across
+   * this seam rather than being handed in (§9).
+   *
+   * A ref naming the other collection is refused rather than run: a Service has
+   * no execution, and the alternative to saying so is a 404 from a path that
+   * reads as if it should have worked.
+   */
+  async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+    const placed = this.placedJob(target, ref);
+    if (placed.kind === 'none') return placed;
+
+    const started = await this.http(placed.connection).json<CloudOperation>({
+      method: 'POST',
+      path: `${placed.path}:run`,
+      body: {},
+    });
+    if (!started.ok) {
+      throw new Error(`running job ${placed.id} failed: ${started.message}`);
+    }
+    const name = started.value?.metadata?.name;
+    return {
+      kind: 'started',
+      execution: {
+        // An operation that named no execution still started one — the runtime
+        // is creating it behind the operation. The Job's own id is the honest
+        // thing to say meanwhile: it names what was run, and the next read of
+        // `executions` replaces it with the run's own name.
+        name: name === undefined ? placed.id : shortName(name),
+        outcome: 'running',
+        startedAt: null,
+      },
+    };
+  }
+
+  /** The runs that have happened, newest first (§17). */
+  async executions(
+    target: DeployTarget,
+    ref: DeployRef,
+    limit = DEFAULT_EXECUTION_PAGE,
+  ): Promise<JobRuns> {
+    const placed = this.placedJob(target, ref);
+    if (placed.kind === 'none') return placed;
+
+    const read = await this.http(placed.connection).json<CloudExecutionPage>({
+      method: 'GET',
+      path: `${placed.path}/${EXECUTIONS}`,
+      query: { pageSize: String(Math.max(1, limit)) },
+    });
+    if (!read.ok) {
+      throw new Error(
+        `reading the runs of job ${placed.id} failed: ${read.message}`,
+      );
+    }
+    // The API answers newest first already; sorting here anyway costs nothing
+    // and means the screen's order is this contract's promise rather than an
+    // undocumented property of one backend.
+    return {
+      kind: 'executions',
+      executions: (read.value?.executions ?? [])
+        .map(cloudRunExecution)
+        .sort((left, right) => startedAtOf(right) - startedAtOf(left)),
+    };
+  }
+
+  /**
+   * The Job this ref names on this connection, or why it names no job.
+   *
+   * Synchronous, because everything it decides is already in the ref: §6 makes
+   * the collection part of the handle precisely so `observe` and `destroy` can
+   * tell a Service from a Job without a Component, and these two verbs get the
+   * same answer from the same place.
+   */
+  private placedJob(
+    target: DeployTarget,
+    ref: DeployRef,
+  ):
+    | {
+        readonly kind: 'job';
+        readonly connection: CloudRunAdapterConnection;
+        readonly id: string;
+        readonly path: string;
+      }
+    | Extract<JobRuns, { kind: 'none' }> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return {
+        kind: 'none',
+        because: `${target.name} is not a Cloud Run Target`,
+      };
+    }
+    const placed = parseRef(connection, ref);
+    if (placed === null) {
+      return {
+        kind: 'none',
+        because: 'this Deploy carries no handle on what it placed here',
+      };
+    }
+    if (placed.collection !== JOBS) {
+      return {
+        kind: 'none',
+        because:
+          'this ref names a service, which has a runtime tail rather than runs',
+      };
+    }
+    return {
+      kind: 'job',
+      connection,
+      id: placed.id,
+      path: `/v2/${parentOf(connection)}/${JOBS}/${encodeURIComponent(placed.id)}`,
     };
   }
 
@@ -692,6 +846,76 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   }
 }
 
+/** The long-running operation a write answers with, as much as is read. */
+interface CloudOperation {
+  /** The resource being created — for `jobs.run`, the Execution itself. */
+  readonly metadata?: { readonly name?: string };
+}
+
+interface CloudExecutionPage {
+  readonly executions?: readonly CloudExecution[];
+}
+
+/** One run, as much of the v2 `Execution` as this adapter reads. */
+interface CloudExecution {
+  readonly name?: string;
+  readonly startTime?: string;
+  readonly createTime?: string;
+  readonly succeededCount?: number;
+  readonly failedCount?: number;
+  readonly conditions?: readonly {
+    readonly type?: string;
+    readonly state?: string;
+    readonly message?: string;
+  }[];
+}
+
+/**
+ * One `Execution` as a run (§17).
+ *
+ * The `Completed` condition is the terminal one, and the counts are the
+ * fallback rather than the primary reading: a run whose condition has not been
+ * written yet but whose task already failed is a failed run, and reporting it
+ * as still going would leave the screen waiting for something that is over.
+ */
+function cloudRunExecution(execution: CloudExecution): JobExecution {
+  const completed = (execution.conditions ?? []).find(
+    (condition) => condition.type === 'Completed',
+  );
+  const at = execution.startTime ?? execution.createTime;
+  const outcome =
+    completed?.state === 'CONDITION_SUCCEEDED' ||
+    (completed === undefined && (execution.succeededCount ?? 0) > 0)
+      ? 'passed'
+      : completed?.state === 'CONDITION_FAILED' ||
+          (execution.failedCount ?? 0) > 0
+        ? 'failed'
+        : 'running';
+  return {
+    name: shortName(execution.name ?? ''),
+    outcome,
+    startedAt: at === undefined ? null : new Date(at),
+    ...(completed?.message === undefined ? {} : { detail: completed.message }),
+  };
+}
+
+/** What a run sorts by. A run with no start time yet is the newest there is. */
+function startedAtOf(execution: JobExecution): number {
+  return execution.startedAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * The last segment of a resource path.
+ *
+ * The runtime names an execution in full — `projects/…/jobs/…/executions/x` —
+ * and the log filter's `execution_name` label carries only the `x`. So the
+ * short name is what travels, because it is the one form both the list and the
+ * logs agree on.
+ */
+function shortName(name: string): string {
+  return name.slice(name.lastIndexOf('/') + 1);
+}
+
 interface CloudLogPage {
   readonly entries?: readonly CloudLogEntry[];
 }
@@ -703,6 +927,8 @@ interface CloudLogEntry {
   readonly textPayload?: string;
   readonly jsonPayload?: unknown;
   readonly resource?: { readonly labels?: Record<string, string> };
+  /** Where a job's entries carry which execution and task wrote them. */
+  readonly labels?: Record<string, string>;
 }
 
 interface CloudLogRecord {
@@ -725,8 +951,19 @@ function cloudLogRecord(entry: CloudLogEntry): CloudLogRecord | null {
     at,
     insertId: entry.insertId,
     line,
-    replica: entry.resource?.labels?.revision_name ?? 'unknown',
+    // What wrote the line. A service's replica is a revision; a run's is one of
+    // its tasks, and a run with `taskCount: 1` still names the task rather than
+    // leaving the column reading `unknown` for every line it ever writes.
+    replica:
+      entry.resource?.labels?.revision_name ??
+      taskReplica(entry.labels?.[TASK_INDEX_LABEL]) ??
+      'unknown',
   };
+}
+
+/** The `task N` a task index reads as, or nothing when there is no index. */
+function taskReplica(index: string | undefined): string | undefined {
+  return index === undefined ? undefined : `task ${index}`;
 }
 
 function cloudLogCursor(cursor: string | undefined): CloudLogRecord | null {

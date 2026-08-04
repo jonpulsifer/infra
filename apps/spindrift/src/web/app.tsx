@@ -17,6 +17,7 @@ import type {
   DeployLedgerItem,
   DeployView,
   LinkedRepoView,
+  LogLine,
   PendingTargetConnection,
   RepositoryConnectorView,
   RepositoryOptionView,
@@ -33,7 +34,11 @@ import { cn } from './ui/utils.ts';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { AppList } from './views/apps/list.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
-import { type SetReach, Workspace } from './views/apps/workspace.tsx';
+import {
+  type RunJob,
+  type SetReach,
+  Workspace,
+} from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
 import { InstallationSettings } from './views/auth/installation.tsx';
 import { Onboarding } from './views/auth/onboarding.tsx';
@@ -854,6 +859,16 @@ function WorkspaceScreen({
   const [deployError, setDeployError] = useState<string | null>(null);
   /** Bumped when an act changed state the workspace has already read. */
   const [reloadToken, setReloadToken] = useState(0);
+  /**
+   * Which run's output is open, and the lines read so far (§17).
+   *
+   * Held here rather than in the card because the socket is: a job's tail is
+   * one run's, so switching runs is a different subscription and the lines
+   * start again — which is why they are cleared when the name changes rather
+   * than appended to whatever the last run said.
+   */
+  const [following, setFollowing] = useState<string | null>(null);
+  const [runLines, setRunLines] = useState<readonly LogLine[]>([]);
 
   // There is no workspace left to stand on once the App is gone.
   const deletion = useAppDeletion(() => onNavigate('/apps'));
@@ -938,6 +953,35 @@ function WorkspaceScreen({
       },
     );
   }, [runtime?.componentId, runtime?.targetId]);
+
+  // A job's runs are read the same way a service's output is — one socket, one
+  // cursor — with the run named. §17's two surfaces stay distinct in what they
+  // are subscribed to, not in how they are transported.
+  const runs =
+    state.type === 'success' && state.workspace.runtime.kind === 'executions'
+      ? state.workspace.runtime
+      : null;
+  useEffect(() => {
+    setRunLines([]);
+    if (runs === null || following === null) return;
+    if (runs.componentId === undefined || runs.targetId === undefined) return;
+    return subscribeRuntime(
+      {
+        componentId: runs.componentId,
+        targetId: runs.targetId,
+        execution: following,
+      },
+      (page) => {
+        if (page.kind !== 'stream' || page.entries.length === 0) return;
+        setRunLines((lines) => [
+          ...lines,
+          ...page.entries.map((entry) => ({
+            text: `${entry.replica}  ${entry.line}`,
+          })),
+        ]);
+      },
+    );
+  }, [runs?.componentId, runs?.targetId, following]);
 
   if (state.type === 'loading') {
     return (
@@ -1033,6 +1077,36 @@ function WorkspaceScreen({
     }
   };
 
+  /**
+   * Start one run (§17), then re-read: the list on the screen was written
+   * before the run existed, and a run that does not appear reads as a press
+   * that did nothing.
+   */
+  const handleRunJob: RunJob = async () => {
+    const job =
+      state.type === 'success' && state.workspace.runtime.kind === 'executions'
+        ? state.workspace.runtime
+        : null;
+    if (job?.componentId === undefined || job.targetId === undefined) {
+      return { ok: false, message: 'This job has not been placed on a Target' };
+    }
+    try {
+      const result = await command('runComponent', {
+        componentId: job.componentId,
+        targetId: job.targetId,
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Starting the run failed',
+      };
+    }
+  };
+
   return (
     <>
       {deployError ? (
@@ -1060,6 +1134,13 @@ function WorkspaceScreen({
         onNavigate={onNavigate}
         deletion={deletion}
         onSetReach={handleSetReach}
+        {...(runs === null
+          ? {}
+          : {
+              onRunJob: handleRunJob,
+              onFollowExecution: setFollowing,
+              executionLines: runLines,
+            })}
       />
       <DeleteAppDialog deletion={deletion} />
     </>

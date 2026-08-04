@@ -634,6 +634,23 @@ describe('the App workspace', () => {
     expect(markup).toContain('configured on the Target');
   });
 
+  test('running a job is offered where the runs are, and only there', () => {
+    // §7 makes a job's `apply` two acts, and only the second one runs
+    // anything: the header's Deploy button writes an intent that places a
+    // CronJob triggered by nothing. Two buttons that both read `Run now` where
+    // one deploys is the label a reader cannot recover from, so the word
+    // belongs to the act that actually runs something.
+    const job = WORKSPACE_SCENARIOS.job;
+    const withoutAct = workspace(job);
+    expect(withoutAct).toContain('Deploy');
+    expect(withoutAct).not.toContain('Run now');
+
+    const withAct = renderToStaticMarkup(
+      <Workspace view={job} onRunJob={async () => ({ ok: true })} />,
+    );
+    expect(withAct).toContain('Run now');
+  });
+
   test('a service states how far its log reaches', () => {
     // §17: `logHistory` "is how far back `since` can honestly reach... so a
     // Target never *lacks* logs; it only has a shorter memory, and the UI

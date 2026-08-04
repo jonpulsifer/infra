@@ -934,3 +934,173 @@ describe('runtime log tail', () => {
     );
   });
 });
+
+/**
+ * A job's runs (§17).
+ *
+ * A Job here is triggered by nothing, so an execution exists exactly when
+ * something asked for one — `jobs.run` is that asking, and its `Operation`
+ * carries the Execution the runtime named. The reading half is the sub-
+ * collection, and the log half is the filter that a Service's would never
+ * match: a run's entries are `cloud_run_job`, keyed on `job_name` and labelled
+ * with the execution, none of which a `cloud_run_revision` filter selects.
+ */
+describe('a job is run, and its runs are read', () => {
+  const JOB_REF =
+    'projects/example-vessel/locations/somewhere/jobs/shop-nightly';
+  const job = () =>
+    desired({ component: 'nightly', kind: 'job', reach: 'none', auth: 'none' });
+
+  /** One `Execution` as the API returns it. */
+  function execution(
+    name: string,
+    fields: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      name: `projects/example-vessel/locations/somewhere/jobs/shop-nightly/executions/${name}`,
+      ...fields,
+    };
+  }
+
+  test('starts a run through the runtime’s own verb', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), job()));
+
+    const started = await adapter.run(target(), JOB_REF);
+
+    expect(started.kind).toBe('started');
+    if (started.kind !== 'started') return;
+    // The short name, which is the only form the log filter's own
+    // `execution_name` label carries.
+    expect(started.execution.name).toBe('shop-nightly-1');
+    expect(started.execution.outcome).toBe('running');
+    expect(api.pathsOf('POST')).toContain(
+      '/v2/projects/example-vessel/locations/somewhere/jobs/shop-nightly:run',
+    );
+  });
+
+  test('refuses a ref that names a service rather than a job', async () => {
+    const { adapter } = adapterFor();
+    await drain(adapter.apply(target(), desired()));
+
+    expect(
+      await adapter.run(
+        target(),
+        'projects/example-vessel/locations/somewhere/services/shop-web',
+      ),
+    ).toEqual({
+      kind: 'none',
+      because:
+        'this ref names a service, which has a runtime tail rather than runs',
+    });
+  });
+
+  test('lists the runs that happened, newest first, with their outcome', async () => {
+    const { adapter } = adapterFor({
+      executions: {
+        'shop-nightly': [
+          execution('shop-nightly-3', {
+            startTime: '2026-08-03T00:00:00Z',
+          }),
+          execution('shop-nightly-2', {
+            startTime: '2026-08-02T00:00:00Z',
+            failedCount: 1,
+            conditions: [
+              {
+                type: 'Completed',
+                state: 'CONDITION_FAILED',
+                message: 'the task exited 1',
+              },
+            ],
+          }),
+          execution('shop-nightly-1', {
+            startTime: '2026-08-01T00:00:00Z',
+            succeededCount: 1,
+            conditions: [{ type: 'Completed', state: 'CONDITION_SUCCEEDED' }],
+          }),
+        ],
+      },
+    });
+    await drain(adapter.apply(target(), job()));
+
+    const runs = await adapter.executions(target(), JOB_REF);
+
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(runs.executions.map((run) => [run.name, run.outcome])).toEqual([
+      ['shop-nightly-3', 'running'],
+      ['shop-nightly-2', 'failed'],
+      ['shop-nightly-1', 'passed'],
+    ]);
+    expect(runs.executions[1]?.detail).toBe('the task exited 1');
+  });
+
+  test("reads one run's logs with a job filter, not a revision one", async () => {
+    const api = new FakeCloudRun();
+    const filters: string[] = [];
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      logsEndpoint: api.endpoint,
+      fetch: async (request) => {
+        if (new URL(request.url).pathname !== '/v2/entries:list') {
+          return api.fetch(request);
+        }
+        const body = (await request.clone().json()) as { filter: string };
+        filters.push(body.filter);
+        return Response.json({
+          entries: [
+            {
+              timestamp: '2026-08-04T12:00:00.000Z',
+              insertId: 'a',
+              textPayload: 'backing up',
+              labels: { 'run.googleapis.com/task_index': '0' },
+            },
+          ],
+        });
+      },
+    });
+
+    const page = await adapter.tail(target(), {
+      app: 'shop',
+      component: 'nightly',
+      execution: 'shop-nightly-2',
+    });
+
+    expect(page.kind).toBe('stream');
+    if (page.kind !== 'stream') return;
+    expect(page.entries.map((entry) => entry.line)).toEqual(['backing up']);
+    // A run has tasks rather than revisions, and a column reading `unknown` for
+    // every line a job ever writes is what a revision-shaped read produces.
+    expect(page.entries[0]?.replica).toBe('task 0');
+    expect(filters[0]).toContain('resource.type="cloud_run_job"');
+    expect(filters[0]).toContain('resource.labels.job_name="shop-nightly"');
+    expect(filters[0]).toContain(
+      'labels."run.googleapis.com/execution_name"="shop-nightly-2"',
+    );
+    expect(filters[0]).not.toContain('cloud_run_revision');
+  });
+
+  test('a service still reads its revisions — the filter did not move', async () => {
+    const api = new FakeCloudRun();
+    const filters: string[] = [];
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      logsEndpoint: api.endpoint,
+      fetch: async (request) => {
+        if (new URL(request.url).pathname !== '/v2/entries:list') {
+          return api.fetch(request);
+        }
+        filters.push(
+          ((await request.clone().json()) as { filter: string }).filter,
+        );
+        return Response.json({ entries: [] });
+      },
+    });
+
+    await adapter.tail(target(), { app: 'shop', component: 'web' });
+
+    expect(filters[0]).toContain('resource.type="cloud_run_revision"');
+    expect(filters[0]).toContain('resource.labels.service_name="shop-web"');
+    expect(filters[0]).not.toContain('execution_name');
+  });
+});
