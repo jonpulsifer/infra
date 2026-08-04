@@ -14,11 +14,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# Each entry is a path some Flux Kustomization names, so an overlay that is its
+# own `spec.path` belongs here in its own right — being under `clusters/*/apps`
+# does not mean the aggregate overlay includes it. oauth2-proxy is exactly that
+# case, and it was rendered by nothing until it was listed.
 OVERLAYS=(
   clusters/folly/apps
   clusters/offsite/apps
   clusters/folly/apps/arc
   clusters/offsite/apps/arc
+  clusters/folly/apps/oauth2-proxy
+  clusters/offsite/apps/oauth2-proxy
   clusters/folly/monitoring
 )
 
@@ -93,12 +99,71 @@ template_releases() {
   done <"$list"
 }
 
+# A sign-in that starts at one host and calls back at another needs both hosts
+# inside the cookie's scope, or the browser carries neither cookie across:
+# the CSRF cookie is written where the flow starts and read at the callback,
+# and the session cookie is written at the callback and read back at the App.
+#
+# So oauth2-proxy's `cookie-domain` must cover the host in its own
+# `redirect-url`. That single rule catches both ways this has actually broken:
+# an absent or null `cookie-domain`, which leaves every cookie host-only and
+# unreadable one hop later; and a `cookie-domain` naming the *other* cluster's
+# apex, which a strategic merge produces silently the moment an overlay omits
+# the key (see `clusters/offsite/apps/oauth2-proxy/helm-release-patch.yaml`).
+#
+# Flux has not substituted its `${VAR}` postbuild values at this point, and that
+# is what makes the second case visible: comparing the literal tokens is exactly
+# how `.${SECRET_DOMAIN}` under `oauth2.${SPINDRIFT_DOMAIN}` fails to match.
+cookie_checks=0
+cookie_scope_contract() {
+  local rendered="$1" overlay="$2"
+  local ns name url domain host rest
+
+  while IFS=$'\t' read -r ns name url domain; do
+    [ -n "${ns:-}" ] || continue
+    cookie_checks=$((cookie_checks + 1))
+
+    host="${url#*://}"
+    host="${host%%/*}"
+    rest="${host%"$domain"}"
+
+    # `rest` empty means cookie-domain equals the callback host exactly: a
+    # host-only cookie the App can never read, which is the loop, not a fix.
+    if [ -z "$domain" ] || [ "$rest" = "$host" ] || [ -z "$rest" ]; then
+      printf '  FAILED %s/%s (%s): cookie-domain "%s" does not cover the redirect-url host "%s"\n' \
+        "$ns" "$name" "$overlay" "$domain" "$host"
+      failures=$((failures + 1))
+    else
+      printf '  cookie scope %s/%s: "%s" covers "%s"\n' "$ns" "$name" "$domain" "$host"
+    fi
+  done < <(yq eval-all '
+    select(.kind == "HelmRelease")
+    | select(.spec.values.extraArgs."redirect-url" // "" | length > 0)
+    | [[ (.metadata.namespace // "default"),
+         .metadata.name,
+         .spec.values.extraArgs."redirect-url",
+         (.spec.values.extraArgs."cookie-domain" // "") ]]
+    | @tsv
+  ' "$rendered")
+}
+
 for overlay in "${OVERLAYS[@]}"; do
   rendered="$WORK/${overlay//\//_}.yaml"
   kubectl kustomize "$overlay" >"$rendered"
   printf 'rendered %s\n' "$overlay"
   template_releases "$rendered" "$overlay"
+  cookie_scope_contract "$rendered" "$overlay"
 done
+
+# The contract above has to have looked at something. `redirect-url` is what
+# selects a release into it, so a rename or a deleted key would otherwise turn
+# the whole check into silence that reads green.
+if [ "$cookie_checks" -eq 0 ]; then
+  printf '\nNo rendered HelmRelease declares extraArgs.redirect-url, so the cookie\n'
+  printf 'scope contract checked nothing. Either the key moved or an overlay is\n'
+  printf 'missing from OVERLAYS in %s.\n' "${BASH_SOURCE[0]}"
+  failures=$((failures + 1))
+fi
 
 # A HelmRelease that names an in-repo chart but lives outside the overlays above
 # is exactly the gap this script closes, so it is an error rather than silence:
