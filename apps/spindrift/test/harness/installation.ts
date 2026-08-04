@@ -164,6 +164,10 @@ export function cloudInput(
     region: 'somewhere',
     runEndpoint: CLOUD_ENDPOINTS.run,
     hostingEndpoint: CLOUD_ENDPOINTS.hosting,
+    // The vessel names one — see `clusters/offsite/apps/spindrift/`. A fixture
+    // that left it out would be a Target no scheduled job can be placed on,
+    // which is a real state but not the ordinary one.
+    serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
     ...overrides,
   };
 }
@@ -204,6 +208,9 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
         region: input.region,
         endpoint: input.runEndpoint,
         policyEndpoint: CLOUD_ENDPOINTS.policy,
+        ...(input.serviceAccount === undefined
+          ? {}
+          : { serviceAccount: input.serviceAccount }),
       };
     }
     case 'static': {

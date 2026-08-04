@@ -237,6 +237,11 @@ export function deployPathReferences(
 export interface TargetCapabilities {
   // From the adapter type.
   kinds: readonly ComponentKind[];
+  /**
+   * From the adapter type **and** from this Target's connection: the code has
+   * to fire a schedule and the Target has to give it something to fire as. See
+   * {@link FIRES_SCHEDULES_BY_ADAPTER} and `CapabilityContext.firesSchedules`.
+   */
   firesSchedules: boolean;
   artifactTypes: readonly ArtifactType[];
 
@@ -306,6 +311,13 @@ export const KINDS_BY_ADAPTER = {
  * one. The only `false` row left is `static`, which renders no job at all and
  * therefore never reaches that sentence — so the mechanism is dormant here
  * rather than dead, and it is what the next backend is measured against.
+ *
+ * **Not the whole answer for one Target, though.** This says what the code can
+ * do; a Cloud Run Target that names no runtime identity has nothing for a
+ * schedule to authenticate as, whatever its adapter is capable of. That half
+ * arrives on the connection — see `CapabilityContext.firesSchedules` — and the
+ * two are ANDed, so the row stays a property of the code and the Target's own
+ * configuration can only ever subtract.
  */
 export const FIRES_SCHEDULES_BY_ADAPTER = {
   kubernetes: true,
@@ -415,6 +427,12 @@ export interface CapabilityContext {
   /** `null` or empty both mean no authenticated edge has been claimed. */
   authReaches: readonly Reach[] | null;
   deployPath: DeployPathReferences;
+  /**
+   * Where this Target's own connection can stop it firing one, even though its
+   * adapter fires them. Absent means nothing about it does — see
+   * {@link FIRES_SCHEDULES_BY_ADAPTER}, which is the only other input.
+   */
+  firesSchedules?: boolean;
 }
 
 /** Fold one inspection into the capabilities §3 describes. */
@@ -424,7 +442,9 @@ export function resolveCapabilities(
 ): TargetCapabilities {
   return {
     kinds: KINDS_BY_ADAPTER[context.adapter],
-    firesSchedules: FIRES_SCHEDULES_BY_ADAPTER[context.adapter],
+    firesSchedules:
+      FIRES_SCHEDULES_BY_ADAPTER[context.adapter] &&
+      (context.firesSchedules ?? true),
     artifactTypes: context.artifactTypes,
 
     arch: discovery.arch,
@@ -506,7 +526,10 @@ export function noCapabilities(context: CapabilityContext): TargetCapabilities {
  * reason, never silently dropped.
  */
 export function capabilitiesOfRow(
-  target: Pick<TargetRow, 'adapter' | 'discovery' | 'reaches' | 'authReaches'>,
+  target: Pick<
+    TargetRow,
+    'adapter' | 'discovery' | 'reaches' | 'authReaches' | 'connection'
+  >,
   options: {
     /** The adapter instance, or `null` when this installation ships none. */
     readonly artifactTypes: readonly ArtifactType[] | null;
@@ -519,10 +542,30 @@ export function capabilitiesOfRow(
     reaches: target.reaches,
     authReaches: target.authReaches,
     deployPath: deployPathReferences(options.manifest),
+    firesSchedules: firesSchedulesOn(target.connection),
   };
   return target.discovery === null || options.artifactTypes === null
     ? noCapabilities(context)
     : resolveCapabilities(target.discovery, context);
+}
+
+/**
+ * Whether this Target's own connection lets a schedule fire, as opposed to its
+ * adapter's code being able to.
+ *
+ * The one case, and the reason this is not purely from-the-adapter-type: a
+ * Cloud Scheduler job authenticates the `jobs.run` call it makes, so a Cloud
+ * Run Target that names no runtime identity has nothing for a schedule to fire
+ * *as* — the adapter refuses it at apply, and §3's grammar says a refusal a
+ * Target's own configuration already decides belongs at Place, before a build,
+ * rather than after one. Every other flavour answers `true`: nothing in a
+ * cluster connection or a static one can withdraw a cadence its adapter keeps.
+ */
+function firesSchedulesOn(connection: TargetRow['connection']): boolean {
+  return (
+    connection?.adapter !== 'cloudrun' ||
+    connection.serviceAccount !== undefined
+  );
 }
 
 /** The columns {@link capabilitiesOfRow} reads, without importing the schema. */
@@ -531,6 +574,15 @@ interface TargetRow {
   discovery: TargetDiscovery | null;
   reaches: readonly Reach[] | null;
   authReaches: readonly Reach[] | null;
+  /**
+   * `adapter` is named so this is not a weak type, exactly as
+   * `placement.ts`'s own view of the same column is; `serviceAccount` is the
+   * one member read here and most flavours carry none.
+   */
+  connection: {
+    readonly adapter: TargetAdapter;
+    readonly serviceAccount?: string;
+  } | null;
 }
 
 /**

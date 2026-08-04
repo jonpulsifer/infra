@@ -222,11 +222,13 @@ describe('the act is credential-shaped though the noun is flat', () => {
     expect(result.value.targets.map((t) => t.rank)).toEqual([0, 1]);
 
     // Each Target keeps only the endpoint its own adapter drives: one connect
-    // act asked for both, and neither Target carries the other's.
+    // act asked for both, and neither Target carries the other's. The runtime
+    // identity splits the same way — only this surface runs anything.
     expect((await targetRow('vessel-cloudrun'))?.connection).toEqual({
       adapter: 'cloudrun',
       region: 'here',
       endpoint: CLOUD_ENDPOINTS.run,
+      serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
     });
     expect((await targetRow('vessel-static'))?.connection).toEqual({
       adapter: 'static',

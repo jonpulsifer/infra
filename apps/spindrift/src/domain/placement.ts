@@ -201,10 +201,14 @@ interface RankedTargetRow {
    * `adapter` is named here only so this is not a weak type: a shape whose every
    * property is optional accepts nothing structurally, and the connection
    * flavours that carry no `chartValues` are most of them.
+   *
+   * `serviceAccount` is not read here — it is what `capabilitiesOfRow` reads
+   * off the same column — and is named so this row satisfies that shape.
    */
   connection: {
     readonly adapter: TargetAdapter;
     readonly chartValues?: Record<string, unknown>;
+    readonly serviceAccount?: string;
   } | null;
 }
 
@@ -433,10 +437,13 @@ export function exclusionsFor(
 
   reasons.push(...reachExclusions(can, requirements));
 
-  // The kind is rendered here and the schedule is not, so this is its own
-  // reason rather than KIND_UNSUPPORTED: Cloud Run runs the Job and has nothing
-  // to fire it, and saying "this Target does not run jobs" would be false in
-  // the sentence a developer reads. Refused at Place because §3 refuses a
+  // Rendering a job and keeping a cadence are two facts, so this is its own
+  // reason rather than KIND_UNSUPPORTED: a Target that runs the Job and has
+  // nothing to fire it would be described by "this Target does not run jobs"
+  // falsely, in the sentence a developer reads. Both backends that render a job
+  // now fire one, and they came true a release apart on Cloud Run — which is
+  // exactly why the two are separate rows rather than one assumption (see
+  // `FIRES_SCHEDULES_BY_ADAPTER`). Refused at Place because §3 refuses a
   // non-candidate there — the alternative is a build and a Deploy that end in
   // the adapter's REJECTED.
   //

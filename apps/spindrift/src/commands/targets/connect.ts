@@ -150,6 +150,19 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       hostingEndpoint: z.url(),
       /** Where this project's admission policy is read from (§16). */
       policyEndpoint: z.url().optional(),
+      /**
+       * The identity a revision runs as, and the one a schedule fires as (§7).
+       *
+       * Accepted here because the declared form already carries it
+       * (`config/manifest.schema.ts`) and the two shapes must not disagree about
+       * what a Cloud Run connection is. It decides a capability rather than only
+       * a runtime detail: a Cloud Scheduler job authenticates the `jobs.run`
+       * call it makes, so a Target naming none is a `NO_SCHEDULER`
+       * non-candidate for a scheduled job — see `firesSchedulesOn` in
+       * `domain/capabilities.ts`. Optional, because a project used only for
+       * services needs no identity of its own.
+       */
+      serviceAccount: z.string().trim().min(1).optional(),
       /** §33's static reachability input, and §3's stated capabilities. */
       servedHosts: z.array(z.string().trim().min(1)).optional(),
       reachableRegistries: z.array(z.string().trim().min(1)).optional(),
@@ -218,6 +231,11 @@ function connectionFor(
       ...(input.policyEndpoint === undefined
         ? {}
         : { policyEndpoint: input.policyEndpoint }),
+      // Only this surface runs anything, so only this one has an identity to
+      // run it as — static hosting serves files and authenticates nothing.
+      ...(input.serviceAccount === undefined
+        ? {}
+        : { serviceAccount: input.serviceAccount }),
       // Only this surface has a runtime to have produced output; static
       // hosting gets §17's honest empty state rather than a duration.
       ...(input.logHistorySeconds === undefined

@@ -46,10 +46,10 @@ locals {
   spindrift_project_roles = toset([
     "roles/cloudsql.admin",
     # A Cloud Run Job carries no cron expression, so a scheduled Component is a
-    # Cloud Scheduler job the controller creates and deletes beside the Job.
+    # Cloud Scheduler job the controller keeps beside the Job.
     # `roles/run.admin` covers `run.jobs.*` and nothing scheduler-shaped, and
-    # this is the narrowest predefined role covering the only two verbs the
-    # adapter calls — `cloudscheduler.jobs.create` and `.delete`. Neither
+    # this is the narrowest predefined role covering the three verbs the adapter
+    # calls — `cloudscheduler.jobs.create`, `.update` and `.delete`. Neither
     # narrower role reaches them: `roles/cloudscheduler.viewer` only reads, and
     # `roles/cloudscheduler.jobRunner` only forces a run of a job somebody else
     # created. Nothing wider, either: an editor-shaped role would carry every

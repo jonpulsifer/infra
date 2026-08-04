@@ -230,6 +230,38 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
       expect(verdict.detail).toContain('invoker policy');
     }
   });
+
+  test('a 404 excuses a policy that grants nothing, and only that one', async () => {
+    // The adapter forgives `404` on a policy write, because a resource that is
+    // not there yet cannot have one and an empty policy is a statement already
+    // true of it. A *granting* policy is the opposite case: it did not land,
+    // and going green on it would report a public Component as reachable when
+    // nothing was ever opened.
+    const granting = adapterFor({
+      refuseIam: { status: 404, body: { error: { status: 'NOT_FOUND' } } },
+    });
+    const opened = await drain(
+      granting.adapter.apply(
+        target(),
+        desired({ reach: 'public', auth: 'none' }),
+      ),
+    );
+    expect(opened.verdict.phase).toBe('FAILED');
+
+    // The same refusal on the write that closes: the tightening pass runs
+    // before the Service exists, so `404` there is the ordinary case rather
+    // than a failure, and the deploy goes on to place it.
+    const closing = adapterFor({
+      refuseIam: { status: 404, body: { error: { status: 'NOT_FOUND' } } },
+    });
+    const tightened = await drain(
+      closing.adapter.apply(
+        target(),
+        desired({ reach: 'private', auth: 'none' }),
+      ),
+    );
+    expect(tightened.verdict.phase).toBe('LIVE');
+  });
 });
 
 describe('§6: phases come from the revision', () => {
@@ -931,12 +963,15 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
     expect(api.scheduled()).toEqual([]);
   });
 
-  test('re-deploying replaces the schedule rather than colliding with it', async () => {
-    // Cloud Scheduler has no create-or-update: its `jobs.create` answers `409`
-    // for a name that exists. An adapter that only ever created would go green
-    // on the first deploy and fail on every one after it.
+  test('re-deploying patches the schedule rather than replacing it', async () => {
+    // Cloud Scheduler has no create-or-update: `jobs.create` answers `409` for
+    // a name that exists and `jobs.patch` answers `404` for one that does not.
+    // An adapter that only ever created would go green on the first deploy and
+    // fail on every one after it.
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(scheduling(), nightly()));
+
+    api.requests.length = 0;
     const { verdict } = await drain(
       adapter.apply(scheduling(), nightly({ schedule: '30 4 * * 1' })),
     );
@@ -944,6 +979,16 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
     expect(verdict.phase).toBe('LIVE');
     expect(api.scheduled()).toHaveLength(1);
     expect(api.schedule('shop-nightly')?.schedule).toBe('30 4 * * 1');
+    // And in **one** call, with no DELETE among them. That is the property, not
+    // the call count: deleting first would mean every re-deploy of an unchanged
+    // Component has a window with nothing scheduled, and a create that then
+    // failed would have destroyed a working cadence while core kept the earlier
+    // deploy LIVE — a schedule that silently stopped.
+    expect(
+      api.requests
+        .filter((request) => request.path.startsWith('/v1/'))
+        .map((request) => request.method),
+    ).toEqual(['PATCH']);
   });
 
   test('a Target naming no identity is refused before anything is written', async () => {
@@ -964,7 +1009,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
     ).toEqual([]);
   });
 
-  test('a schedule the far side refuses fails the deploy rather than the Job', async () => {
+  test('a schedule the far side refuses fails the deploy and takes the grant back', async () => {
     // A cron expression Cloud Scheduler cannot parse is `400 INVALID_ARGUMENT`,
     // which §6 puts under REJECTED and blames the developer. The Job is up by
     // then — this is deliberately the last thing `apply` does — so what the
@@ -980,24 +1025,114 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
       expect(verdict.detail).toContain('every tuesday');
     }
     expect(api.scheduled()).toEqual([]);
+    // And the binding written a moment earlier does not outlive the schedule
+    // that justified it. The runtime account is shared by every workload in the
+    // vessel, so leaving it would leave a Job anything in the vessel may run,
+    // put there by a deploy that visibly failed.
+    expect(api.jobPolicy('shop-nightly')).toEqual({ policy: { bindings: [] } });
+    const ran = await api.fetch(
+      new Request(
+        `${api.endpoint}/v2/projects/example-vessel/locations/somewhere/jobs/shop-nightly:run`,
+        { method: 'POST', headers: { authorization: `Bearer sa:${RUNTIME}` } },
+      ),
+    );
+    expect(ran.status).toBe(403);
   });
 
-  test('a project with Cloud Scheduler switched off still deploys a plain job', async () => {
-    // The service being off is proof there is no scheduler job in the project,
-    // so the removal a plain job asserts is already true. Any other refusal is
-    // raised — a deploy that shrugged at `403 IAM_PERMISSION_DENIED` could
-    // leave a schedule firing at a Component that no longer asks for one.
-    const disabled = adapterFor({
+  test('a job that declares no schedule does not depend on Cloud Scheduler', async () => {
+    // The regression this must not become: before schedules existed, deploying
+    // a Cloud Run job made no scheduler call at all. Asserting the removal on
+    // every unscheduled job is right — the adapter holds no memory of the last
+    // deploy — but *failing* on it would make every plain job depend on Cloud
+    // Scheduler being enabled, permitted and reachable. Both are real: Cloud
+    // Scheduler serves a strict subset of Cloud Run's regions, and the project
+    // IAM that grants the role is eventually consistent after its apply.
+    const refusals = [
+      // The service being off is proof there was no scheduler job to remove,
+      // so there is no residue and nothing to say about one.
+      { refuseScheduler: serviceDisabled(), residue: false },
+      { refuseScheduler: permissionDenied(), residue: true },
+      {
+        refuseScheduler: {
+          status: 400,
+          body: { error: { message: 'unsupported location' } },
+        },
+        residue: true,
+      },
+    ];
+    for (const { refuseScheduler, residue } of refusals) {
+      const { api, adapter } = adapterFor({ refuseScheduler });
+      const { verdict, events } = await drain(
+        adapter.apply(scheduling(), nightly({ schedule: undefined })),
+      );
+
+      expect(verdict.phase).toBe('LIVE');
+      expect(api.job('shop-nightly')).toBeDefined();
+      // And the grant is gone whatever the scheduler said, which is what makes
+      // the firing stop even where the scheduler job survived: a tick lands on
+      // a Job that no longer admits it.
+      expect(api.jobPolicy('shop-nightly')).toEqual({
+        policy: { bindings: [] },
+      });
+      // Tolerated is not the same as unsaid: a residue this deploy could not
+      // clear is on the timeline, which is where an operator finds out.
+      expect(
+        events.some(
+          (event) =>
+            event.type === 'log' && event.line.includes('could not be removed'),
+        ),
+      ).toBe(residue);
+    }
+  });
+
+  test('destroy raises what apply tolerates', async () => {
+    // The other side of the same call, and the reason it is one function with
+    // two callers rather than two: `destroy` is the act that has to leave
+    // nothing behind, so a refusal there is a scheduler job that will keep
+    // calling `jobs.run` at a Job that is gone.
+    const { adapter } = adapterFor({ refuseScheduler: permissionDenied() });
+    const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
+    expect(verdict.phase).toBe('FAILED');
+
+    const ref = 'projects/example-vessel/locations/somewhere/jobs/shop-nightly';
+    await expect(adapter.destroy(scheduling(), ref)).rejects.toThrow(
+      'could not be removed',
+    );
+  });
+
+  test('a project with Cloud Scheduler switched off destroys a plain job', async () => {
+    // The service being off is proof there is no scheduler job in the project:
+    // an API that was never enabled has nothing under it that could have
+    // created one.
+    const { api, adapter } = adapterFor({ refuseScheduler: serviceDisabled() });
+    const { verdict } = await drain(
+      adapter.apply(scheduling(), nightly({ schedule: undefined })),
+    );
+    expect(verdict.phase).toBe('LIVE');
+
+    await adapter.destroy(scheduling(), verdict.ref as string);
+    expect(api.job('shop-nightly')).toBeUndefined();
+  });
+
+  test('and a refusal that only mentions the words does not count', async () => {
+    // That tolerance is read off the ErrorInfo `reason` and nowhere else.
+    // Google says "this service is off" machine-readably; a refusal whose
+    // reason is `IAM_PERMISSION_DENIED` is a real one however its human message
+    // reads, and swallowing it here would leave the scheduler job firing at a
+    // Job `destroy` went on to delete.
+    const denied = permissionDenied();
+    const { adapter } = adapterFor({
       refuseScheduler: {
-        status: 403,
+        status: denied.status,
         body: {
           error: {
-            message: 'Cloud Scheduler API has not been used in this project',
+            message:
+              'the caller does not have permission; check whether SERVICE_DISABLED applies',
             status: 'PERMISSION_DENIED',
             details: [
               {
                 '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
-                reason: 'SERVICE_DISABLED',
+                reason: 'IAM_PERMISSION_DENIED',
               },
             ],
           },
@@ -1005,18 +1140,13 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
       },
     });
     const { verdict } = await drain(
-      disabled.adapter.apply(scheduling(), nightly({ schedule: undefined })),
+      adapter.apply(scheduling(), nightly({ schedule: undefined })),
     );
     expect(verdict.phase).toBe('LIVE');
 
-    const refused = adapterFor({ refuseScheduler: permissionDenied() });
-    const stopped = await drain(
-      refused.adapter.apply(scheduling(), nightly({ schedule: undefined })),
-    );
-    expect(stopped.verdict.phase).toBe('FAILED');
-    if (stopped.verdict.phase === 'FAILED') {
-      expect(stopped.verdict.detail).toContain('could not be removed');
-    }
+    await expect(
+      adapter.destroy(scheduling(), verdict.ref as string),
+    ).rejects.toThrow('could not be removed');
   });
 });
 

@@ -107,9 +107,10 @@ export interface CloudRunAdapterOptions {
   /**
    * Cloud Scheduler API root — what fires a scheduled job (§7).
    *
-   * Injectable for the same two reasons the logging root is, and defaulted for
-   * the same reason: it is a property of the cloud rather than of a project, so
-   * unlike the Target's own `endpoint` there is nothing per-Target to carry.
+   * Injected only by a test: `adapters/registry.ts` passes this adapter a token
+   * and a transport and nothing else. Defaulted rather than carried on the
+   * connection because it is a property of the cloud rather than of a project —
+   * unlike the Target's own `endpoint`, there is nothing per-Target to say.
    */
   readonly schedulerEndpoint?: string;
 }
@@ -290,11 +291,26 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // new template. Asserted on every unscheduled job rather than only where
     // one was removed — this adapter holds no memory of the last deploy, and
     // deleting what is not there costs one call and answers `404`.
+    //
+    // **Said, not fatal.** Which is the difference between this call and the
+    // one in `destroy`: here it is a cleanup for a schedule most jobs never
+    // had, and failing on it would make every Cloud Run job — including one
+    // that has never declared a cadence — depend on Cloud Scheduler being
+    // enabled, permitted and reachable. Two ways that bites without anything
+    // being wrong: Cloud Scheduler serves a strict subset of Cloud Run's
+    // regions, and a project's IAM is eventually consistent after the terraform
+    // that grants the role. What actually stops a schedule firing is the empty
+    // invoker policy written further down, and that is a Cloud Run call: a
+    // scheduler job that survived this lands on a Job that no longer admits it.
+    // So the residue is a ticking job producing nothing — stated on the
+    // timeline so it is not silent, and raised for real by `destroy`.
     if (job && fires === null) {
       const stopped = await this.unschedule(connection, id);
       if (stopped !== null) {
-        yield this.status('FAILED', { resource: id, reason: stopped.reason });
-        return { ...stopped, ref };
+        yield this.log(
+          `${stopped.detail ?? `the schedule on job ${id} could not be removed`} — this Component declares none, so the deploy continues and the grant below is what stops it firing`,
+          id,
+        );
       }
     }
 
@@ -394,6 +410,23 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       // admit it.
       const scheduled = await this.schedule(connection, id, fires, ref);
       if (scheduled !== null) {
+        // And taken back when nothing came to use it. Writing the grant first
+        // is right on the path that succeeds and wrong on the path that does
+        // not: the runtime account is one identity shared by every workload in
+        // the vessel — which is the whole reason the binding is per-Job — so a
+        // grant left behind by a visibly failed deploy is a Job anything in the
+        // vessel may run, uncleaned until someone deploys this Component
+        // successfully. Best effort, and deliberately not allowed to replace
+        // the verdict: what the operator has to see is why the schedule did not
+        // land, not a second failure about tidying up after it.
+        await this.setInvoker(
+          http,
+          connection,
+          JOBS,
+          id,
+          jobInvokerPolicy(null),
+          'this job',
+        );
         yield this.status('FAILED', { resource: id, reason: scheduled.reason });
         return { ...scheduled, ref };
       }
@@ -841,12 +874,17 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   /**
    * Put this job on its schedule, replacing whatever was there.
    *
-   * **Delete, then create.** Cloud Scheduler has no create-or-update: its
-   * `jobs.create` refuses a name that exists and its `jobs.patch` refuses one
-   * that does not, so an upsert is two calls whichever order they go in. Doing
-   * the removal first makes the same call the unscheduled path already makes,
-   * which leaves one way for a schedule to stop rather than two — and the gap
-   * it opens is between two writes on a cadence measured in minutes.
+   * **Patch, then create on `404`.** Cloud Scheduler has no create-or-update —
+   * `jobs.create` refuses a name that exists and `jobs.patch` refuses one that
+   * does not — so one of the two has to go first, and the choice is not a wash.
+   * Patching first costs **one** call in the steady state, which is every
+   * re-deploy of a Component whose cadence has not changed, and it never leaves
+   * a moment with nothing scheduled. Deleting first would cost two always and
+   * open that window on every deploy, including ones that change nothing: a
+   * create that then failed — a transient `500`, a quota — would have destroyed
+   * a working cadence, and core keeps the earlier deploy `LIVE`
+   * (`reconciler/deploy-loop.ts`), so nothing in the product would say the
+   * firing had stopped.
    */
   private async schedule(
     connection: CloudRunAdapterConnection,
@@ -854,23 +892,36 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     schedule: string,
     name: DeployRef,
   ): Promise<Omit<Extract<DeployVerdict, { phase: 'FAILED' }>, 'ref'> | null> {
-    const replaced = await this.unschedule(connection, id);
-    if (replaced !== null) return replaced;
-
-    const created = await this.scheduler().json<unknown>({
-      method: 'POST',
-      path: `/v1/${parentOf(connection)}/${JOBS}`,
-      body: cloudSchedulerJob(schedule, {
-        connection,
-        name,
-        // Refused before anything was written when the Target names none —
-        // see `apply`. The fallback is unreachable and is here because the
-        // type cannot know that.
-        serviceAccount: connection.serviceAccount ?? '',
-      }),
+    const document = cloudSchedulerJob(schedule, {
+      connection,
+      name,
+      // Refused before anything was written when the Target names none —
+      // see `apply`. The fallback is unreachable and is here because the
+      // type cannot know that.
+      serviceAccount: connection.serviceAccount ?? '',
     });
-    if (created.ok) return null;
-    const failure = cloudWriteFailure(created, id);
+    const path = `/v1/${parentOf(connection)}/${JOBS}`;
+    const patched = await this.scheduler().json<unknown>({
+      method: 'PATCH',
+      path: `${path}/${encodeURIComponent(id)}`,
+      // Named rather than omitted: an absent mask means "replace the whole
+      // resource" to some of this family's APIs and "update what was sent" to
+      // others, and the fields this adapter writes are the only ones it should
+      // be able to clear. `name` is the identity and is not in it.
+      query: { updateMask: 'schedule,timeZone,httpTarget' },
+      body: document,
+    });
+    if (patched.ok) return null;
+    const written =
+      patched.kind === 'status' && patched.status === 404
+        ? await this.scheduler().json<unknown>({
+            method: 'POST',
+            path,
+            body: document,
+          })
+        : patched;
+    if (written.ok) return null;
+    const failure = cloudWriteFailure(written, id);
     return {
       phase: 'FAILED',
       reason: failure.reason,
@@ -900,14 +951,15 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // the ordinary one. A refusal because the service is switched off in this
     // project is the other, and it is proof rather than an assumption: an API
     // that was never enabled has nothing under it that could have created a
-    // scheduler job. Tolerating it narrowly is what keeps a project that never
-    // wanted a schedule from failing every unscheduled job on a call about
-    // schedules; every other `403` is a real refusal and is raised.
-    if (
-      removed.status === 404 ||
-      removed.reason === SERVICE_DISABLED ||
-      removed.body.includes(SERVICE_DISABLED)
-    ) {
+    // scheduler job.
+    //
+    // Read off `reason` and nothing else. `cloud/http.ts` lifts that out of the
+    // ErrorInfo the API attaches, which is how Google says "this service is
+    // off" machine-readably; scanning the *body* for the same string would
+    // tolerate a genuine `IAM_PERMISSION_DENIED` whose human message happens to
+    // mention it — swallowing the one refusal that must be raised, on the path
+    // whose whole job is to make sure a schedule really stopped.
+    if (removed.status === 404 || removed.reason === SERVICE_DISABLED) {
       return null;
     }
     const failure = cloudWriteFailure(removed, id);

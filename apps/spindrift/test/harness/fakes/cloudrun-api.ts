@@ -686,11 +686,12 @@ export class FakeCloudRun {
   }
 
   /**
-   * Cloud Scheduler, as much of it as an adapter that only ever creates and
+   * Cloud Scheduler, as much of it as an adapter that creates, updates and
    * deletes needs.
    *
    * **No create-or-update, deliberately.** The real `jobs.create` refuses a
-   * name that already exists with `409 ALREADY_EXISTS`, and modelling that is
+   * name that already exists with `409 ALREADY_EXISTS` and the real
+   * `jobs.patch` refuses one that does not with `404`, and modelling both is
    * what keeps an adapter honest about the fact that this API has no upsert —
    * one that assumed otherwise would pass here and leave a Component's second
    * deploy silently on its first schedule.
@@ -703,14 +704,23 @@ export class FakeCloudRun {
       );
     }
     const parent = `/v1/${this.parent()}/jobs`;
+    const addressed = url.pathname.startsWith(`${parent}/`)
+      ? url.pathname.slice('/v1/'.length)
+      : null;
     if (method === 'DELETE') {
-      if (!url.pathname.startsWith(`${parent}/`)) return json(404, notFound());
-      const name = url.pathname.slice('/v1/'.length);
-      if (!this.schedules.has(name)) return json(404, notFound());
-      this.schedules.delete(name);
+      if (addressed === null || !this.schedules.has(addressed)) {
+        return json(404, notFound());
+      }
+      this.schedules.delete(addressed);
       return json(200, {});
     }
-    if (method !== 'POST' || url.pathname !== parent) {
+    // `patch` addresses the job and `create` addresses its parent — the only
+    // difference between the two, other than which of them refuses.
+    if (method === 'PATCH') {
+      if (addressed === null || !this.schedules.has(addressed)) {
+        return json(404, notFound());
+      }
+    } else if (method !== 'POST' || url.pathname !== parent) {
       return json(404, notFound());
     }
 
@@ -738,7 +748,7 @@ export class FakeCloudRun {
         },
       });
     }
-    if (this.schedules.has(name)) {
+    if (method === 'POST' && this.schedules.has(name)) {
       return json(409, {
         error: { code: 409, status: 'ALREADY_EXISTS', message: 'job exists' },
       });
@@ -902,13 +912,20 @@ function notFound(): unknown {
   return { error: { message: 'not found', status: 'NOT_FOUND' } };
 }
 
-/** A refusal because the service is switched off in this project. */
+/**
+ * A refusal because the service is switched off in this project.
+ *
+ * One definition for both APIs this fake stands in for, because what the
+ * adapter reads is the ErrorInfo `reason` and that is identical whichever
+ * service is off — the human message is the part that names one, and no test
+ * reads it.
+ */
 export function serviceDisabled(): { status: number; body: unknown } {
   return {
     status: 403,
     body: {
       error: {
-        message: 'Cloud Run API has not been used in this project',
+        message: 'this API has not been used in this project',
         status: 'PERMISSION_DENIED',
         details: [{ '@type': ERROR_INFO, reason: 'SERVICE_DISABLED' }],
       },
