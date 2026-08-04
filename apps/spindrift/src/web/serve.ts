@@ -147,14 +147,18 @@ export async function start(
    *
    * `loadStoredManifest` already read this file at boot to decide whether to
    * seed from it, and already logs when it disagrees with what got stored —
-   * this is a second, best-effort read of the same file so `manifestDivergence`
+   * this is a second, best-effort read of the same file so `declarationDivergence`
    * below can answer the same question on demand rather than only once, to a
-   * log line, at the moment nobody was watching. `null` for "unreadable" as
-   * well as "absent": an invalid declaration is already reported by that boot
-   * warning, and this is a display concern, not a second place to be fatal
-   * about it. Not re-read per request — the ConfigMap volume it lives on does
-   * not change without a pod restart in the ordinary case, which is the same
-   * reasoning `relyingParty` below rests on.
+   * log line, at the moment nobody was watching. It also rides the context
+   * whole, as `declaration` itself — not only as the paths it disagrees at —
+   * which is what lets a surface put it on the stored row without a second
+   * reader (`src/commands/installation/get.ts` and `configure.ts` say why that
+   * is safe). `null` for "unreadable" as well as "absent": an invalid
+   * declaration is already reported by that boot warning, and this is a
+   * display concern, not a second place to be fatal about it. Not re-read per
+   * request — the ConfigMap volume it lives on does not change without a pod
+   * restart in the ordinary case, which is the same reasoning `relyingParty`
+   * below rests on.
    */
   const declaration = await loadManifestIfPresent().catch(() => null);
 
@@ -166,7 +170,7 @@ export async function start(
    * is one `select` per command; the adapters are rebuilt only when the
    * document actually changed, which is what makes doing this per request
    * affordable — `createAdapterRegistry` is pure assembly whose credentials are
-   * providers called per request, so rebuilding opens nothing. `manifestDivergence`
+   * providers called per request, so rebuilding opens nothing. `declarationDivergence`
    * is recomputed on that same change, against the one-time `declaration`
    * above — cheap, because `diffManifestPaths` is a pure walk over two
    * documents already in memory.
@@ -179,7 +183,7 @@ export async function start(
   let current = {
     manifest,
     adapters,
-    manifestDivergence:
+    declarationDivergence:
       declaration === null
         ? []
         : diffManifestPaths(declaration, toAuthoredManifest(manifest)),
@@ -196,7 +200,7 @@ export async function start(
         db,
         clock: systemClock,
       }),
-      manifestDivergence:
+      declarationDivergence:
         declaration === null
           ? []
           : diffManifestPaths(declaration, toAuthoredManifest(stored)),
@@ -228,7 +232,8 @@ export async function start(
           db,
           adapters: installation.adapters,
           manifest: installation.manifest,
-          manifestDivergence: installation.manifestDivergence,
+          declaration,
+          declarationDivergence: installation.declarationDivergence,
         };
       },
     },

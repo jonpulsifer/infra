@@ -894,7 +894,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     // cluster's gateway through the connect form and the manifest still
     // declares the old one. The row is what deploys render from, so the notice
     // is a warning about Settings rather than about the Target.
-    manifestDivergence: [
+    connectionDivergence: [
       'connection.chartValues.platform.gateway.name',
       'connection.chartValues.platform.gateway.namespace',
     ],
@@ -915,7 +915,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     status: 'connected',
     configured: true,
     inspectedAt: '2026-08-02T12:00:00.000Z',
-    manifestDivergence: [],
+    connectionDivergence: [],
     // A cloud project has no `platform` values and no probe to read itself
     // back through, so there is nothing here for an edit form to open onto.
     edit: null,
@@ -932,7 +932,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     status: 'connected',
     configured: true,
     inspectedAt: '2026-08-02T12:00:00.000Z',
-    manifestDivergence: [],
+    connectionDivergence: [],
     // A cloud project has no `platform` values and no probe to read itself
     // back through, so there is nothing here for an edit form to open onto.
     edit: null,
@@ -961,7 +961,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     status: 'connected',
     configured: true,
     inspectedAt: '2026-08-02T12:00:00.000Z',
-    manifestDivergence: [],
+    connectionDivergence: [],
     edit: {
       apiServer: 'https://secondary.example:6443',
       proposal: { carriedFrom: 'Secondary', namespace: 'apps' },

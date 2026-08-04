@@ -48,7 +48,11 @@ const OPERATOR = { id: 'usr_test', displayName: 'Operator' };
  * cannot see.
  */
 let answer:
-  | { readonly kind: 'ok'; readonly configured: boolean }
+  | {
+      readonly kind: 'ok';
+      readonly configured: boolean;
+      readonly declarationDivergence?: readonly string[];
+    }
   | { readonly kind: 'throws' }
   | { readonly kind: 'never' } = { kind: 'ok', configured: true };
 
@@ -87,7 +91,11 @@ beforeAll(() => {
             ok: true,
             value: {
               manifest: DEFAULT_PLACEHOLDER_MANIFEST,
-              manifestDivergence: [],
+              declaration: null,
+              declarationDivergence:
+                answer.kind === 'ok'
+                  ? (answer.declarationDivergence ?? [])
+                  : [],
               configured: answer.kind === 'ok' && answer.configured,
             },
           }),
@@ -183,5 +191,46 @@ describe('the installation decides which application is rendered', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+/**
+ * Ticket 78's fourth criterion: a disagreement is visible somewhere an
+ * operator passes anyway, not only on the Settings screen.
+ *
+ * `AppShell` wraps every screen `Screen` renders, and this is the read that
+ * already decides `configured` vs `unconfigured` — so a divergence answered
+ * in the same breath costs nothing further to show on every one of them. The
+ * claim is about `App`/`SignedIn`, the same components the tests above mount,
+ * for the same reason those are asserted against the real branch rather than
+ * against `AppShell` handed a divergence directly: a banner nothing wires
+ * confirms nothing.
+ */
+describe('a divergent declaration is announced on the product surface', () => {
+  test('a non-empty declarationDivergence is shown, unprompted', async () => {
+    answer = {
+      kind: 'ok',
+      configured: true,
+      declarationDivergence: ['build.zeroConfigFrontend'],
+    };
+
+    const screen = await mount();
+
+    expect(screen.text()).toContain(
+      'The mounted declaration no longer matches this installation.',
+    );
+    expect(screen.text()).toContain('Review it in Settings');
+
+    screen.unmount();
+  });
+
+  test('an empty declarationDivergence says nothing', async () => {
+    answer = { kind: 'ok', configured: true, declarationDivergence: [] };
+
+    const screen = await mount();
+
+    expect(screen.text()).not.toContain('mounted declaration');
+
+    screen.unmount();
   });
 });
