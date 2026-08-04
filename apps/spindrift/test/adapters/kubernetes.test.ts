@@ -430,6 +430,54 @@ describe('phases come from the controller', () => {
     expect(phases).toEqual(['APPLYING', 'WAITING', 'LIVE']);
   });
 
+  test("the controller's own sentence reaches the timeline, once each", async () => {
+    // A Helm upgrade says several different things while staying in one phase,
+    // and those sentences are the only progress a reader gets between the
+    // phase change and the verdict. Reporting phases alone left minutes of a
+    // rollout looking like a stopped screen.
+    const said = ['pulling chart', 'pulling chart', 'running upgrade'];
+    const { adapter } = adapterFor({
+      status: (reads) => {
+        const message = said[reads];
+        return message === undefined
+          ? {
+              observedGeneration: 1,
+              conditions: [
+                { type: 'Ready', status: 'True', message: 'upgrade succeeded' },
+              ],
+            }
+          : {
+              observedGeneration: 1,
+              conditions: [
+                {
+                  type: 'Ready',
+                  status: 'False',
+                  reason: 'Progressing',
+                  message,
+                },
+              ],
+            };
+      },
+    });
+
+    const { events, verdict } = await drain(
+      adapter.apply(target(), desiredState()),
+    );
+    expect(verdict.phase).toBe('LIVE');
+
+    const lines = events
+      .filter((event) => event.type === 'log')
+      .map((event) => (event.type === 'log' ? event.line : ''));
+    // After the write this adapter reports itself: the repeated poll of an
+    // unchanged message does not repeat the line, and the terminal sentence is
+    // not echoed here — it travels on the verdict.
+    expect(lines).toEqual([
+      'applied HelmRelease/delivery/blog-web',
+      'pulling chart',
+      'running upgrade',
+    ]);
+  });
+
   test('a LIVE verdict carries no url — the cluster gives no name of its own', async () => {
     const { adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(target(), desiredState()));

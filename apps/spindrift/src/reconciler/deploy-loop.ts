@@ -13,9 +13,13 @@
  * convergence loop must not have; and hand-rolled watch bookkeeping in
  * TypeScript with no informer is real work for no gain at this scale.
  *
- * **The interval is adaptive, not fixed** (see {@link intervalFor}). Fast while
- * an attempt is in flight — a bounded window, not a standing watch — and slow
- * once converged, where the slow cadence *is* the drift detection §6 asks for.
+ * **Two cadences, not one.** Looking for work is one cheap indexed `select`, so
+ * it runs every second or two — a developer who pressed Deploy is waiting, and
+ * the interval before pickup is the largest number they experience. Looking at
+ * what has already converged costs one adapter round trip per live release, so
+ * drift detection runs on its own far slower clock
+ * ({@link DEFAULT_DRIFT_INTERVAL_MS}). Binding the two together made every
+ * pickup wait out a drift interval, which is the wait this split removes.
  *
  * **Claiming is `FOR UPDATE SKIP LOCKED`, and the claim is a leased phase.**
  * The lock on the Component@Target desired-state row is held only long enough
@@ -97,26 +101,36 @@ const IN_FLIGHT: readonly DeployPhase[] = ['APPLYING', 'WAITING'];
 /** A crashed worker's phase remains durable, then becomes safely reclaimable. */
 export const DEFAULT_CLAIM_TIMEOUT_MS = 15 * 60_000;
 
-/** How often to look, given what the Deploy is doing (§6, plan Transport). */
+/** How often to look for claimable work, given what is in flight (§6). */
 export interface LoopIntervals {
   /** While an attempt is converging. Short, and bounded by the attempt. */
   readonly fastMs: number;
-  /** Once converged. Also the drift-detection cadence — drift is information. */
+  /** With nothing unsettled. Still seconds: this is time-to-pickup. */
   readonly slowMs: number;
 }
 
 export const DEFAULT_INTERVALS: LoopIntervals = {
-  fastMs: 2_000,
-  slowMs: 5 * 60_000,
+  fastMs: 1_000,
+  slowMs: 2_000,
 };
 
 /**
- * The interval to wait before looking again.
+ * How often converged releases are re-read to notice drift (§6).
  *
- * Fast only while something is unsettled. §6 is explicit that drift is
- * "information, not an alarm", so the converged cadence is minutes: polling a
- * settled workload every two seconds would be a watch built out of polls, which
- * is the thing this design declined.
+ * Minutes, and deliberately unrelated to {@link LoopIntervals}: §6 is explicit
+ * that drift is "information, not an alarm", and one adapter round trip per
+ * live release is not something to spend every second. Polling for *work* is a
+ * `select`, so it stays fast; polling the platform is a network call, so it
+ * stays slow.
+ */
+export const DEFAULT_DRIFT_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * The interval to wait before looking for work again.
+ *
+ * Fast while something is unsettled, and only a little slower when nothing is:
+ * both ends of this are the latency a developer feels between pressing a button
+ * and something happening.
  *
  * **The phases must come from the database, not from what the last pass
  * returned.** A pass only ever returns terminal outcomes — an attempt runs to
@@ -512,68 +526,80 @@ export async function observeConverged(
     .from(deploys)
     .where(eq(deploys.phase, 'LIVE'));
 
-  const reports: DriftReport[] = [];
-  for (const deploy of live) {
-    if (deploy.ref === null || deploy.orphanedAt !== null) continue;
-    const subject = await subjectOf(context, deploy);
-    if (subject === null) continue;
-
-    let state: ObservedState | null = null;
-    try {
-      state = await subject.adapter.observe(
-        deployTargetOf(subject.target, subject.vessel),
-        deploy.ref,
-      );
-    } catch {
-      // A Target that cannot be reached is not a Target that has drifted. Saying
-      // "drifted" here would turn every uplink blip into a false alarm about
-      // something a developer did.
-      continue;
-    }
-    const observed = state?.artifactDigest ?? null;
-
-    const drifted = hasDrifted({
-      phase: deploy.phase,
-      desiredDigest: subject.build.artifactDigest ?? '',
-      observedDigest: observed,
-      ...(state === null ? {} : { observedPhase: state.phase }),
-    });
-
-    // The platform's own sentence, kept only while it is the reason. §12's
-    // argument for storing a diagnosis applies here for the same cause: a
-    // Helm error naming the value that no longer renders is not recoverable
-    // from anywhere once the object is reconciled again.
-    const driftDetail =
-      drifted && state?.phase === 'FAILED' ? (state.detail ?? null) : null;
-
-    // §6 wants drift to be "a visible state", and visible means a row: the UI
-    // reads rows, so a finding that lived only for the length of this pass
-    // would be surfaced to nobody. Cleared when it matches again, so drift
-    // somebody fixed out of band stops being reported without a dismissal.
-    if (
-      drifted !== (deploy.driftedAt !== null) ||
-      observed !== deploy.observedDigest ||
-      driftDetail !== deploy.driftDetail
-    ) {
-      await context.db
-        .update(deploys)
-        .set({
-          driftedAt: drifted ? now : null,
-          observedDigest: observed,
-          driftDetail,
-          updatedAt: now,
-        })
-        .where(eq(deploys.id, deploy.id));
-    }
-
-    reports.push({
-      deployId: deploy.id,
-      drifted,
-      observedDigest: observed,
-      driftDetail,
-    });
-  }
+  // One adapter round trip each, and they do not depend on one another — so
+  // the pass costs the slowest Target rather than the sum of every Target.
+  // ponytail: unbounded fan-out, add a concurrency cap if an installation ever
+  // carries enough live releases to make that a thundering herd.
+  const reports = (
+    await Promise.all(live.map((deploy) => observeOne(context, deploy, now)))
+  ).filter((report): report is DriftReport => report !== null);
   return reports;
+}
+
+/** Read one converged release back off its platform, and say what it found. */
+async function observeOne(
+  context: DeployLoopContext,
+  deploy: Deploy,
+  now: Date,
+): Promise<DriftReport | null> {
+  if (deploy.ref === null || deploy.orphanedAt !== null) return null;
+  const subject = await subjectOf(context, deploy);
+  if (subject === null) return null;
+
+  let state: ObservedState | null = null;
+  try {
+    state = await subject.adapter.observe(
+      deployTargetOf(subject.target, subject.vessel),
+      deploy.ref,
+    );
+  } catch {
+    // A Target that cannot be reached is not a Target that has drifted. Saying
+    // "drifted" here would turn every uplink blip into a false alarm about
+    // something a developer did.
+    return null;
+  }
+  const observed = state?.artifactDigest ?? null;
+
+  const drifted = hasDrifted({
+    phase: deploy.phase,
+    desiredDigest: subject.build.artifactDigest ?? '',
+    observedDigest: observed,
+    ...(state === null ? {} : { observedPhase: state.phase }),
+  });
+
+  // The platform's own sentence, kept only while it is the reason. §12's
+  // argument for storing a diagnosis applies here for the same cause: a
+  // Helm error naming the value that no longer renders is not recoverable
+  // from anywhere once the object is reconciled again.
+  const driftDetail =
+    drifted && state?.phase === 'FAILED' ? (state.detail ?? null) : null;
+
+  // §6 wants drift to be "a visible state", and visible means a row: the UI
+  // reads rows, so a finding that lived only for the length of this pass
+  // would be surfaced to nobody. Cleared when it matches again, so drift
+  // somebody fixed out of band stops being reported without a dismissal.
+  if (
+    drifted !== (deploy.driftedAt !== null) ||
+    observed !== deploy.observedDigest ||
+    driftDetail !== deploy.driftDetail
+  ) {
+    await context.db
+      .update(deploys)
+      .set({
+        driftedAt: drifted ? now : null,
+        observedDigest: observed,
+        driftDetail,
+        updatedAt: now,
+      })
+      .where(eq(deploys.id, deploy.id));
+  }
+
+  return {
+    deployId: deploy.id,
+    drifted,
+    observedDigest: observed,
+    driftDetail,
+  };
 }
 
 /** Read everything one Deploy refers to, or `null` if it is not runnable. */
@@ -623,6 +649,8 @@ async function subjectOf(
 /** How the loop runs, and how to stop it. */
 export interface DeployLoopOptions {
   readonly intervals?: LoopIntervals;
+  /** Overrides {@link DEFAULT_DRIFT_INTERVAL_MS}, for a test that cannot wait. */
+  readonly driftIntervalMs?: number;
   readonly signal?: AbortSignal;
   /**
    * An optional early wake-up — the `LISTEN/NOTIFY` leg.
@@ -651,26 +679,66 @@ export interface LoopPass {
   readonly unsettled: readonly DeployPhase[];
 }
 
+/** What one pass is asked to do beyond claiming work. */
+export interface DeployPassOptions {
+  /**
+   * Whether to re-read converged releases for drift.
+   *
+   * The loop passes `false` on most ticks, because looking for work and looking
+   * for drift are different costs on different clocks
+   * ({@link DEFAULT_DRIFT_INTERVAL_MS}). Defaults to `true`, so a caller that
+   * wants one complete pass gets one.
+   */
+  readonly observe?: boolean;
+}
+
 /**
- * Drain every claimable intent, then look at what has converged.
+ * Claim every eligible intent, run them all, then optionally look for drift.
  *
- * Draining rather than taking one per tick: a burst of intents should not take
- * one poll interval each to start, and the drain is bounded by how many rows are
- * actually `PENDING`.
+ * **Claim in rounds, run each round together.** Claiming is a short transaction
+ * and applying is somebody else's control plane taking minutes, so the two are
+ * not interleaved: everything claimable is marked `APPLYING` up front and those
+ * attempts then run concurrently. Applying them one after another made a second
+ * App's deploy wait out the first App's whole rollout — two unrelated workloads,
+ * on two unrelated Targets, serialised by nothing but the shape of a `for` loop.
+ *
+ * Concurrency within a round is safe by the same rule that makes claiming safe:
+ * `claimNextDeploy` refuses a Component@Target that already has an in-flight
+ * Deploy, so a round holds at most one attempt per workload and no two attempts
+ * are ever placing the same thing.
+ *
+ * That refusal is also why the rounds repeat. Two queued intents for **one**
+ * Component@Target must still land in order, and the second only becomes
+ * claimable once the first is settled — so the pass keeps claiming until a round
+ * comes back empty. The wall clock is the deepest single queue rather than the
+ * sum of everything pending.
  */
 export async function runDeployPass(
   context: DeployLoopContext,
+  options: DeployPassOptions = {},
 ): Promise<LoopPass> {
   const applied: AttemptOutcome[] = [];
   for (;;) {
-    const claimed = await claimNextDeploy(context);
-    if (claimed === null) break;
-    const outcome = await runAttempt(context, claimed);
-    if (outcome !== null) applied.push(outcome);
+    const claimed: Deploy[] = [];
+    for (;;) {
+      const next = await claimNextDeploy(context);
+      if (next === null) break;
+      claimed.push(next);
+    }
+    if (claimed.length === 0) break;
+    // ponytail: unbounded fan-out, bounded in practice by how many distinct
+    // Component@Targets are pending at once. Add a pool if that stops holding.
+    const outcomes = await Promise.all(
+      claimed.map((deploy) => runAttempt(context, deploy)),
+    );
+    for (const outcome of outcomes) {
+      if (outcome !== null) applied.push(outcome);
+    }
   }
+
   return {
     applied,
-    drift: await observeConverged(context),
+    drift: options.observe === false ? [] : await observeConverged(context),
     unsettled: await unsettledPhases(context),
   };
 }
@@ -681,8 +749,17 @@ export async function runDeployLoop(
   options: DeployLoopOptions = {},
 ): Promise<void> {
   const intervals = options.intervals ?? DEFAULT_INTERVALS;
+  const driftMs = options.driftIntervalMs ?? DEFAULT_DRIFT_INTERVAL_MS;
+  // Zero, so the first pass observes: a reconciler that just started has no
+  // idea what the platforms are holding, and that is the moment to find out.
+  let nextDriftAt = 0;
+
   while (!options.signal?.aborted) {
-    const pass = await runDeployPass(context);
+    const startedAt = context.clock.now().getTime();
+    const observe = startedAt >= nextDriftAt;
+    if (observe) nextDriftAt = startedAt + driftMs;
+
+    const pass = await runDeployPass(context, { observe });
     options.onPass?.(pass);
     if (options.signal?.aborted) return;
 

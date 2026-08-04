@@ -48,8 +48,18 @@ import type { LogoName } from '../../client/logos/index.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
+import {
+  type Stage as ProgressStage,
+  StageProgress,
+} from '../../components/progress.tsx';
+import { RunningTime } from '../../components/running-time.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
-import type { DeployView, SourceView } from '../../model.ts';
+import {
+  type DeployView,
+  isInFlight,
+  type SourceView,
+  type StepStatus,
+} from '../../model.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
 import {
@@ -288,22 +298,103 @@ function Hero({
   view: DeployView;
   actions: AttemptActions;
 }) {
+  const moving = isInFlight(view.phase);
+
   return (
-    <Card className="flex flex-wrap items-center gap-4 px-5 py-5">
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <PhasePill phase={view.phase}>{view.phaseWord}</PhasePill>
-          <Eyebrow>{view.when}</Eyebrow>
-          {view.current ? <Eyebrow>· current release</Eyebrow> : null}
+    <Card className="flex flex-col gap-4 px-5 py-5">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <PhasePill phase={view.phase}>{view.phaseWord}</PhasePill>
+            {/*
+              While it is moving, the number that matters is how long it has
+              been moving — a screen whose only time reads "just now" for the
+              first minute of a rollout looks frozen. Once it settles, "8m ago"
+              is the right grain again and the timer goes away rather than
+              standing there having stopped.
+            */}
+            {moving ? (
+              <Eyebrow>
+                <RunningTime since={view.at} active className="tabular-nums" />
+              </Eyebrow>
+            ) : (
+              <Eyebrow>{view.when}</Eyebrow>
+            )}
+            {view.current ? <Eyebrow>· current release</Eyebrow> : null}
+          </div>
+          <h1 className="text-[27px] font-semibold leading-tight tracking-[-0.02em]">
+            {view.headline}
+          </h1>
+          <Actions view={view} actions={actions} />
         </div>
-        <h1 className="text-[27px] font-semibold leading-tight tracking-[-0.02em]">
-          {view.headline}
-        </h1>
-        <Actions view={view} actions={actions} />
+        <UrlBlock view={view} />
       </div>
-      <UrlBlock view={view} />
+      <StageProgress
+        stages={stagesOf(view)}
+        className="border-t border-border-soft pt-4"
+      />
     </Card>
   );
+}
+
+/**
+ * The four legs every release has, in the order they happen.
+ *
+ * They are derived here rather than carried on {@link DeployView} because none
+ * of them is a new fact: each one is a projection of state the read model
+ * already states, and a fifth field restating them is a fifth field that can
+ * disagree with the four it was derived from.
+ *
+ * **Live is its own leg, and not a duplicate of Deploy.** The two answer
+ * different questions on the case that matters most: §9 never mutates exposure
+ * on red, so a failed deploy leaves the previous release serving — Deploy is
+ * `failed` and the App is still up. Collapsing them would make the strip say
+ * the App is down when it is not, which is the single most frightening thing a
+ * screen can get wrong.
+ */
+function stagesOf(view: DeployView): readonly ProgressStage[] {
+  const build = view.build;
+
+  const deployStatus: StepStatus =
+    view.id === null
+      ? 'waiting'
+      : view.phase === 'LIVE'
+        ? 'done'
+        : view.phase === 'FAILED'
+          ? 'failed'
+          : view.phase === 'PENDING'
+            ? 'waiting'
+            : 'running';
+
+  return [
+    // Always settled: the bytes were staged before any of this was written.
+    {
+      name: 'Source',
+      status: 'done',
+      detail: sourceRef(view.source),
+    },
+    build === null
+      ? // §4's supplied artifact — finished output, recorded as-is. Green
+        // because nothing is owed, and labelled so it does not read as a build
+        // that quietly succeeded.
+        { name: 'Build', status: 'done', detail: 'extracted' }
+      : {
+          name: 'Build',
+          status: build.status,
+          ...(build.duration === undefined ? {} : { detail: build.duration }),
+        },
+    { name: 'Deploy', status: deployStatus, detail: view.target },
+    view.urlLive
+      ? { name: 'Live', status: 'done', detail: 'serving' }
+      : view.previousReleaseServing
+        ? // Serving, just not this release. Neither green nor red: the App is
+          // up and this attempt did not put it there.
+          { name: 'Live', status: 'waiting', detail: 'previous release' }
+        : {
+            name: 'Live',
+            status: view.phase === 'FAILED' ? 'failed' : 'waiting',
+          },
+  ];
 }
 
 /**
@@ -743,7 +834,7 @@ function Transcript({ build }: { build: NonNullable<DeployView['build']> }) {
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="flex flex-col gap-2 pt-2">
-          <LogPane lines={lines} />
+          <LogPane lines={lines} follow={build.status === 'running'} />
           {clipped ? (
             <p className="text-[11.5px] text-muted-foreground">
               Only the tail is kept here — a failure is at the end of a log, and
@@ -825,7 +916,7 @@ function DeployDrawer({ view }: { view: DeployView }) {
           yet.
         </Notice>
       ) : (
-        <LogPane lines={view.deployLog} />
+        <LogPane lines={view.deployLog} follow={isInFlight(view.phase)} />
       )}
     </Stage>
   );

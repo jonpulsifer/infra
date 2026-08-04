@@ -114,7 +114,7 @@ export interface KubernetesAdapterOptions {
   readonly now?: () => number;
 }
 
-const DEFAULT_POLL_MS = 2_000;
+const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const RUNTIME_LOG_LIMIT_BYTES = 256 * 1024;
 
@@ -736,6 +736,15 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * the controller, and this is the only period in which they change quickly.
    * Once the attempt ends, nothing here keeps looking — the slow cadence that
    * detects drift belongs to core's loop, and lives on `observe`.
+   *
+   * **The controller's sentence is emitted, not only its phase.** A Helm
+   * upgrade spends most of its life in one phase while saying a series of
+   * different things — pulling the chart, running the upgrade action, waiting
+   * on a Deployment. Reporting only phase transitions turned two or three
+   * minutes of legible progress into two events and a still screen, so every
+   * change in the `Ready` condition's message becomes a log line on the
+   * timeline. It is deduplicated on the message itself, so a controller
+   * repeating itself every poll does not fill the log with one sentence.
    */
   private async *awaitVerdict(
     api: KubernetesApi,
@@ -751,6 +760,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // reported controller phase too, so an object whose status has not caught
     // up to its generation does not duplicate the event on the timeline.
     let reported: DeployPhase = 'APPLYING';
+    let said: string | undefined;
 
     for (;;) {
       const current = await api.get({
@@ -771,6 +781,20 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           ...(status.reason === undefined ? {} : { reason: status.reason }),
           ...(status.detail === undefined ? {} : { detail: status.detail }),
         });
+      }
+
+      // The progress *within* a phase, which is where a rollout spends its
+      // time. Skipped on the terminal phases: `failed` writes the diagnosis
+      // below and `LIVE` is the verdict, so echoing either here would put the
+      // same sentence on the timeline twice.
+      if (
+        status.detail !== undefined &&
+        status.detail !== said &&
+        status.phase !== 'LIVE' &&
+        status.phase !== 'FAILED'
+      ) {
+        said = status.detail;
+        yield this.log(status.detail, resource);
       }
 
       if (status.phase === 'LIVE') {
