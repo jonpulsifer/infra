@@ -82,3 +82,41 @@ resource "google_org_policy_policy" "allow_public_cloud_run_invoker" {
     }
   }
 }
+
+# The second half of the same grant, and it fails separately.
+#
+# `iam.allowedPolicyMemberDomains` (organization/baseline-policies.tf) permits
+# only principals belonging to this organization's Cloud Identity customer.
+# `allUsers` belongs to no customer, so the same binding is refused a second
+# time with a different sentence:
+#
+#   the invoker policy for {reach: public, auth: none} could not be written:
+#   One or more users named in the policy do not belong to a permitted
+#   customer, perhaps due to an organization policy.
+#
+# Every enforced constraint is an independent AND'd check, so relaxing the
+# managed constraint above does nothing for this one — both have to give
+# before a public Component can answer the internet.
+#
+# `allow_all` is broader than the grant needs: it permits any domain in this
+# project, not merely the public principal. The constraint's list form takes
+# customer IDs, and `allUsers` is not one, so there is no value that names it
+# — the same shape of dead end as the managed constraint above. This follows
+# the project-level override already used for the same constraint in
+# `terraform/gcp/projects/lolcorp/policy.tf` and `homelab-ng/policy.tf`; the
+# org default stays strict everywhere else.
+#
+# Removing this: the same two exits as above — Cloud Run's
+# `invoker_iam_disabled` on public Services would retire the `allUsers`
+# binding entirely, and with it both of these overrides.
+resource "google_org_policy_policy" "allow_public_cloud_run_domains" {
+  name   = "projects/${local.project}/policies/iam.allowedPolicyMemberDomains"
+  parent = "projects/${local.project}"
+
+  spec {
+    inherit_from_parent = false
+    rules {
+      allow_all = "TRUE"
+    }
+  }
+}
