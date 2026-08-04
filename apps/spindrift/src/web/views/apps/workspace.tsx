@@ -149,7 +149,13 @@ export function Workspace({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Activity entries={view.activity.slice(0, 3)} onNavigate={onNavigate} />
+        {/*
+          Every entry the view carries, un-sliced. `getAppWorkspace` bounds the
+          query that produces them, and a second bound here would be a number
+          that can silently disagree with it — a limit raised on the server and
+          not here reads as applied and is not.
+        */}
+        <Activity entries={view.activity} onNavigate={onNavigate} />
         <Runtime view={view} onNavigate={onNavigate} />
       </div>
     </div>

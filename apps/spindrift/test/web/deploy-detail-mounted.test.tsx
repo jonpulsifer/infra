@@ -1,5 +1,5 @@
 /**
- * The assertions `views.test.tsx` cannot make (ticket 08, criterion 3).
+ * The assertions `views.test.tsx` cannot make.
  *
  * That file's own header explains why it renders through
  * `renderToStaticMarkup`: every rule it checks is a statement about what a
@@ -25,10 +25,18 @@
  * simulates a click), and a `getBoundingClientRect` that satisfies
  * `CollapsibleContent`'s layout-effect without a real layout. It is not a DOM
  * implementation; it is the subset this one component tree touches.
+ *
+ * The second half of the file mounts the **route table** rather than one view,
+ * for the same structural reason: navigating between two Deploys of one App
+ * changes a prop and nothing else, so what happens to the mounted instance *is*
+ * the behaviour under test. `fetch` and `WebSocket` are stubbed on the same
+ * globals the shim already owns — the client reaches the network through
+ * exactly those two and nothing else.
  */
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { Screen } from '../../src/web/app.tsx';
 import type { DeployView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { DEPLOY_SCENARIOS } from '../fixtures/scenarios.ts';
@@ -237,6 +245,40 @@ const previousActEnv = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown })
 const previousHTMLIFrameElement = (
   globalThis as { HTMLIFrameElement?: unknown }
 ).HTMLIFrameElement;
+const previousWebSocket = (globalThis as { WebSocket?: unknown }).WebSocket;
+const previousFetch = globalThis.fetch;
+
+/**
+ * What the mounted route table is allowed to answer with.
+ *
+ * The screens reach the network through exactly two globals — `client.ts` is a
+ * `fetch` and `stream-client.ts` is a `WebSocket`, both stated in their own
+ * headers — so replacing those two is the whole seam, with no module mocking
+ * and no injected transport that only a test would ever pass.
+ *
+ * Deliberately a *deferred* answer rather than a resolved value: the second
+ * claim below is entirely about when a response lands relative to a
+ * navigation, and a stub that resolved eagerly could not express it.
+ */
+const pending = new Map<number, (deploy: DeployView) => void>();
+
+function answerFor(id: number): Promise<unknown> {
+  return new Promise((resolve) => {
+    pending.set(id, (deploy) =>
+      resolve({ json: async () => ({ ok: true, value: { deploy } }) }),
+    );
+  });
+}
+
+/** Resolve one Deploy's in-flight read and let React commit the result. */
+async function answer(id: number, deploy: DeployView): Promise<void> {
+  const respond = pending.get(id);
+  if (!respond) throw new Error(`nothing is asking for deploy ${id}`);
+  pending.delete(id);
+  await act(async () => {
+    respond(deploy);
+  });
+}
 
 Object.assign(globalThis, {
   document: fakeDocument,
@@ -256,6 +298,22 @@ Object.assign(globalThis, {
   // `element instanceof window.HTMLIFrameElement`; nothing here ever is
   // one, but the right-hand side still has to be a real constructor.
   HTMLIFrameElement: class {},
+  // `subscribeAttempt` opens one of these as soon as the first read returns.
+  // Nothing here pushes events — the claims below are about the read — so it
+  // only has to be constructible and closeable.
+  WebSocket: class {
+    onmessage: unknown = null;
+    onclose: unknown = null;
+    onerror: unknown = null;
+    close(): void {}
+  },
+  // Every command goes through this, and the id it is asking about is in the
+  // body rather than the path: `pathFor` names the command, not the object.
+  fetch: async (_url: string, init?: { body?: string }) => {
+    const { id } = JSON.parse(init?.body ?? '{}') as { id?: number };
+    if (id === undefined) throw new Error('a command asked for no id');
+    return await answerFor(id);
+  },
 });
 fakeDocument.defaultView = globalThis;
 
@@ -268,6 +326,8 @@ afterAll(() => {
     cancelAnimationFrame: previousCancelRaf,
     IS_REACT_ACT_ENVIRONMENT: previousActEnv,
     HTMLIFrameElement: previousHTMLIFrameElement,
+    WebSocket: previousWebSocket,
+    fetch: previousFetch,
   });
 });
 
@@ -395,5 +455,109 @@ describe('the mounted Deploy screen replaces what a newer view says', () => {
     act(() => {
       root.unmount();
     });
+  });
+});
+
+/**
+ * Switching between two Deploys of the same App.
+ *
+ * The bug this pins only exists between two objects of the *same shape*.
+ * Navigating App → App changes enough of the tree that the screen is rebuilt;
+ * Deploy → Deploy changes one prop, so React keeps the mounted `DeployScreen`
+ * and everything it is holding — the checklist, the log, the diagnosis and the
+ * phase of the Deploy you just left — until a read for the new one returns.
+ *
+ * These render the route table rather than `DeployScreen`, because the fix is a
+ * key on the element the table creates. A test that rendered `DeployScreen`
+ * directly would have to supply that key itself, and would then be asserting
+ * its own prop.
+ */
+describe('switching between two Deploys of one App', () => {
+  const previous: DeployView = {
+    ...DEPLOY_SCENARIOS.buildFailed,
+    id: 42,
+    buildId: 41,
+  };
+  const current: DeployView = {
+    ...DEPLOY_SCENARIOS.live,
+    id: 43,
+    buildId: 43,
+    headline: 'Deployed 4 seconds ago',
+  };
+
+  beforeEach(() => {
+    pending.clear();
+  });
+
+  const mount = () => {
+    const container = fakeDocument.createElement('div');
+    let root!: Root;
+    act(() => {
+      root = createRoot(container as unknown as Element);
+    });
+    return {
+      text: () => container.textContent,
+      show: (path: string) =>
+        act(() => {
+          root.render(<Screen path={path} onNavigate={() => undefined} />);
+        }),
+      unmount: () => act(() => root.unmount()),
+    };
+  };
+
+  test('the second Deploy carries none of the first one’s evidence', async () => {
+    const screen = mount();
+    screen.show('/deploys/42');
+    await answer(42, previous);
+
+    // Deploy 42, in full: its phase, its diagnosis, its failed step, its log.
+    expect(screen.text()).toContain(previous.headline);
+    expect(screen.text()).toContain('BUILD_FAILED');
+    expect(screen.text()).toContain('run build');
+    expect(screen.text()).toContain('Failed to compile');
+
+    screen.show('/deploys/43');
+
+    // Before deploy 43 has answered. Every one of 42's four presentations is
+    // already gone — the screen says it is loading rather than showing another
+    // release's evidence under this one's id.
+    expect(screen.text()).not.toContain(previous.headline);
+    expect(screen.text()).not.toContain('BUILD_FAILED');
+    expect(screen.text()).not.toContain('Failed to compile');
+
+    await answer(43, current);
+
+    expect(screen.text()).toContain(current.headline);
+    expect(screen.text()).not.toContain(previous.headline);
+    expect(screen.text()).not.toContain('BUILD_FAILED');
+    expect(screen.text()).not.toContain('Failed to compile');
+
+    screen.unmount();
+  });
+
+  test('a read for the Deploy you left cannot write into the one on screen', async () => {
+    // Invisible on a fast connection and certain on a slow one: the screen
+    // polls, so a read issued for deploy 42 can still be in flight when 43 is
+    // asked for and resolve *after* 43 has rendered. Nothing about the order
+    // the network answers in is under this screen's control, so the guarantee
+    // has to be structural — 42's read has no state cell left to write into.
+    const screen = mount();
+    screen.show('/deploys/42');
+
+    // 42 is asked for and never answered.
+    expect(pending.has(42)).toBe(true);
+
+    screen.show('/deploys/43');
+    await answer(43, current);
+    expect(screen.text()).toContain(current.headline);
+
+    // And now the response for the Deploy that was navigated away from lands.
+    await answer(42, previous);
+
+    expect(screen.text()).toContain(current.headline);
+    expect(screen.text()).not.toContain(previous.headline);
+    expect(screen.text()).not.toContain('BUILD_FAILED');
+
+    screen.unmount();
   });
 });

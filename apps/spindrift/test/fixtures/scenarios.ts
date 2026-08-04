@@ -117,6 +117,10 @@ const BUILT = {
   // exercise it.
   logTotal: 812,
   runner: 'hosted runner',
+  // The route's name and the platform behind it are two different facts —
+  // "hosted runner" is what this installation calls the route, and the adapter
+  // is what tells a reader it is GitHub Actions rather than Cloud Build.
+  runnerAdapter: 'github-actions',
   runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
 } as const;
 
@@ -163,6 +167,7 @@ export const DEPLOY_SCENARIOS = {
       log: null,
       logTotal: 0,
       runner: 'hosted runner',
+      runnerAdapter: 'github-actions',
       runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
     },
   },
@@ -214,6 +219,7 @@ export const DEPLOY_SCENARIOS = {
       // nothing was left behind.
       logTotal: 8,
       runner: 'hosted runner',
+      runnerAdapter: 'github-actions',
       runUrl: 'https://example.invalid/acme/widgets/actions/runs/1234567890',
     },
   },
@@ -480,6 +486,19 @@ export const WORKSPACE_SCENARIOS = {
         status: 'failed',
         deployId: 40,
         buildId: null,
+      },
+      // The fourth entry is the point of the fixture, not padding: a
+      // build-deploy-fail sequence is four checkpoints long, and a timeline
+      // holding three could never show one. It is what the workspace's
+      // rendering claim is asserted against.
+      {
+        kind: 'build',
+        title: 'Build 39 failed',
+        detail: 'main · 4a91b02 · exit 1 in run build',
+        when: '1d ago',
+        status: 'failed',
+        deployId: null,
+        buildId: 39,
       },
     ],
     runtime: {

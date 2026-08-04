@@ -126,7 +126,33 @@ export function App() {
   );
 }
 
-function Screen({
+/**
+ * The route table.
+ *
+ * **A screen that names one object is keyed on that object's id.** Every screen
+ * below that takes an id holds evidence about *that* object in `useState` —
+ * a Deploy's checklist, log, diagnosis and phase; a Build's attempt; a
+ * workspace's timeline — and React reuses a component instance whose type and
+ * position are unchanged. Switching between two Deploys of the same App is
+ * exactly that case: without a key the instance survives, so the previous
+ * Deploy's evidence stays on screen under the new Deploy's id until the fetch
+ * for it returns, and every `useState` seeded from the old view (the build
+ * drawer's open-ness, the transcript's) carries over with it. A different App
+ * does not look broken only because the id in the path happens to change more
+ * of the tree — the bug is the same one, and the key is what refuses it.
+ *
+ * The key does the second half too: a remount unmounts the old instance, which
+ * runs its effect cleanup, which drops that fetch's `live` flag and closes its
+ * stream. An in-flight response for the object navigated away from then has no
+ * state cell left to write into — a structural guarantee rather than a race the
+ * `live` flag has to win.
+ *
+ * Exported for `test/web/deploy-detail-mounted.test.tsx`, which mounts this
+ * table and changes the path: the claim above is about *this* function's keys,
+ * and a test that rendered `DeployScreen` itself would be asserting its own key
+ * prop.
+ */
+export function Screen({
   path,
   onNavigate,
 }: {
@@ -145,12 +171,22 @@ function Screen({
     );
   if (path.startsWith('/apps/new')) {
     const draftId = path.replace(/^\/apps\/new\/?/, '') || null;
-    return <NewAppScreen draftId={draftId} onNavigate={onNavigate} />;
+    return (
+      <NewAppScreen
+        key={draftId ?? 'new'}
+        draftId={draftId}
+        onNavigate={onNavigate}
+      />
+    );
   }
   if (path.startsWith('/deploys')) {
     const deployId = path.replace(/^\/deploys\/?/, '');
     return deployId ? (
-      <DeployScreen deployId={deployId} onNavigate={onNavigate} />
+      <DeployScreen
+        key={deployId}
+        deployId={deployId}
+        onNavigate={onNavigate}
+      />
     ) : (
       <DeploysScreen onNavigate={onNavigate} />
     );
@@ -161,7 +197,7 @@ function Screen({
   if (path.startsWith('/builds')) {
     const buildId = path.replace(/^\/builds\/?/, '');
     return buildId ? (
-      <BuildScreen buildId={buildId} onNavigate={onNavigate} />
+      <BuildScreen key={buildId} buildId={buildId} onNavigate={onNavigate} />
     ) : (
       <BuildsScreen onNavigate={onNavigate} />
     );
@@ -171,9 +207,18 @@ function Screen({
   if (path === '/apps') return <AppsScreen onNavigate={onNavigate} />;
   if (path.startsWith('/apps/')) {
     const appName = path.replace(/^\/apps\//, '');
-    return <WorkspaceScreen appName={appName} onNavigate={onNavigate} />;
+    return (
+      <WorkspaceScreen
+        key={appName}
+        appName={appName}
+        onNavigate={onNavigate}
+      />
+    );
   }
-  return <WorkspaceScreen appName={path.slice(1)} onNavigate={onNavigate} />;
+  const appName = path.slice(1);
+  return (
+    <WorkspaceScreen key={appName} appName={appName} onNavigate={onNavigate} />
+  );
 }
 
 function SettingsScreen({

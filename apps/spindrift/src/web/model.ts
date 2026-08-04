@@ -125,6 +125,23 @@ export interface BuildView {
   /** The runner that produced it, for the header. */
   readonly runner: string;
   /**
+   * The *platform* behind {@link runner}, as `manifest.build.routes` declares
+   * it — `github-actions`, `cloud-build`, `in-cluster`.
+   *
+   * Carried beside the runner rather than instead of it, because the two answer
+   * different questions and only one of them is stable. `runner` is the route's
+   * name, which an installation chooses: "hosted" says which of *this*
+   * installation's routes ran and nothing at all about what it is. The platform
+   * is what tells an operator which failure modes are on the table — hosted CI
+   * and the cloud builder fail in entirely different ways — and it is the key
+   * the screen draws a mark from, the way a Target's adapter is.
+   *
+   * `null` for a Build whose recorded runner matches no configured route: a
+   * route can be retired while its Builds stay readable, and naming no platform
+   * is the honest answer there rather than guessing at one.
+   */
+  readonly runnerAdapter: string | null;
+  /**
    * Where this build can be watched on the runner's own surface, or `null`
    * where the runner has none.
    *

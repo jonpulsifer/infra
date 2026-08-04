@@ -577,7 +577,47 @@ describe('getAppWorkspace command', () => {
 });
 
 describe('the workspace as a way into the system', () => {
-  test('caps at three checkpoints and gives each one an attempt to open', async () => {
+  test('carries ten checkpoints, which is what a whole sequence needs', async () => {
+    // Three was one attempt's worth of checkpoints, so the shape the timeline
+    // exists to show — built, deployed, went red — never fitted on it. The
+    // number is bounded here and nowhere else: the workspace view renders what
+    // it is handed, so this query is the only thing that can be wrong about it.
+    const ctx = context();
+    const { appName, appId, componentId } = await scaffold(ctx, {
+      prefix: 'decade',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'd101010',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'SUCCEEDED',
+        runner: 'hosted runner',
+      })
+      .returning();
+
+    // Twelve, so the answer is a bound rather than "everything there is".
+    await ctx.db.insert(attemptEvents).values(
+      Array.from({ length: 12 }, () => ({
+        appId,
+        componentId,
+        attemptKind: 'build' as const,
+        buildId: build!.id,
+        eventType: 'status' as const,
+        phase: 'RUNNING',
+      })),
+    );
+
+    const result = await getAppWorkspace({ name: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.workspace.activity.length).toBe(10);
+  });
+
+  test('carries status checkpoints only, each with an attempt to open', async () => {
     // `attempt_events` constrains every row to exactly one attempt, so every
     // entry has somewhere to go. An entry that led nowhere would be the one
     // thing on the screen a reader could not act on.
@@ -656,15 +696,21 @@ describe('the workspace as a way into the system', () => {
     if (!result.ok) return;
 
     const { workspace } = result.value;
-    // Three checkpoints, not the log or the fourth status. Every log line an
-    // adapter emits lands in the same table, and reading it raw made the
-    // timeline the last twenty lines of whatever ran most recently — the
-    // transcript belongs on the attempt screen each entry links to, not here.
-    expect(workspace.activity.length).toBe(3);
+    // Every status checkpoint and none of the log. Every log line an adapter
+    // emits lands in the same table, and reading it raw made the timeline the
+    // last twenty lines of whatever ran most recently — the transcript belongs
+    // on the attempt screen each entry links to, not here.
+    //
+    // Four of the five rows written, because the bound is ten: a timeline is
+    // there to show a build-deploy-fail sequence, and three entries could not
+    // hold one. The log line is the row that is missing, which is the whole
+    // claim.
+    expect(workspace.activity.length).toBe(4);
     expect(workspace.activity.map((entry) => entry.title)).toEqual([
       `Deploy ${deploy!.id} live`,
       `Deploy ${deploy!.id} applying`,
       `Build ${build!.id} succeeded`,
+      `Build ${build!.id} running`,
     ]);
     for (const entry of workspace.activity) {
       expect(entry.deployId ?? entry.buildId).not.toBeNull();
@@ -1173,6 +1219,260 @@ describe('getDeployDetail command', () => {
     expect(result.value.deploy.build?.steps).toEqual([
       { name: 'build / run build', status: 'failed', detail: '3.0s' },
     ]);
+  });
+
+  test('a finished build leaves no checkpoint in progress', async () => {
+    // Observed on a real build that had already succeeded: every step `done`,
+    // and one more entry at `running` forever. The name was `build / build` —
+    // the runner's *job*, two path segments where a step has three — and it
+    // only ever carried log lines. A name folded from log lines alone is born
+    // `running` and the log branch never revisits its status, so there was no
+    // path off it. That is true of every log-only name, not of the job: the
+    // same defect had `dispatch` and `provenance` showing the same permanent
+    // orange dot, which is why the fix is the fold's and not a special case.
+    const ctx = context();
+    const { componentId, appId, target } = await scaffold(ctx, {
+      prefix: 'orphan',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'a420042',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'a'.repeat(64)}`,
+        status: 'SUCCEEDED',
+        runner: 'hosted',
+      })
+      .returning();
+
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'LIVE',
+      })
+      .returning();
+
+    const attempt = {
+      appId,
+      componentId,
+      attemptKind: 'build' as const,
+      buildId: build!.id,
+    };
+
+    await ctx.db.insert(attemptEvents).values([
+      // The one real step, reported the way a route reports one.
+      {
+        ...attempt,
+        resource: 'build / build / Complete job',
+        eventType: 'status',
+        phase: 'RUNNING',
+        createdAt: FROZEN,
+      },
+      {
+        ...attempt,
+        resource: 'build / build / Complete job',
+        eventType: 'status',
+        phase: 'SUCCEEDED',
+        createdAt: new Date(FROZEN.getTime() + 2000),
+      },
+      // Three names that never get a status event at all. `build / build` is
+      // the runner's job — two path segments where the step above has three.
+      {
+        ...attempt,
+        resource: 'dispatch',
+        eventType: 'log',
+        line: 'workflow accepted',
+        createdAt: FROZEN,
+      },
+      {
+        ...attempt,
+        resource: 'build / build',
+        eventType: 'log',
+        line: 'Cleaning up orphan processes',
+        createdAt: new Date(FROZEN.getTime() + 3000),
+      },
+      {
+        ...attempt,
+        resource: 'provenance',
+        eventType: 'log',
+        line: 'attestation written',
+        createdAt: new Date(FROZEN.getTime() + 4000),
+      },
+    ]);
+
+    const result = await getDeployDetail({ id: deploy!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const steps = result.value.deploy.build?.steps ?? [];
+    expect(steps.length).toBe(4);
+    // The criterion, stated as bluntly as it reads: the run is over, so nothing
+    // in the list claims to still be going.
+    expect(steps.filter((step) => step.status === 'running')).toEqual([]);
+    // And a log-only name keeps its sentence, because that sentence is the one
+    // thing it has to say — resolving it must not cost the detail.
+    expect(steps).toContainEqual({
+      name: 'build / build',
+      status: 'done',
+      detail: 'Cleaning up orphan processes',
+    });
+    expect(steps).toContainEqual({
+      name: 'dispatch',
+      status: 'done',
+      detail: 'workflow accepted',
+    });
+  });
+
+  test('a step the runner never closed out takes the run’s verdict, and a log-only name does not', async () => {
+    // The other half of "nothing is in progress once the run is over", and the
+    // reason the two are not one rule. A step that was reported `RUNNING` and
+    // never closed — a killed job, a lost final event — *was* in flight when the
+    // build died, so the build's verdict is honestly its own. A log-only name
+    // was never a step and has no verdict to inherit: painting `dispatch` red
+    // because the build failed four steps later would assert something about
+    // dispatch that nothing recorded.
+    const ctx = context();
+    const { componentId, appId, target } = await scaffold(ctx, {
+      prefix: 'killed',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'b430043',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'FAILED',
+        runner: 'hosted',
+      })
+      .returning();
+
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'FAILED',
+      })
+      .returning();
+
+    await ctx.db.insert(attemptEvents).values([
+      {
+        appId,
+        componentId,
+        attemptKind: 'build' as const,
+        buildId: build!.id,
+        resource: 'build / run build',
+        eventType: 'status' as const,
+        phase: 'RUNNING',
+        createdAt: FROZEN,
+      },
+      {
+        appId,
+        componentId,
+        attemptKind: 'build' as const,
+        buildId: build!.id,
+        resource: 'dispatch',
+        eventType: 'log' as const,
+        line: 'workflow accepted',
+        createdAt: FROZEN,
+      },
+    ]);
+
+    const result = await getDeployDetail({ id: deploy!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.deploy.build?.steps).toEqual([
+      { name: 'build / run build', status: 'failed' },
+      { name: 'dispatch', status: 'done', detail: 'workflow accepted' },
+    ]);
+  });
+
+  test('names the platform behind the route a build ran on', async () => {
+    // "Building on hosted" names a route, and a route name is an installation's
+    // own word for it. Which *platform* ran the build is what says where to go
+    // look when it goes wrong, and it is only knowable from the manifest's route
+    // table — which the browser does not have, so it is resolved here.
+    const ctx = context();
+    const { componentId, target } = await scaffold(ctx, { prefix: 'platform' });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'c440044',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'SUCCEEDED',
+        artifactDigest: `sha256:${'c'.repeat(64)}`,
+        // The fixture installation's `cloud-build` route, so this asserts a
+        // lookup rather than a constant that happens to say `github-actions`.
+        runner: 'managed',
+      })
+      .returning();
+
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'LIVE',
+      })
+      .returning();
+
+    const result = await getDeployDetail({ id: deploy!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.deploy.build?.runner).toBe('managed');
+    expect(result.value.deploy.build?.runnerAdapter).toBe('cloud-build');
+  });
+
+  test('names no platform for a route this installation no longer has', async () => {
+    // A route can be retired while its Builds stay readable. Naming no platform
+    // is the honest answer there; guessing at one would put a mark on a build
+    // that says it ran somewhere nothing says it ran.
+    const ctx = context();
+    const { componentId, target } = await scaffold(ctx, { prefix: 'retired' });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'e460046',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'SUCCEEDED',
+        artifactDigest: `sha256:${'e'.repeat(64)}`,
+        runner: 'a-route-that-was-retired',
+      })
+      .returning();
+
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'LIVE',
+      })
+      .returning();
+
+    const result = await getDeployDetail({ id: deploy!.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.deploy.build?.runnerAdapter).toBeNull();
   });
 });
 

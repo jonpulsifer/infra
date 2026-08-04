@@ -42,7 +42,9 @@ import {
   Rocket,
   Undo2,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import type { LogoName } from '../../client/logos/index.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
@@ -55,7 +57,30 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
+import { Logo } from '../../ui/logo.tsx';
 import { cn } from '../../ui/utils.ts';
+
+/**
+ * The mark and the name for a build route's platform.
+ *
+ * The same shape `targets/list.tsx` uses for a Target's adapter, and here for
+ * the same reason: an installation names its own routes ("hosted", "cloud"),
+ * so the route's *name* identifies nothing to somebody who did not configure
+ * it. The adapter does, and it is a closed vocabulary
+ * (`manifest.schema.ts`'s `buildRouteAdapterSchema`).
+ *
+ * `in-cluster` gets the Kubernetes mark because that is literally where it
+ * runs — §4's build Job — not because the App is going to Kubernetes.
+ *
+ * Keyed by a `string` rather than the enum, so a route this build grew and
+ * this table has not is a missing key rather than a crash: the runner's name
+ * is still rendered, only unaccompanied.
+ */
+const BUILD_ADAPTER: Record<string, { logo: LogoName; label: string }> = {
+  'github-actions': { logo: 'github', label: 'GitHub Actions' },
+  'cloud-build': { logo: 'google-cloud', label: 'Cloud Build' },
+  'in-cluster': { logo: 'kubernetes', label: 'in-cluster' },
+};
 
 /**
  * What the operator can do from here, and which one is running.
@@ -179,16 +204,45 @@ function Chrome({
       <dl className="ml-auto flex flex-wrap gap-x-6 gap-y-1">
         <Meta label="Source" value={sourceRef(view.source)} />
         <Meta label="Target" value={view.target} />
-        <Meta
-          label="Build"
-          value={
-            view.build === null
-              ? 'none · extracted'
-              : `${view.build.runner} · ${view.build.fidelity}`
-          }
-        />
+        <Meta label="Build" value={<Builder view={view} />} />
       </dl>
     </div>
+  );
+}
+
+/**
+ * Which builder ran this build — the platform, not just the route's name.
+ *
+ * "Building on hosted" names one installation's route and leaves an operator
+ * unable to tell GitHub Actions from Cloud Build, which is the fact that
+ * decides where to go look: the two fail in different places, over different
+ * credentials, with different things to read. So the route name stays (it is
+ * what an operator configured and what the manifest calls it) and the platform
+ * is stated beside it, with its mark, exactly as a Target or a repository
+ * identifies its platform.
+ *
+ * The mark is decorative — `Logo` hides it from assistive technology — so the
+ * platform is named in words as well. A logo that is the only carrier of a fact
+ * is a fact a screen reader never reads out.
+ */
+function Builder({ view }: { view: DeployView }) {
+  const build = view.build;
+  // §4's supplied artifact: no builder ran, so there is no platform to name.
+  if (build === null) return <>none · extracted</>;
+
+  const platform =
+    build.runnerAdapter === null
+      ? undefined
+      : BUILD_ADAPTER[build.runnerAdapter];
+
+  return (
+    <span className="flex items-center gap-1.5">
+      {platform ? <Logo name={platform.logo} className="size-3.5" /> : null}
+      <span>
+        {build.runner}
+        {platform ? ` · ${platform.label}` : ''} · {build.fidelity}
+      </span>
+    </span>
   );
 }
 
@@ -210,7 +264,7 @@ function shorten(ref: string): string {
   return bare.length > 12 ? bare.slice(0, 12) : bare;
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function Meta({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
       <dt>
