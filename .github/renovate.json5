@@ -470,5 +470,38 @@
       matchFileNames: ['clusters/*/networking/git-repository-gateway-api.yaml'],
       enabled: false,
     },
+    {
+      // Under `clusters/`, everything this owner publishes is delivered by CD,
+      // and Renovate tracking it is Renovate chasing this repository's own
+      // output. The registry is downstream of the tree in both directions:
+      //
+      //   images — `.github/containers.json` maps each image to the manifests
+      //     that pin it, and `containers.yml` rewrites the digest on the merge
+      //     that built it. A Renovate digest PR duplicates that work and races
+      //     it: `:latest` can move between the lookup and the merge, which is
+      //     how an older revision gets deployed after newer code lands.
+      //
+      //   charts — `spindrift-charts.yml` pushes each chart under the version
+      //     its own Chart.yaml carries, and a conformance test asserts each
+      //     consumer's `ref.tag` equals that version. GHCR therefore never
+      //     holds a tag the tree has not already named, so there is nothing to
+      //     bump toward; a tag moved on its own is a red test, not an upgrade.
+      //
+      // Scoped to `clusters/` on purpose, not to the owner. `apps/spindrift/`'s
+      // Dockerfile pins `ghcr.io/jonpulsifer/spindrift-verifier` by digest to
+      // build the verifier binary in, that image has no `deploy` entry, and
+      // Renovate is the only thing that updates it — an owner-wide block would
+      // strand a supply-chain pin. The rule above keeps that one reviewed.
+      //
+      // Third-party charts and images consumed the same way are untouched and
+      // still bump.
+      description: 'Under clusters/, first-party artifacts are delivered by CD, not Renovate',
+      matchFileNames: ['clusters/**'],
+      matchPackageNames: [
+        '/^ghcr\\.io\\/jonpulsifer\\//',
+        '/^docker\\.io\\/jonpulsifer\\//',
+      ],
+      enabled: false,
+    },
   ],
 }
