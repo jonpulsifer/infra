@@ -21,11 +21,15 @@
  * looking plausible.
  */
 import { describe, expect, test } from 'bun:test';
-import { targetSeedSchema } from '../../src/config/manifest.schema.ts';
+import {
+  targetSeedSchema,
+  vesselSeedSchema,
+} from '../../src/config/manifest.schema.ts';
 import {
   type ClusterConnectChoices,
   clusterConnectPlan,
   targetSeedOf,
+  vesselSeedOf,
 } from '../../src/domain/target-onboarding.ts';
 
 const BASE: ClusterConnectChoices = {
@@ -144,9 +148,25 @@ describe('a cluster connect plan', () => {
       throw new Error(`declared a ${parsed.data.adapter} Target`);
     }
     expect(parsed.data.name).toBe('metal');
+    expect(parsed.data.vessel).toBe('metal');
     expect(parsed.data.reaches).toEqual(plan.reaches);
-    expect(parsed.data.connection?.apiServer).toBe(BASE.apiServer);
     expect(parsed.data.connection?.chartValues).toEqual(plan.chartValues);
+  });
+
+  test('declares the boundary the same act connects', () => {
+    // Where the cluster is left the Target's connection when the vessel became
+    // a declared noun, so the screen's rendered document has to name it in the
+    // array it now lives in — otherwise an operator pastes a fragment that
+    // parses and points nowhere.
+    const plan = clusterConnectPlan(BLENDED);
+    const parsed = vesselSeedSchema.safeParse(vesselSeedOf(plan));
+
+    if (!parsed.success) throw parsed.error;
+    if (parsed.data.kind !== 'cluster') {
+      throw new Error(`declared a ${parsed.data.kind} vessel`);
+    }
+    expect(parsed.data.name).toBe('metal');
+    expect(parsed.data.location?.apiServer).toBe(BASE.apiServer);
   });
 });
 

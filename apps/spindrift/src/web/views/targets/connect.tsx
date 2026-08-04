@@ -50,6 +50,7 @@ import {
   type ClusterConnectChoices,
   clusterConnectPlan,
   targetSeedOf,
+  vesselSeedOf,
 } from '../../../domain/target-onboarding.ts';
 import type { VesselKind } from '../../../domain/vessel.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
@@ -613,14 +614,20 @@ function Declaration({
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2 flex flex-col gap-1.5">
         <p className="text-[11px] text-subtle">
-          The same connection, under <span className="font-mono">targets:</span>{' '}
-          in the installation manifest. A declaration seeds an installation that
-          has none; it does not overwrite one that is already configured.
+          The same connection, under <span className="font-mono">vessels:</span>{' '}
+          and <span className="font-mono">targets:</span> in the installation
+          manifest. A declaration seeds an installation that has none; it does
+          not overwrite one that is already configured.
         </p>
-        {/* JSON, which is valid YAML. An emitter would be a thing to maintain
-            for output nobody parses back. */}
+        {/* Both arrays, because one connect act names a boundary and a surface
+            on it. JSON, which is valid YAML — an emitter would be a thing to
+            maintain for output nobody parses back. */}
         <pre className="overflow-x-auto rounded-md border border-border bg-background px-3 py-2 font-mono text-[11px]">
-          {JSON.stringify([targetSeedOf(plan)], null, 2)}
+          {JSON.stringify(
+            { vessels: [vesselSeedOf(plan)], targets: [targetSeedOf(plan)] },
+            null,
+            2,
+          )}
         </pre>
       </CollapsibleContent>
     </Collapsible>

@@ -152,8 +152,62 @@ spec:
         buckets:
           - bluenose-spindrift-source
         defaultBucket: bluenose-spindrift-source
+      # The tenancy boundaries this installation deploys into. Where a boundary
+      # is, and what it can reach, are facts about the boundary and are stated
+      # here once — a Target below states only what is true of its own runtime
+      # surface and names the vessel it sits on.
+      vessels:
+        - name: offsite
+          kind: cluster
+          location:
+            apiServer: https://kubernetes.default.svc
+          # GHCR and not the artifact registry: these packages are public, so
+          # the kubelet pulls them with no credential at all. Reaching the
+          # artifact registry would mean an imagePullSecret in every App
+          # namespace, which is a stored credential §13 does not have.
+          #
+          # The host rather than the `ghcr.io/jonpulsifer` namespace, because
+          # the kubelet's anonymous pull is a property of the registry and not
+          # of one owner's packages. `artifactAddress` accepts either.
+          reachableRegistries:
+            - ghcr.io
+        # The on-site cluster, reached across the peer OIDC trust rather than
+        # in-cluster: `nix/services/k8s` admits this installation's service
+        # account as `federated:system:serviceaccount:spindrift:spindrift`, and
+        # `clusters/folly/apps/spindrift-target` binds it the discovery,
+        # delivery, and chart-source roles. Nothing here is a credential — the
+        # projected token is minted per request for the `api` audience.
+        - name: folly
+          kind: cluster
+          location:
+            apiServer: https://folly.lolwtf.ca:6443
+          # Public packages, so the kubelet pulls them with no credential — the
+          # same reason offsite names GHCR rather than the artifact registry.
+          reachableRegistries:
+            - ghcr.io/jonpulsifer
+        # One project, two runtime surfaces. That it is one boundary is what
+        # this entry says; before it existed the two Targets said it by sharing
+        # a name prefix and restating the project id.
+        - name: bluenose
+          kind: gcp-project
+          location:
+            project: bluenose
+          # The artifact registry and nothing else. Cloud Run pulls through a
+          # cache mirror that cannot parse the OCI index pushed to GHCR, so
+          # naming the registry it *can* read is what keeps a Deploy here from
+          # pinning a reference it will fail on. `serverless-robot-prod` holds
+          # `artifactregistry.reader` on it — see
+          # terraform/gcp/projects/trusted-builds/artifact-registry.tf.
+          #
+          # The host, which names this installation's one artifact registry
+          # namespace unambiguously. `artifactAddress` takes the fuller
+          # `…/trusted-builds/i` spelling too, and would need it if a second
+          # namespace on this host were ever added to `supplyChain.registry`.
+          reachableRegistries:
+            - northamerica-northeast1-docker.pkg.dev
       targets:
         - name: offsite
+          vessel: offsite
           # Every reach: this cluster has a load-balancer address on the lab net
           # and a Cloudflare tunnel in front of it.
           reaches: [none, private, public]
@@ -171,18 +225,7 @@ spec:
               sourceRef:
                 name: infra
                 namespace: flux-system
-            apiServer: https://kubernetes.default.svc
             namespace: spindrift-apps
-            # GHCR and not the artifact registry: these packages are public, so
-            # the kubelet pulls them with no credential at all. Reaching the
-            # artifact registry would mean an imagePullSecret in every App
-            # namespace, which is a stored credential §13 does not have.
-            #
-            # The host rather than the `ghcr.io/jonpulsifer` namespace, because
-            # the kubelet's anonymous pull is a property of the registry and not
-            # of one owner's packages. `artifactAddress` accepts either.
-            reachableRegistries:
-              - ghcr.io
             # §7's operator class: what the App chart needs about *this*
             # cluster. Spindrift never renders into it.
             chartValues:
@@ -217,13 +260,8 @@ spec:
                   # itself, which the chart always admits as a sibling.
                   allowedNamespaces:
                     - oauth2-proxy
-        # The on-site cluster, reached across the peer OIDC trust rather than
-        # in-cluster: `nix/services/k8s` admits this installation's service
-        # account as `federated:system:serviceaccount:spindrift:spindrift`, and
-        # `clusters/folly/apps/spindrift-target` binds it the discovery,
-        # delivery, and chart-source roles. Nothing here is a credential — the
-        # projected token is minted per request for the `api` audience.
         - name: folly
+          vessel: folly
           # No tunnel of its own is named to Spindrift, so this Target serves
           # what its gateway's RFC1918 address reaches and nothing beyond it.
           # Adding one is this list plus `dns.tunnelHostname`, either here or on
@@ -238,13 +276,7 @@ spec:
               sourceRef:
                 name: infra
                 namespace: flux-system
-            apiServer: https://folly.lolwtf.ca:6443
             namespace: spindrift-apps
-            # Public packages, so the kubelet pulls them with no credential —
-            # the same reason offsite names GHCR rather than the artifact
-            # registry.
-            reachableRegistries:
-              - ghcr.io/jonpulsifer
             chartValues:
               platform:
                 # This cluster's own Apps gateway
@@ -281,10 +313,10 @@ spec:
                   allowedNamespaces:
                     - oauth2-proxy
         - name: bluenose-cloudrun
+          vessel: bluenose
           adapter: cloudrun
           connection:
             region: northamerica-northeast1
-            project: bluenose
             endpoint: https://run.googleapis.com
             # Where this project's admission policy is read from. Naming it is
             # also what makes the Service declare `binaryAuthorization.
@@ -299,23 +331,10 @@ spec:
             # the controller's `actAs` on it are declared in
             # terraform/gcp/projects/bluenose/iam.tf for exactly this.
             serviceAccount: spindrift-runtime@bluenose.iam.gserviceaccount.com
-            # The artifact registry and nothing else. Cloud Run pulls through a
-            # cache mirror that cannot parse the OCI index pushed to GHCR, so
-            # naming the registry it *can* read is what keeps a Deploy here from
-            # pinning a reference it will fail on. `serverless-robot-prod` holds
-            # `artifactregistry.reader` on it — see
-            # terraform/gcp/projects/trusted-builds/artifact-registry.tf.
-            #
-            # The host, which names this installation's one artifact registry
-            # namespace unambiguously. `artifactAddress` takes the fuller
-            # `…/trusted-builds/i` spelling too, and would need it if a second
-            # namespace on this host were ever added to `supplyChain.registry`.
-            reachableRegistries:
-              - northamerica-northeast1-docker.pkg.dev
         - name: bluenose-static
+          vessel: bluenose
           adapter: static
           connection:
-            project: bluenose
             endpoint: https://firebasehosting.googleapis.com
       secretStore:
         adapter: onepassword

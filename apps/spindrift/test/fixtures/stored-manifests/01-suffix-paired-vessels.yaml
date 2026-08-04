@@ -1,0 +1,107 @@
+# A stored manifest as it was written before `vessels` was a key.
+#
+# **Frozen. Never edit this file to match a schema change** — that is the one
+# thing that would make the corpus it belongs to stop meaning anything. It is a
+# snapshot of a document that really was written to a real installation's
+# `installation.manifest` column, and the property under test is that such a
+# document still boots. Editing it forward proves only that a document written
+# today parses today.
+#
+# The shape: a vessel was the shared prefix of `<name>-cloudrun` and
+# `<name>-static`, and the boundary's own facts — where it is, what it can
+# reach — were restated on every surface's connection.
+#
+# `installation` is deliberately not the value any declaration in this suite
+# carries, so a boot that silently re-seeded from a declaration instead of
+# loading this document is visible rather than plausible.
+installation: stored-before-vessels
+
+controlPlane:
+  hostname: spindrift.example.test
+
+auth:
+  gateway: null
+
+dns:
+  zones:
+    private: apps.example.test
+    public: example.test
+
+sources:
+  buckets:
+    - example-source-bucket
+  defaultBucket: example-source-bucket
+
+cloud:
+  artifactsProject: example-artifacts
+  homeVesselProject: example-home
+
+charts:
+  app: example/spindrift-app
+
+supplyChain:
+  registry: registry.example.test/artifacts
+  verifier: verifier.example.test
+  signer: gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer
+
+github:
+  clientId: Iv1.example
+  oauthBaseUrl: https://git.example.test
+  apiBaseUrl: https://api.git.example.test
+  buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
+
+build:
+  routes:
+    - name: hosted
+      adapter: github-actions
+  zeroConfigFrontend: registry.example.test/zero-config:pinned
+
+secretStore:
+  adapter: gcp-secret-manager
+  endpoint: https://secrets.example.test
+  container: example-secrets
+
+targets:
+  - name: cluster
+    adapter: kubernetes
+    reaches: [none, private]
+    authReaches: [private]
+    connection:
+      apiServer: https://cluster.example.test
+      namespace: apps
+      delivery:
+        flavour: flux-helmrelease
+        namespace: apps
+        sourceRef:
+          name: infra
+          namespace: flux-system
+      reachableRegistries:
+        - registry.example.test
+      servedHosts:
+        - apps.example.test
+      chartValues:
+        platform:
+          gateway:
+            name: cluster-gateway
+            namespace: gateway
+  # The two surfaces of one project, and the two places its facts were stated.
+  # `servedHosts` deliberately disagrees between them: two surfaces of one
+  # boundary genuinely could, and the union is what the seeding path stored.
+  - name: cloud-cloudrun
+    adapter: cloudrun
+    connection:
+      project: example-vessel
+      region: example-region
+      endpoint: https://run.example.test
+      serviceAccount: runtime@example-vessel.iam.gserviceaccount.com
+      reachableRegistries:
+        - mirror.example.test
+      servedHosts:
+        - run.example.test
+  - name: cloud-static
+    adapter: static
+    connection:
+      project: example-vessel
+      endpoint: https://hosting.example.test
+      servedHosts:
+        - hosting.example.test

@@ -137,8 +137,8 @@ describe('configuring an installation', () => {
     const swapped = {
       ...manifest,
       targets: [
-        { name: 'cluster', adapter: 'kubernetes' },
-        { name: 'cloud-cloudrun', adapter: 'kubernetes' },
+        { name: 'cluster', vessel: 'cluster', adapter: 'kubernetes' },
+        { name: 'cloud-cloudrun', vessel: 'cluster', adapter: 'kubernetes' },
       ],
     } as InstallationManifest;
 
