@@ -44,6 +44,7 @@ import {
   type AuthoredManifest,
   toAuthoredManifest,
 } from '../../config/manifest.schema.ts';
+import { isPlaceholderInstallation } from '../../config/manifest.ts';
 import { type Command, ok } from '../types.ts';
 
 export const getInstallationManifestInput = z.object({}).strict();
@@ -61,13 +62,37 @@ export interface GetInstallationManifestResult {
    * along with one.
    */
   readonly manifestDivergence: readonly string[];
+  /**
+   * Whether anybody has configured this installation, or it is still the
+   * placeholder `loadStoredManifest` seeds an unseeded row with.
+   *
+   * Answered here rather than by a command of its own because the caller that
+   * needs it — the browser deciding between onboarding and the product — needs
+   * the document in the same breath, and a second command would be a second
+   * round trip to learn two halves of one answer that can be inconsistent
+   * between them.
+   *
+   * Current by construction, for the reason above: `context.manifest` is
+   * resolved per dispatch, and {@link isPlaceholderInstallation} is a pure
+   * function of it. So the dispatch that follows a `configureInstallation`
+   * answers `true`, and onboarding ends because the installation is configured
+   * rather than because a screen decided it was finished.
+   */
+  readonly configured: boolean;
 }
 
 export const getInstallationManifest: Command<
   GetInstallationManifestInput,
   GetInstallationManifestResult
-> = async (_input, context) =>
-  ok({
-    manifest: toAuthoredManifest(context.manifest),
+> = async (_input, context) => {
+  const manifest = toAuthoredManifest(context.manifest);
+  return ok({
+    manifest,
     manifestDivergence: context.manifestDivergence ?? [],
+    // The authored document, not the resolved one: the deployment's federation
+    // is joined onto `context.manifest` per read, and comparing that against a
+    // constant that cannot carry it would answer `configured` for every
+    // installation, including the one that has configured nothing.
+    configured: !isPlaceholderInstallation(manifest),
   });
+};

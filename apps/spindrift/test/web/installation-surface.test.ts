@@ -26,7 +26,7 @@ import type {
   AuthoredManifest,
   InstallationManifest,
 } from '../../src/config/manifest.schema.ts';
-import { resolveManifest } from '../../src/config/manifest.ts';
+import { DEFAULT_PLACEHOLDER_MANIFEST } from '../../src/config/manifest.ts';
 import {
   currentStoredManifest,
   loadStoredManifest,
@@ -109,6 +109,30 @@ async function seed(): Promise<void> {
   });
 }
 
+/**
+ * Boot with no declaration at all — the state the wizard exists for.
+ *
+ * The real loader rather than an insert of the placeholder constant, because
+ * the claim being tested is about *that function's* placeholder arm: it
+ * resolves `stored ?? declaration ?? placeholder` and then writes whichever arm
+ * it took, so a test that wrote the row itself would prove nothing about what a
+ * fresh installation actually boots holding.
+ */
+async function bootUnconfigured(): Promise<void> {
+  await loadStoredManifest(database().db, {});
+}
+
+async function readInstallation(): Promise<{
+  manifest: AuthoredManifest;
+  configured: boolean;
+}> {
+  const response = await post(authenticated, 'getInstallationManifest', {});
+  const body = (await response.json()) as {
+    value: { manifest: AuthoredManifest; configured: boolean };
+  };
+  return body.value;
+}
+
 async function storedManifest(): Promise<AuthoredManifest | undefined> {
   const [row] = await database().db.select().from(installation);
   return row?.manifest;
@@ -144,6 +168,55 @@ describe('reading this installation from the browser', () => {
     await seed();
     const response = await post(anonymous, 'getInstallationManifest', {});
     expect(response.status).toBe(401);
+  });
+});
+
+/**
+ * Which screen an unconfigured installation gets, decided by the row rather
+ * than by a flag.
+ *
+ * This is the whole of what makes onboarding appear instead of a product with
+ * nothing configured behind it, and it is asserted over the route table for the
+ * same reason the criteria above are: the browser asks this question through
+ * `getInstallationManifest` and acts on the answer, so an answer that were only
+ * right when the handler is called directly would be right nowhere.
+ */
+describe('whether anybody has configured this installation', () => {
+  test('a boot with nothing declared is unconfigured, and says so', async () => {
+    await bootUnconfigured();
+    const { manifest, configured } = await readInstallation();
+    expect(configured).toBe(false);
+    // And the document handed to onboarding is the one the row holds, which is
+    // what makes the first screen a confirmation rather than a blank form.
+    expect(manifest).toEqual(DEFAULT_PLACEHOLDER_MANIFEST);
+  });
+
+  test('a declaration configured this installation, so onboarding never runs', async () => {
+    // The live posture, and the one that would be worst to get wrong: an
+    // installation whose chart mounts a manifest has been configured by
+    // whoever wrote it, and showing them a wizard would be offering to redo
+    // work they already did.
+    await seed();
+    expect((await readInstallation()).configured).toBe(true);
+  });
+
+  test('onboarding’s own write is what ends it', async () => {
+    // Resolved per dispatch, so the read that follows the write sees the row —
+    // which is what lets onboarding stop because the installation is
+    // configured rather than because a screen decided it was finished.
+    await bootUnconfigured();
+    const { manifest } = await readInstallation();
+    const named = withValueAt(
+      manifest,
+      ['installation'],
+      'named-by-onboarding',
+    );
+
+    const saved = await post(authenticated, 'configureInstallation', {
+      manifest: named,
+    });
+    expect(saved.status).toBe(200);
+    expect((await readInstallation()).configured).toBe(true);
   });
 });
 

@@ -179,8 +179,15 @@ export function InstallationSettings() {
   );
 }
 
-/** A refusal, kept in the three kinds the command actually draws. */
-function refusalOf(failure: TransportFailure): SaveOutcome {
+/**
+ * A refusal, kept in the three kinds the command actually draws.
+ *
+ * Exported so onboarding refuses in the same three kinds rather than in a
+ * second reading of the same codes: the distinction `NOT_DEPLOYABLE` draws is
+ * the one a form is most likely to flatten, and two screens that flattened it
+ * differently would be two different lies.
+ */
+export function refusalOf(failure: TransportFailure): SaveOutcome {
   switch (failure.code) {
     case 'INVALID_INPUT':
       return { kind: 'invalid', message: failure.message };
@@ -192,7 +199,7 @@ function refusalOf(failure: TransportFailure): SaveOutcome {
 }
 
 /** Server-reported issues, keyed the way the form keys its controls. */
-function issuesOf(failure: TransportFailure): FieldErrors {
+export function issuesOf(failure: TransportFailure): FieldErrors {
   const errors = new Map<string, string[]>();
   for (const issue of failure.issues ?? []) {
     // The dispatch layer paths an issue from the command's *input*, whose one
@@ -394,8 +401,12 @@ function ManifestDivergenceNotice({
  * world, not asked to fix a field, and `NOT_DEPLOYABLE` is that code — a
  * message about a Target that already exists with a different adapter is not
  * something re-typing a value in this form can resolve.
+ *
+ * Exported for the reason {@link refusalOf} is: onboarding writes through the
+ * same command and therefore meets the same three refusals, and it says them in
+ * this markup rather than in a second copy that could drift out of the grammar.
  */
-function Outcome({ outcome }: { readonly outcome: SaveOutcome | null }) {
+export function Outcome({ outcome }: { readonly outcome: SaveOutcome | null }) {
   if (outcome === null) return null;
 
   if (outcome.kind === 'saved') {

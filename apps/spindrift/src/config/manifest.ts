@@ -207,6 +207,37 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
 };
 
 /**
+ * Whether nobody has configured this installation yet.
+ *
+ * **Derived, not flagged**, and that is the whole of the design. `loadStoredManifest`
+ * resolves `stored ?? declaration ?? placeholder` and then writes whichever arm
+ * it took back to the row — so by the time anything can ask the question, the
+ * placeholder arm is no longer distinguishable by *when* it was taken, only by
+ * *what it wrote*. A boolean column recording which arm ran would be a second
+ * copy of a fact the row already carries whole, and it would go stale the first
+ * time somebody edited the row by hand or restored a database.
+ *
+ * So the answer is the document compared against the constant above. Two
+ * properties follow that a flag would not have: it is current the moment the
+ * row changes, which is what lets a wizard's save stop the wizard being shown;
+ * and it is the same answer in the reconciler, in the web process, and in a
+ * test, because it is a pure function of the document.
+ *
+ * **A mounted declaration therefore configures an installation**, which is
+ * right: an operator who wrote a manifest has configured this installation by
+ * definition, and offering them onboarding would be offering to redo work they
+ * already did.
+ *
+ * The named cost: an operator who saves this exact document unchanged is still
+ * unconfigured, and will be shown onboarding again. That is honest — they
+ * confirmed nothing — but it does mean "configured" is not a record of a
+ * *ceremony*, only of a document.
+ */
+export function isPlaceholderInstallation(manifest: AuthoredManifest): boolean {
+  return Bun.deepEquals(manifest, DEFAULT_PLACEHOLDER_MANIFEST, true);
+}
+
+/**
  * Read the manifest the environment points at.
  *
  * `SPINDRIFT_MANIFEST_PATH` wins over `SPINDRIFT_MANIFEST`. If neither is set,

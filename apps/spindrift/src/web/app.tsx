@@ -36,6 +36,7 @@ import { NewApp } from './views/apps/new/index.tsx';
 import { type SetReach, Workspace } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
 import { InstallationSettings } from './views/auth/installation.tsx';
+import { Onboarding } from './views/auth/onboarding.tsx';
 import { IdentitySettings } from './views/auth/settings.tsx';
 import { BuildLedger } from './views/operations/builds.tsx';
 import { DeployLedger } from './views/operations/deploys.tsx';
@@ -64,9 +65,27 @@ type Gatekeeping =
     }
   | { readonly state: 'signed-in'; readonly principal: Principal };
 
+/**
+ * Whether this installation has been configured, and the document to onboard
+ * from if it has not.
+ *
+ * The same shape as {@link Gatekeeping} and for the same reason: which screen
+ * renders is a fact about the installation rather than a choice anybody makes,
+ * and `asking` is a third state because rendering the product for one frame and
+ * then replacing it with onboarding is the flash of a broken app this exists to
+ * remove.
+ */
+export type Configuration =
+  | { readonly state: 'asking' }
+  | { readonly state: 'unconfigured'; readonly manifest: unknown }
+  | { readonly state: 'configured' };
+
 export function App() {
   const route = useRoute();
   const [gate, setGate] = useState<Gatekeeping>({ state: 'asking' });
+  const [installation, setInstallation] = useState<Configuration>({
+    state: 'asking',
+  });
 
   useEffect(() => {
     let live = true;
@@ -93,6 +112,48 @@ export function App() {
     };
   }, []);
 
+  /**
+   * Ask, once there is somebody to ask on behalf of, whether this installation
+   * has been configured.
+   *
+   * **After the session rather than beside it**, which costs a second round
+   * trip before the first paint of the product. The alternative is firing an
+   * unauthenticated command on every anonymous load to learn a fact only a
+   * signed-in operator can act on, and a 401 on the sign-in screen every time
+   * is the worse trade.
+   *
+   * **A read that fails means the product**, not onboarding. Onboarding is the
+   * more disruptive answer — it replaces the whole application — so a transport
+   * failure resolves to the state that takes nothing away, and Settings still
+   * reaches everything this screen would have asked.
+   */
+  useEffect(() => {
+    if (gate.state !== 'signed-in') {
+      // A sign-out has to un-answer this: the next operator to sign in is a
+      // different session on a possibly different installation state, and
+      // carrying the previous answer over would show them the product while
+      // this effect was still asking.
+      setInstallation({ state: 'asking' });
+      return;
+    }
+    let live = true;
+    command('getInstallationManifest', {})
+      .then((result) => {
+        if (!live) return;
+        setInstallation(
+          result.ok && !result.value.configured
+            ? { state: 'unconfigured', manifest: result.value.manifest }
+            : { state: 'configured' },
+        );
+      })
+      .catch(() => {
+        if (live) setInstallation({ state: 'configured' });
+      });
+    return () => {
+      live = false;
+    };
+  }, [gate.state]);
+
   if (gate.state === 'asking') return null;
 
   if (gate.state === 'anonymous') {
@@ -106,11 +167,12 @@ export function App() {
   }
 
   return (
-    <AppShell
+    <SignedIn
+      principal={gate.principal}
+      installation={installation}
       path={route.path}
       onNavigate={route.navigate}
-      principal={gate.principal}
-      themeControl={<ThemeToggle />}
+      onConfigured={() => setInstallation({ state: 'configured' })}
       onSignOut={() => {
         void signOut().then(() =>
           setGate({
@@ -120,8 +182,65 @@ export function App() {
           }),
         );
       }}
+    />
+  );
+}
+
+/**
+ * What somebody who has signed in is shown.
+ *
+ * Two things, and which one is not a preference: an installation that has been
+ * configured gets the product, and one that has not gets onboarding *instead
+ * of* it. Not beside it and not after it — an unconfigured installation has no
+ * Apps, no Builds and no Targets, so the product it would otherwise render is a
+ * navigation to six empty screens with one form buried at the end of it, and
+ * every act reachable from there refuses on whichever placeholder it read first.
+ *
+ * Exported for `test/web/onboarding.test.tsx`, for the same reason {@link Screen}
+ * is exported for the mounted route-table test: the claim is about *this*
+ * function's branches, and a test that rendered `Onboarding` directly would be
+ * asserting that a component it constructed itself renders. The discovery panel
+ * on the settings screen shipped in exactly that state — every test around it
+ * passed, and deleting the one line that mounted it changed nothing.
+ */
+export function SignedIn({
+  principal,
+  installation,
+  path,
+  onNavigate,
+  onConfigured,
+  onSignOut,
+}: {
+  readonly principal: Principal;
+  readonly installation: Configuration;
+  readonly path: string;
+  onNavigate(path: string): void;
+  onConfigured(): void;
+  onSignOut(): void;
+}) {
+  if (installation.state === 'asking') return null;
+
+  if (installation.state === 'unconfigured') {
+    return (
+      <Onboarding
+        initial={installation.manifest}
+        onDone={(next) => {
+          onConfigured();
+          if (next !== null) onNavigate(next);
+        }}
+      />
+    );
+  }
+
+  return (
+    <AppShell
+      path={path}
+      onNavigate={onNavigate}
+      principal={principal}
+      themeControl={<ThemeToggle />}
+      onSignOut={onSignOut}
     >
-      <Screen path={route.path} onNavigate={route.navigate} />
+      <Screen path={path} onNavigate={onNavigate} />
     </AppShell>
   );
 }
