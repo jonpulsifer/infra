@@ -484,30 +484,26 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
     ).toEqual([]);
   });
 
-  test('a job is judged on neither the reach nor the auth it carries', () => {
-    // Nothing routes to a job on either backend that runs one, so the reach
-    // column has no effect on what is rendered — the App chart's `serving`
-    // helper and the Cloud Run Job document both say so. Judging candidacy on
-    // it would refuse a Target that runs the job perfectly well, and the
-    // Component's reach defaults to `private`.
+  test('a schedule nothing fires is refused at Place, and only a schedule', () => {
+    // The kind is rendered on this backend and the schedule is not, so the
+    // refusal is its own reason and lands at Place — a scheduled job accepted
+    // here would be refused by the adapter after a build and a Deploy, which is
+    // the direction §3 exists to prevent.
     const cloud = target({ adapter: 'cloudrun' });
-    const cluster = target({ adapter: 'kubernetes' });
-    for (const reach of ['none', 'private', 'public'] as const) {
-      expect(
-        exclusionsFor(cloud, requirements({ kind: 'job', reach })),
-      ).toEqual([]);
-      expect(
-        exclusionsFor(cluster, requirements({ kind: 'job', reach })),
-      ).toEqual([]);
-    }
-    // And not because a job stopped needing a gateway that is there: it never
-    // renders a route to attach to one.
-    expect(
-      exclusionsFor(
-        target({ adapter: 'kubernetes', routesAttachTo: false }),
-        requirements({ kind: 'job', reach: 'public' }),
-      ),
-    ).toEqual([]);
+    const unscheduled = requirements({
+      kind: 'job',
+      reach: 'none',
+      auth: 'none',
+    });
+    const scheduled = { ...unscheduled, schedule: '0 3 * * *' };
+
+    expect(exclusionsFor(cloud, scheduled)).toEqual(['NO_SCHEDULER']);
+    expect(exclusionsFor(cloud, unscheduled)).toEqual([]);
+    // The cluster's own controller fires the CronJob the chart renders, so the
+    // same Component is a candidate there.
+    expect(exclusionsFor(target({ adapter: 'kubernetes' }), scheduled)).toEqual(
+      [],
+    );
   });
 
   test('a service and a website are both rendered there', () => {

@@ -188,14 +188,14 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     }
 
     const job = desired.kind === 'job';
-    // A schedule fires nothing here yet, and dropping it silently is the one
-    // outcome worse than refusing it: a Component would report `LIVE` on a
-    // cadence nothing keeps. Cloud Run's Job resource carries no schedule at
-    // all — firing one is Cloud Scheduler's job, and standing that up needs an
-    // API this vessel has not enabled and an invoker binding nothing creates
-    // (**72**). `REJECTED` because §6 puts it with the refusals a developer
-    // answers by changing the request: drop the schedule, or place it on a
-    // Target that keeps one.
+    // Place refuses this first: `FIRES_SCHEDULES_BY_ADAPTER` makes a scheduled
+    // job a `NO_SCHEDULER` non-candidate here, in the same words. This is the
+    // backstop for the path that asks for a Deploy without asking Place —
+    // dropping the schedule silently is the one outcome worse than refusing it,
+    // because a Component would report `LIVE` on a cadence nothing keeps.
+    // `REJECTED` because §6 puts it with the refusals a developer answers by
+    // changing the request: drop the schedule, or place it on a Target that
+    // keeps one (**72**).
     if (job && desired.schedule !== undefined) {
       yield this.status('FAILED', { reason: 'REJECTED' });
       return {

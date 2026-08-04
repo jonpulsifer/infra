@@ -95,6 +95,7 @@ async function seedComponent(
   kind: ComponentKind = 'service',
   reach: Component['reach'] = 'private',
   auth: Component['auth'] = 'proxy',
+  schedule: string | null = null,
 ) {
   const db = database().db;
   const [app] = await db
@@ -103,7 +104,7 @@ async function seedComponent(
     .returning();
   const [component] = await db
     .insert(components)
-    .values({ appId: app!.id, name: 'web', kind, reach, auth })
+    .values({ appId: app!.id, name: 'web', kind, reach, auth, schedule })
     .returning();
   return { app: app!, component: component! };
 }
@@ -175,6 +176,32 @@ describe('resolution is derived, and it is a query', () => {
     const run = placement.options.find((o) => o.name === 'vessel-cloudrun')!;
     expect(run.candidate).toBe(true);
     expect(run.artifactType).toBe('image');
+  });
+
+  test("a job's schedule is derived, and refuses the backend that fires none", async () => {
+    const registry = fakes();
+    await connectEverything(registry);
+    const { component } = await seedComponent(
+      'job',
+      'none',
+      'none',
+      '0 3 * * *',
+    );
+
+    // The Cloud Run adapter renders the Job and nothing fires it, so the
+    // schedule is what excludes it — and it is excluded here rather than after
+    // a build, which is what §3 puts resolution before the build for.
+    const placement = await place(registry, component.id);
+    const run = placement.options.find((o) => o.name === 'vessel-cloudrun')!;
+    expect(run.candidate).toBe(false);
+    expect(run.reasons).toEqual(['NO_SCHEDULER']);
+    expect(run.detail).toEqual([
+      'this Target runs a job but has nothing to fire it on a schedule',
+    ]);
+    // The cluster's own controller fires the CronJob the chart renders.
+    expect(placement.suggestedTargetId).toBe(
+      placement.options.find((o) => o.name === 'cluster')!.targetId,
+    );
   });
 
   test('nowhere fits is returned, with a reason for every Target', async () => {

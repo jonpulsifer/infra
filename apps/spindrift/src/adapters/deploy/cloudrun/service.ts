@@ -261,9 +261,8 @@ const WORKLOAD_ID_LIMIT = 63;
  * One resource per (App, Component), so a re-deploy is a new revision of the
  * same Service, or the same Job with a new template.
  *
- * Shared between the two documents because the id is the *Component's*, not the
- * resource's: a Component that changed kind would otherwise leave the workload
- * it used to be running under a name nothing looks at.
+ * The kind is not part of the name: the collection is part of the ref, so
+ * `jobs/{id}` and `services/{id}` name two resources rather than collide.
  */
 export function workloadId(desired: DesiredState): string {
   return workloadName(desired, WORKLOAD_ID_LIMIT);
