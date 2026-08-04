@@ -607,6 +607,27 @@ describe('a write that never landed', () => {
     expect(blameFor(verdict.reason)).toBe('platform');
   });
 
+  test('an apply the API server 404s is a failure, blamed on the platform', async () => {
+    // The write half of the same question the job `create` test asks. A
+    // server-side apply into a deleted namespace — or one whose delivery CRD is
+    // not installed — answers `404`, and `apply` returns `void`, so a swallowed
+    // one was a deploy that placed nothing and went on to poll for a verdict.
+    //
+    // And it is `TARGET_UNREACHABLE`, not `REJECTED`: an apply creates what is
+    // not there, so nothing missing here is the developer's object. §6 blames
+    // `REJECTED` on the developer, which would send them reading their chart
+    // values for a namespace the operator deleted.
+    const { adapter, cluster } = adapterFor({
+      refuse: { status: 404, body: 'namespaces "apps" not found' },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('TARGET_UNREACHABLE');
+    expect(blameFor(verdict.reason)).toBe('platform');
+    expect(verdict.detail).toBe('namespaces "apps" not found');
+    expect(cluster.all('helmreleases')).toHaveLength(0);
+  });
+
   test('an expired credential is unreachable, not a rejection', async () => {
     const { adapter } = adapterFor({ token: 'a-different-token' });
     const { verdict } = await drain(adapter.apply(target(), desiredState()));
@@ -1593,7 +1614,9 @@ describe('a job is run, and its runs are read', () => {
       now: () => RUN_AT,
     });
 
-    expect(adapter.run(target(), REF)).rejects.toThrow(/404/);
+    // Awaited: unawaited, the second assertion runs before `run` has issued its
+    // `POST` and would pass whatever the adapter did.
+    await expect(adapter.run(target(), REF)).rejects.toThrow(/404/);
     expect(far.all('jobs')).toHaveLength(0);
   });
 
@@ -1668,6 +1691,29 @@ describe('a job is run, and its runs are read', () => {
       ['blog-nightly-1', 'passed'],
     ]);
     expect(runs.executions[1]?.detail).toBe('the container exited 1');
+  });
+
+  test('a list the API server 404s is a fault, not a job that never ran', async () => {
+    // The read half of the `create` test above, and the same failure: `403` on
+    // this call reaches the "these runs could not be read" arm, so a `404` —
+    // the namespace deleted, or a cluster that does not serve `batch/v1` —
+    // reading green and empty is an asymmetry nobody chose. `api.list` answers
+    // `null` for exactly that and `?? []` threw the distinction away.
+    const far = new FakeKubernetes({
+      // `CronJob` served and `Job` not: a `list jobs` here is a `404` while
+      // everything `placedJob` reads still answers, so the failure is this one
+      // call's and not the fixture falling over earlier.
+      servedKinds: { ...SERVED, 'batch/v1': ['CronJob'] },
+      objects: {
+        'helmreleases/delivery/blog-nightly': release,
+        'cronjobs/apps/blog-nightly': cronJob,
+      },
+      status: () => null,
+    });
+
+    await expect(adapterFor(far).executions(target(), REF)).rejects.toThrow(
+      /404/,
+    );
   });
 
   test("reads one run's logs rather than the Component's whole output", async () => {

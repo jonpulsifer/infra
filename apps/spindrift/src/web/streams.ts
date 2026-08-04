@@ -25,6 +25,7 @@ import {
   type AttemptLogCursor,
   readAttemptStream,
 } from '../domain/attempt-log.ts';
+import { isLabel } from '../domain/naming.ts';
 import {
   deployTargetOf,
   hasTargetConnection,
@@ -49,17 +50,6 @@ export {
   type StreamErrorMessage,
   type StreamMessage,
 };
-
-/**
- * What a run may be called, which is what both runtimes already enforce.
- *
- * A Cloud Run execution and a Kubernetes Job are both named as an RFC 1123
- * label: lowercase alphanumerics and dashes, starting and ending alphanumeric,
- * 63 characters at most. Nothing a backend would answer about is turned away,
- * and nothing that could end a quoted term in a Cloud Logging filter or a label
- * selector gets past it.
- */
-const RUN_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export interface StreamDeps {
   authenticate(request: Request): Promise<RequestAuthentication>;
@@ -204,12 +194,23 @@ async function upgradeRuntime(
   // entry the project has, other Apps' output and audit logs included, and the
   // lines land in the run pane of whoever asked.
   //
-  // The pattern is what both runtimes name a run: a Cloud Run execution and a
-  // Kubernetes Job are both RFC 1123 label-shaped, so nothing legitimate is
-  // turned away and nothing with a quote in it gets through. `?execution=` is
-  // an empty string rather than `null`, which passes the "name one" guard
-  // below, so it is refused here.
-  if (execution !== null && !RUN_NAME.test(execution)) {
+  // One DNS label — §9's {@link isLabel}, rather than a sixth copy of the same
+  // grammar — because that is what everything Spindrift starts is called: a
+  // Cloud Run execution name *is* validated as a label, and the Jobs this
+  // adapter creates are named from a release name already shortened to 63.
+  //
+  // It is deliberately narrower than Kubernetes. A Job name is a DNS
+  // *subdomain* — dots are legal, and the ceiling is 253 — and `executions()`
+  // lists by label, so a foreign Job named `blog.nightly-1` can reach the
+  // Recent runs card and be refused when its row is clicked. That is the trade
+  // taken: a name Spindrift cannot have produced does not get to widen a
+  // browser-controlled string on its way into two query languages, and a run
+  // whose logs will not open is a smaller failure than one that opens
+  // everyone's. Widening it means escaping at each concatenation site instead.
+  //
+  // `?execution=` is an empty string rather than `null`, which passes the "name
+  // one" guard below, so it is refused here.
+  if (execution !== null && !isLabel(execution)) {
     return refusal(400, 'MALFORMED_REQUEST', 'that is not a run name');
   }
   if (!componentId || !targetId) {

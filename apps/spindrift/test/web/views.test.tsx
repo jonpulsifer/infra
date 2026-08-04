@@ -665,6 +665,8 @@ describe('the App workspace', () => {
     // And not the sentence for a job that has genuinely never run: nobody
     // found out whether it has.
     expect(markup).not.toContain('has not run yet');
+    // Nor the caption, which counts what was shown. Nothing was.
+    expect(markup).not.toContain('Showing the last');
   });
 
   test('running a job is offered where the runs are, and only there', () => {

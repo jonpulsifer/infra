@@ -855,11 +855,17 @@ function Runtime({
               chart's `successfulJobsHistoryLimit` and on `cloudrun` is not the
               retention of anything — saying "the last N are kept" there sends
               an operator looking for a run that `gcloud` still has.
+
+              Not shown at all on a failed read: nothing was shown, so a caption
+              claiming ten of anything is the empty-list lie the sentence above
+              it exists to avoid.
             */}
-            <p className="pt-2 text-xs text-muted-foreground">
-              Showing the last {runtime.retained} runs. The history lives on the
-              Target, not here.
-            </p>
+            {runtime.because ? null : (
+              <p className="pt-2 text-xs text-muted-foreground">
+                Showing the last {runtime.retained} runs. The history lives on
+                the Target, not here.
+              </p>
+            )}
           </>
         ) : (
           <>

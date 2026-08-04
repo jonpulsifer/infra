@@ -548,6 +548,14 @@ describe('a job tails one run rather than the Component', () => {
       '',
       'Nightly-2',
       'nightly_2',
+      // Deliberately narrower than Kubernetes, which names a Job as a DNS
+      // *subdomain*: dots are legal there, and `executions()` lists by label,
+      // so a Job somebody else created can reach the card under a name this
+      // refuses. That is the trade — a name Spindrift cannot have produced
+      // does not get to widen a browser-controlled string on its way into two
+      // query languages, and one row whose log pane will not open is a smaller
+      // failure than one that opens the whole project's.
+      'blog.nightly-1',
     ]) {
       const { response, upgraded } = await upgrade(
         user,

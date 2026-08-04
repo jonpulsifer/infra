@@ -542,15 +542,26 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const placed = await this.placedJob(api, ref);
     if (placed.kind === 'none') return placed;
 
-    const jobs =
-      (await api.list(
-        {
-          apiVersion: JOB.apiVersion,
-          plural: JOB.plural,
-          namespace: connection.namespace,
-        },
-        { labelSelector: placed.selector },
-      )) ?? [];
+    const jobs = await api.list(
+      {
+        apiVersion: JOB.apiVersion,
+        plural: JOB.plural,
+        namespace: connection.namespace,
+      },
+      { labelSelector: placed.selector },
+    );
+    // `list` answers `null` for a `404`, which {@link KubernetesApi.list} keeps
+    // apart from an empty list on purpose: it means the namespace is gone or
+    // this cluster does not serve `batch/v1`. Neither is "this job has never
+    // run", and `?? []` here would render both as the never-run empty state —
+    // the read half of the same silent-wrong-answer `create` had. Raised so it
+    // lands where a `403` on this call already lands, on `executionsOf`'s
+    // `because` arm: the runs could not be read, and the Run now button stays.
+    if (jobs === null) {
+      throw new Error(
+        `the API server answered 404 listing ${JOB.plural} in ${connection.namespace} — that namespace or ${JOB.apiVersion} is not there`,
+      );
+    }
 
     return {
       kind: 'executions',
@@ -1526,15 +1537,23 @@ function writeFailure(
 ): Extract<DeployVerdict, { phase: 'FAILED' }> {
   if (cause instanceof KubernetesRequestError) {
     // A 4xx is the cluster refusing this object — an admission webhook, a
-    // quota, an invalid spec — which §6 puts under one reason. A 5xx or an
-    // auth failure is the cluster being unavailable to Spindrift, which is a
-    // different blame entirely.
+    // quota, an invalid spec — which §6 puts under one reason and blames on the
+    // developer. Three of them are not that, and a 5xx is not either.
+    //
+    // 401 and 403 are Spindrift's own credential. A **404 on a write is the
+    // address, never the object**: a server-side apply creates what is not
+    // there, so the only things that can be missing are the namespace or the
+    // API group — the Target, which the operator configured, not the spec the
+    // developer wrote. Indicting the developer for a namespace that was deleted
+    // sends them reading their chart values, and §6 calls blame the most useful
+    // thing the UI knows. All three are `TARGET_UNREACHABLE`'s platform.
+    const platformFailure =
+      cause.status === 401 || cause.status === 403 || cause.status === 404;
     const rejected = cause.status >= 400 && cause.status < 500;
-    const authFailure = cause.status === 401 || cause.status === 403;
     return {
       phase: 'FAILED',
       ref,
-      reason: rejected && !authFailure ? 'REJECTED' : 'TARGET_UNREACHABLE',
+      reason: rejected && !platformFailure ? 'REJECTED' : 'TARGET_UNREACHABLE',
       detail: cause.body || cause.message,
       debug: { status: cause.status, url: cause.url },
     };
