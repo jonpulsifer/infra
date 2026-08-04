@@ -40,9 +40,9 @@ in
       url = "https://github.com/jdx/mise/releases/download/v${version}/mise-v${version}-linux-${arch}.tar.gz";
       hash =
         if final.stdenv.hostPlatform.isAarch64 then
-          "sha256-DbAwUjf9CHhiroIXXWGdKI0yG64hauEQHMczFXqAtpM="
+          "sha256-bYiLo9C1149nZ3GoSEaIW39oX7TRUz8pJweeubdWM6g="
         else
-          "sha256-LK6NxUgS+mC/ZS5uvcac/uEQZgzdsnBT9UQv3tGdvH0=";
+          "sha256-ZBg2A4VPMZt4ZYMFxUWqyuk14JWaOolLd6D5QW6rBHs=";
     };
 
     # The tarball unpacks into ./mise/{bin,man,...}; set sourceRoot so the
