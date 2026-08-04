@@ -15,16 +15,10 @@
  *
  * The repo has no jsdom/happy-dom (checked: absent from `package.json`,
  * absent from `bun.lock`, no DOM global in the Bun runtime itself), and
- * adding one is out of scope for a single regression test. What follows is a
- * few dozen lines of the smallest object graph `react-dom/client`'s host
- * config and the `@radix-ui/react-collapsible` tree actually call —
- * `appendChild`/`insertBefore`/`removeChild`, `setAttribute`/`getAttribute`
- * (Radix reports `data-state` and `hidden` through these, never through a
- * direct IDL property, which is what makes them a reliable read here),
- * `style` as a plain object, a no-op `addEventListener` (nothing here
- * simulates a click), and a `getBoundingClientRect` that satisfies
- * `CollapsibleContent`'s layout-effect without a real layout. It is not a DOM
- * implementation; it is the subset this one component tree touches.
+ * adding one is out of scope for a regression test. `test/harness/dom.ts` is
+ * the subset `react-dom/client`'s host config and the
+ * `@radix-ui/react-collapsible` tree actually call, and its own header says
+ * what that subset is and why it is a module rather than a copy per file.
  *
  * The second half of the file mounts the **route table** rather than one view,
  * for the same structural reason: navigating between two Deploys of one App
@@ -33,175 +27,26 @@
  * globals the shim already owns — the client reaches the network through
  * exactly those two and nothing else.
  */
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Screen } from '../../src/web/app.tsx';
 import type { DeployView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { DEPLOY_SCENARIOS } from '../fixtures/scenarios.ts';
-
-const ELEMENT_NODE = 1;
-const TEXT_NODE = 3;
-
-/**
- * `CollapsibleContentImpl` sets a `--radix-collapsible-content-height`
- * custom property alongside ordinary style keys. React DOM routes any
- * `--`-prefixed style key through `style.setProperty` rather than a direct
- * assignment (that split exists for real CSSStyleDeclarations, where custom
- * properties aren't reflected as JS properties) — a plain object supports
- * neither, so this is a plain object plus that one method.
- */
-class FakeStyle {
-  [key: string]: unknown;
-  setProperty(name: string, value: string): void {
-    this[name] = value;
-  }
-  removeProperty(name: string): void {
-    delete this[name];
-  }
-}
-
-class FakeNode {
-  readonly nodeType: number;
-  readonly ownerDocument: FakeDocument;
-  readonly namespaceURI?: string;
-  parentNode: FakeNode | null = null;
-  childNodes: FakeNode[] = [];
-  readonly style = new FakeStyle();
-  readonly tagName: string;
-  private readonly attrs = new Map<string, string>();
-  private text: string;
-
-  constructor(
-    nodeType: number,
-    ownerDocument: FakeDocument,
-    text = '',
-    namespaceURI?: string,
-    tag = '',
-  ) {
-    this.nodeType = nodeType;
-    this.ownerDocument = ownerDocument;
-    this.text = text;
-    this.namespaceURI = namespaceURI;
-    // `getRootHostContext` reads the container's `tagName` (uppercase, per
-    // DOM convention) to seed the SVG/HTML namespace switch; every other
-    // fake node just carries it for parity.
-    this.tagName = tag.toUpperCase();
-  }
-
-  appendChild(child: FakeNode): FakeNode {
-    return this.insertBefore(child, null);
-  }
-
-  insertBefore(child: FakeNode, ref: FakeNode | null): FakeNode {
-    if (child.parentNode) child.parentNode.removeChild(child);
-    const index = ref ? this.childNodes.indexOf(ref) : -1;
-    if (ref && index === -1) {
-      this.childNodes.push(child);
-    } else if (ref) {
-      this.childNodes.splice(index, 0, child);
-    } else {
-      this.childNodes.push(child);
-    }
-    child.parentNode = this;
-    return child;
-  }
-
-  removeChild(child: FakeNode): FakeNode {
-    const index = this.childNodes.indexOf(child);
-    if (index !== -1) this.childNodes.splice(index, 1);
-    child.parentNode = null;
-    return child;
-  }
-
-  contains(node: FakeNode): boolean {
-    for (let n: FakeNode | null = node; n; n = n.parentNode) {
-      if (n === this) return true;
-    }
-    return false;
-  }
-
-  setAttribute(name: string, value: string): void {
-    this.attrs.set(name, String(value));
-  }
-  getAttribute(name: string): string | null {
-    return this.attrs.has(name) ? (this.attrs.get(name) ?? null) : null;
-  }
-  removeAttribute(name: string): void {
-    this.attrs.delete(name);
-  }
-  hasAttribute(name: string): boolean {
-    return this.attrs.has(name);
-  }
-
-  addEventListener(): void {}
-  removeEventListener(): void {}
-
-  getBoundingClientRect() {
-    return {
-      x: 0,
-      y: 0,
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      width: 0,
-      height: 0,
-    };
-  }
-
-  get nodeValue(): string | null {
-    return this.nodeType === TEXT_NODE ? this.text : null;
-  }
-  set nodeValue(value: string) {
-    this.text = value;
-  }
-
-  get textContent(): string {
-    return this.nodeType === TEXT_NODE
-      ? this.text
-      : this.childNodes.map((c) => c.textContent).join('');
-  }
-  set textContent(value: string) {
-    this.childNodes = [];
-    if (value)
-      this.appendChild(new FakeNode(TEXT_NODE, this.ownerDocument, value));
-  }
-}
-
-class FakeDocument {
-  readonly nodeType = 9;
-  // Set to `globalThis` once the test installs it as the global `window` —
-  // `commitBeforeMutationEffects` reads focus through
-  // `container.ownerDocument.defaultView.document`, so `defaultView` has to
-  // be the same object as `globalThis.document`'s owner, not a lookalike.
-  defaultView: typeof globalThis | undefined;
-  // Read by `getActiveElement`; there is no focus in this shim, and `null`
-  // says so instead of leaving the property (and the `|| doc.body` fallback
-  // it feeds) undefined.
-  readonly activeElement: null = null;
-  readonly body: null = null;
-
-  // React registers a handful of document-level listeners (selection,
-  // composition) alongside the per-root ones. Nothing here simulates input,
-  // so these only need to not throw.
-  addEventListener(): void {}
-  removeEventListener(): void {}
-
-  createElement(tag: string): FakeNode {
-    return new FakeNode(ELEMENT_NODE, this, '', undefined, tag);
-  }
-  createElementNS(ns: string, tag: string): FakeNode {
-    return new FakeNode(ELEMENT_NODE, this, '', ns, tag);
-  }
-  createTextNode(text: string): FakeNode {
-    return new FakeNode(TEXT_NODE, this, text);
-  }
-  createComment(text: string): FakeNode {
-    return new FakeNode(8, this, text);
-  }
-}
+import {
+  type DomShim,
+  ELEMENT_NODE,
+  type FakeNode,
+  installDomShim,
+} from '../harness/dom.ts';
 
 /** Depth-first search for the first element whose text passes `match`. */
 function findButton(
@@ -222,31 +67,6 @@ function findButton(
   }
   return null;
 }
-
-/**
- * The shim is installed for the whole file rather than one `describe`, because
- * more than one claim needs a mounted tree and installing it twice would leave
- * the second restore holding the first shim as its "previous". Restoring at all
- * is what keeps the rest of the suite honest: a `document` left on `globalThis`
- * flips every `typeof window !== 'undefined'` feature check in the files that
- * run after this one.
- */
-const fakeDocument = new FakeDocument();
-const previousDocument = (globalThis as { document?: unknown }).document;
-const previousWindow = (globalThis as { window?: unknown }).window;
-const previousGetComputedStyle = (globalThis as { getComputedStyle?: unknown })
-  .getComputedStyle;
-const previousRaf = (globalThis as { requestAnimationFrame?: unknown })
-  .requestAnimationFrame;
-const previousCancelRaf = (globalThis as { cancelAnimationFrame?: unknown })
-  .cancelAnimationFrame;
-const previousActEnv = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: unknown })
-  .IS_REACT_ACT_ENVIRONMENT;
-const previousHTMLIFrameElement = (
-  globalThis as { HTMLIFrameElement?: unknown }
-).HTMLIFrameElement;
-const previousWebSocket = (globalThis as { WebSocket?: unknown }).WebSocket;
-const previousFetch = globalThis.fetch;
 
 /**
  * What the mounted route table is allowed to answer with.
@@ -280,56 +100,36 @@ async function answer(id: number, deploy: DeployView): Promise<void> {
   });
 }
 
-Object.assign(globalThis, {
-  document: fakeDocument,
-  // `@radix-ui/react-primitive` does a bare `typeof window !== 'undefined'`
-  // feature-check on every mount, and react-dom's own focus-restoration
-  // pass reads `container.ownerDocument.defaultView.document` — both need
-  // `window` to be the same object `document` was installed on.
-  window: globalThis,
-  // `@radix-ui/react-presence` reads this to decide whether an open/close
-  // transition is mid CSS-animation. Nothing here has a stylesheet, so
-  // reporting no `animationName` is correct, not a stub of convenience.
-  getComputedStyle: (node: FakeNode) => node.style,
-  requestAnimationFrame: (cb: () => void) => setTimeout(cb, 0),
-  cancelAnimationFrame: (id: number) => clearTimeout(id),
-  IS_REACT_ACT_ENVIRONMENT: true,
-  // react-dom's focus restoration walks into iframes via
-  // `element instanceof window.HTMLIFrameElement`; nothing here ever is
-  // one, but the right-hand side still has to be a real constructor.
-  HTMLIFrameElement: class {},
-  // `subscribeAttempt` opens one of these as soon as the first read returns.
-  // Nothing here pushes events — the claims below are about the read — so it
-  // only has to be constructible and closeable.
-  WebSocket: class {
-    onmessage: unknown = null;
-    onclose: unknown = null;
-    onerror: unknown = null;
-    close(): void {}
-  },
-  // Every command goes through this, and the id it is asking about is in the
-  // body rather than the path: `pathFor` names the command, not the object.
-  fetch: async (_url: string, init?: { body?: string }) => {
-    const { id } = JSON.parse(init?.body ?? '{}') as { id?: number };
-    if (id === undefined) throw new Error('a command asked for no id');
-    return await answerFor(id);
-  },
-});
-fakeDocument.defaultView = globalThis;
+/**
+ * Installed in `beforeAll` rather than at import, because these are globals and
+ * a file's imports are evaluated before the file that installed them last has
+ * restored: capturing the previous values at the moment this file's tests start
+ * is what keeps two mounted-test files from restoring each other's shim.
+ */
+let dom: DomShim;
 
-afterAll(() => {
-  Object.assign(globalThis, {
-    document: previousDocument,
-    window: previousWindow,
-    getComputedStyle: previousGetComputedStyle,
-    requestAnimationFrame: previousRaf,
-    cancelAnimationFrame: previousCancelRaf,
-    IS_REACT_ACT_ENVIRONMENT: previousActEnv,
-    HTMLIFrameElement: previousHTMLIFrameElement,
-    WebSocket: previousWebSocket,
-    fetch: previousFetch,
+beforeAll(() => {
+  dom = installDomShim({
+    // `subscribeAttempt` opens one of these as soon as the first read returns.
+    // Nothing here pushes events — the claims below are about the read — so it
+    // only has to be constructible and closeable.
+    WebSocket: class {
+      onmessage: unknown = null;
+      onclose: unknown = null;
+      onerror: unknown = null;
+      close(): void {}
+    },
+    // Every command goes through this, and the id it is asking about is in the
+    // body rather than the path: `pathFor` names the command, not the object.
+    fetch: async (_url: string, init?: { body?: string }) => {
+      const { id } = JSON.parse(init?.body ?? '{}') as { id?: number };
+      if (id === undefined) throw new Error('a command asked for no id');
+      return await answerFor(id);
+    },
   });
 });
+
+afterAll(() => dom.restore());
 
 describe('Transcript re-derives open on a build status change', () => {
   test('a running LIVE_TEXT build that turns failed springs the transcript open', () => {
@@ -343,7 +143,7 @@ describe('Transcript re-derives open on a build status change', () => {
     };
     const failedView: DeployView = DEPLOY_SCENARIOS.buildFailed;
 
-    const container = fakeDocument.createElement('div');
+    const container = dom.document.createElement('div');
     let root!: Root;
     act(() => {
       root = createRoot(container as unknown as Element);
@@ -409,7 +209,7 @@ describe('the mounted Deploy screen replaces what a newer view says', () => {
     const building: DeployView = DEPLOY_SCENARIOS.building;
     const failed: DeployView = DEPLOY_SCENARIOS.buildFailed;
 
-    const container = fakeDocument.createElement('div');
+    const container = dom.document.createElement('div');
     let root!: Root;
     act(() => {
       root = createRoot(container as unknown as Element);
@@ -490,7 +290,7 @@ describe('switching between two Deploys of one App', () => {
   });
 
   const mount = () => {
-    const container = fakeDocument.createElement('div');
+    const container = dom.document.createElement('div');
     let root!: Root;
     act(() => {
       root = createRoot(container as unknown as Element);

@@ -207,6 +207,79 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
 };
 
 /**
+ * Whether nobody has configured this installation yet.
+ *
+ * **Derived, not flagged**, and that is the whole of the design. `loadStoredManifest`
+ * resolves `stored ?? declaration ?? placeholder` and then writes whichever arm
+ * it took back to the row — so by the time anything can ask the question, the
+ * placeholder arm is no longer distinguishable by *when* it was taken, only by
+ * *what it wrote*. A boolean column recording which arm ran would be a second
+ * copy of a fact the row already carries whole, and it would go stale the first
+ * time somebody edited the row by hand or restored a database.
+ *
+ * **The four values below and not the whole document**, which is the difference
+ * between a predicate with a reachable `true` and one without. The manifest is
+ * three kinds of value: deployment facts the chart already knows, cloud facts
+ * discovery can ask for, and the genuine choices — what this installation is
+ * called, whose GitHub App it speaks as, where its artifacts are published, and
+ * which store it delivers config through. Comparing the *whole* document made
+ * `true` reachable for exactly one document, the placeholder verbatim, and that
+ * document names `spindrift.example.com` as its control plane. `serve.ts` binds
+ * the passkey relying party to that hostname at boot, so a browser refuses every
+ * ceremony against it and nobody can sign in — and onboarding renders only after
+ * a session exists. A predicate whose one `true` sits behind a door that cannot
+ * open is a wizard nobody can be shown.
+ *
+ * **What that actually makes reachable, and it is not yet the ordinary case.** A
+ * declaration carrying a real `controlPlane.hostname` with these four left at
+ * their stand-ins answers `true` and *can* enrol somebody, so the reachable set
+ * is no longer empty. It is not a document anybody writes by accident: nothing
+ * in `installationManifestSchema` is optional, so an operator cannot **leave**
+ * the genuine choices — every key must be authored — and the values one would
+ * have to type to stay unconfigured are `installation: default`, this
+ * repository's own production GitHub App id, somebody else's GHCR namespace and
+ * `onepassword`. What makes the wizard ordinarily reachable is the chart seeding
+ * the deployment facts it already holds, `controlPlane.hostname` above all, so
+ * that the *placeholder* — what an installation with no declaration at all is
+ * seeded with — is itself an installation a browser will run a ceremony
+ * against. That is a change to the chart, not to this predicate, and until it
+ * lands the honest statement is: a seeded declaration reaches the wizard, a bare
+ * `manifest: {}` install still cannot sign in to be shown it.
+ *
+ * **All four, not any**, and a false positive here replaces the whole product
+ * with a wizard, so the direction matters. Two of the four are legitimately the
+ * stand-in on a configured installation — this repo's own deployment speaks as
+ * the same GitHub App the placeholder names, and `onepassword` is one of two
+ * adapters — so "any is a stand-in" would answer unconfigured for a live
+ * installation. `test/config/installation-configured.test.ts` pins the live
+ * document against this.
+ *
+ * **A mounted declaration that answers all four therefore configures an
+ * installation**, which is right: an operator who chose them has configured this
+ * installation by definition, and offering them onboarding would be offering to
+ * redo work they already did.
+ *
+ * The named cost: an operator who confirms all four unchanged is still
+ * unconfigured, and will be shown onboarding again on the next load. That is
+ * honest — they chose nothing — but it does mean "configured" is a record of a
+ * document, not of a ceremony.
+ */
+export function isUnconfiguredInstallation(
+  manifest: AuthoredManifest,
+): boolean {
+  const stand = DEFAULT_PLACEHOLDER_MANIFEST;
+  return (
+    manifest.installation === stand.installation &&
+    manifest.github.clientId === stand.github.clientId &&
+    manifest.secretStore.adapter === stand.secretStore.adapter &&
+    // The one that is a list. A bare string is the same document as a
+    // one-element list by the time it is parsed (`manifest.schema.ts`), so both
+    // sides are arrays here and neither spelling changes the answer.
+    Bun.deepEquals(manifest.supplyChain.registry, stand.supplyChain.registry)
+  );
+}
+
+/**
  * Read the manifest the environment points at.
  *
  * `SPINDRIFT_MANIFEST_PATH` wins over `SPINDRIFT_MANIFEST`. If neither is set,

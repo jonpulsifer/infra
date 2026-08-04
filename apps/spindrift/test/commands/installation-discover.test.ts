@@ -22,10 +22,9 @@ import {
   discoverInstallationFacts,
 } from '../../src/commands/installation/discover.ts';
 import type { CommandContext } from '../../src/commands/types.ts';
-import { installationManifestSchema } from '../../src/config/manifest.schema.ts';
 import type { InstallationManifest } from '../../src/config/manifest.ts';
 import type { Database } from '../../src/db/client.ts';
-import { describeObject, type FormField } from '../../src/web/forms/schema.ts';
+import { manifestFieldAt } from '../../src/web/forms/manifest.ts';
 import {
   FakeGcpDiscovery,
   type FakeGcpDiscoveryOptions,
@@ -533,19 +532,15 @@ describe('an installation with no cloud identity', () => {
 });
 
 describe('every path discovery proposes is a path the manifest has', () => {
-  /** Walk the schema the settings form is generated from, key by key. */
+  /**
+   * Walk the schema the settings form is generated from, key by key.
+   *
+   * The wizard's own walk, not a second one: onboarding resolves the keys it
+   * names through `manifestFieldAt`, and a copy here would be a second answer
+   * about one schema that only has to agree by luck.
+   */
   function resolves(path: readonly string[]): boolean {
-    let fields: readonly FormField[] = describeObject(
-      installationManifestSchema,
-    );
-    for (const [index, key] of path.entries()) {
-      const field = fields.find((candidate) => candidate.key === key);
-      if (field === undefined) return false;
-      if (index === path.length - 1) return true;
-      if (field.node.kind !== 'object') return false;
-      fields = field.node.fields;
-    }
-    return false;
+    return manifestFieldAt(path) !== null;
   }
 
   test('the walk rejects a key the schema no longer has', () => {

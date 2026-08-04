@@ -80,6 +80,8 @@ interface Definition {
   readonly shape?: Record<string, unknown>;
   readonly element?: unknown;
   readonly innerType?: unknown;
+  /** A pipe's accepting end — what a document may say. See {@link describeSchema}. */
+  readonly in?: unknown;
   readonly options?: readonly unknown[];
   readonly discriminator?: string;
   readonly entries?: Record<string, string | number>;
@@ -185,6 +187,14 @@ export function describeSchema(schema: unknown): FormNode {
       return { kind: 'array', element: describeSchema(def.element) };
     case 'union':
       return unionNode(def);
+    case 'pipe':
+      // Zod 4 makes `.transform()` a pipe: an accepting schema, then a
+      // function. The function is not a shape and never will be, so the half
+      // worth describing is the accepting one — what a document is allowed to
+      // *say*, which is exactly what a form edits and what re-validation runs
+      // against. Describing the far end would mean describing a transform,
+      // which is the `unsupported` this case exists to stop being the answer.
+      return describeSchema(def.in);
     default:
       return { kind: 'unsupported', type: def.type };
   }
@@ -232,7 +242,51 @@ function unionNode(def: Definition): FormNode {
       node,
     };
   });
-  return { kind: 'union', discriminator, variants };
+  return (
+    oneOrMany(discriminator, variants) ?? {
+      kind: 'union',
+      discriminator,
+      variants,
+    }
+  );
+}
+
+/**
+ * `T | T[]` described as `T[]`, which is the only thing it ever meant.
+ *
+ * An untagged union in this schema is not a choice an operator makes — it is a
+ * document being allowed to spell one value two ways. `supplyChain.registry` is
+ * the case and its own comment is the rule: "A bare string is the same document
+ * as a one-element list and stays legal, so an installation with one registry
+ * says one thing and no stored manifest needs rewriting to keep parsing." The
+ * narrow arm exists for documents already written; the wide arm is what the
+ * value *is*, and it is what the transform on the far side of the pipe produces
+ * either way.
+ *
+ * So a form offers the list. The alternative is a variant selector asking an
+ * operator whether they would like to type one registry or several — a question
+ * about a spelling, in front of somebody configuring an installation for the
+ * first time.
+ *
+ * `null` for anything else, deliberately: this recognises exactly the shape it
+ * describes, by comparing the array arm's element against the other arm rather
+ * than by trusting the order they were declared in. A genuine untagged union of
+ * two unrelated shapes stays a union and keeps whatever the union control makes
+ * of it — being unable to render one honestly is a better answer than rendering
+ * the wrong arm of it.
+ */
+function oneOrMany(
+  discriminator: string | null,
+  variants: readonly FormVariant[],
+): FormNode | null {
+  if (discriminator !== null || variants.length !== 2) return null;
+  const list = variants.find((variant) => variant.node.kind === 'array');
+  const single = variants.find((variant) => variant.node.kind !== 'array');
+  if (list === undefined || single === undefined) return null;
+  if (list.node.kind !== 'array') return null;
+  return Bun.deepEquals(list.node.element, single.node, true)
+    ? list.node
+    : null;
 }
 
 /** The literal value an arm pins its discriminator to. */

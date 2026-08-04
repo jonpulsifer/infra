@@ -176,6 +176,30 @@ describe('what a field knows about itself', () => {
     expect(humanize('zeroConfigFrontend')).toBe('Zero config frontend');
     expect(humanize('tunnelHostname')).toBe('Tunnel hostname');
   });
+
+  test('a one-or-many key is the list it always was', () => {
+    // `supplyChain.registry` accepts a bare string so that documents written
+    // before it took several keep parsing, and transforms either spelling into
+    // a list. Read as the union it is declared as, that key answered
+    // `unsupported` — so the one manifest value an operator is most likely to
+    // be asked for first was the one value no form could edit. It is the list.
+    const supplyChain = field(fields, 'supplyChain').node;
+    if (supplyChain.kind !== 'object')
+      throw new Error('supplyChain is not an object');
+    const registry = field(supplyChain.fields, 'registry');
+    expect(registry.node).toEqual({
+      kind: 'array',
+      element: { kind: 'string', format: 'text' },
+    });
+  });
+
+  test('an untagged union of unrelated shapes is left alone', () => {
+    // The collapse above recognises one shape and must not become "pick an
+    // arm". Two arms that are not each other's element stay a union, which the
+    // union control renders as honestly as it can rather than guessing.
+    const node = describeSchema(z.union([z.string(), z.array(z.number())]));
+    expect(node.kind).toBe('union');
+  });
 });
 
 describe('editing the document', () => {
