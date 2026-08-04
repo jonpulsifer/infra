@@ -12,6 +12,7 @@ import type { BuildListItem, BuildStatus } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
+import { SupplyChainTabs } from './tabs.tsx';
 
 function tone(status: BuildStatus): ExplorerTone {
   if (status === 'SUCCEEDED') return 'success';
@@ -49,10 +50,11 @@ export function BuildLedger({
 
   return (
     <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <SupplyChainTabs current="builds" onNavigate={onNavigate} />
       <ExplorerPageHeader
-        eyebrow="Artifact ledger"
+        eyebrow="Build ledger"
         title="Builds"
-        description="Source becomes an artifact here. Placement remains a separate Deploy, with its own state and evidence."
+        description="The act between the two nouns: a Source becomes an Artifact here. Placement remains a separate Deploy, with its own state and evidence."
       />
       <ObjectExplorer
         items={items}
