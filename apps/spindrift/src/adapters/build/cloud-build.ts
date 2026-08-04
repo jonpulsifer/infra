@@ -752,9 +752,22 @@ attest() {
 # it. The children are attested as well so the question the runtime asks has an
 # answer whichever digest it resolved to.
 #
-# Unfiltered on purpose: the attestation-manifest child is attested too. "Every
-# manifest under the index" is a rule with no exception to get wrong, and a
-# spare occurrence costs nothing.
+# A child means a manifest a runtime can run, which is not every entry the
+# index names. The same \`--attest\` that makes this an index hangs its own
+# manifests off it, and those are not images: \`platform\` is
+# \`unknown/unknown\` and the entry is annotated \`vnd.docker.reference.type:
+# attestation-manifest\`. Nothing resolves to one and no admission decision is
+# ever made about one, so attesting them buys nothing and costs a KMS signing
+# operation and an occurrence per destination per build — and buries the
+# occurrence that matters in a list an operator has to read while diagnosing a
+# refusal.
+#
+# Selected by what the entry *is*, never by how many there are. "Drop the last
+# two" is correct today and wrong the first time a second platform or a third
+# attachment appears, with nothing to report it. An entry that names no
+# platform at all is kept: unrecognised is not the same as unrunnable, and the
+# failure that matters is the one where a runtime resolves to a digest nothing
+# attested.
 #
 # Every media type accepted and not only the index ones, for the same reason: a
 # push with no index has to answer this call rather than 404 it, and
@@ -766,6 +779,12 @@ children() {
     "https://\${1%%/*}/v2/\${1#*/}/manifests/\${2}" \\
   | "\${CLOUDSDK_PYTHON:-python3}" -c 'import json, sys
 for manifest in json.load(sys.stdin).get("manifests", []):
+    annotations = manifest.get("annotations") or {}
+    if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
+        continue
+    platform = manifest.get("platform") or {}
+    if platform.get("os") == "unknown" or platform.get("architecture") == "unknown":
+        continue
     print(manifest["digest"])'
 }
 

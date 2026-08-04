@@ -444,6 +444,21 @@ jobs:
           # what makes the question the runtime asks one that has an answer.
           # `imagetools` reads the index with the credentials the login steps
           # already wrote, so this needs nothing of its own.
+          #
+          # **A child here means a manifest a runtime can run.** The same
+          # `provenance` and `sbom` that make this an index also hang their own
+          # manifests off it, and those are not images: `platform` is
+          # `unknown/unknown` and the entry is annotated
+          # `vnd.docker.reference.type: attestation-manifest`. Nothing ever
+          # resolves to one and no admission decision is ever made about one, so
+          # attesting them buys nothing and costs a KMS signing operation and an
+          # occurrence per destination per build — and buries the occurrence
+          # that matters in a list an operator has to read while diagnosing a
+          # refusal.
+          #
+          # Selected by what the entry *is*, never by how many there are. "Drop
+          # the last two" is correct today and wrong the first time a second
+          # platform or a third attachment appears, with nothing to report it.
           while IFS= read -r destination; do
             [ -n "$destination" ] || continue
             attest "$destination" "$DIGEST"
@@ -452,7 +467,13 @@ jobs:
             # an assignment is. A registry having a bad moment must not read as
             # an index with no children.
             manifests="$(docker buildx imagetools inspect --raw \
-              "${destination}@${DIGEST}" | jq -r '.manifests[]?.digest')"
+              "${destination}@${DIGEST}" | jq -r '
+                .manifests[]?
+                | select(.annotations["vnd.docker.reference.type"]
+                         != "attestation-manifest")
+                | select((.platform.os // "") != "unknown"
+                         and (.platform.architecture // "") != "unknown")
+                | .digest')"
             for child in $manifests; do
               attest "$destination" "$child"
             done
