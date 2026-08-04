@@ -267,7 +267,68 @@ export interface ObservedState {
 export interface RuntimeLogSubject {
   readonly app: string;
   readonly component: string;
+  /**
+   * One run of a job, when the question is about a run rather than the
+   * Component (§17).
+   *
+   * A job's output does not belong to the Component the way a service's does.
+   * "What is this Component saying now" has no answer for a job — nothing is
+   * running most of the time — and merging every run's lines into one tail
+   * would answer a question nobody asked, with last night's failure
+   * interleaved into this morning's. So the subject narrows: the name is one
+   * {@link JobExecution}'s, and the page is that run's lines and no other's.
+   *
+   * Absent for a service, which is the ordinary case and the reason this is
+   * optional rather than a second method. The two differ by one clause in a
+   * selector or a filter, and a second method would have had to restate the
+   * cursor, the paging and the reach that make this one honest.
+   *
+   * **A run name, checked before it gets here.** Adapters put it into a query
+   * language by concatenation — a Cloud Logging filter, a label selector — so a
+   * caller that lets a request body reach this field unchecked hands the far
+   * side a filter of the caller's choosing. `src/web/streams.ts` is the one
+   * boundary this crosses from a browser and it is checked there; a second
+   * caller owes the same check.
+   */
+  readonly execution?: string;
 }
+
+/**
+ * One run of a job, as the backend reports it (§17).
+ *
+ * §17: "**A job is not a stream but a list of executions.** An execution
+ * terminates, so it is attempt-shaped." Which is why this carries an outcome
+ * rather than a {@link DeployPhase}: a run that ended is not a workload that
+ * went `FAILED`, and borrowing the deploy vocabulary would put "the release is
+ * down" and "last night's backup exited 1" under the same word.
+ *
+ * The `name` is the backend's own and is deliberately not parsed by core: it is
+ * what {@link RuntimeLogSubject.execution} is filled with, so the only thing it
+ * owes anyone is naming the same run twice.
+ */
+export interface JobExecution {
+  /** The backend's own name for this run — what a tail reads its logs by. */
+  readonly name: string;
+  readonly outcome: 'passed' | 'failed' | 'running';
+  /** When the platform says it started, or `null` while it has not. */
+  readonly startedAt: Date | null;
+  /** The sentence a reader gets, where the backend offers one. */
+  readonly detail?: string;
+}
+
+/** What starting a run produced, or why this backend had nothing to start. */
+export type StartedRun =
+  | { readonly kind: 'started'; readonly execution: JobExecution }
+  | { readonly kind: 'none'; readonly because: string };
+
+/** The runs that have happened, or why this backend has none to report. */
+export type JobRuns =
+  | {
+      readonly kind: 'executions';
+      /** Newest first — the order the screen reads them in. */
+      readonly executions: readonly JobExecution[];
+    }
+  | { readonly kind: 'none'; readonly because: string };
 
 /** One line from one replica, with the backend's durable resume position. */
 export interface RuntimeLogEntry {
@@ -375,11 +436,63 @@ export interface DeployAdapter {
   destroy(target: DeployTarget, ref: DeployRef): Promise<void>;
 
   /**
+   * Start one run of the job this ref names, now (§7, §17).
+   *
+   * **Why a verb and not a mode on `apply`.** §7: "a job always renders a
+   * `CronJob`, suspended when unscheduled… `apply` for a job therefore becomes
+   * two acts." `apply` is convergent and core re-applies it whenever desired
+   * state moves, so a run folded into it would fire on a reach change, on a
+   * config edit, on a rollback. The two acts have different arity — the object
+   * is placed once and run any number of times — and one method cannot have
+   * both.
+   *
+   * **Why a ref and not a `DesiredState`.** What is being run is what `apply`
+   * placed, not a description core assembled a second time. Handing this a
+   * `DesiredState` would let a run execute an image the Component is not
+   * serving, which is exactly the kind of divergence storing the ref exists to
+   * prevent.
+   *
+   * **Why it refuses rather than throws.** §13's "connect always succeeds" is
+   * core's promise in one direction and this is the same promise in the other:
+   * an adapter that has no job to run says so in a sentence, the way `tail`'s
+   * `none` arm does, because "a website cannot be run" is a fact about the
+   * backend and not an exception. A far side that *is* asked correctly and
+   * fails — the API refused, the cluster is unreachable — throws, exactly as
+   * `tail` does, because that is a fault and not an answer.
+   */
+  run(target: DeployTarget, ref: DeployRef): Promise<StartedRun>;
+
+  /**
+   * The runs that have happened, newest first (§17).
+   *
+   * The second half of the same seam, split along the line `apply` and
+   * `observe` are already split along: one member acts, one member reads. A run
+   * nobody can see afterwards is not something an operator can be given, so
+   * this is not an extra — it is what makes the verb above mean anything.
+   *
+   * **Read from the platform, never stored.** §17 fixes the history asymmetry
+   * between backends "by rendering a larger history limit, not by storing logs
+   * — configure the platform, don't build it", so the depth is the CronJob's
+   * `successfulJobsHistoryLimit` on one backend and the runtime's own retention
+   * on the other. `limit` is a page size, not that depth: it bounds what is
+   * asked for and says nothing about what is kept.
+   */
+  executions(
+    target: DeployTarget,
+    ref: DeployRef,
+    limit?: number,
+  ): Promise<JobRuns>;
+
+  /**
    * Read a bounded page of service output from the platform (§17).
    *
    * The cursor is platform-owned and survives a web/reconciler restart. Static
    * hosting returns the explicit `none` arm; it never masquerades as an empty
    * stream.
+   *
+   * A subject naming an `execution` asks the narrower question — one run's
+   * lines rather than the Component's — and it is the only way a job's output
+   * is readable, because a job's entries belong to the run that wrote them.
    */
   tail(
     target: DeployTarget,

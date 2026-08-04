@@ -48,6 +48,7 @@ import {
   setComponentReach,
   setComponentReachInput,
 } from './components/reach.ts';
+import { runComponent, runComponentInput } from './components/run.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
 import {
@@ -207,6 +208,7 @@ export const commandRegistry = {
     input: setComponentReachInput,
     handler: setComponentReach,
   },
+  runComponent: { input: runComponentInput, handler: runComponent },
   setConfig: { input: setConfigInput, handler: setConfig },
   configureInstallation: {
     input: configureInstallationInput,

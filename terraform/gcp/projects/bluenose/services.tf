@@ -3,6 +3,11 @@ resource "google_project_service" "service" {
     "artifactregistry.googleapis.com",
     "binaryauthorization.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    # A Cloud Run Job holds no cron expression, so a Component that declares a
+    # schedule is a Cloud Scheduler job calling `jobs.run` in front of it.
+    # Enabling this also creates the Cloud Scheduler service agent, which is
+    # what mints the token that call carries.
+    "cloudscheduler.googleapis.com",
     "compute.googleapis.com",
     "firebase.googleapis.com",
     "firebasehosting.googleapis.com",

@@ -14,6 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { targetAdapterSchema } from '../../src/config/manifest.schema.ts';
 import {
   type CapabilityContext,
+  capabilitiesOfRow,
   deriveHealth,
   deriveOfflineDeploy,
   deriveVerifiedDeploy,
@@ -26,6 +27,10 @@ import {
   type TargetDiscovery,
 } from '../../src/domain/capabilities.ts';
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
+import { fixtureManifest } from '../harness/installation.ts';
+
+/** Read once: nothing here asserts on the manifest, only through it. */
+const MANIFEST = await fixtureManifest();
 
 /** A deploy path served entirely by the Target itself. */
 const LOCAL_PATH = {
@@ -152,6 +157,53 @@ describe('the provenances that are not discovered', () => {
     // The direction that fails closed: claiming auth nobody wired would put a
     // Component behind a filter that is not there.
     expect(resolveCapabilities(discovery(), context()).authReaches).toEqual([]);
+  });
+
+  test('firing a schedule takes the adapter and the Target both', () => {
+    // §3's grammar: a refusal a Target's own configuration already decides
+    // belongs at Place rather than after a build. A Cloud Scheduler job
+    // authenticates the `jobs.run` call it makes, so a Cloud Run Target naming
+    // no runtime identity has nothing for a schedule to fire *as* — and the
+    // adapter refuses it at apply, which is the after-the-build refusal this
+    // row exists to avoid.
+    const cloud = { adapter: 'cloudrun', project: 'vessel' } as const;
+    const capable = capabilitiesOfRow(
+      {
+        adapter: 'cloudrun',
+        discovery: discovery(),
+        reaches: null,
+        authReaches: null,
+        connection: { ...cloud, serviceAccount: 'runtime@vessel.test' },
+      },
+      { artifactTypes: ['image'], manifest: MANIFEST },
+    );
+    expect(capable.firesSchedules).toBe(true);
+
+    const anonymous = capabilitiesOfRow(
+      {
+        adapter: 'cloudrun',
+        discovery: discovery(),
+        reaches: null,
+        authReaches: null,
+        connection: cloud,
+      },
+      { artifactTypes: ['image'], manifest: MANIFEST },
+    );
+    expect(anonymous.firesSchedules).toBe(false);
+    // And it subtracts only: a cluster connection has nothing that could
+    // withdraw the cadence its adapter keeps.
+    expect(
+      capabilitiesOfRow(
+        {
+          adapter: 'kubernetes',
+          discovery: discovery(),
+          reaches: null,
+          authReaches: null,
+          connection: { adapter: 'kubernetes' },
+        },
+        { artifactTypes: ['image'], manifest: MANIFEST },
+      ).firesSchedules,
+    ).toBe(true);
   });
 
   test('a Target nothing could be discovered about is capable of nothing', () => {

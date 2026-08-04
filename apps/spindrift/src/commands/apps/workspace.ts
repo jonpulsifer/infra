@@ -1,6 +1,15 @@
 import { z } from 'zod';
+import type { JobRuns } from '../../adapters/deploy/contract.ts';
+import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { artifactSummary } from '../../domain/artifact-name.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
+import {
+  deployTargetOf,
+  hasTargetConnection,
+  hasVesselLocation,
+  type TargetConnection,
+} from '../../domain/target.ts';
+import type { VesselLocation } from '../../domain/vessel.ts';
 import type {
   ActivityEntry,
   ComponentView,
@@ -9,7 +18,7 @@ import type {
   Runtime,
   WorkspaceView,
 } from '../../web/model.ts';
-import { type Command, failed, ok } from '../types.ts';
+import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
 export const getAppWorkspaceInput = z.object({
   name: z.string().min(1),
@@ -34,7 +43,9 @@ export const getAppWorkspace: Command<
             orderBy: (deploys, { desc }) => [desc(deploys.createdAt)],
             limit: 1,
             with: {
-              target: true,
+              // The boundary as well as the surface: a job's runs are read
+              // from the platform, and `deployTargetOf` needs both rows.
+              target: { with: { vessel: true } },
               build: true,
             },
           },
@@ -185,11 +196,12 @@ export const getAppWorkspace: Command<
       because: 'Static files are served by the Target.',
     };
   } else if (primaryComponent?.kind === 'job') {
-    runtime = {
-      kind: 'executions',
-      executions: [],
-      retained: 10,
-    };
+    runtime = await executionsOf(
+      context,
+      primaryComponent.id,
+      latestDeploy ?? null,
+      now,
+    );
   } else if (primaryComponent && latestTarget) {
     runtime = {
       kind: 'stream',
@@ -233,6 +245,135 @@ export const getAppWorkspace: Command<
 
   return ok({ workspace });
 };
+
+/**
+ * How many runs the screen asks for (§17).
+ *
+ * §17 fixes N at 10 and the App chart renders exactly that —
+ * `successfulJobsHistoryLimit` and `failedJobsHistoryLimit` in
+ * `packages/charts/spindrift-app/templates/cronjob.yaml`.
+ *
+ * ponytail: it is a page size on every backend and a retention depth on only
+ * one. On `kubernetes` it happens to be both, because the chart Spindrift
+ * renders sets the same number; Cloud Run keeps its own count of executions and
+ * reports it nowhere, so a job there may well have runs beyond this. The
+ * caption beneath the list says only what this is — how many are shown — for
+ * that reason. Upgrade path: return the depth from `executions` and let each
+ * adapter answer with what it observes.
+ */
+const RETAINED_RUNS = 10;
+
+/** What {@link executionsOf} reads off the Deploy that placed the job. */
+interface PlacedJob {
+  /** §6's opaque handle. Null until an `apply` placed something. */
+  readonly ref: string | null;
+  readonly target: {
+    readonly id: string;
+    readonly name: string;
+    readonly adapter: TargetAdapter;
+    readonly connection: TargetConnection | null;
+    readonly vessel: {
+      readonly location: VesselLocation | null;
+      readonly servedHosts: readonly string[] | null;
+      readonly reachableRegistries: readonly string[] | null;
+    } | null;
+  } | null;
+}
+
+/**
+ * The runs a job has had, read from the platform (§17).
+ *
+ * §17 keeps a job's history on the backend — "configure the platform, don't
+ * build it" — so this is a live read on every load of the screen rather than a
+ * table Spindrift maintains. A stored history would have to be reconciled
+ * against the CronJob that prunes it, and would be wrong for every run the
+ * scheduler started rather than an operator.
+ *
+ * **Every failure is an empty state, never a failed screen.** A Target that
+ * will not answer is one card's worth of bad news; the App's phase, its URL and
+ * its timeline are all still readable, and taking the workspace down over a
+ * cluster that is momentarily unreachable would hide the very things an
+ * operator opened it to see.
+ *
+ * **A failed read is still a runnable job.** Whether this job can be run is a
+ * fact about the Deploy that placed it, not about whether listing its runs
+ * worked, so a Target that refuses the list answers on the `executions` arm
+ * with the reason on it rather than on `none`. The two are one screen apart:
+ * `none` renders no Run now button, and the first thing an operator meets after
+ * this merges is a cluster whose Role has not reconciled yet, answering `403`
+ * to the list. Hiding the control there hides it exactly where its refusal is
+ * the diagnosis.
+ */
+async function executionsOf(
+  context: CommandContext,
+  componentId: string,
+  placed: PlacedJob | null,
+  now: Date,
+): Promise<Runtime> {
+  const surface = placed?.target ?? null;
+  const vessel = surface?.vessel ?? null;
+  if (placed?.ref == null || surface === null || vessel === null) {
+    return {
+      kind: 'none',
+      because: 'This job has not been placed on a Target yet.',
+    };
+  }
+  if (!hasTargetConnection(surface) || !hasVesselLocation(vessel)) {
+    return {
+      kind: 'none',
+      because: `${surface.name} is not connected, so its runs cannot be read.`,
+    };
+  }
+  const adapter = context.adapters.deploy(surface.adapter);
+  if (adapter === null) {
+    return {
+      kind: 'none',
+      because: `This installation has no ${surface.adapter} adapter.`,
+    };
+  }
+
+  const runnable = {
+    kind: 'executions',
+    componentId,
+    targetId: surface.id,
+    retained: RETAINED_RUNS,
+  } as const;
+
+  let runs: JobRuns;
+  try {
+    runs = await adapter.executions(
+      deployTargetOf(surface, vessel),
+      placed.ref,
+      RETAINED_RUNS,
+    );
+  } catch (cause) {
+    return {
+      ...runnable,
+      executions: [],
+      because: `The runs on ${surface.name} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+    };
+  }
+  // A refusal is the adapter saying this ref names no job it can report on —
+  // a Service's handle, a release that is gone. There is nothing to run either,
+  // so this one does collapse to `none`.
+  if (runs.kind === 'none') return { kind: 'none', because: runs.because };
+
+  return {
+    ...runnable,
+    executions: runs.executions.map((execution) => ({
+      name: execution.name,
+      outcome: execution.outcome,
+      detail: execution.detail ?? '',
+      // A run the backend has accepted and not started carries no time, and
+      // "just now" is what that is — the same word `elapsedSince` uses for the
+      // first minute, so the column reads consistently either way.
+      when:
+        execution.startedAt === null
+          ? 'just now'
+          : elapsedSince(execution.startedAt, now),
+    })),
+  };
+}
 
 /**
  * What a checkpoint is called on the timeline.

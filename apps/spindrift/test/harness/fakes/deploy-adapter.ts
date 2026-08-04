@@ -17,10 +17,13 @@ import type {
   DeployRef,
   DeployTarget,
   DeployVerdict,
+  JobExecution,
+  JobRuns,
   ObservedState,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
+  StartedRun,
 } from '../../../src/adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../../../src/config/manifest.schema.ts';
 import {
@@ -74,6 +77,26 @@ export interface FakeDeployAdapterOptions {
    * has to survive one, so the fake has to be able to be one.
    */
   applyThrows?: string;
+  /**
+   * When set, both run verbs refuse with this sentence — the `static` shape.
+   *
+   * §17 gives a backend that runs nothing an explicit refusal rather than an
+   * empty list, so a test about how core handles one needs a fake that can be
+   * that backend without being a different class.
+   */
+  noRuns?: string;
+  /** When set, `run` throws — the far side that was asked correctly and failed. */
+  runThrows?: string;
+  /**
+   * When set, `executions` throws while `run` still works.
+   *
+   * Separate from {@link runThrows} because that is the state this feature's
+   * first day looks like: `list` on batch jobs is a grant the Role has not
+   * reconciled yet, so reading the runs `403`s while starting one would have
+   * worked. A fake that could only fail both could not tell whether core hid
+   * the button because the job is unrunnable or because nobody could look.
+   */
+  executionsThrows?: string;
 }
 
 /**
@@ -116,11 +139,16 @@ export class FakeDeployAdapter implements DeployAdapter {
   /** Every `inspect`, so a test can prove the loop ran without a reconnect. */
   readonly inspected: DeployTarget[] = [];
 
+  /** Every `run`, in call order — what proves a press reached the backend. */
+  readonly runsStarted: DeployRef[] = [];
+
   private readonly script: readonly ScriptedAttempt[];
   private readonly options: FakeDeployAdapterOptions;
   private attempts = 0;
   /** What `apply` placed, so `observe` can report it back (§6). */
   private readonly placed = new Map<DeployRef, ObservedState>();
+  /** The runs each ref has had, oldest first — the platform's own history. */
+  private readonly runs = new Map<DeployRef, JobExecution[]>();
 
   constructor(options: FakeDeployAdapterOptions = {}) {
     this.options = options;
@@ -193,6 +221,46 @@ export class FakeDeployAdapter implements DeployAdapter {
     this.placed.delete(ref);
   }
 
+  /**
+   * Put a run on the far side that this fake did not start.
+   *
+   * The same reason {@link place} exists: a job's history is the platform's,
+   * and most of it was written by the scheduler rather than by anything core
+   * asked for — so a test about reading runs has to be able to arrange runs
+   * without pressing the button first.
+   */
+  ran(ref: DeployRef, execution: JobExecution): void {
+    this.runs.set(ref, [...(this.runs.get(ref) ?? []), execution]);
+  }
+
+  async run(_target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+    this.runsStarted.push(ref);
+    if (this.options.runThrows !== undefined) {
+      throw new Error(this.options.runThrows);
+    }
+    const refusal = this.refusalFor(ref);
+    if (refusal !== null) return refusal;
+    const execution: JobExecution = {
+      name: `${ref}-run-${(this.runs.get(ref)?.length ?? 0) + 1}`,
+      outcome: 'running',
+      startedAt: null,
+    };
+    this.ran(ref, execution);
+    return { kind: 'started', execution };
+  }
+
+  async executions(_target: DeployTarget, ref: DeployRef): Promise<JobRuns> {
+    if (this.options.executionsThrows !== undefined) {
+      throw new Error(this.options.executionsThrows);
+    }
+    const refusal = this.refusalFor(ref);
+    if (refusal !== null) return refusal;
+    return {
+      kind: 'executions',
+      executions: [...(this.runs.get(ref) ?? [])].reverse(),
+    };
+  }
+
   async tail(
     _target: DeployTarget,
     _subject: RuntimeLogSubject,
@@ -222,6 +290,29 @@ export class FakeDeployAdapter implements DeployAdapter {
       ),
       discovery: { ...CAPABLE_DISCOVERY, ...this.options.discovery },
     };
+  }
+
+  /**
+   * Why this ref has no runs, or `null` when it has.
+   *
+   * A ref nothing was placed under refuses for the same reason `observe`
+   * returns `null` for one: the far side does not have it. Both run verbs share
+   * the answer so a test cannot arrange a fake that would start a run it could
+   * never then list.
+   */
+  private refusalFor(
+    ref: DeployRef,
+  ): Extract<JobRuns, { kind: 'none' }> | null {
+    if (this.options.noRuns !== undefined) {
+      return { kind: 'none' as const, because: this.options.noRuns };
+    }
+    if (!this.placed.has(ref) && !this.runs.has(ref)) {
+      return {
+        kind: 'none' as const,
+        because: `nothing is placed under ${ref}`,
+      };
+    }
+    return null;
   }
 
   /** The last scripted attempt repeats once the script is exhausted. */

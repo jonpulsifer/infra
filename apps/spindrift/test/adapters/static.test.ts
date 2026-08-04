@@ -382,6 +382,25 @@ describe('§13 and §17: what this Target is honest about', () => {
     });
   });
 
+  test('refuses to run, rather than being unimplemented', async () => {
+    // §17's other direction. `KINDS_BY_ADAPTER.static` is `['website']`, so a
+    // job never reaches this backend and the refusal is unreachable through
+    // placement — which is exactly why it has to be a sentence rather than a
+    // throw: a caller that forgot to check the kind gets an answer it can put
+    // on a screen instead of a stack trace it cannot.
+    const { adapter } = adapterFor();
+    const refusal = {
+      kind: 'none',
+      because: 'Static files are served by the Target.',
+    } as const;
+    expect(await adapter.run(TARGET, 'example/sites/shop-site')).toEqual(
+      refusal,
+    );
+    expect(await adapter.executions(TARGET, 'example/sites/shop-site')).toEqual(
+      refusal,
+    );
+  });
+
   test('a site reaches no store, which is why §10 exempts a website', async () => {
     const { adapter } = adapterFor();
     const { discovery } = await adapter.inspect(TARGET);

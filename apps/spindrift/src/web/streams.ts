@@ -25,6 +25,7 @@ import {
   type AttemptLogCursor,
   readAttemptStream,
 } from '../domain/attempt-log.ts';
+import { isLabel } from '../domain/naming.ts';
 import {
   deployTargetOf,
   hasTargetConnection,
@@ -183,6 +184,35 @@ async function upgradeRuntime(
   const componentId = url.searchParams.get('componentId');
   const targetId = url.searchParams.get('targetId');
   const after = url.searchParams.get('after');
+  /** Which run, for the one kind whose output belongs to a run (§17). */
+  const execution = url.searchParams.get('execution');
+  // This value is concatenated into a query language on the far side — a Cloud
+  // Logging filter, a label selector — so it is checked here, at the one place
+  // it enters from a browser, rather than escaped at each of them. Unchecked it
+  // is a read of the whole vessel project: `AND` binds tighter than `OR`, so
+  // `a" OR timestamp>="2020-01-01T00:00:00Z` makes a filter that matches every
+  // entry the project has, other Apps' output and audit logs included, and the
+  // lines land in the run pane of whoever asked.
+  //
+  // One DNS label — §9's {@link isLabel}, rather than a sixth copy of the same
+  // grammar — because that is what everything Spindrift starts is called: a
+  // Cloud Run execution name *is* validated as a label, and the Jobs this
+  // adapter creates are named from a release name already shortened to 63.
+  //
+  // It is deliberately narrower than Kubernetes. A Job name is a DNS
+  // *subdomain* — dots are legal, and the ceiling is 253 — and `executions()`
+  // lists by label, so a foreign Job named `blog.nightly-1` can reach the
+  // Recent runs card and be refused when its row is clicked. That is the trade
+  // taken: a name Spindrift cannot have produced does not get to widen a
+  // browser-controlled string on its way into two query languages, and a run
+  // whose logs will not open is a smaller failure than one that opens
+  // everyone's. Widening it means escaping at each concatenation site instead.
+  //
+  // `?execution=` is an empty string rather than `null`, which passes the "name
+  // one" guard below, so it is refused here.
+  if (execution !== null && !isLabel(execution)) {
+    return refusal(400, 'MALFORMED_REQUEST', 'that is not a run name');
+  }
   if (!componentId || !targetId) {
     return refusal(
       400,
@@ -213,11 +243,26 @@ async function upgradeRuntime(
     return refusal(404, 'NOT_FOUND', 'the Component or Target does not exist');
   }
   const { target: surface, vessel } = target;
-  if (component.kind === 'job') {
+  // §17: a job has executions rather than a runtime tail, and the refusal that
+  // used to end here is now answered by the executions it names — one of them
+  // is the subject. Without one there is still nothing to follow: a job is not
+  // running most of the time, and merging every run's output into one stream
+  // would answer a question nobody asked.
+  if (component.kind === 'job' && execution === null) {
     return refusal(
       409,
       'NO_RUNTIME',
-      'a job has executions rather than a runtime tail',
+      'a job has executions rather than a runtime tail: name one to read it',
+    );
+  }
+  // And the other direction: a service has one output and it is not a run's.
+  // Serving a named execution here would hand back the Component's whole tail
+  // under a name that had been silently dropped.
+  if (component.kind !== 'job' && execution !== null) {
+    return refusal(
+      409,
+      'NO_RUNTIME',
+      `${component.name} is a ${component.kind}, and only a job has runs`,
     );
   }
   const [placed] = await authenticated.context.db
@@ -258,7 +303,11 @@ async function upgradeRuntime(
       kind: 'runtime',
       adapter,
       target: deployTargetOf(surface, vessel),
-      subject: { app: app.name, component: component.name },
+      subject: {
+        app: app.name,
+        component: component.name,
+        ...(execution === null ? {} : { execution }),
+      },
       cursor: after,
       closed: false,
     },

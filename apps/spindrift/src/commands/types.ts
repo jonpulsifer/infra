@@ -246,6 +246,17 @@ export type CommandFailureCode =
    * missing, so a provenance document would have nothing to join against.
    */
   | 'NOT_BUILDABLE'
+  /**
+   * A run was asked for and did not start (§17).
+   *
+   * One code for every reason, because from the screen they are one fact: the
+   * Component is not a job, nothing has been placed on that Target yet, the
+   * Target is disconnected, the backend has nothing to run, or the far side
+   * refused. The sentence differs; what the operator does next — read it and
+   * fix the thing it names — does not, and five codes would only be five ways
+   * to render the same button state.
+   */
+  | 'NOT_RUNNABLE'
   /** The caller saved an older revision than the server currently owns. */
   | 'STALE_EDIT';
 

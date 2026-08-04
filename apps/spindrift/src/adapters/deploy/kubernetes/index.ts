@@ -52,11 +52,14 @@ import type {
   DeployTarget,
   DeployVerdict,
   FailureReason,
+  JobExecution,
+  JobRuns,
   ObservedState,
   RuntimeLogEntry,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
+  StartedRun,
 } from '../contract.ts';
 import {
   type Fetcher,
@@ -150,6 +153,46 @@ const SECRET_STORE = {
   kind: 'ClusterSecretStore',
   plural: 'clustersecretstores',
 } as const;
+
+/**
+ * The two objects a job's runs are (§7, §17).
+ *
+ * The chart renders a CronJob for every job, scheduled or not, and a run is a
+ * Job it owns — so "start a run" is creating a Job from the CronJob's own
+ * `jobTemplate` rather than un-suspending it. Un-suspending would make the
+ * next *scheduled* time fire, which for an unscheduled job is a date that never
+ * occurs and for a scheduled one is a different act than the operator asked
+ * for.
+ */
+const CRON_JOB = {
+  apiVersion: 'batch/v1',
+  kind: 'CronJob',
+  plural: 'cronjobs',
+} as const;
+
+const JOB = { apiVersion: 'batch/v1', kind: 'Job', plural: 'jobs' } as const;
+
+/**
+ * The label the Job controller stamps on the pods of one run.
+ *
+ * The current one. The unprefixed label of the same name is set beside it and
+ * is deprecated, so keying on this one is what keeps a job's tail reading the
+ * run it was asked about rather than whichever label the cluster stops writing
+ * first.
+ */
+const JOB_NAME_LABEL = 'batch.kubernetes.io/job-name';
+
+/** What `kubectl create job --from` marks a run somebody asked for. */
+const MANUAL_RUN = 'cronjob.kubernetes.io/instantiate';
+
+/**
+ * The longest name a run may carry.
+ *
+ * A Job's pods are named `<job>-<five random characters>`, and a pod's hostname
+ * is a DNS label — so the six characters the Job controller appends have to fit
+ * under 63 or the run starts and can never schedule a pod.
+ */
+const RUN_NAME_LIMIT = 57;
 
 /**
  * What a route attaches to. Read only by {@link KubernetesDeployAdapter.probe}
@@ -264,7 +307,17 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       return { kind: 'stream', entries: [], cursor: null, reach: 0 };
     }
     const api = this.api(connection);
-    const selector = `app.kubernetes.io/name=${subject.component},app.kubernetes.io/part-of=${subject.app}`;
+    // A run's pods carry the Component's labels like every other pod the chart
+    // renders, so the subject narrows by one term rather than by a second
+    // query: with no execution named this is the Component's whole output, and
+    // with one it is that run's and no other run's.
+    const selector = [
+      `app.kubernetes.io/name=${subject.component}`,
+      `app.kubernetes.io/part-of=${subject.app}`,
+      ...(subject.execution === undefined
+        ? []
+        : [`${JOB_NAME_LABEL}=${subject.execution}`]),
+    ].join(',');
     const pods =
       (await api.list(
         { apiVersion: 'v1', plural: 'pods', namespace: connection.namespace },
@@ -330,6 +383,247 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       // cursor in that case would skip the beginning of the new log.
       cursor: entries.at(-1)?.cursor ?? encodeRuntimeCursor(next),
       reach: connection.logHistorySeconds ?? 0,
+    };
+  }
+
+  /**
+   * Start one run of the job this ref placed (§7, §17).
+   *
+   * A Job created from the CronJob's own `jobTemplate`, **owned by that
+   * CronJob**. Both halves are load-bearing. Creating from the template rather
+   * than un-suspending is what makes this run *now* instead of at the next
+   * scheduled time — which for an unscheduled job is a date that never occurs.
+   * And the owner reference is what makes §7's "a scheduled run and a manual
+   * run are the same object with a field flipped" true from the reading side:
+   * `getJobsToBeReconciled` selects the controller ref, so a manual run lands
+   * in `cleanupFinishedJobs` and is pruned by the same history limit rather
+   * than becoming an orphan that outlives every execution beside it.
+   *
+   * **The reference does not make `concurrencyPolicy: Forbid` hold a manual run
+   * off, and nothing here can.** The controller's Forbid check is
+   * `len(cj.Status.Active) > 0`, and `Status.Active` is appended only where the
+   * controller creates a Job itself — it never adopts a foreign Job into it. So
+   * a run started here at 02:59:55 does not stop the `0 3 * * *` fire, and the
+   * two run concurrently even though the policy says never. There is no API
+   * that asks a CronJob to run now; `kubectl create job --from=cronjob/x` does
+   * exactly this and does not set an owner at all. An in-flight check in
+   * `runComponent` would not change it either: the fire that overlaps comes
+   * from the controller, which does not consult Spindrift.
+   *
+   * The known cost of the reference is a `Warning UnexpectedJob "Saw a job that
+   * the controller did not create or forgot"` on every sync until the run
+   * finishes — `syncCronJob`'s `!found && !IsJobFinished(j)` arm. That is a
+   * true statement about a Job the controller did not create, and pruning is
+   * worth it.
+   *
+   * `blockOwnerDeletion` is deliberately absent from that reference: setting it
+   * needs `update` on the owner's `finalizers` subresource wherever the
+   * `OwnerReferencesPermissionEnforcement` admission plugin is on, and the
+   * garbage collection this wants happens without it.
+   */
+  async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return refuse(`${target.name} is not a Kubernetes Target`);
+    }
+    const api = this.api(connection);
+    const placed = await this.placedJob(api, ref);
+    if (placed.kind === 'none') return placed;
+
+    const [owner] =
+      (await api.list(
+        {
+          apiVersion: CRON_JOB.apiVersion,
+          plural: CRON_JOB.plural,
+          namespace: connection.namespace,
+        },
+        { labelSelector: placed.selector },
+      )) ?? [];
+    if (owner === undefined) {
+      return refuse(
+        `no ${CRON_JOB.kind} for ${placed.app}/${placed.component} is on this Target yet`,
+      );
+    }
+    const template = (owner.spec as { jobTemplate?: JobTemplate } | undefined)
+      ?.jobTemplate;
+    if (template?.spec === undefined) {
+      return refuse(
+        `${CRON_JOB.kind} ${owner.metadata.name} carries no job template to run`,
+      );
+    }
+
+    // The CronJob controller's own naming, at second rather than minute
+    // resolution: a name derived from when the run was asked for, so a second
+    // press within the same second is the *same* run rather than a second one.
+    // The API server enforces that for free — see the 409 below.
+    const name = workloadName(
+      {
+        app: owner.metadata.name,
+        component: String(Math.floor(this.clock() / 1_000)),
+      },
+      RUN_NAME_LIMIT,
+    );
+    const uid = owner.metadata.uid;
+    const run: KubernetesObject = {
+      apiVersion: JOB.apiVersion,
+      kind: JOB.kind,
+      metadata: {
+        name,
+        namespace: connection.namespace,
+        ...(template.metadata?.labels === undefined
+          ? {}
+          : { labels: template.metadata.labels }),
+        annotations: {
+          ...template.metadata?.annotations,
+          [MANUAL_RUN]: 'manual',
+        },
+        ...(typeof uid === 'string'
+          ? {
+              ownerReferences: [
+                {
+                  apiVersion: CRON_JOB.apiVersion,
+                  kind: CRON_JOB.kind,
+                  name: owner.metadata.name,
+                  uid,
+                  controller: true,
+                },
+              ],
+            }
+          : {}),
+      },
+      spec: template.spec,
+    };
+
+    let created: KubernetesObject;
+    try {
+      created = await api.create(
+        {
+          apiVersion: JOB.apiVersion,
+          plural: JOB.plural,
+          namespace: connection.namespace,
+        },
+        run,
+      );
+    } catch (cause) {
+      // The run this press names is already going. Reporting it as started is
+      // the honest answer and the idempotent one: a double press produced one
+      // run, which is what the operator asked for and what §6 asks of `destroy`
+      // for the same reason.
+      if (cause instanceof KubernetesRequestError && cause.status === 409) {
+        return { kind: 'started', execution: startingRun(name) };
+      }
+      throw cause;
+    }
+    // The name the API server stored, not the one that was asked for: `create`
+    // now answers with the object or raises, so this reports a run that exists.
+    return { kind: 'started', execution: startingRun(created.metadata.name) };
+  }
+
+  /**
+   * The runs that have happened, newest first (§17).
+   *
+   * Listed by the Component's own labels rather than by ownership, because a
+   * Job the CronJob controller created and a Job this adapter created both
+   * carry the template's labels while only the second is guaranteed to still
+   * have an owner: garbage collection removes the reference before it removes
+   * the object. Listing by label reads both, which is the whole question — what
+   * has this Component run, however it was started.
+   */
+  async executions(
+    target: DeployTarget,
+    ref: DeployRef,
+    limit = 20,
+  ): Promise<JobRuns> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return refuse(`${target.name} is not a Kubernetes Target`);
+    }
+    const api = this.api(connection);
+    const placed = await this.placedJob(api, ref);
+    if (placed.kind === 'none') return placed;
+
+    const jobs = await api.list(
+      {
+        apiVersion: JOB.apiVersion,
+        plural: JOB.plural,
+        namespace: connection.namespace,
+      },
+      { labelSelector: placed.selector },
+    );
+    // `list` answers `null` for a `404`, which {@link KubernetesApi.list} keeps
+    // apart from an empty list on purpose: it means the namespace is gone or
+    // this cluster does not serve `batch/v1`. Neither is "this job has never
+    // run", and `?? []` here would render both as the never-run empty state —
+    // the read half of the same silent-wrong-answer `create` had. Raised so it
+    // lands where a `403` on this call already lands, on `executionsOf`'s
+    // `because` arm: the runs could not be read, and the Run now button stays.
+    if (jobs === null) {
+      throw new Error(
+        `the API server answered 404 listing ${JOB.plural} in ${connection.namespace} — that namespace or ${JOB.apiVersion} is not there`,
+      );
+    }
+
+    return {
+      kind: 'executions',
+      executions: jobs
+        .map(jobExecution)
+        .sort((left, right) => startedAtOf(right) - startedAtOf(left))
+        .slice(0, Math.max(1, limit)),
+    };
+  }
+
+  /**
+   * The job this ref placed, as the labels its objects carry.
+   *
+   * Read off the delivery object's **values** rather than derived from the ref,
+   * because the ref names the release and the workload is named by the chart —
+   * `spindrift-app.fullname` truncates plainly where {@link workloadName} keeps
+   * a digest, so the two names diverge for a long App and deriving one from the
+   * other would be a reimplementation of a chart helper that is free to change.
+   * The values are what Spindrift wrote and what the chart rendered from, so
+   * they are the one place both sides agree.
+   */
+  private async placedJob(
+    api: KubernetesApi,
+    ref: DeployRef,
+  ): Promise<
+    | {
+        readonly kind: 'job';
+        readonly app: string;
+        readonly component: string;
+        readonly selector: string;
+      }
+    | Extract<JobRuns, { kind: 'none' }>
+  > {
+    const parsed = parseRef(ref);
+    if (parsed === null) {
+      return refuse('this Deploy carries no handle on what it placed');
+    }
+    const object = await api.get({
+      apiVersion: apiVersionOf(parsed.flavour),
+      plural: pluralOf(parsed.flavour),
+      namespace: parsed.namespace,
+      name: parsed.name,
+    });
+    if (object === null) {
+      return refuse(`${parsed.name} is no longer on this Target`);
+    }
+    const app = valuesOf(parsed.flavour, object).app as
+      | { name?: unknown; component?: unknown; kind?: unknown }
+      | undefined;
+    if (app?.kind !== 'job') {
+      return refuse('this Component is not a job, so it has no runs');
+    }
+    if (typeof app.name !== 'string' || typeof app.component !== 'string') {
+      return refuse(`${parsed.name} does not say which Component it renders`);
+    }
+    return {
+      kind: 'job',
+      app: app.name,
+      component: app.component,
+      // `spindrift-app.selectorLabels`, which is on every object the chart
+      // renders and on every pod a run of it creates.
+      selector: `app.kubernetes.io/name=${app.component},app.kubernetes.io/part-of=${app.name}`,
     };
   }
 
@@ -802,7 +1096,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           },
         },
       );
-      const status = review?.status as { allowed?: boolean } | undefined;
+      const status = review.status as { allowed?: boolean } | undefined;
       return status?.allowed === true;
     } catch {
       return false;
@@ -999,6 +1293,75 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 }
 
+/** The half of a CronJob a run is made from. */
+interface JobTemplate {
+  readonly metadata?: {
+    readonly labels?: Record<string, string>;
+    readonly annotations?: Record<string, string>;
+  };
+  readonly spec?: Record<string, unknown>;
+}
+
+/** A refusal in the vocabulary both run verbs answer in (§17). */
+function refuse(because: string): Extract<JobRuns, { kind: 'none' }> {
+  return { kind: 'none', because };
+}
+
+/**
+ * A run that has just been asked for.
+ *
+ * `running` with no start time, which is what it is: the API server has the
+ * Job and the controller has not created a pod for it yet. Reporting anything
+ * else would be this adapter guessing at a status it can read a moment later.
+ */
+function startingRun(name: string): JobExecution {
+  return { name, outcome: 'running', startedAt: null };
+}
+
+/**
+ * One Job as a run (§17).
+ *
+ * `Complete` and `Failed` are the only conditions that end a Job; everything
+ * else on the list — `SuccessCriteriaMet`, `FailureTarget`, `Suspended` — is
+ * the controller narrating, and a run narrating is a run still going.
+ */
+function jobExecution(job: KubernetesObject): JobExecution {
+  const status = job.status as
+    | {
+        startTime?: string;
+        conditions?: {
+          type?: string;
+          status?: string;
+          reason?: string;
+          message?: string;
+        }[];
+      }
+    | undefined;
+  const terminal = (status?.conditions ?? []).find(
+    (condition) =>
+      condition.status === 'True' &&
+      (condition.type === 'Complete' || condition.type === 'Failed'),
+  );
+  const at = status?.startTime ?? job.metadata.creationTimestamp;
+  const detail = terminal?.message ?? terminal?.reason;
+  return {
+    name: job.metadata.name,
+    outcome:
+      terminal === undefined
+        ? 'running'
+        : terminal.type === 'Complete'
+          ? 'passed'
+          : 'failed',
+    startedAt: typeof at === 'string' ? new Date(at) : null,
+    ...(detail === undefined ? {} : { detail }),
+  };
+}
+
+/** What a run sorts by. A run with no start time yet is the newest there is. */
+function startedAtOf(execution: JobExecution): number {
+  return execution.startedAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+}
+
 interface RuntimePosition {
   readonly at: string;
   readonly seen: number;
@@ -1104,13 +1467,26 @@ function statusOf(flavour: Flavour, object: KubernetesObject): DeliveryStatus {
     : helmReleaseStatus(object);
 }
 
+/**
+ * The values the delivery object was applied with — what the chart rendered.
+ *
+ * The one read of them, because the two flavours keep them in different places
+ * and a second branch could only ever read one of the two wrongly.
+ */
+function valuesOf(
+  flavour: Flavour,
+  object: KubernetesObject,
+): Record<string, unknown> {
+  return flavour === 'argo-application'
+    ? applicationValues(object)
+    : helmReleaseValues(object);
+}
+
 /** The digest the delivery object was applied with — what is serving. */
 function appliedDigest(flavour: Flavour, object: KubernetesObject): string {
-  const values =
-    flavour === 'argo-application'
-      ? applicationValues(object)
-      : helmReleaseValues(object);
-  const app = values.app as { artifactDigest?: string } | undefined;
+  const app = valuesOf(flavour, object).app as
+    | { artifactDigest?: string }
+    | undefined;
   return app?.artifactDigest ?? '';
 }
 
@@ -1161,15 +1537,23 @@ function writeFailure(
 ): Extract<DeployVerdict, { phase: 'FAILED' }> {
   if (cause instanceof KubernetesRequestError) {
     // A 4xx is the cluster refusing this object — an admission webhook, a
-    // quota, an invalid spec — which §6 puts under one reason. A 5xx or an
-    // auth failure is the cluster being unavailable to Spindrift, which is a
-    // different blame entirely.
+    // quota, an invalid spec — which §6 puts under one reason and blames on the
+    // developer. Three of them are not that, and a 5xx is not either.
+    //
+    // 401 and 403 are Spindrift's own credential. A **404 on a write is the
+    // address, never the object**: a server-side apply creates what is not
+    // there, so the only things that can be missing are the namespace or the
+    // API group — the Target, which the operator configured, not the spec the
+    // developer wrote. Indicting the developer for a namespace that was deleted
+    // sends them reading their chart values, and §6 calls blame the most useful
+    // thing the UI knows. All three are `TARGET_UNREACHABLE`'s platform.
+    const platformFailure =
+      cause.status === 401 || cause.status === 403 || cause.status === 404;
     const rejected = cause.status >= 400 && cause.status < 500;
-    const authFailure = cause.status === 401 || cause.status === 403;
     return {
       phase: 'FAILED',
       ref,
-      reason: rejected && !authFailure ? 'REJECTED' : 'TARGET_UNREACHABLE',
+      reason: rejected && !platformFailure ? 'REJECTED' : 'TARGET_UNREACHABLE',
       detail: cause.body || cause.message,
       debug: { status: cause.status, url: cause.url },
     };

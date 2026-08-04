@@ -31,6 +31,11 @@
  *   §9's fail-closed ordering rather than only that a call was made.
  * - **The admission policy lives at its own endpoint**, which is how a Target
  *   that names none is distinguishable from one whose policy admits everything.
+ * - **Cloud Scheduler is a third API in the same project**, because what fires a
+ *   Job is not the runtime. It is here rather than in a fake of its own for the
+ *   reason {@link FakeCloudRun.tick} exists: the only interesting thing about a
+ *   scheduler job is whether the call it makes is *admitted*, and answering that
+ *   needs the Job's IAM policy — which lives here.
  */
 import type { Fetcher } from '../../../src/adapters/deploy/cloud/http.ts';
 import { CLOUD_ENDPOINTS } from '../installation.ts';
@@ -57,8 +62,23 @@ export interface FakeCloudRunOptions {
   readonly refuseList?: { status: number; body: unknown };
   /** When set, `:setIamPolicy` is refused with this. */
   readonly refuseIam?: { status: number; body: unknown };
+  /** When set, every Cloud Scheduler write is refused with this. */
+  readonly refuseScheduler?: { status: number; body: unknown };
   /** The admission policy this project reports, or `null` for none at all. */
   readonly admissionPolicy?: Record<string, unknown> | null;
+  /**
+   * Runs each Job already has, by job id, **in the order the API will list
+   * them**.
+   *
+   * Seeded rather than only produced by `:run`, because most of a job's history
+   * was written before Spindrift asked for anything — a fake that could only
+   * report what this process started could not test reading one at all.
+   *
+   * The order is the seeder's because `executions.list` documents none and
+   * takes no `orderBy`. Seed oldest-first to hold an adapter to sorting what it
+   * read rather than trusting the page it was handed.
+   */
+  readonly executions?: Readonly<Record<string, readonly unknown[]>>;
   /**
    * Reads a newly created Service `404`s for before it becomes readable.
    *
@@ -209,6 +229,61 @@ const SCHEMAS: Record<string, ServiceSchema> = {
 };
 
 /**
+ * A Cloud Scheduler v1 `Job`, closed the same way and for the same reason.
+ *
+ * Note the two targets that are here and unused: `pubsubTarget` and
+ * `oidcToken`. They are the shapes a renderer might reach for by analogy — one
+ * fires a topic rather than a Job, and the other authenticates to an endpoint
+ * that verifies an audience rather than to an API that verifies a permission —
+ * so a document naming them is accepted by the schema and then fails
+ * {@link FakeCloudRun.tick}, which is where the mistake actually shows.
+ */
+const SCHEDULER_JOB_SCHEMA: ServiceSchema = {
+  name: true,
+  description: true,
+  schedule: true,
+  timeZone: true,
+  retryConfig: true,
+  attemptDeadline: true,
+  pubsubTarget: true,
+  appEngineHttpTarget: true,
+  httpTarget: {
+    uri: true,
+    httpMethod: true,
+    headers: true,
+    body: true,
+    oauthToken: { serviceAccountEmail: true, scope: true },
+    oidcToken: { serviceAccountEmail: true, audience: true },
+  },
+};
+
+/**
+ * A unix-cron expression, as loosely as this needs to check one.
+ *
+ * Five whitespace-separated fields. The real API parses each of them and
+ * refuses `400 INVALID_ARGUMENT` for a field it cannot read; what matters here
+ * is only that a schedule reaches the far side as a schedule rather than as
+ * something the adapter mangled on the way.
+ */
+const CRON = /^\S+(\s+\S+){4}$/;
+
+/**
+ * How this fake is told a call is being made by a service account.
+ *
+ * The controller's own token is the one every other call carries. A scheduled
+ * fire is made by a *different* identity — the account the scheduler job names
+ * — which is the whole thing criterion "on the Job and on nothing wider" is
+ * about, so it has to be distinguishable here or the IAM policy is decoration.
+ */
+const SERVICE_ACCOUNT_TOKEN = 'sa:';
+
+/** The one role that lets an identity run a Job. */
+const INVOKER = 'roles/run.invoker';
+
+/** The one collection that has runs. Named, because `:run` is refused elsewhere. */
+const JOBS_COLLECTION = 'jobs';
+
+/**
  * The first member the document names that the schema does not, if any.
  *
  * Reported by path rather than by name alone, because "Unknown name `foo`" in
@@ -295,6 +370,7 @@ const READY: ServiceScript = (reads) =>
 export class FakeCloudRun {
   readonly endpoint = CLOUD_ENDPOINTS.run;
   readonly policyEndpoint = CLOUD_ENDPOINTS.policy;
+  readonly schedulerEndpoint = CLOUD_ENDPOINTS.scheduler;
   readonly requests: RecordedCloudRequest[] = [];
   /** Every Operation a write answered with, in order — what a poll would use. */
   readonly operations: { name: string; done: boolean }[] = [];
@@ -307,16 +383,41 @@ export class FakeCloudRun {
    * would hide exactly the case `parseRef` exists to get right.
    */
   private readonly resources = new Map<string, Record<string, unknown>>();
+  /**
+   * What Cloud Scheduler holds, by full resource name.
+   *
+   * A separate map rather than a third collection in `resources`, because it is
+   * a separate *service*: a scheduler job and a Cloud Run Job share a resource
+   * name, and collapsing them would hide the one interesting property of that
+   * — that the same string addresses two things.
+   */
+  private readonly schedules = new Map<string, Record<string, unknown>>();
   /** Invoker policies, by `<collection>/<id>` — the surface for exposure. */
   private readonly policies = new Map<string, unknown>();
   private readonly reads = new Map<string, number>();
   /** Reads a just-created Service still owes before it can be seen. */
   private readonly creating = new Map<string, number>();
   private nextOperation = 1;
+  private nextRun = 1;
+  /** Each Job's runs, in list order — the sub-collection `:run` prepends to. */
+  private readonly executions = new Map<string, unknown[]>();
   private readonly options: FakeCloudRunOptions;
 
   constructor(options: FakeCloudRunOptions = {}) {
     this.options = options;
+    for (const [job, runs] of Object.entries(options.executions ?? {})) {
+      this.executions.set(job, [...runs]);
+    }
+  }
+
+  /** `projects/<p>/locations/<r>` — what every name here hangs off. */
+  private parent(): string {
+    return `projects/${this.project}/locations/${this.region}`;
+  }
+
+  /** The runs one Job holds, in the order this fake will list them. */
+  private runsOf(job: string): unknown[] {
+    return this.executions.get(job) ?? [];
   }
 
   get project(): string {
@@ -345,6 +446,64 @@ export class FakeCloudRun {
     return this.policies.get(`services/${id}`);
   }
 
+  /** The same, for a Job — which is where a schedule's grant lands. */
+  jobPolicy(id: string): unknown {
+    return this.policies.get(`jobs/${id}`);
+  }
+
+  /** The Cloud Scheduler job standing in front of one Job, if any is. */
+  schedule(id: string): Record<string, unknown> | undefined {
+    return this.schedules.get(`${this.parent()}/jobs/${id}`);
+  }
+
+  /** Every scheduler job in the project, by name — nothing should be orphaned. */
+  scheduled(): string[] {
+    return [...this.schedules.keys()].sort();
+  }
+
+  /**
+   * Let every scheduler job fire once, the way Cloud Scheduler would.
+   *
+   * The point is not that the fake can call itself: it is that the call goes
+   * through the same `fetch` as everything else, carrying **the identity the
+   * scheduler job names** rather than the controller's token. So a fire is
+   * admitted only if that account holds `roles/run.invoker` on that Job — which
+   * makes the IAM policy the adapter writes load-bearing instead of decorative,
+   * and makes an execution here mean the same thing it means in a vessel:
+   * something ran that nobody asked for by hand.
+   *
+   * Returns each fire's status, in scheduler-job name order.
+   */
+  async tick(): Promise<number[]> {
+    const fired: number[] = [];
+    for (const name of this.scheduled()) {
+      const job = this.schedules.get(name) as {
+        httpTarget?: {
+          uri?: string;
+          httpMethod?: string;
+          oauthToken?: { serviceAccountEmail?: string };
+        };
+      };
+      const target = job.httpTarget;
+      if (target?.uri === undefined) {
+        fired.push(400);
+        continue;
+      }
+      const response = await this.fetch(
+        new Request(target.uri, {
+          method: target.httpMethod ?? 'POST',
+          headers: {
+            authorization: `Bearer ${SERVICE_ACCOUNT_TOKEN}${
+              target.oauthToken?.serviceAccountEmail ?? ''
+            }`,
+          },
+        }),
+      );
+      fired.push(response.status);
+    }
+    return fired;
+  }
+
   /** Requests the adapter made, in order — what § Seam 2 asserts on. */
   pathsOf(method: string): string[] {
     return this.requests
@@ -354,10 +513,14 @@ export class FakeCloudRun {
 
   fetch: Fetcher = async (request) => {
     const url = new URL(request.url);
-    const body =
+    // A POST with no body at all is legal and is what `jobs.run` is fired with
+    // — the scheduler sends no overrides. Read as text first so that an empty
+    // body is `null` rather than a parse error thrown out of the transport.
+    const sent =
       request.method === 'GET' || request.method === 'DELETE'
-        ? null
-        : await request.clone().json();
+        ? ''
+        : await request.clone().text();
+    const body = sent === '' ? null : (JSON.parse(sent) as unknown);
     this.requests.push({
       method: request.method,
       url: `${url.pathname}${url.search}`,
@@ -365,12 +528,24 @@ export class FakeCloudRun {
       body,
     });
 
-    if (request.headers.get('authorization') !== `Bearer ${this.token()}`) {
+    // Who is calling. Almost always the controller, holding the token §13's
+    // federation minted; a scheduled fire is the one call made by somebody
+    // else, and `tick` says so in the header rather than by being let in
+    // through a side door.
+    const authorization = request.headers.get('authorization') ?? '';
+    const caller = authorization.startsWith(`Bearer ${SERVICE_ACCOUNT_TOKEN}`)
+      ? authorization.slice(`Bearer ${SERVICE_ACCOUNT_TOKEN}`.length)
+      : null;
+    if (caller === null && authorization !== `Bearer ${this.token()}`) {
       return json(401, { error: { message: 'unauthenticated' } });
     }
 
     if (url.origin === new URL(this.policyEndpoint).origin) {
       return this.admissionResponse();
+    }
+
+    if (url.origin === new URL(this.schedulerEndpoint).origin) {
+      return this.schedulerResponse(request.method, url, body);
     }
 
     const parent = `/v2/projects/${this.project}/locations/${this.region}/`;
@@ -404,9 +579,65 @@ export class FakeCloudRun {
       return json(200, { [collection]: [...this.held(collection)] });
     }
 
+    // A Job's runs are a sub-collection rather than a resource of their own,
+    // so they are routed before the `<name>[:verb]` split — which would
+    // otherwise read `jobs/<id>/executions` as a resource nobody named.
+    const runs = rest.match(/^([^/:]+)\/executions$/);
+    if (runs !== null) {
+      if (request.method !== 'GET') {
+        return json(405, {
+          error: { message: 'runs are listed, not written' },
+        });
+      }
+      if (!this.resources.has(`${collection}/${runs[1]}`)) {
+        return json(404, notFound());
+      }
+      // `pageSize` is honoured and the order is whatever this fake was seeded
+      // with, because that is what `executions.list` documents: a page size and
+      // no ordering at all. An adapter that asks for ten and trusts them to be
+      // the newest ten is right only by luck, and a fake that always answered
+      // newest-first is a fake that makes that luck look like a guarantee.
+      const page = Number(url.searchParams.get('pageSize') ?? '0');
+      const held = this.runsOf(runs[1] as string);
+      return json(200, {
+        executions: page > 0 ? held.slice(0, page) : held,
+      });
+    }
+
     const [name, verb] = rest.split(':', 2);
     if (name === undefined || name === '') return json(404, notFound());
     const key = `${collection}/${name}`;
+
+    // `jobs.run` is the runtime's own verb: it answers with an `Operation`
+    // whose metadata **is** the Execution being created, and the execution
+    // appears in the job's sub-collection behind it. A fake that only answered
+    // the call would let an adapter that never read the name back pass.
+    if (verb === 'run') {
+      if (collection !== JOBS_COLLECTION || !this.resources.has(key)) {
+        return json(404, notFound());
+      }
+      // The controller holds `roles/run.admin` on the project, which carries
+      // this. Every other identity has to have been granted it **on this Job**,
+      // which is what makes a schedule that was removed stop firing even if
+      // something still calls: the binding is what the policy says now, not
+      // what it said when the scheduler job was written.
+      if (caller !== null && !this.mayRun(key, caller)) {
+        return json(permissionDenied().status, permissionDenied().body);
+      }
+      const started = `${name}-${this.nextRun++}`;
+      this.executions.set(name, [
+        { name: `${this.parent()}/jobs/${name}/executions/${started}` },
+        ...this.runsOf(name),
+      ]);
+      return json(200, {
+        name: `${this.parent()}/operations/op-${this.nextOperation++}`,
+        done: false,
+        metadata: {
+          '@type': 'type.googleapis.com/google.cloud.run.v2.Execution',
+          name: `${this.parent()}/jobs/${name}/executions/${started}`,
+        },
+      });
+    }
 
     if (verb === 'setIamPolicy') {
       if (this.options.refuseIam !== undefined) {
@@ -441,6 +672,102 @@ export class FakeCloudRun {
         });
     }
   };
+
+  /** Whether one service account may run one Job, per that Job's own policy. */
+  private mayRun(key: string, serviceAccount: string): boolean {
+    const written = this.policies.get(key) as
+      | { policy?: { bindings?: { role?: string; members?: string[] }[] } }
+      | undefined;
+    return (written?.policy?.bindings ?? []).some(
+      (binding) =>
+        binding.role === INVOKER &&
+        (binding.members ?? []).includes(`serviceAccount:${serviceAccount}`),
+    );
+  }
+
+  /**
+   * Cloud Scheduler, as much of it as an adapter that creates, updates and
+   * deletes needs.
+   *
+   * **No create-or-update, deliberately.** The real `jobs.create` refuses a
+   * name that already exists with `409 ALREADY_EXISTS` and the real
+   * `jobs.patch` refuses one that does not with `404`, and modelling both is
+   * what keeps an adapter honest about the fact that this API has no upsert —
+   * one that assumed otherwise would pass here and leave a Component's second
+   * deploy silently on its first schedule.
+   */
+  private schedulerResponse(method: string, url: URL, body: unknown): Response {
+    if (this.options.refuseScheduler !== undefined) {
+      return json(
+        this.options.refuseScheduler.status,
+        this.options.refuseScheduler.body,
+      );
+    }
+    const parent = `/v1/${this.parent()}/jobs`;
+    const addressed = url.pathname.startsWith(`${parent}/`)
+      ? url.pathname.slice('/v1/'.length)
+      : null;
+    if (method === 'DELETE') {
+      if (addressed === null || !this.schedules.has(addressed)) {
+        return json(404, notFound());
+      }
+      this.schedules.delete(addressed);
+      return json(200, {});
+    }
+    // `patch` addresses the job and `create` addresses its parent — the only
+    // difference between the two, other than which of them refuses.
+    if (method === 'PATCH') {
+      if (addressed === null || !this.schedules.has(addressed)) {
+        return json(404, notFound());
+      }
+    } else if (method !== 'POST' || url.pathname !== parent) {
+      return json(404, notFound());
+    }
+
+    const document = body as Record<string, unknown>;
+    const unknown = unknownMember(document, SCHEDULER_JOB_SCHEMA);
+    if (unknown !== null) {
+      return json(400, {
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: `Invalid JSON payload received. Unknown name "${unknown}" at 'job'.`,
+        },
+      });
+    }
+    const name = document.name;
+    if (
+      typeof name !== 'string' ||
+      !name.startsWith(`${this.parent()}/jobs/`)
+    ) {
+      return json(400, {
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: 'the job name must be under the parent it is created in',
+        },
+      });
+    }
+    if (method === 'POST' && this.schedules.has(name)) {
+      return json(409, {
+        error: { code: 409, status: 'ALREADY_EXISTS', message: 'job exists' },
+      });
+    }
+    if (
+      typeof document.schedule !== 'string' ||
+      !CRON.test(document.schedule)
+    ) {
+      return json(400, {
+        error: {
+          code: 400,
+          status: 'INVALID_ARGUMENT',
+          message: `"${String(document.schedule)}" is not a valid cron expression`,
+        },
+      });
+    }
+    this.schedules.set(name, document);
+    return json(200, { ...document, state: 'ENABLED' });
+  }
 
   /** Everything stored in one collection. */
   private held(collection: string): Record<string, unknown>[] {
@@ -585,13 +912,20 @@ function notFound(): unknown {
   return { error: { message: 'not found', status: 'NOT_FOUND' } };
 }
 
-/** A refusal because the service is switched off in this project. */
+/**
+ * A refusal because the service is switched off in this project.
+ *
+ * One definition for both APIs this fake stands in for, because what the
+ * adapter reads is the ErrorInfo `reason` and that is identical whichever
+ * service is off — the human message is the part that names one, and no test
+ * reads it.
+ */
 export function serviceDisabled(): { status: number; body: unknown } {
   return {
     status: 403,
     body: {
       error: {
-        message: 'Cloud Run API has not been used in this project',
+        message: 'this API has not been used in this project',
         status: 'PERMISSION_DENIED',
         details: [{ '@type': ERROR_INFO, reason: 'SERVICE_DISABLED' }],
       },

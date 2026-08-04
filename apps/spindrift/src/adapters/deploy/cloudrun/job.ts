@@ -5,14 +5,16 @@
  * describes, the adapter renders**, and a pure function returning a plain
  * object is a document a test can assert whole without a fake API standing by.
  *
- * **What a job on this backend is.** A Job resource that exists and is triggered
- * by nothing. That is the exact analogue of the Kubernetes side, where
+ * **What a job on this backend is.** A Job resource, and nothing in it that says
+ * when to run. That is the exact analogue of the Kubernetes side, where
  * `packages/charts/spindrift-app/templates/cronjob.yaml` renders a CronJob with
  * `suspend: true` and a date that never occurs for an unscheduled job — the
- * object has to exist for anything to have something to trigger. Cloud Run
- * reaches the same state by having no scheduler in front of it, because a Job
- * carries no schedule of its own: firing one is a separate service (**72**) and
- * running one on demand is a `DeployAdapter` verb that does not exist (**73**).
+ * object has to exist for anything to have something to trigger. The difference
+ * is where the cadence lives: a CronJob carries its own and a Job carries none,
+ * so a schedule here is a Cloud Scheduler job standing in front of this one —
+ * `scheduler.ts`, applied by the adapter and not rendered into this document.
+ * Running one on demand is `DeployAdapter.run`, the runtime's own `jobs.run`,
+ * which is also the call a schedule makes.
  *
  * **The template nests twice.** `Job.template` is an `ExecutionTemplate` and
  * `ExecutionTemplate.template` is a `TaskTemplate`; the containers live in the
@@ -22,10 +24,9 @@
  * holds the closed Job schema that makes that mistake fail here rather than in
  * a vessel.
  *
- * **Nothing Service-only is rendered.** `ingress`, `containerPort` and the
- * invoker policy are all answers to "who may reach this", and a Job is reached
- * by nobody: the resource has no `ingress` member and nothing routes to it. So
- * a job's `reach` is `none`, which
+ * **Nothing Service-only is rendered.** `ingress` and `containerPort` are
+ * answers to "who may route to this", and nothing routes to a Job: the resource
+ * has no `ingress` member at all. So a job's `reach` is `none`, which
  * `ASSERTED_REACHES_BY_ADAPTER.cloudrun` already serves, and the chart says the
  * same thing one layer over — `spindrift-app.serving` is "a job is the only
  * workload branch and never serves".

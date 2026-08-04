@@ -32,6 +32,10 @@ resource "google_service_account_iam_member" "spindrift_controller_token_creator
   member             = local.spindrift_principal
 }
 
+# Attaching an identity to something is a separate permission from creating the
+# something. The controller writes both a Cloud Run revision and a Cloud
+# Scheduler job that authenticate as the runtime account, and neither call is
+# admitted without `iam.serviceAccounts.actAs` on it.
 resource "google_service_account_iam_member" "spindrift_act_as_runtime" {
   service_account_id = google_service_account.spindrift_runtime.name
   role               = "roles/iam.serviceAccountUser"
@@ -41,6 +45,16 @@ resource "google_service_account_iam_member" "spindrift_act_as_runtime" {
 locals {
   spindrift_project_roles = toset([
     "roles/cloudsql.admin",
+    # A Cloud Run Job carries no cron expression, so a scheduled Component is a
+    # Cloud Scheduler job the controller keeps beside the Job.
+    # `roles/run.admin` covers `run.jobs.*` and nothing scheduler-shaped, and
+    # this is the narrowest predefined role covering the three verbs the adapter
+    # calls — `cloudscheduler.jobs.create`, `.update` and `.delete`. Neither
+    # narrower role reaches them: `roles/cloudscheduler.viewer` only reads, and
+    # `roles/cloudscheduler.jobRunner` only forces a run of a job somebody else
+    # created. Nothing wider, either: an editor-shaped role would carry every
+    # other API in the project along with it.
+    "roles/cloudscheduler.admin",
     "roles/compute.networkUser",
     "roles/firebasehosting.admin",
     "roles/iap.admin",

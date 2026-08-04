@@ -484,12 +484,37 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
     ).toEqual([]);
   });
 
-  test('a schedule nothing fires is refused at Place, and only a schedule', () => {
-    // The kind is rendered on this backend and the schedule is not, so the
-    // refusal is its own reason and lands at Place — a scheduled job accepted
-    // here would be refused by the adapter after a build and a Deploy, which is
-    // the direction §3 exists to prevent.
-    const cloud = target({ adapter: 'cloudrun' });
+  test('both backends that render a job also fire one', () => {
+    // Two quite different machineries reaching the same answer: the cluster's
+    // own controller fires the CronJob the chart renders, and the Cloud Run
+    // adapter puts a Cloud Scheduler job in front of the Job it renders. The
+    // capability is what makes those one row rather than a special case.
+    const scheduled = requirements({
+      kind: 'job',
+      reach: 'none',
+      auth: 'none',
+      schedule: '0 3 * * *',
+    });
+    expect(exclusionsFor(target({ adapter: 'cloudrun' }), scheduled)).toEqual(
+      [],
+    );
+    expect(exclusionsFor(target({ adapter: 'kubernetes' }), scheduled)).toEqual(
+      [],
+    );
+  });
+
+  test('a schedule nothing fires is still refused at Place, and only a schedule', () => {
+    // No connected adapter is in this state today, which is exactly why it is
+    // constructed: the guard is what the *next* backend is measured against,
+    // and a rule with no test is a rule that rots. The kind is rendered and the
+    // schedule is not, so the refusal is its own reason and lands at Place — a
+    // scheduled job accepted here would be refused after a build and a Deploy,
+    // which is the direction §3 exists to prevent.
+    const capable = target({ adapter: 'kubernetes' });
+    const cadenceless: PlacementTarget = {
+      ...capable,
+      capabilities: { ...capable.capabilities, firesSchedules: false },
+    };
     const unscheduled = requirements({
       kind: 'job',
       reach: 'none',
@@ -497,13 +522,8 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
     });
     const scheduled = { ...unscheduled, schedule: '0 3 * * *' };
 
-    expect(exclusionsFor(cloud, scheduled)).toEqual(['NO_SCHEDULER']);
-    expect(exclusionsFor(cloud, unscheduled)).toEqual([]);
-    // The cluster's own controller fires the CronJob the chart renders, so the
-    // same Component is a candidate there.
-    expect(exclusionsFor(target({ adapter: 'kubernetes' }), scheduled)).toEqual(
-      [],
-    );
+    expect(exclusionsFor(cadenceless, scheduled)).toEqual(['NO_SCHEDULER']);
+    expect(exclusionsFor(cadenceless, unscheduled)).toEqual([]);
     // A backend that renders no job at all says so once. NO_SCHEDULER's
     // sentence opens by granting that this Target runs a job, so beside
     // KIND_UNSUPPORTED it would contradict it on a single row — and

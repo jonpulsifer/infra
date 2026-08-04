@@ -15,6 +15,12 @@
  * `job.ts` render the two documents; this file is the only thing that knows both
  * exist.
  *
+ * **Three APIs, though.** A Job carries no cron expression, so a scheduled one
+ * is a Cloud Scheduler job calling `jobs.run` in front of it — `scheduler.ts`
+ * renders that, and it is the one part of a Component this adapter places
+ * outside the runtime's own API. It shares the Job's resource name exactly, so
+ * a `DeployRef` locates both and `destroy` takes the schedule with the Job.
+ *
  * **Never the build-from-source path** (§4). The runtime will happily take a
  * source archive and build it, and taking that offer would give this
  * installation a second build engine — with its own frontends, its own
@@ -44,10 +50,8 @@ import type {
 } from '../../../domain/capabilities.ts';
 import {
   type ArtifactType,
-  type Auth,
   artifactAddress,
   type DesiredState,
-  type Reach,
 } from '../../../domain/desired-state.ts';
 import type { CloudRunAdapterConnection } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
@@ -62,15 +66,20 @@ import type {
   DeployTarget,
   DeployVerdict,
   FailureReason,
+  JobExecution,
+  JobRuns,
   ObservedState,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
+  StartedRun,
 } from '../contract.ts';
 import { cloudRunJob } from './job.ts';
+import { cloudSchedulerJob, jobInvokerPolicy, TIME_ZONE } from './scheduler.ts';
 import {
   allowsUnauthenticated,
   cloudRunService,
+  type InvokerPolicy,
   invokerPolicy,
   workloadId,
 } from './service.ts';
@@ -95,11 +104,21 @@ export interface CloudRunAdapterOptions {
   readonly now?: () => number;
   /** Cloud Logging API root; injectable for perimeter endpoints and tests. */
   readonly logsEndpoint?: string;
+  /**
+   * Cloud Scheduler API root — what fires a scheduled job (§7).
+   *
+   * Injected only by a test: `adapters/registry.ts` passes this adapter a token
+   * and a transport and nothing else. Defaulted rather than carried on the
+   * connection because it is a property of the cloud rather than of a project —
+   * unlike the Target's own `endpoint`, there is nothing per-Target to say.
+   */
+  readonly schedulerEndpoint?: string;
 }
 
 const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_LOGS_ENDPOINT = 'https://logging.googleapis.com';
+const DEFAULT_SCHEDULER_ENDPOINT = 'https://cloudscheduler.googleapis.com';
 const SERVICE_ID_LIMIT = 63;
 
 /**
@@ -113,8 +132,52 @@ const SERVICES = 'services';
 const JOBS = 'jobs';
 type Collection = typeof SERVICES | typeof JOBS;
 
+/** The sub-collection a Job's runs live in — the executions §17 names. */
+const EXECUTIONS = 'executions';
+
+/**
+ * What a job's log entries carry where a service's carry a revision (§17).
+ *
+ * A Job's entries are typed `cloud_run_job`, keyed on `job_name`, and labelled
+ * with the execution and task that wrote them — none of which a
+ * `cloud_run_revision` filter matches. That is why a run's logs are a different
+ * question from "what is this Component saying now" rather than the same query
+ * with a different name in it.
+ */
+const JOB_RESOURCE = 'cloud_run_job';
+const SERVICE_RESOURCE = 'cloud_run_revision';
+const EXECUTION_LABEL = 'run.googleapis.com/execution_name';
+const TASK_INDEX_LABEL = 'run.googleapis.com/task_index';
+
+/** How many runs `executions` reports when nothing says otherwise. */
+const DEFAULT_EXECUTION_PAGE = 20;
+
+/**
+ * How many the API is asked for, regardless of how many are reported.
+ *
+ * `projects.locations.jobs.executions.list` documents no ordering and takes no
+ * `orderBy`, so a page of ten is ten *some* executions and sorting them
+ * afterwards only orders what arrived. Asking for a page far larger than the
+ * depth any caller wants makes the newest ones be in it whichever end the API
+ * starts from. Google's list APIs clamp a `pageSize` above their own maximum
+ * rather than refusing it, so this is a ceiling request, not a promise.
+ *
+ * ponytail: a job with more executions than this still hides its newest ones if
+ * the API pages oldest-first. Upgrade path is following `nextPageToken` until
+ * it is empty, which is unbounded work for a screen that shows ten rows.
+ */
+const EXECUTION_PAGE_ASKED = 100;
+
 /** How the operator would name the service in the sentence about enabling it. */
 const SERVICE_NAME = 'Cloud Run';
+
+/**
+ * The reason a cloud API gives for "this service is not turned on here".
+ *
+ * The same code `cloud/checklist.ts` reads, and read here for one narrow
+ * purpose — see {@link CloudRunDeployAdapter.unschedule}.
+ */
+const SERVICE_DISABLED = 'SERVICE_DISABLED';
 
 /**
  * What the runtime runs.
@@ -188,21 +251,29 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     }
 
     const job = desired.kind === 'job';
-    // Place refuses this first: `FIRES_SCHEDULES_BY_ADAPTER` makes a scheduled
-    // job a `NO_SCHEDULER` non-candidate here, in the same words. This is the
-    // backstop for the path that asks for a Deploy without asking Place —
-    // dropping the schedule silently is the one outcome worse than refusing it,
-    // because a Component would report `LIVE` on a cadence nothing keeps.
-    // `REJECTED` because §6 puts it with the refusals a developer answers by
-    // changing the request: drop the schedule, or place it on a Target that
-    // keeps one (**72**).
-    if (job && desired.schedule !== undefined) {
+    // What this job's schedule is, or `null` for every other Component: the one
+    // value the rest of `apply` reads to decide whether anything stands in
+    // front of the Job. A `service` never has one — §6 marks `schedule` as a
+    // job's field — so reading it off the kind here means nothing below has to
+    // ask again.
+    const fires = job ? (desired.schedule ?? null) : null;
+    // A schedule fires *as* an identity or it does not fire: Cloud Scheduler
+    // authenticates the `jobs.run` call it makes, and a scheduler job created
+    // without an account would be created happily and refused on every tick —
+    // a Component reporting `LIVE` on a cadence that lands nowhere, which is
+    // the failure this whole path exists to avoid. The Target's runtime
+    // account is the only identity this controller can act as
+    // (`terraform/gcp/projects/bluenose/iam.tf`), so a Target naming none
+    // cannot hold a scheduled job. `REJECTED` because §6 puts it with the
+    // refusals answered by changing the request: drop the schedule, or place it
+    // where an identity is named.
+    if (fires !== null && connection.serviceAccount === undefined) {
       yield this.status('FAILED', { reason: 'REJECTED' });
       return {
         phase: 'FAILED',
         reason: 'REJECTED',
         detail:
-          'this Target runs a job but has nothing to fire it on a schedule',
+          'this Target names no runtime identity for a schedule to fire as',
       };
     }
 
@@ -213,6 +284,36 @@ export class CloudRunDeployAdapter implements DeployAdapter {
 
     yield this.status('APPLYING', { resource: id });
 
+    // A job that declares no schedule must not keep one a previous deploy
+    // asked for, and the removal happens **before** the Job is written for the
+    // same reason §9 writes a tightening invoker policy first: a gap in which
+    // nothing fires is better than a window in which the old cadence fires the
+    // new template. Asserted on every unscheduled job rather than only where
+    // one was removed — this adapter holds no memory of the last deploy, and
+    // deleting what is not there costs one call and answers `404`.
+    //
+    // **Said, not fatal.** Which is the difference between this call and the
+    // one in `destroy`: here it is a cleanup for a schedule most jobs never
+    // had, and failing on it would make every Cloud Run job — including one
+    // that has never declared a cadence — depend on Cloud Scheduler being
+    // enabled, permitted and reachable. Two ways that bites without anything
+    // being wrong: Cloud Scheduler serves a strict subset of Cloud Run's
+    // regions, and a project's IAM is eventually consistent after the terraform
+    // that grants the role. What actually stops a schedule firing is the empty
+    // invoker policy written further down, and that is a Cloud Run call: a
+    // scheduler job that survived this lands on a Job that no longer admits it.
+    // So the residue is a ticking job producing nothing — stated on the
+    // timeline so it is not silent, and raised for real by `destroy`.
+    if (job && fires === null) {
+      const stopped = await this.unschedule(connection, id);
+      if (stopped !== null) {
+        yield this.log(
+          `${stopped.detail ?? `the schedule on job ${id} could not be removed`} — this Component declares none, so the deploy continues and the grant below is what stops it firing`,
+          id,
+        );
+      }
+    }
+
     // §9: "tightening drops public reach first and stays red if the stricter
     // boundary does not come up." So for every non-public exposure the invoker
     // policy is written *before* the Service — a bounded outage is preferred
@@ -222,15 +323,20 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // written again after the rollout below: the closed state is **asserted**
     // on every deploy rather than inherited from the platform's default.
     //
-    // A job has no exposure to assert in either direction: nothing routes to it
-    // and nothing invokes it, so there is no policy that would mean anything.
+    // A job's invoker policy is not on this path. Nothing routes to a Job, so
+    // its policy answers only *who may run it* — which is the scheduler and
+    // nobody else — and the tightening direction there is the scheduler job
+    // deleted above rather than a binding: a grant with nothing left to use it
+    // invokes nothing. So a job asserts its policy once, after the Job exists
+    // and in whichever direction the schedule now means.
     if (!job && !allowsUnauthenticated(desired.reach, desired.auth)) {
       const tightened = await this.setInvoker(
         http,
         connection,
+        SERVICES,
         id,
-        desired.reach,
-        desired.auth,
+        invokerPolicy(desired.reach, desired.auth),
+        `{reach: ${desired.reach}, auth: ${desired.auth}}`,
       );
       if (tightened !== null) {
         yield this.status('FAILED', { resource: id, reason: tightened.reason });
@@ -274,7 +380,59 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       id,
       ref,
     );
-    if (verdict.phase !== 'LIVE' || job) return verdict;
+    if (verdict.phase !== 'LIVE') return verdict;
+
+    if (job) {
+      // Who may run this Job, asserted in whichever direction the schedule now
+      // means — a binding for the identity the scheduler fires as, or nothing
+      // at all. One call rather than a branch, because "what the policy says"
+      // and "whether there is a schedule" are the same question, and skipping
+      // the write on the unscheduled path is how a grant outlives the schedule
+      // that justified it.
+      const bound = await this.setInvoker(
+        http,
+        connection,
+        JOBS,
+        id,
+        jobInvokerPolicy(
+          fires === null ? null : (connection.serviceAccount ?? null),
+        ),
+        'this job',
+      );
+      if (bound !== null) {
+        yield this.status('FAILED', { resource: id, reason: bound.reason });
+        return { ...bound, ref };
+      }
+      if (fires === null) return verdict;
+
+      // Last, and only now: the binding it fires with is already in place, so
+      // the first tick cannot land on a Job that has not yet been told to
+      // admit it.
+      const scheduled = await this.schedule(connection, id, fires, ref);
+      if (scheduled !== null) {
+        // And taken back when nothing came to use it. Writing the grant first
+        // is right on the path that succeeds and wrong on the path that does
+        // not: the runtime account is one identity shared by every workload in
+        // the vessel — which is the whole reason the binding is per-Job — so a
+        // grant left behind by a visibly failed deploy is a Job anything in the
+        // vessel may run, uncleaned until someone deploys this Component
+        // successfully. Best effort, and deliberately not allowed to replace
+        // the verdict: what the operator has to see is why the schedule did not
+        // land, not a second failure about tidying up after it.
+        await this.setInvoker(
+          http,
+          connection,
+          JOBS,
+          id,
+          jobInvokerPolicy(null),
+          'this job',
+        );
+        yield this.status('FAILED', { resource: id, reason: scheduled.reason });
+        return { ...scheduled, ref };
+      }
+      yield this.log(`firing job ${id} on "${fires}" (${TIME_ZONE})`, id);
+      return verdict;
+    }
 
     // Now that the Service exists, the policy this exposure means is written
     // whichever direction it moved. Opening can only happen here — granting
@@ -285,9 +443,10 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     const written = await this.setInvoker(
       http,
       connection,
+      SERVICES,
       id,
-      desired.reach,
-      desired.auth,
+      invokerPolicy(desired.reach, desired.auth),
+      `{reach: ${desired.reach}, auth: ${desired.auth}}`,
     );
     if (written !== null) {
       yield this.status('FAILED', { resource: id, reason: written.reason });
@@ -331,6 +490,19 @@ export class CloudRunDeployAdapter implements DeployAdapter {
 
     const { collection, id } = placed;
     const noun = collection === JOBS ? 'job' : 'service';
+    // The schedule goes first, and it goes at all: a scheduler job left behind
+    // would keep calling `jobs.run` on a Job that no longer exists, which is
+    // the orphan §6's idempotence rule is about wearing a second service's
+    // uniform. Ordered first so the window is "nothing fires it yet" rather
+    // than "it fires and 404s".
+    if (collection === JOBS) {
+      const stopped = await this.unschedule(connection, id);
+      if (stopped !== null) {
+        throw new Error(
+          stopped.detail ?? `the schedule on job ${id} could not be removed`,
+        );
+      }
+    }
     const deleted = await this.http(connection).json<unknown>({
       method: 'DELETE',
       path: `/v2/${parentOf(connection)}/${collection}/${encodeURIComponent(id)}`,
@@ -357,7 +529,13 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       return { kind: 'stream', entries: [], cursor: null, reach: 0 };
     }
     const after = cloudLogCursor(options.after);
-    const service = workloadName(subject, SERVICE_ID_LIMIT);
+    const id = workloadName(subject, SERVICE_ID_LIMIT);
+    // A run's entries are keyed on the Job and labelled with the execution, so
+    // naming one narrows the filter twice: to this Component's Job rather than
+    // its Service, and to that run rather than every run it has ever had. The
+    // Component-wide question a service answers has no answer for a job, which
+    // is why there is no third branch here.
+    const run = subject.execution;
     const response = await new CloudHttp({
       baseUrl: this.options.logsEndpoint ?? DEFAULT_LOGS_ENDPOINT,
       token: this.options.token,
@@ -368,9 +546,14 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       body: {
         resourceNames: [`projects/${connection.project}`],
         filter: [
-          'resource.type="cloud_run_revision"',
-          `resource.labels.service_name="${service}"`,
+          `resource.type="${run === undefined ? SERVICE_RESOURCE : JOB_RESOURCE}"`,
+          run === undefined
+            ? `resource.labels.service_name="${id}"`
+            : `resource.labels.job_name="${id}"`,
           `resource.labels.location="${connection.region}"`,
+          ...(run === undefined
+            ? []
+            : [`labels."${EXECUTION_LABEL}"="${run}"`]),
           ...(after === null ? [] : [`timestamp>="${after.at}"`]),
         ].join(' AND '),
         orderBy: 'timestamp asc',
@@ -405,6 +588,130 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       entries,
       cursor: entries.at(-1)?.cursor ?? options.after ?? null,
       reach: connection.logHistorySeconds ?? 0,
+    };
+  }
+
+  /**
+   * Start one run of the job this ref names, now (§17).
+   *
+   * `jobs.run` is the runtime's own verb, and the same one a schedule fires
+   * through — the scheduler calls exactly this over HTTP, as the identity the
+   * Job's invoker policy names. So an on-demand run and a scheduled one produce
+   * the same kind of execution, which is what makes a job's history one list
+   * rather than two (§17). The call answers with an
+   * `Operation` whose `metadata` **is** the Execution being created, which is
+   * where the name comes from — an execution named by the runtime rather than
+   * by this adapter, for the same reason a Service's `uri` comes back across
+   * this seam rather than being handed in (§9).
+   *
+   * A ref naming the other collection is refused rather than run: a Service has
+   * no execution, and the alternative to saying so is a 404 from a path that
+   * reads as if it should have worked.
+   */
+  async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+    const placed = this.placedJob(target, ref);
+    if (placed.kind === 'none') return placed;
+
+    const started = await this.http(placed.connection).json<CloudOperation>({
+      method: 'POST',
+      path: `${placed.path}:run`,
+      body: {},
+    });
+    if (!started.ok) {
+      throw new Error(`running job ${placed.id} failed: ${started.message}`);
+    }
+    const name = started.value?.metadata?.name;
+    return {
+      kind: 'started',
+      execution: {
+        // An operation that named no execution still started one — the runtime
+        // is creating it behind the operation. The Job's own id is the honest
+        // thing to say meanwhile: it names what was run, and the next read of
+        // `executions` replaces it with the run's own name.
+        name: name === undefined ? placed.id : shortName(name),
+        outcome: 'running',
+        startedAt: null,
+      },
+    };
+  }
+
+  /** The runs that have happened, newest first (§17). */
+  async executions(
+    target: DeployTarget,
+    ref: DeployRef,
+    limit = DEFAULT_EXECUTION_PAGE,
+  ): Promise<JobRuns> {
+    const placed = this.placedJob(target, ref);
+    if (placed.kind === 'none') return placed;
+
+    const read = await this.http(placed.connection).json<CloudExecutionPage>({
+      method: 'GET',
+      path: `${placed.path}/${EXECUTIONS}`,
+      query: { pageSize: String(EXECUTION_PAGE_ASKED) },
+    });
+    if (!read.ok) {
+      throw new Error(
+        `reading the runs of job ${placed.id} failed: ${read.message}`,
+      );
+    }
+    // Sort then slice, and in that order: the API documents no ordering, so
+    // a page of `limit` would be `limit` arbitrary runs and sorting them would
+    // put the newest of *those* on top. `limit` is what to report, never what
+    // to look at — see {@link EXECUTION_PAGE_ASKED}.
+    return {
+      kind: 'executions',
+      executions: (read.value?.executions ?? [])
+        .map(cloudRunExecution)
+        .sort((left, right) => startedAtOf(right) - startedAtOf(left))
+        .slice(0, Math.max(1, limit)),
+    };
+  }
+
+  /**
+   * The Job this ref names on this connection, or why it names no job.
+   *
+   * Synchronous, because everything it decides is already in the ref: §6 makes
+   * the collection part of the handle precisely so `observe` and `destroy` can
+   * tell a Service from a Job without a Component, and these two verbs get the
+   * same answer from the same place.
+   */
+  private placedJob(
+    target: DeployTarget,
+    ref: DeployRef,
+  ):
+    | {
+        readonly kind: 'job';
+        readonly connection: CloudRunAdapterConnection;
+        readonly id: string;
+        readonly path: string;
+      }
+    | Extract<JobRuns, { kind: 'none' }> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return {
+        kind: 'none',
+        because: `${target.name} is not a Cloud Run Target`,
+      };
+    }
+    const placed = parseRef(connection, ref);
+    if (placed === null) {
+      return {
+        kind: 'none',
+        because: 'this Deploy carries no handle on what it placed here',
+      };
+    }
+    if (placed.collection !== JOBS) {
+      return {
+        kind: 'none',
+        because:
+          'this ref names a service, which has a runtime tail rather than runs',
+      };
+    }
+    return {
+      kind: 'job',
+      connection,
+      id: placed.id,
+      path: `/v2/${parentOf(connection)}/${JOBS}/${encodeURIComponent(placed.id)}`,
     };
   }
 
@@ -517,27 +824,39 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     }
   }
 
-  /** Write the invoker policy for one exposure, or say why it could not. */
+  /**
+   * Write one resource's whole invoker policy, or say why it could not.
+   *
+   * Takes the policy rather than the exposure it came from, because both
+   * collections have one and they are computed from different things: a
+   * Service's from `{reach, auth}` (§9), a Job's from whether anything fires it
+   * (§7). What is shared is the write and how a refusal is read, and that is
+   * all this holds. `describes` is how the policy is named in the sentence a
+   * failure produces.
+   */
   private async setInvoker(
     http: CloudHttp,
     connection: CloudRunAdapterConnection,
+    collection: Collection,
     id: string,
-    reach: Reach,
-    auth: Auth,
+    policy: InvokerPolicy,
+    describes: string,
   ): Promise<Omit<Extract<DeployVerdict, { phase: 'FAILED' }>, 'ref'> | null> {
     const written = await http.json<unknown>({
       method: 'POST',
-      path: `/v2/${parentOf(connection)}/services/${encodeURIComponent(id)}:setIamPolicy`,
-      body: invokerPolicy(reach, auth),
+      path: `/v2/${parentOf(connection)}/${collection}/${encodeURIComponent(id)}:setIamPolicy`,
+      body: policy,
     });
     if (written.ok) return null;
-    // A Service that does not exist yet cannot have a policy, and on the
-    // tightening path that is the normal case rather than a failure: there is
-    // no public reach to drop from something that was never placed.
+    // A resource that does not exist yet cannot have a policy, and where the
+    // policy grants nothing that is not a failure but a statement already true:
+    // there is no reach to drop from something that was never placed. A policy
+    // that *grants* is a different matter — it did not land, and saying so is
+    // the whole point of writing it after the resource exists.
     if (
       written.kind === 'status' &&
       written.status === 404 &&
-      !allowsUnauthenticated(reach, auth)
+      policy.policy.bindings.length === 0
     ) {
       return null;
     }
@@ -545,7 +864,109 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     return {
       phase: 'FAILED',
       reason: failure.reason,
-      detail: `the invoker policy for {reach: ${reach}, auth: ${auth}} could not be written: ${failure.detail}`,
+      detail: `the invoker policy for ${describes} could not be written: ${failure.detail}`,
+      debug: failure.debug,
+    };
+  }
+
+  // --- what stands in front of a Job ---------------------------------------
+
+  /**
+   * Put this job on its schedule, replacing whatever was there.
+   *
+   * **Patch, then create on `404`.** Cloud Scheduler has no create-or-update —
+   * `jobs.create` refuses a name that exists and `jobs.patch` refuses one that
+   * does not — so one of the two has to go first, and the choice is not a wash.
+   * Patching first costs **one** call in the steady state, which is every
+   * re-deploy of a Component whose cadence has not changed, and it never leaves
+   * a moment with nothing scheduled. Deleting first would cost two always and
+   * open that window on every deploy, including ones that change nothing: a
+   * create that then failed — a transient `500`, a quota — would have destroyed
+   * a working cadence, and core keeps the earlier deploy `LIVE`
+   * (`reconciler/deploy-loop.ts`), so nothing in the product would say the
+   * firing had stopped.
+   */
+  private async schedule(
+    connection: CloudRunAdapterConnection,
+    id: string,
+    schedule: string,
+    name: DeployRef,
+  ): Promise<Omit<Extract<DeployVerdict, { phase: 'FAILED' }>, 'ref'> | null> {
+    const document = cloudSchedulerJob(schedule, {
+      connection,
+      name,
+      // Refused before anything was written when the Target names none —
+      // see `apply`. The fallback is unreachable and is here because the
+      // type cannot know that.
+      serviceAccount: connection.serviceAccount ?? '',
+    });
+    const path = `/v1/${parentOf(connection)}/${JOBS}`;
+    const patched = await this.scheduler().json<unknown>({
+      method: 'PATCH',
+      path: `${path}/${encodeURIComponent(id)}`,
+      // Named rather than omitted: an absent mask means "replace the whole
+      // resource" to some of this family's APIs and "update what was sent" to
+      // others, and the fields this adapter writes are the only ones it should
+      // be able to clear. `name` is the identity and is not in it.
+      query: { updateMask: 'schedule,timeZone,httpTarget' },
+      body: document,
+    });
+    if (patched.ok) return null;
+    const written =
+      patched.kind === 'status' && patched.status === 404
+        ? await this.scheduler().json<unknown>({
+            method: 'POST',
+            path,
+            body: document,
+          })
+        : patched;
+    if (written.ok) return null;
+    const failure = cloudWriteFailure(written, id);
+    return {
+      phase: 'FAILED',
+      reason: failure.reason,
+      detail: `job ${id} could not be put on the schedule "${schedule}": ${failure.detail}`,
+      debug: failure.debug,
+    };
+  }
+
+  /** Take this job off its schedule, whether or not it was on one. */
+  private async unschedule(
+    connection: CloudRunAdapterConnection,
+    id: string,
+  ): Promise<Omit<Extract<DeployVerdict, { phase: 'FAILED' }>, 'ref'> | null> {
+    const removed = await this.scheduler().json<unknown>({
+      method: 'DELETE',
+      path: `/v1/${parentOf(connection)}/${JOBS}/${encodeURIComponent(id)}`,
+    });
+    if (removed.ok) return null;
+    if (removed.kind !== 'status') {
+      return {
+        phase: 'FAILED',
+        reason: 'TARGET_UNREACHABLE',
+        detail: `the schedule on job ${id} could not be removed: ${removed.message}`,
+      };
+    }
+    // Nothing to remove, in the two ways there are to have nothing. A `404` is
+    // the ordinary one. A refusal because the service is switched off in this
+    // project is the other, and it is proof rather than an assumption: an API
+    // that was never enabled has nothing under it that could have created a
+    // scheduler job.
+    //
+    // Read off `reason` and nothing else. `cloud/http.ts` lifts that out of the
+    // ErrorInfo the API attaches, which is how Google says "this service is
+    // off" machine-readably; scanning the *body* for the same string would
+    // tolerate a genuine `IAM_PERMISSION_DENIED` whose human message happens to
+    // mention it — swallowing the one refusal that must be raised, on the path
+    // whose whole job is to make sure a schedule really stopped.
+    if (removed.status === 404 || removed.reason === SERVICE_DISABLED) {
+      return null;
+    }
+    const failure = cloudWriteFailure(removed, id);
+    return {
+      phase: 'FAILED',
+      reason: failure.reason,
+      detail: `the schedule on job ${id} could not be removed: ${failure.detail}`,
       debug: failure.debug,
     };
   }
@@ -640,6 +1061,25 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     });
   }
 
+  /**
+   * The Cloud Scheduler API, which is not the Target's endpoint.
+   *
+   * A second root rather than a second connection field: the Target names where
+   * *its own* control plane is, and the service that fires its jobs is the
+   * cloud's, addressed the same way from every project. Same shape as the
+   * logging root `tail` reaches for, and the same token — §13's federation is
+   * one identity across every API it touches.
+   */
+  private scheduler(): CloudHttp {
+    return new CloudHttp({
+      baseUrl: this.options.schedulerEndpoint ?? DEFAULT_SCHEDULER_ENDPOINT,
+      token: this.options.token,
+      ...(this.options.fetch === undefined
+        ? {}
+        : { fetch: this.options.fetch }),
+    });
+  }
+
   private connectionOf(target: DeployTarget): CloudRunAdapterConnection | null {
     return target.connection.adapter === 'cloudrun' ? target.connection : null;
   }
@@ -692,6 +1132,76 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   }
 }
 
+/** The long-running operation a write answers with, as much as is read. */
+interface CloudOperation {
+  /** The resource being created — for `jobs.run`, the Execution itself. */
+  readonly metadata?: { readonly name?: string };
+}
+
+interface CloudExecutionPage {
+  readonly executions?: readonly CloudExecution[];
+}
+
+/** One run, as much of the v2 `Execution` as this adapter reads. */
+interface CloudExecution {
+  readonly name?: string;
+  readonly startTime?: string;
+  readonly createTime?: string;
+  readonly succeededCount?: number;
+  readonly failedCount?: number;
+  readonly conditions?: readonly {
+    readonly type?: string;
+    readonly state?: string;
+    readonly message?: string;
+  }[];
+}
+
+/**
+ * One `Execution` as a run (§17).
+ *
+ * The `Completed` condition is the terminal one, and the counts are the
+ * fallback rather than the primary reading: a run whose condition has not been
+ * written yet but whose task already failed is a failed run, and reporting it
+ * as still going would leave the screen waiting for something that is over.
+ */
+function cloudRunExecution(execution: CloudExecution): JobExecution {
+  const completed = (execution.conditions ?? []).find(
+    (condition) => condition.type === 'Completed',
+  );
+  const at = execution.startTime ?? execution.createTime;
+  const outcome =
+    completed?.state === 'CONDITION_SUCCEEDED' ||
+    (completed === undefined && (execution.succeededCount ?? 0) > 0)
+      ? 'passed'
+      : completed?.state === 'CONDITION_FAILED' ||
+          (execution.failedCount ?? 0) > 0
+        ? 'failed'
+        : 'running';
+  return {
+    name: shortName(execution.name ?? ''),
+    outcome,
+    startedAt: at === undefined ? null : new Date(at),
+    ...(completed?.message === undefined ? {} : { detail: completed.message }),
+  };
+}
+
+/** What a run sorts by. A run with no start time yet is the newest there is. */
+function startedAtOf(execution: JobExecution): number {
+  return execution.startedAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * The last segment of a resource path.
+ *
+ * The runtime names an execution in full — `projects/…/jobs/…/executions/x` —
+ * and the log filter's `execution_name` label carries only the `x`. So the
+ * short name is what travels, because it is the one form both the list and the
+ * logs agree on.
+ */
+function shortName(name: string): string {
+  return name.slice(name.lastIndexOf('/') + 1);
+}
+
 interface CloudLogPage {
   readonly entries?: readonly CloudLogEntry[];
 }
@@ -703,6 +1213,8 @@ interface CloudLogEntry {
   readonly textPayload?: string;
   readonly jsonPayload?: unknown;
   readonly resource?: { readonly labels?: Record<string, string> };
+  /** Where a job's entries carry which execution and task wrote them. */
+  readonly labels?: Record<string, string>;
 }
 
 interface CloudLogRecord {
@@ -725,8 +1237,19 @@ function cloudLogRecord(entry: CloudLogEntry): CloudLogRecord | null {
     at,
     insertId: entry.insertId,
     line,
-    replica: entry.resource?.labels?.revision_name ?? 'unknown',
+    // What wrote the line. A service's replica is a revision; a run's is one of
+    // its tasks, and a run with `taskCount: 1` still names the task rather than
+    // leaving the column reading `unknown` for every line it ever writes.
+    replica:
+      entry.resource?.labels?.revision_name ??
+      taskReplica(entry.labels?.[TASK_INDEX_LABEL]) ??
+      'unknown',
   };
+}
+
+/** The `task N` a task index reads as, or nothing when there is no index. */
+function taskReplica(index: string | undefined): string | undefined {
+  return index === undefined ? undefined : `task ${index}`;
 }
 
 function cloudLogCursor(cursor: string | undefined): CloudLogRecord | null {
@@ -772,6 +1295,11 @@ function parentOf(connection: CloudRunAdapterConnection): string {
  * already stored says `services`, and reading the collection out of the ref
  * rather than deriving it from a kind is what keeps those readable instead of
  * orphaning every running Service.
+ *
+ * A third thing falls out of the shape rather than being designed into it: a
+ * Cloud Scheduler job is named `projects/…/locations/…/jobs/…` too, so this
+ * string **is** the scheduler job's own resource name at a different API root.
+ * That is why nothing has to store where a schedule went.
  */
 function refOf(
   connection: CloudRunAdapterConnection,

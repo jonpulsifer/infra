@@ -445,8 +445,29 @@ export type Runtime =
     }
   | {
       readonly kind: 'executions';
+      /**
+       * The two ids a run is acted on by: `runComponent` starts one here, and
+       * the runtime stream reads one run's logs by naming it beside them.
+       *
+       * On this arm as well as on `stream` because a job has both — an act and
+       * a tail — while a `none` has neither. Absent where the Component has
+       * never been placed: there is no Target to run it on, and a button that
+       * could not resolve one would be a button that only ever fails.
+       */
+      readonly componentId?: string;
+      readonly targetId?: string;
       readonly executions: readonly Execution[];
       readonly retained: number;
+      /**
+       * Why this list is empty, when it is empty because the read failed.
+       *
+       * A job that is placed on a Target is runnable whether or not its runs
+       * could be listed, so a failed read stays on this arm rather than
+       * collapsing to `none` — collapsing took the Run now button away in
+       * exactly the state its diagnostics matter, the one where the Target
+       * answers `403` because the Role has not reconciled yet.
+       */
+      readonly because?: string;
     }
   | { readonly kind: 'none'; readonly because: string };
 

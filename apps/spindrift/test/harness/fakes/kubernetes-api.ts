@@ -273,6 +273,26 @@ export class FakeKubernetes {
     }
 
     if (parsed.name === undefined) {
+      // A `POST` to a collection creates. It is the one write that refuses a
+      // name already taken — a `409`, not an overwrite — which is what makes a
+      // caller relying on that refusal for idempotence testable here rather
+      // than only in a cluster.
+      if (request.method === 'POST') {
+        const object = body as FakeObject;
+        const key = `${parsed.plural}/${parsed.namespace ?? ''}/${object.metadata.name}`;
+        if (this.objects.has(key)) {
+          return json(409, {
+            kind: 'Status',
+            apiVersion: 'v1',
+            status: 'Failure',
+            reason: 'AlreadyExists',
+            code: 409,
+            message: `${parsed.plural} "${object.metadata.name}" already exists`,
+          });
+        }
+        this.objects.set(key, object);
+        return json(201, object);
+      }
       return this.listResponse(parsed, url.searchParams);
     }
 

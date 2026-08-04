@@ -56,9 +56,11 @@ import type {
   DeployTarget,
   DeployVerdict,
   FailureReason,
+  JobRuns,
   ObservedState,
   RuntimeLogPage,
   RuntimeLogSubject,
+  StartedRun,
 } from '../contract.ts';
 import { BundleError, type BundleFile, readBundle } from './bundle.ts';
 
@@ -82,6 +84,15 @@ const DEPLOY_LABEL = 'spindrift-deploy';
 
 /** A site id is capped well below a DNS label. See `domain/workload-name.ts`. */
 const SITE_ID_LIMIT = 30;
+
+/**
+ * The one sentence every runtime question here is answered with (§17).
+ *
+ * Three questions — what is it saying, run it, what has it run — and one fact
+ * behind all three: files are served, never executed. Written once so the three
+ * refusals cannot drift into three different explanations of the same thing.
+ */
+const NOTHING_RUNS = 'Static files are served by the Target.';
 
 /**
  * The most file hashes one `populateFiles` call may carry.
@@ -292,8 +303,28 @@ export class StaticDeployAdapter implements DeployAdapter {
   ): Promise<RuntimeLogPage> {
     return {
       kind: 'none',
-      because: 'Static files are served by the Target.',
+      because: NOTHING_RUNS,
     };
+  }
+
+  /**
+   * There is nothing here to run, and saying so is the answer (§17).
+   *
+   * `KINDS_BY_ADAPTER.static` is `['website']`, so a job never reaches this
+   * backend and this refusal is unreachable through placement. It is written
+   * anyway, and written as a refusal rather than left unimplemented, for the
+   * same reason `tail` returns its `none` arm rather than an empty page: a
+   * contract every adapter answers is a contract core can call without asking
+   * which one it is holding, and a method that threw would make the one caller
+   * that forgot to check the kind fail as a crash instead of as a sentence.
+   */
+  async run(_target: DeployTarget, _ref: DeployRef): Promise<StartedRun> {
+    return { kind: 'none', because: NOTHING_RUNS };
+  }
+
+  /** The same fact from the reading side: no run ever happened here. */
+  async executions(_target: DeployTarget, _ref: DeployRef): Promise<JobRuns> {
+    return { kind: 'none', because: NOTHING_RUNS };
   }
 
   /** One pass of §13's checklist and §3's discovery, in one call. */

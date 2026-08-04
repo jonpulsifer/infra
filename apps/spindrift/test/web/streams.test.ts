@@ -15,6 +15,7 @@ import {
 } from '../../src/domain/attempt-log.ts';
 import {
   ATTEMPT_STREAM_PATH,
+  RUNTIME_STREAM_PATH,
   readStreamPage,
   type StreamSocketData,
   streamRoutes,
@@ -446,5 +447,151 @@ describe('in-process attempt event notifications', () => {
 
     expect(wakes).toEqual(['woke']);
     unsub();
+  });
+});
+
+/**
+ * §17's second pipe, aimed at a job.
+ *
+ * A job's output belongs to a run, so the subject the socket carries has to say
+ * which one. Both directions are asserted, because the failure of each is
+ * silent: a job with no run named would tail every run at once, and a service
+ * with one named would drop the name and hand back the Component's whole tail
+ * under it.
+ */
+describe('a job tails one run rather than the Component', () => {
+  async function seedJob(): Promise<{
+    user: { id: string; displayName: string };
+    componentId: string;
+    serviceId: string;
+    targetId: string;
+  }> {
+    const seeded = await seedAttempt();
+    const [job] = await database()
+      .db.insert(components)
+      .values({ appId: seeded.app.id, name: 'nightly', kind: 'job' })
+      .returning();
+    await database()
+      .db.insert(deploys)
+      .values({
+        componentId: job?.id as string,
+        targetId: seeded.target.id,
+        buildId: seeded.build.id,
+      });
+    return {
+      user: seeded.user,
+      componentId: job?.id as string,
+      serviceId: seeded.component.id,
+      targetId: seeded.target.id,
+    };
+  }
+
+  function runtimeRequest(query: string): Request {
+    return new Request(
+      `https://spindrift.example.test${RUNTIME_STREAM_PATH}?${query}`,
+      { headers: { upgrade: 'websocket' } },
+    );
+  }
+
+  async function upgrade(
+    user: { id: string; displayName: string },
+    query: string,
+  ): Promise<{ response: Response | undefined; upgraded: StreamSocketData[] }> {
+    const upgraded: StreamSocketData[] = [];
+    const ctx = await context(user);
+    const response = await streamRoutes({
+      authenticate: async () => ({ kind: 'authenticated', principal: user }),
+      context: () => ctx,
+    })[RUNTIME_STREAM_PATH]?.(runtimeRequest(query), {
+      upgrade: (_request: Request, options: { data: StreamSocketData }) => {
+        upgraded.push(options.data);
+        return true;
+      },
+    } as unknown as Bun.Server<StreamSocketData>);
+    return { response, upgraded };
+  }
+
+  test('a named run becomes the subject the adapter is asked about', async () => {
+    const { user, componentId, targetId } = await seedJob();
+
+    const { response, upgraded } = await upgrade(
+      user,
+      `componentId=${componentId}&targetId=${targetId}&execution=nightly-2`,
+    );
+
+    expect(response).toBeUndefined();
+    const socket = upgraded[0];
+    expect(socket?.kind).toBe('runtime');
+    if (socket?.kind !== 'runtime') return;
+    expect(socket.subject).toEqual({
+      app: 'live-app',
+      component: 'nightly',
+      execution: 'nightly-2',
+    });
+  });
+
+  test('a run name that is not one is refused before an adapter sees it', async () => {
+    // The Cloud Run adapter concatenates this into a Cloud Logging filter over
+    // `projects/<vessel>`, joining its clauses with ` AND `. `AND` binds
+    // tighter than `OR`, so a value carrying a quote and an `OR` widens the
+    // filter to every entry the project has — other Apps' output, GCP audit
+    // logs — and the lines render in the run pane of whoever asked for them.
+    // The check is here because this is the one place the value crosses in
+    // from a browser.
+    const { user, componentId, targetId } = await seedJob();
+
+    for (const attempt of [
+      'a" OR timestamp>="2020-01-01T00:00:00Z',
+      'nightly-2" OR "x"="x',
+      // `?execution=` is an empty string rather than `null`, so it passes the
+      // "name one to read it" guard and names nothing.
+      '',
+      'Nightly-2',
+      'nightly_2',
+      // Deliberately narrower than Kubernetes, which names a Job as a DNS
+      // *subdomain*: dots are legal there, and `executions()` lists by label,
+      // so a Job somebody else created can reach the card under a name this
+      // refuses. That is the trade — a name Spindrift cannot have produced
+      // does not get to widen a browser-controlled string on its way into two
+      // query languages, and one row whose log pane will not open is a smaller
+      // failure than one that opens the whole project's.
+      'blog.nightly-1',
+    ]) {
+      const { response, upgraded } = await upgrade(
+        user,
+        `componentId=${componentId}&targetId=${targetId}&execution=${encodeURIComponent(attempt)}`,
+      );
+      expect(response?.status).toBe(400);
+      expect(upgraded).toHaveLength(0);
+    }
+  });
+
+  test('a job with no run named still refuses, and says how to ask', async () => {
+    const { user, componentId, targetId } = await seedJob();
+
+    const { response } = await upgrade(
+      user,
+      `componentId=${componentId}&targetId=${targetId}`,
+    );
+
+    expect(response?.status).toBe(409);
+    const body = (await response?.json()) as {
+      failure: { code: string; message: string };
+    };
+    expect(body.failure.code).toBe('NO_RUNTIME');
+    expect(body.failure.message).toContain('name one to read it');
+  });
+
+  test('a service is refused a run, rather than quietly given its tail', async () => {
+    const { user, serviceId, targetId } = await seedJob();
+
+    const { response } = await upgrade(
+      user,
+      `componentId=${serviceId}&targetId=${targetId}&execution=nightly-2`,
+    );
+
+    expect(response?.status).toBe(409);
+    const body = (await response?.json()) as { failure: { message: string } };
+    expect(body.failure.message).toContain('only a job has runs');
   });
 });

@@ -237,6 +237,11 @@ export function deployPathReferences(
 export interface TargetCapabilities {
   // From the adapter type.
   kinds: readonly ComponentKind[];
+  /**
+   * From the adapter type **and** from this Target's connection: the code has
+   * to fire a schedule and the Target has to give it something to fire as. See
+   * {@link FIRES_SCHEDULES_BY_ADAPTER} and `CapabilityContext.firesSchedules`.
+   */
   firesSchedules: boolean;
   artifactTypes: readonly ArtifactType[];
 
@@ -271,19 +276,14 @@ export interface TargetCapabilities {
  * *mean* public" (§13) a consequence of the model rather than a rule bolted on
  * top of it.
  *
- * **A job on `cloudrun` is a Job resource that exists and is triggered by
- * nothing**, which is the same thing a job is on `kubernetes`: the App chart
- * renders an unscheduled job as a *suspended* CronJob, because the object has
- * to exist for anything to have something to trigger. Cloud Run reaches that
- * state by having no scheduler in front of the Job rather than by suspending
- * it, since a Job carries no schedule of its own.
- *
- * Two things a job here does not have, and each is a filed ticket rather than
- * a silence: **a schedule**, which needs Cloud Scheduler standing in front of
- * the Job and an API this vessel has not enabled (**72**) and is therefore a
- * non-candidate at Place — see {@link FIRES_SCHEDULES_BY_ADAPTER} — and **an
- * on-demand run**, which needs a verb `DeployAdapter` does not have and every
- * adapter would have to answer (**73**).
+ * **A job on `cloudrun` is a Job resource with no cadence of its own**, which is
+ * the same thing a job is on `kubernetes` until something schedules it: the App
+ * chart renders an unscheduled job as a *suspended* CronJob, because the object
+ * has to exist for anything to have something to trigger. Cloud Run reaches
+ * that state by having no scheduler in front of the Job rather than by
+ * suspending it. Put one there and both rows run the same Component the same
+ * way — see {@link FIRES_SCHEDULES_BY_ADAPTER}. An on-demand run is
+ * `DeployAdapter.run`, which both backends answer.
  */
 export const KINDS_BY_ADAPTER = {
   kubernetes: ['service', 'website', 'job'],
@@ -295,20 +295,33 @@ export const KINDS_BY_ADAPTER = {
  * Which adapters fire a job at the times its `schedule` names.
  *
  * From the adapter type for the same reason {@link KINDS_BY_ADAPTER} is: what
- * the code driving the Target renders. The App chart renders a CronJob, and the
- * cluster's own controller fires it. Cloud Run's Job resource carries no cron
- * expression at all — firing one is Cloud Scheduler standing in front of it,
- * which needs an API this vessel has not enabled and an invoker binding nothing
- * creates (**72**).
+ * the code driving the Target renders. Both backends that render a job now fire
+ * one, by quite different machinery — the App chart renders a CronJob and the
+ * cluster's own controller fires it, while a Cloud Run Job carries no cron
+ * expression at all and the adapter puts a Cloud Scheduler job in front of it
+ * (`adapters/deploy/cloudrun/scheduler.ts`). Which is exactly why this is a
+ * capability and not an assumption: the *kind* being renderable says nothing
+ * about whether anything keeps a cadence, and the two facts came true on this
+ * backend a release apart.
  *
- * It is a row of its own rather than a second kind because the *kind* is
- * rendered here and the *schedule* is not: §3's grammar refuses a scheduled job
- * at Place with a sentence saying which of the two is missing, so a developer
- * hears it before a build rather than after one.
+ * It is a row of its own rather than a second kind for that same reason, and
+ * §3's grammar is what it buys: a Target that runs a job and fires no schedule
+ * is a `NO_SCHEDULER` non-candidate at Place with a sentence naming which of
+ * the two is missing, so a developer hears it before a build rather than after
+ * one. The only `false` row left is `static`, which renders no job at all and
+ * therefore never reaches that sentence — so the mechanism is dormant here
+ * rather than dead, and it is what the next backend is measured against.
+ *
+ * **Not the whole answer for one Target, though.** This says what the code can
+ * do; a Cloud Run Target that names no runtime identity has nothing for a
+ * schedule to authenticate as, whatever its adapter is capable of. That half
+ * arrives on the connection — see `CapabilityContext.firesSchedules` — and the
+ * two are ANDed, so the row stays a property of the code and the Target's own
+ * configuration can only ever subtract.
  */
 export const FIRES_SCHEDULES_BY_ADAPTER = {
   kubernetes: true,
-  cloudrun: false,
+  cloudrun: true,
   static: false,
 } as const satisfies Record<TargetAdapter, boolean>;
 
@@ -414,6 +427,12 @@ export interface CapabilityContext {
   /** `null` or empty both mean no authenticated edge has been claimed. */
   authReaches: readonly Reach[] | null;
   deployPath: DeployPathReferences;
+  /**
+   * Where this Target's own connection can stop it firing one, even though its
+   * adapter fires them. Absent means nothing about it does — see
+   * {@link FIRES_SCHEDULES_BY_ADAPTER}, which is the only other input.
+   */
+  firesSchedules?: boolean;
 }
 
 /** Fold one inspection into the capabilities §3 describes. */
@@ -423,7 +442,9 @@ export function resolveCapabilities(
 ): TargetCapabilities {
   return {
     kinds: KINDS_BY_ADAPTER[context.adapter],
-    firesSchedules: FIRES_SCHEDULES_BY_ADAPTER[context.adapter],
+    firesSchedules:
+      FIRES_SCHEDULES_BY_ADAPTER[context.adapter] &&
+      (context.firesSchedules ?? true),
     artifactTypes: context.artifactTypes,
 
     arch: discovery.arch,
@@ -505,7 +526,10 @@ export function noCapabilities(context: CapabilityContext): TargetCapabilities {
  * reason, never silently dropped.
  */
 export function capabilitiesOfRow(
-  target: Pick<TargetRow, 'adapter' | 'discovery' | 'reaches' | 'authReaches'>,
+  target: Pick<
+    TargetRow,
+    'adapter' | 'discovery' | 'reaches' | 'authReaches' | 'connection'
+  >,
   options: {
     /** The adapter instance, or `null` when this installation ships none. */
     readonly artifactTypes: readonly ArtifactType[] | null;
@@ -518,10 +542,30 @@ export function capabilitiesOfRow(
     reaches: target.reaches,
     authReaches: target.authReaches,
     deployPath: deployPathReferences(options.manifest),
+    firesSchedules: firesSchedulesOn(target.connection),
   };
   return target.discovery === null || options.artifactTypes === null
     ? noCapabilities(context)
     : resolveCapabilities(target.discovery, context);
+}
+
+/**
+ * Whether this Target's own connection lets a schedule fire, as opposed to its
+ * adapter's code being able to.
+ *
+ * The one case, and the reason this is not purely from-the-adapter-type: a
+ * Cloud Scheduler job authenticates the `jobs.run` call it makes, so a Cloud
+ * Run Target that names no runtime identity has nothing for a schedule to fire
+ * *as* — the adapter refuses it at apply, and §3's grammar says a refusal a
+ * Target's own configuration already decides belongs at Place, before a build,
+ * rather than after one. Every other flavour answers `true`: nothing in a
+ * cluster connection or a static one can withdraw a cadence its adapter keeps.
+ */
+function firesSchedulesOn(connection: TargetRow['connection']): boolean {
+  return (
+    connection?.adapter !== 'cloudrun' ||
+    connection.serviceAccount !== undefined
+  );
 }
 
 /** The columns {@link capabilitiesOfRow} reads, without importing the schema. */
@@ -530,6 +574,15 @@ interface TargetRow {
   discovery: TargetDiscovery | null;
   reaches: readonly Reach[] | null;
   authReaches: readonly Reach[] | null;
+  /**
+   * `adapter` is named so this is not a weak type, exactly as
+   * `placement.ts`'s own view of the same column is; `serviceAccount` is the
+   * one member read here and most flavours carry none.
+   */
+  connection: {
+    readonly adapter: TargetAdapter;
+    readonly serviceAccount?: string;
+  } | null;
 }
 
 /**
