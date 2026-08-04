@@ -1,5 +1,5 @@
 /**
- * What a Cloud Run Service says, in §6's vocabulary rather than its own.
+ * What a Cloud Run Service or Job says, in §6's vocabulary rather than its own.
  *
  * §6 gives the user **one shared vocabulary** along one timeline, so the
  * runtime's condition states and reason enums never reach core. This is the
@@ -8,20 +8,54 @@
  * where the platform is precise about *why*, and a test should be able to hand
  * them over one at a time.
  *
- * **Status comes from the revision, not from the apply.** A Service accepted by
- * the API has not started anything: `terminalCondition` is what turns pending
- * into a verdict, which is why §6's phases come from the platform and never from
- * core's idea of readiness.
+ * **Status comes from the resource, not from the apply.** A Service accepted by
+ * the API has not started anything and neither has an accepted Job:
+ * `terminalCondition` is what turns pending into a verdict, which is why §6's
+ * phases come from the platform and never from core's idea of readiness. Both
+ * resources report it in the same shape, so one reading serves both — the
+ * documents differ in what they *are*, not in how they say whether they are
+ * ready.
  */
 import type { DeployPhase, FailureReason } from '../contract.ts';
 
-/** The Service fields this adapter reads. Everything else is left alone. */
-export interface CloudRunService {
-  readonly uri?: string;
+/**
+ * What every workload this adapter places says about itself.
+ *
+ * A Service and a Job report readiness identically — one `terminalCondition`
+ * and a list of `conditions`, in the same vocabulary — which is why
+ * {@link cloudRunStatus} takes both and there is no second translation table.
+ * A Job's readiness is its own conditions, not a Service's revisions and
+ * traffic, and this is the part of the Service reading that never depended on
+ * either.
+ */
+export interface CloudRunConditions {
   readonly terminalCondition?: CloudRunCondition;
   readonly conditions?: readonly CloudRunCondition[];
-  readonly template?: {
-    readonly containers?: readonly { readonly image?: string }[];
+}
+
+/** The template both documents end in, whatever they wrap it in. */
+export interface CloudRunTaskTemplate {
+  readonly containers?: readonly { readonly image?: string }[];
+}
+
+/**
+ * The fields this adapter reads back off a Service or a Job.
+ *
+ * One interface rather than two because the difference between the documents is
+ * one level of nesting and one absent field, and both are read by code that has
+ * a ref rather than a kind: `observe` and `destroy` are handed an opaque handle
+ * (§6) and no Component.
+ *
+ * `uri` is a Service's — a Job has no address, and reading it off a Job document
+ * yields `undefined`, which is exactly the answer core wants for something
+ * nothing routes to. `template.template` is a Job's — a Service's
+ * `TaskTemplate` has no such member, which is what makes {@link servingDigest}
+ * able to tell the shapes apart without being told.
+ */
+export interface CloudRunWorkload extends CloudRunConditions {
+  readonly uri?: string;
+  readonly template?: CloudRunTaskTemplate & {
+    readonly template?: CloudRunTaskTemplate;
   };
 }
 
@@ -80,8 +114,8 @@ const REASONS: Readonly<Record<string, FailureReason>> = {
 const SUCCEEDED = 'CONDITION_SUCCEEDED';
 const FAILED = 'CONDITION_FAILED';
 
-/** Translate one Service document into §6's phase and reason. */
-export function cloudRunStatus(service: CloudRunService): CloudRunStatus {
+/** Translate one Service or Job document into §6's phase and reason. */
+export function cloudRunStatus(service: CloudRunConditions): CloudRunStatus {
   const terminal = service.terminalCondition;
   if (terminal === undefined) {
     // Applied, and the runtime has not yet said anything about it.
@@ -128,7 +162,7 @@ export function cloudRunStatus(service: CloudRunService): CloudRunStatus {
 
 /** The first non-terminal condition that is itself failing, for its message. */
 function failingCondition(
-  service: CloudRunService,
+  service: CloudRunConditions,
 ): CloudRunCondition | undefined {
   return (service.conditions ?? []).find(
     (condition) => condition.state === FAILED,
@@ -136,15 +170,24 @@ function failingCondition(
 }
 
 /**
- * The digest actually serving, as the Service still carries it.
+ * The digest actually placed, as the workload still carries it.
  *
- * Read off the template's image rather than off the latest ready revision,
- * because the template is what core wrote and what drift is measured against.
- * An image with no digest yields an empty string, which compares unequal to
- * every desired digest — drift is surfaced rather than assumed away (§6).
+ * Read off the template's image rather than off the latest ready revision or
+ * the latest execution, because the template is what core wrote and what drift
+ * is measured against. An image with no digest yields an empty string, which
+ * compares unequal to every desired digest — drift is surfaced rather than
+ * assumed away (§6).
+ *
+ * **The inner template first, because only a Job has one.** A Service's
+ * `template` is the task template; a Job's `template` is an `ExecutionTemplate`
+ * whose own `template` is. A `TaskTemplate` has no `template` member at all, so
+ * the inner read is present exactly when the document is a Job — which is why
+ * this needs no kind handed to it, and why `observe` can answer a ref whose
+ * collection it has only just parsed.
  */
-export function servingDigest(service: CloudRunService): string {
-  const image = service.template?.containers?.[0]?.image ?? '';
+export function servingDigest(workload: CloudRunWorkload): string {
+  const template = workload.template?.template ?? workload.template;
+  const image = template?.containers?.[0]?.image ?? '';
   const at = image.lastIndexOf('@');
   return at === -1 ? '' : image.slice(at + 1);
 }

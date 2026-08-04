@@ -2,18 +2,26 @@
  * The Cloud Run deploy adapter (§6).
  *
  * Accepts an `image`, talks to the runtime's own API directly, and reads status
- * from the revision's conditions. There is no operator in between and nothing
+ * off the resource's own conditions. There is no operator in between and nothing
  * to install: §6's "the GitOps operator *is* the pluggable machinery" has no
  * analogue here, which is why this adapter is smaller than the Kubernetes one
  * and why the Target's connection carries an endpoint rather than a flavour.
+ *
+ * **Two collections, one adapter.** A `service` or a `website` is a Service and
+ * a `job` is a Job: two resources with separate APIs, separate documents and
+ * separate ideas of what readiness means. The kind picks one at `apply`, and the
+ * ref carries it from then on — `observe` and `destroy` are handed a ref and no
+ * Component, so nothing else could tell them which API to ask. `service.ts` and
+ * `job.ts` render the two documents; this file is the only thing that knows both
+ * exist.
  *
  * **Never the build-from-source path** (§4). The runtime will happily take a
  * source archive and build it, and taking that offer would give this
  * installation a second build engine — with its own frontends, its own
  * defaults, and its own idea of what a website is — reachable only from one of
  * three backends. §4's "build is always separate from deploy" is what forbids
- * it, `service.ts` is where the document that carries no build is rendered, and
- * `test/adapters/cloudrun.test.ts` is what notices if one appears.
+ * it, `service.ts` and `job.ts` are where the documents that carry no build are
+ * rendered, and `test/adapters/cloudrun.test.ts` is what notices if one appears.
  *
  * **Nothing here watches.** `apply` polls the Service it just wrote for a
  * bounded window and `observe` is one read, exactly as the Kubernetes adapter
@@ -59,15 +67,16 @@ import type {
   RuntimeLogSubject,
   RuntimeLogTailOptions,
 } from '../contract.ts';
+import { cloudRunJob } from './job.ts';
 import {
   allowsUnauthenticated,
   cloudRunService,
   invokerPolicy,
-  serviceId,
+  workloadId,
 } from './service.ts';
 import {
-  type CloudRunService,
   type CloudRunStatus,
+  type CloudRunWorkload,
   cloudRunStatus,
   servingDigest,
 } from './status.ts';
@@ -92,6 +101,17 @@ const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_LOGS_ENDPOINT = 'https://logging.googleapis.com';
 const SERVICE_ID_LIMIT = 63;
+
+/**
+ * The two API collections this adapter places into.
+ *
+ * A Component's kind chooses one at apply, and a ref carries it thereafter —
+ * see {@link refOf}. There is no third: the runtime's other resources are
+ * things this adapter reads, never things it creates.
+ */
+const SERVICES = 'services';
+const JOBS = 'jobs';
+type Collection = typeof SERVICES | typeof JOBS;
 
 /** How the operator would name the service in the sentence about enabling it. */
 const SERVICE_NAME = 'Cloud Run';
@@ -167,8 +187,28 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       );
     }
 
-    const id = serviceId(desired);
-    const ref = refOf(connection, id);
+    const job = desired.kind === 'job';
+    // A schedule fires nothing here yet, and dropping it silently is the one
+    // outcome worse than refusing it: a Component would report `LIVE` on a
+    // cadence nothing keeps. Cloud Run's Job resource carries no schedule at
+    // all — firing one is Cloud Scheduler's job, and standing that up needs an
+    // API this vessel has not enabled and an invoker binding nothing creates
+    // (**72**). `REJECTED` because §6 puts it with the refusals a developer
+    // answers by changing the request: drop the schedule, or place it on a
+    // Target that keeps one.
+    if (job && desired.schedule !== undefined) {
+      yield this.status('FAILED', { reason: 'REJECTED' });
+      return {
+        phase: 'FAILED',
+        reason: 'REJECTED',
+        detail:
+          'this Target runs a job but has nothing to fire it on a schedule',
+      };
+    }
+
+    const id = workloadId(desired);
+    const collection = job ? JOBS : SERVICES;
+    const ref = refOf(connection, collection, id);
     const http = this.http(connection);
 
     yield this.status('APPLYING', { resource: id });
@@ -181,7 +221,10 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // call finds no Service and does nothing, which is why the policy is
     // written again after the rollout below: the closed state is **asserted**
     // on every deploy rather than inherited from the platform's default.
-    if (!allowsUnauthenticated(desired.reach, desired.auth)) {
+    //
+    // A job has no exposure to assert in either direction: nothing routes to it
+    // and nothing invokes it, so there is no policy that would mean anything.
+    if (!job && !allowsUnauthenticated(desired.reach, desired.auth)) {
       const tightened = await this.setInvoker(
         http,
         connection,
@@ -195,18 +238,23 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       }
     }
 
-    const document = cloudRunService(desired, {
+    const render = {
       project: connection.project,
       image,
       serviceAccount: connection.serviceAccount ?? null,
       // §16's "one signature, two verifiers": `policyEndpoint` is where this
       // project's admission policy is read from, so a Target that names one is
-      // a Target whose project has a policy the Service must submit to.
+      // a Target whose project has a policy the workload must submit to. The
+      // vessel's `run.allowedBinaryAuthorizationPolicies` constraint applies to
+      // Jobs as well as Services, so both declare it.
       useProjectAdmissionPolicy: connection.policyEndpoint !== undefined,
-    });
+    };
+    const document = job
+      ? cloudRunJob(desired, render)
+      : cloudRunService(desired, render);
     const applied = await http.json<unknown>({
       method: 'PATCH',
-      path: `/v2/${parentOf(connection)}/services/${encodeURIComponent(id)}`,
+      path: `/v2/${parentOf(connection)}/${collection}/${encodeURIComponent(id)}`,
       // Create-or-update in one call, which is what makes `apply` idempotent
       // without core having to remember whether it placed this before.
       query: { allowMissing: 'true' },
@@ -217,10 +265,16 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       yield this.status('FAILED', { resource: id, reason: verdict.reason });
       return verdict;
     }
-    yield this.log(`applied service ${id}`, id);
+    yield this.log(`applied ${job ? 'job' : 'service'} ${id}`, id);
 
-    const verdict = yield* this.awaitVerdict(http, connection, id, ref);
-    if (verdict.phase !== 'LIVE') return verdict;
+    const verdict = yield* this.awaitVerdict(
+      http,
+      connection,
+      collection,
+      id,
+      ref,
+    );
+    if (verdict.phase !== 'LIVE' || job) return verdict;
 
     // Now that the Service exists, the policy this exposure means is written
     // whichever direction it moved. Opening can only happen here — granting
@@ -248,10 +302,15 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   ): Promise<ObservedState | null> {
     const connection = this.connectionOf(target);
     if (connection === null) return null;
-    const id = parseRef(connection, ref);
-    if (id === null) return null;
+    const placed = parseRef(connection, ref);
+    if (placed === null) return null;
 
-    const read = await this.read(this.http(connection), connection, id);
+    const read = await this.read(
+      this.http(connection),
+      connection,
+      placed.collection,
+      placed.id,
+    );
     if (read === null) return null;
 
     const status = cloudRunStatus(read);
@@ -267,12 +326,14 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   async destroy(target: DeployTarget, ref: DeployRef): Promise<void> {
     const connection = this.connectionOf(target);
     if (connection === null) return;
-    const id = parseRef(connection, ref);
-    if (id === null) return;
+    const placed = parseRef(connection, ref);
+    if (placed === null) return;
 
+    const { collection, id } = placed;
+    const noun = collection === JOBS ? 'job' : 'service';
     const deleted = await this.http(connection).json<unknown>({
       method: 'DELETE',
-      path: `/v2/${parentOf(connection)}/services/${encodeURIComponent(id)}`,
+      path: `/v2/${parentOf(connection)}/${collection}/${encodeURIComponent(id)}`,
     });
     // §6's idempotence: destroying what is already gone succeeds. Every other
     // refusal is raised, because a delete that silently did nothing is how an
@@ -281,8 +342,8 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     if (deleted.kind === 'status' && deleted.status === 404) return;
     throw new Error(
       deleted.kind === 'status'
-        ? `deleting service ${id} failed with ${deleted.status}: ${deleted.message}`
-        : `deleting service ${id} failed: ${deleted.message}`,
+        ? `deleting ${noun} ${id} failed with ${deleted.status}: ${deleted.message}`
+        : `deleting ${noun} ${id} failed: ${deleted.message}`,
     );
   }
 
@@ -387,6 +448,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   private async *awaitVerdict(
     http: CloudHttp,
     connection: CloudRunAdapterConnection,
+    collection: Collection,
     id: string,
     ref: DeployRef,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
@@ -398,7 +460,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     let reported: DeployPhase = 'APPLYING';
 
     for (;;) {
-      const service = await this.read(http, connection, id);
+      const service = await this.read(http, connection, collection, id);
       const status: CloudRunStatus =
         service === null ? { phase: 'APPLYING' } : cloudRunStatus(service);
 
@@ -415,7 +477,9 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         // §9: the platform names its own, so the canonical address comes back
         // across this seam rather than being handed in. A Service reported
         // ready with no `uri` is the one case core cannot fill in, and an
-        // absent url is more honest than a name core assembled.
+        // absent url is more honest than a name core assembled. A Job document
+        // has no `uri` member at all, which is the same absence meaning
+        // something stronger: there is no address, because nothing routes here.
         const uri = service?.uri;
         return {
           phase: 'LIVE',
@@ -580,15 +644,16 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     return target.connection.adapter === 'cloudrun' ? target.connection : null;
   }
 
-  /** One Service, or `null` where there is nothing there. */
+  /** One Service or Job, or `null` where there is nothing there. */
   private async read(
     http: CloudHttp,
     connection: CloudRunAdapterConnection,
+    collection: Collection,
     id: string,
-  ): Promise<CloudRunService | null> {
-    const read = await http.json<CloudRunService>({
+  ): Promise<CloudRunWorkload | null> {
+    const read = await http.json<CloudRunWorkload>({
       method: 'GET',
-      path: `/v2/${parentOf(connection)}/services/${encodeURIComponent(id)}`,
+      path: `/v2/${parentOf(connection)}/${collection}/${encodeURIComponent(id)}`,
     });
     return read.ok ? (read.value ?? null) : null;
   }
@@ -697,20 +762,34 @@ function parentOf(connection: CloudRunAdapterConnection): string {
  *
  * It carries the project and the region as well as the id because an operator
  * may reconnect a Target against a different project, and a ref that named only
- * the Service would then be read against the wrong one — reporting a healthy
+ * the resource would then be read against the wrong one — reporting a healthy
  * workload that is not the one this Deploy placed.
+ *
+ * It carries the **collection** for a reason that outlives this change:
+ * `observe` and `destroy` are handed a ref and nothing else — no Component, no
+ * kind — so the handle is the only thing that can say which API to ask. Which
+ * is also why the ref shape written before jobs existed still parses: every ref
+ * already stored says `services`, and reading the collection out of the ref
+ * rather than deriving it from a kind is what keeps those readable instead of
+ * orphaning every running Service.
  */
-function refOf(connection: CloudRunAdapterConnection, id: string): DeployRef {
-  return `${parentOf(connection)}/services/${id}`;
+function refOf(
+  connection: CloudRunAdapterConnection,
+  collection: Collection,
+  id: string,
+): DeployRef {
+  return `${parentOf(connection)}/${collection}/${id}`;
 }
 
-/** The id this ref names on this connection, or `null` if it names another. */
+/** What this ref names on this connection, or `null` if it names another. */
 function parseRef(
   connection: CloudRunAdapterConnection,
   ref: DeployRef,
-): string | null {
-  const prefix = `${parentOf(connection)}/services/`;
+): { collection: Collection; id: string } | null {
+  const prefix = `${parentOf(connection)}/`;
   if (!ref.startsWith(prefix)) return null;
-  const id = ref.slice(prefix.length);
-  return id.length === 0 || id.includes('/') ? null : id;
+  const [collection, ...rest] = ref.slice(prefix.length).split('/');
+  if (collection !== SERVICES && collection !== JOBS) return null;
+  const id = rest.join('/');
+  return id.length === 0 || id.includes('/') ? null : { collection, id };
 }

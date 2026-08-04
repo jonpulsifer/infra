@@ -392,11 +392,22 @@ function fits(asked: string | undefined, ceiling: string | undefined): boolean {
  * — a deploy that re-ran the whole of `exclusionsFor` would newly refuse an
  * UNHEALTHY Target, which is exactly the rollback `deploys/rollback.ts` exists
  * to keep possible during an incident.
+ *
+ * **A job joins on neither**, because nothing routes to one and nothing stands
+ * in front of one. Both renderers say so: the App chart's `serving` helper is
+ * "a job is the only workload branch and never serves", so a job gets no
+ * Service, no HTTPRoute and no DNSEndpoint whatever its reach, and a Cloud Run
+ * Job document has no `ingress` member and no invoker policy. Judging a job by
+ * the reach column it carries would decide candidacy on a field its rendering
+ * ignores — refusing a Target that will run it perfectly well, or worse,
+ * *offering* one on the strength of a public address nothing will publish.
  */
 export function reachExclusions(
   can: Pick<TargetCapabilities, 'reaches' | 'authReaches'>,
-  requirements: Pick<DerivedRequirements, 'reach' | 'auth'>,
+  requirements: Pick<DerivedRequirements, 'kind' | 'reach' | 'auth'>,
 ): readonly Exclusion[] {
+  if (requirements.kind === 'job') return [];
+
   const reasons: Exclusion[] = [];
   if (!can.reaches.includes(requirements.reach)) {
     reasons.push('REACH_UNSUPPORTED');
@@ -426,8 +437,13 @@ export function exclusionsFor(
 
   // A route needs something to attach to. Without this the Deploy goes green
   // with `parentRefs` naming a Gateway that is the empty string, which is a
-  // route attached to nothing and a URL that answers nothing.
-  if (requirements.reach !== 'none' && !target.routesAttachTo) {
+  // route attached to nothing and a URL that answers nothing. A job renders no
+  // route to attach, for the reason {@link reachExclusions} gives.
+  if (
+    requirements.kind !== 'job' &&
+    requirements.reach !== 'none' &&
+    !target.routesAttachTo
+  ) {
     reasons.push('NO_GATEWAY');
   }
 

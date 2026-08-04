@@ -179,11 +179,23 @@ describe('resolution is derived, and it is a query', () => {
 
   test('nowhere fits is returned, with a reason for every Target', async () => {
     const registry = fakes();
-    await connectEverything(registry);
-    const { component } = await seedComponent('job', 'public', 'none');
+    const connected = await connectEverything(registry);
+    const { app, component } = await seedComponent('service', 'public', 'none');
 
-    // A public job: the cluster runs jobs and has no public reach, and neither
-    // cloud backend runs a job at all. Every row has a reason.
+    // A public service with a cluster-local Datastore attached: the cluster
+    // hosts the Datastore and has no public reach, and the two cloud Targets
+    // serve the public and cannot reach a Datastore that stays where it is
+    // (§11). Two facts pulling opposite ways, so every row has a reason.
+    await database()
+      .db.insert(datastores)
+      .values({
+        name: 'primary',
+        engine: 'postgres',
+        provenance: 'managed',
+        appId: app.id,
+        targetId: connected.get('cluster')!.id,
+      });
+
     const placement = await place(registry, component.id);
     expect(placement.suggestedTargetId).toBeNull();
     expect(placement.options.every((option) => !option.candidate)).toBe(true);

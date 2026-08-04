@@ -22,6 +22,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.ts';
+import { cloudRunJob } from '../../src/adapters/deploy/cloudrun/job.ts';
 import {
   cloudRunService,
   INGRESS,
@@ -643,6 +644,218 @@ describe('the reach a Target rejects is a state, not a crash', () => {
       });
       expect(document.ingress).toBe(ingressFor(reach));
     }
+  });
+});
+
+describe('§3: a job is a Job that exists and is triggered by nothing', () => {
+  /** A job, with the only reach nothing routing to it can honestly claim. */
+  const job = (overrides: Partial<DesiredState> = {}) =>
+    desired({
+      component: 'nightly',
+      kind: 'job',
+      reach: 'none',
+      auth: 'none',
+      ...overrides,
+    });
+
+  const RENDER = {
+    project: 'example-vessel',
+    image: 'registry.example.test/shop@sha256:abc',
+    serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
+    useProjectAdmissionPolicy: true,
+  };
+
+  test('the whole document is the doubled template and nothing else', () => {
+    // Asserted whole rather than field by field, the way the Service document
+    // is: what makes this document right is as much what is absent from it as
+    // what is in it, and only an exact comparison sees an absence.
+    expect(
+      cloudRunJob(
+        job({
+          config: [
+            {
+              name: 'TOKEN',
+              secret: { key: 'shop-nightly-token', version: '3' },
+            },
+          ],
+          requirements: {
+            platform: { os: 'linux', arch: 'amd64' },
+            resources: { cpu: '1', memory: '512Mi' },
+          },
+        }),
+        RENDER,
+      ),
+    ).toEqual({
+      labels: {
+        'spindrift-managed': 'true',
+        'spindrift-app': 'shop',
+        'spindrift-component': 'nightly',
+      },
+      binaryAuthorization: { useDefault: true },
+      template: {
+        labels: {
+          'spindrift-managed': 'true',
+          'spindrift-app': 'shop',
+          'spindrift-component': 'nightly',
+          'spindrift-deploy': 'deploy-1',
+        },
+        // `Job.template` is an ExecutionTemplate; its own `template` is the
+        // TaskTemplate. A Service nests once, and rendering that shape here
+        // produces an error that reads like a field-name problem.
+        template: {
+          serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
+          containers: [
+            {
+              image: 'registry.example.test/shop@sha256:abc',
+              env: [
+                {
+                  name: 'TOKEN',
+                  valueSource: {
+                    secretKeyRef: {
+                      secret:
+                        'projects/example-vessel/secrets/shop-nightly-token',
+                      version: '3',
+                    },
+                  },
+                },
+              ],
+              resources: { limits: { cpu: '1', memory: '512Mi' } },
+            },
+          ],
+          // The chart's `backoffLimit: 0` on the same Component's CronJob. The
+          // runtime's own default is 3, so leaving it out would mean one App
+          // retrying on one backend and not on the other.
+          maxRetries: 0,
+        },
+      },
+    });
+  });
+
+  test('nothing that answers "who may reach this" is rendered or written', async () => {
+    // `ingress`, a container port and the invoker policy are all Service
+    // concepts: the Job resource has no `ingress` member, nothing routes to a
+    // Job, and nothing invokes one. The fake's closed Job schema refuses the
+    // first two; the request log is what proves the third never happened.
+    const document = cloudRunJob(job(), RENDER);
+    expect(document).not.toHaveProperty('ingress');
+    expect(JSON.stringify(document)).not.toContain('containerPort');
+
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), job()));
+    expect(verdict.phase).toBe('LIVE');
+    expect(
+      api.requests.filter((request) => request.path.endsWith(':setIamPolicy')),
+    ).toEqual([]);
+  });
+
+  test('the runtime accepts it, and reports no address for it', async () => {
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), job()));
+
+    expect(api.job('shop-nightly')).toBeDefined();
+    expect(api.service('shop-nightly')).toBeUndefined();
+    expect(verdict.phase).toBe('LIVE');
+    // §9: core mints nothing. A Job has no `uri` member at all, so the absence
+    // here is the platform saying there is no address rather than core
+    // declining to invent one.
+    if (verdict.phase === 'LIVE') expect(verdict.url).toBeUndefined();
+  });
+
+  test('the Service nesting would be refused by the API, not silently taken', async () => {
+    // The negative half of the first test. Google's protobuf-JSON parsers
+    // reject an unknown member, so a renderer that nested once would fail at
+    // apply with a message about a *name* rather than about a shape — which is
+    // why the fake carries a closed Job schema rather than a `Map.set`.
+    const { api } = adapterFor();
+    const response = await api.fetch(
+      new Request(
+        `${api.endpoint}/v2/projects/example-vessel/locations/somewhere/jobs/shop-nightly?allowMissing=true`,
+        {
+          method: 'PATCH',
+          headers: { authorization: `Bearer ${api.token()}` },
+          body: JSON.stringify({ template: { containers: [{ image: 'x' }] } }),
+        },
+      ),
+    );
+    expect(response.status).toBe(400);
+    const refusal = (await response.json()) as { error: { message: string } };
+    expect(refusal.error.message).toContain(
+      'Unknown name "template.containers"',
+    );
+  });
+
+  test('a schedule is refused rather than dropped', async () => {
+    // A Cloud Run Job carries no schedule, and nothing in this vessel fires one
+    // (**72**). Rendering the Job and saying nothing would leave a Component
+    // reporting LIVE on a cadence nothing keeps — the same failure shape as a
+    // declared change that reaches storage and never reaches what acts on it.
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(target(), job({ schedule: '0 3 * * *' })),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('REJECTED');
+      expect(blameFor(verdict.reason)).toBe('developer');
+      expect(verdict.detail).toContain('schedule');
+    }
+    // Nothing was placed: a refusal that had already written the Job would be
+    // the silent drop wearing an error message.
+    expect(
+      api.requests.filter((request) => request.method === 'PATCH'),
+    ).toEqual([]);
+  });
+});
+
+describe('the ref an adapter hands back names its own collection', () => {
+  const job = () =>
+    desired({ component: 'nightly', kind: 'job', reach: 'none', auth: 'none' });
+
+  /** The shape of every ref written before jobs existed. */
+  const LEGACY_SERVICE_REF =
+    'projects/example-vessel/locations/somewhere/services/shop-web';
+
+  test('a job round-trips through observe and destroy', async () => {
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), job()));
+    expect(verdict.ref).toBe(
+      'projects/example-vessel/locations/somewhere/jobs/shop-nightly',
+    );
+
+    const observed = await adapter.observe(target(), verdict.ref as string);
+    expect(observed?.phase).toBe('LIVE');
+    expect(observed?.artifactDigest).toBe('sha256:abc');
+
+    await adapter.destroy(target(), verdict.ref as string);
+    expect(api.job('shop-nightly')).toBeUndefined();
+  });
+
+  test('a Service ref written before jobs existed still round-trips', async () => {
+    // Every ref in the database today says `services`. `observe` and `destroy`
+    // are handed one with no kind beside it, so a parser that had learned only
+    // `/jobs/` would orphan every running Service — nothing would read it and
+    // nothing would delete it.
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    expect(verdict.ref).toBe(LEGACY_SERVICE_REF);
+
+    const observed = await adapter.observe(target(), LEGACY_SERVICE_REF);
+    expect(observed?.phase).toBe('LIVE');
+    expect(observed?.artifactDigest).toBe('sha256:abc');
+
+    await adapter.destroy(target(), LEGACY_SERVICE_REF);
+    expect(api.service('shop-web')).toBeUndefined();
+  });
+
+  test('a collection this adapter does not place into is not a ref', async () => {
+    const { adapter } = adapterFor();
+    await drain(adapter.apply(target(), desired()));
+    expect(
+      await adapter.observe(
+        target(),
+        'projects/example-vessel/locations/somewhere/executions/shop-web',
+      ),
+    ).toBeNull();
   });
 });
 
