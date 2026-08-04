@@ -122,11 +122,16 @@ export const getAppWorkspace: Command<
   // deployed, went red". A checkpoint is a status event by definition — §6's
   // `{phase, resource?, reason?}` — so the filter is the whole selection, and
   // the text stays where it belongs, on the attempt screen each entry links to.
+  // Ten, and this is the only bound: the workspace renders what it is given, so
+  // a second limit in the view could only disagree with this one. Three showed
+  // one attempt's worth of checkpoints, and the shape the timeline exists to
+  // make legible — built, deployed, went red — is three attempts, not three
+  // events.
   const events = await context.db.query.attemptEvents.findMany({
     where: (ev, { eq, and }) =>
       and(eq(ev.appId, app.id), eq(ev.eventType, 'status')),
     orderBy: (ev, { desc }) => [desc(ev.id)],
-    limit: 3,
+    limit: 10,
   });
 
   const now = context.clock.now();

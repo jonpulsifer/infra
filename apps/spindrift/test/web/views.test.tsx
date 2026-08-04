@@ -13,6 +13,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { logos } from '../../src/web/client/logos/index.ts';
 import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { ReachEditor, Workspace } from '../../src/web/views/apps/workspace.tsx';
@@ -223,6 +224,38 @@ describe('the GitHub repository connector', () => {
     ]) {
       expect(markup).not.toContain(field);
     }
+  });
+});
+
+describe('the deploy screen names the builder', () => {
+  test('states the platform in words and draws its mark', () => {
+    // "Building on hosted" names a route, which is a word an installation chose
+    // for itself. An operator reading it cannot tell GitHub Actions from Cloud
+    // Build, and the two fail in different places over different credentials —
+    // so the platform is named beside the route, the way a Target and a
+    // repository already identify theirs.
+    const view = DEPLOY_SCENARIOS.live;
+    expect(view.build?.runnerAdapter).toBe('github-actions');
+
+    const markup = deploy(view);
+    // In words, because `Logo` is `aria-hidden` by construction: a mark that is
+    // the only carrier of a fact is a fact a screen reader never reads out.
+    expect(words(markup)).toContain('GitHub Actions');
+    expect(markup).toContain(view.build!.runner);
+    // And the mark itself, from the same barrel every other platform mark comes
+    // from rather than a second one invented for this panel.
+    expect(markup).toContain(logos.github);
+  });
+
+  test('a release that was never built names no builder at all', () => {
+    // §4's supplied artifact: nothing ran, so there is no platform, and a mark
+    // here would be a claim about a builder that was never involved.
+    const view = DEPLOY_SCENARIOS.extracted;
+    expect(view.build).toBeNull();
+
+    const markup = deploy(view);
+    expect(words(markup)).toContain('none · extracted');
+    expect(markup).not.toContain(logos.github);
   });
 });
 
@@ -531,12 +564,13 @@ describe('the compact App history', () => {
     <Workspace view={view} onNavigate={() => undefined} />,
   );
 
-  test('shows only the three newest checkpoints', () => {
-    for (const entry of view.activity.slice(0, 3)) {
+  test('shows every checkpoint it was handed, not the first three', () => {
+    // The bound belongs to `getAppWorkspace`, which asks for ten. A second one
+    // here could only disagree with it, and the way it disagreed was silent:
+    // the query was raised and the screen went on showing three.
+    expect(view.activity.length).toBeGreaterThan(3);
+    for (const entry of view.activity) {
       expect(markup).toContain(entry.title);
-    }
-    for (const entry of view.activity.slice(3)) {
-      expect(markup).not.toContain(entry.title);
     }
     expect(markup).toContain('Recent checkpoints');
   });
@@ -557,14 +591,14 @@ describe('the App workspace', () => {
       <Workspace view={view} onNavigate={() => undefined} />,
     );
 
-    for (const entry of view.activity.slice(0, 3)) {
+    for (const entry of view.activity) {
       expect(entry.deployId ?? entry.buildId).not.toBeNull();
       expect(markup).toContain(entry.title);
     }
     // Rendered as buttons rather than static rows — one per visible checkpoint,
     // plus the global ledger links and release link in the hero.
     const buttons = markup.split('<button').length - 1;
-    expect(buttons).toBeGreaterThanOrEqual(Math.min(view.activity.length, 3));
+    expect(buttons).toBeGreaterThanOrEqual(view.activity.length);
   });
 
   test('a website states that it has no runtime', () => {

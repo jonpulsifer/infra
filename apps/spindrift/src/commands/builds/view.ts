@@ -115,7 +115,7 @@ export async function buildViewOf(
       tone: event.reason ? ('error' as const) : undefined,
     }));
 
-  const steps = checkpointsOf(events);
+  const steps = checkpointsOf(events, status);
 
   return {
     view: {
@@ -131,6 +131,14 @@ export async function buildViewOf(
       log: log.length > 0 ? log.slice(-LOG_TAIL) : null,
       logTotal: log.length,
       runner: build.runner ?? 'hosted runner',
+      // §20: the route table is a manifest value, so the route name a Build
+      // recorded is resolved against it here rather than by the screen — the
+      // browser has no manifest, and inventing a name→platform table in the
+      // client would be a second copy of an installation's configuration.
+      runnerAdapter:
+        context.manifest.build.routes.find(
+          (route) => route.name === build.runner,
+        )?.adapter ?? null,
       runUrl: build.runUrl ?? null,
     },
     events,
@@ -168,18 +176,45 @@ function stepStatusOf(phase: string | null, failed: boolean): StepStatus {
  * status event for a name wins; the pair of timestamps around it gives the step
  * a duration, which is the whole reason a reader scans this list.
  *
- * A name carried only by log lines — `dispatch`, `provenance` — never gets a
- * status event, so it keeps its sentence as its detail instead of a duration.
- * That is the one thing it has to say, and dropping it would leave a bare word.
+ * A name carried only by log lines — `dispatch`, `provenance`, and the runner's
+ * own job entry — never gets a status event, so it keeps its sentence as its
+ * detail instead of a duration. That is the one thing it has to say, and
+ * dropping it would leave a bare word.
+ *
+ * **A finished run leaves nothing in progress**, which is why the Build's own
+ * status is an argument here. Two different names would otherwise sit at
+ * `running` on a build that ended minutes ago, and each needs its own answer
+ * because the two know different amounts:
+ *
+ * - A **log-only** name never claimed to be a step and has no verdict of its
+ *   own. Once the run is over it is not in progress, so it resolves to `done` —
+ *   or to `failed` where one of its own lines carried a reason, which is the
+ *   same rule {@link stepStatusOf} applies to a status event. Taking the run's
+ *   verdict instead would paint `dispatch` red on a build that failed three
+ *   steps later, which is a claim about dispatch that nothing recorded.
+ * - A name whose **last status event said `RUNNING`** is a real step the runner
+ *   started and never closed out — a killed job, a lost final event. That one
+ *   *was* in progress when the run ended, so the run's verdict is honestly its
+ *   own: it is where the build stopped.
  */
-function checkpointsOf(events: readonly AttemptEvent[]): ChecklistItem[] {
+function checkpointsOf(
+  events: readonly AttemptEvent[],
+  runStatus: StepStatus,
+): ChecklistItem[] {
   interface Checkpoint {
     status: StepStatus;
+    /** No status event has ever named this checkpoint. */
+    logOnly: boolean;
+    /** A line under this name carried a failure reason. */
+    errored: boolean;
     from: Date;
     to: Date | null;
     line: string | null;
   }
   const seen = new Map<string, Checkpoint>();
+  // `waiting` and `running` are the two non-terminal answers `buildStepStatus`
+  // gives; anything else means the runner is done talking about this build.
+  const finished = runStatus !== 'running' && runStatus !== 'waiting';
 
   for (const event of events) {
     const name = event.resource;
@@ -192,6 +227,8 @@ function checkpointsOf(events: readonly AttemptEvent[]): ChecklistItem[] {
         status: isLog
           ? 'running'
           : stepStatusOf(event.phase, event.reason !== null),
+        logOnly: isLog,
+        errored: isLog && event.reason !== null,
         from: event.createdAt,
         to: null,
         line: isLog ? event.line : null,
@@ -201,17 +238,33 @@ function checkpointsOf(events: readonly AttemptEvent[]): ChecklistItem[] {
 
     if (isLog) {
       if (event.line) prior.line = event.line;
+      if (event.reason !== null) prior.errored = true;
       continue;
     }
+    prior.logOnly = false;
     prior.status = stepStatusOf(event.phase, event.reason !== null);
     prior.to = prior.status === 'running' ? null : event.createdAt;
   }
 
   return Array.from(seen, ([name, checkpoint]) => ({
     name,
-    status: checkpoint.status,
+    status: resolvedStatus(checkpoint, runStatus, finished),
     ...detailOf(checkpoint),
   }));
+}
+
+/** One checkpoint's status, with a finished run's claim on it applied. */
+function resolvedStatus(
+  checkpoint: { status: StepStatus; logOnly: boolean; errored: boolean },
+  runStatus: StepStatus,
+  finished: boolean,
+): StepStatus {
+  if (!finished || checkpoint.status !== 'running') return checkpoint.status;
+  return checkpoint.logOnly
+    ? checkpoint.errored
+      ? 'failed'
+      : 'done'
+    : runStatus;
 }
 
 function detailOf(checkpoint: {
