@@ -366,10 +366,13 @@ describe('the route', () => {
           http: {
             // Exactly two, and the exactness is the point. `allowedHeaders`
             // permits a header through to oauth2-proxy; it does not create one.
-            // Cilium's Envoy composes `x-forwarded-proto` and appends to
-            // `x-forwarded-for`, and the check needs only the first;
-            // `x-forwarded-host` and `x-forwarded-uri` reach the proxy only if
-            // a client supplies them and change nothing when it does; and
+            // `x-forwarded-proto` is here because Envoy is the hop that writes
+            // it, not because the check reads it — every `x-forwarded-*` read
+            // is gated on `CanTrustForwardedHeaders`, false from the shim's
+            // `127.0.0.1`. `x-forwarded-host` and `x-forwarded-uri` are absent
+            // because only a client could set them, and `x-forwarded-uri` is
+            // read straight through `GetRequestURI` with no `IsForwardedRequest`
+            // comparison — it chose the path the sign-in returned to.
             // `authorization` is read by no provider this deployment
             // configures. The template comment carries the measurement, this
             // carries the assertion.
