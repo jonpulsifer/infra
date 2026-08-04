@@ -236,6 +236,7 @@ export function deployPathReferences(
 export interface TargetCapabilities {
   // From the adapter type.
   kinds: readonly ComponentKind[];
+  firesSchedules: boolean;
   artifactTypes: readonly ArtifactType[];
 
   // Discovered.
@@ -269,19 +270,46 @@ export interface TargetCapabilities {
  * *mean* public" (§13) a consequence of the model rather than a rule bolted on
  * top of it.
  *
- * **`cloudrun` runs no job yet**, and that is this table's honest reading
- * rather than a disagreement with §3. A job on this backend is a second
- * resource with its own API and a schedule that lives in a separate scheduling
- * service — Task 33's work, not the Service path Task 28 built. Until it
- * exists, a job's placement here is a non-candidate with the sentence "this
- * Target does not run jobs" (§3's grammar), which is refused at Place rather
- * than accepted and failed at apply.
+ * **A job on `cloudrun` is a Job resource that exists and is triggered by
+ * nothing**, which is the same thing a job is on `kubernetes`: the App chart
+ * renders an unscheduled job as a *suspended* CronJob, because the object has
+ * to exist for anything to have something to trigger. Cloud Run reaches that
+ * state by having no scheduler in front of the Job rather than by suspending
+ * it, since a Job carries no schedule of its own.
+ *
+ * Two things a job here does not have, and each is a filed ticket rather than
+ * a silence: **a schedule**, which needs Cloud Scheduler standing in front of
+ * the Job and an API this vessel has not enabled (**72**) and is therefore a
+ * non-candidate at Place — see {@link FIRES_SCHEDULES_BY_ADAPTER} — and **an
+ * on-demand run**, which needs a verb `DeployAdapter` does not have and every
+ * adapter would have to answer (**73**).
  */
 export const KINDS_BY_ADAPTER = {
   kubernetes: ['service', 'website', 'job'],
-  cloudrun: ['service', 'website'],
+  cloudrun: ['service', 'website', 'job'],
   static: ['website'],
 } as const satisfies Record<TargetAdapter, readonly ComponentKind[]>;
+
+/**
+ * Which adapters fire a job at the times its `schedule` names.
+ *
+ * From the adapter type for the same reason {@link KINDS_BY_ADAPTER} is: what
+ * the code driving the Target renders. The App chart renders a CronJob, and the
+ * cluster's own controller fires it. Cloud Run's Job resource carries no cron
+ * expression at all — firing one is Cloud Scheduler standing in front of it,
+ * which needs an API this vessel has not enabled and an invoker binding nothing
+ * creates (**72**).
+ *
+ * It is a row of its own rather than a second kind because the *kind* is
+ * rendered here and the *schedule* is not: §3's grammar refuses a scheduled job
+ * at Place with a sentence saying which of the two is missing, so a developer
+ * hears it before a build rather than after one.
+ */
+export const FIRES_SCHEDULES_BY_ADAPTER = {
+  kubernetes: true,
+  cloudrun: false,
+  static: false,
+} as const satisfies Record<TargetAdapter, boolean>;
 
 /**
  * What each adapter serves before an operator asserts anything.
@@ -394,6 +422,7 @@ export function resolveCapabilities(
 ): TargetCapabilities {
   return {
     kinds: KINDS_BY_ADAPTER[context.adapter],
+    firesSchedules: FIRES_SCHEDULES_BY_ADAPTER[context.adapter],
     artifactTypes: context.artifactTypes,
 
     arch: discovery.arch,

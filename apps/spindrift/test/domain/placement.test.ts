@@ -470,14 +470,51 @@ describe('§10: the reach rule does not bind a website', () => {
 });
 
 describe('§3: a kind an adapter does not render is refused at Place', () => {
-  test('a job is a non-candidate on the cloud runtime, with the reason', () => {
-    // `KINDS_BY_ADAPTER` is "a property of the code": the Cloud Run adapter
-    // renders Services, and a job there is Task 33's work. Until it exists the
-    // honest answer is a non-candidate with a stated reason, which fails at
-    // Place rather than at apply.
+  test('a job is a candidate on the cloud runtime', () => {
+    // `KINDS_BY_ADAPTER` is "a property of the code", and the Cloud Run adapter
+    // now renders a Job as well as a Service. A job reaches `none` because
+    // nothing routes to one — which is what the adapter renders, and what the
+    // App chart's `serving` helper says one layer over.
     const cloud = target({ adapter: 'cloudrun' });
-    const reasons = exclusionsFor(cloud, requirements({ kind: 'job' }));
-    expect(reasons).toContain('KIND_UNSUPPORTED');
+    expect(
+      exclusionsFor(
+        cloud,
+        requirements({ kind: 'job', reach: 'none', auth: 'none' }),
+      ),
+    ).toEqual([]);
+  });
+
+  test('a schedule nothing fires is refused at Place, and only a schedule', () => {
+    // The kind is rendered on this backend and the schedule is not, so the
+    // refusal is its own reason and lands at Place — a scheduled job accepted
+    // here would be refused by the adapter after a build and a Deploy, which is
+    // the direction §3 exists to prevent.
+    const cloud = target({ adapter: 'cloudrun' });
+    const unscheduled = requirements({
+      kind: 'job',
+      reach: 'none',
+      auth: 'none',
+    });
+    const scheduled = { ...unscheduled, schedule: '0 3 * * *' };
+
+    expect(exclusionsFor(cloud, scheduled)).toEqual(['NO_SCHEDULER']);
+    expect(exclusionsFor(cloud, unscheduled)).toEqual([]);
+    // The cluster's own controller fires the CronJob the chart renders, so the
+    // same Component is a candidate there.
+    expect(exclusionsFor(target({ adapter: 'kubernetes' }), scheduled)).toEqual(
+      [],
+    );
+    // A backend that renders no job at all says so once. NO_SCHEDULER's
+    // sentence opens by granting that this Target runs a job, so beside
+    // KIND_UNSUPPORTED it would contradict it on a single row — and
+    // `bluenose-static` is a connected Target, so that is a row a developer
+    // reads rather than a shape only a test constructs.
+    // REACH_UNSUPPORTED rides along because `static` serves only `public`;
+    // what matters is that NO_SCHEDULER is not the third.
+    expect(exclusionsFor(target({ adapter: 'static' }), scheduled)).toEqual([
+      'KIND_UNSUPPORTED',
+      'REACH_UNSUPPORTED',
+    ]);
   });
 
   test('a service and a website are both rendered there', () => {

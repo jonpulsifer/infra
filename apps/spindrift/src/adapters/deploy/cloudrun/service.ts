@@ -116,12 +116,7 @@ export function cloudRunService(
   desired: DesiredState,
   context: CloudRunRenderContext,
 ): Record<string, unknown> {
-  const limits = resourceLimits(desired);
-  const labels = {
-    'spindrift-managed': 'true',
-    'spindrift-app': desired.app,
-    'spindrift-component': desired.component,
-  };
+  const labels = workloadLabels(desired);
 
   return {
     labels,
@@ -136,13 +131,50 @@ export function cloudRunService(
         : { serviceAccount: context.serviceAccount }),
       containers: [
         {
-          image: context.image,
+          ...workloadContainer(desired, context),
+          // A Service is contacted; a Job is not. This is the one member of the
+          // container that belongs to only one of the two documents, which is
+          // why it is added here rather than being made optional above.
           ports: [{ containerPort: CONTAINER_PORT }],
-          env: environment(desired.config, context.project),
-          ...(limits === null ? {} : { resources: { limits } }),
         },
       ],
     },
+  };
+}
+
+/**
+ * The three names on every workload this adapter places.
+ *
+ * The same three the Kubernetes adapter puts on its delivery object, and shared
+ * between the two documents this file's neighbour and this one render — a
+ * second copy would be two answers to "which App is this" that could drift.
+ */
+export function workloadLabels(desired: DesiredState): Record<string, string> {
+  return {
+    'spindrift-managed': 'true',
+    'spindrift-app': desired.app,
+    'spindrift-component': desired.component,
+  };
+}
+
+/**
+ * The container both documents carry, with nothing either one adds.
+ *
+ * §4's "build is always separate from deploy" lives here as much as in the
+ * documents: an image, a pinned reference per config key, and a size — nothing
+ * that could cause the runtime to build. Shared rather than written twice
+ * because a Job's container and a Service's container are the same container,
+ * and the one difference between them (`ports`) is the caller's to add.
+ */
+export function workloadContainer(
+  desired: DesiredState,
+  context: CloudRunRenderContext,
+): Record<string, unknown> {
+  const limits = resourceLimits(desired);
+  return {
+    image: context.image,
+    env: environment(desired.config, context.project),
+    ...(limits === null ? {} : { resources: { limits } }),
   };
 }
 
@@ -219,12 +251,19 @@ export function invokerPolicy(
 }
 
 /**
- * The longest name the runtime accepts for a Service — the same ceiling a
- * Kubernetes object name has, which is why both go through one helper.
+ * The longest name the runtime accepts for a Service or a Job — the same
+ * ceiling a Kubernetes object name has, which is why both go through one
+ * helper.
  */
-const SERVICE_ID_LIMIT = 63;
+const WORKLOAD_ID_LIMIT = 63;
 
-/** One Service per (App, Component), so a re-deploy is a new revision. */
-export function serviceId(desired: DesiredState): string {
-  return workloadName(desired, SERVICE_ID_LIMIT);
+/**
+ * One resource per (App, Component), so a re-deploy is a new revision of the
+ * same Service, or the same Job with a new template.
+ *
+ * The kind is not part of the name: the collection is part of the ref, so
+ * `jobs/{id}` and `services/{id}` name two resources rather than collide.
+ */
+export function workloadId(desired: DesiredState): string {
+  return workloadName(desired, WORKLOAD_ID_LIMIT);
 }

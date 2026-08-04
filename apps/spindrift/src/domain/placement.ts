@@ -66,6 +66,7 @@ export const EXCLUSIONS = [
   'REACH_UNSUPPORTED',
   'AUTH_UNSUPPORTED',
   'NO_GATEWAY',
+  'NO_SCHEDULER',
   'ARCH_UNSUPPORTED',
   'RESOURCES_EXCEED_CEILING',
   'NO_GPU',
@@ -117,6 +118,12 @@ export interface DerivedRequirements {
   readonly kind: ComponentKind;
   readonly reach: Reach;
   readonly auth: Auth;
+  /**
+   * §2: "`schedule` is a field on a job, not a kind." Absent means unscheduled,
+   * which every backend that runs a job can honour; present names a cadence
+   * something has to keep, and not every backend has anything that keeps one.
+   */
+  readonly schedule?: string;
   readonly platform: Platform;
   readonly resources: Resources;
   readonly gpu: boolean;
@@ -301,6 +308,8 @@ export function sentence(
         : 'this Target has no authenticated edge to put in front of this Component';
     case 'NO_GATEWAY':
       return 'this Target names no gateway for a route to attach to';
+    case 'NO_SCHEDULER':
+      return 'this Target runs a job but has nothing to fire it on a schedule';
     case 'ARCH_UNSUPPORTED':
       return `this Target does not run ${requirements.platform.arch}`;
     case 'RESOURCES_EXCEED_CEILING':
@@ -423,6 +432,25 @@ export function exclusionsFor(
   if (!can.kinds.includes(requirements.kind)) reasons.push('KIND_UNSUPPORTED');
 
   reasons.push(...reachExclusions(can, requirements));
+
+  // The kind is rendered here and the schedule is not, so this is its own
+  // reason rather than KIND_UNSUPPORTED: Cloud Run runs the Job and has nothing
+  // to fire it, and saying "this Target does not run jobs" would be false in
+  // the sentence a developer reads. Refused at Place because §3 refuses a
+  // non-candidate there — the alternative is a build and a Deploy that end in
+  // the adapter's REJECTED.
+  //
+  // Gated on the kind for the same reason it exists at all. Its sentence opens
+  // by granting that this Target "runs a job", so on a Target that renders none
+  // — `static` — it would sit beside KIND_UNSUPPORTED contradicting it on one
+  // row. A reason speaks only where its own sentence is true.
+  if (
+    requirements.schedule !== undefined &&
+    can.kinds.includes(requirements.kind) &&
+    !can.firesSchedules
+  ) {
+    reasons.push('NO_SCHEDULER');
+  }
 
   // A route needs something to attach to. Without this the Deploy goes green
   // with `parentRefs` naming a Gateway that is the empty string, which is a

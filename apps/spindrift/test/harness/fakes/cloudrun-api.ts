@@ -18,9 +18,11 @@
  *   polled pass, which is the whole of `apply`'s second half.
  * - **A document carrying a field the v2 schema does not define is refused.**
  *   Google's protobuf-JSON parsers reject unknown members with `400
- *   INVALID_ARGUMENT`, and the rendered Service is the single document
- *   standing between this product and a Cloud Run deploy — a `Map.set` is not
- *   a check.
+ *   INVALID_ARGUMENT`, and the rendered document is the single thing standing
+ *   between this product and a Cloud Run deploy — a `Map.set` is not a check.
+ *   There is a schema per collection, and they differ in the ways that bite: a
+ *   `Job` has no `ingress`, and it wraps its container one level deeper than a
+ *   `Service` does.
  * - **A refusal carries a body with a machine-readable reason**, because the
  *   checklist tells "the service is off" from "you may not" from "there is no
  *   such project" by exactly that, and a bare status code would leave nothing to
@@ -151,6 +153,62 @@ const SERVICE_SCHEMA: ServiceSchema = {
 };
 
 /**
+ * `TaskTemplate` — the inner half of a Job's doubled template.
+ *
+ * The container is the same message a revision holds, which is the point: the
+ * two documents differ in how deeply they wrap it and in nothing else. Note
+ * what is *not* here that `REVISION_TEMPLATE` has — `scaling`, `revision`,
+ * `sessionAffinity`, `healthCheckDisabled` — and note that `Job` has no
+ * `ingress` at all. Those absences are the whole value of a closed schema: a
+ * renderer that reached for a Service concept is refused here rather than in a
+ * vessel.
+ */
+const TASK_TEMPLATE: ServiceSchema = {
+  containers: [CONTAINER],
+  volumes: true,
+  maxRetries: true,
+  timeout: true,
+  serviceAccount: true,
+  executionEnvironment: true,
+  encryptionKey: true,
+  vpcAccess: true,
+  nodeSelector: true,
+  gpuZonalRedundancyDisabled: true,
+};
+
+/** `ExecutionTemplate` — the outer half, which holds no container itself. */
+const EXECUTION_TEMPLATE: ServiceSchema = {
+  labels: true,
+  annotations: true,
+  parallelism: true,
+  taskCount: true,
+  template: TASK_TEMPLATE,
+  client: true,
+  clientVersion: true,
+};
+
+const JOB_SCHEMA: ServiceSchema = {
+  name: true,
+  uid: true,
+  generation: true,
+  labels: true,
+  annotations: true,
+  client: true,
+  clientVersion: true,
+  launchStage: true,
+  binaryAuthorization: true,
+  template: EXECUTION_TEMPLATE,
+  startExecutionToken: true,
+  runExecutionToken: true,
+};
+
+/** The two collections a v2 path can name, and what each one accepts. */
+const SCHEMAS: Record<string, ServiceSchema> = {
+  services: SERVICE_SCHEMA,
+  jobs: JOB_SCHEMA,
+};
+
+/**
  * The first member the document names that the schema does not, if any.
  *
  * Reported by path rather than by name alone, because "Unknown name `foo`" in
@@ -241,9 +299,15 @@ export class FakeCloudRun {
   /** Every Operation a write answered with, in order — what a poll would use. */
   readonly operations: { name: string; done: boolean }[] = [];
 
-  /** Services this project holds, by id. */
-  private readonly services = new Map<string, Record<string, unknown>>();
-  /** Invoker policies, by service id — the assertion surface for exposure. */
+  /**
+   * What this project holds, by `<collection>/<id>`.
+   *
+   * Keyed by both because a Service and a Job may share a name: they are
+   * separate collections in the same project, and a fake that collapsed them
+   * would hide exactly the case `parseRef` exists to get right.
+   */
+  private readonly resources = new Map<string, Record<string, unknown>>();
+  /** Invoker policies, by `<collection>/<id>` — the surface for exposure. */
   private readonly policies = new Map<string, unknown>();
   private readonly reads = new Map<string, number>();
   /** Reads a just-created Service still owes before it can be seen. */
@@ -268,12 +332,17 @@ export class FakeCloudRun {
 
   /** What the project holds now — the assertion surface for a write. */
   service(id: string): Record<string, unknown> | undefined {
-    return this.services.get(id);
+    return this.resources.get(`services/${id}`);
+  }
+
+  /** The same, for the other collection. */
+  job(id: string): Record<string, unknown> | undefined {
+    return this.resources.get(`jobs/${id}`);
   }
 
   /** The invoker policy written for one Service, if any was. */
   policy(id: string): unknown {
-    return this.policies.get(id);
+    return this.policies.get(`services/${id}`);
   }
 
   /** Requests the adapter made, in order — what § Seam 2 asserts on. */
@@ -304,14 +373,27 @@ export class FakeCloudRun {
       return this.admissionResponse();
     }
 
-    const parent = `/v2/projects/${this.project}/locations/${this.region}/services`;
+    const parent = `/v2/projects/${this.project}/locations/${this.region}/`;
     if (!url.pathname.startsWith(parent)) {
       return json(404, {
         error: { message: 'no such path', status: 'NOT_FOUND' },
       });
     }
 
-    const rest = url.pathname.slice(parent.length).replace(/^\//, '');
+    // The collection is part of the path rather than a mode this fake is put
+    // into, because that is what it is on the real API — and because a ref that
+    // named the wrong one has to reach a 404 here rather than silently reading
+    // the other collection's resource of the same name.
+    const [collection, ...segments] = url.pathname
+      .slice(parent.length)
+      .split('/');
+    if (collection === undefined || SCHEMAS[collection] === undefined) {
+      return json(404, {
+        error: { message: 'no such collection', status: 'NOT_FOUND' },
+      });
+    }
+
+    const rest = segments.join('/');
     if (rest === '') {
       if (this.options.refuseList !== undefined) {
         return json(
@@ -319,33 +401,40 @@ export class FakeCloudRun {
           this.options.refuseList.body,
         );
       }
-      return json(200, { services: [...this.services.values()] });
+      return json(200, { [collection]: [...this.held(collection)] });
     }
 
-    const [id, verb] = rest.split(':', 2);
-    if (id === undefined || id === '') return json(404, notFound());
+    const [name, verb] = rest.split(':', 2);
+    if (name === undefined || name === '') return json(404, notFound());
+    const key = `${collection}/${name}`;
 
     if (verb === 'setIamPolicy') {
       if (this.options.refuseIam !== undefined) {
         return json(this.options.refuseIam.status, this.options.refuseIam.body);
       }
-      if (!this.services.has(id)) return json(404, notFound());
-      this.policies.set(id, body);
+      if (!this.resources.has(key)) return json(404, notFound());
+      this.policies.set(key, body);
       return json(200, (body as { policy?: unknown })?.policy ?? {});
     }
 
     switch (request.method) {
       case 'GET':
-        return this.readResponse(id);
+        return this.readResponse(key);
       case 'PATCH':
-        return this.applyResponse(url, id, body as Record<string, unknown>);
+        return this.applyResponse(
+          url,
+          collection,
+          key,
+          name,
+          body as Record<string, unknown>,
+        );
       case 'DELETE':
-        if (!this.services.has(id)) return json(404, notFound());
-        this.services.delete(id);
-        this.policies.delete(id);
-        this.reads.delete(id);
-        this.creating.delete(id);
-        return json(200, this.operation(id, true));
+        if (!this.resources.has(key)) return json(404, notFound());
+        this.resources.delete(key);
+        this.policies.delete(key);
+        this.reads.delete(key);
+        this.creating.delete(key);
+        return json(200, this.operation(name, true));
       default:
         return json(405, {
           error: { message: `${request.method} is not supported` },
@@ -353,36 +442,45 @@ export class FakeCloudRun {
     }
   };
 
+  /** Everything stored in one collection. */
+  private held(collection: string): Record<string, unknown>[] {
+    return [...this.resources]
+      .filter(([key]) => key.startsWith(`${collection}/`))
+      .map(([, held]) => held);
+  }
+
   private admissionResponse(): Response {
     const policy = this.options.admissionPolicy;
     if (policy === undefined || policy === null) return json(404, notFound());
     return json(200, policy);
   }
 
-  private readResponse(id: string): Response {
-    // The Service is created *behind* the Operation the write returned, so for
+  private readResponse(key: string): Response {
+    // The resource is created *behind* the Operation the write returned, so for
     // a while after a create it is genuinely not there yet. `read()` must map
     // that to "still applying" rather than to a failure.
-    const owed = this.creating.get(id) ?? 0;
+    const owed = this.creating.get(key) ?? 0;
     if (owed > 0) {
-      this.creating.set(id, owed - 1);
+      this.creating.set(key, owed - 1);
       return json(404, notFound());
     }
-    const service = this.services.get(id);
-    if (service === undefined) return json(404, notFound());
+    const held = this.resources.get(key);
+    if (held === undefined) return json(404, notFound());
 
-    // The runtime writes the terminal condition *after* the Service exists,
+    // The runtime writes the terminal condition *after* the resource exists,
     // which is what makes `apply` poll rather than assume.
     const script = this.options.service ?? READY;
-    const reads = (this.reads.get(id) ?? 0) + 1;
-    this.reads.set(id, reads);
+    const reads = (this.reads.get(key) ?? 0) + 1;
+    this.reads.set(key, reads);
     const status = script(reads);
-    return json(200, status === null ? service : { ...service, ...status });
+    return json(200, status === null ? held : { ...held, ...status });
   }
 
   private applyResponse(
     url: URL,
-    id: string,
+    collection: string,
+    key: string,
+    name: string,
     document: Record<string, unknown>,
   ): Response {
     if (this.options.refuse !== undefined) {
@@ -392,37 +490,50 @@ export class FakeCloudRun {
     // fake that created regardless would let the adapter drop the parameter
     // and still pass, so the refusal is modelled rather than assumed.
     if (
-      !this.services.has(id) &&
+      !this.resources.has(key) &&
       url.searchParams.get('allowMissing') !== 'true'
     ) {
       return json(404, notFound());
     }
-    const rejected = this.schemaProblem(document);
+    const rejected = this.schemaProblem(collection, document);
     if (rejected !== null) return rejected;
 
-    const creating = !this.services.has(id);
+    const creating = !this.resources.has(key);
     const stored = {
       ...document,
-      name: id,
-      uri: `https://${id}.run.example.test`,
+      name,
+      // Only a Service is addressable. A fake that minted a `uri` for a Job
+      // would hand the adapter a URL for something nothing routes to, and the
+      // one assertion that a job reports no address would pass for the wrong
+      // reason.
+      ...(collection === 'services'
+        ? { uri: `https://${name}.run.example.test` }
+        : {}),
     };
-    this.services.set(id, stored);
-    this.reads.set(id, 0);
+    this.resources.set(key, stored);
+    this.reads.set(key, 0);
     if (creating) {
-      this.creating.set(id, this.options.createLatencyReads ?? 1);
+      this.creating.set(key, this.options.createLatencyReads ?? 1);
     }
-    return json(200, this.operation(id, false));
+    return json(200, this.operation(name, false));
   }
 
   /** Why the API would refuse this document, or `null` if it would not. */
-  private schemaProblem(document: Record<string, unknown>): Response | null {
-    const unknown = unknownMember(document, SERVICE_SCHEMA);
+  private schemaProblem(
+    collection: string,
+    document: Record<string, unknown>,
+  ): Response | null {
+    const job = collection === 'jobs';
+    const unknown = unknownMember(
+      document,
+      SCHEMAS[collection] as ServiceSchema,
+    );
     if (unknown !== null) {
       return json(400, {
         error: {
           code: 400,
           status: 'INVALID_ARGUMENT',
-          message: `Invalid JSON payload received. Unknown name "${unknown}" at 'service'.`,
+          message: `Invalid JSON payload received. Unknown name "${unknown}" at '${job ? 'job' : 'service'}'.`,
         },
       });
     }
@@ -431,8 +542,11 @@ export class FakeCloudRun {
       | undefined
       | null;
     const label =
-      labelProblem(document.labels, 'service') ??
-      labelProblem(template?.labels, 'revision template');
+      labelProblem(document.labels, job ? 'job' : 'service') ??
+      labelProblem(
+        template?.labels,
+        job ? 'execution template' : 'revision template',
+      );
     if (label !== null) {
       return json(400, {
         error: { code: 400, status: 'INVALID_ARGUMENT', message: label },

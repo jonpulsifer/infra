@@ -98,6 +98,7 @@ export const resolveComponentPlacement: Command<
     component.kind,
     component.reach,
     component.auth,
+    component.schedule,
     [
       ...attached.map(
         (datastore): RequiredDatastore => ({
@@ -163,18 +164,24 @@ export const resolveComponentPlacement: Command<
  * Target for a requirement nothing has actually established. The three
  * requirements that *are* known at this point — kind, exposure, and attached
  * Datastores — are the three §3 and §11 name as decisive.
+ *
+ * A job's `schedule` joins them: it is authored, not detected, and a Target
+ * with nothing to fire it on that cadence is a non-candidate rather than a
+ * Deploy that is refused after a build.
  */
 function derive(
   context: CommandContext,
   kind: DerivedRequirements['kind'],
   reach: Reach,
   auth: Auth,
+  schedule: string | null,
   attached: readonly RequiredDatastore[],
 ): DerivedRequirements {
   return {
     kind,
     reach,
     auth,
+    ...(schedule === null ? {} : { schedule }),
     platform: DEFAULT_PLATFORM,
     registries: context.manifest.supplyChain.registry,
     resources: {},
