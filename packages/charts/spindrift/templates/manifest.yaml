@@ -1,13 +1,21 @@
 {{/*
-The installation manifest, declared by the release.
+The installation manifest, declared by the release — or, absent a
+declaration, seeded from `files/default-manifest.yaml` when this release has
+a `hostname` to bind the passkey relying party to. See
+`spindrift.manifest.content` in `_helpers.tpl` for which case applies, and
+ticket 77 for why the seeded case exists.
 
 **A declaration seeds; it does not govern.** `loadStoredManifest` takes the
 stored row whenever one exists and this document only when none does, so
-editing it does nothing to a seeded installation. Empty declares nothing.
+editing it does nothing to a seeded installation. Rendering neither declares
+nothing.
 
 **A declaration may not restate what this chart already renders.** The refusals
-below reject a manifest carrying a fact this chart owns, at render time — the
-earliest the two copies can be compared and the only place being wrong is free.
+below reject an operator's manifest carrying a fact this chart owns, at render
+time — the earliest the two copies can be compared and the only place being
+wrong is free. They run only against `.Values.manifest`: the seeded default
+document is this chart's own copy of the placeholder, built to already agree
+with `.Values.hostname`, so there is nothing for it to disagree with.
 */}}
 {{- if .Values.manifest }}
 {{- if dig "cloud" "federation" nil .Values.manifest }}
@@ -20,6 +28,9 @@ earliest the two copies can be compared and the only place being wrong is free.
 {{- if and .Values.hostname $declaredHostname (ne $declaredHostname .Values.hostname) }}
 {{- fail (printf "manifest.controlPlane.hostname is %q but this release serves the control plane at %q. It is the passkey relying-party id, so the disagreement would enrol nobody: a ceremony is scoped to the origin it began at, and the origin is the one the HTTPRoute answers on." $declaredHostname .Values.hostname) }}
 {{- end }}
+{{- end }}
+{{- $manifestContent := include "spindrift.manifest.content" . }}
+{{- if $manifestContent }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -32,5 +43,5 @@ data:
   # The filename the process looks for. It is mounted at the directory so the
   # key lands at the path `DEFAULT_MANIFEST_PATH` names.
   manifest.yaml: |-
-    {{- toYaml .Values.manifest | nindent 4 }}
+    {{- $manifestContent | nindent 4 }}
 {{- end }}
