@@ -95,7 +95,7 @@ export function AppList({
     detail: `${app.kind} · ${app.target}`,
     status: app.phase.toLowerCase(),
     tone: phaseTone(app.phase),
-    search: `${app.source} ${app.url} ${app.vessel} ${app.release}`,
+    search: `${app.source} ${app.url} ${app.vessel} ${app.artifact}`,
     active:
       app.phase === 'PENDING' ||
       app.phase === 'APPLYING' ||
@@ -107,7 +107,7 @@ export function AppList({
       <ExplorerPageHeader
         eyebrow="Application catalog"
         title="Apps"
-        description="Inspect each App's current contract, placement, source, and release without leaving the catalog."
+        description="Inspect each App's current contract, placement, source, and artifact without leaving the catalog."
         actions={
           <Button onClick={() => onNavigate('/apps/new')}>
             <Plus aria-hidden="true" className="size-4" /> New App
@@ -151,7 +151,7 @@ export function AppList({
                 entries={[
                   { label: 'State', value: app.phase.toLowerCase() },
                   { label: 'Target', value: app.target },
-                  { label: 'Release', value: app.release, mono: true },
+                  { label: 'Artifact', value: app.artifact, mono: true },
                   { label: 'Source', value: app.source, mono: true },
                   { label: 'Vessel', value: app.vessel, mono: true },
                   {

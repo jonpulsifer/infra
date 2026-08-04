@@ -148,7 +148,7 @@ export function Overview({
         search: `${app.source} ${app.url}`,
         facts: [
           { label: 'Target', value: app.target },
-          { label: 'Release', value: app.release, mono: true },
+          { label: 'Artifact', value: app.artifact, mono: true },
           { label: 'URL', value: app.url || 'not allocated', mono: true },
         ],
       }),

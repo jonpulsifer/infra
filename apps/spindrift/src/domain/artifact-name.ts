@@ -265,3 +265,41 @@ export const MOVING_TAG = 'latest';
 export function artifactTags(bundleDigest: string): readonly string[] {
   return [bundleTag(bundleDigest), MOVING_TAG];
 }
+
+/**
+ * One line naming the bytes a Build produced — never what it was configured
+ * with.
+ *
+ * Written once because the App list and the App workspace both answer "what
+ * did this deploy" and a value invented twice is exactly {@link
+ * import('./digest.ts')}'s "written out four times, identically" problem
+ * happening a fifth: the App list took its own answer from `Deploy.
+ * configVersion` instead, which is `commands/apps/list.ts`'s bug — a Deploy's
+ * config hash is total (§10, `config-version.ts`) so it exists and reads as an
+ * artifact digest even when no artifact-identifying information was actually
+ * being asked for.
+ *
+ * `${type} · ${digest[:12]}` once a Build produced one, `${type} from
+ * <commit[:7]>` for a route mid-flight that has only committed source so far,
+ * and `none` before either exists — the three states `getAppWorkspace` already
+ * distinguished per Component before this had a second caller.
+ */
+export function artifactSummary(
+  build:
+    | {
+        readonly artifactType: string;
+        readonly artifactDigest: string | null;
+        readonly commit: string | null;
+      }
+    | null
+    | undefined,
+): string {
+  if (!build) return 'none';
+  if (build.artifactDigest) {
+    return `${build.artifactType} · ${build.artifactDigest.slice(0, 12)}`;
+  }
+  if (build.commit) {
+    return `${build.artifactType} from ${build.commit.slice(0, 7)}`;
+  }
+  return 'none';
+}

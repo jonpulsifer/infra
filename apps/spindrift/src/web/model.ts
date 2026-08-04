@@ -600,7 +600,22 @@ export interface AppListItem {
   readonly kind: ComponentKind;
   /** The source: repo fullName or 'archive'. */
   readonly source: string;
-  readonly release: string;
+  /**
+   * The live Component's artifact, as {@link
+   * import('../domain/artifact-name.ts').artifactSummary} renders it —
+   * `image · a1b2c3d4e5f6`, never a config hash.
+   *
+   * Not called `release`: {@link WorkspaceView.release} already owns that name
+   * for `Deploy <id>`, a reference to the release row rather than to the bytes
+   * it delivers, and the two answer different questions an operator asks —
+   * "which attempt is this" versus "what is actually running". Reusing one
+   * name for both was the bug this field exists to close: a row's `release`
+   * used to read `deploy.configVersion`, which is total over an empty
+   * document (§10) and so is byte-identical across every App with no config,
+   * rendered as `sha256:…` so it looked like the artifact digest while
+   * answering nothing about which artifact was live.
+   */
+  readonly artifact: string;
 }
 
 /** A Target as the targets management view lists it. */

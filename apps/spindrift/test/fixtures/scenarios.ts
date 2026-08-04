@@ -802,7 +802,7 @@ export const APP_LIST: readonly AppListItem[] = [
     urlLive: true,
     kind: 'service',
     source: 'example-org/infra',
-    release: 'Deploy #14 · a1b2c3d',
+    artifact: 'image · a1b2c3d4e5f6',
   },
   {
     id: '00000000-0000-4000-8000-0000000000a2',
@@ -814,7 +814,7 @@ export const APP_LIST: readonly AppListItem[] = [
     urlLive: true,
     kind: 'service',
     source: 'example-org/api',
-    release: 'Deploy #8 · m3n4o5p',
+    artifact: 'image · m3n4o5p6q7r8',
   },
   {
     id: '00000000-0000-4000-8000-0000000000a3',
@@ -826,7 +826,7 @@ export const APP_LIST: readonly AppListItem[] = [
     urlLive: true,
     kind: 'website',
     source: 'example-org/infra',
-    release: 'Deploy #3 · q6r7s8t',
+    artifact: 'image · q6r7s8t9u0v1',
   },
   {
     id: '00000000-0000-4000-8000-0000000000a4',
@@ -838,7 +838,7 @@ export const APP_LIST: readonly AppListItem[] = [
     urlLive: false,
     kind: 'website',
     source: 'archive',
-    release: 'Deploy #1 · sha256:d82a…',
+    artifact: 'files · sha256:d82a1234',
   },
 ];
 

@@ -242,7 +242,7 @@ const TWIN_ROWS: readonly AppListItem[] = [
     urlLive: false,
     kind: 'service',
     source: 'acme/twins',
-    release: 'latest',
+    artifact: 'none',
   },
   {
     id: '00000000-0000-4000-8000-0000000000b2',
@@ -254,7 +254,7 @@ const TWIN_ROWS: readonly AppListItem[] = [
     urlLive: false,
     kind: 'website',
     source: 'acme/twins',
-    release: 'Deploy 4',
+    artifact: 'image · a1b2c3d4e5f6',
   },
 ];
 

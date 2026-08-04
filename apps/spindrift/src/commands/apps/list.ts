@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { artifactSummary } from '../../domain/artifact-name.ts';
 import type { AppListItem, DeployPhase } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
 
@@ -20,6 +21,7 @@ export const listApps: Command<
             limit: 1,
             with: {
               target: true,
+              build: true,
             },
           },
         },
@@ -59,7 +61,12 @@ export const listApps: Command<
       target: target?.name ?? 'none',
       url: deploy?.url ?? app.vanityDomain ?? '',
       urlLive: deploy?.phase === 'LIVE',
-      release: deploy?.configVersion ?? 'latest',
+      // `deploy.build` is a real Build row whenever `deploy` is — `deploys`
+      // makes `build_id` `.notNull()` — never the config hash `configVersion`
+      // carries: that field is §10's total hash over a document that is
+      // legitimately empty for most Apps, which reads as an artifact digest
+      // while answering nothing about which artifact is live.
+      artifact: artifactSummary(deploy?.build),
     } satisfies AppListItem;
   });
 
