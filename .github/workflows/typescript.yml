@@ -5,6 +5,16 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner target (infra-offsite, infra-folly, ubuntu-latest)'
+        type: choice
+        options:
+          - infra-offsite
+          - infra-folly
+          - ubuntu-latest
+        default: infra-offsite
 
 permissions:
   contents: read
@@ -69,8 +79,8 @@ jobs:
 
   validate:
     needs: detect
-    if: needs.detect.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
+    if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ inputs.runner || 'infra-offsite' }}
     permissions:
       contents: read
       id-token: write
