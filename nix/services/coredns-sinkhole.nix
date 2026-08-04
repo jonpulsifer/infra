@@ -42,7 +42,7 @@ in
           fallthrough
         }
         cache {
-          disable denial ${fleet.dnsZone}
+          disable denial ${fleet.dnsZone} lolwtf.dev pulsifer.ca
         }
         forward . ${lib.concatStringsSep " " (map (upstream: "tls://${upstream}") upstreams)} {
           policy random

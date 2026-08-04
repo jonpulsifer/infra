@@ -12,9 +12,13 @@ tags:: runbook, validation
 	- ```bash
 	  nix flake check
 	  ```
-	- Host build:
+	- Native x86 host build:
 	- ```bash
-	  nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel --no-link
+	  HOST=<hostname> mise run nix:build
+	  ```
+	- Operator-run ARM host builds always use [[Fleet/forge]]. Select forge as the Nix store so evaluation inputs, substitutions, and builds stay on the builder:
+	- ```bash
+	  NIX_REMOTE=ssh-ng://forge.lolwtf.ca HOST=<hostname> mise run nix:build
 	  ```
 	- See [[Runbooks/Deploy a NixOS Host]].
 - # Kubernetes

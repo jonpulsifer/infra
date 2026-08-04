@@ -10,6 +10,7 @@ tags:: runbook, nixos
 	- ```bash
 	  nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel --no-link
 	  ```
+	- Operator-run ARM host builds always use [[Fleet/forge]]; use the exact pre-PR build command in [[Runbooks/Validate Infra Changes]].
 	- Run a harmless remote command through the host app:
 	- ```bash
 	  nix run .#<hostname> -- date
