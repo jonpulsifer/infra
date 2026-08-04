@@ -432,8 +432,8 @@ function ClusterComponents({
             options={probe.chartSources.map(refOf)}
             hint={
               probe.chartSources.length === 0
-                ? 'No GitRepository was readable here — the App chart has nowhere to come from.'
-                : 'The GitRepository the App chart is fetched from.'
+                ? 'No source of the kind this installation’s chart needs was readable here — the App chart has nowhere to come from.'
+                : 'The Flux source the App chart is fetched from.'
             }
           />
         </div>

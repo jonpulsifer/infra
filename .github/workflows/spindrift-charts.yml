@@ -1,18 +1,29 @@
 name: spindrift-charts
 
-# Publishes the Spindrift installer chart as an independently pinned,
-# extractable OCI artifact instead of a path this repository's own GitRepository
-# source has to be checked out to reach. See
-# clusters/offsite/apps/spindrift/oci-repository.yaml for the consumer and
-# packages/charts/spindrift/Chart.yaml for the version this pushes.
+# Publishes both Spindrift charts as independently pinned, extractable OCI
+# artifacts instead of paths this repository's own GitRepository source has to
+# be checked out to reach. Each is pushed under the version its own Chart.yaml
+# carries, and each has a consumer that pins that version by tag:
 #
-# packages/charts/spindrift-app is linted and packaged here too, so a broken
-# chart is caught before merge, but it is not pushed: the kubernetes deploy
-# adapter that renders every App's HelmRelease still hardcodes a GitRepository
-# source (apps/spindrift/src/adapters/deploy/kubernetes/flux-helmrelease.ts),
-# so a pushed artifact nothing consumes would just be dead weight in the
-# registry — see the header comment on
-# clusters/offsite/apps/spindrift/helm-release.yaml for the rest of that gap.
+#   packages/charts/spindrift      → clusters/offsite/apps/spindrift/oci-repository.yaml
+#   packages/charts/spindrift-app  → clusters/base/platform/spindrift-target/oci-repository.yaml
+#
+# The App chart's consumer is in the per-Target base because every Kubernetes
+# Target needs its own copy of that source object — Spindrift points each
+# rendered HelmRelease's chartRef at the one in the Target's own delivery
+# namespace.
+#
+# **Bumping a chart's version without bumping its consumer's tag ships
+# nothing**, and bumping the consumer's tag before this workflow has pushed
+# that version leaves the source object failing to pull. The conformance suite
+# holds the pair together (apps/spindrift/test/conformance/), so the drift is a
+# red test rather than a silent no-op.
+#
+# **A chart added here needs one manual step the first time.** GHCR creates the
+# package private on its first push and neither consumer carries a secretRef,
+# so the new package has to be flipped to public on its settings page once —
+# GITHUB_TOKEN cannot do it. Until then the OCIRepository sits at
+# OCIArtifactPullFailed with a 401.
 on:
   push:
     branches:
@@ -67,13 +78,15 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
-      - name: Push installer chart
-        # Only the installer chart: see the workflow header for why
-        # spindrift-app is packaged above but stops there. Named explicitly
-        # rather than a `dist/spindrift-*.tgz` glob, which `spindrift-app-*.tgz`
-        # also satisfies.
+      - name: Push charts
+        # Each named explicitly rather than through a `dist/spindrift-*.tgz`
+        # glob, which `spindrift-app-*.tgz` also satisfies — a glob would push
+        # the App chart under the installer's loop and get its version from the
+        # wrong Chart.yaml.
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
-          version="$(grep '^version:' packages/charts/spindrift/Chart.yaml | awk '{print $2}')"
-          helm push "dist/spindrift-${version}.tgz" oci://ghcr.io/jonpulsifer/charts
+          for chart in spindrift spindrift-app; do
+            version="$(grep '^version:' "packages/charts/${chart}/Chart.yaml" | awk '{print $2}')"
+            helm push "dist/${chart}-${version}.tgz" oci://ghcr.io/jonpulsifer/charts
+          done

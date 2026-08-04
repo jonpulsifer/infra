@@ -44,6 +44,8 @@ import {
 } from '../harness/fakes/kubernetes-api.ts';
 
 const CHART = 'example/spindrift-app';
+/** The same chart as an artifact — §20's other legal spelling of `charts.app`. */
+const OCI_CHART = 'oci://registry.example.test/charts/spindrift-app';
 
 const FLUX: KubernetesDelivery = {
   flavour: 'flux-helmrelease',
@@ -148,13 +150,17 @@ function desiredState(overrides: Partial<DesiredState> = {}): DesiredState {
 }
 
 /** The adapter, wired to one fake cluster, with the cadence spent instantly. */
-function adapterFor(options: FakeKubernetesOptions = {}): {
+function adapterFor(
+  options: FakeKubernetesOptions = {},
+  /** How this installation names the App chart — the source kind follows it. */
+  chart: string = CHART,
+): {
   adapter: KubernetesDeployAdapter;
   cluster: FakeKubernetes;
 } {
   const cluster = new FakeKubernetes({ servedKinds: SERVED, ...options });
   const adapter = new KubernetesDeployAdapter({
-    chart: CHART,
+    chart,
     token: cluster.token,
     fetch: cluster.fetch,
     pollIntervalMs: 1,
@@ -259,15 +265,43 @@ describe('the delivery object', () => {
     expect(spec.valuesFrom).toBeUndefined();
     expect(cluster.all('configmaps')).toEqual([]);
 
-    // The chart comes from the Target's own repository until the OCI swap.
+    // A path is a path inside a repository the Target trusts, so the release
+    // asks Flux to build a HelmChart from a GitRepository source — the only
+    // form that can carry a path at all.
     expect(spec.chart.spec.chart).toBe(CHART);
     expect(spec.chart.spec.sourceRef).toEqual({
       kind: 'GitRepository',
       name: 'charts',
       namespace: 'delivery',
     });
+    expect(spec.chartRef).toBeUndefined();
     // Reconciliation lives in core: the controller must not retry an attempt
     // nobody asked for (§6).
+    expect(spec.install.remediation.retries).toBe(0);
+  });
+
+  test('an oci:// chart is delivered as a chartRef at the Target’s OCIRepository', async () => {
+    // The other half of §7's per-Target pin. Flux refuses `chart` and
+    // `chartRef` together and its `chart.spec.sourceRef` does not accept an
+    // `OCIRepository` at all, so this is not a `kind` swap inside the same
+    // shape — the whole reference moves, and nothing is left naming a path
+    // that only a checkout of some repository resolves.
+    const { adapter, cluster } = adapterFor({}, OCI_CHART);
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+
+    expect(verdict.phase).toBe('LIVE');
+    const spec = cluster.get('helmreleases/delivery/blog-web')?.spec as any;
+    expect(spec.chartRef).toEqual({
+      kind: 'OCIRepository',
+      name: 'charts',
+      namespace: 'delivery',
+    });
+    expect(spec.chart).toBeUndefined();
+    // Everything else about the release is the same object it always was: the
+    // source moved, not the delivery.
+    expect(spec.values.app.image).toBe(
+      'registry.example.test/blog/web@sha256:feed',
+    );
     expect(spec.install.remediation.retries).toBe(0);
   });
 
@@ -645,10 +679,10 @@ describe('the checklist', () => {
     expect(prerequisites.filter((item) => !item.met)).toEqual([]);
   });
 
-  test('a Target without the GitRepository is unhealthy, and says so', async () => {
-    // The plan's named cost: sourcing the chart from a repository makes "a
-    // GitRepository in this cluster" a Target prerequisite, and it is the
-    // first thing that breaks on extraction.
+  test('a Target without the chart source is unhealthy, and says so', async () => {
+    // §7 pins the App chart per Target, which makes "this source object exists
+    // in this cluster" a Target prerequisite rather than something a deploy
+    // discovers late.
     const { adapter } = adapterFor({
       objects: {
         'namespaces//apps': {
@@ -666,6 +700,91 @@ describe('the checklist', () => {
     expect(chartSource?.met).toBe(false);
     expect(chartSource?.detail).toContain('GitRepository');
     expect(chartSource?.detail).toContain('charts');
+  });
+
+  test('the kind the checklist reads follows the installation’s chart reference', async () => {
+    // The failure this rules out is the quiet one: a cluster carrying a
+    // GitRepository of the right name while the installation deploys from OCI
+    // would read green on a check that never looked at the object the release
+    // will actually reference, and fail on the first deploy instead.
+    const gitOnly = {
+      objects: {
+        'gitrepositories/delivery/charts': {
+          apiVersion: 'source.toolkit.fluxcd.io/v1',
+          kind: 'GitRepository',
+          metadata: { name: 'charts', namespace: 'delivery' },
+        },
+        'namespaces//apps': {
+          apiVersion: 'v1',
+          kind: 'Namespace',
+          metadata: { name: 'apps' },
+        },
+      },
+    };
+
+    const missing = await adapterFor(gitOnly, OCI_CHART).adapter.inspect(
+      target(),
+    );
+    const unmet = missing.prerequisites.find(
+      (item) => item.name === 'CHART_SOURCE',
+    );
+    expect(unmet?.met).toBe(false);
+    expect(unmet?.detail).toContain('OCIRepository');
+
+    const { adapter } = adapterFor(
+      {
+        objects: {
+          ...gitOnly.objects,
+          'ocirepositories/delivery/charts': {
+            apiVersion: 'source.toolkit.fluxcd.io/v1',
+            kind: 'OCIRepository',
+            metadata: { name: 'charts', namespace: 'delivery' },
+            spec: { url: OCI_CHART },
+          },
+        },
+      },
+      OCI_CHART,
+    );
+    const { prerequisites } = await adapter.inspect(target());
+    expect(
+      prerequisites.find((item) => item.name === 'CHART_SOURCE')?.met,
+    ).toBe(true);
+  });
+
+  test('a source object serving another artifact is named, not deployed to', async () => {
+    // The rendered `chartRef` carries the source object and nothing else, so
+    // what a Component pulls is whatever that object's `url` says — an
+    // installation declaring one artifact while a Target's source serves
+    // another deploys a chart nobody asked for, and every other check reads
+    // green. This is the only place the two references meet.
+    const { adapter } = adapterFor(
+      {
+        objects: {
+          'ocirepositories/delivery/charts': {
+            apiVersion: 'source.toolkit.fluxcd.io/v1',
+            kind: 'OCIRepository',
+            metadata: { name: 'charts', namespace: 'delivery' },
+            spec: { url: 'oci://registry.example.test/charts/somebody-else' },
+          },
+          'namespaces//apps': {
+            apiVersion: 'v1',
+            kind: 'Namespace',
+            metadata: { name: 'apps' },
+          },
+        },
+      },
+      OCI_CHART,
+    );
+
+    const { prerequisites } = await adapter.inspect(target());
+    const chartSource = prerequisites.find(
+      (item) => item.name === 'CHART_SOURCE',
+    );
+    expect(chartSource?.met).toBe(false);
+    expect(chartSource?.detail).toContain(
+      'oci://registry.example.test/charts/somebody-else',
+    );
+    expect(chartSource?.detail).toContain(OCI_CHART);
   });
 
   test('a cluster running neither operator cannot deliver anything', async () => {
@@ -1190,16 +1309,22 @@ describe('probing a cluster before it is a Target', () => {
     metadata: { name },
   });
 
-  const probed = async (options: FakeKubernetesOptions = {}) => {
-    const { adapter, cluster } = adapterFor({
-      servedKinds: {
-        ...SERVED,
-        'source.toolkit.fluxcd.io/v1': ['GitRepository'],
-        'external-secrets.io/v1': ['ClusterSecretStore'],
-        'gateway.networking.k8s.io/v1': ['Gateway'],
+  const probed = async (
+    options: FakeKubernetesOptions = {},
+    chart: string = CHART,
+  ) => {
+    const { adapter, cluster } = adapterFor(
+      {
+        servedKinds: {
+          ...SERVED,
+          'source.toolkit.fluxcd.io/v1': ['GitRepository', 'OCIRepository'],
+          'external-secrets.io/v1': ['ClusterSecretStore'],
+          'gateway.networking.k8s.io/v1': ['Gateway'],
+        },
+        ...options,
       },
-      ...options,
-    });
+      chart,
+    );
     return adapter.probe(cluster.apiServer);
   };
 
@@ -1227,6 +1352,29 @@ describe('probing a cluster before it is a Target', () => {
     expect(probe.secretStores).toEqual(['vault']);
     expect(probe.gateways).toEqual([
       { name: 'shared', namespace: 'edge', address: '10.0.0.9' },
+    ]);
+  });
+
+  test('the sources offered are the kind this installation’s chart needs', async () => {
+    // Every option a picker offers has to be an answer that would work. An
+    // installation deploying from OCI offered a GitRepository would be a screen
+    // whose only choices produce a Target that cannot deploy.
+    const lists = {
+      gitrepositories: [source('delivery', 'charts')],
+      ocirepositories: [
+        {
+          apiVersion: 'source.toolkit.fluxcd.io/v1',
+          kind: 'OCIRepository',
+          metadata: { name: 'spindrift-app', namespace: 'apps' },
+        },
+      ],
+    };
+
+    expect((await probed({ lists })).chartSources).toEqual([
+      { name: 'charts', namespace: 'delivery' },
+    ]);
+    expect((await probed({ lists }, OCI_CHART)).chartSources).toEqual([
+      { name: 'spindrift-app', namespace: 'apps' },
     ]);
   });
 

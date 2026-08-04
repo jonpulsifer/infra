@@ -196,7 +196,7 @@ export interface ClusterConnectChoices {
   readonly namespace: string;
   /** Where the `HelmRelease` object itself is created. */
   readonly deliveryNamespace: string;
-  /** The `GitRepository` the App chart is fetched from. */
+  /** The Flux source object the App chart is fetched from. */
   readonly sourceRef: { readonly name: string; readonly namespace: string };
   /** The gateway routes attach to, and the address it answers on. */
   readonly gateway: {

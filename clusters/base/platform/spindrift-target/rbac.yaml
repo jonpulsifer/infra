@@ -32,13 +32,16 @@ rules:
     verbs:
       - get
       - list
-  # Which sources the App chart could be fetched from. The checklist's `get` on
-  # flux-system/infra stays a Role below: reading one named object is the
-  # narrower grant and is what the standing check actually needs.
+  # Which sources the App chart could be fetched from. Both kinds, because the
+  # connect screen offers the kind this installation's `charts.app` reference
+  # names and an installation can be reconfigured between them without anyone
+  # revisiting a Role. The checklist's `get` on one named object stays a Role
+  # below: reading the object it actually needs is the narrower grant.
   - apiGroups:
       - source.toolkit.fluxcd.io
     resources:
       - gitrepositories
+      - ocirepositories
     verbs:
       - list
   # Which Gateways exist and what address each answers on — the input to
@@ -88,7 +91,24 @@ rules:
       - pods/log
     verbs:
       - get
+  # `CHART_SOURCE`, for the artifact form. The App chart's `OCIRepository` is
+  # this namespace's own object (`oci-repository.yaml`), so the grant to read it
+  # belongs to the Role this namespace already binds rather than to a second one
+  # that would need a second RoleBinding in every cluster overlay.
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+    resources:
+      - ocirepositories
+    resourceNames:
+      - spindrift-app
+    verbs:
+      - get
 ---
+# `CHART_SOURCE`, for the repository form — a Target whose installation names
+# `charts.app` as a path rather than as an artifact reads the source object here
+# instead. Kept beside the artifact grant above because either kind can be the
+# one an installation is configured with, and a Target that has been read under
+# both is a Target that can be reconfigured back without an RBAC change.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

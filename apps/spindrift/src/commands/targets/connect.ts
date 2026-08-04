@@ -61,7 +61,7 @@ const kubernetesDelivery = z.discriminatedUnion('flavour', [
     .object({
       flavour: z.literal('flux-helmrelease'),
       namespace: z.string().trim().min(1),
-      /** The `GitRepository` the App chart is fetched from (Milestone 3). */
+      /** The Flux source object the App chart is fetched from (§7). */
       sourceRef: z
         .object({
           name: z.string().trim().min(1),

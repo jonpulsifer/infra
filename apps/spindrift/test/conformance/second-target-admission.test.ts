@@ -18,6 +18,7 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
+import { helmRelease } from '../../src/adapters/deploy/kubernetes/flux-helmrelease.ts';
 import {
   connectTarget,
   createDeploy,
@@ -338,23 +339,119 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     expect(isExtractableChartSource(beforeThisFix)).toBe(false);
   });
 
-  // The App chart is not the same yet. Every per-Component HelmRelease the
-  // kubernetes adapter renders still sources `manifest.charts.app` from
-  // GitRepository/infra by path: `helmRelease()`
-  // (src/adapters/deploy/kubernetes/flux-helmrelease.ts) hardcodes
-  // `sourceRef.kind: GitRepository`, and the delivery schema's `sourceRef`
-  // (`kubernetesDeliverySchema` in src/config/manifest.schema.ts) is `.strict()`
-  // with no `kind` field to say otherwise. Pointing `charts.app` at an OCI
-  // reference without that adapter support would not distribute anything —
-  // Flux would try to resolve the reference as a path inside the named
-  // GitRepository and fail every deploy. That is real adapter work — a second
-  // Flux source per Kubernetes Target, a schema change, and a live
-  // `configureInstallation` on top, since the stored manifest wins over any
-  // declaration — so it stays a `test.todo` rather than a passing assertion
-  // that is not backed by anything, which is the mistake this whole test
-  // exists to stop repeating.
-  test.todo('App chart distribution is an independently pinned, extractable OCI artifact', () => {
-    expect(isExtractableAppChartRef(manifest.charts.app)).toBe(true);
+  test('App chart distribution is an independently pinned, extractable OCI artifact', async () => {
+    // The declaration this installation is seeded from, not a fixture, for the
+    // same reason the installer assertion above reads it: what matters is what
+    // this installation deploys every Component through.
+    const release = Bun.YAML.parse(
+      await Bun.file(
+        join(REPO_ROOT, 'clusters/offsite/apps/spindrift/helm-release.yaml'),
+      ).text(),
+    ) as {
+      spec?: {
+        values?: {
+          manifest?: {
+            charts?: { app?: string };
+            targets?: {
+              connection?: {
+                delivery?: {
+                  sourceRef?: { name?: string; namespace?: string };
+                };
+              };
+            }[];
+          };
+        };
+      };
+    };
+    const declared = release.spec?.values?.manifest;
+    expect(isExtractableAppChartRef(declared?.charts?.app ?? '')).toBe(true);
+
+    // And that the reference is one every Kubernetes Target can actually
+    // resolve. The chart reference is the only discriminant the adapter has, so
+    // an `oci://` value with a Target still pointed at a GitRepository is a
+    // declaration that renders a chartRef at an object of the wrong kind — the
+    // failure mode the `charts.app` string alone cannot show.
+    const sources = (declared?.targets ?? [])
+      .map((target) => target.connection?.delivery?.sourceRef)
+      .filter((ref) => ref !== undefined);
+    expect(sources.length).toBeGreaterThan(0);
+    for (const ref of sources) {
+      expect(ref).toEqual({
+        name: 'spindrift-app',
+        namespace: 'spindrift-apps',
+      });
+    }
+  });
+
+  test('the App-chart check catches a repository-local chart path', () => {
+    // The proof the assertion above is not the vacuous one it replaces. The old
+    // guard asked only that `manifest.charts.app` was a defined string, which
+    // the exact value this installation carried before this ticket satisfies —
+    // so it passed the whole time nothing was built.
+    expect(isExtractableAppChartRef('packages/charts/spindrift-app')).toBe(
+      false,
+    );
+  });
+
+  test('an oci:// App chart is rendered as an extractable source, not a path', () => {
+    // The declaration is only half the claim: `charts.app` naming an artifact
+    // means nothing unless the object the adapter writes fetches from it. This
+    // is that half, against the real renderer.
+    const rendered = helmRelease({
+      name: 'blog-web',
+      namespace: 'spindrift-apps',
+      targetNamespace: 'spindrift-apps',
+      chart: 'oci://ghcr.io/jonpulsifer/charts/spindrift-app',
+      sourceRef: { name: 'spindrift-app', namespace: 'spindrift-apps' },
+      labels: {},
+      values: {},
+    }) as Parameters<typeof isExtractableChartSource>[0];
+
+    expect(isExtractableChartSource(rendered)).toBe(true);
+    // The repository form still renders, unchanged, for an installation that
+    // names a path — extraction is a choice this installation made, not a
+    // capability the adapter lost.
+    const path = helmRelease({
+      name: 'blog-web',
+      namespace: 'spindrift-apps',
+      targetNamespace: 'spindrift-apps',
+      chart: 'packages/charts/spindrift-app',
+      sourceRef: { name: 'infra', namespace: 'flux-system' },
+      labels: {},
+      values: {},
+    }) as Parameters<typeof isExtractableChartSource>[0];
+
+    expect(isExtractableChartSource(path)).toBe(false);
+    expect(path.spec?.chart?.spec?.sourceRef?.kind).toBe('GitRepository');
+  });
+
+  test('each chart consumer pins the version its Chart.yaml carries', async () => {
+    // `.github/workflows/spindrift-charts.yml` pushes each chart under the
+    // version its own Chart.yaml names, and each consumer pins that version by
+    // tag. Bumping one without the other is silent both ways: a version ahead
+    // of the tag ships nothing, and a tag ahead of the push leaves the source
+    // object failing to pull. This is the only thing holding the pair together.
+    const consumers: [string, string][] = [
+      ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
+      [
+        'spindrift-app',
+        'clusters/base/platform/spindrift-target/oci-repository.yaml',
+      ],
+    ];
+    for (const [chart, consumer] of consumers) {
+      const { version } = Bun.YAML.parse(
+        await Bun.file(
+          join(REPO_ROOT, `packages/charts/${chart}/Chart.yaml`),
+        ).text(),
+      ) as { version?: string };
+      const source = Bun.YAML.parse(
+        await Bun.file(join(REPO_ROOT, consumer)).text(),
+      ) as { spec?: { url?: string; ref?: { tag?: string } } };
+      expect(source.spec?.url).toBe(
+        `oci://ghcr.io/jonpulsifer/charts/${chart}`,
+      );
+      expect(source.spec?.ref?.tag).toBe(version);
+    }
   });
 
   test('Status, diagnosis, and logs identify the second Target while preserving App-first product view', async () => {

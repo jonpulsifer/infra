@@ -8,10 +8,13 @@
  * reimplements what the controller does: this module renders one object and
  * reads one status.
  *
- * **The chart is sourced from the Target's own repository**, not from OCI. That
- * is the plan's deliberate deviation from §7 for v1, and its whole cost is
- * stated where the prerequisite is checked: a Target without that repository is
- * a non-candidate, and it is the first thing that breaks on extraction.
+ * **The chart reference decides where the chart comes from** (§7). An `oci://`
+ * reference is an artifact a registry serves and anything else is a path inside
+ * a repository the Target already trusts, so this module renders both forms and
+ * the installation's own `charts.app` picks between them — see
+ * {@link chartSourceKind}. Either way the source object is one the Target
+ * already carries: a Target that carries neither is a non-candidate with a
+ * stated reason (`CHART_SOURCE`), never a deploy that fails late.
  */
 import type { FailureReason } from '../contract.ts';
 import type { KubernetesObject } from './api.ts';
@@ -24,12 +27,35 @@ export const HELM_RELEASE = {
   plural: 'helmreleases',
 } as const;
 
-/** The source object a `HelmRelease` fetches its chart from. */
+/** The source object a repository-sourced `HelmRelease` fetches its chart from. */
 export const GIT_REPOSITORY = {
   apiVersion: 'source.toolkit.fluxcd.io/v1',
   kind: 'GitRepository',
   plural: 'gitrepositories',
 } as const;
+
+/** The source object an artifact-sourced `HelmRelease` fetches its chart from. */
+export const OCI_REPOSITORY = {
+  apiVersion: 'source.toolkit.fluxcd.io/v1',
+  kind: 'OCIRepository',
+  plural: 'ocirepositories',
+} as const;
+
+/**
+ * Which Flux source object a chart reference names.
+ *
+ * The reference **is** the discriminant, and deliberately the only one: an
+ * `oci://` string is an artifact a registry serves by itself and a bare string
+ * is a path only a checkout resolves. A second field stating the kind would be
+ * a second field that can disagree with the first, and the disagreement is
+ * silent — Flux would resolve `oci://…` as a directory inside a repository and
+ * fail every release with a chart-not-found nobody can read as a mis-set kind.
+ */
+export function chartSourceKind(
+  chart: string,
+): typeof GIT_REPOSITORY | typeof OCI_REPOSITORY {
+  return chart.startsWith('oci://') ? OCI_REPOSITORY : GIT_REPOSITORY;
+}
 
 /** What rendering one `HelmRelease` needs beyond the values themselves. */
 export interface HelmReleaseSpec {
@@ -39,8 +65,9 @@ export interface HelmReleaseSpec {
   namespace: string;
   /** Namespace the release's workloads land in. */
   targetNamespace: string;
-  /** The chart's path inside the source repository (§20's manifest value). */
+  /** How this installation names the App chart (§20's manifest value). */
   chart: string;
+  /** The source object in the Target's cluster, of whichever kind it is. */
   sourceRef: { name: string; namespace: string };
   /** Labels every object this adapter writes carries. */
   labels: Record<string, string>;
@@ -57,6 +84,12 @@ export interface HelmReleaseSpec {
  * telling the developer about attempts nobody made.
  */
 export function helmRelease(spec: HelmReleaseSpec): KubernetesObject {
+  const source = chartSourceKind(spec.chart);
+  const sourceRef = {
+    kind: source.kind,
+    name: spec.sourceRef.name,
+    namespace: spec.sourceRef.namespace,
+  };
   return {
     apiVersion: HELM_RELEASE.apiVersion,
     kind: HELM_RELEASE.kind,
@@ -73,17 +106,27 @@ export function helmRelease(spec: HelmReleaseSpec): KubernetesObject {
       // the thing that creates it — a `destroy()` that removed a namespace
       // would take every other Component in it along.
       storageNamespace: spec.targetNamespace,
-      chart: {
-        spec: {
-          chart: spec.chart,
-          reconcileStrategy: 'Revision',
-          sourceRef: {
-            kind: GIT_REPOSITORY.kind,
-            name: spec.sourceRef.name,
-            namespace: spec.sourceRef.namespace,
-          },
-        },
-      },
+      // Flux takes a chart one of two ways and refuses both at once. `chart`
+      // asks it to build a `HelmChart` from a repository source, which is the
+      // only form that can carry a path — and whose `sourceRef` does not accept
+      // `OCIRepository` at all. `chartRef` names a source object that already
+      // holds the artifact, which is the only form an OCI chart has. So the
+      // form follows the reference rather than being a third thing to state.
+      //
+      // Switching an existing release between the two is safe because the write
+      // is a server-side apply under one field manager (`api.ts`): the half this
+      // render drops is pruned in the same request that adds the other.
+      ...(source === OCI_REPOSITORY
+        ? { chartRef: sourceRef }
+        : {
+            chart: {
+              spec: {
+                chart: spec.chart,
+                reconcileStrategy: 'Revision',
+                sourceRef,
+              },
+            },
+          }),
       install: { remediation: { retries: 0 } },
       upgrade: { remediation: { retries: 0 } },
       values: spec.values,

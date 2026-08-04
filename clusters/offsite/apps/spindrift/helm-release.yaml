@@ -3,23 +3,19 @@
 # this namespace exactly as it owns Atlantis's and hub's, which is what resolves
 # a deploy layer that would otherwise have to deploy itself.
 #
-# The installer chart is an independently pinned, extractable OCI artifact, not
-# this installation's repository-local chart path. `oci-repository.yaml` names
-# the artifact; `.github/workflows/spindrift-charts.yml` is what puts it there,
-# packaging and pushing `packages/charts/spindrift` on every merge that touches
-# it. That closes the installer half of the per-Target chart pinning the
-# extraction path wants.
+# Both charts are independently pinned, extractable OCI artifacts rather than
+# repository-local paths. `.github/workflows/spindrift-charts.yml` packages and
+# pushes each on every merge that touches it; `oci-repository.yaml` beside this
+# file is the installer's consumer, and
+# `clusters/base/platform/spindrift-target/oci-repository.yaml` is the App
+# chart's, one per Target cluster. The deploy adapter renders each Component's
+# `HelmRelease` with a `chartRef` at the Target's own copy.
 #
-# The App chart (`manifest.charts.app` below) is not the same yet, and cannot
-# be flipped the same way. Every per-Component `HelmRelease` the kubernetes
-# adapter renders for a deployed App still sources it from `GitRepository/infra`
-# by path: the adapter hardcodes `sourceRef.kind: GitRepository`
-# (apps/spindrift/src/adapters/deploy/kubernetes/flux-helmrelease.ts) and the
-# manifest's delivery `sourceRef` schema carries no `kind` to say otherwise
-# (apps/spindrift/src/config/manifest.schema.ts, `kubernetesDeliverySchema`).
-# Reversing that is a second Flux source per Kubernetes Target, a schema and
-# adapter change, and — because the stored manifest always wins over this
-# declaration — a live `configureInstallation` on top, not a file edit here.
+# **This document seeds; the stored row governs.** Editing `manifest:` below
+# does nothing to an installation that already has a row — `charts.app` and the
+# Targets' `sourceRef` move together through `configureInstallation` with the
+# whole document, and `manifestDivergence` on `getInstallationManifest` is what
+# says whether they landed.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -157,7 +153,14 @@ spec:
         artifactsProject: trusted-builds
         homeVesselProject: bluenose
       charts:
-        app: packages/charts/spindrift-app
+        # The App chart as an artifact, which is what makes every Target's
+        # release independent of a checkout of this repository. The reference
+        # is also the discriminant: an `oci://` value is what makes the deploy
+        # adapter render `chartRef` at each Target's own `OCIRepository`
+        # (`clusters/base/platform/spindrift-target/oci-repository.yaml`)
+        # instead of a `GitRepository` path, so the two Targets' `sourceRef`
+        # below name that object. Flipping this back to a path flips both.
+        app: oci://ghcr.io/jonpulsifer/charts/spindrift-app
       github:
         clientId: Iv1.918d699f36ee7afc
         apiBaseUrl: https://api.github.com
@@ -237,9 +240,13 @@ spec:
             delivery:
               flavour: flux-helmrelease
               namespace: spindrift-apps
+              # The App chart's `OCIRepository`, in this Target's own delivery
+              # namespace — `clusters/base/platform/spindrift-target` puts one
+              # in every Target cluster. Which kind this names follows from
+              # `charts.app` above and is never restated here.
               sourceRef:
-                name: infra
-                namespace: flux-system
+                name: spindrift-app
+                namespace: spindrift-apps
             namespace: spindrift-apps
             # §7's operator class: what the App chart needs about *this*
             # cluster. Spindrift never renders into it.
@@ -293,9 +300,13 @@ spec:
             delivery:
               flavour: flux-helmrelease
               namespace: spindrift-apps
+              # The App chart's `OCIRepository`, in this Target's own delivery
+              # namespace — `clusters/base/platform/spindrift-target` puts one
+              # in every Target cluster. Which kind this names follows from
+              # `charts.app` above and is never restated here.
               sourceRef:
-                name: infra
-                namespace: flux-system
+                name: spindrift-app
+                namespace: spindrift-apps
             namespace: spindrift-apps
             chartValues:
               platform:
