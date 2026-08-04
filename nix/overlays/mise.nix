@@ -22,7 +22,7 @@ let
   #     https://github.com/jdx/mise/releases/download/v<ver>/mise-v<ver>-linux-x64.tar.gz
   # (nix hash to-sri --type sha256 <h> gives the `sha256-...` SRI form.)
   # renovate: datasource=github-releases depName=jdx/mise
-  version = "2026.7.18";
+  version = "2026.8.0";
   arch =
     if final.stdenv.hostPlatform.isAarch64 then
       "arm64"
