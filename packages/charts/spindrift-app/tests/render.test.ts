@@ -364,19 +364,24 @@ describe('the route', () => {
             port: 80,
           },
           http: {
-            // Exactly two, and the exactness is the point. `allowedHeaders`
+            // Exactly one, and the exactness is the point. `allowedHeaders`
             // permits a header through to oauth2-proxy; it does not create one.
-            // `x-forwarded-proto` is here because Envoy is the hop that writes
-            // it, not because the check reads it — every `x-forwarded-*` read
-            // is gated on `CanTrustForwardedHeaders`, false from the shim's
-            // `127.0.0.1`. `x-forwarded-host` and `x-forwarded-uri` are absent
-            // because only a client could set them, and `x-forwarded-uri` is
-            // read straight through `GetRequestURI` with no `IsForwardedRequest`
-            // comparison — it chose the path the sign-in returned to.
+            // `cookie` carries the session, which is all the check reads.
+            //
+            // No `x-forwarded-*` is listed, and this list is the only thing
+            // that keeps the family out of the check — it applies whichever
+            // backend `platform.externalAuth` names. oauth2-proxy's own gate
+            // (`CanTrustForwardedHeaders`, false while `reverse-proxy` is
+            // unset) lives in `clusters/base/apps/oauth2-proxy/helm-release.yaml`
+            // and is one flag from opening. Past it, `x-forwarded-host` naming
+            // a sibling host flips `IsForwardedRequest`, `x-forwarded-uri`
+            // picks the path on it through `GetRequestURI` with no such
+            // comparison, and `x-forwarded-proto` is what makes the pair a
+            // valid absolute URL rather than a rejected `://host/path`.
             // `authorization` is read by no provider this deployment
             // configures. The template comment carries the measurement, this
             // carries the assertion.
-            allowedHeaders: ['cookie', 'x-forwarded-proto'],
+            allowedHeaders: ['cookie'],
             allowedResponseHeaders: [
               'set-cookie',
               'x-auth-request-email',

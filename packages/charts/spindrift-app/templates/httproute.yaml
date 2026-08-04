@@ -19,30 +19,41 @@ publishes: external-dns's `gateway-httproute` source would otherwise emit its
 own endpoint for these same hostnames, targeting the parent Gateway's status
 address — the same name claimed twice, at two record types, by two sources.
 
-**`allowedHeaders` permits, it does not create.** The two it names are what
-oauth2-proxy is shown of the original request, on top of the `Host`, method and
-path Envoy's ext_authz client includes on its own. `cookie` carries the session
-the check is about. Cilium's Envoy composes two headers of the `x-forwarded-*`
-family: it sets `x-forwarded-proto`, overwriting whatever the client sent, and
-appends to `x-forwarded-for`. `x-forwarded-proto` is listed because Envoy is the
-hop that writes it, not because the check depends on it — every `x-forwarded-*`
-read in oauth2-proxy goes through `CanTrustForwardedHeaders`, and the check now
-arrives from `127.0.0.1`, which is outside `trusted-proxy-ip` on every replica.
-`authorization` is unlisted for a different reason — no provider this deployment
-configures reads it, with neither an htpasswd file nor bearer-token skipping in
-play.
+**`allowedHeaders` permits, it does not create.** `cookie` is the only header it
+names, on top of the `Host`, method and path Envoy's ext_authz client includes
+on its own: the session is the whole of what the check reads. `authorization` is
+unlisted because no provider this deployment configures reads it, with neither
+an htpasswd file nor bearer-token skipping in play.
 
-`x-forwarded-host` and `x-forwarded-uri` are absent because permitting them
-opened something, not because they did nothing. No hop sets either, so only a
-client could, and the two are read differently: `x-forwarded-host` is inert on
-its own — `IsForwardedRequest` needs `req.Host != GetRequestHost(req)`, and a
-header holding this Component's own hostname equals the `Host` beside it — but
-`x-forwarded-uri` is read straight through `GetRequestURI` with no such
-comparison, so a client did choose the path the sign-in returned to, on
-whichever replica's source address fell inside `trusted-proxy-ip`. Measured
-both ways, not reasoned. The shim closes the gate rather than the header:
-`CanTrustForwardedHeaders` is now false for every replica. `?rd=` needs no
-`allowedHeaders` entry at all and stays open.
+**No `x-forwarded-*` header is listed, and this list is the only thing that
+keeps the family out of the check.** It holds whichever backend
+`platform.externalAuth` names, because it is this filter that decides what
+crosses, not the backend — the same list guards a check that lands on
+oauth2-proxy's own port and one that goes through the ext_authz shim beside it.
+Cilium's Envoy does compose two of them on the request itself, setting
+`x-forwarded-proto` over whatever the client sent and appending to
+`x-forwarded-for`; forwarding either buys the check nothing. oauth2-proxy has
+its own gate — every `x-forwarded-*` read goes through
+`CanTrustForwardedHeaders`, which returns false on `!s.ReverseProxy` before it
+looks at an address, because
+`clusters/base/apps/oauth2-proxy/helm-release.yaml` sets no `reverse-proxy` —
+but that is one gate, in a file this chart does not own, one flag from opening.
+The omission here is the half that does not move.
+
+All three were measured against a replica that did trust its caller, and the
+result is why none of them is listed. `x-forwarded-host` is the dangerous one
+rather than the inert one: `IsForwardedRequest` fires on
+`req.Host != GetRequestHost(req)`, so a value naming *another* host in the zone
+— not this Component's own, which is the one value an attacker has no use for —
+makes `getXForwardedHeadersRedirect` compose where the sign-in returns to, and
+`whitelist-domain` accepts any sibling in the zone. `x-forwarded-uri` picks the
+path on that origin, read straight through `GetRequestURI` with no such
+comparison. `x-forwarded-proto` is what makes the pair a *valid* absolute URL:
+`GetRequestProto` otherwise answers `req.URL.Scheme`, empty on a server request,
+and the resulting `://host/path` fails `validateRedirect` and falls back to the
+bare path. Forged host and proto together returned an absolute
+`https://<sibling>/…` as the sign-in state; host alone stayed a bare path.
+`?rd=` needs no `allowedHeaders` entry at all and stays open.
 
 `x-auth-request-redirect` is the header oauth2-proxy honours without any trust
 gate, and its absence here is load-bearing rather than incidental: a browser
@@ -101,7 +112,6 @@ spec:
             http:
               allowedHeaders:
                 - cookie
-                - x-forwarded-proto
               allowedResponseHeaders:
                 - set-cookie
                 - x-auth-request-email
