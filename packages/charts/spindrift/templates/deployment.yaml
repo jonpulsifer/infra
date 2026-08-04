@@ -21,17 +21,28 @@ metadata:
   labels:
     {{- include "spindrift.labels" $top | nindent 4 }}
     app.kubernetes.io/component: {{ $process.name }}
-  {{- if or $top.Values.database.enabled $top.Values.envFromSecret }}
   annotations:
     {{- if $top.Values.database.enabled }}
     app.kubernetes.io/database: {{ include "spindrift.databaseName" $top }}
     {{- end }}
+    # `NODE_EXTRA_CA_CERTS` is read once, at process start. A kubelet refresh of
+    # the projected bundle changes the file and nothing else, so a corrected
+    # trust store reaches the mount and never reaches the process holding the
+    # old one — and it misfires during a CA rotation, when every symptom already
+    # reads as a wrong bundle rather than an old process. Reloader turns the
+    # ConfigMap change into the restart that makes the correction take.
+    #
+    # The ConfigMap is named rather than left to `reloader.stakater.com/auto`
+    # because this is the one the pod reaches through a projected volume, and
+    # because the name is often a bundle this release does not own — including
+    # the `kube-root-ca.crt` default, which a cluster CA rotation rewrites in
+    # place with nothing else to roll these pods.
+    configmap.reloader.stakater.com/reload: {{ $top.Values.serviceAccount.token.caConfigMap | quote }}
     {{- with $top.Values.envFromSecret }}
     # A rotated token is a Secret change; Reloader turns it into the restart the
     # process needs to read the new value.
     secret.reloader.stakater.com/reload: {{ . | quote }}
     {{- end }}
-  {{- end }}
 spec:
   replicas: {{ $process.replicas }}
   selector:
@@ -39,21 +50,11 @@ spec:
       {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
   template:
     metadata:
-      {{- if or $top.Values.manifest $top.Values.serviceAccount.token.caBundle }}
+      {{- if $top.Values.manifest }}
       annotations:
-        {{- if $top.Values.manifest }}
         # Both processes read the manifest once, at start, so a ConfigMap change
         # has to become a rollout.
         checksum/manifest: {{ toYaml $top.Values.manifest | sha256sum }}
-        {{- end }}
-        {{- with $top.Values.serviceAccount.token.caBundle }}
-        # And `NODE_EXTRA_CA_CERTS` once, at process start, for the same reason:
-        # a bundle that reaches only the mount is a correction the running
-        # process never sees. The digest is over the bundle's own text — the
-        # exact string ca-bundle.yaml puts in the ConfigMap this pod projects —
-        # so it moves when and only when the trust store does.
-        checksum/ca-bundle: {{ . | sha256sum }}
-        {{- end }}
       {{- end }}
       labels:
         {{- include "spindrift.labels" $top | nindent 8 }}
@@ -206,7 +207,7 @@ spec:
                   expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
                   path: token
               - configMap:
-                  name: {{ include "spindrift.caConfigMapName" $top }}
+                  name: {{ $top.Values.serviceAccount.token.caConfigMap }}
                   items:
                     - key: ca.crt
                       path: ca.crt

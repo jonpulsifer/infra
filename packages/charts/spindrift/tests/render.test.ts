@@ -489,17 +489,13 @@ describe('the relying party and the front door cannot disagree', () => {
 });
 
 describe('the trust store', () => {
-  const federated = (
-    token: Record<string, unknown> = {},
-    extra: Record<string, unknown> = {},
-  ) => ({
+  const federated = (caConfigMap?: string) => ({
     reconciler: { enabled: true },
-    ...extra,
     serviceAccount: {
       token: {
         gcpAudience:
           '//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite',
-        ...token,
+        ...(caConfigMap === undefined ? {} : { caConfigMap }),
       },
     },
   });
@@ -512,17 +508,6 @@ describe('the trust store', () => {
         (volume: { name: string }) => volume.name === 'federated-identity',
       ).projected.sources;
 
-  const caChecksums = (objects: RenderedObject[]) =>
-    objects
-      .filter((object) => object.kind === 'Deployment')
-      .map(
-        (object) =>
-          object.spec.template.metadata.annotations?.['checksum/ca-bundle'],
-      );
-
-  const pem = (body: string) =>
-    `-----BEGIN CERTIFICATE-----\n${body}\n-----END CERTIFICATE-----\n`;
-
   test('the projected ca.crt follows the configured ConfigMap', async () => {
     // `NODE_EXTRA_CA_CERTS` names exactly one file and a projected volume
     // cannot merge two sources onto one path, so an installation holding a
@@ -530,22 +515,54 @@ describe('the trust store', () => {
     // Before this was configurable, `folly` failed all six prerequisites with
     // "unable to verify the first certificate": the in-cluster
     // `kube-root-ca.crt` carries this cluster's root and nothing else.
-    const objects = await render(
-      federated({ caConfigMap: 'somebody-elses-bundle' }),
-    );
+    const objects = await render(federated('spindrift-ca-bundle'));
     for (const name of ['spindrift-web', 'spindrift-reconciler']) {
       expect(trustSource(objects, name)).toContainEqual({
         configMap: {
-          name: 'somebody-elses-bundle',
+          name: 'spindrift-ca-bundle',
           items: [{ key: 'ca.crt', path: 'ca.crt' }],
         },
       });
     }
-    // A ConfigMap this chart only names is one it cannot hash, so there is
-    // nothing honest to put on the pod template. Deliberately uncovered rather
-    // than covered by a digest of the name, which never changes and would pass
-    // every test while rolling nothing.
-    expect(caChecksums(objects)).toEqual([undefined, undefined]);
+  });
+
+  // The ConfigMap each Deployment actually projects at `ca.crt`, read back out
+  // of the rendered pod spec. The Reloader annotation is checked against this
+  // rather than against a literal, because the failure being guarded is the two
+  // disagreeing — an annotation naming *a* ConfigMap proves nothing.
+  const projectedBundle = (objects: RenderedObject[], name: string) =>
+    trustSource(objects, name)?.find(
+      (source: { configMap?: { items?: { path: string }[] } }) =>
+        source.configMap?.items?.some((item) => item.path === 'ca.crt'),
+    )?.configMap.name;
+
+  const reloadsFor = (objects: RenderedObject[], name: string) =>
+    objects
+      .filter((object) => object.kind === 'Deployment')
+      .find((object) => object.metadata.name === name)?.metadata.annotations?.[
+      'configmap.reloader.stakater.com/reload'
+    ];
+
+  test('both processes roll when the bundle they project changes', async () => {
+    // The criterion that decides whether the mechanism is real. `NODE_EXTRA_CA_
+    // CERTS` is read once at process start, so a kubelet refresh of the mounted
+    // file is a correction the running process never sees — and the annotation
+    // has to name the ConfigMap the pod actually projects, on *both*
+    // Deployments. A bundle somebody else owns counts: `kube-root-ca.crt` is
+    // rewritten in place by a cluster CA rotation, and nothing else rolls these
+    // pods for it. Offsite's CA adoption is the recorded proof of that — every
+    // prerequisite failed "unable to verify the first certificate" against a
+    // ConfigMap that was already correct.
+    for (const values of [federated(), federated('spindrift-ca-bundle')]) {
+      const objects = await render(values);
+      // Both names, so the half-fix that leaves a stale reconciler holding the
+      // old trust store fails here. `toBeString` so an unrendered pod spec
+      // cannot pass this by making both sides undefined.
+      for (const name of ['spindrift-web', 'spindrift-reconciler']) {
+        expect(projectedBundle(objects, name)).toBeString();
+        expect(reloadsFor(objects, name)).toBe(projectedBundle(objects, name));
+      }
+    }
   });
 
   test('it defaults to the cluster’s own published root', async () => {
@@ -559,71 +576,5 @@ describe('the trust store', () => {
         items: [{ key: 'ca.crt', path: 'ca.crt' }],
       },
     });
-  });
-
-  test('a carried bundle is projected from the ConfigMap this chart renders', async () => {
-    const bundle = pem('AAAA') + pem('BBBB');
-    const objects = await render(federated({ caBundle: bundle }));
-
-    // Byte for byte: the digest below is over the value, so a ConfigMap that
-    // mangles it — a chomped final newline, a re-indented block — would mount
-    // one string and attest another.
-    expect(
-      one(objects, 'ConfigMap', 'spindrift-trust-bundle').data?.['ca.crt'],
-    ).toBe(bundle);
-    for (const name of ['spindrift-web', 'spindrift-reconciler']) {
-      expect(trustSource(objects, name)).toContainEqual({
-        configMap: {
-          name: 'spindrift-trust-bundle',
-          items: [{ key: 'ca.crt', path: 'ca.crt' }],
-        },
-      });
-    }
-  });
-
-  test('rolls both processes when, and only when, the bundle’s content changes', async () => {
-    // The one criterion that decides whether the mechanism is real. A checksum
-    // computed over the wrong thing — the ConfigMap's *name*, the whole values
-    // document, a constant — passes "the annotation exists" and fails silently
-    // in the only case it was written for. So: change the bundle and nothing
-    // else, and the digest has to move; change everything else and not the
-    // bundle, and it has to hold.
-    const original = pem('AAAA');
-    const corrected = original + pem('BBBB');
-
-    const before = caChecksums(await render(federated({ caBundle: original })));
-    const after = caChecksums(await render(federated({ caBundle: corrected })));
-    // Same bundle, a different release in every other respect.
-    const unrelated = caChecksums(
-      await render(
-        federated(
-          { caBundle: original, expirationSeconds: 600 },
-          {
-            web: { replicas: 3 },
-            sandbox: true,
-            manifest: { installation: 'elsewhere' },
-          },
-        ),
-      ),
-    );
-
-    expect(before).toHaveLength(2);
-    for (const checksum of before) expect(checksum).toBeString();
-    expect(after[0]).not.toBe(before[0]);
-    expect(after[1]).not.toBe(before[1]);
-    expect(unrelated).toEqual(before);
-  });
-
-  test('the digest is of the text the pod actually mounts', async () => {
-    // The cross-check the two tests above cannot make on their own: they prove
-    // the annotation moves with the value, not that it describes the file. This
-    // hashes what the ConfigMap carries and demands the pod template agree —
-    // the guard against a digest taken over a *different* copy of the bundle.
-    const objects = await render(federated({ caBundle: pem('CCCC') }));
-    const mounted =
-      one(objects, 'ConfigMap', 'spindrift-trust-bundle').data?.['ca.crt'] ??
-      '';
-    const digest = new Bun.CryptoHasher('sha256').update(mounted).digest('hex');
-    expect(caChecksums(objects)).toEqual([digest, digest]);
   });
 });
