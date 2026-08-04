@@ -526,6 +526,45 @@ describe('the trust store', () => {
     }
   });
 
+  // The ConfigMap each Deployment actually projects at `ca.crt`, read back out
+  // of the rendered pod spec. The Reloader annotation is checked against this
+  // rather than against a literal, because the failure being guarded is the two
+  // disagreeing — an annotation naming *a* ConfigMap proves nothing.
+  const projectedBundle = (objects: RenderedObject[], name: string) =>
+    trustSource(objects, name)?.find(
+      (source: { configMap?: { items?: { path: string }[] } }) =>
+        source.configMap?.items?.some((item) => item.path === 'ca.crt'),
+    )?.configMap.name;
+
+  const reloadsFor = (objects: RenderedObject[], name: string) =>
+    objects
+      .filter((object) => object.kind === 'Deployment')
+      .find((object) => object.metadata.name === name)?.metadata.annotations?.[
+      'configmap.reloader.stakater.com/reload'
+    ];
+
+  test('both processes roll when the bundle they project changes', async () => {
+    // The criterion that decides whether the mechanism is real. `NODE_EXTRA_CA_
+    // CERTS` is read once at process start, so a kubelet refresh of the mounted
+    // file is a correction the running process never sees — and the annotation
+    // has to name the ConfigMap the pod actually projects, on *both*
+    // Deployments. A bundle somebody else owns counts: `kube-root-ca.crt` is
+    // rewritten in place by a cluster CA rotation, and nothing else rolls these
+    // pods for it. Offsite's CA adoption is the recorded proof of that — every
+    // prerequisite failed "unable to verify the first certificate" against a
+    // ConfigMap that was already correct.
+    for (const values of [federated(), federated('spindrift-ca-bundle')]) {
+      const objects = await render(values);
+      // Both names, so the half-fix that leaves a stale reconciler holding the
+      // old trust store fails here. `toBeString` so an unrendered pod spec
+      // cannot pass this by making both sides undefined.
+      for (const name of ['spindrift-web', 'spindrift-reconciler']) {
+        expect(projectedBundle(objects, name)).toBeString();
+        expect(reloadsFor(objects, name)).toBe(projectedBundle(objects, name));
+      }
+    }
+  });
+
   test('it defaults to the cluster’s own published root', async () => {
     // An installation whose Targets are all in-cluster needs nothing else, and
     // must not be made to declare a bundle to keep working.

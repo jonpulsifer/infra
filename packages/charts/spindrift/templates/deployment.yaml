@@ -21,17 +21,28 @@ metadata:
   labels:
     {{- include "spindrift.labels" $top | nindent 4 }}
     app.kubernetes.io/component: {{ $process.name }}
-  {{- if or $top.Values.database.enabled $top.Values.envFromSecret }}
   annotations:
     {{- if $top.Values.database.enabled }}
     app.kubernetes.io/database: {{ include "spindrift.databaseName" $top }}
     {{- end }}
+    # `NODE_EXTRA_CA_CERTS` is read once, at process start. A kubelet refresh of
+    # the projected bundle changes the file and nothing else, so a corrected
+    # trust store reaches the mount and never reaches the process holding the
+    # old one — and it misfires during a CA rotation, when every symptom already
+    # reads as a wrong bundle rather than an old process. Reloader turns the
+    # ConfigMap change into the restart that makes the correction take.
+    #
+    # The ConfigMap is named rather than left to `reloader.stakater.com/auto`
+    # because this is the one the pod reaches through a projected volume, and
+    # because the name is often a bundle this release does not own — including
+    # the `kube-root-ca.crt` default, which a cluster CA rotation rewrites in
+    # place with nothing else to roll these pods.
+    configmap.reloader.stakater.com/reload: {{ $top.Values.serviceAccount.token.caConfigMap | quote }}
     {{- with $top.Values.envFromSecret }}
     # A rotated token is a Secret change; Reloader turns it into the restart the
     # process needs to read the new value.
     secret.reloader.stakater.com/reload: {{ . | quote }}
     {{- end }}
-  {{- end }}
 spec:
   replicas: {{ $process.replicas }}
   selector:
