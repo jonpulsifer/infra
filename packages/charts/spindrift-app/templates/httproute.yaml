@@ -22,9 +22,12 @@ address — the same name claimed twice, at two record types, by two sources.
 **`allowedHeaders` permits, it does not create.** The two it names are what
 oauth2-proxy is shown of the original request, on top of the `Host`, method and
 path Envoy's ext_authz client includes on its own. `cookie` carries the session
-the check is about. `x-forwarded-proto` is the one header of its family this
-gateway composes — Cilium's Envoy sets it and overwrites whatever the client
-sent, beside the `x-forwarded-for` it appends to.
+the check is about. Cilium's Envoy composes two headers of the `x-forwarded-*`
+family: it sets `x-forwarded-proto`, overwriting whatever the client sent, and
+appends to `x-forwarded-for`. The check needs the first and has no use for the
+second. `authorization` is unlisted for a different reason — no provider this
+deployment configures reads it, with neither an htpasswd file nor bearer-token
+skipping in play.
 
 Nothing sets `x-forwarded-host` or `x-forwarded-uri`, and oauth2-proxy reads
 neither to any effect: it treats a request as forwarded only when

@@ -366,12 +366,13 @@ describe('the route', () => {
           http: {
             // Exactly two, and the exactness is the point. `allowedHeaders`
             // permits a header through to oauth2-proxy; it does not create one.
-            // `x-forwarded-proto` is the one header of its family Cilium's
-            // Envoy composes; `x-forwarded-host` and `x-forwarded-uri` reach
-            // the proxy only if a client supplies them and change nothing when
-            // it does, and `authorization` is read by no provider this
-            // deployment configures. The template comment carries the
-            // measurement, this carries the assertion.
+            // Cilium's Envoy composes `x-forwarded-proto` and appends to
+            // `x-forwarded-for`, and the check needs only the first;
+            // `x-forwarded-host` and `x-forwarded-uri` reach the proxy only if
+            // a client supplies them and change nothing when it does; and
+            // `authorization` is read by no provider this deployment
+            // configures. The template comment carries the measurement, this
+            // carries the assertion.
             allowedHeaders: ['cookie', 'x-forwarded-proto'],
             allowedResponseHeaders: [
               'set-cookie',
