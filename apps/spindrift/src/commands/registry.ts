@@ -49,6 +49,10 @@ import {
   setComponentReachInput,
 } from './components/reach.ts';
 import { runComponent, runComponentInput } from './components/run.ts';
+import {
+  setComponentSchedule,
+  setComponentScheduleInput,
+} from './components/schedule.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
 import {
@@ -209,6 +213,10 @@ export const commandRegistry = {
     handler: setComponentReach,
   },
   runComponent: { input: runComponentInput, handler: runComponent },
+  setComponentSchedule: {
+    input: setComponentScheduleInput,
+    handler: setComponentSchedule,
+  },
   setConfig: { input: setConfigInput, handler: setConfig },
   configureInstallation: {
     input: configureInstallationInput,

@@ -45,7 +45,7 @@ const componentName = z
  * parser here would be a second implementation of something core does not run,
  * and the two would eventually disagree about a Sunday.
  */
-const cronExpression = z
+export const cronExpression = z
   .string()
   .trim()
   .regex(

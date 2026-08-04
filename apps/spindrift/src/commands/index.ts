@@ -30,6 +30,7 @@ export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
 export { setComponentReach } from './components/reach.ts';
 export { runComponent } from './components/run.ts';
+export { setComponentSchedule } from './components/schedule.ts';
 export { replaceConfig } from './config/replace.ts';
 export { setConfig } from './config/set.ts';
 export {
