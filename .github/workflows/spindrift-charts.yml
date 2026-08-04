@@ -1,0 +1,79 @@
+name: spindrift-charts
+
+# Publishes the Spindrift installer chart as an independently pinned,
+# extractable OCI artifact instead of a path this repository's own GitRepository
+# source has to be checked out to reach. See
+# clusters/offsite/apps/spindrift/oci-repository.yaml for the consumer and
+# packages/charts/spindrift/Chart.yaml for the version this pushes.
+#
+# packages/charts/spindrift-app is linted and packaged here too, so a broken
+# chart is caught before merge, but it is not pushed: the kubernetes deploy
+# adapter that renders every App's HelmRelease still hardcodes a GitRepository
+# source (apps/spindrift/src/adapters/deploy/kubernetes/flux-helmrelease.ts),
+# so a pushed artifact nothing consumes would just be dead weight in the
+# registry — see the header comment on
+# clusters/offsite/apps/spindrift/helm-release.yaml for the rest of that gap.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/charts/spindrift/**'
+      - 'packages/charts/spindrift-app/**'
+      - '.github/workflows/spindrift-charts.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'packages/charts/spindrift/**'
+      - 'packages/charts/spindrift-app/**'
+      - '.github/workflows/spindrift-charts.yml'
+
+# Cancel superseded runs on the same ref instead of letting them pile up.
+concurrency:
+  group: spindrift-charts-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install helm
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        with:
+          install_args: helm
+      - name: Lint charts
+        run: |
+          set -euo pipefail
+          helm lint packages/charts/spindrift
+          helm lint packages/charts/spindrift-app
+      - name: Package charts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          helm package packages/charts/spindrift -d dist
+          helm package packages/charts/spindrift-app -d dist
+      - name: Login to GitHub Container Registry
+        # Only needed for the push (on main); PRs lint and package to validate
+        # without pushing, matching the pattern containers.yml uses for images —
+        # a fork's PR has no access to this credential either way.
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - name: Push installer chart
+        # Only the installer chart: see the workflow header for why
+        # spindrift-app is packaged above but stops there. Named explicitly
+        # rather than a `dist/spindrift-*.tgz` glob, which `spindrift-app-*.tgz`
+        # also satisfies.
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          version="$(grep '^version:' packages/charts/spindrift/Chart.yaml | awk '{print $2}')"
+          helm push "dist/spindrift-${version}.tgz" oci://ghcr.io/jonpulsifer/charts
