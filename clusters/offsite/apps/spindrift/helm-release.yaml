@@ -3,24 +3,39 @@
 # this namespace exactly as it owns Atlantis's and hub's, which is what resolves
 # a deploy layer that would otherwise have to deploy itself.
 #
-# The chart is sourced from GitRepository/infra rather than OCI. That costs the
-# per-Target chart pinning and leaves the extraction path unexercised; reversing
-# it is one workflow plus a source swap, and must happen before extraction.
+# The installer chart is an independently pinned, extractable OCI artifact, not
+# this installation's repository-local chart path. `oci-repository.yaml` names
+# the artifact; `.github/workflows/spindrift-charts.yml` is what puts it there,
+# packaging and pushing `packages/charts/spindrift` on every merge that touches
+# it. That closes the installer half of the per-Target chart pinning the
+# extraction path wants.
+#
+# The App chart (`manifest.charts.app` below) is not the same yet, and cannot
+# be flipped the same way. Every per-Component `HelmRelease` the kubernetes
+# adapter renders for a deployed App still sources it from `GitRepository/infra`
+# by path: the adapter hardcodes `sourceRef.kind: GitRepository`
+# (apps/spindrift/src/adapters/deploy/kubernetes/flux-helmrelease.ts) and the
+# manifest's delivery `sourceRef` schema carries no `kind` to say otherwise
+# (apps/spindrift/src/config/manifest.schema.ts, `kubernetesDeliverySchema`).
+# Reversing that is a second Flux source per Kubernetes Target, a schema and
+# adapter change, and — because the stored manifest always wins over this
+# declaration — a live `configureInstallation` on top, not a file edit here.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: spindrift
   namespace: spindrift
+  labels:
+    # clusters/offsite/apps/kustomization.yaml patches `chart.spec.interval`
+    # onto every HelmRelease that is *not* labeled this way — that field only
+    # exists on a GitRepository/HelmRepository-sourced chart, and a chartRef
+    # release like this one has no `chart.spec` for the patch to land on.
+    source.toolkit.fluxcd.io/kind: OCIRepository
 spec:
   interval: 5m
-  chart:
-    spec:
-      chart: packages/charts/spindrift
-      reconcileStrategy: Revision
-      sourceRef:
-        kind: GitRepository
-        name: infra
-        namespace: flux-system
+  chartRef:
+    kind: OCIRepository
+    name: spindrift
   values:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
