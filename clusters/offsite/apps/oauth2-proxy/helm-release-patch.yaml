@@ -7,15 +7,43 @@ spec:
   values:
     extraArgs:
       redirect-url: https://oauth2.${SPINDRIFT_DOMAIN}/oauth2/callback
-      # The session cookie is host-only, for whatever x-forwarded-host the
-      # filter passed. A zone-wide cookie would be sent to an `auth: none` App
-      # on this same zone — handing the token that unlocks every authenticated
-      # App to the one workload deliberately exposed.
+      # Both cookies are scoped to this zone, because the sign-in spans two
+      # hosts and a host-only cookie cannot cross between them.
       #
-      # Explicitly null rather than absent. `extraArgs` is a map, so a strategic
-      # merge that simply omits the key merges the base's value straight through:
-      # this overlay read as "no cookie-domain" and shipped `.${SECRET_DOMAIN}`,
-      # the *other* cluster's apex, on every session cookie offsite issued.
-      cookie-domain: null
-      # whitelist-domain still permits the return trip after sign-in.
+      # The ExternalAuth filter on an App's route
+      # (`packages/charts/spindrift-app/templates/httproute.yaml`) sets no
+      # `http.path`, so oauth2-proxy runs its whole flow at the App's own host:
+      # it mints the provider redirect there and writes the CSRF cookie there.
+      # `redirect-url` above pins the callback to one host, which is all the
+      # GitHub OAuth App registers. So the two halves land on different hosts —
+      # the CSRF cookie is written at the App, the callback is served at
+      # `oauth2.${SPINDRIFT_DOMAIN}`, and a host-only cookie is unreadable
+      # there. The proxy finds no CSRF token and answers the operator with
+      #
+      #   Login Failed: Unable to find a valid CSRF token. Please try again.
+      #
+      # after they have already approved on github.com. The session cookie has
+      # the mirror-image problem: minted at the callback host, it is not sent
+      # back to the App, so the filter denies again and the browser loops.
+      #
+      # What this costs. A zone-scoped cookie is sent to every App on this zone,
+      # including the `auth: none` ones — the workloads deliberately exposed
+      # without a gate now receive the session token that unlocks every
+      # authenticated App beside them. That is not hypothetical; `auth: none`
+      # Apps share this zone today. It is an accepted risk, not a refuted one.
+      #
+      # Making it host-only again needs the two halves on one host: either
+      # unauthenticated Apps move off this zone, so the cookie can be scoped to
+      # a parent only authenticated Apps sit under, or a callback is registered
+      # per App hostname — and a GitHub OAuth App registers exactly one.
+      #
+      # Explicitly written rather than absent. `extraArgs` is a map, so a
+      # strategic merge that simply omits the key merges the base's value
+      # straight through: this overlay once read as "no cookie-domain" and
+      # shipped `.${SECRET_DOMAIN}`, the *other* cluster's apex, on every
+      # session cookie offsite issued. Deleting this line does not restore a
+      # host-only cookie — it scopes offsite's cookies to folly's domain.
+      # `.github/scripts/render-cluster-apps.sh` fails on both mistakes.
+      cookie-domain: .${SPINDRIFT_DOMAIN}
+      # whitelist-domain permits the return trip after sign-in.
       whitelist-domain: .${SPINDRIFT_DOMAIN}
