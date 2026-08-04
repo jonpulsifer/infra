@@ -80,6 +80,18 @@ const built = await buildClient();
 const DIST = join(APP, 'dist');
 
 describe('the client bundle', () => {
+  test('does not depend on the Bun runtime in a browser', async () => {
+    const files = await readdir(DIST);
+    const entry = files.find((file) => file.endsWith('.js'));
+    expect(entry).toBeDefined();
+    const text = await Bun.file(join(DIST, entry!)).text();
+
+    // `Bun.build` leaves unknown globals intact. A `Bun.*` call can therefore
+    // compile and pass Bun-hosted unit tests, then throw `Bun is not defined`
+    // when a browser reaches it. The client must use browser APIs only.
+    expect(text).not.toMatch(/\bBun\./);
+  });
+
   test('carries no fingerprint of the command layer it used to pull in', async () => {
     const files = await readdir(DIST);
     const entry = files.find((file) => file.endsWith('.js'));

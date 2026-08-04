@@ -284,7 +284,10 @@ function oneOrMany(
   const single = variants.find((variant) => variant.node.kind !== 'array');
   if (list === undefined || single === undefined) return null;
   if (list.node.kind !== 'array') return null;
-  return Bun.deepEquals(list.node.element, single.node, true)
+  // FormNodes are plain, acyclic data built above in one canonical property
+  // order, so their JSON representation is their structural identity. Keep
+  // this browser-owned module independent of Bun's server runtime.
+  return JSON.stringify(list.node.element) === JSON.stringify(single.node)
     ? list.node
     : null;
 }
