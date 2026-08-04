@@ -22,7 +22,10 @@
  * bookkeeping was being tidied would be the most destructive possible reading of
  * the request. What the operator gets instead is the list, before they confirm
  * and again afterwards, because after the rows are gone that list is the only
- * record that those workloads exist.
+ * record that those workloads exist — and each entry says whether it keeps
+ * *acting*, not merely sitting: a stranded service is inert, but a stranded
+ * `kind: job` Component with a `schedule` bills on every tick, forever, in a
+ * vessel project nobody is watching (`StrandedWorkload.firing`).
  *
  * **It does reap the config store**, and that is not the same thing. §10's
  * store items are per-key material this App put there and nothing else will ever
@@ -73,6 +76,18 @@ export interface StrandedWorkload {
   /** Where it is still running — the operator has to go there by hand. */
   readonly target: string;
   readonly url: string | null;
+  /**
+   * Whether this stranded workload keeps *acting* rather than merely sitting.
+   *
+   * A stranded service is inert until something calls it; a stranded
+   * `kind: job` Component with a `schedule` has a Cloud Scheduler job in front
+   * of it that fires on every tick forever, billed in a vessel project nobody
+   * is watching — the cost this review exists to make visible before the rows
+   * that name it are gone. Derived from the Component, not the Deploy: the
+   * cadence lives on `components.schedule`, and it is what fires regardless of
+   * which Build is live.
+   */
+  readonly firing: boolean;
 }
 
 /** What deleting this App does, whether or not it has been done yet. */
@@ -174,6 +189,8 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
             url: deploys.url,
             component: components.name,
             target: targets.name,
+            componentKind: components.kind,
+            schedule: components.schedule,
           })
           .from(deploys)
           .innerJoin(components, eq(deploys.componentId, components.id))
@@ -223,6 +240,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
       component: deploy.component,
       target: deploy.target,
       url: deploy.url,
+      firing: deploy.componentKind === 'job' && deploy.schedule !== null,
     })),
     detachedDatastores: attached.map((datastore) => datastore.name),
     configKeys: pinned.map(
