@@ -972,7 +972,20 @@ function WorkspaceScreen({
         execution: following,
       },
       (page) => {
-        if (page.kind !== 'stream' || page.entries.length === 0) return;
+        // The two non-stream frames are exactly the cases criterion 4 fails in
+        // — `pods/log` not granted, the pods garbage collected, Cloud Logging
+        // refusing — and dropping them made those look identical to a run that
+        // printed nothing. They are the only thing this pane has to say, so
+        // they replace it rather than being appended to it.
+        if (page.kind === 'none') {
+          setRunLines([{ text: page.because }]);
+          return;
+        }
+        if (page.kind === 'error') {
+          setRunLines([{ text: page.message }]);
+          return;
+        }
+        if (page.entries.length === 0) return;
         setRunLines((lines) => [
           ...lines,
           ...page.entries.map((entry) => ({

@@ -60,11 +60,16 @@ export interface FakeCloudRunOptions {
   /** The admission policy this project reports, or `null` for none at all. */
   readonly admissionPolicy?: Record<string, unknown> | null;
   /**
-   * Runs each Job already has, newest first, by job id.
+   * Runs each Job already has, by job id, **in the order the API will list
+   * them**.
    *
    * Seeded rather than only produced by `:run`, because most of a job's history
    * was written before Spindrift asked for anything — a fake that could only
    * report what this process started could not test reading one at all.
+   *
+   * The order is the seeder's because `executions.list` documents none and
+   * takes no `orderBy`. Seed oldest-first to hold an adapter to sorting what it
+   * read rather than trusting the page it was handed.
    */
   readonly executions?: Readonly<Record<string, readonly unknown[]>>;
   /**
@@ -325,7 +330,7 @@ export class FakeCloudRun {
   private readonly creating = new Map<string, number>();
   private nextOperation = 1;
   private nextRun = 1;
-  /** Each Job's runs, newest first — the sub-collection `:run` appends to. */
+  /** Each Job's runs, in list order — the sub-collection `:run` prepends to. */
   private readonly executions = new Map<string, unknown[]>();
   private readonly options: FakeCloudRunOptions;
 
@@ -341,7 +346,7 @@ export class FakeCloudRun {
     return `projects/${this.project}/locations/${this.region}`;
   }
 
-  /** The runs one Job holds, newest first. */
+  /** The runs one Job holds, in the order this fake will list them. */
   private runsOf(job: string): unknown[] {
     return this.executions.get(job) ?? [];
   }
@@ -444,7 +449,16 @@ export class FakeCloudRun {
       if (!this.resources.has(`${collection}/${runs[1]}`)) {
         return json(404, notFound());
       }
-      return json(200, { executions: this.runsOf(runs[1] as string) });
+      // `pageSize` is honoured and the order is whatever this fake was seeded
+      // with, because that is what `executions.list` documents: a page size and
+      // no ordering at all. An adapter that asks for ten and trusts them to be
+      // the newest ten is right only by luck, and a fake that always answered
+      // newest-first is a fake that makes that luck look like a guarantee.
+      const page = Number(url.searchParams.get('pageSize') ?? '0');
+      const held = this.runsOf(runs[1] as string);
+      return json(200, {
+        executions: page > 0 ? held.slice(0, page) : held,
+      });
     }
 
     const [name, verb] = rest.split(':', 2);

@@ -247,18 +247,19 @@ export const getAppWorkspace: Command<
 };
 
 /**
- * How many runs the screen offers, and says it keeps (§17).
+ * How many runs the screen asks for (§17).
  *
  * §17 fixes N at 10 and the App chart renders exactly that —
  * `successfulJobsHistoryLimit` and `failedJobsHistoryLimit` in
  * `packages/charts/spindrift-app/templates/cronjob.yaml`.
  *
  * ponytail: it is a page size on every backend and a retention depth on only
- * one. Cloud Run keeps its own number of executions and reports it nowhere, so
- * a job there may well have more runs than this asks for and the caption
- * beneath the list is the chart's promise rather than that project's. Upgrade
- * path: return the depth from `executions` and let each adapter answer with
- * what it observes.
+ * one. On `kubernetes` it happens to be both, because the chart Spindrift
+ * renders sets the same number; Cloud Run keeps its own count of executions and
+ * reports it nowhere, so a job there may well have runs beyond this. The
+ * caption beneath the list says only what this is — how many are shown — for
+ * that reason. Upgrade path: return the depth from `executions` and let each
+ * adapter answer with what it observes.
  */
 const RETAINED_RUNS = 10;
 
@@ -293,6 +294,15 @@ interface PlacedJob {
  * its timeline are all still readable, and taking the workspace down over a
  * cluster that is momentarily unreachable would hide the very things an
  * operator opened it to see.
+ *
+ * **A failed read is still a runnable job.** Whether this job can be run is a
+ * fact about the Deploy that placed it, not about whether listing its runs
+ * worked, so a Target that refuses the list answers on the `executions` arm
+ * with the reason on it rather than on `none`. The two are one screen apart:
+ * `none` renders no Run now button, and the first thing an operator meets after
+ * this merges is a cluster whose Role has not reconciled yet, answering `403`
+ * to the list. Hiding the control there hides it exactly where its refusal is
+ * the diagnosis.
  */
 async function executionsOf(
   context: CommandContext,
@@ -322,6 +332,13 @@ async function executionsOf(
     };
   }
 
+  const runnable = {
+    kind: 'executions',
+    componentId,
+    targetId: surface.id,
+    retained: RETAINED_RUNS,
+  } as const;
+
   let runs: JobRuns;
   try {
     runs = await adapter.executions(
@@ -331,16 +348,18 @@ async function executionsOf(
     );
   } catch (cause) {
     return {
-      kind: 'none',
+      ...runnable,
+      executions: [],
       because: `The runs on ${surface.name} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
     };
   }
+  // A refusal is the adapter saying this ref names no job it can report on —
+  // a Service's handle, a release that is gone. There is nothing to run either,
+  // so this one does collapse to `none`.
   if (runs.kind === 'none') return { kind: 'none', because: runs.because };
 
   return {
-    kind: 'executions',
-    componentId,
-    targetId: surface.id,
+    ...runnable,
     executions: runs.executions.map((execution) => ({
       name: execution.name,
       outcome: execution.outcome,
@@ -353,7 +372,6 @@ async function executionsOf(
           ? 'just now'
           : elapsedSince(execution.startedAt, now),
     })),
-    retained: RETAINED_RUNS,
   };
 }
 

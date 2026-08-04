@@ -805,7 +805,17 @@ function Runtime({
                 ) : null}
               </div>
             ) : null}
-            {runtime.executions.length === 0 ? (
+            {/*
+              A read that failed keeps this arm so the button above stays
+              pressable, and says why here. Rendering the empty-list sentence
+              instead would claim the job has never run when what happened is
+              that nobody could find out.
+            */}
+            {runtime.because ? (
+              <EmptyState title="These runs could not be read.">
+                {runtime.because}
+              </EmptyState>
+            ) : runtime.executions.length === 0 ? (
               <EmptyState title="This job has not run yet.">
                 A run started here, or by the schedule, appears in this list.
               </EmptyState>
@@ -839,9 +849,16 @@ function Runtime({
                 ) : null}
               </div>
             ))}
+            {/*
+              What this number is, and nothing more. It is the page size the
+              screen asks for, which on `kubernetes` also happens to be the
+              chart's `successfulJobsHistoryLimit` and on `cloudrun` is not the
+              retention of anything — saying "the last N are kept" there sends
+              an operator looking for a run that `gcloud` still has.
+            */}
             <p className="pt-2 text-xs text-muted-foreground">
-              The last {runtime.retained} executions are kept. Depth is
-              configured on the Target, not stored here.
+              Showing the last {runtime.retained} runs. The history lives on the
+              Target, not here.
             </p>
           </>
         ) : (

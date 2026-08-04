@@ -1574,6 +1574,29 @@ describe('a job is run, and its runs are read', () => {
     expect(far.all('jobs')).toHaveLength(1);
   });
 
+  test('a create the API server 404s is a fault, not a started run', async () => {
+    // `POST /apis/batch/v1/namespaces/<ns>/jobs` answers `404` when the
+    // namespace has been deleted or the cluster does not serve `batch/v1`.
+    // Nothing is created either way, so a started run reported from it is a
+    // row reading `running` that the next `executions` read never lists —
+    // this repo's signature failure, an act that reached nothing and said it
+    // worked. `create` distinguishes stored from not-stored by raising.
+    const far = cluster();
+    const adapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: far.token,
+      fetch: async (request) =>
+        request.method === 'POST' &&
+        new URL(request.url).pathname.endsWith('/jobs')
+          ? new Response('{"kind":"Status","code":404}', { status: 404 })
+          : far.fetch(request),
+      now: () => RUN_AT,
+    });
+
+    expect(adapter.run(target(), REF)).rejects.toThrow(/404/);
+    expect(far.all('jobs')).toHaveLength(0);
+  });
+
   test('refuses a Component that is not a job, in a sentence', async () => {
     const far = new FakeKubernetes({
       servedKinds: { ...SERVED, 'batch/v1': ['CronJob', 'Job'] },

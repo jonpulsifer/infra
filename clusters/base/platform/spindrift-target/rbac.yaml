@@ -99,13 +99,16 @@ rules:
   # deletes one. The CronJob owns what this creates and prunes it under its own
   # history limits, which is why no `delete` is needed for the history to stay
   # bounded.
+  #
+  # `list` without `get`, because both reads are by label selector — the adapter
+  # never knows an object's name in advance, since the chart names the workload
+  # and Spindrift names the release.
   - apiGroups:
       - batch
     resources:
       - cronjobs
       - jobs
     verbs:
-      - get
       - list
   - apiGroups:
       - batch

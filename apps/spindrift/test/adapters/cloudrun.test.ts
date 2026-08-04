@@ -1035,6 +1035,33 @@ describe('a job is run, and its runs are read', () => {
     expect(runs.executions[1]?.detail).toBe('the task exited 1');
   });
 
+  test('reads past the page it wants, because the API orders nothing', async () => {
+    // `projects.locations.jobs.executions.list` documents no ordering and takes
+    // no `orderBy`, so a page of `limit` is `limit` arbitrary runs. Asking for
+    // exactly what the screen shows and sorting the reply is correct only if
+    // the API happens to answer newest-first: seeded oldest-first, that reads
+    // the same ten stale runs forever and a run started by the button is never
+    // on the list. The page asked for is a ceiling, `limit` is what to report.
+    const oldestFirst = Array.from({ length: 14 }, (_, index) =>
+      execution(`shop-nightly-${index + 1}`, {
+        startTime: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+        succeededCount: 1,
+      }),
+    );
+    const { adapter } = adapterFor({
+      executions: { 'shop-nightly': oldestFirst },
+    });
+    await drain(adapter.apply(target(), job()));
+
+    const runs = await adapter.executions(target(), JOB_REF, 10);
+
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(runs.executions).toHaveLength(10);
+    expect(runs.executions[0]?.name).toBe('shop-nightly-14');
+    expect(runs.executions.at(-1)?.name).toBe('shop-nightly-5');
+  });
+
   test("reads one run's logs with a job filter, not a revision one", async () => {
     const api = new FakeCloudRun();
     const filters: string[] = [];

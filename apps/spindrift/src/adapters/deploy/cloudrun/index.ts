@@ -133,8 +133,24 @@ const SERVICE_RESOURCE = 'cloud_run_revision';
 const EXECUTION_LABEL = 'run.googleapis.com/execution_name';
 const TASK_INDEX_LABEL = 'run.googleapis.com/task_index';
 
-/** How many runs `executions` asks for when nothing says otherwise. */
+/** How many runs `executions` reports when nothing says otherwise. */
 const DEFAULT_EXECUTION_PAGE = 20;
+
+/**
+ * How many the API is asked for, regardless of how many are reported.
+ *
+ * `projects.locations.jobs.executions.list` documents no ordering and takes no
+ * `orderBy`, so a page of ten is ten *some* executions and sorting them
+ * afterwards only orders what arrived. Asking for a page far larger than the
+ * depth any caller wants makes the newest ones be in it whichever end the API
+ * starts from. Google's list APIs clamp a `pageSize` above their own maximum
+ * rather than refusing it, so this is a ceiling request, not a promise.
+ *
+ * ponytail: a job with more executions than this still hides its newest ones if
+ * the API pages oldest-first. Upgrade path is following `nextPageToken` until
+ * it is empty, which is unbounded work for a screen that shows ten rows.
+ */
+const EXECUTION_PAGE_ASKED = 100;
 
 /** How the operator would name the service in the sentence about enabling it. */
 const SERVICE_NAME = 'Cloud Run';
@@ -496,21 +512,23 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     const read = await this.http(placed.connection).json<CloudExecutionPage>({
       method: 'GET',
       path: `${placed.path}/${EXECUTIONS}`,
-      query: { pageSize: String(Math.max(1, limit)) },
+      query: { pageSize: String(EXECUTION_PAGE_ASKED) },
     });
     if (!read.ok) {
       throw new Error(
         `reading the runs of job ${placed.id} failed: ${read.message}`,
       );
     }
-    // The API answers newest first already; sorting here anyway costs nothing
-    // and means the screen's order is this contract's promise rather than an
-    // undocumented property of one backend.
+    // Sort then slice, and in that order: the API documents no ordering, so
+    // a page of `limit` would be `limit` arbitrary runs and sorting them would
+    // put the newest of *those* on top. `limit` is what to report, never what
+    // to look at — see {@link EXECUTION_PAGE_ASKED}.
     return {
       kind: 'executions',
       executions: (read.value?.executions ?? [])
         .map(cloudRunExecution)
-        .sort((left, right) => startedAtOf(right) - startedAtOf(left)),
+        .sort((left, right) => startedAtOf(right) - startedAtOf(left))
+        .slice(0, Math.max(1, limit)),
     };
   }
 

@@ -307,4 +307,31 @@ describe('the App screen lists the runs that happened', () => {
       because: 'this backend keeps no runs',
     });
   });
+
+  test('a read that failed still says the job can be run', async () => {
+    // The state this feature's first day is in: the Role granting `list` on
+    // batch jobs has not reconciled on the cluster yet, so the read `403`s
+    // while starting a run would have worked. Collapsing that to `kind: 'none'`
+    // takes the ids off the runtime, and the screen renders no Run now button —
+    // the feature hiding itself in exactly the state where pressing it is the
+    // diagnosis. Whether a job is runnable is a fact about the Deploy that
+    // placed it, not about whether listing worked.
+    const backend = new FakeDeployAdapter({
+      executionsThrows: 'jobs.batch is forbidden: User cannot list jobs',
+    });
+    const ctx = context(backend);
+    const { appName } = await scaffold(ctx, backend);
+
+    const workspace = await getAppWorkspace({ name: appName }, ctx);
+
+    expect(workspace.ok).toBe(true);
+    if (!workspace.ok) return;
+    const runtime = workspace.value.workspace.runtime;
+    expect(runtime.kind).toBe('executions');
+    if (runtime.kind !== 'executions') return;
+    expect(runtime.executions).toHaveLength(0);
+    expect(runtime.componentId).toBeDefined();
+    expect(runtime.targetId).toBeDefined();
+    expect(runtime.because).toContain('is forbidden');
+  });
 });

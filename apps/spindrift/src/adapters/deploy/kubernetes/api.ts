@@ -100,7 +100,9 @@ export class KubernetesApi {
 
   /** One object, or `null` when the API says it is not there. */
   async get(ref: ResourceRef): Promise<KubernetesObject | null> {
-    return this.json<KubernetesObject>('GET', resourcePath(ref));
+    return this.json<KubernetesObject>('GET', resourcePath(ref), {
+      tolerate: [404],
+    });
   }
 
   /**
@@ -119,6 +121,7 @@ export class KubernetesApi {
     const list = await this.json<KubernetesList>(
       'GET',
       `${resourcePath(ref)}${search}`,
+      { tolerate: [404] },
     );
     return list === null ? null : (list.items ?? []);
   }
@@ -149,22 +152,42 @@ export class KubernetesApi {
   }
 
   /**
-   * `POST` one object, for the APIs that answer rather than store.
+   * `POST` one object, and answer with what the API server made of it.
    *
-   * `SelfSubjectAccessReview` is the only such call this adapter makes: the
-   * API server replies with what the request's own identity may do, which is
-   * how §13's "OIDC both ways" is checked without holding a credential.
+   * Two callers, and they want opposite things from the reply.
+   * `SelfSubjectAccessReview` answers rather than stores: the API server
+   * replies with what the request's own identity may do, which is how §13's
+   * "OIDC both ways" is checked without holding a credential. A Job stores, and
+   * the object that comes back is the proof it exists.
+   *
+   * **A `404` here is a fault, never an absence.** `POST`ing to a collection
+   * path 404s when the namespace is gone or the group is not served — neither
+   * of which is "there is nothing there", both of which mean nothing was
+   * created. Absence is only an answer for a read, which is why the tolerance
+   * for it is opt-in one method up rather than a default in {@link send}.
    */
   async create(
     ref: ResourceRef,
     object: KubernetesObject,
-  ): Promise<KubernetesObject | null> {
-    return this.json<KubernetesObject>('POST', resourcePath(ref), object);
+  ): Promise<KubernetesObject> {
+    const created = await this.json<KubernetesObject>(
+      'POST',
+      resourcePath(ref),
+      { body: object },
+    );
+    // `send` only answers `null` for a tolerated status and this call tolerates
+    // none, so this is unreachable — asserted rather than assumed because the
+    // whole point of the change above is that a caller must not be able to
+    // treat "created nothing" as "created something".
+    if (created === null) {
+      throw new Error(`POST ${resourcePath(ref)} returned no object`);
+    }
+    return created;
   }
 
   /** Idempotent: deleting what is already gone succeeds (§6). */
   async delete(ref: ResourceRef): Promise<void> {
-    await this.send('DELETE', resourcePath(ref));
+    await this.send('DELETE', resourcePath(ref), { tolerate: [404] });
   }
 
   /**
@@ -207,7 +230,9 @@ export class KubernetesApi {
     const response = await this.send(
       'GET',
       `/api/v1/namespaces/${namespace}/pods/${pod}/log${query}`,
-      { tolerate: [400] },
+      // A pod that has been garbage collected is a `404`, and "there is no log"
+      // is the same honest answer for it as for one that has not started.
+      { tolerate: [400, 404] },
     );
     return response === null ? null : await response.text();
   }
@@ -220,6 +245,9 @@ export class KubernetesApi {
     const resources = await this.json<{ resources?: { kind: string }[] }>(
       'GET',
       path,
+      // A group the cluster does not serve has no discovery document, which is
+      // the answer this asks for rather than a fault.
+      { tolerate: [404] },
     );
     return (resources?.resources ?? []).some(
       (resource) => resource.kind === kind,
@@ -229,13 +257,12 @@ export class KubernetesApi {
   private async json<Result>(
     method: string,
     path: string,
-    body?: unknown,
+    options: {
+      body?: unknown;
+      tolerate?: readonly number[];
+    } = {},
   ): Promise<Result | null> {
-    const response = await this.send(
-      method,
-      path,
-      body === undefined ? {} : { body },
-    );
+    const response = await this.send(method, path, options);
     if (response === null) return null;
     return (await response.json()) as Result;
   }
@@ -246,7 +273,18 @@ export class KubernetesApi {
     options: {
       body?: unknown;
       contentType?: string;
-      /** Statuses the caller has a value for, returned instead of thrown. */
+      /**
+       * Statuses the caller has a value for, returned as `null` rather than
+       * raised.
+       *
+       * `404` is in here for every read and for `delete`, and in here for
+       * nothing that writes. It used to be unconditional, on the reasoning that
+       * absence is an answer every caller has a value for — which was true
+       * until a caller started `POST`ing a Job. A create whose namespace was
+       * deleted 404s, and swallowing that turned "nothing was created" into a
+       * started run: an act that reached nothing and reported success. The
+       * distinction is a property of the verb, so the verb states it.
+       */
       tolerate?: readonly number[];
     } = {},
   ): Promise<Response | null> {
@@ -269,9 +307,6 @@ export class KubernetesApi {
     const send = this.endpoint.fetch ?? ((input: Request) => fetch(input));
     const response = await send(request);
 
-    // Absence is an answer every caller here has a value for, so it comes back
-    // rather than being raised.
-    if (response.status === 404) return null;
     if (options.tolerate?.includes(response.status)) return null;
     if (!response.ok) {
       throw new KubernetesRequestError(

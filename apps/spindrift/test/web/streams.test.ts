@@ -530,6 +530,34 @@ describe('a job tails one run rather than the Component', () => {
     });
   });
 
+  test('a run name that is not one is refused before an adapter sees it', async () => {
+    // The Cloud Run adapter concatenates this into a Cloud Logging filter over
+    // `projects/<vessel>`, joining its clauses with ` AND `. `AND` binds
+    // tighter than `OR`, so a value carrying a quote and an `OR` widens the
+    // filter to every entry the project has — other Apps' output, GCP audit
+    // logs — and the lines render in the run pane of whoever asked for them.
+    // The check is here because this is the one place the value crosses in
+    // from a browser.
+    const { user, componentId, targetId } = await seedJob();
+
+    for (const attempt of [
+      'a" OR timestamp>="2020-01-01T00:00:00Z',
+      'nightly-2" OR "x"="x',
+      // `?execution=` is an empty string rather than `null`, so it passes the
+      // "name one to read it" guard and names nothing.
+      '',
+      'Nightly-2',
+      'nightly_2',
+    ]) {
+      const { response, upgraded } = await upgrade(
+        user,
+        `componentId=${componentId}&targetId=${targetId}&execution=${encodeURIComponent(attempt)}`,
+      );
+      expect(response?.status).toBe(400);
+      expect(upgraded).toHaveLength(0);
+    }
+  });
+
   test('a job with no run named still refuses, and says how to ask', async () => {
     const { user, componentId, targetId } = await seedJob();
 

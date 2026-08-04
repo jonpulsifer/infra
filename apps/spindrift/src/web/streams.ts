@@ -50,6 +50,17 @@ export {
   type StreamMessage,
 };
 
+/**
+ * What a run may be called, which is what both runtimes already enforce.
+ *
+ * A Cloud Run execution and a Kubernetes Job are both named as an RFC 1123
+ * label: lowercase alphanumerics and dashes, starting and ending alphanumeric,
+ * 63 characters at most. Nothing a backend would answer about is turned away,
+ * and nothing that could end a quoted term in a Cloud Logging filter or a label
+ * selector gets past it.
+ */
+const RUN_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
 export interface StreamDeps {
   authenticate(request: Request): Promise<RequestAuthentication>;
   /**
@@ -185,6 +196,22 @@ async function upgradeRuntime(
   const after = url.searchParams.get('after');
   /** Which run, for the one kind whose output belongs to a run (§17). */
   const execution = url.searchParams.get('execution');
+  // This value is concatenated into a query language on the far side — a Cloud
+  // Logging filter, a label selector — so it is checked here, at the one place
+  // it enters from a browser, rather than escaped at each of them. Unchecked it
+  // is a read of the whole vessel project: `AND` binds tighter than `OR`, so
+  // `a" OR timestamp>="2020-01-01T00:00:00Z` makes a filter that matches every
+  // entry the project has, other Apps' output and audit logs included, and the
+  // lines land in the run pane of whoever asked.
+  //
+  // The pattern is what both runtimes name a run: a Cloud Run execution and a
+  // Kubernetes Job are both RFC 1123 label-shaped, so nothing legitimate is
+  // turned away and nothing with a quote in it gets through. `?execution=` is
+  // an empty string rather than `null`, which passes the "name one" guard
+  // below, so it is refused here.
+  if (execution !== null && !RUN_NAME.test(execution)) {
+    return refusal(400, 'MALFORMED_REQUEST', 'that is not a run name');
+  }
   if (!componentId || !targetId) {
     return refusal(
       400,

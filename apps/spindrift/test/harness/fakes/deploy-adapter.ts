@@ -87,6 +87,16 @@ export interface FakeDeployAdapterOptions {
   noRuns?: string;
   /** When set, `run` throws — the far side that was asked correctly and failed. */
   runThrows?: string;
+  /**
+   * When set, `executions` throws while `run` still works.
+   *
+   * Separate from {@link runThrows} because that is the state this feature's
+   * first day looks like: `list` on batch jobs is a grant the Role has not
+   * reconciled yet, so reading the runs `403`s while starting one would have
+   * worked. A fake that could only fail both could not tell whether core hid
+   * the button because the job is unrunnable or because nobody could look.
+   */
+  executionsThrows?: string;
 }
 
 /**
@@ -240,6 +250,9 @@ export class FakeDeployAdapter implements DeployAdapter {
   }
 
   async executions(_target: DeployTarget, ref: DeployRef): Promise<JobRuns> {
+    if (this.options.executionsThrows !== undefined) {
+      throw new Error(this.options.executionsThrows);
+    }
     const refusal = this.refusalFor(ref);
     if (refusal !== null) return refusal;
     return {

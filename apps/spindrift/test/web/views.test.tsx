@@ -627,11 +627,44 @@ describe('the App workspace', () => {
     expect(markup).toContain('Execution 118');
     expect(markup).toContain('passed');
     expect(markup).toContain('failed');
-    // The retention depth is stated, and stated as configured rather than
-    // stored — §17 fixes the platform asymmetry "by rendering a larger history
-    // limit, not by storing logs".
-    expect(markup).toContain('last 10 executions');
-    expect(markup).toContain('configured on the Target');
+    // The caption says how many are shown and where the history lives, and
+    // stops there. `retained` is a page size on both backends and a retention
+    // depth on `kubernetes` only, where it happens to equal the chart's
+    // `successfulJobsHistoryLimit`; a Cloud Run project retains its own number
+    // and reports it nowhere, so "the last 10 are kept" sent an operator
+    // looking for a run `gcloud run jobs executions list` still had.
+    expect(markup).toContain('Showing the last 10 runs');
+    expect(markup).not.toContain('are kept');
+  });
+
+  test('runs that could not be read say so, and stay runnable', () => {
+    // The state this is about is the first one an operator meets after this
+    // merges: the Role granting `list` on batch has not reconciled yet, the
+    // Target answers `403`, and the read fails. Collapsing that to `kind:
+    // 'none'` took the Run now button off the card — the feature hiding itself
+    // in exactly the state where pressing it is the diagnosis.
+    const refused = {
+      ...WORKSPACE_SCENARIOS.job,
+      runtime: {
+        kind: 'executions',
+        componentId: 'component-1',
+        targetId: 'target-1',
+        executions: [],
+        retained: 10,
+        because:
+          'The runs on folly could not be read: GET /apis/batch/v1/... failed with 403',
+      },
+    } as const satisfies WorkspaceView;
+
+    const markup = renderToStaticMarkup(
+      <Workspace view={refused} onRunJob={async () => ({ ok: true })} />,
+    );
+    expect(markup).toContain('Run now');
+    expect(markup).toContain('could not be read');
+    expect(markup).toContain('403');
+    // And not the sentence for a job that has genuinely never run: nobody
+    // found out whether it has.
+    expect(markup).not.toContain('has not run yet');
   });
 
   test('running a job is offered where the runs are, and only there', () => {

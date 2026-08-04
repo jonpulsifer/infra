@@ -282,6 +282,13 @@ export interface RuntimeLogSubject {
    * optional rather than a second method. The two differ by one clause in a
    * selector or a filter, and a second method would have had to restate the
    * cursor, the paging and the reach that make this one honest.
+   *
+   * **A run name, checked before it gets here.** Adapters put it into a query
+   * language by concatenation — a Cloud Logging filter, a label selector — so a
+   * caller that lets a request body reach this field unchecked hands the far
+   * side a filter of the caller's choosing. `src/web/streams.ts` is the one
+   * boundary this crosses from a browser and it is checked there; a second
+   * caller owes the same check.
    */
   readonly execution?: string;
 }

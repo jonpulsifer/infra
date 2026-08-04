@@ -458,6 +458,16 @@ export type Runtime =
       readonly targetId?: string;
       readonly executions: readonly Execution[];
       readonly retained: number;
+      /**
+       * Why this list is empty, when it is empty because the read failed.
+       *
+       * A job that is placed on a Target is runnable whether or not its runs
+       * could be listed, so a failed read stays on this arm rather than
+       * collapsing to `none` — collapsing took the Run now button away in
+       * exactly the state its diagnostics matter, the one where the Target
+       * answers `403` because the Role has not reconciled yet.
+       */
+      readonly because?: string;
     }
   | { readonly kind: 'none'; readonly because: string };
 

@@ -395,10 +395,26 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * scheduled time — which for an unscheduled job is a date that never occurs.
    * And the owner reference is what makes §7's "a scheduled run and a manual
    * run are the same object with a field flipped" true from the reading side:
-   * the CronJob controller counts what it owns, so a manual run lands in the
-   * same history, is pruned by the same limit, and is held off by the same
-   * `concurrencyPolicy: Forbid` — rather than becoming an orphan that outlives
-   * every execution beside it.
+   * `getJobsToBeReconciled` selects the controller ref, so a manual run lands
+   * in `cleanupFinishedJobs` and is pruned by the same history limit rather
+   * than becoming an orphan that outlives every execution beside it.
+   *
+   * **The reference does not make `concurrencyPolicy: Forbid` hold a manual run
+   * off, and nothing here can.** The controller's Forbid check is
+   * `len(cj.Status.Active) > 0`, and `Status.Active` is appended only where the
+   * controller creates a Job itself — it never adopts a foreign Job into it. So
+   * a run started here at 02:59:55 does not stop the `0 3 * * *` fire, and the
+   * two run concurrently even though the policy says never. There is no API
+   * that asks a CronJob to run now; `kubectl create job --from=cronjob/x` does
+   * exactly this and does not set an owner at all. An in-flight check in
+   * `runComponent` would not change it either: the fire that overlaps comes
+   * from the controller, which does not consult Spindrift.
+   *
+   * The known cost of the reference is a `Warning UnexpectedJob "Saw a job that
+   * the controller did not create or forgot"` on every sync until the run
+   * finishes — `syncCronJob`'s `!found && !IsJobFinished(j)` arm. That is a
+   * true statement about a Job the controller did not create, and pruning is
+   * worth it.
    *
    * `blockOwnerDeletion` is deliberately absent from that reference: setting it
    * needs `update` on the owner's `finalizers` subresource wherever the
@@ -478,7 +494,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       spec: template.spec,
     };
 
-    let created: KubernetesObject | null;
+    let created: KubernetesObject;
     try {
       created = await api.create(
         {
@@ -498,10 +514,9 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       }
       throw cause;
     }
-    return {
-      kind: 'started',
-      execution: startingRun(created?.metadata.name ?? name),
-    };
+    // The name the API server stored, not the one that was asked for: `create`
+    // now answers with the object or raises, so this reports a run that exists.
+    return { kind: 'started', execution: startingRun(created.metadata.name) };
   }
 
   /**
@@ -1070,7 +1085,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           },
         },
       );
-      const status = review?.status as { allowed?: boolean } | undefined;
+      const status = review.status as { allowed?: boolean } | undefined;
       return status?.allowed === true;
     } catch {
       return false;
