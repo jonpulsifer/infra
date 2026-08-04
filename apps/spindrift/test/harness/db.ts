@@ -141,6 +141,18 @@ export function defaultVesselId(kind: VesselKind): string {
 }
 
 /**
+ * What the fixture vessel of this kind is called.
+ *
+ * Screens state the boundary by name, read from the placed Target's vessel, so
+ * a test asserting what a screen says needs the name rather than the id — and
+ * spelling `fixture-cluster` into a test file would put the fixture convention
+ * in two places.
+ */
+export function defaultVesselName(kind: VesselKind): string {
+  return `fixture-${kind}`;
+}
+
+/**
  * Create, migrate, and hand back one private schema.
  *
  * Callers that want it around every test should use {@link withIsolatedDatabase};
@@ -172,7 +184,7 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
     .insert(vessels)
     .values(
       VESSEL_KINDS.map((kind) => ({
-        name: `fixture-${kind}`,
+        name: defaultVesselName(kind),
         kind,
         location:
           kind === 'cluster'

@@ -503,9 +503,11 @@ export interface ComponentView {
 /**
  * The App workspace's whole state (Task 40).
  *
- * `vessel` is present and marked immutable because §14 makes it so: an App's
- * cloud project is chosen once, at creation, and the workspace is where a
- * developer would otherwise go looking for the setting that does not exist.
+ * `vessel` is the boundary the placed Target is a surface on, read from that
+ * Target rather than from the App. An App is not in a vessel; its Components
+ * are placed, and where they land is what the screen states. Moving a Component
+ * therefore moves what this field says, which is the honest behaviour — the
+ * column that used to answer this could not change and could not be checked.
  */
 export interface WorkspaceView {
   readonly app: string;
@@ -631,6 +633,7 @@ export interface AppListItem {
   readonly name: string;
   readonly phase: DeployPhase;
   readonly target: string;
+  /** The boundary the placed Target is a surface on. Empty when unplaced. */
   readonly vessel: string;
   readonly url: string;
   readonly urlLive: boolean;

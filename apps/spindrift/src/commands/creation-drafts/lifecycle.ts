@@ -269,7 +269,9 @@ export const completeCreationDraft: Command<
               ? row.draft.source.digest
               : null,
           repositoryId: prepared.value.repositoryId,
-          vesselRef: row.draft.vessel.name,
+          // The draft's vessel is a preflight gate, not a field: an
+          // unprovisioned home is a reason to refuse creation, and never a
+          // value the App carries afterwards.
           createdAt: now,
           updatedAt: now,
         })

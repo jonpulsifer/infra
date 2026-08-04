@@ -39,20 +39,17 @@ const vanityLabel = z
     'must be a single lowercase DNS label',
   );
 
-/**
- * §14: the project this App's own resources live in. There is no default
- * here: §20 puts every installation-naming value in the manifest, so the act
- * of defaulting an unset vessel belongs to whatever reads the manifest, never
- * to a literal in this file.
- */
-const vesselRef = z.string().trim().min(1);
-
 /** A content digest of the uploaded bundle (§4: the bundle digest joins the receipt to its provenance). */
 const archiveDigest = digestSchema;
 
+/**
+ * **No vessel input.** Creating an App does not choose a boundary: placement
+ * does, one Component at a time, and the Target it picks is a surface on one.
+ * An App-level vessel would be a second answer nothing reconciles against the
+ * first.
+ */
 const common = {
   name: appName,
-  vesselRef: vesselRef.optional(),
   vanityDomain: vanityLabel.optional(),
 };
 
@@ -110,7 +107,6 @@ export const createApp: Command<CreateAppInput, CreateAppResult> = async (
         input.sourceKind === 'repo' ? (input.subpath ?? null) : null,
       sourceArchiveDigest:
         input.sourceKind === 'archive' ? input.archiveDigest : null,
-      vesselRef: input.vesselRef ?? null,
       vanityDomain: input.vanityDomain ?? null,
       createdAt: now,
       updatedAt: now,

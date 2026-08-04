@@ -22,7 +22,11 @@ import {
   deploys,
   targets,
 } from '../../src/db/schema.ts';
-import { defaultVesselId, withIsolatedDatabase } from '../harness/db.ts';
+import {
+  defaultVesselId,
+  defaultVesselName,
+  withIsolatedDatabase,
+} from '../harness/db.ts';
 import {
   SupplyChainHarness,
   testSignature,
@@ -77,13 +81,11 @@ async function scaffold(
           name,
           sourceKind: 'archive',
           archiveDigest: `sha256:${'e'.repeat(64)}`,
-          vesselRef: 'driftwood',
         }
       : {
           name,
           sourceKind: 'repo',
           repoUrl: 'https://vcs.example/acme/thing.git',
-          vesselRef: 'driftwood',
         },
     ctx,
   );
@@ -400,7 +402,6 @@ describe('getAppWorkspace command', () => {
         name: appName,
         sourceKind: 'repo',
         repoUrl: 'https://github.com/acme/beacon.git',
-        vesselRef: 'driftwood',
         vanityDomain: 'beacon.example.com',
       },
       ctx,
@@ -448,7 +449,9 @@ describe('getAppWorkspace command', () => {
 
     const { workspace } = result.value;
     expect(workspace.app).toBe(appName);
-    expect(workspace.vessel).toBe('driftwood');
+    // The boundary comes from the placed Target, not from the App: this is the
+    // vessel the harness seeded that Target onto.
+    expect(workspace.vessel).toBe(defaultVesselName('cluster'));
     expect(workspace.components.length).toBe(1);
     expect(workspace.components[0]?.name).toBe('web');
     expect(workspace.components[0]?.kind).toBe('service');
@@ -520,7 +523,6 @@ describe('getAppWorkspace command', () => {
         name: `queued-${crypto.randomUUID().slice(0, 8)}`,
         sourceKind: 'archive',
         archiveDigest: `sha256:${'c'.repeat(64)}`,
-        vesselRef: 'driftwood',
       },
       ctx,
     );

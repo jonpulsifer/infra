@@ -144,7 +144,7 @@ export function AppList({
                 </Badge>
               </div>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                {app.source} is placed on {app.target} in the immutable vessel{' '}
+                {app.source} is placed on {app.target}, a surface on{' '}
                 <span className="font-mono">{app.vessel}</span>.
               </p>
               <DefinitionGrid

@@ -361,7 +361,7 @@ export function blockersFor(
   if (!draft.vessel.ready) {
     blockers.push({
       code: 'VESSEL_UNAVAILABLE',
-      title: `The vessel project ${draft.vessel.name} is not provisioned.`,
+      title: `The vessel ${draft.vessel.name} is not provisioned.`,
       remediation:
         'Vessels are pre-provisioned through Terraform and adopted by Atlantis. Creation waits for that merge; the draft is kept.',
     });

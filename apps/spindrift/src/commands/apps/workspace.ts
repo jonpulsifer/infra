@@ -56,7 +56,10 @@ export const getAppWorkspace: Command<
           desiredTargets: {
             limit: 1,
             with: {
-              target: true,
+              // With its vessel, for the reason the deploy's Target carries
+              // one: `workspaceTarget` is either of these two rows and the
+              // screen states the boundary from whichever it got.
+              target: { with: { vessel: true } },
             },
           },
         },
@@ -225,7 +228,7 @@ export const getAppWorkspace: Command<
     latestDeployId: latestDeploy?.id,
     latestBuildId: primaryComponent?.builds[0]?.id,
     target: workspaceTarget?.name ?? 'none',
-    vessel: app.vesselRef ?? 'none',
+    vessel: workspaceTarget?.vessel.name ?? 'none',
     prerequisitesMet: workspaceTarget
       ? workspaceTarget.health === 'healthy'
       : false,

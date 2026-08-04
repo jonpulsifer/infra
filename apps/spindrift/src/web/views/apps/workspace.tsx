@@ -1,16 +1,18 @@
 /**
  * The App workspace (Task 40, §18).
  *
- * **Live state and URL lead**, then Target and the immutable vessel, then
- * Components and Datastores as **peer actionable sections**, then a dense
- * activity timeline. The peering is the decision worth protecting: a Datastore
- * is a top-level noun that an App attaches (§11), never a field on the App, and
- * a layout that nests it under Components would quietly say the opposite.
+ * **Live state and URL lead**, then the placement — Target and the vessel it
+ * is a surface on — then Components and Datastores as **peer actionable
+ * sections**, then a dense activity timeline. The peering is the decision worth
+ * protecting: a Datastore is a top-level noun that an App attaches (§11), never
+ * a field on the App, and a layout that nests it under Components would quietly
+ * say the opposite.
  *
  * Two things are stated here rather than hidden:
  *
- * - **The vessel is immutable** (§14). A developer who does not find the
- *   setting will go looking for it, so the absence is labelled.
+ * - **The vessel is where the App is placed**, not something it was created
+ *   with. It is read from the placed Target, so it is one fact rather than two
+ *   that can disagree, and moving a Component moves it.
  * - **A `website` has no runtime**, one level down (§17, §18). Static files are
  *   served by the Target, so there is no process output — an honest empty state,
  *   not a disabled tab.
@@ -247,7 +249,7 @@ function Hero({
         <Eyebrow>Placement</Eyebrow>
         <p className="font-semibold">{view.target}</p>
         <p className="font-mono text-xs text-muted-foreground">
-          {view.vessel} · immutable vessel
+          on {view.vessel}
         </p>
         <p className="text-xs text-muted-foreground">
           {view.prerequisitesMet

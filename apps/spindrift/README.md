@@ -182,10 +182,31 @@ that context, and credential Settings changes how its Principal is proved.
 delegate before choosing an HTTP response. A command exported but not registered
 is a compile error, and so is a registry key that is not a command.
 
-## Targets, capabilities, and placement
+## Vessels, Targets, and placement
 
-A `Target` is flat and has exactly one adapter type, so connecting a cloud
-project registers two of them — `cloudrun` and `static`. That one act asks for
+A **Vessel** is a tenancy boundary: the thing that admits a call or refuses it,
+that owns the federation, and that can `404`. A cluster is one. A cloud project
+is one. A **Target** is one runtime surface on a vessel — `Target = Vessel ×
+surface` — and a Target is what an App's Component is placed on.
+
+That is why connecting one cloud project registers two Targets, `cloudrun` and
+`static`: placement determines artifact shape, and a single "Cloud" Target would
+leave a website ambiguous between the Cloud Run rendering and the static one.
+
+The split decides where every fact lives. What is true of the boundary, and
+therefore of every surface on it — where it is, which hosts it serves, which
+registries it reaches — belongs to the vessel, stated once, where two surfaces
+cannot disagree about it (`src/domain/vessel.ts`). What is true of one runtime
+and not its neighbours — a region, a namespace, an API root, a delivery flavour —
+belongs to the Target. No adapter sees the seam: `deployTargetOf` composes the
+one flat view an adapter has always received out of the two rows.
+
+**An App is not in a vessel.** It has Components, each placed on a Target, and
+that Target's vessel is the boundary the Component runs in. Nothing on the App
+records this, because a second answer to one question can only disagree with the
+first.
+
+A Target is flat and has exactly one adapter type. That one connect act asks for
 both control APIs, and each Target keeps only the endpoint its own adapter
 drives: an endpoint is connection material for exactly the reason a cluster's
 API server is, because two connected projects may sit behind different regional
