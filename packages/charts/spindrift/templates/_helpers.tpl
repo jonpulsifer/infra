@@ -35,6 +35,22 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{/*
+The ConfigMap projected at `ca.crt` — the one file `NODE_EXTRA_CA_CERTS` names.
+
+A release carrying `serviceAccount.token.caBundle` gets a ConfigMap of this
+chart's own, rendered from that text in ca-bundle.yaml, so the same string can
+be digested onto the pod template. One naming somebody else's ConfigMap gets
+that name and no digest: the chart cannot hash content it does not hold.
+*/}}
+{{- define "spindrift.caConfigMapName" -}}
+{{- if .Values.serviceAccount.token.caBundle -}}
+{{ include "spindrift.fullname" . }}-trust-bundle
+{{- else -}}
+{{ .Values.serviceAccount.token.caConfigMap }}
+{{- end }}
+{{- end }}
+
+{{/*
 The migration Job's name carries a digest of every input to its immutable pod
 template. New migrations arrive with a new image and become a new Job; an
 unrelated chart revision leaves the completed Job alone.

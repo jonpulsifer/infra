@@ -39,11 +39,21 @@ spec:
       {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
   template:
     metadata:
-      {{- if $top.Values.manifest }}
+      {{- if or $top.Values.manifest $top.Values.serviceAccount.token.caBundle }}
       annotations:
+        {{- if $top.Values.manifest }}
         # Both processes read the manifest once, at start, so a ConfigMap change
         # has to become a rollout.
         checksum/manifest: {{ toYaml $top.Values.manifest | sha256sum }}
+        {{- end }}
+        {{- with $top.Values.serviceAccount.token.caBundle }}
+        # And `NODE_EXTRA_CA_CERTS` once, at process start, for the same reason:
+        # a bundle that reaches only the mount is a correction the running
+        # process never sees. The digest is over the bundle's own text — the
+        # exact string ca-bundle.yaml puts in the ConfigMap this pod projects —
+        # so it moves when and only when the trust store does.
+        checksum/ca-bundle: {{ . | sha256sum }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "spindrift.labels" $top | nindent 8 }}
@@ -196,7 +206,7 @@ spec:
                   expirationSeconds: {{ $top.Values.serviceAccount.token.expirationSeconds }}
                   path: token
               - configMap:
-                  name: {{ $top.Values.serviceAccount.token.caConfigMap }}
+                  name: {{ include "spindrift.caConfigMapName" $top }}
                   items:
                     - key: ca.crt
                       path: ca.crt

@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - gateway.yaml
-  - ca-bundle.yaml
   - secret.sops.yaml
   - oci-repository.yaml
   - helm-release.yaml

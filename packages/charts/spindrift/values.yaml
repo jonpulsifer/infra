@@ -27,10 +27,24 @@ serviceAccount:
     # The ConfigMap projected at `ca.crt` — the one file `NODE_EXTRA_CA_CERTS`
     # names. The cluster's own published root by default, which is all an
     # installation whose Targets are in-cluster ever needs. An installation
-    # holding a Target on another cluster names a ConfigMap carrying that
-    # cluster's chain as well, because the variable takes exactly one file and a
-    # projected volume cannot merge two sources onto one path.
+    # holding a Target on another cluster needs that cluster's chain as well,
+    # because the variable takes exactly one file and a projected volume cannot
+    # merge two sources onto one path. Ignored when `caBundle` is set.
     caConfigMap: kube-root-ca.crt
+    # The bundle itself. **Prefer this to `caConfigMap` for anything but the
+    # cluster's own published root**: the chart renders the ConfigMap from this
+    # text and digests the same text onto both pod templates, so correcting the
+    # bundle rolls the processes that read it. `NODE_EXTRA_CA_CERTS` is read
+    # once, at process start, so a bundle that changes only on disk is a
+    # correction the running process never sees — and that misfires during a CA
+    # rotation, when every symptom already looks like a wrong bundle.
+    #
+    # A ConfigMap named here instead gets no digest, because the chart cannot
+    # hash content it does not hold. That leaves the default in-cluster root
+    # uncovered, which is the one bundle that changes only when the cluster CA
+    # does — a rotation that reissues every API-server leaf and rolls the
+    # cluster anyway.
+    caBundle: ""
 
 # Where the control plane's own UI is served. Empty renders no Gateway and no
 # HTTPRoute, leaving the UI reachable only in-cluster.
