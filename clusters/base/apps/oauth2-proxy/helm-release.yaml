@@ -64,11 +64,22 @@ spec:
       # directly, so `X-Forwarded-Host` would become a header anything in the
       # cluster can set. Consistency is not worth that.
       #
-      # Trusting nothing costs nothing here, because nothing on the way in
-      # composes `X-Forwarded-Host` or `X-Forwarded-Uri`. `redirect-url` below
-      # is absolute, so `getOAuthRedirectURI` returns it without consulting
-      # either, and the shim's `X-Auth-Request-Redirect` is read ahead of them
-      # and ungated — see the block below.
+      # Trusting nothing loses no behaviour, because nothing on the way in
+      # composes `X-Forwarded-Host` or `X-Forwarded-Uri`. Envoy's ext_authz
+      # client forwards only what a route's `allowedHeaders` names, and
+      # `packages/charts/spindrift-app/templates/httproute.yaml` names neither —
+      # on the check's way to port 80 and on its way through the shim below
+      # alike. `redirect-url` further down is absolute, so `getOAuthRedirectURI`
+      # returns it without consulting either.
+      #
+      # It does change one thing, and the change is in the log rather than the
+      # decision. `pkg/validation` installs
+      # `logger.SetGetClientFunc(ip.GetClientString(…))` only under
+      # `reverse-proxy`, so with the flag gone the client column falls back to
+      # the logger's own default of `r.RemoteAddr`: `10.101.1.197:41234` with
+      # the ephemeral port on it rather than `10.101.1.197`, and `X-Real-IP` no
+      # longer consulted there. It names the same hop either way, and that hop
+      # was never the browser.
       #
       # They have to go together. `reverse-proxy: "true"` left on its own is not
       # the cautious half of this: `oauthproxy.go`'s `buildTrustedProxyNetSet`
