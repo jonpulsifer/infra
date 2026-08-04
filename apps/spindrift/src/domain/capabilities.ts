@@ -68,11 +68,12 @@ import type {
  * splitting it would put two rows in the UI that always agree.
  *
  * `CHART_SOURCE` is separate from `DELIVERY_OPERATOR` because the two fail
- * apart: a cluster can run Flux perfectly and still not carry the repository
- * the App chart is fetched from. It exists at all because v1 sources the chart
- * from a repository rather than from OCI (plan, Milestone 3) — **it is the
- * first thing that breaks on extraction**, and naming it here is what makes
- * that visible as a stated reason rather than as a deploy that fails late.
+ * apart: a cluster can run Flux perfectly and still not carry the source object
+ * the App chart is fetched from. §7 pins that chart per Target, so the object
+ * is the Target's own — an `OCIRepository` over a pinned artifact, or a
+ * `GitRepository` where the installation names a path — and naming the check
+ * here is what makes a missing one a stated reason rather than a deploy that
+ * fails late.
  *
  * `PLATFORM_API` is the cloud backends' equivalent of `DELIVERY_OPERATOR`, and
  * it is a separate name rather than a reuse because the two are unmet for

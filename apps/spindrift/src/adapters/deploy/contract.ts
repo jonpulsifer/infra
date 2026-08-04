@@ -322,7 +322,10 @@ export interface ClusterProbe {
   readonly deliveryFlavours: readonly KubernetesDeliveryFlavour[];
   /** Namespaces that exist. Spindrift never creates one (§7). */
   readonly namespaces: readonly string[];
-  /** Sources the App chart could be fetched from — Flux `GitRepository`s. */
+  /**
+   * Sources the App chart could be fetched from — the Flux source objects of
+   * whichever kind this installation's `charts.app` reference names.
+   */
   readonly chartSources: readonly { name: string; namespace: string }[];
   /** `ClusterSecretStore`s config could be delivered through (§10). */
   readonly secretStores: readonly string[];

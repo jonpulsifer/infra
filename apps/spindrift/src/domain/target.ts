@@ -155,10 +155,11 @@ export interface KubernetesConnection {
  * the inversion §6 records: applying manifests directly is the *expensive*
  * flavour, being the only one with no controller to report status.
  *
- * **Both carry the chart's source**, because until the OCI swap the App chart
- * is fetched from a repository the Target already trusts (plan, Milestone 3).
- * That makes "a `GitRepository` in this cluster" a Target prerequisite, and the
- * prerequisite is checkable exactly because the reference is here.
+ * **Both carry the chart's source**, because the App chart is fetched from an
+ * object the Target already carries — a pinned OCI artifact or a repository it
+ * trusts (§7). That makes "this source object exists in this cluster" a Target
+ * prerequisite, and the prerequisite is checkable exactly because the reference
+ * is here.
  */
 export const KUBERNETES_DELIVERY_FLAVOURS = [
   'flux-helmrelease',
@@ -174,7 +175,11 @@ export type KubernetesDelivery =
       flavour: 'flux-helmrelease';
       /** Namespace the `HelmRelease` object itself is created in. */
       namespace: string;
-      /** The `GitRepository` the App chart is fetched from. */
+      /**
+       * The Flux source object the App chart is fetched from — an
+       * `OCIRepository` or a `GitRepository`, decided by the installation's
+       * own `charts.app` reference rather than restated here.
+       */
       sourceRef: { name: string; namespace: string };
     }
   | {

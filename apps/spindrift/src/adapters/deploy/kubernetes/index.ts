@@ -73,7 +73,7 @@ import {
 } from './argo-application.ts';
 import { diagnose } from './diagnose.ts';
 import {
-  GIT_REPOSITORY,
+  chartSourceKind,
   HELM_RELEASE,
   helmRelease,
   helmReleaseStatus,
@@ -85,8 +85,13 @@ import { chartValues, imageReference, VALUES_CONTRACT } from './values.ts';
 /** What the adapter needs that a Target's connection does not carry. */
 export interface KubernetesAdapterOptions {
   /**
-   * The chart, as this installation names it (§20's `charts.app`). A path
-   * inside the Target's configured repository until the OCI swap.
+   * The chart, as this installation names it (§20's `charts.app`).
+   *
+   * An `oci://` artifact or a path inside the Target's configured repository,
+   * and the string itself is what decides which — `chartSourceKind`. Every
+   * read and write of a chart source in this adapter goes through that one
+   * function, so a Target cannot be checked against one kind and deployed
+   * against the other.
    */
   readonly chart: string;
   /** Mints a bearer token per request. Never a stored credential (§13). */
@@ -392,12 +397,10 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         .servesKind(APPLICATION.apiVersion, APPLICATION.kind)
         .catch(() => false),
       api.list({ apiVersion: 'v1', plural: 'namespaces' }).catch(() => null),
-      api
-        .list({
-          apiVersion: GIT_REPOSITORY.apiVersion,
-          plural: GIT_REPOSITORY.plural,
-        })
-        .catch(() => null),
+      // The kind this installation's own chart reference needs, and only that
+      // kind: a picker offering a `GitRepository` to an installation that
+      // deploys from OCI is a picker whose every option is a wrong answer.
+      api.list(chartSourceKind(this.options.chart)).catch(() => null),
       api
         .list({
           apiVersion: SECRET_STORE.apiVersion,
@@ -724,15 +727,20 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         'this Target names no repository to fetch the App chart from',
       ];
     }
+    // Whichever kind this installation's chart reference implies, and never
+    // both: a cluster that carries a `GitRepository` of that name while the
+    // installation deploys from OCI is a cluster this Target cannot deploy to,
+    // and reading the wrong kind would report it green.
+    const kind = chartSourceKind(this.options.chart);
     const source = await api.get({
-      apiVersion: GIT_REPOSITORY.apiVersion,
-      plural: GIT_REPOSITORY.plural,
+      apiVersion: kind.apiVersion,
+      plural: kind.plural,
       namespace: delivery.sourceRef.namespace,
       name: delivery.sourceRef.name,
     });
     return [
       source !== null,
-      `this cluster has no ${GIT_REPOSITORY.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} to fetch the App chart from`,
+      `this cluster has no ${kind.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} to fetch the App chart from`,
     ];
   }
 

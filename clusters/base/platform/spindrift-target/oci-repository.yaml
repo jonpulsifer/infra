@@ -1,0 +1,32 @@
+---
+# The App chart, as an independently pinned artifact every Target carries.
+#
+# Spindrift renders one `HelmRelease` per (Component, Target) through the API
+# and points its `chartRef` here, so this object is a **Target prerequisite**:
+# the standing checklist reads it by name (`CHART_SOURCE`), and a cluster
+# without it is a non-candidate with a stated reason rather than a deploy that
+# fails late. It lives in this base for that reason — a Target's prerequisites
+# are provisioned by whatever provisions the namespace and the RBAC beside it,
+# never by hand on the cluster.
+#
+# In `spindrift-apps` and not `flux-system`: it is the delivery namespace's own
+# object, which is what makes the release's reference same-namespace and keeps
+# the identity's `get` on it inside the Role that namespace already binds.
+#
+# `.github/workflows/spindrift-charts.yml` packages and pushes
+# `packages/charts/spindrift-app` here on every merge that touches it, tagged
+# with the version `Chart.yaml` carries — the same convention every other chart
+# consumed by tag uses (`clusters/base/apps/reloader/oci-repository.yaml`).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: spindrift-app
+  namespace: spindrift-apps
+spec:
+  interval: 15m
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    tag: 0.2.0
+  url: oci://ghcr.io/jonpulsifer/charts/spindrift-app
