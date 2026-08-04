@@ -34,7 +34,17 @@ spec:
     extraArgs:
       provider: github
       github-user: jonpulsifer
-      scope: user:email
+      # `read:org` is not optional beside `github-user`. Restricting to a user
+      # makes the provider enumerate the caller's organizations before it
+      # decides, and GitHub refuses that read under `user:email` alone:
+      #
+      #   403 You need at least read:org scope or user scope to list your
+      #   organizations.
+      #
+      # The proxy turns that refusal into a 500 on `/oauth2/callback`, so the
+      # sign-in fails *after* the operator has already approved on github.com —
+      # far enough from the cause that the log line is the only thing naming it.
+      scope: user:email read:org
       reverse-proxy: "true"
       trusted-proxy-ip: ${K8S_NODE_CIDR}
       redirect-url: https://oauth2.${SECRET_DOMAIN}/oauth2/callback
