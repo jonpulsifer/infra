@@ -45,8 +45,35 @@ spec:
       # sign-in fails *after* the operator has already approved on github.com —
       # far enough from the cause that the log line is the only thing naming it.
       scope: user:email read:org
-      reverse-proxy: "true"
-      trusted-proxy-ip: ${K8S_NODE_CIDR}
+      # `reverse-proxy` and `trusted-proxy-ip` are both deliberately absent.
+      #
+      # No CIDR names the gateway, because the gateway does not have one
+      # address. What oauth2-proxy sees is whatever Cilium's datapath left on
+      # the connection, and that varies with where the answering replica sits:
+      # one host, probing both replicas in the same breath, is seen as its node
+      # address by the replica on the other node and as that node's
+      # `cilium_host` router address by the replica beside it. Through the
+      # gateway the hop is seen as an address in the pod CIDR belonging to no
+      # pod at all. Only the first of those is inside `${K8S_NODE_CIDR}`, so
+      # naming it made two byte-identical replicas answer one request two ways
+      # — one composed an origin out of a client-supplied `X-Forwarded-Host`
+      # and logged it as the request's host, the other ignored it.
+      #
+      # Widening to the pod CIDR would make them agree by putting every pod in
+      # the cluster inside the trust boundary: any pod can reach this Service
+      # directly, so `X-Forwarded-Host` would become a header anything in the
+      # cluster can set. Consistency is not worth that.
+      #
+      # Trusting nothing costs nothing here, because nothing on the way in
+      # composes `X-Forwarded-Host` or `X-Forwarded-Uri`. `redirect-url` below
+      # is absolute, so `getOAuthRedirectURI` returns it without consulting
+      # either, and the shim's `X-Auth-Request-Redirect` is read ahead of them
+      # and ungated — see the block below.
+      #
+      # They have to go together. `reverse-proxy: "true"` left on its own is not
+      # the cautious half of this: `oauthproxy.go`'s `buildTrustedProxyNetSet`
+      # substitutes `0.0.0.0/0, ::/0` when `--trusted-proxy-ip` is empty, so the
+      # flag alone trusts every caller rather than none.
       redirect-url: https://oauth2.${SECRET_DOMAIN}/oauth2/callback
       whitelist-domain: .${SECRET_DOMAIN}
       cookie-domain: .${SECRET_DOMAIN}
