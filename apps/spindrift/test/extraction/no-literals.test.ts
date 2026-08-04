@@ -110,6 +110,11 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // The vendor subcommand that writes an attestation. Same kind of thing as
   // the two below it: a tool's own vocabulary, identical in every installation.
   'sign-and-create',
+  // The value BuildKit annotates its `provenance` and `sbom` manifests with,
+  // read by the attestation step to tell an entry a runtime can run from one it
+  // cannot. A registry's own vocabulary — the same string under every index
+  // BuildKit has ever pushed, in every installation.
+  'attestation-manifest',
   'slsa-verifier',
   'verify-image',
   'verify-signature',

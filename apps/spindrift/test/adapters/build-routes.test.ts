@@ -45,6 +45,14 @@ import {
   RUN_NAME_PREFIX,
 } from '../../src/integrations/github/config-pr.ts';
 import {
+  ATTACHMENT_DIGEST,
+  attested,
+  GCLOUD_STUB,
+  INDEX_DIGEST,
+  indexStub,
+  RUNTIME_DIGEST,
+} from '../harness/attest-step.ts';
+import {
   FakeCloudBuild,
   type FakeCloudBuildOptions,
 } from '../harness/fakes/cloud-build-api.ts';
@@ -600,6 +608,41 @@ describe('the cloud build route', () => {
     const children = program.slice(program.indexOf('# The children,'));
     expect(children).toContain(`${CLOUD_REGISTRY}/example-builds/i/app`);
     expect(children).not.toContain('registry.example.test');
+  });
+
+  test('the attachments hanging off that index are not', async () => {
+    // A child is a manifest a runtime can run. `--attest` hangs BuildKit's own
+    // `provenance` and `sbom` manifests off the same index — `unknown/unknown`,
+    // annotated `attestation-manifest` — and nothing ever resolves to one, so
+    // each one signed is a KMS operation and an occurrence per destination per
+    // build spent on a digest no admission decision is made about.
+    //
+    // Run rather than read: an assertion on the text of the selection would
+    // pass for any expression that merely mentions `attestation-manifest`.
+    const { api, route } = cloudRoute(
+      {},
+      {},
+      { signer: SIGNER, attestor: ATTESTOR },
+    );
+    await run(route.build(archiveSource(), cloudSpec));
+
+    const references = await attested(api.steps[0]?.[1]?.args?.[1] ?? '', {
+      gcloud: GCLOUD_STUB,
+      curl: indexStub(),
+      // The `/workspace` volume the builder wrote the digest to. This box has
+      // no such path and reading it is the step's first line.
+      cat: `echo '${INDEX_DIGEST}'`,
+    });
+
+    // Every destination at the index, then the platform manifest under the one
+    // this step can read a manifest back out of. The attachment appears
+    // nowhere.
+    expect(references).toEqual([
+      `${CLOUD_REGISTRY}/example-builds/i/app@${INDEX_DIGEST}`,
+      `registry.example.test/app@${INDEX_DIGEST}`,
+      `${CLOUD_REGISTRY}/example-builds/i/app@${RUNTIME_DIGEST}`,
+    ]);
+    expect(references.join('\n')).not.toContain(ATTACHMENT_DIGEST);
   });
 
   test('an installation that named no attestor submits no attestation', async () => {
