@@ -439,7 +439,16 @@ export function exclusionsFor(
   // the sentence a developer reads. Refused at Place because §3 refuses a
   // non-candidate there — the alternative is a build and a Deploy that end in
   // the adapter's REJECTED.
-  if (requirements.schedule !== undefined && !can.firesSchedules) {
+  //
+  // Gated on the kind for the same reason it exists at all. Its sentence opens
+  // by granting that this Target "runs a job", so on a Target that renders none
+  // — `static` — it would sit beside KIND_UNSUPPORTED contradicting it on one
+  // row. A reason speaks only where its own sentence is true.
+  if (
+    requirements.schedule !== undefined &&
+    can.kinds.includes(requirements.kind) &&
+    !can.firesSchedules
+  ) {
     reasons.push('NO_SCHEDULER');
   }
 

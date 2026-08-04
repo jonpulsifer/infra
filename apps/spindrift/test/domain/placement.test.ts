@@ -504,6 +504,17 @@ describe('§3: a kind an adapter does not render is refused at Place', () => {
     expect(exclusionsFor(target({ adapter: 'kubernetes' }), scheduled)).toEqual(
       [],
     );
+    // A backend that renders no job at all says so once. NO_SCHEDULER's
+    // sentence opens by granting that this Target runs a job, so beside
+    // KIND_UNSUPPORTED it would contradict it on a single row — and
+    // `bluenose-static` is a connected Target, so that is a row a developer
+    // reads rather than a shape only a test constructs.
+    // REACH_UNSUPPORTED rides along because `static` serves only `public`;
+    // what matters is that NO_SCHEDULER is not the third.
+    expect(exclusionsFor(target({ adapter: 'static' }), scheduled)).toEqual([
+      'KIND_UNSUPPORTED',
+      'REACH_UNSUPPORTED',
+    ]);
   });
 
   test('a service and a website are both rendered there', () => {
