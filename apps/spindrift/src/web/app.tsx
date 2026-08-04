@@ -165,7 +165,7 @@ export function App() {
       .then((result) => {
         if (!live) return;
         setInstallation(
-          result !== null && result.ok && !result.value.configured
+          result?.ok && !result.value.configured
             ? { state: 'unconfigured', manifest: result.value.manifest }
             : { state: 'configured' },
         );

@@ -36,17 +36,21 @@
  * wizard that saved per step would run reconciliation four times over four
  * documents that were each missing something.
  *
- * **The four are the same four the predicate reads**, which is not a
- * coincidence and is what keeps this screen coherent:
- * `isUnconfiguredInstallation` answers over the genuine choices, so answering
- * them here is what ends onboarding, and a step asking something the predicate
- * ignores would be a question whose answer changed nothing. Discovery is the
- * exception and is the reason it is a step rather than a fifth ask: it writes
- * cloud facts, which are nobody's choice — it is here because confirming them is
+ * **This asks three of the four the predicate reads**, which is what keeps the
+ * screen coherent without making it a fourth question:
+ * `isUnconfiguredInstallation` answers over the genuine choices, and because it
+ * is an **and** — unconfigured means all four are still stand-ins — answering
+ * any one of the three asked here is what ends onboarding. A step asking
+ * something the predicate ignores would be a question whose answer changed
+ * nothing, which is why the fourth ask is discovery rather than another key: it
+ * writes cloud facts, nobody's choice, and it is here because confirming them is
  * cheapest while the operator is already looking at the document.
  * `secretStore.adapter` is the fourth genuine choice and is deliberately *not*
  * asked: it is one of two values, both wrong for an installation that has not
- * decided, and answering the other three is already enough to leave this screen.
+ * decided, and answering any of the other three already ends this screen. The
+ * asymmetry is safe only in that direction — a predicate that answered
+ * unconfigured when *any* choice was still a stand-in would hand this
+ * installation, which legitimately keeps two, a wizard instead of its product.
  *
  * **What an operator can authenticate as before any of this.** Nothing here is
  * reachable without a session, and a session is a passkey ceremony scoped to

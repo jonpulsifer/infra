@@ -230,10 +230,21 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * a session exists. A predicate whose one `true` sits behind a door that cannot
  * open is a wizard nobody can be shown.
  *
- * Reading only the genuine choices makes the reachable state the ordinary one: a
- * declaration that seeds the deployment facts — a real hostname above all — and
- * leaves the operator's own answers at their stand-ins. That installation can
- * enrol somebody, and what they are shown first is the four questions.
+ * **What that actually makes reachable, and it is not yet the ordinary case.** A
+ * declaration carrying a real `controlPlane.hostname` with these four left at
+ * their stand-ins answers `true` and *can* enrol somebody, so the reachable set
+ * is no longer empty. It is not a document anybody writes by accident: nothing
+ * in `installationManifestSchema` is optional, so an operator cannot **leave**
+ * the genuine choices — every key must be authored — and the values one would
+ * have to type to stay unconfigured are `installation: default`, this
+ * repository's own production GitHub App id, somebody else's GHCR namespace and
+ * `onepassword`. What makes the wizard ordinarily reachable is the chart seeding
+ * the deployment facts it already holds, `controlPlane.hostname` above all, so
+ * that the *placeholder* — what an installation with no declaration at all is
+ * seeded with — is itself an installation a browser will run a ceremony
+ * against. That is a change to the chart, not to this predicate, and until it
+ * lands the honest statement is: a seeded declaration reaches the wizard, a bare
+ * `manifest: {}` install still cannot sign in to be shown it.
  *
  * **All four, not any**, and a false positive here replaces the whole product
  * with a wizard, so the direction matters. Two of the four are legitimately the

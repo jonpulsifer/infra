@@ -57,6 +57,11 @@ export function manifestFieldAt(at: Path): FormField | null {
  * rendered against the control that produced it rather than in a list at the
  * bottom of the screen — `dns.zones.private` names one input, and `targets.1.name`
  * names one row of one array.
+ *
+ * An issue against the document itself has an empty path — strict mode's
+ * unrecognized-key refusal is one — and is spelled `(root)` rather than `''`,
+ * the same word `validateManifest` uses for it. Both callers put these keys in a
+ * sentence, and "because  is not valid" is a sentence with a hole in it.
  */
 export function manifestIssues(document: unknown): FieldErrors {
   const result = installationManifestSchema.safeParse(document);
@@ -64,7 +69,7 @@ export function manifestIssues(document: unknown): FieldErrors {
 
   const errors = new Map<string, string[]>();
   for (const issue of result.error.issues) {
-    const path = issue.path.map(String).join('.');
+    const path = issue.path.map(String).join('.') || '(root)';
     const existing = errors.get(path);
     if (existing === undefined) {
       errors.set(path, [issue.message]);

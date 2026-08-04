@@ -87,6 +87,17 @@ describe('the installation settings round trip', () => {
     ).toBe(true);
   });
 
+  test('a refusal of the document itself is named, not blank', () => {
+    // Strict mode refuses an unrecognized *top-level* key with an empty path,
+    // and both surfaces put these keys into a sentence — "was not written,
+    // because ${paths} are not valid". An empty key is a sentence with a hole
+    // in it, and this is the same word `validateManifest` already prints for
+    // the same issue.
+    const issues = manifestIssues({ ...manifest, unexpected: true });
+
+    expect([...issues.keys()]).toContain('(root)');
+  });
+
   test('the answered document carries no derived key', async () => {
     await seed();
 
