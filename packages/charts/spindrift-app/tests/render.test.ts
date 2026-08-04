@@ -364,13 +364,19 @@ describe('the route', () => {
             port: 80,
           },
           http: {
-            allowedHeaders: [
-              'authorization',
-              'cookie',
-              'x-forwarded-host',
-              'x-forwarded-proto',
-              'x-forwarded-uri',
-            ],
+            // Exactly two, and the exactness is the point. `allowedHeaders`
+            // permits a header through to oauth2-proxy; it does not create one.
+            // `x-forwarded-proto` is here because Envoy is the hop that writes
+            // it, not because the check reads it — every `x-forwarded-*` read
+            // is gated on `CanTrustForwardedHeaders`, false from the shim's
+            // `127.0.0.1`. `x-forwarded-host` and `x-forwarded-uri` are absent
+            // because only a client could set them, and `x-forwarded-uri` is
+            // read straight through `GetRequestURI` with no `IsForwardedRequest`
+            // comparison — it chose the path the sign-in returned to.
+            // `authorization` is read by no provider this deployment
+            // configures. The template comment carries the measurement, this
+            // carries the assertion.
+            allowedHeaders: ['cookie', 'x-forwarded-proto'],
             allowedResponseHeaders: [
               'set-cookie',
               'x-auth-request-email',
@@ -380,6 +386,25 @@ describe('the route', () => {
         },
       },
     ]);
+  });
+
+  test('the filter never forwards the header that names the return target', async () => {
+    // `getXAuthRequestRedirect` (oauth2-proxy `pkg/app/redirect/getters.go`)
+    // reads `X-Auth-Request-Redirect` with no trusted-proxy gate at all, so
+    // whoever puts that header on the check request decides where a sign-in
+    // returns to. The value the flow uses is composed inside the auth pod, by
+    // the shim `platform.externalAuth` points at; the only thing keeping a
+    // *browser* from composing one instead is that Envoy is never told to
+    // forward it. That absence is the guard, so it is asserted rather than
+    // left to the list above happening not to mention it.
+    const route = one(
+      await render({ app: { reach: 'private', auth: 'proxy' } }),
+      'HTTPRoute',
+    );
+    const { allowedHeaders } = route.spec.rules[0].filters[0].externalAuth.http;
+    expect(
+      (allowedHeaders as string[]).map((header) => header.toLowerCase()),
+    ).not.toContain('x-auth-request-redirect');
   });
 
   test('auth: none renders no filter, at either reach', async () => {

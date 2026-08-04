@@ -251,10 +251,15 @@ spec:
                 gateway:
                   name: spindrift-apps
                   namespace: spindrift-apps
+                # The shim beside oauth2-proxy, not oauth2-proxy's own port 80.
+                # It composes the absolute origin the browser is returned to
+                # after sign-in, which nothing on the check path otherwise
+                # carries; `clusters/base/apps/oauth2-proxy/helm-release.yaml`
+                # holds the mechanism.
                 externalAuth:
-                  name: oauth2-proxy
+                  name: oauth2-proxy-authz
                   namespace: oauth2-proxy
-                  port: 80
+                  port: 4181
                 # The chart requires this whenever a Component has config: the
                 # ExternalSecret names the store, and an unset name renders an
                 # object that never syncs behind a workload that waits forever.
@@ -303,14 +308,24 @@ spec:
                   namespace: spindrift-apps
                 # Answers on `oauth2.${SECRET_DOMAIN}` here rather than in the
                 # App zone, so the sign-in redirect leaves this gateway for
-                # `cluster-gateway`. That is one hop rather than a 404: the
+                # `cluster-gateway`. That much is one hop rather than a 404: the
                 # ExternalAuth filter is a backend reference, granted by the
                 # ReferenceGrant in `clusters/base/apps/oauth2-proxy`, and is
                 # not affected by which gateway serves the sign-in name.
+                #
+                # The sign-in itself does not complete on this Target. This
+                # cluster's proxy scopes its cookies to `.${SECRET_DOMAIN}`,
+                # which is where its callback is, and an App here is minted
+                # under `dns.zones` — `.${SPINDRIFT_DOMAIN}`. A browser at the
+                # App drops a cookie for a domain that does not cover the host
+                # it was served from, and `whitelist-domain` refuses the return
+                # trip for the same reason. Closing it needs one host to serve
+                # both halves: a second GitHub OAuth App with a callback in the
+                # App zone, or the App zone and the callback zone made one.
                 externalAuth:
-                  name: oauth2-proxy
+                  name: oauth2-proxy-authz
                   namespace: oauth2-proxy
-                  port: 80
+                  port: 4181
                 secretStore:
                   kind: ClusterSecretStore
                   name: onepassword-connect
