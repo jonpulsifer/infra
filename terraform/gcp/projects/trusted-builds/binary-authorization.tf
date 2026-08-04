@@ -7,6 +7,26 @@ resource "google_binary_authorization_attestor" "provenance" {
     public_keys {
       comment = "Next-gen KMS key"
 
+      # The name the *signer* stamps, because that is the only name admission
+      # matches on.
+      #
+      # `attestations sign-and-create --keyversion-*` writes the KMS key
+      # version's resource URI into the attestation as its public key id, and
+      # Binary Authorization then looks that string up on the attestor. Leave
+      # this unset and the API invents an id instead — here it kept the
+      # fingerprint of the PGP key this PKIX key replaced, `0A1EC650…`, which no
+      # signer has ever produced. The build stays green because
+      # `sign-and-create` succeeds either way; the mismatch surfaces one project
+      # and one deploy later as `denied by attestor` on an artifact that really
+      # was attested.
+      #
+      # Composed, never pasted. The URI ends in `/cryptoKeyVersions/N`, so a
+      # rotation moves it — and a hardcoded copy would go wrong in exactly the
+      # way described above, silently. `.name` is the version the attestor is
+      # registering the public half of, so the id and the PEM below cannot come
+      # from different versions.
+      id = "//cloudkms.googleapis.com/v1/${data.google_kms_crypto_key_latest_version.signer.name}"
+
       pkix_public_key {
         public_key_pem      = data.google_kms_crypto_key_latest_version.signer.public_key[0].pem
         signature_algorithm = data.google_kms_crypto_key_latest_version.signer.public_key[0].algorithm
