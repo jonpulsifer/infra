@@ -116,6 +116,26 @@ spec:
         routes:
           - name: hosted
             adapter: github-actions
+            # The public half of the sealing keypair. A stored registry
+            # credential travels to this route only inside an envelope sealed
+            # to this key; the private half lives in one place, the
+            # SPINDRIFT_BUILD_SEAL_KEY repository Actions secret, and rotating
+            # the pair is exactly those two edits.
+            sealPublicKey: |
+              -----BEGIN PUBLIC KEY-----
+              MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAqJhA+am3NJ4pDPNi/EDi
+              TD3UjZoP736+Nn3/RluZhdazx+UoUftS0FCXDBBI9WIG0ZzSGPYwpYXgoiZ45x+T
+              IwOrqvl+MXpU436eLPZH8vGuC9I1lRhLpepkoDkXaXixf5+CBAGHKTe/7WjlcMuS
+              +5Wkqhr20qYm8Xt2Znq9hNZHV+3x32rZGG4SEG9QdRJXt39+SI2gARpTwSdRdcpd
+              H7ScPha8cmxUiEM4S2GtVByIrwGXfxWHxb80OZrU4Kvea/GFSlWk9nKQUrmFqnj0
+              Lx4nh617h7SClmYeagkGyiQ8SL6C3hM3sGpnkaXXA4DQ/+W6QADLSAuLJKaI0xv9
+              tsDFqkNz60VQf9+SNkF446ekKqFztdsOM879nyAOIv4SfpQI3ZdvK3daFep/z4K9
+              2BUBzdb5F/f9TgTpW+PSQA2fX4vzt73WeeikVRxKx6zpnZKgFzjVMIhmu3Y47btD
+              xrPbOokNfv3N7OIhNuC7oz0tX1Lq0andlplZlcTm8pv/3bkT2QmmxtEPDRJ+Xn8h
+              fi04rbJRFt4x8GqPwCJSswH+eKOLw7c5Jtjl1vRoIKsxs5hICcFTZEIXnyycHxtA
+              Ve9Xp3LMmVgqq70mHzGCVMfJXfZgm8HBqJ5U9K5Xzjp0EHNdsE/tFjlBA/x+4KSh
+              ey2JEg4EriDjMik2MaTQqHcCAwEAAQ==
+              -----END PUBLIC KEY-----
           # The cloud builder, in the shared artifacts project beside the
           # registry. Spindrift is the proxy on the way in: it stages the git
           # revision (or the uploaded archive) into the source bucket and hands
