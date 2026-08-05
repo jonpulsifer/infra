@@ -27,6 +27,7 @@ import type {
 } from './model.ts';
 import { isInFlight } from './model.ts';
 import { useRoute } from './router.ts';
+import { SESSION_EXPIRED_EVENT } from './session-events.ts';
 import { subscribeAttempt, subscribeRuntime } from './stream-client.ts';
 import { type Theme, useTheme } from './theme.ts';
 import { Button } from './ui/button.tsx';
@@ -147,6 +148,21 @@ export function App() {
     return () => {
       live = false;
     };
+  }, []);
+
+  /**
+   * Re-gate on the one signal `client.ts`, the archive upload, and
+   * `stream-client.ts` all raise the same way: a 24h session that expired
+   * mid-visit, read as `UNAUTHENTICATED` by a transport with nothing sensible
+   * to render for it. The reset is the same shape `onSignOut` below already
+   * uses — this installation is still claimed, and nothing here suggests the
+   * linked Gateway went anywhere.
+   */
+  useEffect(() => {
+    const onExpired = () =>
+      setGate({ state: 'anonymous', claimed: true, gatewayUnlinked: false });
+    addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, []);
 
   /**

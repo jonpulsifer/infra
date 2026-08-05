@@ -6,9 +6,12 @@ import {
   LogOut,
   Rocket,
   Settings,
+  WifiOff,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { Principal } from '../../commands/types.ts';
+import { isReconnecting, onConnectionChange } from '../connection-status.ts';
 import { Button } from '../ui/button.tsx';
 import { cn } from '../ui/utils.ts';
 
@@ -103,6 +106,16 @@ export function AppShell({
   readonly declarationDivergence?: readonly string[];
   readonly children: ReactNode;
 }) {
+  // `isReconnecting` doubles as its own server snapshot: unlike
+  // `router.ts`'s hash, this store's state is `Set.size`, which reads the
+  // same — always `false` — with or without a `window`. React still requires
+  // the third argument from any `useSyncExternalStore` reached during a
+  // server render, so it is passed rather than left to the default.
+  const reconnecting = useSyncExternalStore(
+    onConnectionChange,
+    isReconnecting,
+    isReconnecting,
+  );
   const navigation = (
     <>
       {NAVIGATION.map(({ path: destination, label, icon: Icon, roots }) => {
@@ -197,6 +210,21 @@ export function AppShell({
               </button>
               .
             </span>
+          </div>
+        ) : null}
+        {reconnecting ? (
+          // Silent forever was the bug (`stream-client.ts`'s header explains
+          // the retry loop this reports on): a live pane that has stopped
+          // updating and says nothing looks identical to one with nothing new
+          // to show. This is the one place every screen with a stream passes
+          // through, the same reason `declarationDivergence` renders here
+          // rather than on each screen that could show it.
+          <div
+            role="status"
+            className="flex items-center gap-2 border-b border-border bg-muted/60 px-4 py-1.5 text-xs text-muted-foreground sm:px-6"
+          >
+            <WifiOff aria-hidden="true" className="size-3.5 shrink-0" />
+            <span>Disconnected, retrying…</span>
           </div>
         ) : null}
         <main className="min-w-0 pb-20 md:pb-0">{children}</main>
