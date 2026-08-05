@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Renders the shared app seams for both cluster adapters plus each cluster's
-# monitoring tree, without touching live state, then templates every in-repo
-# chart the rendered HelmReleases name, using the values those HelmReleases set.
+# monitoring overlay without touching live state, then templates every
+# in-repo chart the rendered HelmReleases name,
+# using the values those HelmReleases set.
 #
 # Rendering the kustomizations alone proves the overlays compose; it says
 # nothing about whether the charts they point at can render. A chart guard

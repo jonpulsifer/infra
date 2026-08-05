@@ -13,6 +13,7 @@ icon:: 🚒
 	- [[Runbooks/Inspect UniFi Network]] — read-only UniFi discovery before making changes
 	- [[Runbooks/SOPS Secrets and Age Keys]] — operator age key, harmonia keypairs, two-stage sops-nix recipient setup, decryption-failure triage
 	- [[Runbooks/Kiosk]] — the Raspberry Pi kiosk hosts: Cage/Wayland, Firefox, container-backed apps
+	- [[Runbooks/Adopt Folly Prometheus Operator CRDs]] — the one-time live ownership stamp and Kustomization wiring that lets folly join `monitoring-crds`
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.
 	- Prefer `mise run <task>` where a task exists; it encodes the correct binary and flags. Give a raw invocation only where mise has no task — deploying to a live host, `sops`, `flux reconcile`.
