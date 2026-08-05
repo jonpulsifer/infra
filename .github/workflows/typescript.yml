@@ -14,7 +14,7 @@ on:
           - infra-offsite
           - infra-folly
           - ubuntu-latest
-        default: infra-offsite
+        default: ubuntu-latest
 
 permissions:
   contents: read
