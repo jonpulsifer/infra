@@ -64,6 +64,24 @@ describe('a Component’s repository', () => {
     expect(first).not.toEqual(second);
   });
 
+  test('folds to two levels on Docker Hub, which holds no nested namespaces', () => {
+    // Docker Hub is namespace/repository and nothing deeper — the nested form
+    // is "push access denied, repository does not exist" after the whole
+    // build. The fold gives up the unambiguity above on that one registry;
+    // every other registry keeps the canonical nested name, and those are the
+    // refs Deploys pin.
+    expect(
+      componentRepositories({
+        registries: ['docker.io/jonpulsifer', REGISTRY],
+        app: 'statty',
+        component: 'nightly',
+      }),
+    ).toEqual([
+      'docker.io/jonpulsifer/statty-nightly',
+      'ghcr.io/jonpulsifer/statty/nightly',
+    ]);
+  });
+
   test('refuses a name no registry would accept rather than projecting it', () => {
     // Projecting would push two Components to one repository, which is the
     // quiet failure: the second build overwrites the first's tag.

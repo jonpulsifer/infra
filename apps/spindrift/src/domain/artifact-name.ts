@@ -79,8 +79,15 @@ export function componentRepositories(
 ): readonly string[] | null {
   if (!isPathComponent(parts.app)) return null;
   if (!isPathComponent(parts.component)) return null;
-  return parts.registries.map(
-    (registry) => `${registry}/${parts.app}/${parts.component}`,
+  return parts.registries.map((registry) =>
+    // Docker Hub holds exactly two path levels — namespace, then repository —
+    // so the App and Component fold into one hyphenated segment there. Every
+    // other registry takes the nested form; pushing the nested form to Docker
+    // Hub is "push access denied, repository does not exist" after the whole
+    // build, which is where this was found.
+    registryFlavour(registryHostOf(registry)) === 'dockerHub'
+      ? `${registry}/${parts.app}-${parts.component}`
+      : `${registry}/${parts.app}/${parts.component}`,
   );
 }
 
