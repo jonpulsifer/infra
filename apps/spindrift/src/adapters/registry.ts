@@ -507,6 +507,10 @@ function createBuildRoute(
         zeroConfigFrontend,
         signer: manifest.supplyChain.signer,
         attestor: manifest.supplyChain.attestor ?? '',
+        // Absent unless the manifest configured one, which is what keeps
+        // `carriesRegistryCredential` false and `dispatchBuild` refusing a
+        // stored credential on this route until an operator pastes a key in.
+        sealPublicKey: route.sealPublicKey,
       });
     }
     case 'cloud-build':

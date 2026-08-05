@@ -36,6 +36,7 @@ import {
   CALLER_WORKFLOW_FILE,
   RUN_NAME_PREFIX,
 } from '../../integrations/github/config-pr.ts';
+import type { RegistryAuth } from '../../storage/registry-credentials.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -154,6 +155,13 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
   readonly signer: string;
   /** The attestor a cloud Target's admission asks. See `BuildRequestSpec.attestor`. */
   readonly attestor: string;
+  /**
+   * SPKI PEM, matching the manifest's `build.routes[].sealPublicKey`.
+   *
+   * Its presence is what turns on `carriesRegistryCredential`. Absent, this
+   * route composes exactly the dispatch it always has.
+   */
+  readonly sealPublicKey?: string;
   /** Injected so a test can pin the correlation it asserts on. */
   readonly correlation?: () => string;
   /** How long to keep looking for the run a dispatch started. */
@@ -238,6 +246,20 @@ export interface BuildRequestSpec {
    * two verifiers, two artifacts.
    */
   readonly attestor: string;
+  /**
+   * The installation's held registry credential, sealed to `sealPublicKey`
+   * (`sealRegistryAuth` below) — absent wherever {@link BuildSpec.registryAuth}
+   * is empty, which is the ordinary case (§16).
+   *
+   * Never the credential itself. `workflow_dispatch` renders every other field
+   * of this request in the run header, so the plaintext travels no further
+   * than the process that composed this object — see
+   * `carriesRegistryCredential` for the rest of the reasoning. The reusable
+   * workflow's "Log in with sealed credentials" step is the only place that
+   * ever opens it, and it does so with the private key on the other side of
+   * this pair, held as this repository's `SPINDRIFT_BUILD_SEAL_KEY` secret.
+   */
+  readonly sealedRegistryAuth?: string;
 }
 
 export class GitHubActionsBuildRoute implements BuildAdapter {
@@ -246,18 +268,31 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
   readonly provenanceBuilderId =
     'https://github.com/actions/runner/github-hosted';
   /**
-   * **No.** This route is dispatched through `workflow_dispatch`, and GitHub
-   * renders a dispatch's inputs in the run header — so a credential travelling
-   * in the spec would be published to everyone who can see the run, in a
-   * repository §15 deliberately does not require the installation to own.
+   * **Only where a seal key is configured.** This route is dispatched through
+   * `workflow_dispatch`, and GitHub renders a dispatch's inputs in the run
+   * header — so a credential travelling in the spec in the clear would be
+   * published to everyone who can see the run, in a repository §15
+   * deliberately does not require the installation to own. That is still true
+   * and is still why nothing here ever sends one unsealed.
    *
-   * The right mechanism is a repository Actions secret, which is written
-   * through a libsodium sealed box and therefore wants a dependency this
-   * package has not taken. Until then `dispatchBuild` refuses a build that
-   * needs a stored credential on this route, which is a route an operator can
-   * change rather than a token an operator cannot un-publish.
+   * What changed is the mechanism for carrying one anyway. A repository
+   * Actions secret written through a libsodium sealed box would have needed a
+   * dependency this package has not taken — the alternative actually built is
+   * the reverse of that write: this route seals a held credential to
+   * `sealPublicKey` (`sealRegistryAuth` below) *before* it ever reaches the
+   * dispatch inputs, so what the run header renders is ciphertext. The only
+   * key that opens it is the matching private key, and its only home is the
+   * platform repository's `SPINDRIFT_BUILD_SEAL_KEY` Actions secret — never
+   * this manifest, never git, and not a connected repository's own secrets
+   * either: a caller in a connected repository passes none, so a build that
+   * runs there carries no credential regardless of what this route declares.
+   *
+   * A route with no `sealPublicKey` configured answers `false` here exactly as
+   * before, and `dispatchBuild` refuses a build that needs a stored credential
+   * on it — a route an operator can change, rather than a token an operator
+   * cannot un-publish.
    */
-  readonly carriesRegistryCredential = false;
+  readonly carriesRegistryCredential: boolean;
   /**
    * Both, because the run holds two identities at once and the pinned workflow
    * uses each: `docker/login-action` against `ghcr.io` with the run's own
@@ -284,6 +319,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
   constructor(private readonly options: GitHubActionsRouteOptions) {
     this.name = options.name;
     this.platformRepository = reusableWorkflowRepository(options.buildWorkflow);
+    this.carriesRegistryCredential = options.sealPublicKey !== undefined;
   }
 
   async *build(
@@ -330,6 +366,24 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     )();
     const runName = `${RUN_NAME_PREFIX} ${correlation}`;
 
+    // `dispatchBuild` already refused a build that needs one where
+    // `carriesRegistryCredential` is false, so a seal key is here whenever
+    // `spec.registryAuth` is not empty — the throw below is for a caller that
+    // skipped that refusal, which is a programming error rather than a
+    // configuration one (the same posture `reusableWorkflowRepository` takes).
+    let sealedRegistryAuth: string | undefined;
+    if (spec.registryAuth.length > 0) {
+      if (this.options.sealPublicKey === undefined) {
+        throw new TypeError(
+          'build received a registry credential but this route has no sealPublicKey configured',
+        );
+      }
+      sealedRegistryAuth = await sealRegistryAuth(
+        spec.registryAuth,
+        this.options.sealPublicKey,
+      );
+    }
+
     const request: BuildRequestSpec = {
       bundleDigest: source.bundleDigest,
       origin: source.origin,
@@ -342,6 +396,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       zeroConfigFrontend: this.options.zeroConfigFrontend,
       signer: this.options.signer,
       attestor: this.options.attestor,
+      ...(sealedRegistryAuth !== undefined ? { sealedRegistryAuth } : {}),
     };
 
     let repository: string | null = null;
@@ -541,6 +596,75 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       report,
     });
   }
+}
+
+/**
+ * Seals a held registry credential to `sealPublicKey`, so it can travel inside
+ * `workflow_dispatch`'s inputs without arriving in the clear
+ * (`carriesRegistryCredential` above says why that would otherwise matter).
+ *
+ * Hybrid rather than RSA-OAEP alone: OAEP has no room for more than a couple
+ * hundred bytes of plaintext under a 2048-bit key, and a registry login is not
+ * bounded that way. A fresh AES-256-GCM key encrypts the payload; RSA-OAEP
+ * wraps only that key.
+ *
+ * The envelope is `base64(JSON.stringify({k, iv, c}))` — the wrapped AES key,
+ * the GCM nonce, and the ciphertext with WebCrypto's own 16-byte tag already
+ * appended to it, each base64 on its own. Exported so a test can decrypt what
+ * this produces with the *exact* algorithm the reusable workflow runs — see
+ * `.github/workflows/spindrift-build.yml`'s "Log in with sealed credentials"
+ * step, the other half of this pair and the one the wire format actually has
+ * to agree with.
+ */
+export async function sealRegistryAuth(
+  auth: readonly RegistryAuth[],
+  sealPublicKey: string,
+): Promise<string> {
+  const publicKey = await crypto.subtle.importKey(
+    'spki',
+    spkiPemToDer(sealPublicKey),
+    { name: 'RSA-OAEP', hash: 'SHA-256' },
+    false,
+    ['encrypt'],
+  );
+
+  const aesKey = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt'],
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    aesKey,
+    new TextEncoder().encode(JSON.stringify(auth)),
+  );
+  const rawKey = await crypto.subtle.exportKey('raw', aesKey);
+  const wrappedKey = await crypto.subtle.encrypt(
+    { name: 'RSA-OAEP' },
+    publicKey,
+    rawKey,
+  );
+
+  const envelope = {
+    k: Buffer.from(wrappedKey).toString('base64'),
+    iv: Buffer.from(iv).toString('base64'),
+    c: Buffer.from(ciphertext).toString('base64'),
+  };
+  return Buffer.from(JSON.stringify(envelope)).toString('base64');
+}
+
+/** The DER bytes inside an SPKI PEM, which is what WebCrypto's `importKey` takes. */
+function spkiPemToDer(pem: string): Uint8Array<ArrayBuffer> {
+  const body = pem
+    .replace(/-{5}BEGIN PUBLIC KEY-{5}/, '')
+    .replace(/-{5}END PUBLIC KEY-{5}/, '')
+    .replace(/\s+/g, '');
+  // Copied into a fresh `Uint8Array<ArrayBuffer>` rather than returned as the
+  // `Buffer` itself: `Buffer`'s type admits `ArrayBufferLike`, which WebCrypto's
+  // `BufferSource` does not, and a cast here would paper over the one call site
+  // that actually needs the narrower type.
+  return new Uint8Array(Buffer.from(body, 'base64'));
 }
 
 /**
