@@ -13,6 +13,11 @@ spec:
     name: infra
   dependsOn:
     - name: storage
+    # base/monitoring holds a raw ServiceMonitor. Flux dry-runs every object
+    # in a Kustomization before applying any, so without the CRD already on
+    # the cluster this one is refused whole — including the
+    # kube-prometheus-stack HelmRelease that would supply the CRD.
+    - name: monitoring-crds
   decryption:
     provider: sops
     secretRef:

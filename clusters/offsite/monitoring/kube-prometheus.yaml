@@ -28,6 +28,11 @@ spec:
     remediation:
       retries: 5
   values:
+    # The CRDs come from the monitoring-crds Kustomization this one dependsOn,
+    # so they already exist and belong to another release by the time this
+    # installs. Leaving this true makes Helm refuse to adopt them.
+    crds:
+      enabled: false
     defaultRules:
       rules:
         etcd: false

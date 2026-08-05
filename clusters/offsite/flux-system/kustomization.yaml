@@ -6,6 +6,7 @@ resources:
   - apps.yaml
   - arc-runners.yaml
   - config.yaml
+  - monitoring-crds.yaml
   - monitoring.yaml
   - networking.yaml
   - oauth2-proxy.yaml

@@ -1,0 +1,16 @@
+---
+# Deliberately a second HelmRepository for the same URL as
+# `base/monitoring/helm-repository-prometheus.yaml`, under its own name.
+#
+# `monitoring` dependsOn `monitoring-crds`, so anything `monitoring-crds`
+# needs must exist before `monitoring` has reconciled even once. Pointing at
+# the `prometheus` HelmRepository — which `monitoring` owns — would invert
+# that and deadlock the pair on a cluster building from nothing.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: prometheus-crds
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://prometheus-community.github.io/helm-charts
