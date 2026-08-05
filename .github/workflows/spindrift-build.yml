@@ -510,7 +510,12 @@ jobs:
 
           attest() {
             echo "attesting ${1}@${2}"
-            gcloud beta container binauthz attestations sign-and-create \
+            # `sign-and-create` refuses a second occurrence for the same
+            # artifact-url as a conflict — but an identical rebuild reusing
+            # its digest is this pipeline's ordinary behaviour, and "already
+            # attested" is the condition this step exists to bring about, not
+            # a failure. Any other error still fails the build.
+            output=$(gcloud beta container binauthz attestations sign-and-create \
               --project="$attestor_project" \
               --artifact-url="${1}@${2}" \
               --attestor="$attestor_name" \
@@ -519,7 +524,13 @@ jobs:
               --keyversion-location="$(field locations)" \
               --keyversion-keyring="$(field keyRings)" \
               --keyversion-key="$(field cryptoKeys)" \
-              --keyversion="$version"
+              --keyversion="$version" 2>&1) && { printf '%s\n' "$output"; return 0; }
+            case "$output" in
+              *"is the subject of a conflict"*)
+                echo "already attested: ${1}@${2}" ;;
+              *)
+                printf '%s\n' "$output" >&2; return 1 ;;
+            esac
           }
 
           # Once per destination, and for a sharper reason than the signature:

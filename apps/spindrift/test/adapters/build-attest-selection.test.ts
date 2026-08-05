@@ -67,4 +67,55 @@ describe('the hosted route attests what a runtime can run', () => {
     ]);
     expect(digests).not.toContain(`${DESTINATION}@${ATTACHMENT_DIGEST}`);
   });
+
+  test('an occurrence that already exists is done, not a failure', async () => {
+    // An identical rebuild reuses its digest, and a rerun after a green attest
+    // meets its own occurrence — the condition this step exists to bring
+    // about. Observed live: a rerun died at `sign-and-create … is the subject
+    // of a conflict` with everything already attested.
+    const conflictStub = `case "$*" in
+  *print-access-token*) echo stub-token ;;
+  *sign-and-create*) echo 'ERROR: (gcloud.beta.container.binauthz.attestations.sign-and-create) Resource in projects [trusted-builds] is the subject of a conflict: Could not create occurrence' >&2; exit 1 ;;
+esac
+exit 0`;
+
+    const digests = await attested(
+      await attestScript(),
+      { gcloud: conflictStub, docker: indexStub() },
+      {
+        ATTESTOR,
+        SIGNER,
+        DESTINATIONS: DESTINATION,
+        DIGEST: INDEX_DIGEST,
+        CLOUDSDK_CORE_DISABLE_PROMPTS: '1',
+      },
+    );
+
+    expect(digests).toEqual([
+      `${DESTINATION}@${INDEX_DIGEST}`,
+      `${DESTINATION}@${RUNTIME_DIGEST}`,
+    ]);
+  });
+
+  test('any other signing failure still fails the build', async () => {
+    const brokenStub = `case "$*" in
+  *print-access-token*) echo stub-token ;;
+  *sign-and-create*) echo 'ERROR: PERMISSION_DENIED: no signing for you' >&2; exit 1 ;;
+esac
+exit 0`;
+
+    await expect(
+      attested(
+        await attestScript(),
+        { gcloud: brokenStub, docker: indexStub() },
+        {
+          ATTESTOR,
+          SIGNER,
+          DESTINATIONS: DESTINATION,
+          DIGEST: INDEX_DIGEST,
+          CLOUDSDK_CORE_DISABLE_PROMPTS: '1',
+        },
+      ),
+    ).rejects.toThrow('the attest step failed');
+  });
 });
