@@ -6,10 +6,10 @@
  * statement about **what appears on the screen in a given state**, and none of
  * them is about interaction. A test that needed a click would be testing Radix.
  *
- * The screens are rendered from `demo/scenarios.ts`, which is the placeholder
- * data. When the query commands replace it these tests keep their subject —
- * they assert over `DeployView` and `WorkspaceView`, and those types are the
- * contract the queries will have to meet.
+ * The screens are rendered from `test/fixtures/scenarios.ts`, which is the
+ * placeholder data. When the query commands replace it these tests keep their
+ * subject — they assert over `DeployView` and `WorkspaceView`, and those types
+ * are the contract the queries will have to meet.
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';

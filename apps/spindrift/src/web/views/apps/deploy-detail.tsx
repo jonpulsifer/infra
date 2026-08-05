@@ -485,11 +485,12 @@ function Actions({
 
 /**
  * The three honest things a name can be: serving this attempt, serving the
- * release before it, or reserved and answering with a status page.
+ * release before it, or reserved with nothing behind it yet.
  *
- * §21 gives an App a lowest-precedence wildcard route from the moment it
- * exists, so the third case is a real page rather than a dead name — which is
- * why it is labelled "status page" and not "not yet available".
+ * §21 wants an App to carry a lowest-precedence wildcard route from the
+ * moment it exists, so a reserved name resolves to a status page instead of a
+ * dead one — but that route is not built (see the README's "status page is
+ * not served yet"), so the third case names only the state, not a page.
  */
 function UrlBlock({ view }: { view: DeployView }) {
   const serving = view.urlLive;
@@ -510,7 +511,6 @@ function UrlBlock({ view }: { view: DeployView }) {
         {view.url}
       </a>
       {previous ? <Eyebrow>previous release</Eyebrow> : null}
-      {!serving && !previous ? <Eyebrow>status page</Eyebrow> : null}
     </div>
   );
 }

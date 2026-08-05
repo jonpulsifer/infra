@@ -10,10 +10,13 @@
  * `AdapterRegistry`'s own contract: **lookups return `null` rather than
  * throwing**, because an installation with no adapter for a Target's declared
  * type is a configuration fact a command must report, not an exception it
- * should propagate. So the two adapters Milestone 5 will add and the build
- * routes Milestone 4 will add are `null` here today, and every caller already
- * handles that — a Target whose adapter is missing is a non-candidate with a
- * stated reason (§3), which is exactly right for one that is not built yet.
+ * should propagate. All three deploy backends, all three build routes, and
+ * both datastore adapters are wired below; `null` here now means "this
+ * installation didn't configure one" — no OAuth store for hosted CI, no route
+ * by that name, `static`'s deliberate absence from `datastoreAdapters` — and
+ * every caller already handles that: a Target whose adapter is missing is a
+ * non-candidate with a stated reason (§3), which is exactly right for a
+ * configuration gap.
  *
  * §13's one auth mode is why there is no credential in this file: "native OIDC
  * federation, nothing stored." The cluster Spindrift runs on is reached with
