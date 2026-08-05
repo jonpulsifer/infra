@@ -203,7 +203,21 @@ jobs:
           git add -- "${targets[@]}"
           git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
 
-          git push origin "$BRANCH_NAME" --force
+          if ! git push origin "$BRANCH_NAME" --force; then
+            # A prior run that failed after pushing leaves this branch cut from
+            # an older main, so the next push introduces every commit in
+            # between — and GITHUB_TOKEN may never write one that touched
+            # .github/workflows/, whatever this job's `permissions:` say.
+            # Recreating the ref reduces the push to the single manifest-only
+            # commit above. Only on failure, so an open PR keeps its identity
+            # and its running checks in the ordinary case.
+            echo "Push refused; recreating $BRANCH_NAME so it carries only this commit."
+            git push origin --delete "$BRANCH_NAME" || true
+            git push origin "$BRANCH_NAME" || {
+              echo "::error::Cannot push $BRANCH_NAME even as a fresh ref carrying one manifest-only commit. Delete the remote branch and any open pull request for it, then re-run this job."
+              exit 1
+            }
+          fi
 
           # An **open** one, not any one. `gh pr view <branch>` answers with the
           # most recent pull request for that head whatever its state, so once
