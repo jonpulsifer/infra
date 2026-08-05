@@ -20,6 +20,7 @@
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
+import { deployApp } from '../../src/commands/apps/deploy.ts';
 import { placeIntent } from '../../src/commands/deploys/create.ts';
 import {
   createDeploy,
@@ -605,6 +606,140 @@ describe('createDeploy writes an intent, and only an intent', () => {
       },
     });
     expect(refusing.signatureChecks.admissions).toHaveLength(1);
+  });
+});
+
+describe('deployApp selects which Component it acts on', () => {
+  /**
+   * A second Component on the fixture's App — a `job` alongside the fixture's
+   * `service`, the shape that had no path to a Build at all before `deployApp`
+   * could be told which Component it meant. Placed on the fixture's own Target
+   * so `desiredTargets` — not a Deploy history that does not exist yet — is
+   * what resolves `targetId`.
+   */
+  async function secondComponent(appId: string, targetId: string) {
+    const db = database().db;
+    const [component] = await db
+      .insert(components)
+      .values({
+        appId,
+        name: 'worker',
+        kind: 'job',
+        reach: 'none',
+        auth: 'none',
+      })
+      .returning();
+    await db
+      .insert(componentTargetDesired)
+      .values({ componentId: component!.id, targetId, updatedAt: FROZEN });
+    return component!;
+  }
+
+  test('a fresh second Component gets its own Build, not the primary’s', async () => {
+    const { app, component, target } = await fixture();
+    const primaryBuild = await succeededBuild(component.id, 10);
+    const worker = await secondComponent(app.id, target.id);
+
+    const result = await deployApp(
+      { name: app.name, component: worker.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Nothing was deployable yet for `worker`, so this is the Build-starting
+    // act, not the deploy one.
+    expect(result.value.phase).toBe('BUILDING');
+    expect(result.value.deployId).toBeNull();
+
+    const [started] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, result.value.buildId));
+    expect(started?.componentId).toBe(worker.id);
+
+    // The primary's own Build is untouched — a different Component's deploy
+    // wrote nothing onto it.
+    const primaryRows = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.componentId, component.id));
+    expect(primaryRows).toEqual([primaryBuild]);
+  });
+
+  test('a named second Component with an artifact gets its own Deploy, not the primary’s', async () => {
+    const { app, component, target } = await fixture();
+    await succeededBuild(component.id, 11);
+    const worker = await secondComponent(app.id, target.id);
+    const workerBuild = await succeededBuild(worker.id, 12);
+
+    const result = await deployApp(
+      { name: app.name, component: worker.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('PENDING');
+    expect(result.value.buildId).toBe(workerBuild.id);
+
+    const [deploy] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.id, result.value.deployId!));
+    expect(deploy?.componentId).toBe(worker.id);
+
+    // The primary Component gets no Deploy out of an intent aimed at `worker`.
+    const primaryDeploys = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.componentId, component.id));
+    expect(primaryDeploys).toHaveLength(0);
+
+    const desired = await desiredRow(worker.id, target.id);
+    expect(desired?.desiredBuildId).toBe(workerBuild.id);
+    expect(desired?.desiredDeployId).toBe(result.value.deployId);
+  });
+
+  test('an unknown Component name is refused, naming what the App actually has', async () => {
+    const { app, component } = await fixture();
+
+    const result = await deployApp(
+      { name: app.name, component: 'no-such-component' },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_FOUND');
+    expect(result.failure.message).toContain('no-such-component');
+    expect(result.failure.message).toContain(component.name);
+  });
+
+  test('an absent Component still deploys the primary, unchanged', async () => {
+    const { app, component, target } = await fixture();
+    const build = await succeededBuild(component.id, 13);
+    await database().db.insert(componentTargetDesired).values({
+      componentId: component.id,
+      targetId: target.id,
+      updatedAt: FROZEN,
+    });
+
+    const result = await deployApp(
+      { name: app.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('PENDING');
+    expect(result.value.buildId).toBe(build.id);
+
+    const [deploy] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.id, result.value.deployId!));
+    expect(deploy?.componentId).toBe(component.id);
   });
 });
 
