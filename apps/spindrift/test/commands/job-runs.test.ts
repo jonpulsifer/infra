@@ -75,7 +75,6 @@ async function scaffold(
       name,
       sourceKind: 'repo',
       repoUrl: 'https://vcs.example/acme/thing.git',
-      vesselRef: 'driftwood',
     },
     ctx,
   );

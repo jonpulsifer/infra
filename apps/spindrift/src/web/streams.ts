@@ -189,7 +189,7 @@ async function upgradeRuntime(
   // This value is concatenated into a query language on the far side — a Cloud
   // Logging filter, a label selector — so it is checked here, at the one place
   // it enters from a browser, rather than escaped at each of them. Unchecked it
-  // is a read of the whole vessel project: `AND` binds tighter than `OR`, so
+  // is a read of the whole vessel's project: `AND` binds tighter than `OR`, so
   // `a" OR timestamp>="2020-01-01T00:00:00Z` makes a filter that matches every
   // entry the project has, other Apps' output and audit logs included, and the
   // lines land in the run pane of whoever asked.

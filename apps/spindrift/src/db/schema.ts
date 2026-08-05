@@ -475,8 +475,14 @@ export const apps = pgTable('apps', {
    * honest reading and the one an operator can act on.
    */
   buildRoute: text('build_route'),
-  /** §14: the cloud project this App's own resources live in, if any. */
-  vesselRef: text('vessel_ref'),
+  /**
+   * **No vessel column, deliberately.** An App has placements, and each
+   * placement's Target is a surface on a vessel — that is the boundary the App
+   * is in, and it is derivable. A column here could only be a second, unchecked
+   * answer to the same question; the one that existed was written from
+   * `cloud.homeVesselProject` at creation and read by nothing but two labels.
+   * See `0025_drop_app_vessel_ref.sql`.
+   */
   /** §9: the flat single-label vanity name, if the developer chose one. */
   vanityDomain: text('vanity_domain'),
   createdAt: timestamp('created_at', { withTimezone: true })
