@@ -8,6 +8,7 @@ icon:: 🚒
 	- [[Runbooks/Managed Postgres]] — reach a CloudNativePG database through `kubectl cnpg`, and check whether it has a backup
 	- [[Runbooks/OpenBao Bootstrap]] — initialize and verify the folly OpenBao instance
 	- [[Runbooks/Add Shared Kubernetes Resource]] — use the `clusters/base/` pattern for both clusters
+	- [[Runbooks/Adopt Folly Monitoring CRDs]] — stamp Helm ownership metadata onto folly's pre-existing Prometheus Operator CRDs before wiring `monitoring-crds`
 	- [[Runbooks/Validate Infra Changes]] — validation commands by change area
 	- [[Runbooks/Inspect UniFi Network]] — read-only UniFi discovery before making changes
 	- [[Runbooks/SOPS Secrets and Age Keys]] — operator age key, harmonia keypairs, two-stage sops-nix recipient setup, decryption-failure triage

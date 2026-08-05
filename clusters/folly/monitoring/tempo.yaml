@@ -36,10 +36,9 @@ spec:
               endpoint: 0.0.0.0:4317
             http:
               endpoint: 0.0.0.0:4318
-      storage:
-        type: filesystem
-      traces_storage:
-        path: /var/tempo/traces
+      # storage.trace defaults to backend: local, local.path: /var/tempo/traces,
+      # wal.path: /var/tempo/wal — exactly the local single-binary intent here,
+      # both under the persistence PVC's /var/tempo mount. No override needed.
     service:
       type: ClusterIP
     persistence:

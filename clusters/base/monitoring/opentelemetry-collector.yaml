@@ -62,7 +62,16 @@ spec:
       service:
         telemetry:
           metrics:
-            address: 0.0.0.0:8888
+            # Collector 0.156.0 (chart 0.165.0) dropped the flat `address`
+            # form in favour of the OpenTelemetry `readers` shape. This is
+            # self-telemetry only — the data-pipeline prometheus exporter
+            # below (port 8889) is untouched.
+            readers:
+              - pull:
+                  exporter:
+                    prometheus:
+                      host: 0.0.0.0
+                      port: 8888
         pipelines:
           traces:
             receivers: [otlp]
@@ -87,7 +96,9 @@ spec:
         containerPort: 4318
         servicePort: 4318
         protocol: TCP
-      metrics:
+      # Named "monitoring" (not "metrics") to match the port name the
+      # opentelemetry-collector-servicemonitor.yaml endpoint selects.
+      monitoring:
         enabled: true
         containerPort: 8888
         servicePort: 8888
