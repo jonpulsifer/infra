@@ -87,6 +87,8 @@ describe('the bundle a rerun stages', () => {
     connectRepository?: boolean;
     status?: 'FAILED' | 'SUCCEEDED';
     artifactDigest?: string;
+    /** `false` seeds a Component that has never built at all. */
+    previousBuild?: boolean;
   }) {
     const name = `rerun-${crypto.randomUUID().slice(0, 8)}`;
     const [repository] = options.connectRepository
@@ -121,6 +123,9 @@ describe('the bundle a rerun stages', () => {
     await ctx.db
       .insert(componentTargetDesired)
       .values({ componentId: component!.id, targetId: target!.id });
+    if (options.previousBuild === false) {
+      return { app: app!, component: component!, build: null };
+    }
     const [build] = await ctx.db
       .insert(builds)
       .values({
@@ -195,7 +200,7 @@ describe('the bundle a rerun stages', () => {
     // was staged for it, and the handle that predates the depot is not in it.
     expect(rerun!.bundleLocation).toBe(FRESH_LOCATION);
     expect(rerun!.bundleDigest).toBe(FRESH_DIGEST);
-    expect(rerun!.id).not.toBe(seeded.build.id);
+    expect(rerun!.id).not.toBe(seeded.build!.id);
 
     // The exact commit, once — the rerun suffix is a uniqueness device on the
     // row and never travels into staging.
@@ -290,10 +295,10 @@ describe('the bundle a rerun stages', () => {
     expect(result.failure.message).toContain(COMMIT);
   });
 
-  test('a Build with no bundle at all is still started, as it always was', async () => {
-    // Nothing stale to retire here: dispatch already refuses a Build with no
-    // staged bundle, with its own sentence. This ticket narrows what is
-    // inherited, not when a Build may be created.
+  test('a repo Build with no bundle stages one instead of starting dead', async () => {
+    // A repo Component whose previous Build never had a bundle used to get
+    // another Build with none — a row dispatch then refused, forever. The
+    // repository is right there; staging it is what a first bundle is.
     const seeded = await seedFailedBuild({
       location: null,
       connectRepository: true,
@@ -303,7 +308,42 @@ describe('the bundle a rerun stages', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.phase).toBe('BUILDING');
-    expect(stager.staged).toHaveLength(0);
+    expect(stager.staged).toEqual([
+      { repository: `jonpulsifer/${seeded.app.name}`, commit: COMMIT },
+    ]);
+
+    const [row] = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, result.value.buildId));
+    expect(row?.bundleLocation).toBe(FRESH_LOCATION);
+  });
+
+  test("a Component's first Build stages the App's source and subpath", async () => {
+    // The live shape this pins: a freshly created second Component has no
+    // Build history at all. Its first Build stages the repository at the
+    // authoritative commit and carries the App's own subpath — '.' would
+    // build the monorepo root instead of the App.
+    const seeded = await seedFailedBuild({
+      location: null,
+      connectRepository: true,
+      previousBuild: false,
+    });
+
+    const result = await deployApp({ name: seeded.app.name }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('BUILDING');
+    expect(stager.staged).toEqual([
+      { repository: `jonpulsifer/${seeded.app.name}`, commit: COMMIT },
+    ]);
+
+    const [row] = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, result.value.buildId));
+    expect(row?.bundleLocation).toBe(FRESH_LOCATION);
+    expect(row?.bundleSubpath).toBe('apps/spindrift');
   });
 
   /**
@@ -334,7 +374,7 @@ describe('the bundle a rerun stages', () => {
       // no intent to navigate to.
       expect(result.value.phase).toBe('BUILDING');
       expect(result.value.deployId).toBeNull();
-      expect(result.value.buildId).not.toBe(seeded.build.id);
+      expect(result.value.buildId).not.toBe(seeded.build!.id);
 
       const rows = await ctx.db
         .select()
@@ -352,7 +392,7 @@ describe('the bundle a rerun stages', () => {
 
       // The row edit this ticket exists to end: the succeeded Build still says
       // it succeeded, and still names what it produced.
-      const succeeded = rows.find((row) => row.id === seeded.build.id);
+      const succeeded = rows.find((row) => row.id === seeded.build!.id);
       expect(succeeded?.status).toBe('SUCCEEDED');
       expect(succeeded?.artifactDigest).toBe(`sha256:${'b'.repeat(64)}`);
     });

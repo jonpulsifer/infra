@@ -50,6 +50,15 @@ const noAdapters: AdapterRegistry = {
   },
   repository: () => null,
   supplyChain: () => supplyChainHarness,
+  // A repo Component's first bundle is staged at Build creation now, so the
+  // deploy tests below need a depot; none of them asserts on its contents.
+  source: () => ({
+    stageRepository: async () => ({
+      digest: `sha256:${'d'.repeat(64)}`,
+      location: `gs://depot.example.test/${'d'.repeat(64)}.tgz`,
+      retention: 'ephemeral' as const,
+    }),
+  }),
 };
 
 function context(clock: Clock = frozenClock): CommandContext {
@@ -1744,6 +1753,10 @@ describe('deployApp command', () => {
       targetShape: 'image',
       artifactType: 'image',
       status: 'FAILED',
+      // Durable, so the rerun inherits it: this test is about Build-vs-intent,
+      // and an app with no connected repository has nothing to stage from.
+      bundleDigest: `sha256:${'e'.repeat(64)}`,
+      bundleLocation: `gs://depot.example.test/${'e'.repeat(64)}.tgz`,
     });
 
     const result = await deployApp({ name: appName }, ctx);
