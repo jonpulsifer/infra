@@ -2,6 +2,10 @@ resource "google_project_service" "service" {
   for_each = toset([
     "artifactregistry.googleapis.com",
     "binaryauthorization.googleapis.com",
+    # The build submit targets trusted-builds, but the controller's federated
+    # token bills its quota here — and GCP refuses a call whose consumer
+    # project has not enabled the API, whatever project the URL names.
+    "cloudbuild.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     # A Cloud Run Job holds no cron expression, so a Component that declares a
     # schedule is a Cloud Scheduler job calling `jobs.run` in front of it.
