@@ -49,6 +49,7 @@ import {
   builds,
   componentTargetDesired,
   repositories,
+  targets,
 } from '../../db/schema.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { isFetchableBundleLocation } from '../../storage/archives.ts';
@@ -82,6 +83,16 @@ export const deployAppInput = z
      * way to reach the rest: nothing else inserts a Build for them.
      */
     component: z.string().trim().min(1).optional(),
+    /**
+     * The Target for a Component deploying for the first time, by name or id.
+     *
+     * Only a first deploy needs it: placement is a fact a deploy writes, so a
+     * Component that has never deployed has none to read back — `placeComponent`
+     * migrates configuration, it does not place. Absent, the Component's own
+     * history answers as it always has, and a value that disagrees with that
+     * history is refused rather than silently moving the Component.
+     */
+    target: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -324,13 +335,40 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   }
 
   const latestDeploy = component.deploys[0];
-  const targetId =
+  const placedTargetId =
     latestDeploy?.targetId ?? component.desiredTargets[0]?.targetId;
+
+  let targetId = placedTargetId;
+  if (input.target !== undefined) {
+    const wantsId = z.uuid().safeParse(input.target).success;
+    const [named] = await context.db
+      .select({ id: targets.id })
+      .from(targets)
+      .where(
+        wantsId ? eq(targets.id, input.target) : eq(targets.name, input.target),
+      );
+    if (named === undefined) {
+      return failed('NOT_FOUND', `there is no Target '${input.target}'`);
+    }
+    // History wins where it exists: a deploy that named a different Target
+    // than the one this Component lives on is a move, and moves go through
+    // placement — not through a deploy that quietly lands somewhere new.
+    if (placedTargetId !== undefined && placedTargetId !== named.id) {
+      return failed(
+        'INVALID_INPUT',
+        `Component '${component.name}' is placed elsewhere — deploy without ` +
+          'naming a Target, or move it first',
+        [{ path: 'target', message: 'disagrees with the existing placement' }],
+      );
+    }
+    targetId = named.id;
+  }
 
   if (!targetId) {
     return failed(
       'NOT_FOUND',
-      `Component '${component.name}' has no target placement`,
+      `Component '${component.name}' has no target placement — name one: ` +
+        'a first deploy is what writes it',
     );
   }
 

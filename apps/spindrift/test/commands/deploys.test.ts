@@ -716,6 +716,82 @@ describe('deployApp selects which Component it acts on', () => {
     expect(result.failure.message).toContain(component.name);
   });
 
+  /**
+   * Placement is a fact a deploy writes, so a Component that has never
+   * deployed has none to read back — `placeComponent` migrates configuration,
+   * it does not place. The first deploy is where a Target gets named.
+   */
+  test('a first deploy names the Target that placement will remember', async () => {
+    const { app, target } = await fixture();
+    const db = database().db;
+    const [nightly] = await db
+      .insert(components)
+      .values({
+        appId: app.id,
+        name: 'nightly',
+        kind: 'job',
+        reach: 'none',
+        auth: 'none',
+      })
+      .returning();
+
+    const result = await deployApp(
+      { name: app.name, component: nightly!.name, target: target.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('BUILDING');
+
+    const desired = await desiredRow(nightly!.id, target.id);
+    expect(desired).toBeDefined();
+  });
+
+  test('a Target that disagrees with existing placement is refused', async () => {
+    const { app, component, target } = await fixture();
+    await succeededBuild(component.id, 14);
+    await database().db.insert(componentTargetDesired).values({
+      componentId: component.id,
+      targetId: target.id,
+      updatedAt: FROZEN,
+    });
+    const [elsewhere] = await database()
+      .db.insert(targets)
+      .values(
+        targetValues({
+          name: `cluster-${crypto.randomUUID()}`,
+          adapter: 'kubernetes',
+          discovery: null,
+        }),
+      )
+      .returning();
+
+    const result = await deployApp(
+      { name: app.name, target: elsewhere!.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('INVALID_INPUT');
+    expect(result.failure.message).toContain('placed elsewhere');
+  });
+
+  test('an unknown Target is refused by name', async () => {
+    const { app } = await fixture();
+
+    const result = await deployApp(
+      { name: app.name, target: 'no-such-target' },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_FOUND');
+    expect(result.failure.message).toContain('no-such-target');
+  });
+
   test('an absent Component still deploys the primary, unchanged', async () => {
     const { app, component, target } = await fixture();
     const build = await succeededBuild(component.id, 13);
