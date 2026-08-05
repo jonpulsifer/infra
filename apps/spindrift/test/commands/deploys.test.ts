@@ -719,13 +719,11 @@ describe('deployApp selects which Component it acts on', () => {
   test('an absent Component still deploys the primary, unchanged', async () => {
     const { app, component, target } = await fixture();
     const build = await succeededBuild(component.id, 13);
-    await database()
-      .db.insert(componentTargetDesired)
-      .values({
-        componentId: component.id,
-        targetId: target.id,
-        updatedAt: FROZEN,
-      });
+    await database().db.insert(componentTargetDesired).values({
+      componentId: component.id,
+      targetId: target.id,
+      updatedAt: FROZEN,
+    });
 
     const result = await deployApp(
       { name: app.name },
