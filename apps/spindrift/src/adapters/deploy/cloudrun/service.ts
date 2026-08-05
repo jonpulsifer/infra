@@ -40,7 +40,7 @@ export const CONTAINER_PORT = 8080;
 
 /** What the caller must supply that `DesiredState` does not carry. */
 export interface CloudRunRenderContext {
-  /** The vessel project the Service lives in (§14). */
+  /** The vessel's project the Service lives in (§14). */
   readonly project: string;
   /** The image the revision pulls, pinned by digest where the artifact has one. */
   readonly image: string;

@@ -128,7 +128,6 @@ describe('createApp: an App sourced from a repository', () => {
 
     const row = await appRow(result.value.appId);
     expect(row?.sourceRepoSubpath).toBeNull();
-    expect(row?.vesselRef).toBeNull();
     expect(row?.vanityDomain).toBeNull();
   });
 });
@@ -141,7 +140,6 @@ describe('createApp: an App sourced from an uploaded archive', () => {
         name: `bundle-${crypto.randomUUID().slice(0, 8)}`,
         sourceKind: 'archive',
         archiveDigest: digest,
-        vesselRef: 'vessel-of-record',
         vanityDomain: 'notes',
       },
       context(),
@@ -153,7 +151,6 @@ describe('createApp: an App sourced from an uploaded archive', () => {
     expect(row?.sourceKind).toBe('archive');
     expect(row?.sourceArchiveDigest).toBe(digest);
     expect(row?.sourceRepoUrl).toBeNull();
-    expect(row?.vesselRef).toBe('vessel-of-record');
     expect(row?.vanityDomain).toBe('notes');
   });
 });

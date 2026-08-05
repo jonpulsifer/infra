@@ -716,12 +716,14 @@ describe('the App workspace', () => {
     expect(markup).toContain('listening on :3000');
   });
 
-  test('the vessel is shown and marked immutable', () => {
-    // §14: chosen once, at creation. A developer who does not find the setting
-    // will go looking for it, so the absence is labelled.
+  test('the placement states both the Target and the vessel it is on', () => {
+    // The vessel is where the App is placed, not something it was created
+    // with — so it is stated beside the Target it was read from, and never as
+    // a setting the developer is being told they cannot change.
     const markup = workspace(WORKSPACE_SCENARIOS.service);
-    expect(markup).toContain(WORKSPACE_SCENARIOS.service.vessel);
-    expect(markup).toContain('immutable vessel');
+    expect(markup).toContain(WORKSPACE_SCENARIOS.service.target);
+    expect(markup).toContain(`on ${WORKSPACE_SCENARIOS.service.vessel}`);
+    expect(markup).not.toContain('immutable');
   });
 
   test('Components and Datastores are peer sections', () => {

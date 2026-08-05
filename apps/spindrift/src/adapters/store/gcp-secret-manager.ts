@@ -35,7 +35,7 @@ import { type StoreEndpoint, StoreHttp, StoreRequestError } from './http.ts';
 
 /** Which project's Secret Manager this adapter writes to. */
 export interface SecretManagerStoreConfig extends StoreEndpoint {
-  /** The vessel project holding this installation's App secrets (§14). */
+  /** The vessel's project holding this installation's App secrets (§14). */
   readonly project: string;
 }
 

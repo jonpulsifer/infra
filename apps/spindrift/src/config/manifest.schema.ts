@@ -637,7 +637,7 @@ export const installationManifestSchema = z
          */
         endpoint: z.string().url(),
         /**
-         * What holds the items inside that store: the vessel project for Secret
+         * What holds the items inside that store: the vessel's project for Secret
          * Manager, the vault for 1Password.
          *
          * One key rather than one per adapter, because the two are the same

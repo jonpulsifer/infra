@@ -80,7 +80,6 @@ async function seedLiveApp(
       name,
       sourceKind: 'repo',
       repoUrl: `https://vcs.example/acme/${options.prefix}.git`,
-      vesselRef: 'driftwood',
     },
     ctx,
   );

@@ -40,7 +40,7 @@ export const CLOUD_PREREQUISITES = [
 
 /** What the probe was asking about, in the sentences an operator reads. */
 export interface CloudChecklistSubject {
-  /** The vessel project (§14). */
+  /** The project this vessel is, in the boundary's own terms (§14). */
   readonly project: string;
   /** What the service is called where the operator would go to enable it. */
   readonly service: string;
@@ -106,7 +106,7 @@ export function cloudChecklist(
       OIDC_FEDERATION: notAssessed(subject.service),
       VESSEL: {
         met: false,
-        detail: `${subject.scope} does not exist, and Spindrift never creates a project (§14)`,
+        detail: `${subject.scope} does not exist, and Spindrift never creates a vessel (§14)`,
       },
     });
   }

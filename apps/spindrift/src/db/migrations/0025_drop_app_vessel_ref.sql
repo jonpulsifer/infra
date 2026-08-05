@@ -1,0 +1,17 @@
+-- `apps.vessel_ref` was a name with no referent.
+--
+-- It was written once at creation from `cloud.homeVesselProject` and read in
+-- two places, both of them display: the App list and the workspace, where it
+-- rendered as "immutable vessel". Nothing joined it to `vessels`, nothing
+-- validated it, and nothing dispatched on it — the project a Deploy actually
+-- lands in comes from `targets.vessel_id` through `deployTargetOf`, and the
+-- secret store is installation-wide (`manifest.secretStore.container`), not
+-- per-App. So the one fact the column claimed to state was a fact no code
+-- consulted and no test could catch being wrong.
+--
+-- An App has placements, and each placement's Target is a surface on a vessel.
+-- That is the boundary an App is actually in, it is derivable, and it is the
+-- one the screens now show. A column that says otherwise can only disagree.
+--
+-- Nothing reads it, so there is nothing to backfill and nothing to preserve.
+ALTER TABLE "apps" DROP COLUMN "vessel_ref";

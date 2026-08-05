@@ -20,7 +20,10 @@ export const listApps: Command<
             orderBy: (deploys, { desc }) => [desc(deploys.createdAt)],
             limit: 1,
             with: {
-              target: true,
+              // The boundary as well as the surface: the list states which
+              // vessel an App is in, and that is the placed Target's, never a
+              // column on the App.
+              target: { with: { vessel: true } },
               build: true,
             },
           },
@@ -54,7 +57,7 @@ export const listApps: Command<
     return {
       id: app.id,
       name: app.name,
-      vessel: app.vesselRef ?? '',
+      vessel: target?.vessel.name ?? '',
       source,
       kind: comp?.kind ?? 'service',
       phase: (deploy?.phase ?? 'PENDING') as DeployPhase,

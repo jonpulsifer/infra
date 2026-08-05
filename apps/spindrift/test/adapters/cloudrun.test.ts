@@ -511,7 +511,7 @@ describe('§13: one probe, three answers', () => {
     const second = await absent.adapter.inspect(target());
     const vessel = second.prerequisites.find((item) => item.name === 'VESSEL');
     expect(vessel?.met).toBe(false);
-    expect(vessel?.detail).toContain('never creates a project');
+    expect(vessel?.detail).toContain('never creates a vessel');
   });
 });
 
