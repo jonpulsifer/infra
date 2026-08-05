@@ -52,6 +52,7 @@ import {
 import { SPINDRIFT_FILE } from '../integrations/github/config-pr.ts';
 import { GitHubAccessError } from '../integrations/github/http.ts';
 import type { WebhookDelivery } from '../integrations/github/webhook.ts';
+import { reconcilerLoopDuration } from '../telemetry/index.ts';
 
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface RepoLoopContext {
@@ -496,7 +497,12 @@ export async function runRepoLoop(
   options: RepoLoopOptions,
 ): Promise<void> {
   while (!options.signal?.aborted) {
-    options.onPass?.(await reconcileAllRepositories(context));
+    const startedAt = Date.now();
+    const passes = await reconcileAllRepositories(context);
+    reconcilerLoopDuration.record((Date.now() - startedAt) / 1000, {
+      loop: 'repository',
+    });
+    options.onPass?.(passes);
     if (options.signal?.aborted) return;
     await sleep(options.intervalMs, options.signal);
   }

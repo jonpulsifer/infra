@@ -9,6 +9,7 @@ import type { SecretStore } from '../adapters/store/contract.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
+import { reconcilerLoopDuration } from '../telemetry/index.ts';
 import { DEFAULT_BUILD_INTERVALS, runBuildLoop } from './build-loop.ts';
 import { DEFAULT_REAP_INTERVAL_MS, runConfigLoop } from './config-loop.ts';
 import { DEFAULT_INTERVALS, runDeployLoop } from './deploy-loop.ts';
@@ -214,7 +215,11 @@ export async function runReconciler(
         const interval =
           options.manifestIntervalMs ?? DEFAULT_MANIFEST_INTERVAL_MS;
         while (!signal.aborted) {
+          const startedAt = Date.now();
           await refresh();
+          reconcilerLoopDuration.record((Date.now() - startedAt) / 1000, {
+            loop: 'manifest',
+          });
           if (signal.aborted) return;
           passed('manifest');
           await abortableSleep(interval, signal);

@@ -44,6 +44,7 @@ import {
   hasVesselLocation,
   type TargetHealth,
 } from '../domain/target.ts';
+import { reconcilerLoopDuration } from '../telemetry/index.ts';
 
 /**
  * What the loop needs. Narrower than a `CommandContext` on purpose — the loop
@@ -312,7 +313,11 @@ export async function runTargetLoop(
   options: TargetLoopOptions,
 ): Promise<void> {
   while (!options.signal?.aborted) {
+    const startedAt = Date.now();
     const refreshed = await refreshAllTargets(context);
+    reconcilerLoopDuration.record((Date.now() - startedAt) / 1000, {
+      loop: 'target',
+    });
     options.onPass?.(refreshed);
     if (options.signal?.aborted) return;
     await sleep(options.intervalMs, options.signal);

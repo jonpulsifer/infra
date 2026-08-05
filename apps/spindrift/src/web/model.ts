@@ -372,6 +372,13 @@ export interface BuildListItem {
   readonly at: string;
   /** The newest Deploy created from this Build, when placement has begun. */
   readonly deployId: number | null;
+  /**
+   * What a PENDING Build is stuck on, in the operator's own words — set by
+   * `recordDispatchWait` (`commands/builds/dispatch.ts`) and cleared the
+   * moment a route actually claims it. `null` covers both "never refused" and
+   * "already running", which is the distinction `status` already carries.
+   */
+  readonly dispatchWaitingOn: string | null;
 }
 
 /** One Deploy in the global placement ledger, including its owning App. */

@@ -161,11 +161,16 @@ spec:
                 name: {{ . }}
           {{- end }}
           {{- if $process.serves }}
-          # Readiness only. A liveness probe on a process whose slow path is a
-          # database query restarts it exactly when it is least able to recover.
+          # Readiness only, and on purpose: a liveness probe on a process
+          # whose slow path is a database query would restart it exactly when
+          # it is least able to recover. `/readyz` does a real `select 1`
+          # through the app's pool, so a Postgres outage takes the pod out of
+          # the Service without killing the one process that will notice
+          # Postgres come back. `/healthz` stays a bare constant for exactly
+          # that liveness case, should one ever be added here.
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: {{ $top.Values.port }}
             initialDelaySeconds: 5
             periodSeconds: 10

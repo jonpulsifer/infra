@@ -103,6 +103,7 @@ describe('the global operation ledgers', () => {
     when: '13m ago',
     at: '2026-08-03T12:31:00.000Z',
     deployId: 993,
+    dispatchWaitingOn: null,
   };
   const deploy: DeployLedgerItem = {
     id: 993,

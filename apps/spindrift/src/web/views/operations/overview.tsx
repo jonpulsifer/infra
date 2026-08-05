@@ -31,9 +31,16 @@ interface Concern extends ExplorerItem {
   }[];
 }
 
-function buildTone(status: BuildListItem['status']): ExplorerTone {
-  if (status === 'FAILED') return 'destructive';
-  if (status === 'SUCCEEDED') return 'success';
+function buildTone(
+  build: Pick<BuildListItem, 'status' | 'dispatchWaitingOn'>,
+): ExplorerTone {
+  if (build.status === 'FAILED') return 'destructive';
+  if (build.status === 'SUCCEEDED') return 'success';
+  // A PENDING Build refusing every tick is not "in progress" the way a
+  // RUNNING one is — it needs an operator to configure the thing it is
+  // waiting on, which is what 'warning' already means everywhere else on
+  // this screen.
+  if (build.dispatchWaitingOn !== null) return 'warning';
   return 'accent';
 }
 
@@ -81,6 +88,9 @@ export function Overview({
     (b) => b.status === 'RUNNING' || b.status === 'PENDING',
   ).length;
   const succeededBuilds = builds.filter((b) => b.status === 'SUCCEEDED').length;
+  const waitingBuilds = builds.filter(
+    (b) => b.dispatchWaitingOn !== null,
+  ).length;
 
   const healthyTargets = targets.filter(
     (t) => t.configured && t.status === 'connected' && t.health === 'healthy',
@@ -115,29 +125,38 @@ export function Overview({
         ],
       }),
     ),
-    ...builds.map(
-      (build): Concern => ({
+    ...builds.map((build): Concern => {
+      const waitingOn = build.dispatchWaitingOn;
+      return {
         id: `build:${build.id}`,
         category: 'build',
         title: `Build ${build.id}`,
-        detail: `${build.app} / ${build.component} · ${build.runner ?? 'queued'}`,
-        status: build.status.toLowerCase(),
-        tone: buildTone(build.status),
+        detail:
+          waitingOn !== null
+            ? `${build.app} / ${build.component} · waiting: ${waitingOn}`
+            : `${build.app} / ${build.component} · ${build.runner ?? 'queued'}`,
+        status: waitingOn !== null ? 'waiting' : build.status.toLowerCase(),
+        tone: buildTone(build),
         when: build.when,
         at: build.at,
         active: build.status === 'RUNNING' || build.status === 'PENDING',
         eyebrow: `Build / ${build.id}`,
-        summary: `Commit ${build.commit} is becoming a ${build.artifactType} artifact.`,
+        summary:
+          waitingOn ??
+          `Commit ${build.commit} is becoming a ${build.artifactType} artifact.`,
         path: `/builds/${build.id}`,
         appPath: `/apps/${build.appId}`,
-        search: `${build.commit} ${build.app}`,
+        search: `${build.commit} ${build.app} ${waitingOn ?? ''}`,
         facts: [
           { label: 'Runner', value: build.runner ?? 'waiting' },
           { label: 'Shape', value: build.targetShape, mono: true },
           { label: 'Created', value: build.when, mono: true },
+          ...(waitingOn !== null
+            ? [{ label: 'Waiting on', value: waitingOn }]
+            : []),
         ],
-      }),
-    ),
+      };
+    }),
     ...targets.map(
       (target): Concern => ({
         id: `target:${target.id}`,
@@ -288,6 +307,14 @@ export function Overview({
             ) : (
               `${succeededBuilds} Succeeded`
             )}
+            {waitingBuilds > 0 ? (
+              <>
+                {' · '}
+                <span className="font-semibold text-warning">
+                  {waitingBuilds} Waiting
+                </span>
+              </>
+            ) : null}
           </p>
         </Card>
 
