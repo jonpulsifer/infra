@@ -753,7 +753,12 @@ echo "attesting with key version \${version}"
 
 attest() {
   echo "attesting \${1}@\${2}"
-  gcloud beta container binauthz attestations sign-and-create \\
+  # \`sign-and-create\` refuses a second occurrence for the same artifact-url
+  # as a conflict — but an identical rebuild reusing its digest is this
+  # pipeline's ordinary behaviour, and "already attested" is the condition
+  # this step exists to bring about, not a failure. Any other error still
+  # fails the build.
+  output=$(gcloud beta container binauthz attestations sign-and-create \\
     --project=${attestorProject} \\
     --artifact-url="\${1}@\${2}" \\
     --attestor=${quote(attestor[2] ?? '')} \\
@@ -762,7 +767,13 @@ attest() {
     --keyversion-location=${quote(key.location)} \\
     --keyversion-keyring=${quote(key.keyRing)} \\
     --keyversion-key=${quote(key.key)} \\
-    --keyversion="\${version}"
+    --keyversion="\${version}" 2>&1) && { printf '%s\\n' "\${output}"; return 0; }
+  case "\${output}" in
+    *"is the subject of a conflict"*)
+      echo "already attested: \${1}@\${2}" ;;
+    *)
+      printf '%s\\n' "\${output}" >&2; return 1 ;;
+  esac
 }
 
 # Every manifest the index names, read off the registry.
