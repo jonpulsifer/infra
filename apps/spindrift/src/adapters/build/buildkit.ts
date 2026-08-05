@@ -200,9 +200,14 @@ function zeroConfigArm(input: BuildKitProgramInput): string {
  * payload core cannot decode.
  */
 export function buildKitProgram(input: BuildKitProgramInput): string {
+  // Each entry is a whole line, newline included, so an empty set contributes
+  // nothing at all: a bare `${args}` line in the template would leave a blank
+  // line after the command's `\` continuation, ending it — and the flag on
+  // the next line becomes a command of its own (`sh: --attest=…: not found`,
+  // observed on the first Component built with no build args).
   const args = Object.entries(input.buildArgs)
-    .map(([key, value]) => `  --opt ${quote(`build-arg:${key}=${value}`)} \\`)
-    .join('\n');
+    .map(([key, value]) => `  --opt ${quote(`build-arg:${key}=${value}`)} \\\n`)
+    .join('');
 
   return `set -eu
 workspace=$(mktemp -d)
@@ -268,8 +273,7 @@ ${zeroConfigArm(input)}
 fi
 
 buildctl-daemonless.sh build "$@" \\
-${args}
-  --attest=type=provenance,mode=max \\
+${args}  --attest=type=provenance,mode=max \\
   --attest=type=sbom \\
   --output ${quote(`type=image,${imageNames(input)},push=true`)} \\
   --metadata-file "$workspace/metadata.json"
