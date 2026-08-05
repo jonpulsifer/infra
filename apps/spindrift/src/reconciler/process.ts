@@ -10,6 +10,7 @@ import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
 import { reconcilerLoopDuration } from '../telemetry/index.ts';
+import { dispatchAutoDeploys } from './auto-deploy.ts';
 import { DEFAULT_BUILD_INTERVALS, runBuildLoop } from './build-loop.ts';
 import { DEFAULT_REAP_INTERVAL_MS, runConfigLoop } from './config-loop.ts';
 import { DEFAULT_INTERVALS, runDeployLoop } from './deploy-loop.ts';
@@ -244,7 +245,13 @@ export async function runReconciler(
           {
             intervalMs: DEFAULT_REPOSITORY_INTERVAL_MS,
             signal,
-            onPass: () => passed('repository'),
+            // The poll loop's fallback half of §15's pairing: the webhook route
+            // calls the same `dispatchAutoDeploys` over the same passes, so a
+            // missed delivery still deploys on this loop's next tick.
+            onPass: async (passes) => {
+              passed('repository');
+              await dispatchAutoDeploys(context, passes);
+            },
           },
         ),
     });

@@ -15,6 +15,7 @@ import type { EnrolmentDeps } from '../../src/auth/enrol.ts';
 import type { GatewayDeps } from '../../src/auth/gateway.ts';
 import { createDb, type Database } from '../../src/db/client.ts';
 import { READY_PATH, webRoutes } from '../../src/web/routes.ts';
+import type { WebhookRouteDeps } from '../../src/web/webhook-route.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 
 const database = withIsolatedDatabase();
@@ -43,8 +44,20 @@ function authDeps(db: Database): EnrolmentDeps & GatewayDeps {
   };
 }
 
+/** Inert: `/readyz` never routes a delivery, so reaching these is the bug. */
+function noWebhook(db: Database): WebhookRouteDeps {
+  return {
+    db,
+    clock: { now: () => new Date('2026-01-01T00:00:00Z') },
+    secret: null,
+    current: () => {
+      throw new Error('a readiness test read installation state');
+    },
+  };
+}
+
 async function readyz(db: Database): Promise<Response> {
-  const routes = webRoutes(CLIENT, noSession, authDeps(db));
+  const routes = webRoutes(CLIENT, noSession, authDeps(db), noWebhook(db));
   const handler = routes[READY_PATH] as () => Promise<Response>;
   return handler();
 }

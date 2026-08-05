@@ -23,6 +23,10 @@ import { pathFor } from '../../src/web/dispatch.ts';
 import { HEALTH_PATH, READY_PATH, webRoutes } from '../../src/web/routes.ts';
 import { STREAM_PATHS } from '../../src/web/streams.ts';
 import { UPLOAD_PATH } from '../../src/web/upload.ts';
+import {
+  WEBHOOK_PATH,
+  type WebhookRouteDeps,
+} from '../../src/web/webhook-route.ts';
 
 const APP = join(import.meta.dir, '../..');
 
@@ -60,10 +64,36 @@ const noAuth: EnrolmentDeps & GatewayDeps = {
   gateway: null,
 };
 
+/**
+ * Webhook deps that would throw if reached, and a secret that is never
+ * configured — this file asserts over the *shape* of the table, so a delivery
+ * actually reaching `applyWebhookDelivery` here would mean the assertion had
+ * gone wrong.
+ */
+const noWebhook: WebhookRouteDeps = {
+  db: new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error('a route-table test reached the database');
+      },
+    },
+  ) as Database,
+  clock: {
+    now: () => {
+      throw new Error('a route-table test read the clock');
+    },
+  },
+  secret: null,
+  current: () => {
+    throw new Error('a route-table test read installation state');
+  },
+};
+
 /** A stand-in for the client, so this file never depends on a build having run. */
 const CLIENT = { '/': new Response('the client document') };
 
-const served = webRoutes(CLIENT, noSession, noAuth);
+const served = webRoutes(CLIENT, noSession, noAuth, noWebhook);
 
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
 
@@ -78,6 +108,7 @@ describe('what the web process serves', () => {
         ...commandNames.map(pathFor),
         ...STREAM_PATHS,
         UPLOAD_PATH,
+        WEBHOOK_PATH,
       ].sort(),
     );
   });
@@ -99,6 +130,7 @@ describe('what the web process serves', () => {
         ...AUTH_PATHS,
         ...STREAM_PATHS,
         UPLOAD_PATH,
+        WEBHOOK_PATH,
       ].sort(),
     );
   });

@@ -35,6 +35,7 @@ import {
 import { createDb } from '../db/client.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
+import { WEBHOOK_SECRET_VAR } from './webhook-route.ts';
 
 /**
  * Where the enrolment token arrives.
@@ -238,6 +239,15 @@ export async function start(
       },
     },
     auth,
+    {
+      db,
+      clock: systemClock,
+      secret: Bun.env[WEBHOOK_SECRET_VAR]?.trim() || null,
+      // Same accessor `context` above reads through: current as of this
+      // request, rebuilt only when `configureInstallation` actually changed
+      // something.
+      current: installationNow,
+    },
   );
 
   const server = Bun.serve<StreamSocketData>({

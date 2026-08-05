@@ -79,6 +79,17 @@ function serve() {
         }) satisfies CommandContext,
     },
     auth,
+    {
+      db: auth.db,
+      clock: auth.clock,
+      // No secret configured: this file is about the auth surface, not the
+      // webhook, and an unconfigured secret is what keeps the route from
+      // reaching `current` if a test here ever hit it by mistake.
+      secret: null,
+      current: () => {
+        throw new Error('an auth-route test reached installation state');
+      },
+    },
   );
 
   return { auth, routes };
