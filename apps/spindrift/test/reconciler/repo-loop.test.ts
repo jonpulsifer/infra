@@ -43,6 +43,7 @@ import {
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeGitHub } from '../harness/fakes/github-api.ts';
 import { targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 
@@ -143,6 +144,7 @@ async function liveDeploy(appId: string) {
     .insert(deploys)
     .values({
       componentId: component!.id,
+      desired: aDesiredDocument(),
       targetId: target!.id,
       buildId: build!.id,
       phase: 'LIVE',

@@ -68,7 +68,6 @@ import {
   hasDrifted,
 } from '../domain/diagnosis.ts';
 import { displayUrl, hostnameFor } from '../domain/naming.ts';
-import { DEFAULT_PLATFORM } from '../domain/placement.ts';
 import {
   deployTargetOf,
   hasTargetConnection,
@@ -273,36 +272,31 @@ export function desiredStateFor(
    */
   vanityIsUnambiguous: boolean,
 ): DesiredState {
-  const { deploy, app, component, build, target } = subject;
+  const { deploy, app, build, target } = subject;
   return {
+    // The row's own key, which is why it is not in the pinned document.
     deploy: String(deploy.id),
-    app: app.name,
-    component: component.name,
-    target: target.name,
-    kind: component.kind,
+    // Everything this intent asked for, exactly as it asked for it. Nothing
+    // here re-reads `components`: an attempt that did would deliver a shape
+    // nobody asked for, and a rollback would come back up with yesterday's
+    // artifact under today's kind, exposure and schedule.
+    ...deploy.desired,
+    // Carried by the Build, which is immutable once `SUCCEEDED` — and a Deploy
+    // cannot be written naming one that is not (`checkDeployable`).
     artifact: {
       type: build.artifactType,
       digest: build.artifactDigest ?? '',
       refs: build.artifactRefs ?? [],
     },
-    ...(component.expose === null ? {} : { expose: component.expose }),
-    // The Deploy's own reach and auth, not the Component's current ones: this
-    // attempt asked for what it asked for, and a Component edited since must
-    // not retroactively change what a running attempt is placing.
-    reach: deploy.reach ?? component.reach,
-    auth: deploy.auth ?? component.auth,
-    ...(component.schedule === null ? {} : { schedule: component.schedule }),
-    // §10: the document this Deploy recorded when its intent was written, not
-    // whatever config says now. An attempt that re-read the items would deliver
-    // a configuration nobody asked for, and a rollback would come back up with
-    // the config of the release it was rolling away from.
-    config: deploy.configDocument ?? [],
-    requirements: { platform: DEFAULT_PLATFORM, resources: {} },
+    // Derived, not pinned: a name is a property of the App rather than of a
+    // release. §9 makes moving an App between backends "one record re-point",
+    // which only holds if the name outlives the releases under it — so a
+    // rollback must not take back the address somebody bookmarked.
     hostname: hostnameFor({
       app: app.name,
-      component: component.name,
+      component: deploy.desired.component,
       adapter: target.adapter,
-      reach: deploy.reach ?? component.reach,
+      reach: deploy.desired.reach,
       zones: manifest.dns.zones,
       vanityLabel: vanityIsUnambiguous ? app.vanityDomain : null,
     }),

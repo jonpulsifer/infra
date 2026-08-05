@@ -29,6 +29,7 @@ import type { Command, CommandContext } from '../types.ts';
 import {
   type CreateDeployResult,
   checkDeployable,
+  deliveringConfig,
   placeIntent,
 } from './create.ts';
 
@@ -65,7 +66,9 @@ export const rollbackDeploy: Command<
   // up unconfigured because history is silent.
   const previous = await lastDeployOf(context, input);
   const value =
-    previous === null ? checked.value : { ...checked.value, config: previous };
+    previous === null
+      ? checked.value
+      : deliveringConfig(checked.value, previous);
 
   // The "is this actually older" question is asked **under the lock**, against
   // the desired row as it is at the moment the intent is written. Asking it
@@ -99,7 +102,7 @@ async function lastDeployOf(
   input: RollbackDeployInput,
 ): Promise<PinnedConfig | null> {
   const [previous] = await context.db
-    .select({ document: deploys.configDocument })
+    .select({ desired: deploys.desired })
     .from(deploys)
     .where(
       and(
@@ -111,11 +114,9 @@ async function lastDeployOf(
     .orderBy(desc(deploys.id))
     .limit(1);
 
-  if (previous?.document === undefined || previous.document === null) {
-    return null;
-  }
+  if (previous === undefined) return null;
   return {
-    document: previous.document,
-    version: await configVersionOf(previous.document),
+    document: previous.desired.config,
+    version: await configVersionOf(previous.desired.config),
   };
 }

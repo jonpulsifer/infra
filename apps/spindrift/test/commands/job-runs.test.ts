@@ -32,6 +32,7 @@ import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const manifest = await fixtureManifest();
 const database = withIsolatedDatabase();
@@ -116,6 +117,7 @@ async function scaffold(
     .insert(deploys)
     .values({
       componentId: component.value.componentId,
+      desired: aDesiredDocument(),
       targetId: target?.id as string,
       buildId: await buildFor(ctx, component.value.componentId),
       phase: 'LIVE',

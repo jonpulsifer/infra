@@ -51,6 +51,7 @@ import {
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -711,11 +712,10 @@ describe('concurrency: the locking read (§6)', () => {
     const preconditions = {
       componentId: component.id,
       targetId: target.id,
-      reach: 'private' as const,
-      auth: 'proxy' as const,
       // Nothing is configured here, and the empty document still has a version
       // (§10) — "no config" is a state a Deploy is pinned to like any other.
-      config: { document: [], version: await configVersionOf([]) },
+      configVersion: await configVersionOf([]),
+      desired: aDesiredDocument({ reach: 'private', auth: 'proxy' }),
     };
 
     let announceRead = (): void => {};

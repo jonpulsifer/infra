@@ -57,6 +57,7 @@ import {
   connectionFor,
   fixtureManifest,
 } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -143,6 +144,7 @@ async function seedLiveDeploy(targetId: string, ref: string) {
     .insert(deploys)
     .values({
       componentId: component!.id,
+      desired: aDesiredDocument(),
       targetId,
       buildId: build!.id,
       phase: 'LIVE',

@@ -15,6 +15,7 @@ import type {
 import { builds, deploys, targets } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -162,6 +163,7 @@ describe('global operation ledgers', () => {
         .insert(deploys)
         .values({
           componentId: owner.componentId,
+          desired: aDesiredDocument(),
           targetId: target!.id,
           buildId: build!.id,
           phase: index === 0 ? 'LIVE' : 'APPLYING',
@@ -213,6 +215,7 @@ describe('global operation ledgers', () => {
     await ctx.db.insert(deploys).values(
       Array.from({ length: RELEASE_PAGE + 1 }, () => ({
         componentId: owner.componentId,
+        desired: aDesiredDocument(),
         targetId: target!.id,
         buildId: build!.id,
         phase: 'LIVE' as const,

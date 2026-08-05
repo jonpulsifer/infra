@@ -36,6 +36,7 @@ import {
 } from '../../src/domain/attempt-log.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 
@@ -70,6 +71,7 @@ async function seedAttempt() {
     .db.insert(deploys)
     .values({
       componentId: component!.id,
+      desired: aDesiredDocument(),
       targetId: target!.id,
       buildId: build!.id,
     })

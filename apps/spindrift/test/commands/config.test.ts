@@ -330,7 +330,7 @@ describe('a config change produces a new Deploy', () => {
       .from(deploys)
       .where(eq(deploys.id, changed.value.deployId!));
     expect(deploy?.buildId).toBe(build.id);
-    const document = deploy?.configDocument ?? [];
+    const document = deploy?.desired.config ?? [];
     expect(document).toHaveLength(1);
     expect(document[0]?.name).toBe('TOKEN');
     // Pinned, not floating: the entry names a version the store minted.
@@ -421,8 +421,8 @@ describe('a rollback comes up with the configuration it originally had', () => {
       .db.select()
       .from(deploys)
       .where(eq(deploys.id, first.value.deployId));
-    expect(restored?.configDocument).toEqual(original!.configDocument!);
-    expect(restored?.configDocument).not.toEqual([]);
+    expect(restored?.desired.config).toEqual(original!.desired.config);
+    expect(restored?.desired.config).not.toEqual([]);
   });
 });
 

@@ -253,3 +253,38 @@ export interface DesiredState {
   requirements: Requirements;
   hostname: Hostname;
 }
+
+/**
+ * The part of {@link DesiredState} a Deploy **pins when its intent is written**.
+ *
+ * §10 pinned the config document for a stated reason — "re-reading current
+ * config at apply time would give a rollback the configuration of the release it
+ * is rolling away from" — and the same argument covers the rest of the shape: a
+ * Component edited after an intent was written must not retroactively change
+ * what that intent placed. Pinning three fields and re-reading the others made a
+ * rollback come back up with yesterday's artifact under today's shape.
+ *
+ * **Every Deploy has one.** The column is `NOT NULL`, and that is the point: an
+ * intent whose meaning has to be reassembled from rows that have moved since is
+ * not an intent, it is a query. There is no compose-from-rows path to fall back
+ * to, because a fallback is where the bug would keep living.
+ *
+ * Three fields are deliberately **not** here, each because pinning it would be
+ * wrong rather than merely unnecessary:
+ *
+ * - `deploy` — the Deploy's own id. Storing a row's primary key inside the row
+ *   is a second copy that can disagree with the first.
+ * - `artifact` — carried by the Build, which is immutable once `SUCCEEDED` and
+ *   is what a Deploy names. Copying it here would be a cache of an immutable
+ *   fact.
+ * - `hostname` — a property of the **App**, not of a release. §9 makes moving an
+ *   App between backends "one record re-point", which only holds if a name
+ *   outlives the releases under it; a rollback that restored an older vanity
+ *   name would take away the address somebody bookmarked. It is derived at apply
+ *   time from the App's names, the Target's adapter, and the installation's
+ *   zones, and that is correct.
+ */
+export type DesiredDocument = Omit<
+  DesiredState,
+  'deploy' | 'artifact' | 'hostname'
+>;

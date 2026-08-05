@@ -48,6 +48,7 @@ import {
   type ScriptedAttempt,
 } from '../harness/fakes/deploy-adapter.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -115,11 +116,18 @@ async function pendingDeploy(
     .insert(deploys)
     .values({
       componentId: component!.id,
+      // The document names what this fixture actually created, because the
+      // adapter is handed these names and the hostname is built from them.
+      desired: aDesiredDocument({
+        app: app!.name,
+        component: component!.name,
+        target: target!.name,
+        reach: options.reach ?? 'private',
+        auth: options.auth ?? 'proxy',
+      }),
       targetId: target!.id,
       buildId: build!.id,
       phase: 'PENDING',
-      reach: options.reach ?? 'private',
-      auth: options.auth ?? 'proxy',
     })
     .returning();
   await db.insert(componentTargetDesired).values({
@@ -167,6 +175,7 @@ describe('claiming (§6, SKIP LOCKED)', () => {
       .db.insert(deploys)
       .values({
         componentId: first.component.id,
+        desired: aDesiredDocument(),
         targetId: first.target.id,
         buildId: first.build.id,
         phase: 'PENDING',
@@ -185,6 +194,7 @@ describe('claiming (§6, SKIP LOCKED)', () => {
       .db.insert(deploys)
       .values({
         componentId: first.component.id,
+        desired: aDesiredDocument(),
         targetId: first.target.id,
         buildId: first.build.id,
         phase: 'PENDING',
@@ -300,6 +310,37 @@ describe('phases come from the platform, not from core (§6)', () => {
     expect(desired.hostname.canonical).toBe(
       `shop-web.${manifest.dns.zones.private}`,
     );
+  });
+
+  test('a Component edited after the intent does not change what it places', async () => {
+    const { deploy, component } = await pendingDeploy();
+
+    // Everything the old apply path re-read from `components`, moved. Under
+    // that path this attempt would have placed a suspended CronJob for a
+    // Component the developer had already stopped exposing — yesterday's
+    // artifact under today's shape, which is the same failure §10 pinned the
+    // config document to prevent.
+    await database()
+      .db.update(components)
+      .set({ kind: 'job', expose: false, schedule: '0 3 * * *' })
+      .where(eq(components.id, component.id));
+
+    const adapter = new FakeDeployAdapter();
+    const claimed = await claimNextDeploy(context(adapter));
+    await runAttempt(context(adapter), claimed!);
+
+    const desired = adapter.applied[0]!.desired;
+    expect(desired.kind).toBe('service');
+    expect(desired.expose).toBe(true);
+    expect(desired.schedule).toBeUndefined();
+    expect(desired.deploy).toBe(String(deploy.id));
+
+    // And the row still says so afterwards, which is what a rollback reads.
+    const [row] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.id, deploy.id));
+    expect(row?.desired.kind).toBe('service');
   });
 });
 
@@ -492,8 +533,8 @@ describe('§9: reach and auth never mutate on red', () => {
     // The App is exactly as reachable as it was: the previous release is still
     // serving, and quietly tightening this would turn one red deploy into an
     // outage nobody asked for.
-    expect(row?.reach).toBe('public');
-    expect(row?.auth).toBe('none');
+    expect(row?.desired.reach).toBe('public');
+    expect(row?.desired.auth).toBe('none');
 
     const [after] = await database()
       .db.select()
@@ -695,6 +736,7 @@ describe('the poll is the correctness path (plan, Transport shape)', () => {
     };
     await database().db.insert(deploys).values({
       componentId: first.component.id,
+      desired: aDesiredDocument(),
       targetId: first.target.id,
       buildId: first.build.id,
       phase: 'PENDING',

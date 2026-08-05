@@ -41,6 +41,7 @@ import {
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -150,6 +151,7 @@ async function seedApp(
     .insert(deploys)
     .values({
       componentId: component!.id,
+      desired: aDesiredDocument(),
       targetId: options.targetId,
       buildId: build!.id,
       phase: options.phase ?? 'LIVE',

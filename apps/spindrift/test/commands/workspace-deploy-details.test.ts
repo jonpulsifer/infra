@@ -32,6 +32,7 @@ import {
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const manifest = await fixtureManifest();
 const database = withIsolatedDatabase();
@@ -192,6 +193,7 @@ describe('getBuildDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'LIVE',
@@ -284,6 +286,7 @@ describe('listDeploys command', () => {
         .insert(deploys)
         .values({
           componentId,
+          desired: aDesiredDocument(),
           targetId: target.id,
           buildId: build!.id,
           phase: 'LIVE',
@@ -348,6 +351,7 @@ describe('listDeploys command', () => {
         .insert(deploys)
         .values({
           componentId,
+          desired: aDesiredDocument(),
           targetId: target.id,
           buildId: build!.id,
           phase: 'LIVE',
@@ -438,6 +442,7 @@ describe('getAppWorkspace command', () => {
       .returning();
     await database().db.insert(deploys).values({
       componentId: createdComp.value.componentId,
+      desired: aDesiredDocument(),
       targetId: target!.id,
       buildId: build!.id,
       phase: 'LIVE',
@@ -500,6 +505,7 @@ describe('getAppWorkspace command', () => {
       .returning();
     await database().db.insert(deploys).values({
       componentId: createdComp.value.componentId,
+      desired: aDesiredDocument(),
       targetId: target!.id,
       buildId: build!.id,
       phase: 'LIVE',
@@ -644,6 +650,7 @@ describe('the workspace as a way into the system', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'LIVE',
@@ -752,6 +759,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'LIVE',
@@ -861,6 +869,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId: createdComp.value.componentId,
+        desired: aDesiredDocument(),
         targetId: targetRow.id,
         buildId: buildRow.id,
         phase: 'LIVE',
@@ -947,6 +956,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId: createdComp.value.componentId,
+        desired: aDesiredDocument(),
         targetId: targetRow!.id,
         buildId: build1!.id,
         phase: 'LIVE',
@@ -969,6 +979,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId: createdComp.value.componentId,
+        desired: aDesiredDocument(),
         targetId: targetRow!.id,
         buildId: build2!.id,
         phase: 'FAILED',
@@ -1028,6 +1039,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'FAILED',
@@ -1110,6 +1122,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'FAILED',
@@ -1149,6 +1162,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'FAILED',
@@ -1190,6 +1204,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'FAILED',
@@ -1254,6 +1269,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'LIVE',
@@ -1360,6 +1376,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'FAILED',
@@ -1426,6 +1443,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'LIVE',
@@ -1464,6 +1482,7 @@ describe('getDeployDetail command', () => {
       .insert(deploys)
       .values({
         componentId,
+        desired: aDesiredDocument(),
         targetId: target.id,
         buildId: build!.id,
         phase: 'LIVE',

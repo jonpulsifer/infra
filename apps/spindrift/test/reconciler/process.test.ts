@@ -38,6 +38,7 @@ import {
   fixtureManifest,
   targetValues,
 } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -462,11 +463,10 @@ async function pendingDeploy() {
     .insert(deploys)
     .values({
       componentId: component!.id,
+      desired: aDesiredDocument({ reach: 'private', auth: 'proxy' }),
       targetId: target!.id,
       buildId: build!.id,
       phase: 'PENDING',
-      reach: 'private',
-      auth: 'proxy',
     })
     .returning();
   await db.insert(componentTargetDesired).values({
