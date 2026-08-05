@@ -31,11 +31,15 @@ cloud runtime through its own API, and static hosting through a release — and
 one conformance suite runs over every one of them, which is what keeps "core
 describes, the adapter renders" a tested claim rather than a stated one.
 
-What has no implementation is datastores and jobs. The App workspace and Deploy
-screen query command-owned state; authenticated WebSockets carry durable build
-and deploy attempt events separately from adapter-owned runtime output.
-`src/web/demo/` remains as an explicit standalone scenario for developing the
-views without a database.
+Datastore provisioning has no command yet: the App workspace lists what the
+`datastores` table and each adapter already know (`src/adapters/datastore/`),
+but nothing creates or attaches one. Jobs run end to end on `kubernetes` and
+`cloudrun` — `runComponent` presses one and the App workspace reads its
+executions back from the platform, never from a core-side guess. The App
+workspace and Deploy screen query command-owned state; authenticated
+WebSockets carry durable build and deploy attempt events separately from
+adapter-owned runtime output. `test/fixtures/scenarios.ts` remains as an
+explicit standalone scenario for developing the views without a database.
 
 One named gap is deliberate:
 
@@ -56,7 +60,7 @@ One image, two processes (§19): `web` serves the product surface and
 | `src/db/` | the Drizzle schema, the connection, and the committed migrations |
 | `src/commands/` | the application command layer and its registry |
 | `src/domain/` | backend-neutral product rules and value types |
-| `src/adapters/` | the adapter contracts, the three deploy backends, the three build routes, DNS records, and the two stores |
+| `src/adapters/` | the adapter contracts, the three deploy backends, the three build routes, the datastore adapters, and the two stores |
 | `src/reconciler/` | the independently supervised reconciliation process |
 | `src/supply-chain/` | provenance verification, core signing, and derived posture |
 | `src/web/` | the `web` process — the server, the dispatch surface, and the client |
@@ -520,19 +524,12 @@ delivers no config still holds the one kind that asks for none. Applying it
 anyway would make "picking the static Target *means* public" (§13) unreachable
 by construction.
 
-Three things stated rather than worked around:
+Two things stated rather than worked around:
 
 - **Cloud Run advertises no egress filtering** (§8). It has network controls and
   not the by-name allowlist §8 specifies, and a capability reported on the
   strength of something adjacent is a workload placed somewhere its egress was
   never actually constrained.
-- **Cloud Run runs no job yet**, and `KINDS_BY_ADAPTER` says so. This diverges
-  from §3 and §6, which give `cloudrun` all three kinds: a job there is a second
-  resource with its own API and a schedule living in a separate scheduling
-  service, and none of that is the Service path. Until it exists a job is a
-  non-candidate there with the reason stated (§3's grammar), refused at Place
-  rather than accepted and failed at apply — and widening the row is the first
-  thing jobs will do.
 - **`Private` has no audience on Cloud Run.** §9 gives it "one
   admin-configured Private audience per Target" and no Target carries one, so a
   `private` Component gets an empty invoker policy: reachable at its address and
@@ -565,16 +562,18 @@ canonical name only for a cluster — Cloud Run and static hosting name their ow
 workloads, and there the adapter reports the address back across the deploy seam.
 
 **Spindrift publishes no record itself, and holds no zone credential.** On a
-cluster the names travel on the `HTTPRoute` the App chart renders — the
-installation's external-dns runs with `gateway-httproute` among its sources, so
-a route carrying a hostname *is* the record, and it is garbage collected with
-the release that owns it.
+cluster the App chart renders one `DNSEndpoint` per Component
+(`packages/charts/spindrift-app/templates/dnsendpoint.yaml`), at the record type
+and target `reach` decides, garbage collected with the release that owns it.
+The `HTTPRoute` itself carries a controller annotation that keeps
+external-dns's `gateway-httproute` source from also publishing the same
+hostname off the shared gateway's own address — a route can never state its own
+per-Component target, so letting both sources publish raced the same name at
+two record types.
 
-`src/adapters/dns/cr.ts` builds `DNSEndpoint` objects for the names that have no
-route to hang on — the live-from-creation status name, and a vanity leg standing
-in front of a backend that cannot carry the name itself. **The status name is
-not built, so nothing calls it for that yet**; it is here because external-dns's
-`crd` source is configured for exactly that gap.
+The live-from-creation status name and a vanity leg standing in front of a
+backend that cannot carry the name itself still have no `DNSEndpoint` to
+render, because both need a name before any Component exists to hang one on.
 `test/extraction/no-dns-credential.test.ts` is the grep that keeps "no zone
 credential" true, and it also asserts DNS is still being described somewhere, so
 the negative claim cannot be satisfied by there being no DNS at all.
