@@ -443,6 +443,7 @@ export const WORKSPACE_SCENARIOS = {
         auth: 'proxy',
       },
     ],
+    configKeys: ['DATABASE_URL', 'PORT'],
     datastores: [
       {
         name: 'primary',
@@ -537,6 +538,10 @@ export const WORKSPACE_SCENARIOS = {
         auth: 'none',
       },
     ],
+    // A website's configuration is baked at build time (§10) — ordinary
+    // rows, not entries in this store, so this list is empty rather than
+    // wrong.
+    configKeys: [],
     // §11: a website cannot attach a Datastore.
     datastores: [],
     activity: [
@@ -586,6 +591,7 @@ export const WORKSPACE_SCENARIOS = {
         auth: 'none',
       },
     ],
+    configKeys: ['BUCKET'],
     datastores: [
       {
         name: 'archive',

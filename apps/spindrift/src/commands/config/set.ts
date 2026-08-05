@@ -92,7 +92,23 @@ export const setConfigInput = z
   .object({
     componentId: z.uuid(),
     targetId: z.uuid(),
-    entries: z.array(configEntry).min(1),
+    /** Absent or empty on a call that only removes (below). */
+    entries: z.array(configEntry).optional(),
+    /**
+     * Keys to remove, named and nothing more.
+     *
+     * `applyConfigChange` already takes removals as their own list — this is
+     * the one place that list is exposed past this file. It is deliberately
+     * not `replaceConfig`'s diff: that upload is a stand-in for values core
+     * cannot read back, so it has to restate every key an operator means to
+     * keep. A removal does not, because deleting one key was never a claim
+     * about any other key's value.
+     */
+    removals: z
+      .array(
+        z.string().regex(VARIABLE_NAME, 'must be an environment variable name'),
+      )
+      .optional(),
   })
   .strict();
 
@@ -129,10 +145,16 @@ export const setConfig: Command<SetConfigInput, ConfigChangeResult> = async (
   input,
   context,
 ) => {
+  const entries = input.entries ?? [];
+  const removals = input.removals ?? [];
+  if (entries.length === 0 && removals.length === 0) {
+    return failed('INVALID_INPUT', 'nothing to set or remove');
+  }
+
   const subject = await configSubject(context, input);
   if ('failure' in subject) return { ok: false, failure: subject.failure };
 
-  const duplicate = firstDuplicate(input.entries.map((entry) => entry.key));
+  const duplicate = firstDuplicate(entries.map((entry) => entry.key));
   if (duplicate !== null) {
     return failed(
       'INVALID_INPUT',
@@ -140,7 +162,17 @@ export const setConfig: Command<SetConfigInput, ConfigChangeResult> = async (
     );
   }
 
-  return applyConfigChange(context, subject, input.entries, []);
+  const contested = entries
+    .map((entry) => entry.key)
+    .find((key) => removals.includes(key));
+  if (contested !== undefined) {
+    return failed(
+      'INVALID_INPUT',
+      `${contested} is both set and removed in the same call`,
+    );
+  }
+
+  return applyConfigChange(context, subject, entries, removals);
 };
 
 /** Everything a config act needs about what it is acting on. */

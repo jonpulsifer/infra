@@ -16,6 +16,10 @@
  * - **A `website` has no runtime**, one level down (§17, §18). Static files are
  *   served by the Target, so there is no process output — an honest empty state,
  *   not a disabled tab.
+ * - **Config shows keys, never values** (§10). Core's store is write-only, so
+ *   the section below Components and Datastores is a list of names and a form
+ *   that writes — there is nothing here that could show a secret it was handed
+ *   by accident, because nothing here is ever handed one.
  */
 import { ChevronRight, ExternalLink } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -36,6 +40,7 @@ import type {
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
+import { Field } from '../../ui/field.tsx';
 import { cn } from '../../ui/utils.ts';
 import {
   AUTH_NOTE,
@@ -74,6 +79,30 @@ export type RunJob = () => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
+/**
+ * Writing or removing config for the pair this workspace is showing (§10),
+ * as the screen above needs it answered.
+ *
+ * One call for both, because `setConfig` itself takes entries and removals
+ * together — there is no separate "edit" act, because setting a key that
+ * already exists *is* the edit (core upserts and never reads the old value
+ * back to compare against). `componentId`/`targetId` are not part of this
+ * shape: the workspace has exactly one pair on screen, so the screen above
+ * binds them once rather than asking every call here to restate it.
+ */
+export type SetConfig = (change: {
+  readonly entries: readonly { key: string; value: string }[];
+  readonly removals: readonly string[];
+}) => Promise<
+  | {
+      readonly ok: true;
+      readonly written: readonly string[];
+      readonly removed: readonly string[];
+      readonly notDeployed: string | null;
+    }
+  | { readonly ok: false; readonly message: string }
+>;
+
 export function Workspace({
   view,
   onDeploy,
@@ -82,6 +111,7 @@ export function Workspace({
   onNavigate,
   deletion,
   onSetReach,
+  onSetConfig,
   onRunJob,
   onFollowExecution,
   executionLines,
@@ -112,6 +142,12 @@ export function Workspace({
    * worse than no form.
    */
   onSetReach?: SetReach;
+  /**
+   * Absent where config is not editable from here, for the same reason
+   * {@link onSetReach} is — the fixture screens render this view with no acts
+   * wired, and a form whose Save cannot be called is worse than no form.
+   */
+  onSetConfig?: SetConfig;
   /**
    * Start one run of this App's job (§17). Absent where the screen wires no
    * acts, and absent for every Component that is not a job — the runtime card
@@ -178,6 +214,11 @@ export function Workspace({
         />
         <Datastores datastores={view.datastores} />
       </div>
+
+      <ConfigSection
+        configKeys={view.configKeys}
+        {...(onSetConfig === undefined ? {} : { onSetConfig })}
+      />
 
       <div className="grid gap-4 md:grid-cols-2">
         {/*
@@ -549,6 +590,212 @@ function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The App's environment configuration (§10).
+ *
+ * Keys only, ever — the same posture core's config commands take, kept all
+ * the way to the screen: nothing here has ever been handed a value, so there
+ * is nothing here that could show one by accident.
+ * "Set variable" is the one form underneath, because `setConfig` upserts —
+ * naming a key that already exists overwrites it, so add and edit are one
+ * act, not two the operator has to choose between.
+ */
+function ConfigSection({
+  configKeys,
+  onSetConfig,
+}: {
+  configKeys: readonly string[];
+  onSetConfig?: SetConfig;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  return (
+    <Card>
+      <SectionHeader
+        eyebrow="App configuration"
+        title="Config"
+        {...(onSetConfig
+          ? {
+              action: adding ? 'Close' : 'Set variable',
+              onAction: () => setAdding((current) => !current),
+            }
+          : {})}
+      />
+      <CardContent className="pt-0">
+        {onSetConfig && adding ? (
+          <ConfigVarForm
+            onSetConfig={onSetConfig}
+            onDone={() => setAdding(false)}
+          />
+        ) : null}
+        {deleteError ? (
+          <p className="mb-2 rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+            {deleteError}
+          </p>
+        ) : null}
+        {configKeys.length === 0 ? (
+          <EmptyState title="No configuration is set.">
+            Values are write-only — Spindrift stores one secret per variable and
+            never reads one back, including here.
+          </EmptyState>
+        ) : (
+          configKeys.map((key) => (
+            <Row
+              key={key}
+              badge={<Badge tone="idle">env</Badge>}
+              title={key}
+              detail="value is write-only"
+              trailing={
+                onSetConfig ? (
+                  <DeleteConfigVarButton
+                    configKey={key}
+                    onSetConfig={onSetConfig}
+                    onError={setDeleteError}
+                  />
+                ) : undefined
+              }
+            />
+          ))
+        )}
+        <p className="pt-2 text-xs text-muted-foreground">
+          A config change redeploys what is running under a new configVersion —
+          or says why nothing was redeployed, the same way Deploy does.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Setting one variable — write-only in, so the value field always starts
+ * blank, even for a key that already has one (§10: nothing above the store
+ * has ever been allowed to read it back).
+ */
+function ConfigVarForm({
+  onSetConfig,
+  onDone,
+}: {
+  onSetConfig: SetConfig;
+  onDone: () => void;
+}) {
+  const [key, setKey] = useState('');
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [outcome, setOutcome] = useState<
+    | { readonly kind: 'saved'; readonly notDeployed: string | null }
+    | { readonly kind: 'refused'; readonly message: string }
+    | null
+  >(null);
+
+  const save = async () => {
+    setSaving(true);
+    setOutcome(null);
+    try {
+      const result = await onSetConfig({
+        entries: [{ key: key.trim(), value }],
+        removals: [],
+      });
+      if (result.ok) {
+        setOutcome({ kind: 'saved', notDeployed: result.notDeployed });
+        setKey('');
+        setValue('');
+      } else {
+        setOutcome({ kind: 'refused', message: result.message });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-border-soft pb-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Field
+          name="config-key"
+          label="Key"
+          value={key}
+          onChange={(event) => setKey(event.target.value)}
+          placeholder="DATABASE_URL"
+        />
+        <Field
+          name="config-value"
+          label="Value"
+          type="password"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder="written once, never shown again"
+        />
+      </div>
+      {outcome?.kind === 'refused' ? (
+        <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+          {outcome.message}
+        </p>
+      ) : null}
+      {outcome?.kind === 'saved' ? (
+        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+          {outcome.notDeployed ??
+            'Saved. Redeployed under the new configuration.'}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={saving || key.trim() === ''}
+          onClick={() => {
+            void save();
+          }}
+        >
+          {saving ? 'Saving…' : 'Save variable'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDone} disabled={saving}>
+          {outcome?.kind === 'saved' ? 'Close' : 'Cancel'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Removing one variable, and nothing else.
+ *
+ * `setConfig` takes the key alone — unlike `replaceConfig`'s upload, a
+ * removal never asks this button to restate the values of the keys it is
+ * leaving alone, which is the whole reason deleting one key does not mean
+ * retyping every other one. No local confirmation state: the button has
+ * nowhere on the row to show one, so a refusal is reported to the section
+ * above instead of being lost.
+ *
+ * Exported for `test/web/views.test.tsx`, which calls it directly to prove
+ * what pressing it sends — the same reason `DeleteAppButton` is.
+ */
+export function DeleteConfigVarButton({
+  configKey,
+  onSetConfig,
+  onError,
+}: {
+  configKey: string;
+  onSetConfig: SetConfig;
+  onError: (message: string | null) => void;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => {
+        onError(null);
+        void onSetConfig({ entries: [], removals: [configKey] }).then(
+          (result) => {
+            if (!result.ok) onError(result.message);
+          },
+        );
+      }}
+    >
+      Delete
+    </Button>
   );
 }
 

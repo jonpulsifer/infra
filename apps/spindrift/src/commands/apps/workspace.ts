@@ -18,6 +18,7 @@ import type {
   Runtime,
   WorkspaceView,
 } from '../../web/model.ts';
+import { configuredKeys } from '../config/set.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
 export const getAppWorkspaceInput = z.object({
@@ -127,6 +128,21 @@ export const getAppWorkspace: Command<
       });
     }
   }
+
+  // Keys only, never values (§10) — `configuredKeys` is the same read
+  // `setConfig` itself uses to know what is already there, and it is the
+  // only shape a screen is allowed to show: core's store has no verb that
+  // returns a value. Scoped to the same pair the rest of this screen already
+  // picked — `workspaceTarget`, not every Target the Component might be
+  // placed on — because that pair is what a `Set variable` here would act on.
+  const configKeys =
+    primaryComponent && workspaceTarget
+      ? await configuredKeys(
+          context.db,
+          primaryComponent.id,
+          workspaceTarget.id,
+        )
+      : [];
 
   // Status events only — the checkpoints, not the transcript.
   //
@@ -241,6 +257,7 @@ export const getAppWorkspace: Command<
         ? `Build ${primaryComponent.builds[0].id}`
         : 'none',
     components,
+    configKeys,
     datastores: Array.from(datastoresMap.values()),
     activity,
     runtime,
