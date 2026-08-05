@@ -1,0 +1,22 @@
+# Managed by Spindrift, and yours to edit.
+#
+# This scope has to say `kind: job` because nothing can work it out: detection
+# infers only `service` and `website` (`Exclude<ComponentKind, 'job'>` in
+# apps/spindrift/src/domain/detection/ladder.ts), since a tree of files does
+# not say whether it should be served or run once. The sibling `railpack/`
+# scope deliberately carries no such file — it is the demo of detection
+# choosing for itself.
+#
+# There is no `schedule` key here on purpose. A cadence belongs to a
+# Component, not to a directory: the same code is a job you press Run on and a
+# job that fires every five minutes, and which one it is is the operator's
+# choice at Place, not the repository's.
+version: 1
+component:
+  kind: job
+build:
+  frontend: railpack
+  command: null
+  outputDirectory: null
+watchPaths:
+  - apps/spindrift-demo/job
