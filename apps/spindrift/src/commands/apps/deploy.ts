@@ -168,11 +168,18 @@ async function sourceForRerun(
     previous?.bundleDigest ?? app.sourceArchiveDigest ?? null;
   const inherited = previous?.bundleLocation ?? null;
 
-  if (inherited === null || isFetchableBundleLocation(inherited)) {
+  if (
+    inherited !== null
+      ? isFetchableBundleLocation(inherited)
+      : app.sourceKind !== 'repo'
+  ) {
     // Either there is a durable bundle to reuse — a `gs://` object is immutable
-    // and shared, so the same commit wants the same one — or there was never a
-    // bundle here to begin with, which is a Build dispatch already refuses for
-    // its own reasons rather than a stale handle to retire.
+    // and shared, so the same commit wants the same one — or this is an archive
+    // App whose Component never had a bundle, which is a Build dispatch already
+    // refuses for its own reasons rather than a stale handle to retire. A
+    // *repo* Component with no bundle is different: its first Build is exactly
+    // the "stage the exact commit once" act, so it falls through to staging
+    // rather than writing a Build nothing can dispatch.
     return ok({
       commit: baseCommit,
       bundleDigest: inheritedDigest,
@@ -190,11 +197,18 @@ async function sourceForRerun(
     );
   }
 
+  // On this path `inherited` is a stale unfetchable handle — or, for a
+  // Component's first Build, nothing at all. The refusals below say which.
+  const was =
+    inherited === null
+      ? 'never staged for this Component'
+      : `staged at ${inherited}, which no build route can fetch`;
+
   const stager = context.adapters.source?.() ?? null;
   if (stager === null) {
     return failed(
       'NOT_BUILDABLE',
-      `${app.name}'s bundle was staged at ${inherited}, which no build route can fetch, and this installation configures no source depot to stage a fresh one into`,
+      `${app.name}'s bundle was ${was}, and this installation configures no source depot to stage a fresh one into`,
     );
   }
 
@@ -209,13 +223,13 @@ async function sourceForRerun(
   if (repository === undefined) {
     return failed(
       'NOT_BUILDABLE',
-      `${app.name}'s bundle was staged at ${inherited}, which no build route can fetch, and ${app.name} has no connected repository to stage a fresh one from — connect its repository to make it buildable`,
+      `${app.name}'s bundle was ${was}, and ${app.name} has no connected repository to stage a fresh one from — connect its repository to make it buildable`,
     );
   }
   if (repository.access !== 'active') {
     return failed(
       'NOT_BUILDABLE',
-      `${app.name}'s bundle was staged at ${inherited}, which no build route can fetch, and ${repository.fullName} is ${repository.access}, so no fresh bundle can be staged: ${repository.frozenReason ?? 'access to it was lost'}`,
+      `${app.name}'s bundle was ${was}, and ${repository.fullName} is ${repository.access}, so no fresh bundle can be staged: ${repository.frozenReason ?? 'access to it was lost'}`,
     );
   }
 
@@ -228,7 +242,7 @@ async function sourceForRerun(
   if (commit === null) {
     return failed(
       'NOT_BUILDABLE',
-      `${app.name}'s bundle was staged at ${inherited}, which no build route can fetch, and ${repository.fullName} has no authoritative commit ready to stage a fresh one from`,
+      `${app.name}'s bundle was ${was}, and ${repository.fullName} has no authoritative commit ready to stage a fresh one from`,
     );
   }
 
@@ -431,7 +445,11 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         artifactType: buildToRun?.artifactType ?? 'image',
         bundleDigest: rerun.value.bundleDigest,
         bundleLocation: rerun.value.bundleLocation,
-        bundleSubpath: buildToRun?.bundleSubpath ?? '.',
+        // A first Build for this Component inherits the App's own subpath —
+        // the bundle is the staged source root, and '.' would build the
+        // monorepo's root instead of the App.
+        bundleSubpath:
+          buildToRun?.bundleSubpath ?? app.sourceRepoSubpath ?? '.',
         status: 'PENDING',
         createdAt: now,
       })
