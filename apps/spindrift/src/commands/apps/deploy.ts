@@ -445,11 +445,16 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         artifactType: buildToRun?.artifactType ?? 'image',
         bundleDigest: rerun.value.bundleDigest,
         bundleLocation: rerun.value.bundleLocation,
-        // A first Build for this Component inherits the App's own subpath —
-        // the bundle is the staged source root, and '.' would build the
-        // monorepo's root instead of the App.
+        // A repo Build's subpath is the App's declared subpath, never an
+        // inheritance: the bundle is the staged source root, '.' would build
+        // the monorepo's root instead of the App, and a predecessor row that
+        // recorded '.' (a Build created before its Component could stage)
+        // must not pass that lie forward. Archive lineage keeps the uploaded
+        // bundle's own subpath — its bytes carry their own layout.
         bundleSubpath:
-          buildToRun?.bundleSubpath ?? app.sourceRepoSubpath ?? '.',
+          app.sourceKind === 'repo'
+            ? (app.sourceRepoSubpath ?? '.')
+            : (buildToRun?.bundleSubpath ?? '.'),
         status: 'PENDING',
         createdAt: now,
       })
