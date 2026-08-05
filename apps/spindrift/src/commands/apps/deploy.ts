@@ -73,6 +73,15 @@ export const deployAppInput = z
      * for a Build in as many words.
      */
     rebuild: z.boolean().optional(),
+    /**
+     * The Component to act on, by its name or id within this App.
+     *
+     * Absent means the App's primary component (`components[0]`), so every
+     * existing caller keeps its behaviour by saying nothing. An App with more
+     * than one Component — a `job` alongside its `service`, say — has no other
+     * way to reach the rest: nothing else inserts a Build for them.
+     */
+    component: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -296,18 +305,36 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     return failed('NOT_FOUND', `App '${app.name}' has no components to deploy`);
   }
 
-  const latestDeploy = primaryComponent.deploys[0];
+  let component = primaryComponent;
+  if (input.component !== undefined) {
+    const named = app.components.find(
+      (candidate) =>
+        candidate.id === input.component || candidate.name === input.component,
+    );
+    if (!named) {
+      const names = app.components
+        .map((candidate) => candidate.name)
+        .join(', ');
+      return failed(
+        'NOT_FOUND',
+        `App '${app.name}' has no Component '${input.component}' — it has: ${names}`,
+      );
+    }
+    component = named;
+  }
+
+  const latestDeploy = component.deploys[0];
   const targetId =
-    latestDeploy?.targetId ?? primaryComponent.desiredTargets[0]?.targetId;
+    latestDeploy?.targetId ?? component.desiredTargets[0]?.targetId;
 
   if (!targetId) {
     return failed(
       'NOT_FOUND',
-      `Component '${primaryComponent.name}' has no target placement`,
+      `Component '${component.name}' has no target placement`,
     );
   }
 
-  const latestBuild = primaryComponent.builds[0];
+  const latestBuild = component.builds[0];
 
   if (
     !input.rebuild &&
@@ -317,7 +344,7 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   ) {
     const deployAttempt = await createDeploy(
       {
-        componentId: primaryComponent.id,
+        componentId: component.id,
         targetId,
         buildId: latestBuild.id,
       },
@@ -360,7 +387,7 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     const [newBuild] = await context.db
       .insert(builds)
       .values({
-        componentId: primaryComponent.id,
+        componentId: component.id,
         commit: commitRef,
         targetShape: buildToRun?.targetShape ?? 'image',
         artifactType: buildToRun?.artifactType ?? 'image',
@@ -394,7 +421,7 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   await context.db
     .insert(componentTargetDesired)
     .values({
-      componentId: primaryComponent.id,
+      componentId: component.id,
       targetId,
       updatedAt: now,
     })
