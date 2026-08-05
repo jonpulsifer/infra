@@ -17,6 +17,7 @@
  * - **`in-cluster` is L1**, which is what makes an L2 Target refuse it.
  */
 import { describe, expect, test } from 'bun:test';
+import { generateKeyPairSync } from 'node:crypto';
 import { buildKitProgram } from '../../src/adapters/build/buildkit.ts';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import type {
@@ -28,6 +29,7 @@ import type {
 import {
   GitHubActionsBuildRoute,
   reusableWorkflowRepository,
+  sealRegistryAuth,
 } from '../../src/adapters/build/github-actions.ts';
 import {
   InClusterBuildRoute,
@@ -44,6 +46,7 @@ import {
   buildWorkflowCaller,
   RUN_NAME_PREFIX,
 } from '../../src/integrations/github/config-pr.ts';
+import type { RegistryAuth } from '../../src/storage/registry-credentials.ts';
 import {
   ATTACHMENT_DIGEST,
   attested,
@@ -71,6 +74,13 @@ const FRONTEND = 'registry.example.test/zero-config:pinned';
 const SIGNER =
   'gcpkms://projects/example/locations/global/keyRings/keys/cryptoKeys/signer';
 const ATTESTOR = 'projects/example/attestors/provenance';
+
+/** Generated once — every sealing test opens envelopes with the same pair. */
+const SEAL_KEYPAIR = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
 
 const spec: BuildSpec = {
   artifactType: 'image',
@@ -168,6 +178,7 @@ function text(events: readonly BuildEvent[]): string {
 function hostedRoute(
   options: FakeGitHubOptions = {},
   pacing: { discoveryMs?: number; timeoutMs?: number } = {},
+  sealPublicKey?: string,
 ): {
   host: FakeGitHub;
   route: GitHubActionsBuildRoute;
@@ -187,11 +198,54 @@ function hostedRoute(
       signer: SIGNER,
       attestor: ATTESTOR,
       correlation: () => 'fixed-correlation',
+      ...(sealPublicKey !== undefined ? { sealPublicKey } : {}),
       ...PACING,
       ...pacing,
       ...fakeClock(),
     }),
   };
+}
+
+/**
+ * The decrypt half of the reusable workflow's "Log in with sealed
+ * credentials" step, lifted from the workflow file itself rather than
+ * retyped — so the round-trip test below proves the algorithm this repository
+ * actually runs, not a copy of it that could quietly drift out of step.
+ *
+ * Sliced at `const auth = …` — the point where the workflow's own script has
+ * finished decrypting and has nothing further to prove — with one line of the
+ * test's own appended so the spawned process has something to report back.
+ * `docker login` never runs under this cut.
+ */
+async function workflowDecryptScript(): Promise<string> {
+  const text = await Bun.file(
+    new URL(
+      '../../../../.github/workflows/spindrift-build.yml',
+      import.meta.url,
+    ),
+  ).text();
+  const workflow = Bun.YAML.parse(text) as {
+    jobs: { build: { steps: { name?: string; run?: string }[] } };
+  };
+  const step = workflow.jobs.build.steps.find(
+    (candidate) => candidate.name === 'Log in with sealed credentials',
+  );
+  // The bash preamble sits before the heredoc and is not JavaScript, so the
+  // slice starts *after* the line that opens it — not at the top of `run`.
+  const heredocStart = step?.run?.indexOf("<<'SPINDRIFT_SEAL_SCRIPT'\n");
+  const scriptStart =
+    heredocStart === undefined || heredocStart === -1
+      ? -1
+      : heredocStart + "<<'SPINDRIFT_SEAL_SCRIPT'\n".length;
+  const marker = "const auth = JSON.parse(plaintext.toString('utf8'));";
+  const cut =
+    scriptStart === -1 ? -1 : (step?.run?.indexOf(marker, scriptStart) ?? -1);
+  if (step?.run === undefined || scriptStart === -1 || cut === -1) {
+    throw new Error(
+      'could not find the sealed-credential decrypt algorithm in spindrift-build.yml',
+    );
+  }
+  return `${step.run.slice(scriptStart, cut + marker.length)}\nconsole.log(JSON.stringify(auth));\n`;
 }
 
 describe('the hosted build route', () => {
@@ -432,6 +486,70 @@ describe('the hosted build route', () => {
     // syntax and the linter cannot tell which one this file meant.
     const expression = ['${', '{ inputs.correlation }', '}'].join('');
     expect(caller).toContain(`run-name: ${RUN_NAME_PREFIX} ${expression}`);
+  });
+
+  test('carries a registry credential only where a seal key is configured', () => {
+    expect(hostedRoute().route.carriesRegistryCredential).toBe(false);
+    expect(
+      hostedRoute({}, {}, SEAL_KEYPAIR.publicKey).route
+        .carriesRegistryCredential,
+    ).toBe(true);
+  });
+
+  test('a held credential travels sealed, never as a username or secret in the clear', async () => {
+    const held = {
+      host: 'registry-1.docker.io',
+      username: 'an-owner',
+      secret: 'a-token',
+    };
+    const { host, route } = hostedRoute({}, {}, SEAL_KEYPAIR.publicKey);
+    await run(route.build(archiveSource(), { ...spec, registryAuth: [held] }));
+
+    // The whole request, not just the field it should have landed in — the
+    // one thing this test cannot afford to miss is the secret showing up
+    // somewhere `sealedRegistryAuth` was not, in a request GitHub renders in
+    // the run header.
+    const raw = host.dispatches[0]?.inputs.spec ?? '{}';
+    expect(raw).not.toContain(held.secret);
+    expect(raw).not.toContain(held.username);
+
+    const request = JSON.parse(raw);
+    expect(typeof request.sealedRegistryAuth).toBe('string');
+    expect((request.sealedRegistryAuth as string).length).toBeGreaterThan(0);
+  });
+
+  test('carries no sealedRegistryAuth key at all where nothing is held', async () => {
+    const { host, route } = hostedRoute({}, {}, SEAL_KEYPAIR.publicKey);
+    await run(route.build(archiveSource(), spec));
+
+    const request = JSON.parse(host.dispatches[0]?.inputs.spec ?? '{}');
+    expect(request).not.toHaveProperty('sealedRegistryAuth');
+  });
+
+  test('the sealed envelope opens with the exact algorithm the workflow runs', async () => {
+    const auth: RegistryAuth[] = [
+      { host: 'registry-1.docker.io', username: 'an-owner', secret: 'a-token' },
+      { host: 'ghcr.io', username: 'other-owner', secret: 'a-second-token' },
+    ];
+    const sealed = await sealRegistryAuth(auth, SEAL_KEYPAIR.publicKey);
+
+    const proc = Bun.spawn(['node', '-e', await workflowDecryptScript()], {
+      env: {
+        ...process.env,
+        SEALED: sealed,
+        SEAL_KEY: SEAL_KEYPAIR.privateKey,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode, stderr).toBe(0);
+    expect(JSON.parse(stdout)).toEqual(auth);
   });
 });
 

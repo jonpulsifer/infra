@@ -30,6 +30,16 @@ on:
         description: The build request, as JSON.
         required: true
         type: string
+    secrets:
+      # Optional, because a caller that passes nothing still runs every build
+      # that carries no credential. Present, it is the private half of the
+      # manifest's `sealPublicKey` — the only thing that can open what
+      # `GitHubActionsBuildRoute.sealRegistryAuth` sealed into `spec`, and
+      # asked for here by name so a caller can pass it explicitly or with
+      # `secrets: inherit`. A connected repository's caller does neither (see
+      # "Log in with sealed credentials" below for what that means for it).
+      SPINDRIFT_BUILD_SEAL_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       spec:
@@ -87,6 +97,12 @@ jobs:
             # signature is the thing that says so.
             printf 'signer=%s\n'       "$(read_key '.signer // ""')"
             printf 'attestor=%s\n'     "$(read_key '.attestor // ""')"
+            # Empty on every build whose destinations this route already
+            # authorizes itself — most of them (§13). Present, it is this
+            # build's held registry credential, sealed to `sealPublicKey` and
+            # opened by "Log in with sealed credentials" below; nothing about
+            # it is readable in this output or anywhere this step touches.
+            printf 'sealedRegistryAuth=%s\n' "$(read_key '.sealedRegistryAuth // ""')"
             # One login per distinct registry host. The GitHub token below only
             # authenticates to GHCR; anything else is a cloud registry the
             # `Authenticate to Google Cloud` step already federates for, so the
@@ -269,6 +285,79 @@ jobs:
         env:
           HOSTS: ${{ steps.request.outputs.googleHosts }}
         run: gcloud auth configure-docker --quiet "$HOSTS"
+
+      # §16's Docker Hub exception, opened rather than sent in the clear. The
+      # credential travelled inside `spec` sealed to this route's
+      # `sealPublicKey` (`GitHubActionsBuildRoute.sealRegistryAuth`) precisely
+      # because `workflow_dispatch` renders every other input of this run in
+      # its header — nothing about it was readable before this step, and the
+      # only key that opens it is this repository's own
+      # `SPINDRIFT_BUILD_SEAL_KEY` secret. What comes out goes straight into
+      # `docker login`'s stdin and nowhere this workflow can be read from —
+      # not `$GITHUB_OUTPUT`, not a file, not a log line. This repository is
+      # public, and its run log is treated as though it already is.
+      - name: Log in with sealed credentials
+        if: steps.request.outputs.sealedRegistryAuth != ''
+        env:
+          SEALED: ${{ steps.request.outputs.sealedRegistryAuth }}
+          SEAL_KEY: ${{ secrets.SPINDRIFT_BUILD_SEAL_KEY }}
+        run: |
+          set -euo pipefail
+          # This build carries a sealed credential, so failing to open it here
+          # has to be loud: reaching `docker login` with nothing would instead
+          # fail several steps later, at the push, for a reason this sentence
+          # already knows.
+          if [ -z "${SEAL_KEY:-}" ]; then
+            echo "::error::this build carries a sealed registry credential, but SPINDRIFT_BUILD_SEAL_KEY is not set on this repository — set it to the private half of the manifest's sealPublicKey, or every push below fails instead, with a worse error." >&2
+            exit 1
+          fi
+          node <<'SPINDRIFT_SEAL_SCRIPT'
+          const crypto = require('node:crypto');
+          const { execFileSync } = require('node:child_process');
+
+          const envelope = JSON.parse(
+            Buffer.from(process.env.SEALED, 'base64').toString('utf8'),
+          );
+          const wrappedKey = Buffer.from(envelope.k, 'base64');
+          const iv = Buffer.from(envelope.iv, 'base64');
+          const combined = Buffer.from(envelope.c, 'base64');
+          // WebCrypto's AES-GCM appends its 16-byte tag to the ciphertext
+          // rather than returning it separately — `sealRegistryAuth` never
+          // split the two, so this is the split back apart.
+          const tag = combined.subarray(combined.length - 16);
+          const ciphertext = combined.subarray(0, combined.length - 16);
+
+          const aesKey = crypto.privateDecrypt(
+            {
+              key: process.env.SEAL_KEY,
+              padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+              oaepHash: 'sha256',
+            },
+            wrappedKey,
+          );
+
+          const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
+          decipher.setAuthTag(tag);
+          const plaintext = Buffer.concat([
+            decipher.update(ciphertext),
+            decipher.final(),
+          ]);
+          const auth = JSON.parse(plaintext.toString('utf8'));
+
+          // Masked before this step prints anything else, including the
+          // logins below — whose own output could otherwise echo them back.
+          for (const entry of auth) {
+            console.log(`::add-mask::${entry.username}`);
+            console.log(`::add-mask::${entry.secret}`);
+          }
+          for (const entry of auth) {
+            execFileSync(
+              'docker',
+              ['login', entry.host, '-u', entry.username, '--password-stdin'],
+              { input: entry.secret, stdio: ['pipe', 'inherit', 'inherit'] },
+            );
+          }
+          SPINDRIFT_SEAL_SCRIPT
 
       - name: Build and push
         id: push

@@ -326,15 +326,16 @@ export interface BuildAdapter {
    * A property of the route's *mechanism*, not a policy. The two routes that
    * run the BuildKit program in a container of their own can take a secret
    * through an environment variable scoped to that container. The hosted route
-   * cannot: it is dispatched by a `workflow_dispatch` whose inputs GitHub
-   * renders in the run header, so a token in the request would be published to
-   * anyone who can see the run — including a repository the installation does
-   * not own.
+   * is dispatched by a `workflow_dispatch` whose inputs GitHub renders in the
+   * run header, so a token in the request would be published to anyone who can
+   * see the run — including a repository the installation does not own — and
+   * it answers `true` only where it has somewhere else to put one: see
+   * `GitHubActionsBuildRoute.carriesRegistryCredential` for the sealed
+   * mechanism that opens up.
    *
-   * The correct mechanism there is a repository Actions secret, which needs a
-   * libsodium sealed box to write and therefore a dependency §20 has not taken.
-   * Until it exists this is `false` and `dispatchBuild` refuses, which is the
-   * direction being wrong has to fail in.
+   * A route with nowhere configured to carry one answers `false`, and
+   * `dispatchBuild` refuses a build that needs a stored credential on it —
+   * which is the direction being wrong has to fail in.
    */
   readonly carriesRegistryCredential: boolean;
   /**

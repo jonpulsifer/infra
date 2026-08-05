@@ -38,5 +38,14 @@ permissions:
 jobs:
   build:
     uses: ./.github/workflows/spindrift-build.yml
+    # A `workflow_call` passes no secret it is not told to, even locally — so
+    # without this, `SPINDRIFT_BUILD_SEAL_KEY` set on this repository would sit
+    # unreachable one `uses:` away from the step that needs it. `inherit`
+    # rather than naming it: this repository is the only caller of its own
+    # build workflow that can hold the key at all (a connected repository's
+    # generated caller passes no secrets — see `buildWorkflowCaller`), so there
+    # is nothing here `inherit` could leak that this repository does not
+    # already hold.
+    secrets: inherit
     with:
       spec: ${{ inputs.spec }}

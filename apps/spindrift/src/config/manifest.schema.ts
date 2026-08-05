@@ -117,6 +117,20 @@ export const buildRouteSchema = z.discriminatedUnion('adapter', [
       /** What this route is called, as `Target.buildRoutes` names it. */
       name: nonEmptyString,
       adapter: z.literal('github-actions'),
+      /**
+       * The public half of this route's sealing keypair, SPKI PEM.
+       *
+       * A dispatch's inputs are rendered in the run header (§15), so a stored
+       * registry credential cannot travel to this route in the clear —
+       * `GitHubActionsBuildRoute.carriesRegistryCredential` says why at
+       * length. Present, that credential is sealed to this key before it ever
+       * reaches the dispatch, and the reusable workflow opens it with the
+       * matching private key, which lives only as this repository's
+       * `SPINDRIFT_BUILD_SEAL_KEY` Actions secret — never here, never in git.
+       * Absent, this route carries no credential and `dispatchBuild` keeps
+       * refusing a build that needs one.
+       */
+      sealPublicKey: nonEmptyString.optional(),
     })
     .strict(),
   z
