@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Six kinds of route exist, and five of the six are generated:
+ * Eight kinds of route exist, and three of the eight are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -18,9 +18,14 @@
  *    closed tuple of acts. It contains the pre-session acts that *produce* a
  *    principal and passkey-rooted credential administration; neither belongs
  *    in the product command registry.
- * 4. **Streams**, the two authenticated, purpose-specific WebSocket upgrades.
- * 5. **{@link HEALTH_PATH}**, a liveness probe that consults nothing.
- * 6. **{@link READY_PATH}**, a readiness probe that does — see below.
+ * 4. **Upload**, the archive upload boundary (`upload.ts`) — session-authenticated
+ *    like a command, but it takes bytes rather than JSON, so it cannot be one.
+ * 5. **Streams**, the two authenticated, purpose-specific WebSocket upgrades.
+ * 6. **The webhook** (`webhook-route.ts`), the one route with no session at
+ *    all — its authentication is the GitHub HMAC over the raw body, not a
+ *    cookie, so it cannot go through `DispatchDeps.authenticate` either.
+ * 7. **{@link HEALTH_PATH}**, a liveness probe that consults nothing.
+ * 8. **{@link READY_PATH}**, a readiness probe that does — see below.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -34,6 +39,7 @@ import type { Database } from '../db/client.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
 import { streamRoutes } from './streams.ts';
 import { uploadRoutes } from './upload.ts';
+import { type WebhookRouteDeps, webhookRoutes } from './webhook-route.ts';
 
 /**
  * Liveness: whether this process is still running.
@@ -92,6 +98,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
   client: Client,
   deps: DispatchDeps,
   auth: EnrolmentDeps & GatewayDeps,
+  webhook: WebhookRouteDeps,
 ) {
   return {
     ...client,
@@ -101,5 +108,6 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...commandRoutes(deps),
     ...streamRoutes(deps),
     ...uploadRoutes(deps),
+    ...webhookRoutes(webhook),
   };
 }

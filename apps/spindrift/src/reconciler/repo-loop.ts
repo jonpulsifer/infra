@@ -33,10 +33,17 @@
  * running, and what stops is the one thing that genuinely cannot continue,
  * which is reading new source.
  *
- * What this loop does **not** do is dispatch a build. §5 makes default-branch
- * HEAD the trigger, but a Build has to name a route, and the routes arrive with
- * the build adapters. Until then the loop's job ends at adopting a commit and
- * saying which scopes it changed, which is the fact a dispatcher will need.
+ * What this file's own functions do **not** do is dispatch a build or a
+ * Deploy. `reconcileRepository`, `reconcileAllRepositories`, and
+ * `applyWebhookDelivery` end at adopting a commit and saying which scopes it
+ * changed — `./auto-deploy.ts`'s `dispatchAutoDeploys` is the dispatcher that
+ * fact was always for. It reads the `RepositoryReconciliation[]` these
+ * functions return and, for every App on the repository that opted in
+ * (`apps.autoDeploy`), calls `deployApp`. Both the poll loop's periodic pass
+ * and the webhook route call it over the same passes, which is what keeps a
+ * missed delivery self-healing rather than silently skipping a deploy: the
+ * loop's next tick reconciles the same commit and dispatches exactly as the
+ * webhook would have.
  */
 import { eq } from 'drizzle-orm';
 import type { Clock } from '../commands/types.ts';
@@ -480,8 +487,15 @@ async function repositoriesOf(
 export interface RepoLoopOptions {
   readonly intervalMs: number;
   readonly signal?: AbortSignal;
-  /** Called after each pass — where an installation wires logging or metrics. */
-  readonly onPass?: (passes: readonly RepositoryReconciliation[]) => void;
+  /**
+   * Called after each pass — where an installation wires logging, metrics, or
+   * `./auto-deploy.ts`'s `dispatchAutoDeploys`. May return a `Promise`, which
+   * the loop awaits before sleeping: dispatch is a database write and the
+   * loop's shutdown signal must not race ahead of it.
+   */
+  readonly onPass?: (
+    passes: readonly RepositoryReconciliation[],
+  ) => void | Promise<void>;
 }
 
 /**
@@ -502,7 +516,7 @@ export async function runRepoLoop(
     reconcilerLoopDuration.record((Date.now() - startedAt) / 1000, {
       loop: 'repository',
     });
-    options.onPass?.(passes);
+    await options.onPass?.(passes);
     if (options.signal?.aborted) return;
     await sleep(options.intervalMs, options.signal);
   }

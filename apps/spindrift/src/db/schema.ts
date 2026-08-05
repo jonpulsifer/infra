@@ -476,6 +476,15 @@ export const apps = pgTable('apps', {
    */
   buildRoute: text('build_route'),
   /**
+   * Opt in to a Deploy dispatched from a push, with no operator at the
+   * keyboard (§15's webhook, `src/reconciler/auto-deploy.ts`).
+   *
+   * `false` by default and on every App that predates this column: auto-deploy
+   * changes what is live without being asked at that moment, so an App gets it
+   * only by a developer turning it on, never by upgrading Spindrift.
+   */
+  autoDeploy: boolean('auto_deploy').notNull().default(false),
+  /**
    * **No vessel column, deliberately.** An App has placements, and each
    * placement's Target is a surface on a vessel — that is the boundary the App
    * is in, and it is derivable. A column here could only be a second, unchecked

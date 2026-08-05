@@ -190,6 +190,13 @@
       "when": 1785374380770,
       "tag": "0026_deploy_desired",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785374380771,
+      "tag": "0027_app_auto_deploy",
+      "breakpoints": true
     }
   ]
 }
