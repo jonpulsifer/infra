@@ -346,8 +346,12 @@ jobs:
 
           // Masked before this step prints anything else, including the
           // logins below — whose own output could otherwise echo them back.
+          // The secret only: the runner also masks the base64 form of a
+          // masked value, and the username is inside every image reference —
+          // masking it punched `***` through the base64 build report and the
+          // route refused a green run it could no longer parse. A username is
+          // the public half of the pair; it is in the refs by design.
           for (const entry of auth) {
-            console.log(`::add-mask::${entry.username}`);
             console.log(`::add-mask::${entry.secret}`);
           }
           for (const entry of auth) {
