@@ -54,9 +54,14 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: spindrift
-          # Matches typescript.yml: the benchmark runs the same suite, so it
-          # must not be the one that hits the stock connection ceiling.
-          POSTGRES_INITDB_ARGS: -c max_connections=300
+          # Matches typescript.yml, and has to: the benchmark runs the same
+          # suite, so a database configured differently would be measuring a
+          # different thing.
+          POSTGRES_INITDB_ARGS: >-
+            -c max_connections=300
+            -c fsync=off
+            -c synchronous_commit=off
+            -c full_page_writes=off
         ports:
           - 5432:5432
         options: >-
