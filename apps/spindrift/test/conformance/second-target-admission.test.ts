@@ -431,6 +431,22 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     // tag. Bumping one without the other is silent both ways: a version ahead
     // of the tag ships nothing, and a tag ahead of the push leaves the source
     // object failing to pull. This is the only thing holding the pair together.
+    //
+    // Fast lane: this test alone is `spindrift#test:chart-pins` in
+    // `turbo.json`, with its own narrow `inputs` (the four files below, plus
+    // this file) and no `build` dependency — so a PR that only bumps a chart
+    // version and its consumer tag reruns this one fast assertion (still pays
+    // for the file's per-test isolated schema, via the describe-scoped
+    // `withIsolatedDatabase()` below, but nothing more) instead of
+    // cache-busting the full `spindrift#test` suite. The two
+    // `oci-repository.yaml` consumers stay
+    // out of `spindrift#test`'s own inputs because every check the rest of
+    // the suite makes against them (existence of a `tag`/`digest`, `url`
+    // shape) is strictly weaker than this test's exact-match checks — nothing
+    // else needs a fresher copy than this test already demands. `Chart.yaml`
+    // for `spindrift-app` is the one file both tasks still list:
+    // `values.test.ts` reads a different field of it (the values-contract
+    // annotation) that this test does not touch and does not subsume.
     const consumers: [string, string][] = [
       ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
       [
