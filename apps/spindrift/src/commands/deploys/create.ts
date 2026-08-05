@@ -36,6 +36,7 @@
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  apps,
   builds,
   components,
   componentTargetDesired,
@@ -43,6 +44,7 @@ import {
   targets,
 } from '../../db/schema.ts';
 import { DEFAULT_MINIMUM_BUILD_LEVEL } from '../../domain/build-route.ts';
+import type { DesiredDocument } from '../../domain/desired-state.ts';
 import {
   artifactTypeFor,
   DEFAULT_PLATFORM,
@@ -104,16 +106,46 @@ export interface DeployPreconditions {
   readonly componentId: string;
   readonly targetId: string;
   readonly buildId: number;
-  readonly reach: 'none' | 'private' | 'public';
-  readonly auth: 'none' | 'proxy';
   /**
-   * The pinned config document this attempt delivers (§10).
+   * Everything this attempt places, captured here rather than read at apply
+   * time — which is what makes a Deploy "exactly Heroku's Release": what a
+   * rollback comes back up with is what its Deploy recorded, not what the
+   * Component and config rows say today.
    *
-   * Captured here rather than read at apply time, which is what makes a Deploy
-   * "exactly Heroku's Release": what a rollback comes back up with is what its
-   * Deploy recorded, not what the config items say today.
+   * §10 made this argument for the config document alone. It was never specific
+   * to config: a Component's kind, exposure and schedule are read by the same
+   * apply, and re-reading them gives a rollback yesterday's artifact under
+   * today's shape.
    */
-  readonly config: PinnedConfig;
+  readonly desired: DesiredDocument;
+  /** §10's hash over `desired.config`, materialized because the UI lists it. */
+  readonly configVersion: string;
+}
+
+/**
+ * The same preconditions, delivering a different config document.
+ *
+ * Two callers replace exactly this one leg and nothing else: a config change
+ * deploys what was *just written* rather than what `checkDeployable` read a
+ * moment earlier, and a rollback deploys what the release being rolled back to
+ * originally had. Both leave the rest of the shape alone, because the shape a
+ * rollback wants is the Component as it is now — rolling an artifact back is
+ * not a request to undo unrelated edits.
+ *
+ * A function rather than the spread written twice, because the spread is
+ * nested: `{ ...value, config: pinned }` type-checks against nothing and
+ * silently pins the old document, which is the bug this whole column exists to
+ * remove.
+ */
+export function deliveringConfig(
+  value: DeployPreconditions,
+  config: PinnedConfig,
+): DeployPreconditions {
+  return {
+    ...value,
+    configVersion: config.version,
+    desired: { ...value.desired, config: config.document },
+  };
 }
 
 /**
@@ -217,16 +249,11 @@ export async function placeIntent(
         targetId: checked.targetId,
         buildId: checked.buildId,
         phase: 'PENDING',
-        // §9: reach and auth are the Component's settings, captured at intent
-        // time so a later change to the Component does not retroactively
-        // describe what this attempt asked for.
-        reach: checked.reach,
-        auth: checked.auth,
-        // §10, for the same reason and with more at stake: the document is what
-        // this Deploy delivers, so a rollback to it delivers that document
-        // again rather than whatever config was set in the meantime.
-        configVersion: checked.config.version,
-        configDocument: checked.config.document,
+        // The document this Deploy places, captured at intent time so that a
+        // later edit to the Component does not retroactively describe what this
+        // attempt asked for, and so a rollback to it places what it placed.
+        desired: checked.desired,
+        configVersion: checked.configVersion,
         createdAt: now,
         updatedAt: now,
       })
@@ -255,7 +282,7 @@ export async function placeIntent(
     buildId: checked.buildId,
     phase: 'PENDING' as const,
     supersededBuildId: placed.supersededBuildId,
-    configVersion: checked.config.version,
+    configVersion: checked.configVersion,
   });
 }
 
@@ -281,6 +308,17 @@ export async function checkDeployable(
       'NOT_FOUND',
       `there is no Component with id ${input.componentId}`,
     );
+  }
+
+  const [app] = await context.db
+    .select()
+    .from(apps)
+    .where(eq(apps.id, component.appId));
+  if (app === undefined) {
+    // Unreachable while the foreign key holds, which is what makes this a
+    // refusal rather than a `!`: a Component whose App has been deleted is not
+    // a state to compose a release document out of.
+    return refuse('NOT_FOUND', `Component ${component.name} has no App`);
   }
 
   const [target] = await context.db
@@ -424,15 +462,35 @@ export async function checkDeployable(
     );
   }
 
+  const config = await readPinnedConfig(context.db, component.id, target.id);
+
   return {
     ok: true,
     value: {
       componentId: component.id,
       targetId: target.id,
       buildId: build.id,
-      reach: component.reach,
-      auth: component.auth,
-      config: await readPinnedConfig(context.db, component.id, target.id),
+      configVersion: config.version,
+      desired: {
+        app: app.name,
+        component: component.name,
+        target: target.name,
+        kind: component.kind,
+        // Optional on `DesiredState`, so absent rather than null — the chart
+        // branches on emptiness and the adapters spread this straight through.
+        ...(component.expose === null ? {} : { expose: component.expose }),
+        reach: component.reach,
+        auth: component.auth,
+        ...(component.schedule === null
+          ? {}
+          : { schedule: component.schedule }),
+        config: config.document,
+        // §3 keeps core out of scheduling and detection has not landed, so
+        // nothing states a platform or a size yet. Pinned as the constant it
+        // has always been applied as, so that the day something does state one
+        // this is the only place that changes.
+        requirements: { platform: DEFAULT_PLATFORM, resources: {} },
+      },
     },
   };
 }

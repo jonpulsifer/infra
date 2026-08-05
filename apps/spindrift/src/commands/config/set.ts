@@ -52,7 +52,11 @@ import {
   VARIABLE_NAME,
 } from '../../domain/config.ts';
 import type { ComponentKind } from '../../domain/desired-state.ts';
-import { checkDeployable, placeIntent } from '../deploys/create.ts';
+import {
+  checkDeployable,
+  deliveringConfig,
+  placeIntent,
+} from '../deploys/create.ts';
 import {
   type AdapterRegistry,
   type Command,
@@ -463,10 +467,10 @@ async function deployChange(
     return { deployId: null, notDeployed: checked.failure.message };
   }
 
-  const placed = await placeIntent(context, {
-    ...checked.value,
-    config: pinned,
-  });
+  const placed = await placeIntent(
+    context,
+    deliveringConfig(checked.value, pinned),
+  );
   return placed.ok
     ? { deployId: placed.value.deployId, notDeployed: null }
     : { deployId: null, notDeployed: placed.failure.message };

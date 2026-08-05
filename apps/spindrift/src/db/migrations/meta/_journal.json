@@ -183,6 +183,13 @@
       "when": 1785374380769,
       "tag": "0025_drop_app_vessel_ref",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785374380770,
+      "tag": "0026_deploy_desired",
+      "breakpoints": true
     }
   ]
 }

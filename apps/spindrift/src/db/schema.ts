@@ -49,7 +49,7 @@ import type {
   TargetDiscovery,
 } from '../domain/capabilities.ts';
 import type { Draft } from '../domain/creation-draft.ts';
-import type { ConfigEntry } from '../domain/desired-state.ts';
+import type { DesiredDocument } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import { VESSEL_KINDS, type VesselLocation } from '../domain/vessel.ts';
 import type { CoreSignature } from '../supply-chain/sign.ts';
@@ -692,32 +692,34 @@ export const deploys = pgTable('deploys', {
    */
   ref: text('ref'),
   url: text('url'),
-  /** §10: "a hash over a document of pinned version references." */
+  /**
+   * §10: "a hash over a document of pinned version references."
+   *
+   * Kept beside {@link deploys.desired} rather than recomputed from it: this is
+   * a materialized hash the UI reads on every list, not a second statement of
+   * what is delivered.
+   */
   configVersion: text('config_version'),
   /**
-   * The pinned document itself, captured when this intent was written (§10).
+   * **What this intent places**, captured when it was written (§6, §10).
    *
-   * Stored rather than re-read from `config_items` at apply time, and that is
-   * the whole of what makes a Deploy "exactly Heroku's Release": a rollback is
-   * an ordinary deploy naming an older Build (§6), and it "comes back up with
-   * the configuration it originally had" only because the configuration it had
-   * is on the row. Re-deriving it from current config items would make every
-   * rollback come up with *today's* config, which is the failure §10's pinning
-   * exists to prevent.
+   * `NOT NULL`, and that is the whole design. A Deploy whose meaning has to be
+   * reassembled from Component and config rows that have moved since is not an
+   * intent — it is a query, and it answers with today's shape under yesterday's
+   * artifact. §10 already made this argument for config alone: "re-deriving it
+   * from current config items would make every rollback come up with *today's*
+   * config." The argument was never specific to config.
+   *
+   * So this column **replaces** `config_document`, `reach` and `auth`, which
+   * pinned three fields of one document and left the rest to be re-read. Two
+   * places holding one fact is two places for them to disagree.
    *
    * References, never values — the same posture as `sessions.tokenHash`: a
    * database that cannot produce a credential is a database whose disclosure
-   * does not produce one either.
+   * does not produce one either. See {@link DesiredDocument} for the three
+   * fields this deliberately does not carry.
    */
-  configDocument:
-    jsonbDocument('config_document').$type<readonly ConfigEntry[]>(),
-  /**
-   * What this attempt asked for, pinned the same way `configDocument` is: a
-   * Component edited mid-attempt must not retroactively change what a running
-   * attempt is placing.
-   */
-  reach: reachState('reach'),
-  auth: authMode('auth'),
+  desired: jsonbDocument('desired').$type<DesiredDocument>().notNull(),
   /**
    * §13: "Disconnect always works: live Deploys go `orphaned`, workloads keep
    * running." Set when the Target this Deploy sits on was disconnected, and
