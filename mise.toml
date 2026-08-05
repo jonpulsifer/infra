@@ -53,7 +53,7 @@ description = "Test validation-impact routing"
 run = "bash .github/scripts/validation-impact_test.sh"
 
 [tasks."k8s:render-apps"]
-description = "Render shared cluster app overlays and folly monitoring, then template referenced in-repo charts"
+description = "Render shared cluster app overlays and both clusters' monitoring, then template referenced in-repo charts"
 run = "bash .github/scripts/render-cluster-apps.sh"
 
 [tasks."tf:init"]
