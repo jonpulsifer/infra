@@ -18,7 +18,7 @@ WORKDIR /app
 COPY . .
 RUN cd apps/spindrift-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
 
-FROM cgr.dev/chainguard/node:latest@sha256:cf7ae5ead5aed79a61404d7b1bbb9b89ea461991b21cb8fcb07d4b6ad4d8b734 AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:d63839a6cd9f694f7302f377f5ce8a6521bc8ac43ab03f53a4b6544acf0f6c6e AS runner
 ENV NODE_ENV=production \
   PORT=3000
 WORKDIR /app
