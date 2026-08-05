@@ -370,16 +370,18 @@ jobs:
       # a Target that enforces the second refuses a perfectly signed image
       # that lacks it.
       #
-      # **The key version has to be named and cannot be read off the
-      # attestor.** Binary Authorization overwrites a PKIX key's `id` with an
-      # API-calculated RFC6920 fingerprint (`ni:///sha-256;…`), so what the
-      # attestor reports is a hash and not the `cryptoKeyVersions/N` that
-      # produced it. The enabled version is asked for instead, and `1` is the
-      # fallback for a caller whose role carries `cloudkms.cryptoKeyVersions.
-      # useToSign` but not `.list` — which is the shape of `roles/cloudkms.
-      # signer`. A key with `prevent_destroy` and no rotation schedule has one
-      # version, and the attestor registered the latest at apply time, so the
-      # fallback is the same answer the query would give.
+      # **The key version is asked from KMS, not read off the attestor.** The
+      # attestor registers the key under its full `cryptoKeyVersions/N`
+      # resource URI — the same id this step stamps — but that registration
+      # is a snapshot of the version that was enabled at apply time, not an
+      # authority on which version is enabled now: a rotation moves the
+      # enabled version first and re-registers second. The enabled version is
+      # asked for instead, and `1` is the fallback for a caller whose role
+      # carries `cloudkms.cryptoKeyVersions.useToSign` but not `.list` —
+      # which is the shape of `roles/cloudkms.signer`. A key with
+      # `prevent_destroy` and no rotation schedule has one version, and the
+      # attestor registered the latest at apply time, so the fallback is the
+      # same answer the query would give.
       - name: Attest the artifact
         if: steps.request.outputs.attestor != '' && steps.request.outputs.signer != ''
         env:
