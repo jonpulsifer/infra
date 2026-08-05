@@ -1094,6 +1094,26 @@ describe('the BuildKit program', () => {
     expect(program).toContain(`--opt source='${FRONTEND}'`);
   });
 
+  test('an empty build-arg set leaves no blank continuation line', () => {
+    // A `\` continuation followed by a blank line ends the command there, and
+    // the flag on the next line becomes a command of its own — observed live
+    // as `sh: --attest=type=provenance,mode=max: not found` on the first
+    // Component built with no build args.
+    const bare = buildKitProgram({
+      bundleUrl: 'staged://bundle',
+      bundleDigest: 'sha256:bundle',
+      subpath: 'apps/web',
+      destinations: ['registry.example.test/app'],
+      tags: ['latest'],
+      zeroConfigFrontend: FRONTEND,
+      buildArgs: {},
+    });
+    expect(bare).not.toMatch(/\\\n\s*\n\s*--/);
+    // The populated program holds the same invariant.
+    expect(program).not.toMatch(/\\\n\s*\n\s*--/);
+    expect(bare).toContain('--attest=type=provenance,mode=max');
+  });
+
   test('builds a Dockerfile against the bundle root, not the scope', () => {
     // The scope names the Dockerfile; the root is what it builds. A monorepo
     // App shares a lockfile and sibling packages with the tree above it, and
