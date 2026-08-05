@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Renders the shared app seams for both cluster adapters plus folly monitoring
-# without touching live state, then templates every in-repo chart the rendered HelmReleases name,
-# using the values those HelmReleases set.
+# Renders the shared app seams for both cluster adapters plus each cluster's
+# monitoring tree, without touching live state, then templates every in-repo
+# chart the rendered HelmReleases name, using the values those HelmReleases set.
 #
 # Rendering the kustomizations alone proves the overlays compose; it says
 # nothing about whether the charts they point at can render. A chart guard
@@ -26,6 +26,8 @@ OVERLAYS=(
   clusters/folly/apps/oauth2-proxy
   clusters/offsite/apps/oauth2-proxy
   clusters/folly/monitoring
+  clusters/offsite/monitoring
+  clusters/offsite/monitoring-crds
 )
 
 WORK="$(mktemp -d)"
