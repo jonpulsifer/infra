@@ -40,8 +40,9 @@ jobs:
           # tests read those declarations rather than a fixture: `charts.app`,
           # a Target's delivery `sourceRef`, and an `OCIRepository` tag are all
           # things the suite asserts and all things that change only there.
-          # `turbo.json`'s `spindrift#test` inputs name the same files — a path
-          # missing from either list is a guard that cannot run in CI.
+          # `turbo.json`'s `spindrift#test` and `spindrift#test:chart-pins`
+          # inputs together name the same files — a path missing from all
+          # three lists is a guard that cannot run in CI.
           files: |
             apps/hub/**
             apps/slingshot/**
@@ -90,13 +91,17 @@ jobs:
       TURBO_TELEMETRY_DISABLED: 1
       # spindrift's tests fake the far side of an adapter, never the database.
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/spindrift
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: spindrift
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # A `services:` container blocks every step in the job — including
+      # Checkout — behind its health check, even though nothing before `Test`
+      # touches the database. Starting it here instead lets it boot in the
+      # background across auth/setup/cache/install/lint/typecheck/build, so by
+      # the time `Wait for Postgres` runs it is normally already healthy.
+      - name: Start Postgres
+        run: |
+          docker rm -f spindrift-test-db >/dev/null 2>&1 || true
           # This database is destroyed when the job ends, so every guarantee it
           # makes about surviving a crash is paid for and never collected.
           # spindrift's harness builds and drops a schema per test — over 1600
@@ -110,24 +115,13 @@ jobs:
           # peaks near 30, but a backend the server has not finished reaping
           # still counts against the limit, and on a contended runner that lag
           # is what becomes `sorry, too many clients already`.
-          #
-          # A service container takes no command, so all of it rides in through
-          # initdb, which has accepted `-c` since PG16.
-          POSTGRES_INITDB_ARGS: >-
-            -c max_connections=300
-            -c fsync=off
-            -c synchronous_commit=off
-            -c full_page_writes=off
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+          docker run -d --name spindrift-test-db \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=spindrift \
+            -e POSTGRES_INITDB_ARGS="-c max_connections=300 -c fsync=off -c synchronous_commit=off -c full_page_writes=off" \
+            -p 5432:5432 \
+            postgres:18-alpine
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -174,5 +168,16 @@ jobs:
         run: bun run typecheck
       - name: Build
         run: bun run build
+      - name: Wait for Postgres
+        run: |
+          for _ in $(seq 1 30); do
+            docker exec spindrift-test-db pg_isready -U postgres && exit 0
+            sleep 1
+          done
+          echo "Postgres did not become ready in time" >&2
+          exit 1
       - name: Test
         run: bun run test
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f spindrift-test-db >/dev/null 2>&1 || true
