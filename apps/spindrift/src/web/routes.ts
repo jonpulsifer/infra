@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Five kinds of route exist, and four of the five are generated:
+ * Six kinds of route exist, and five of the six are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -19,28 +19,57 @@
  *    principal and passkey-rooted credential administration; neither belongs
  *    in the product command registry.
  * 4. **Streams**, the two authenticated, purpose-specific WebSocket upgrades.
- * 5. **{@link HEALTH_PATH}**, which is the whole of the rest.
+ * 5. **{@link HEALTH_PATH}**, a liveness probe that consults nothing.
+ * 6. **{@link READY_PATH}**, a readiness probe that does — see below.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
  */
 
+import { sql } from 'drizzle-orm';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
 import type { GatewayDeps } from '../auth/gateway.ts';
 import { authRoutes } from '../auth/routes.ts';
+import type { Database } from '../db/client.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
 import { streamRoutes } from './streams.ts';
 import { uploadRoutes } from './upload.ts';
 
 /**
- * The one route that is neither a command nor part of the client bundle.
+ * Liveness: whether this process is still running.
  *
- * It is a constant rather than a handler on purpose: a probe that can consult
+ * A constant rather than a handler on purpose: a probe that can consult
  * something is a probe that can be wrong about something, and §21's "no route
  * may contain domain logic" is easiest to keep when there is no logic to keep
- * out.
+ * out. Deliberately answers "yes" even while the database is unreachable — a
+ * kubelet that restarted this pod for that would kill the one thing capable of
+ * reconnecting once Postgres comes back. {@link READY_PATH} is where that
+ * question actually gets asked.
  */
 export const HEALTH_PATH = '/healthz';
+
+/**
+ * Readiness: whether this pod should currently receive traffic.
+ *
+ * Unlike {@link HEALTH_PATH} this does consult something — a `select 1`
+ * through the same pool every command uses — because "is the process up" and
+ * "can it actually do anything" are different questions, and only the second
+ * one is the Service's to act on. A failure here takes the pod out of
+ * rotation without restarting it, which is the correct response to a database
+ * that is down and will recover on its own.
+ */
+export const READY_PATH = '/readyz';
+
+/** {@link READY_PATH}'s handler: the one hand-authored route that reads the database. */
+async function readyResponse(db: Database): Promise<Response> {
+  try {
+    await db.execute(sql`select 1`);
+    return new Response('ok\n');
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return new Response(`not ready: ${detail}\n`, { status: 503 });
+  }
+}
 
 /**
  * What a client route may be: a built file's `Response` in production, or Bun's
@@ -66,7 +95,8 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
 ) {
   return {
     ...client,
-    '/healthz': new Response('ok\n'),
+    [HEALTH_PATH]: new Response('ok\n'),
+    [READY_PATH]: () => readyResponse(auth.db),
     ...authRoutes(auth),
     ...commandRoutes(deps),
     ...streamRoutes(deps),

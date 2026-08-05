@@ -18,6 +18,12 @@ import {
   componentTargetDesired,
   targets,
 } from '../db/schema.ts';
+import {
+  reconcilerAttemptDuration,
+  reconcilerLoopDuration,
+  reconcilerPickupLatency,
+  reconcilerQueueDepth,
+} from '../telemetry/index.ts';
 
 /**
  * How often to look for a Build to dispatch.
@@ -53,6 +59,10 @@ export async function runBuildPass(
       appId: components.appId,
       componentId: components.id,
       waitingOn: builds.dispatchWaitingOn,
+      // For the pickup-latency metric below — every row here is PENDING by
+      // the `where` clause, so this is the age of a Build still waiting to be
+      // claimed.
+      createdAt: builds.createdAt,
     })
     .from(builds)
     .innerJoin(components, eq(builds.componentId, components.id))
@@ -101,6 +111,10 @@ export async function runBuildPass(
       continue;
     }
     const route = selection.route;
+    // `dispatchBuild` runs the whole attempt — including the adapter's build
+    // stream — to completion before returning, so timing this call is timing
+    // the build itself, not the loop's own bookkeeping around it.
+    const startedAt = Date.now();
     const result = await dispatchBuild(
       {
         buildId: row.buildId,
@@ -109,8 +123,22 @@ export async function runBuildPass(
       },
       context,
     );
-    if (result.ok) dispatched += 1;
+    reconcilerAttemptDuration.record((Date.now() - startedAt) / 1000, {
+      kind: 'build',
+      outcome: result.ok ? 'ok' : 'refused',
+    });
+    if (result.ok) {
+      dispatched += 1;
+      reconcilerPickupLatency.record(
+        (Date.now() - row.createdAt.getTime()) / 1000,
+        { kind: 'build' },
+      );
+    }
   }
+  // `visited` is every distinct Build this pass looked at, all of them
+  // PENDING by the `where` clause — the backlog this pass found, whether or
+  // not it managed to dispatch all of it.
+  reconcilerQueueDepth.record(visited.size, { kind: 'build' });
   return dispatched;
 }
 
@@ -120,7 +148,11 @@ export async function runBuildLoop(
 ): Promise<void> {
   const intervals = options.intervals ?? DEFAULT_BUILD_INTERVALS;
   while (!options.signal.aborted) {
+    const passStartedAt = Date.now();
     const dispatched = await runBuildPass(context);
+    reconcilerLoopDuration.record((Date.now() - passStartedAt) / 1000, {
+      loop: 'build',
+    });
     options.onPass?.();
     await abortableSleep(
       dispatched > 0 ? intervals.activeMs : intervals.idleMs,

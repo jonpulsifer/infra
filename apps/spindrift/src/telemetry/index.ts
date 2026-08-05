@@ -1,12 +1,17 @@
 import {
   type Counter,
+  type Gauge,
   type Histogram,
   type Meter,
   metrics,
   type Tracer,
   trace,
 } from '@opentelemetry/api';
-import { logs, SeverityNumber } from '@opentelemetry/api-logs';
+import {
+  type LogAttributes,
+  logs,
+  SeverityNumber,
+} from '@opentelemetry/api-logs';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -128,49 +133,110 @@ export const reconcilerErrorCounter: Counter = meter.createCounter(
   },
 );
 
+/**
+ * How long one build or deploy attempt took, from dispatch to a terminal
+ * outcome — recorded around the same adapter call the build and deploy loops
+ * already block on, so this is real wall time and not the loop's own poll
+ * interval. `kind` distinguishes 'build' from 'deploy'; `outcome` carries
+ * whatever each loop already knows the attempt ended as.
+ */
+export const reconcilerAttemptDuration: Histogram = meter.createHistogram(
+  'reconciler_attempt_duration_seconds',
+  {
+    description: 'Duration of one build or deploy attempt',
+    unit: 's',
+  },
+);
+
+/**
+ * How long a build or deploy row sat before the reconciler first claimed it —
+ * the wait a developer who just pressed the button actually feels.
+ */
+export const reconcilerPickupLatency: Histogram = meter.createHistogram(
+  'reconciler_pickup_latency_seconds',
+  {
+    description:
+      'Time from a build or deploy row being created to the reconciler first claiming it',
+    unit: 's',
+  },
+);
+
+/**
+ * How many build or deploy rows were still unclaimed at the end of one pass.
+ * A gauge, not a counter: the loop reports the level, not an increment.
+ */
+export const reconcilerQueueDepth: Gauge = meter.createGauge(
+  'reconciler_queue_depth',
+  {
+    description: 'Rows still awaiting reconciliation at the end of one pass',
+  },
+);
+
+/**
+ * How many live deploys are currently drifted from their desired artifact, as
+ * of the deploy loop's last drift-observing pass (§6's "visible state").
+ */
+export const reconcilerDriftedDeploys: Gauge = meter.createGauge(
+  'reconciler_drifted_deploys',
+  {
+    description:
+      'Live deploys whose observed artifact no longer matches what is desired',
+  },
+);
+
 const logger = logs.getLogger('spindrift');
 
-export function logInfo(message: string, attributes: Record<string, any> = {}) {
-  console.log(`[INFO] ${message}`, attributes);
+/**
+ * Emit a log record without letting a broken exporter take the caller down.
+ *
+ * `console.*` already ran before this is reached, so the log line itself is
+ * never lost to an OTLP outage — this only guards the second, best-effort
+ * copy. Reported to stderr directly rather than through `logger.emit` again,
+ * which would risk looping back into the same failure.
+ */
+function emitSafely(record: Parameters<typeof logger.emit>[0]): void {
   try {
-    logger.emit({
-      severityNumber: SeverityNumber.INFO,
-      severityText: 'INFO',
-      body: message,
-      attributes,
-    });
-  } catch {}
+    logger.emit(record);
+  } catch (cause) {
+    console.error('[Telemetry] failed to emit log record', cause);
+  }
 }
 
-export function logWarn(message: string, attributes: Record<string, any> = {}) {
+export function logInfo(message: string, attributes: LogAttributes = {}) {
+  console.log(`[INFO] ${message}`, attributes);
+  emitSafely({
+    severityNumber: SeverityNumber.INFO,
+    severityText: 'INFO',
+    body: message,
+    attributes,
+  });
+}
+
+export function logWarn(message: string, attributes: LogAttributes = {}) {
   console.warn(`[WARN] ${message}`, attributes);
-  try {
-    logger.emit({
-      severityNumber: SeverityNumber.WARN,
-      severityText: 'WARN',
-      body: message,
-      attributes,
-    });
-  } catch {}
+  emitSafely({
+    severityNumber: SeverityNumber.WARN,
+    severityText: 'WARN',
+    body: message,
+    attributes,
+  });
 }
 
 export function logError(
   message: string,
   error?: unknown,
-  attributes: Record<string, any> = {},
+  attributes: LogAttributes = {},
 ) {
   console.error(`[ERROR] ${message}`, error, attributes);
-  try {
-    logger.emit({
-      severityNumber: SeverityNumber.ERROR,
-      severityText: 'ERROR',
-      body: `${message}${error instanceof Error ? `: ${error.message}` : ''}`,
-      attributes: {
-        ...attributes,
-        ...(error instanceof Error
-          ? { 'error.stack': error.stack, 'error.message': error.message }
-          : {}),
-      },
-    });
-  } catch {}
+  emitSafely({
+    severityNumber: SeverityNumber.ERROR,
+    severityText: 'ERROR',
+    body: `${message}${error instanceof Error ? `: ${error.message}` : ''}`,
+    attributes: {
+      ...attributes,
+      ...(error instanceof Error
+        ? { 'error.stack': error.stack, 'error.message': error.message }
+        : {}),
+    },
+  });
 }

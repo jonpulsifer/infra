@@ -84,7 +84,7 @@ describe('declarative schema ordering', () => {
     const web = one(objects, 'Deployment', 'spindrift-web');
     expect(
       web.spec.template.spec.containers[0].readinessProbe.httpGet.path,
-    ).toBe('/healthz');
+    ).toBe('/readyz');
   });
 });
 

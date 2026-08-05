@@ -20,7 +20,7 @@ import { commandNames } from '../../src/commands/registry.ts';
 import type { Database } from '../../src/db/client.ts';
 import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
-import { HEALTH_PATH, webRoutes } from '../../src/web/routes.ts';
+import { HEALTH_PATH, READY_PATH, webRoutes } from '../../src/web/routes.ts';
 import { STREAM_PATHS } from '../../src/web/streams.ts';
 import { UPLOAD_PATH } from '../../src/web/upload.ts';
 
@@ -68,11 +68,12 @@ const served = webRoutes(CLIENT, noSession, noAuth);
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
 
 describe('what the web process serves', () => {
-  test('is the client, the probe, auth, and commands — nothing else', () => {
+  test('is the client, the probes, auth, and commands — nothing else', () => {
     expect(Object.keys(served).sort()).toEqual(
       [
         ...Object.keys(CLIENT),
         HEALTH_PATH,
+        READY_PATH,
         ...AUTH_PATHS,
         ...commandNames.map(pathFor),
         ...STREAM_PATHS,
@@ -81,7 +82,7 @@ describe('what the web process serves', () => {
     );
   });
 
-  test('the hand-authored surface is the probe and auth, and stops there', () => {
+  test('the hand-authored surface is the probes and auth, and stops there', () => {
     // Everything else traces to a generator: a command name, or a file the
     // build emitted. Auth is generated too — from `AUTH_ACTS` — but it is the
     // one generator whose tuple a person writes by hand, so it is counted here
@@ -92,7 +93,13 @@ describe('what the web process serves', () => {
       (path) => !generated.has(path) && !(path in CLIENT),
     );
     expect(handAuthored.sort()).toEqual(
-      [HEALTH_PATH, ...AUTH_PATHS, ...STREAM_PATHS, UPLOAD_PATH].sort(),
+      [
+        HEALTH_PATH,
+        READY_PATH,
+        ...AUTH_PATHS,
+        ...STREAM_PATHS,
+        UPLOAD_PATH,
+      ].sort(),
     );
   });
 

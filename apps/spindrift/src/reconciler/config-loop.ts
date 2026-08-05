@@ -36,6 +36,7 @@ import {
   targets,
 } from '../db/schema.ts';
 import { CONFIG_RETENTION, configScopeOf, reapable } from '../domain/config.ts';
+import { reconcilerLoopDuration } from '../telemetry/index.ts';
 
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface ConfigLoopContext {
@@ -121,7 +122,12 @@ export async function runConfigLoop(
 ): Promise<void> {
   const interval = options.intervalMs ?? DEFAULT_REAP_INTERVAL_MS;
   while (!options.signal?.aborted) {
-    options.onPass?.(await runConfigPass(context));
+    const startedAt = Date.now();
+    const reports = await runConfigPass(context);
+    reconcilerLoopDuration.record((Date.now() - startedAt) / 1000, {
+      loop: 'config',
+    });
+    options.onPass?.(reports);
     if (options.signal?.aborted) return;
     await sleep(interval, options.signal);
   }

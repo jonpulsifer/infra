@@ -75,6 +75,13 @@ import {
   type TargetWithConnection,
   type VesselRef,
 } from '../domain/target.ts';
+import {
+  reconcilerAttemptDuration,
+  reconcilerDriftedDeploys,
+  reconcilerLoopDuration,
+  reconcilerPickupLatency,
+  reconcilerQueueDepth,
+} from '../telemetry/index.ts';
 
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface DeployLoopContext {
@@ -224,6 +231,17 @@ export async function claimNextDeploy(
       .for('update', { of: componentTargetDesired, skipLocked: true });
 
     if (row === undefined) return null;
+
+    // Only a fresh `PENDING` intent is a "pickup" in the sense a developer
+    // feels — a reclaimed stale `APPLYING`/`WAITING` lease is a retry, and
+    // timing it against the original Deploy would report the crashed
+    // reconciler's downtime as latency this one caused.
+    if (row.deploy.phase === 'PENDING') {
+      reconcilerPickupLatency.record(
+        (now.getTime() - row.deploy.createdAt.getTime()) / 1000,
+        { kind: 'deploy' },
+      );
+    }
 
     await tx
       .update(deploys)
@@ -723,17 +741,44 @@ export async function runDeployPass(
     // ponytail: unbounded fan-out, bounded in practice by how many distinct
     // Component@Targets are pending at once. Add a pool if that stops holding.
     const outcomes = await Promise.all(
-      claimed.map((deploy) => runAttempt(context, deploy)),
+      claimed.map(async (deploy) => {
+        // `runAttempt` runs the adapter's whole apply stream to a terminal
+        // verdict before returning, so this is the deploy's real duration —
+        // not the loop's own bookkeeping around it.
+        const startedAt = Date.now();
+        const outcome = await runAttempt(context, deploy);
+        reconcilerAttemptDuration.record((Date.now() - startedAt) / 1000, {
+          kind: 'deploy',
+          outcome: outcome?.phase ?? 'skipped',
+        });
+        return outcome;
+      }),
     );
     for (const outcome of outcomes) {
       if (outcome !== null) applied.push(outcome);
     }
   }
 
+  // `null` rather than `[]` when skipped, so a fast tick that does not
+  // observe cannot be mistaken for one that observed zero drifted releases —
+  // §6 wants drift reported on its own slow clock, and recording a false zero
+  // between drift-observing passes would erase the last real count from
+  // anyone scraping between them.
+  const driftReports =
+    options.observe === false ? null : await observeConverged(context);
+  if (driftReports !== null) {
+    reconcilerDriftedDeploys.record(
+      driftReports.filter((report) => report.drifted).length,
+    );
+  }
+
+  const unsettled = await unsettledPhases(context);
+  reconcilerQueueDepth.record(unsettled.length, { kind: 'deploy' });
+
   return {
     applied,
-    drift: options.observe === false ? [] : await observeConverged(context),
-    unsettled: await unsettledPhases(context),
+    drift: driftReports ?? [],
+    unsettled,
   };
 }
 
@@ -753,7 +798,14 @@ export async function runDeployLoop(
     const observe = startedAt >= nextDriftAt;
     if (observe) nextDriftAt = startedAt + driftMs;
 
+    // Wall-clock, not `context.clock` — this measures how long the pass
+    // actually took to run, which is a fact about the machine rather than
+    // about the domain time the injected clock stands in for during tests.
+    const passWallStartedAt = Date.now();
     const pass = await runDeployPass(context, { observe });
+    reconcilerLoopDuration.record((Date.now() - passWallStartedAt) / 1000, {
+      loop: 'deploy',
+    });
     options.onPass?.(pass);
     if (options.signal?.aborted) return;
 

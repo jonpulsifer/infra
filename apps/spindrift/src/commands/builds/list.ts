@@ -71,6 +71,7 @@ export const listBuilds: Command<ListBuildsInput, ListBuildsResult> = async (
         when: elapsedSince(row.createdAt, now),
         at: row.createdAt.toISOString(),
         deployId: row.deploys[0]?.id ?? null,
+        dispatchWaitingOn: row.dispatchWaitingOn,
       }),
     ),
     nextBefore: rows.length > limit ? (page.at(-1)?.id ?? null) : null,
