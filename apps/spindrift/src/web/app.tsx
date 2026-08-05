@@ -8,7 +8,7 @@ import { Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
-import { command, type InputOf } from './client.ts';
+import { command, type InputOf, type OutputOf } from './client.ts';
 import { DeleteAppDialog, useAppDeletion } from './components/delete-app.tsx';
 import { AppShell } from './components/shell.tsx';
 import type {
@@ -44,7 +44,6 @@ import { Gate } from './views/auth/gate.tsx';
 import { InstallationSettings } from './views/auth/installation.tsx';
 import { Onboarding } from './views/auth/onboarding.tsx';
 import { IdentitySettings } from './views/auth/settings.tsx';
-import { BuildLedger } from './views/operations/builds.tsx';
 import { DeployLedger } from './views/operations/deploys.tsx';
 import { Overview } from './views/operations/overview.tsx';
 import {
@@ -52,11 +51,17 @@ import {
   RepositoryList,
 } from './views/repos/list.tsx';
 import {
+  ArtifactRegistries,
+  SourceBuckets,
+} from './views/settings/connections.tsx';
+import {
   EmptySettingsSection,
   SettingsLayout,
   type SettingsSection,
 } from './views/settings/layout.tsx';
-import { Storage, type StorageView } from './views/storage/list.tsx';
+import { ArtifactLedger } from './views/supply-chain/artifacts.tsx';
+import { BuildLedger } from './views/supply-chain/builds.tsx';
+import { SourceLedger } from './views/supply-chain/sources.tsx';
 import { TargetList } from './views/targets/list.tsx';
 
 /**
@@ -341,14 +346,22 @@ export function Screen({
 }) {
   if (path.startsWith('/settings'))
     return <SettingsScreen path={path} onNavigate={onNavigate} />;
-  if (path.startsWith('/targets') || path.startsWith('/repos'))
+  // Every system Spindrift holds an address for is one screen, so the three
+  // routes that used to be their own land on it. `/storage` is among them: the
+  // buckets and registries it named are connections, and the bundles it listed
+  // are Sources.
+  if (
+    path.startsWith('/targets') ||
+    path.startsWith('/repos') ||
+    path.startsWith('/storage')
+  )
     return (
       <SettingsScreen path="/settings/connections" onNavigate={onNavigate} />
     );
-  if (path.startsWith('/storage'))
-    return (
-      <SettingsScreen path="/settings/artifacts" onNavigate={onNavigate} />
-    );
+  if (path.startsWith('/sources'))
+    return <SourcesScreen onNavigate={onNavigate} />;
+  if (path.startsWith('/artifacts'))
+    return <ArtifactsScreen onNavigate={onNavigate} />;
   if (path.startsWith('/apps/new')) {
     const draftId = path.replace(/^\/apps\/new\/?/, '') || null;
     return (
@@ -413,7 +426,6 @@ function SettingsScreen({
     'connections',
     'identity',
     'installation',
-    'artifacts',
     'notifications',
     'danger',
   ].includes(requested)
@@ -428,8 +440,6 @@ function SettingsScreen({
         <IdentitySettings />
       ) : section === 'installation' ? (
         <InstallationSettings />
-      ) : section === 'artifacts' ? (
-        <StorageScreen embedded />
       ) : section === 'notifications' ? (
         <EmptySettingsSection
           eyebrow="Settings / notifications"
@@ -463,11 +473,15 @@ function ConnectionsSettings({
         Connected systems
       </h2>
       <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-        Authorize source access and connect deployment Targets. Each provider
-        keeps its concrete state and actions in one ruled row.
+        Every system outside Spindrift that Spindrift holds an address for. Each
+        provider keeps its concrete state and actions in one ruled row, and the
+        order is the supply chain: where code comes from, where a Source is
+        staged, where an Artifact is pushed, and where it runs.
       </p>
       <div className="mt-6 divide-y divide-border border-y border-border">
         <RepositoriesScreen embedded />
+        <SourceBuckets />
+        <ArtifactRegistries />
         <TargetsScreen embedded onNavigate={onNavigate} />
       </div>
     </section>
@@ -1753,44 +1767,23 @@ function TargetsScreen({
   );
 }
 
-function StorageScreen({ embedded = false }: { embedded?: boolean }) {
+function SourcesScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [state, setState] = useState<
     | { type: 'loading' }
     | { type: 'error'; message: string }
-    | { type: 'success'; view: StorageView }
+    | { type: 'success'; result: OutputOf<'listSources'> }
   >({ type: 'loading' });
-  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
-    // Three reads, one screen, one failure state. Two of them answer from the
-    // manifest and the third from the database, so a slow one is the slow one
-    // for everybody — which is the honest cost of the sections being one page.
-    Promise.all([
-      command('listSourceBuckets', {}),
-      command('listArtifactRegistries', {}),
-      command('listStagedBundles', {}),
-    ])
-      .then(([buckets, registries, bundles]) => {
+    command('listSources', {})
+      .then((result) => {
         if (!live) return;
-        const refused = [buckets, registries, bundles].find(
-          (result) => !result.ok,
+        setState(
+          result.ok
+            ? { type: 'success', result: result.value }
+            : { type: 'error', message: result.failure.message },
         );
-        if (refused !== undefined && !refused.ok) {
-          setState({ type: 'error', message: refused.failure.message });
-          return;
-        }
-        if (!buckets.ok || !registries.ok || !bundles.ok) return;
-        setState({
-          type: 'success',
-          view: {
-            source: buckets.value,
-            registries: registries.value.registries,
-            canHoldCredentials: registries.value.canHoldCredentials,
-            bundles: bundles.value.bundles,
-            bundleLimit: bundles.value.limit,
-          },
-        });
       })
       .catch((cause: unknown) => {
         if (!live) return;
@@ -1802,34 +1795,76 @@ function StorageScreen({ embedded = false }: { embedded?: boolean }) {
     return () => {
       live = false;
     };
-  }, [reloadToken]);
+  }, []);
 
   if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading source storage...
-        </p>
-      </div>
-    );
+    return <ScreenLoading>Loading Sources…</ScreenLoading>;
   }
-
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load source storage</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
-      </div>
+      <ScreenFailure title="Failed to load Sources">
+        {state.message}
+      </ScreenFailure>
     );
   }
-
   return (
-    <Storage
-      view={state.view}
-      onChanged={() => setReloadToken((token) => token + 1)}
-      embedded={embedded}
+    <SourceLedger
+      sources={state.result.sources}
+      limit={state.result.limit}
+      onNavigate={onNavigate}
+    />
+  );
+}
+
+function ArtifactsScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | { type: 'success'; result: OutputOf<'listArtifacts'> }
+  >({ type: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    command('listArtifacts', {})
+      .then((result) => {
+        if (!live) return;
+        setState(
+          result.ok
+            ? { type: 'success', result: result.value }
+            : { type: 'error', message: result.failure.message },
+        );
+      })
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (state.type === 'loading') {
+    return <ScreenLoading>Loading Artifacts…</ScreenLoading>;
+  }
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure title="Failed to load Artifacts">
+        {state.message}
+      </ScreenFailure>
+    );
+  }
+  return (
+    <ArtifactLedger
+      artifacts={state.result.artifacts}
+      limit={state.result.limit}
+      onNavigate={onNavigate}
     />
   );
 }

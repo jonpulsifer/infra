@@ -6,7 +6,6 @@ export type SettingsSection =
   | 'connections'
   | 'identity'
   | 'installation'
-  | 'artifacts'
   | 'notifications'
   | 'danger';
 
@@ -14,7 +13,6 @@ const SECTIONS = [
   { id: 'connections', label: 'Connections' },
   { id: 'identity', label: 'Identity' },
   { id: 'installation', label: 'Installation' },
-  { id: 'artifacts', label: 'Artifact policy' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'danger', label: 'Danger zone' },
 ] as const satisfies readonly { id: SettingsSection; label: string }[];
