@@ -104,7 +104,7 @@ export const setComponentReach: Command<
     where: (desired, { eq }) => eq(desired.componentId, row.id),
     with: {
       target: { columns: { name: true } },
-      desiredDeploy: { columns: { reach: true, auth: true } },
+      desiredDeploy: { columns: { desired: true } },
     },
   });
 
@@ -116,8 +116,8 @@ export const setComponentReach: Command<
       .filter(
         ({ desiredDeploy }) =>
           desiredDeploy !== null &&
-          (desiredDeploy.reach !== input.reach ||
-            desiredDeploy.auth !== input.auth),
+          (desiredDeploy.desired.reach !== input.reach ||
+            desiredDeploy.desired.auth !== input.auth),
       )
       .map(({ target }) => target.name)
       .sort(),

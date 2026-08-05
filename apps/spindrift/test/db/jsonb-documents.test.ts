@@ -43,13 +43,40 @@ async function seedOperator() {
   return user!;
 }
 
-/** The committed migration, exactly as it ships, as its own statements. */
+/**
+ * The committed migration, exactly as it ships, as its own statements — minus
+ * the ones whose column this schema no longer has.
+ *
+ * 0016 is one independent `UPDATE` per `jsonb` column, and this test replays it
+ * against a **fully migrated** database rather than against the schema of its
+ * own day. So a column dropped by any later migration makes one of these
+ * statements refer to something that is not there: `deploys.config_document`
+ * went that way when a Deploy started carrying its whole release document.
+ *
+ * Skipping is derived from `information_schema` rather than hard-coded, so this
+ * keeps working as columns come and go, and it is narrower than catching the
+ * error would be — an undefined column anywhere else still fails the test.
+ */
 async function migrationStatements() {
   const sql = await readFile(MIGRATION, 'utf8');
-  return sql
+  const statements = sql
     .split('--> statement-breakpoint')
     .map((statement) => statement.trim())
     .filter((statement) => statement.length > 0);
+
+  const present = await Promise.all(
+    statements.map(async (statement) => {
+      const target = /UPDATE\s+"(\w+)"\s+SET\s+"(\w+)"/.exec(statement);
+      if (target === null) return true;
+      const [found] = await database().client`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = ${target[1]!}
+          AND column_name = ${target[2]!}`;
+      return found !== undefined;
+    }),
+  );
+  return statements.filter((_, index) => present[index]);
 }
 
 describe('jsonb columns store documents', () => {

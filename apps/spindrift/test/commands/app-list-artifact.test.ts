@@ -37,6 +37,7 @@ import {
 import { configVersionOf } from '../../src/domain/config-version.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const manifest = await fixtureManifest();
 const database = withIsolatedDatabase();
@@ -130,6 +131,7 @@ async function seedLiveApp(
     .insert(deploys)
     .values({
       componentId: component.value.componentId,
+      desired: aDesiredDocument(),
       targetId: target!.id,
       buildId: build!.id,
       phase: 'LIVE',

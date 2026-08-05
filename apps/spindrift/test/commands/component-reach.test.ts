@@ -299,7 +299,9 @@ describe('a Component edited mid-attempt does not change what is being placed', 
       .from(deploys)
       .where(eq(deploys.componentId, component.id))
       .orderBy(deploys.id);
-    expect(rows.map(({ reach, auth }) => ({ reach, auth }))).toEqual([
+    expect(
+      rows.map(({ desired }) => ({ reach: desired.reach, auth: desired.auth })),
+    ).toEqual([
       { reach: 'private', auth: 'proxy' },
       { reach: 'public', auth: 'none' },
     ]);

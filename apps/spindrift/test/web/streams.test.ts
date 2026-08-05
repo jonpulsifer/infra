@@ -24,6 +24,7 @@ import {
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 
@@ -57,6 +58,7 @@ async function seedAttempt() {
     .db.insert(deploys)
     .values({
       componentId: component!.id,
+      desired: aDesiredDocument(),
       targetId: target!.id,
       buildId: build!.id,
     })
@@ -475,6 +477,7 @@ describe('a job tails one run rather than the Component', () => {
       .db.insert(deploys)
       .values({
         componentId: job?.id as string,
+        desired: aDesiredDocument(),
         targetId: seeded.target.id,
         buildId: seeded.build.id,
       });
