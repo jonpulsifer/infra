@@ -58,6 +58,15 @@ spec:
         enabled: true
         size: 10Gi
         storageClassName: local-path
+    # Chart 7.2.0 defaults deploymentMode to SimpleScalable, which defaults
+    # backend/read/write to 3 replicas each. Zero them out so only the
+    # single binary above is running, matching deploymentMode: SingleBinary.
+    backend:
+      replicas: 0
+    read:
+      replicas: 0
+    write:
+      replicas: 0
     minio:
       enabled: false
     monitoring:
