@@ -317,6 +317,10 @@ describe('the bundle a rerun stages', () => {
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
     expect(row?.bundleLocation).toBe(FRESH_LOCATION);
+    // The predecessor was created before its Component could stage, so its
+    // recorded subpath is the placeholder — the App's declared subpath wins,
+    // observed live as build 52 building a monorepo root.
+    expect(row?.bundleSubpath).toBe('apps/spindrift');
   });
 
   test("a Component's first Build stages the App's source and subpath", async () => {
