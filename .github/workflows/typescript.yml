@@ -97,6 +97,13 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: spindrift
+          # Headroom, not a requirement. spindrift's harness builds a private
+          # schema per test and peaks well under the stock 100 — but a backend
+          # the server has not finished reaping still counts against the limit,
+          # and on a contended runner that lag is what turns into `sorry, too
+          # many clients already`. A service container takes no command, so
+          # this rides in through initdb, which has taken `-c` since PG16.
+          POSTGRES_INITDB_ARGS: -c max_connections=300
         ports:
           - 5432:5432
         options: >-
