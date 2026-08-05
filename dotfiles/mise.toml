@@ -27,6 +27,15 @@ dotfiles.root = "."
 "~/.pi/agent" = { mode = "copy" }
 "~/.claude/settings.json" = { mode = "copy" }
 
+# Common user instructions: one canonical source copied to every harness. Copies avoid
+# runtime links into a checkout or Nix store path that may move or be garbage-collected.
+"~/.agents/AGENTS.md" = { mode = "copy", source = ".agents/AGENTS.md" }
+"~/.claude/CLAUDE.md" = { mode = "copy", source = ".agents/AGENTS.md" }
+"~/.codex/AGENTS.md" = { mode = "copy", source = ".agents/AGENTS.md" }
+"~/.pi/agent/AGENTS.md" = { mode = "copy", source = ".agents/AGENTS.md" }
+"~/.gemini/GEMINI.md" = { mode = "copy", source = ".agents/AGENTS.md" }
+"~/.config/opencode/agents/global.md" = { mode = "copy", source = ".agents/AGENTS.md" }
+
 # Agent skills: source lives in `skills/` (this repo's canonical copy); all three agent
 # tools read from their own location, so each gets its own direct entry.
 "~/.agents/skills" = { mode = "copy", source = "skills" }
