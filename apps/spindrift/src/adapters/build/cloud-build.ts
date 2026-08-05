@@ -361,16 +361,24 @@ export class CloudBuildRoute implements BuildAdapter {
             entrypoint: 'sh',
             args: [
               '-c',
-              registryAuth(spec.destinations) + program + exportDigest(attest),
+              literalDollars(
+                registryAuth(spec.destinations) +
+                  program +
+                  exportDigest(attest),
+              ),
             ],
             // On the step's environment and never in `args`: the arguments are
             // the program, and the program is what a reader of this build
             // resource sees in full. See REGISTRY_AUTH_VAR.
             ...(dockerConfig === null
               ? {}
-              : { env: [`${REGISTRY_AUTH_VAR}=${dockerConfig}`] }),
+              : {
+                  env: [literalDollars(`${REGISTRY_AUTH_VAR}=${dockerConfig}`)],
+                }),
           },
-          ...(attest === null ? [] : [attest]),
+          ...(attest === null
+            ? []
+            : [{ ...attest, args: attest.args.map(literalDollars) }]),
         ],
         // Read, never pushed: the build writes to the log service and this
         // route polls it. Nothing is posted back to Spindrift (§4).
@@ -600,6 +608,23 @@ function googleRegistryDestinations(
  * credential silently lost the vendor half and 401'd on the artifact registry
  * at the export, after the whole build. One writer, one document, both halves.
  */
+/**
+ * Every dollar in a step's fields, escaped for the build service's template
+ * engine.
+ *
+ * The service expands `$UPPERCASE` and `${UPPERCASE}` in a submitted step as
+ * substitutions and refuses a template naming one it does not know — observed
+ * live: the prelude's `"$SPINDRIFT_REGISTRY_AUTH"` failed the whole submit
+ * with "not a valid built-in substitution". Nothing submitted here *is* a
+ * substitution — the programs are shell, and every dollar is the shell's —
+ * so every dollar is escaped uniformly (`$$` is the service's literal-dollar
+ * escape) rather than this file knowing which spellings the template grammar
+ * happens to claim.
+ */
+function literalDollars(field: string): string {
+  return field.replaceAll('$', '$$$$');
+}
+
 function registryAuth(destinations: readonly string[]): string {
   const hosts = googleRegistryHosts(destinations);
   if (hosts.length === 0) return '';

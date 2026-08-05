@@ -599,7 +599,9 @@ describe('the cloud build route', () => {
     );
     await run(route.build(archiveSource(), cloudSpec));
 
-    const program = api.steps[0]?.[1]?.args?.[1] ?? '';
+    // As the step will run it: the service's template expansion turns the
+    // route's `$$` literal-dollar escape back into `$` before bash sees it.
+    const program = (api.steps[0]?.[1]?.args?.[1] ?? '').replaceAll('$$', '$');
     expect(program).toContain('manifests');
     expect(program).toContain('attest "$destination" "$child"');
     // The vendor's registries and no others: this step holds one metadata
