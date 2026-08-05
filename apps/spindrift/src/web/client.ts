@@ -14,6 +14,7 @@
 import type { commandRegistry } from '../commands/registry.ts';
 import type { CommandResult } from '../commands/types.ts';
 import { pathFor, type TransportFailureCode } from './command-path.ts';
+import { reportSessionExpired } from './session-events.ts';
 
 type Registry = typeof commandRegistry;
 
@@ -77,5 +78,14 @@ export async function command<Name extends keyof Registry & string>(
     );
   }
 
-  return body as ClientResult<OutputOf<Name>>;
+  const result = body as ClientResult<OutputOf<Name>>;
+  // The 24h session this request rode has expired mid-visit. The view that
+  // called `command()` did not ask "is my session still good" — it asked for
+  // an App or a Build — so it has nothing sensible to render for this refusal
+  // beyond the raw sentence. Re-gating to sign-in is the one answer that is
+  // right for every caller, which is why it happens here rather than in each.
+  if (!result.ok && result.failure.code === 'UNAUTHENTICATED') {
+    reportSessionExpired();
+  }
+  return result;
 }

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { isReconnecting } from '../../src/web/connection-status.ts';
+import { SESSION_EXPIRED_EVENT } from '../../src/web/session-events.ts';
 import {
   type BrowserSocket,
   type SocketFactory,
@@ -48,6 +50,10 @@ describe('resumable browser stream', () => {
       terminal: false,
     });
     sockets[0]!.drop();
+    // A drop marks the shared "any stream is retrying" flag `shell.tsx`
+    // reads through `connection-status.ts` — before the reconnect resolves,
+    // not after, since that is the window a banner exists to cover.
+    expect(isReconnecting()).toBe(true);
     await Bun.sleep(1);
     expect(urls[1]).toContain('after=41');
 
@@ -57,6 +63,9 @@ describe('resumable browser stream', () => {
       cursor: 42,
       terminal: true,
     });
+    // A message is what clears it — a reconnect that opened but has not yet
+    // heard back is not yet "connected" again.
+    expect(isReconnecting()).toBe(false);
     sockets[1]!.drop();
     await Bun.sleep(1);
     expect(urls).toHaveLength(2);
@@ -98,5 +107,74 @@ describe('resumable browser stream', () => {
     });
     expect(urls[1]).toContain('after=opaque');
     stop();
+  });
+});
+
+describe('a drop the socket cannot explain', () => {
+  // A failed WebSocket upgrade and a network blip fire the identical
+  // `onerror`/`onclose` pair — the browser does not hand back the 401 a
+  // reconnect got refused with. `checkSession` stands in for the real
+  // `readSession()` read `stream-client.ts` falls back to.
+  function harness(checkSession: () => Promise<boolean>) {
+    const urls: string[] = [];
+    const sockets: FakeSocket[] = [];
+    const createSocket: SocketFactory = (url) => {
+      urls.push(url);
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    let sessionChecks = 0;
+    const stop = subscribeAttempt({ buildId: 1 }, () => {}, {
+      createSocket,
+      retryMs: 0,
+      checkSession: () => {
+        sessionChecks += 1;
+        return checkSession();
+      },
+    });
+    return {
+      urls,
+      sockets,
+      stop,
+      checks: () => sessionChecks,
+    };
+  }
+
+  test('three drops with nothing heard from in between ask before a fourth try', async () => {
+    const { urls, sockets, stop, checks } = harness(async () => true);
+
+    for (let i = 0; i < 3; i++) {
+      sockets.at(-1)!.drop();
+      await Bun.sleep(1);
+    }
+
+    // A network blip: still signed in, so the loop keeps going rather than
+    // giving up on the first run of bad luck.
+    expect(checks()).toBe(1);
+    expect(urls).toHaveLength(4);
+    stop();
+  });
+
+  test('a session gone by the third drop stops the loop and re-gates', async () => {
+    const events: string[] = [];
+    const onExpired = () => events.push('expired');
+    addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+
+    const { urls, sockets, checks } = harness(async () => false);
+
+    for (let i = 0; i < 3; i++) {
+      sockets.at(-1)!.drop();
+      await Bun.sleep(1);
+    }
+
+    removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+
+    // No fourth socket: the loop stopped instead of hammering a session that
+    // is not coming back, and the shell's gate hears about it exactly once.
+    expect(checks()).toBe(1);
+    expect(urls).toHaveLength(3);
+    expect(events).toEqual(['expired']);
+    expect(isReconnecting()).toBe(false);
   });
 });

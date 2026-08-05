@@ -29,9 +29,14 @@ import type {
   CreationDraftView,
   DraftAction,
 } from '../../../../domain/creation-draft.ts';
-import { command, type TransportFailure } from '../../../client.ts';
+import {
+  type ClientResult,
+  command,
+  type TransportFailure,
+} from '../../../client.ts';
 import { RepoPicker } from '../../../components/repo-picker.tsx';
 import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
+import { reportSessionExpired } from '../../../session-events.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
@@ -506,6 +511,49 @@ export function NewApp({
   );
 }
 
+interface UploadValue {
+  readonly digest: string;
+  readonly location: string;
+  readonly filename: string;
+  readonly size: number;
+}
+
+/**
+ * Archive upload, with byte progress.
+ *
+ * `fetch` has no cross-browser way to report how much of a request body has
+ * gone out — the upload side of the streams `ReadableStream` request bodies
+ * would need is not the broadly-supported half. `XMLHttpRequest.upload` has
+ * carried this exact event since it was introduced, so this is the one
+ * remaining reason the screen reaches for it instead of `client.ts`'s `fetch`
+ * wrapper the rest of the app uses.
+ */
+function uploadArchive(
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<ClientResult<UploadValue>> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/internal/upload');
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.onload = () => {
+      try {
+        resolve(JSON.parse(xhr.responseText) as ClientResult<UploadValue>);
+      } catch {
+        reject(new Error('Upload response was not valid JSON'));
+      }
+    };
+    const formData = new FormData();
+    formData.append('file', file);
+    xhr.send(formData);
+  });
+}
+
 /**
  * Source, which is the one row that is genuinely a question.
  *
@@ -529,6 +577,7 @@ function SourceRow({
   onSelectRepo: (fullName: string, url: string) => void;
 }) {
   const [uploading, setUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -537,16 +586,11 @@ function SourceRow({
 
     setUploading(true);
     setUploadError(null);
+    setUploadPercent(0);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
       // No bucket named: which bucket sources stage to is installation
       // configuration and lives on the Storage screen.
-      const response = await fetch('/internal/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const res = await response.json();
+      const res = await uploadArchive(file, setUploadPercent);
       if (res.ok) {
         dispatch({
           type: 'archive',
@@ -554,8 +598,13 @@ function SourceRow({
           digest: res.value.digest,
           location: res.value.location,
         });
+      } else if (res.failure.code === 'UNAUTHENTICATED') {
+        // The 24h session expired mid-upload. This row has nothing sensible
+        // to render for that beyond the raw refusal — `App` (`app.tsx`) does,
+        // by re-gating to sign-in.
+        reportSessionExpired();
       } else {
-        setUploadError(res.failure?.message || 'Archive upload failed');
+        setUploadError(res.failure.message || 'Archive upload failed');
       }
     } catch (err: unknown) {
       setUploadError(
@@ -563,6 +612,7 @@ function SourceRow({
       );
     } finally {
       setUploading(false);
+      setUploadPercent(null);
     }
   }
 
@@ -625,12 +675,20 @@ function SourceRow({
             <label className="flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-border p-4 transition-colors hover:border-primary">
               <span className="text-sm font-medium text-foreground">
                 {uploading
-                  ? 'Uploading archive…'
+                  ? `Uploading archive… ${uploadPercent ?? 0}%`
                   : 'Choose or drop a zip/tar archive'}
               </span>
               <span className="mt-0.5 text-xs text-muted-foreground">
                 Accepts .zip, .tar.gz, .tgz
               </span>
+              {uploading ? (
+                <div className="mt-2 h-1 w-full max-w-56 overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width] duration-150 ease-out"
+                    style={{ width: `${uploadPercent ?? 0}%` }}
+                  />
+                </div>
+              ) : null}
               <input
                 type="file"
                 accept=".zip,.tar.gz,.tgz,.tar"
