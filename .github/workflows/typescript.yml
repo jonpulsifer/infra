@@ -97,13 +97,27 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: spindrift
-          # Headroom, not a requirement. spindrift's harness builds a private
-          # schema per test and peaks well under the stock 100 — but a backend
-          # the server has not finished reaping still counts against the limit,
-          # and on a contended runner that lag is what turns into `sorry, too
-          # many clients already`. A service container takes no command, so
-          # this rides in through initdb, which has taken `-c` since PG16.
-          POSTGRES_INITDB_ARGS: -c max_connections=300
+          # This database is destroyed when the job ends, so every guarantee it
+          # makes about surviving a crash is paid for and never collected.
+          # spindrift's harness builds and drops a schema per test — over 1600
+          # of them — and with `fsync` on, each one waits on real disk flushes
+          # for state nothing will ever read again. Measured on one machine,
+          # everything else held constant: 199s → 96s → 31s across the harness
+          # fix and this. It is the difference between a five-second hook having
+          # margin and having none.
+          #
+          # `max_connections` is headroom rather than a requirement: the suite
+          # peaks near 30, but a backend the server has not finished reaping
+          # still counts against the limit, and on a contended runner that lag
+          # is what becomes `sorry, too many clients already`.
+          #
+          # A service container takes no command, so all of it rides in through
+          # initdb, which has accepted `-c` since PG16.
+          POSTGRES_INITDB_ARGS: >-
+            -c max_connections=300
+            -c fsync=off
+            -c synchronous_commit=off
+            -c full_page_writes=off
         ports:
           - 5432:5432
         options: >-
