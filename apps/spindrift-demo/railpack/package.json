@@ -1,0 +1,10 @@
+{
+  "name": "spindrift-demo-railpack",
+  "private": true,
+  "type": "module",
+  "description": "Zero-config service demo: no Dockerfile, so Spindrift builds it with railpack.",
+  "scripts": {
+    "build": "node build.js",
+    "start": "node server.js"
+  }
+}

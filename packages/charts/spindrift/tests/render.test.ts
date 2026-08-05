@@ -488,6 +488,77 @@ describe('the relying party and the front door cannot disagree', () => {
   });
 });
 
+describe('a chart-only install seeds its own relying party', () => {
+  // Ticket 77: `manifest: {}` with a `hostname` used to render no ConfigMap
+  // at all, so `loadStoredManifest` fell through to the code's own
+  // placeholder — `spindrift.example.com` — and no browser on this release's
+  // real origin can complete a passkey ceremony against it. See
+  // `spindrift.manifest.content` in `_helpers.tpl` for the precedence and
+  // `apps/spindrift/test/conformance/chart-only-enrolment.test.ts` for the
+  // proof that this document still agrees with the code's copy everywhere
+  // except the hostname.
+  test('renders a default manifest naming this release as the relying party, when none is declared', async () => {
+    const objects = await render({ hostname: 'spindrift.example.test' });
+    const configMap = one(objects, 'ConfigMap', 'spindrift-manifest');
+    const seeded = Bun.YAML.parse(
+      configMap.data?.['manifest.yaml'] ?? '',
+    ) as Record<string, unknown>;
+    expect(seeded.controlPlane).toEqual({
+      hostname: 'spindrift.example.test',
+    });
+    // The genuine choices stay at their stand-ins, so the seeded document is
+    // still one `isUnconfiguredInstallation` (apps/spindrift/src/config/manifest.ts)
+    // reads as unconfigured.
+    expect(seeded.installation).toBe('default');
+    expect((seeded.github as { clientId?: string }).clientId).toBe(
+      'Iv1.918d699f36ee7afc',
+    );
+    expect((seeded.secretStore as { adapter?: string }).adapter).toBe(
+      'onepassword',
+    );
+    expect((seeded.supplyChain as { registry?: string[] }).registry).toEqual([
+      'ghcr.io/spindrift',
+    ]);
+
+    const web = one(objects, 'Deployment', 'spindrift-web');
+    const pod = web.spec.template.spec;
+    expect(
+      pod.containers[0].env.some(
+        (item: { name: string }) => item.name === 'SPINDRIFT_MANIFEST_PATH',
+      ),
+    ).toBe(true);
+    expect(
+      pod.volumes.some((v: { name: string }) => v.name === 'manifest'),
+    ).toBe(true);
+  });
+
+  test('renders no manifest ConfigMap for a hostless, undeclared release', async () => {
+    // The in-cluster-only shape stays exactly as unreachable-by-default as it
+    // was: no hostname means no deployment fact to seed a relying party from,
+    // so this release still renders nothing rather than a document naming an
+    // empty string.
+    const objects = await render();
+    expect(
+      objects.some((object) => object.metadata.name === 'spindrift-manifest'),
+    ).toBe(false);
+  });
+
+  test('an explicit declaration still wins over the seeded default', async () => {
+    const objects = await render({
+      hostname: 'spindrift.example.test',
+      manifest: {
+        installation: 'declared',
+        controlPlane: { hostname: 'spindrift.example.test' },
+      },
+    });
+    const configMap = one(objects, 'ConfigMap', 'spindrift-manifest');
+    expect(Bun.YAML.parse(configMap.data?.['manifest.yaml'] ?? '')).toEqual({
+      installation: 'declared',
+      controlPlane: { hostname: 'spindrift.example.test' },
+    });
+  });
+});
+
 describe('the trust store', () => {
   const federated = (caConfigMap?: string) => ({
     reconciler: { enabled: true },

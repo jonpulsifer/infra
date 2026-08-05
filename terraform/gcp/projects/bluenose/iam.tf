@@ -65,6 +65,16 @@ locals {
   ])
 }
 
+# `roles/run.invoker` is deliberately absent from the list above, and the
+# absence is the design rather than a gap. A scheduled Component's Cloud
+# Scheduler job calls `jobs.run` under an OIDC identity that is granted the
+# role **on the one Job it fires**, by the controller, at deploy time:
+# `apps/spindrift/src/adapters/deploy/cloudrun/scheduler.ts:112-124` sets the
+# whole policy on that resource and says why nothing wider reaches it.
+# Granting it here instead would hand the controller the right to invoke every
+# Cloud Run resource in the project, for the life of the project, to save a
+# per-Job call it already makes.
+
 resource "google_project_iam_member" "spindrift" {
   for_each = local.spindrift_project_roles
 

@@ -22,7 +22,7 @@ let
   #     https://github.com/jdx/mise/releases/download/v<ver>/mise-v<ver>-linux-x64.tar.gz
   # (nix hash to-sri --type sha256 <h> gives the `sha256-...` SRI form.)
   # renovate: datasource=github-releases depName=jdx/mise
-  version = "2026.7.18";
+  version = "2026.8.0";
   arch =
     if final.stdenv.hostPlatform.isAarch64 then
       "arm64"
@@ -40,9 +40,9 @@ in
       url = "https://github.com/jdx/mise/releases/download/v${version}/mise-v${version}-linux-${arch}.tar.gz";
       hash =
         if final.stdenv.hostPlatform.isAarch64 then
-          "sha256-DbAwUjf9CHhiroIXXWGdKI0yG64hauEQHMczFXqAtpM="
+          "sha256-bYiLo9C1149nZ3GoSEaIW39oX7TRUz8pJweeubdWM6g="
         else
-          "sha256-LK6NxUgS+mC/ZS5uvcac/uEQZgzdsnBT9UQv3tGdvH0=";
+          "sha256-ZBg2A4VPMZt4ZYMFxUWqyuk14JWaOolLd6D5QW6rBHs=";
     };
 
     # The tarball unpacks into ./mise/{bin,man,...}; set sourceRoot so the

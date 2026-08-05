@@ -3,9 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ObjectExplorer } from '../../src/web/components/object-explorer.tsx';
 import { AppShell } from '../../src/web/components/shell.tsx';
 import type { BuildListItem, DeployLedgerItem } from '../../src/web/model.ts';
-import { BuildLedger } from '../../src/web/views/operations/builds.tsx';
 import { DeployLedger } from '../../src/web/views/operations/deploys.tsx';
 import { SettingsLayout } from '../../src/web/views/settings/layout.tsx';
+import { ArtifactLedger } from '../../src/web/views/supply-chain/artifacts.tsx';
+import { BuildLedger } from '../../src/web/views/supply-chain/builds.tsx';
+import { SourceLedger } from '../../src/web/views/supply-chain/sources.tsx';
 
 describe('the object-first shell', () => {
   test('keeps the operational ledgers and Settings in the primary rail', () => {
@@ -72,13 +74,16 @@ describe('the object-first shell', () => {
       'Connections',
       'Identity',
       'Installation',
-      'Artifact policy',
       'Notifications',
       'Danger zone',
     ]) {
       expect(markup).toContain(label);
     }
     expect(markup).toContain('real connector controls');
+    // The section that held source buckets, staged bundles and registries.
+    // Buckets and registries are connections; the bundles were Sources, and
+    // both nouns are supply-chain ledgers — nothing is left for a policy tab.
+    expect(markup).not.toContain('Artifact policy');
   });
 });
 
@@ -121,10 +126,14 @@ describe('the global operation ledgers', () => {
     const markup = renderToStaticMarkup(
       <BuildLedger builds={[build]} onNavigate={() => undefined} />,
     );
-    expect(markup).toContain('Artifact ledger');
+    expect(markup).toContain('Build ledger');
     expect(markup).toContain('Cloud Build');
     expect(markup).toContain('sha256:abc');
     expect(markup).toContain('Loading Build evidence');
+    // Builds is one of three supply-chain surfaces, and says so: the Artifact
+    // it produced is its own noun on its own tab.
+    expect(markup).toContain('Supply chain');
+    expect(markup).toContain('Artifacts');
   });
 
   test('keeps placement facts on the Deploy explorer', () => {
@@ -135,6 +144,71 @@ describe('the global operation ledgers', () => {
     expect(markup).toContain('Folly');
     expect(markup).toContain('applying');
     expect(markup).toContain('Loading Deploy evidence');
+  });
+
+  /**
+   * The two nouns either side of a Build. Each says what it *is* rather than
+   * what happened to it: a Source names its origin and whether a builder could
+   * still fetch it, an Artifact names how many Deploys have placed it.
+   */
+  test('a Source reads as staged bytes, not as the Build that used them', () => {
+    const markup = renderToStaticMarkup(
+      <SourceLedger
+        limit={50}
+        sources={[
+          {
+            digest: `sha256:${'a'.repeat(64)}`,
+            origin: 'upload',
+            repository: null,
+            commit: null,
+            location: `upload://${'a'.repeat(64)}`,
+            fetchable: false,
+            retention: 'durable',
+            app: 'morrow',
+            component: 'web',
+            builds: 2,
+            latestBuildId: 1837,
+            supplied: true,
+            at: '2026-08-03T12:31:00.000Z',
+          },
+        ]}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).toContain('Source ledger');
+    expect(markup).toContain('durable');
+    expect(markup).toContain('supplied artifact');
+    expect(markup).toContain('no builder can fetch this');
+  });
+
+  test('an Artifact reads as what is placed, including when nothing is', () => {
+    const markup = renderToStaticMarkup(
+      <ArtifactLedger
+        limit={50}
+        artifacts={[
+          {
+            digest: `sha256:${'b'.repeat(64)}`,
+            type: 'image',
+            refs: ['ghcr.io/an-owner/morrow'],
+            app: 'morrow',
+            component: 'web',
+            buildId: 1837,
+            sourceDigest: `sha256:${'a'.repeat(64)}`,
+            commit: '5bc1000000000000000000000000000000000000',
+            provenanceLevel: 3,
+            signed: true,
+            supplied: false,
+            deploys: 0,
+            at: '2026-08-03T12:31:00.000Z',
+          },
+        ]}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).toContain('Artifact ledger');
+    expect(markup).toContain('never placed');
+    expect(markup).toContain('SLSA L3');
+    expect(markup).toContain('ghcr.io/an-owner/morrow');
   });
 
   test('offers the next cursor page instead of truncating history', () => {

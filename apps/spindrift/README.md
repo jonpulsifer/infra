@@ -91,10 +91,16 @@ tokens the prototypes settled, bound to shadcn's token names so `bg-card` and
 `text-muted-foreground` resolve to them. Light and dark both ship; the toggle
 stamps `data-theme` on the root, and its absence means "follow the OS".
 
-The operational rail separates Overview, Apps, Builds, and Deploys. Each list
-uses the object-explorer pattern: stable objects on the left and evidence for
-the selection on the right. Settings owns Connections, identity, installation,
-artifact policy, notifications, and destructive controls.
+The operational rail separates Overview, Apps, Supply chain, and Deploys. Supply
+chain is one entry over three ledgers — Sources, Builds, Artifacts — because
+that is §2's chain read left to right: a Source plus a Build is an Artifact, and
+an Artifact plus config is a Deploy. Deploy stays its own entry: it is the act
+that puts something in front of users, not the last stage of a pipeline. Each
+list uses the object-explorer pattern: stable objects on the left and evidence
+for the selection on the right. Settings owns Connections, identity,
+installation, notifications, and destructive controls — and Connections is every
+system outside Spindrift that Spindrift holds an address for, in supply-chain
+order: repositories, source buckets, artifact registries, Targets.
 
 The detail surfaces implement rules §18 and identity settled rather than
 choices made while building them:

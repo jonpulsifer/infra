@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Boxes,
   Hammer,
   LayoutDashboard,
@@ -11,26 +12,47 @@ import type { Principal } from '../../commands/types.ts';
 import { Button } from '../ui/button.tsx';
 import { cn } from '../ui/utils.ts';
 
+/**
+ * The rail, and the one grouping in it.
+ *
+ * **Supply chain is one entry over three roots.** Sources, Builds and Artifacts
+ * are §2's chain read left to right — Source + Build = Artifact — and a rail
+ * that listed all three would spend half its height on the machinery behind one
+ * running App. They share an entry and separate with a tab strip on the screen.
+ *
+ * Deploy is not in that group. It is the act that puts something in front of
+ * users, and §18's "the running app is the product, the pipeline is only how it
+ * got there" is the whole reason it does not read as the chain's last stage.
+ *
+ * `roots` is what the entry lights up for; the first of them is where it goes.
+ */
 const NAVIGATION = [
-  { path: '/', label: 'Overview', icon: LayoutDashboard },
-  { path: '/apps', label: 'Apps', icon: Boxes },
-  { path: '/builds', label: 'Builds', icon: Hammer },
-  { path: '/deploys', label: 'Deploys', icon: Rocket },
-  { path: '/settings/connections', label: 'Settings', icon: Settings },
+  { path: '/', label: 'Overview', icon: LayoutDashboard, roots: ['/'] },
+  { path: '/apps', label: 'Apps', icon: Boxes, roots: ['/apps'] },
+  {
+    path: '/builds',
+    label: 'Supply chain',
+    icon: Hammer,
+    roots: ['/builds', '/sources', '/artifacts'],
+  },
+  { path: '/deploys', label: 'Deploys', icon: Rocket, roots: ['/deploys'] },
+  {
+    path: '/settings/connections',
+    label: 'Settings',
+    icon: Settings,
+    // The three roots that used to be their own screens and are now sections
+    // of Connections.
+    roots: ['/settings', '/targets', '/repos', '/storage'],
+  },
 ] as const;
 
-function active(path: string, destination: string): boolean {
-  if (destination === '/') return path === '/';
-  const root = destination.split('/')[1];
-  if (
-    root === 'settings' &&
-    ['/targets', '/repos', '/storage'].some(
-      (legacy) => path === legacy || path.startsWith(`${legacy}/`),
-    )
-  ) {
-    return true;
-  }
-  return path === `/${root}` || path.startsWith(`/${root}/`);
+function under(path: string, root: string): boolean {
+  if (root === '/') return path === '/';
+  return path === root || path.startsWith(`${root}/`);
+}
+
+function active(path: string, roots: readonly string[]): boolean {
+  return roots.some((root) => under(path, root));
 }
 
 function title(path: string): string {
@@ -58,6 +80,7 @@ export function AppShell({
   onNavigate,
   onSignOut,
   themeControl,
+  declarationDivergence = [],
   children,
 }: {
   readonly path: string;
@@ -65,12 +88,25 @@ export function AppShell({
   readonly onNavigate: (path: string) => void;
   readonly onSignOut: () => void;
   readonly themeControl: ReactNode;
+  /**
+   * Dotted paths where the mounted declaration disagrees with this
+   * installation (`views/auth/installation.tsx` says why a value never rides
+   * along with one). Optional and defaulted to `[]` so every existing caller
+   * — none of which had an opinion about a declaration — keeps asserting
+   * nothing about a fact it does not exercise.
+   *
+   * Rendered here, under the header rather than only on the Settings screen,
+   * because this is the one component every screen in the product passes
+   * through: an installation nobody opens Settings on otherwise never learns
+   * a merge did not reach the row.
+   */
+  readonly declarationDivergence?: readonly string[];
   readonly children: ReactNode;
 }) {
   const navigation = (
     <>
-      {NAVIGATION.map(({ path: destination, label, icon: Icon }) => {
-        const current = active(path, destination);
+      {NAVIGATION.map(({ path: destination, label, icon: Icon, roots }) => {
+        const current = active(path, roots);
         return (
           <button
             key={destination}
@@ -141,6 +177,28 @@ export function AppShell({
             </Button>
           </div>
         </header>
+        {declarationDivergence.length > 0 ? (
+          <div
+            role="alert"
+            className="flex items-center gap-2 border-b border-warning/40 bg-warning-soft px-4 py-2 text-xs sm:px-6"
+          >
+            <AlertTriangle
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-warning"
+            />
+            <span>
+              The mounted declaration no longer matches this installation.{' '}
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:no-underline"
+                onClick={() => onNavigate('/settings/installation')}
+              >
+                Review it in Settings
+              </button>
+              .
+            </span>
+          </div>
+        ) : null}
         <main className="min-w-0 pb-20 md:pb-0">{children}</main>
       </div>
 

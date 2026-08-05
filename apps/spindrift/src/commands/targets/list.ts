@@ -132,7 +132,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
       status: target.status,
       configured: target.connection !== null,
       inspectedAt: target.inspectedAt?.toISOString() ?? null,
-      manifestDivergence: targetConnectionDivergence(
+      connectionDivergence: targetConnectionDivergence(
         context.manifest.targets.find((seed) => seed.name === target.name),
         target.connection,
       ),

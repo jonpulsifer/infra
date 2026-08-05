@@ -19,9 +19,16 @@ import {
   targets,
 } from '../db/schema.ts';
 
+/**
+ * How often to look for a Build to dispatch.
+ *
+ * Both ends are the wait between pressing Deploy and a runner starting, and the
+ * scan itself is one indexed `select` over `PENDING` rows — so idle is seconds,
+ * not the tens of seconds a cheaper-looking number would cost every developer.
+ */
 export const DEFAULT_BUILD_INTERVALS = {
-  activeMs: 1_000,
-  idleMs: 5_000,
+  activeMs: 500,
+  idleMs: 1_500,
 } as const;
 
 export interface BuildLoopOptions {

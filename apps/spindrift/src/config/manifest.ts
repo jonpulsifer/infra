@@ -230,7 +230,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * a session exists. A predicate whose one `true` sits behind a door that cannot
  * open is a wizard nobody can be shown.
  *
- * **What that actually makes reachable, and it is not yet the ordinary case.** A
+ * **What that actually makes reachable, and it is now the ordinary case.** A
  * declaration carrying a real `controlPlane.hostname` with these four left at
  * their stand-ins answers `true` and *can* enrol somebody, so the reachable set
  * is no longer empty. It is not a document anybody writes by accident: nothing
@@ -242,9 +242,14 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * the deployment facts it already holds, `controlPlane.hostname` above all, so
  * that the *placeholder* — what an installation with no declaration at all is
  * seeded with — is itself an installation a browser will run a ceremony
- * against. That is a change to the chart, not to this predicate, and until it
- * lands the honest statement is: a seeded declaration reaches the wizard, a bare
- * `manifest: {}` install still cannot sign in to be shown it.
+ * against: a bare `manifest: {}` release with a `hostname` renders
+ * `files/default-manifest.yaml` (`packages/charts/spindrift`) in place of the
+ * stored row's fallback, and that document is this same
+ * `DEFAULT_PLACEHOLDER_MANIFEST` with `controlPlane.hostname` bound to the
+ * release's own instead of `spindrift.example.com`. A seeded declaration and a
+ * bare `manifest: {}` install both reach the wizard now; only a release with
+ * neither a declaration nor a `hostname` — in-cluster-only, nothing to bind a
+ * relying party to — still cannot.
  *
  * **All four, not any**, and a false positive here replaces the whole product
  * with a wizard, so the direction matters. Two of the four are legitimately the

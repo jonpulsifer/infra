@@ -436,11 +436,11 @@ describe('an operator’s Target correction outlives the next boot', () => {
     );
     if (!listed.ok) throw new Error('listTargets refused');
     const cluster = listed.value.targets.find((t) => t.name === 'cluster');
-    expect(cluster?.manifestDivergence).toEqual([
+    expect(cluster?.connectionDivergence).toEqual([
       'connection.chartValues.platform.gateway.name',
       'connection.chartValues.platform.gateway.namespace',
     ]);
-    expect(JSON.stringify(cluster?.manifestDivergence)).not.toContain(
+    expect(JSON.stringify(cluster?.connectionDivergence)).not.toContain(
       'gateway-that-moved',
     );
 
@@ -470,7 +470,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
     if (!listed.ok) throw new Error('listTargets refused');
     expect(
       listed.value.targets.find((t) => t.name === 'cluster')
-        ?.manifestDivergence,
+        ?.connectionDivergence,
     ).toEqual([]);
   });
 });

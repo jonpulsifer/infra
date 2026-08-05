@@ -5,6 +5,16 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner target (infra-offsite, infra-folly, ubuntu-latest)'
+        type: choice
+        options:
+          - infra-offsite
+          - infra-folly
+          - ubuntu-latest
+        default: infra-offsite
 
 permissions:
   contents: read
@@ -18,9 +28,11 @@ jobs:
   detect:
     runs-on: ubuntu-latest
     outputs:
-      has_changes: ${{ steps.changed-paths.outputs.any_changed }}
+      has_changes: ${{ steps.classify.outputs.has_changes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
       - id: changed-paths
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
@@ -44,11 +56,31 @@ jobs:
             turbo.json
             biome.json
             .github/workflows/typescript.yml
+      - id: classify
+        env:
+          ANY_CHANGED: ${{ steps.changed-paths.outputs.any_changed }}
+          ALL_CHANGED_FILES: ${{ steps.changed-paths.outputs.all_changed_files }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          has_changes="$ANY_CHANGED"
+          release=clusters/offsite/apps/spindrift/helm-release.yaml
+
+          # Continuous delivery only rewrites this image digest. The rest of
+          # the release is a conformance-test input and remains significant.
+          if [[ "$ALL_CHANGED_FILES" == "$release" ]] &&
+            git diff --quiet \
+              --ignore-matching-lines='^[[:space:]]*image: ghcr\.io/jonpulsifer/spindrift:latest@sha256:[[:xdigit:]]{64}$' \
+              "$BASE_SHA" "$HEAD_SHA" -- "$release"; then
+            has_changes=false
+          fi
+
+          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
 
   validate:
     needs: detect
-    if: needs.detect.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
+    if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ inputs.runner || 'infra-offsite' }}
     permissions:
       contents: read
       id-token: write
@@ -65,6 +97,27 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: spindrift
+          # This database is destroyed when the job ends, so every guarantee it
+          # makes about surviving a crash is paid for and never collected.
+          # spindrift's harness builds and drops a schema per test — over 1600
+          # of them — and with `fsync` on, each one waits on real disk flushes
+          # for state nothing will ever read again. Measured on one machine,
+          # everything else held constant: 199s → 96s → 31s across the harness
+          # fix and this. It is the difference between a five-second hook having
+          # margin and having none.
+          #
+          # `max_connections` is headroom rather than a requirement: the suite
+          # peaks near 30, but a backend the server has not finished reaping
+          # still counts against the limit, and on a contended runner that lag
+          # is what becomes `sorry, too many clients already`.
+          #
+          # A service container takes no command, so all of it rides in through
+          # initdb, which has accepted `-c` since PG16.
+          POSTGRES_INITDB_ARGS: >-
+            -c max_connections=300
+            -c fsync=off
+            -c synchronous_commit=off
+            -c full_page_writes=off
         ports:
           - 5432:5432
         options: >-

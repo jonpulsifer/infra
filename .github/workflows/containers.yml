@@ -7,10 +7,15 @@ on:
     branches:
       - main
 
-# Cancel superseded runs on the same ref instead of letting them pile up.
+# Cancel superseded runs on a pull request instead of letting them pile up.
+# **Never on `main`**: this workflow builds from a changed-files matrix, so a
+# cancelled push run's images are never built by any later one — the next
+# commit's matrix contains only what *it* changed. A push landing seconds after
+# another would otherwise silently drop the earlier commit's images, and the
+# only symptom is a stale digest nobody bumped. Queue them instead.
 concurrency:
   group: containers-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

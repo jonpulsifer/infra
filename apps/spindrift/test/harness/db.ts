@@ -58,8 +58,30 @@ const BREAKPOINT = '--> statement-breakpoint';
  */
 const QUALIFIER = '"public".';
 
-/** The committed migrations, in filename order, rewritten to target `schema`. */
-async function migrationStatements(schema: string): Promise<string[]> {
+/**
+ * The committed DDL, read once and joined once.
+ *
+ * Read once because the files do not change while the process runs, and there
+ * is one schema built **per test**: re-reading twenty-five files before each of
+ * them is a thousandfold of the same syscalls for a string that was already in
+ * memory.
+ *
+ * Joined once because the cost that matters is round trips, not bytes. The
+ * breakpoints exist so drizzle-kit can write one statement per line, not
+ * because Postgres needs them apart — sending them separately spends one
+ * network round trip per statement, per test, and that is what makes a schema
+ * build take long enough on a loaded runner for a five-second hook to time out.
+ * Sent together they are one simple-query round trip, and Postgres runs them in
+ * one implicit transaction, so a schema is either built whole or not at all.
+ *
+ * Splitting on the breakpoint before rejoining is not a no-op: it is what drops
+ * comment-only fragments and normalizes whitespace, and it is what keeps the
+ * rewrite below operating on the same units the committed file declares.
+ */
+let committedDdl: string | null = null;
+
+async function migrationDdl(): Promise<string> {
+  if (committedDdl !== null) return committedDdl;
   const files = (await readdir(MIGRATIONS))
     .filter((name) => name.endsWith('.sql'))
     .sort();
@@ -67,11 +89,44 @@ async function migrationStatements(schema: string): Promise<string[]> {
   for (const file of files) {
     const sql = await Bun.file(join(MIGRATIONS, file)).text();
     for (const statement of sql.split(BREAKPOINT)) {
-      const trimmed = statement.replaceAll(QUALIFIER, `"${schema}".`).trim();
+      const trimmed = statement.trim();
       if (trimmed.length > 0) statements.push(trimmed);
     }
   }
-  return statements;
+  committedDdl = statements.join(';\n');
+  return committedDdl;
+}
+
+/** The committed migrations, as one script targeting `schema`. */
+async function migrationScript(schema: string): Promise<string> {
+  return (await migrationDdl()).replaceAll(QUALIFIER, `"${schema}".`);
+}
+
+/**
+ * The one session that creates and drops schemas, for the whole process.
+ *
+ * It is shared because it holds no isolated state: `CREATE SCHEMA` and
+ * `DROP SCHEMA` name their target, so nothing about them belongs to the test
+ * that asked. What was per-test was the *connection* — a pool opened and closed
+ * for a single DDL statement, twice per test, which at four figures of tests is
+ * several thousand connection lifecycles Postgres has to set up and reap. A
+ * server still reaping them when the next test asks for one is a server that
+ * answers `sorry, too many clients already`, and that is the shape the failure
+ * takes on a loaded runner.
+ *
+ * Never closed. It lives exactly as long as the test process, and there is no
+ * later point at which closing it would be more correct than exiting.
+ *
+ * Shareable under concurrency because it is a pool, not a connection —
+ * `isolation.test.ts` builds two schemas inside one `Promise.all`, which is the
+ * case that would break a single session. Its own `search_path` is deliberately
+ * left alone: every statement it runs names the schema it operates on.
+ */
+let admin: SQL | null = null;
+
+function adminSession(): SQL {
+  admin ??= createClient();
+  return admin;
 }
 
 /**
@@ -162,9 +217,7 @@ export function defaultVesselName(kind: VesselKind): string {
 export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
   const schema = schemaName();
 
-  const admin = createClient();
-  await admin.unsafe(`CREATE SCHEMA "${schema}"`);
-  await admin.close();
+  await adminSession().unsafe(`CREATE SCHEMA "${schema}"`);
 
   const url = schemaUrl(schema);
   const opened: SQL[] = [];
@@ -175,9 +228,7 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
   };
 
   const client = connect();
-  for (const statement of await migrationStatements(schema)) {
-    await client.unsafe(statement);
-  }
+  await client.unsafe(await migrationScript(schema));
 
   const db = createDb(client);
   const seeded = await db
@@ -207,9 +258,7 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
     connect,
     async close() {
       for (const open of opened) await open.close();
-      const dropper = createClient();
-      await dropper.unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await dropper.close();
+      await adminSession().unsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     },
   };
 }

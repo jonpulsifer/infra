@@ -11,6 +11,7 @@
  * than an empty pane or a spinner.
  */
 import type { ReactNode } from 'react';
+import { useEffect, useRef } from 'react';
 import type { LogLine } from '../model.ts';
 import { cn } from '../ui/utils.ts';
 
@@ -19,18 +20,53 @@ const TONE = {
   muted: 'text-terminal-muted',
 } as const;
 
+/**
+ * How close to the bottom counts as "watching the end", in pixels.
+ *
+ * Generous, because the test is applied *after* the new lines are in the DOM:
+ * a reader pinned to the bottom is already this far from it by the time the
+ * effect runs, and a tighter threshold would drop them off the tail on exactly
+ * the fast-moving logs that most need following.
+ */
+const FOLLOW_SLACK_PX = 120;
+
 export function LogPane({
   lines,
+  follow = false,
   className,
 }: {
   lines: readonly LogLine[];
+  /**
+   * Keep the newest line in view as output arrives.
+   *
+   * Set while the thing writing the log is still running, and never otherwise —
+   * a finished transcript is a document you read from the top. Following also
+   * caps the pane's height, because a pane that grows forever has no bottom to
+   * scroll to and would drag the whole page down instead.
+   */
+  follow?: boolean;
   className?: string;
 }) {
+  const pane = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    const node = pane.current;
+    if (!follow || node === null) return;
+    // Only if the reader is already at the end. Somebody who scrolled up to
+    // read an earlier line is reading it, and yanking them back to the tail
+    // every time the runner prints is how a live log becomes unusable.
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+    if (distance > FOLLOW_SLACK_PX) return;
+    node.scrollTop = node.scrollHeight;
+  }, [follow, lines]);
+
   return (
     <pre
+      ref={pane}
       className={cn(
         'overflow-x-auto rounded-lg bg-terminal px-3.5 py-3',
         'text-[12.5px] leading-[1.65] text-terminal-foreground',
+        follow && 'max-h-[420px] overflow-y-auto scroll-smooth',
         className,
       )}
     >

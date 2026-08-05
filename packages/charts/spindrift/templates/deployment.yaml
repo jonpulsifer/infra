@@ -7,6 +7,11 @@ The reconciler serves nothing, so it gets no port and no probe: a loop that
 claims work with `SELECT … FOR UPDATE SKIP LOCKED` has no readiness to report.
 */}}
 {{- $top := . -}}
+{{/* See spindrift.manifest.content (_helpers.tpl): a declaration verbatim,
+the chart-only seed of files/default-manifest.yaml, or empty. Computed once
+so the checksum, the mount and the env var below all gate on and hash exactly
+what manifest.yaml renders. */}}
+{{- $manifestContent := include "spindrift.manifest.content" $top -}}
 {{- $processes := list (dict "name" "web" "command" "src/web/server.ts" "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" true) -}}
 {{- if .Values.reconciler.enabled -}}
 {{- $processes = append $processes (dict "name" "reconciler" "command" "src/reconciler/main.ts" "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false "federates" true) -}}
@@ -50,11 +55,11 @@ spec:
       {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
   template:
     metadata:
-      {{- if $top.Values.manifest }}
+      {{- if $manifestContent }}
       annotations:
         # Both processes read the manifest once, at start, so a ConfigMap change
         # has to become a rollout.
-        checksum/manifest: {{ toYaml $top.Values.manifest | sha256sum }}
+        checksum/manifest: {{ $manifestContent | sha256sum }}
       {{- end }}
       labels:
         {{- include "spindrift.labels" $top | nindent 8 }}
@@ -128,7 +133,7 @@ spec:
               value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- end }}
             {{- end }}
-            {{- if $top.Values.manifest }}
+            {{- if $manifestContent }}
             # Named explicitly, so a declaration that fails to mount is fatal
             # rather than falling back to the durable row.
             - name: SPINDRIFT_MANIFEST_PATH
@@ -168,7 +173,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            {{- if $top.Values.manifest }}
+            {{- if $manifestContent }}
             - name: manifest
               mountPath: /etc/spindrift
               readOnly: true
@@ -193,7 +198,7 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        {{- if $top.Values.manifest }}
+        {{- if $manifestContent }}
         - name: manifest
           configMap:
             name: {{ include "spindrift.fullname" $top }}-manifest

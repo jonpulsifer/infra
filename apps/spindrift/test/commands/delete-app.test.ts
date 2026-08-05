@@ -109,7 +109,12 @@ async function seedTarget(name: string) {
  */
 async function seedApp(
   name: string,
-  options: { targetId?: string; phase?: 'LIVE' | 'FAILED' } = {},
+  options: {
+    targetId?: string;
+    phase?: 'LIVE' | 'FAILED';
+    kind?: 'service' | 'job';
+    schedule?: string | null;
+  } = {},
 ) {
   const db = database().db;
   const [app] = await db
@@ -118,7 +123,12 @@ async function seedApp(
     .returning();
   const [component] = await db
     .insert(components)
-    .values({ appId: app!.id, name: 'web', kind: 'service' })
+    .values({
+      appId: app!.id,
+      name: 'web',
+      kind: options.kind ?? 'service',
+      schedule: options.schedule ?? null,
+    })
     .returning();
 
   if (options.targetId === undefined) {
@@ -279,6 +289,7 @@ describe('a live workload is named and left running', () => {
         component: 'web',
         target: 'folly',
         url: 'web.example.test',
+        firing: false,
       },
     ]);
 
@@ -295,6 +306,44 @@ describe('a live workload is named and left running', () => {
     // §13's rule, verbatim: no adapter was ever constructed, so nothing was
     // torn down.
     expect(built().size).toBe(0);
+  });
+
+  test('a scheduled job is named as one that keeps firing', async () => {
+    const target = await seedTarget('folly');
+    await seedApp('bills-forever', {
+      targetId: target.id,
+      kind: 'job',
+      schedule: '0 3 * * *',
+    });
+    const { registry } = fakes();
+
+    const review = await deleteApp(
+      { name: 'bills-forever', confirm: false },
+      context(registry),
+    );
+
+    expect(review.ok).toBe(true);
+    if (!review.ok) return;
+    // The point of this box: a stranded schedule is not merely sitting there
+    // like a stranded service — it bills on every tick, so the review has to
+    // say so before the rows that name it are gone.
+    expect(review.value.stranded).toHaveLength(1);
+    expect(review.value.stranded[0]?.firing).toBe(true);
+  });
+
+  test('an unscheduled job is stranded but not firing', async () => {
+    const target = await seedTarget('folly');
+    await seedApp('idle-job', { targetId: target.id, kind: 'job' });
+    const { registry } = fakes();
+
+    const review = await deleteApp(
+      { name: 'idle-job', confirm: false },
+      context(registry),
+    );
+
+    expect(review.ok).toBe(true);
+    if (!review.ok) return;
+    expect(review.value.stranded[0]?.firing).toBe(false);
   });
 });
 

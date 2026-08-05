@@ -40,10 +40,13 @@ on:
       - 'packages/charts/spindrift-app/**'
       - '.github/workflows/spindrift-charts.yml'
 
-# Cancel superseded runs on the same ref instead of letting them pile up.
+# Cancel superseded runs on a pull request instead of letting them pile up.
+# **Never on `main`**: a cancelled push run leaves the chart version in its
+# Chart.yaml unpublished, and the consumer that pins that version by tag then
+# fails to pull with nothing here saying why. Queue them instead.
 concurrency:
   group: spindrift-charts-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

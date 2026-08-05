@@ -1,14 +1,13 @@
 /**
- * Storage — everything this installation keeps, and which of it deploys.
+ * The two storage systems this installation is connected to.
  *
- * Three sections, and the order is the argument. **Source buckets** hold the
- * bundle a builder is handed. **Bundles** are those inputs themselves, one row
- * per staged digest. **Artifact registries** hold what came back out. Reading
- * down the page is reading the supply chain in the direction it runs, and the
- * distinction the sections exist to keep visible is that a source is not a
- * built artifact: nothing on this screen deploys except §4's supplied artifact,
- * an archive of finished output recorded with no builder, which is the one row
- * the bundle list marks.
+ * They belong beside repositories and Targets rather than on a screen of their
+ * own, because all four are the same kind of thing: a system outside Spindrift
+ * that Spindrift holds an address and possibly a credential for. A bucket is
+ * where a Source is staged and a registry is where an Artifact is pushed — but
+ * neither *is* the Source or the Artifact, and while they shared a screen with
+ * a list of staged bundles that distinction had nowhere to live. The objects
+ * are the supply-chain ledgers now; what is left here is the connection.
  *
  * The bucket section began as three controls buried in step one of the creation
  * flow: a `<select>` of the manifest's buckets, a "Custom bucket…" option that
@@ -18,6 +17,11 @@
  * flow now shows the default as a fact, and §20 puts every value naming this
  * installation in the manifest — which `useSourceBucket` writes to, after
  * verifying that the controller can actually write there.
+ *
+ * **Each section reads its own state.** Two independent far sides answering one
+ * `Promise.all` meant a slow bucket check was a slow registry list, and either
+ * refusal blanked both. A connection that is down should read as one row that
+ * is down.
  *
  * **Verification is per row and on request**, in both sections that have any.
  * A screen that checked N destinations on load would be a screen slow in
@@ -41,7 +45,6 @@
  */
 import {
   AlertTriangle,
-  Archive,
   Check,
   Database,
   KeyRound,
@@ -53,16 +56,17 @@ import {
 } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { command, type OutputOf } from '../../client.ts';
-import { Badge } from '../../ui/badge.tsx';
+import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
-import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
+import { Card, CardContent } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
+import { Logo } from '../../ui/logo.tsx';
 import { cn } from '../../ui/utils.ts';
 
 type Verification = OutputOf<'testBucketPermissions'>;
 type RegistryProbe = OutputOf<'testRegistryReachability'>;
 type RegistryRow = OutputOf<'listArtifactRegistries'>['registries'][number];
-type BundleRow = OutputOf<'listStagedBundles'>['bundles'][number];
+type SourceStorageView = OutputOf<'listSourceBuckets'>;
 
 /** What is known about one destination's reachability, right now. */
 type Reachability<Result> =
@@ -71,67 +75,84 @@ type Reachability<Result> =
   | { readonly state: 'reachable'; readonly result: Result }
   | { readonly state: 'unreachable'; readonly message: string };
 
-export interface SourceStorageView {
-  readonly buckets: readonly string[];
-  readonly defaultBucket: string;
-  readonly canVerify: boolean;
-}
+/**
+ * One section's own read of one far side.
+ *
+ * Reload is a token rather than a refetch call so that an act which changed the
+ * manifest re-reads what the manifest now says, instead of patching a local
+ * copy of it and hoping the two agree.
+ */
+function useConnection<Value>(
+  read: () => Promise<
+    { ok: true; value: Value } | { ok: false; failure: { message: string } }
+  >,
+  reloadToken: number,
+): { state: 'loading' | 'error' | 'ready'; value?: Value; message?: string } {
+  const [state, setState] = useState<{
+    state: 'loading' | 'error' | 'ready';
+    value?: Value;
+    message?: string;
+  }>({ state: 'loading' });
 
-export interface StorageView {
-  readonly source: SourceStorageView;
-  readonly registries: readonly RegistryRow[];
-  readonly bundles: readonly BundleRow[];
-  /** Whether this installation has a keyring to seal a registry token with. */
-  readonly canHoldCredentials: boolean;
-  /** The cap the bundle listing answered under, so a full page reads as one. */
-  readonly bundleLimit: number;
-}
+  useEffect(() => {
+    let live = true;
+    read()
+      .then((result) => {
+        if (!live) return;
+        setState(
+          result.ok
+            ? { state: 'ready', value: result.value }
+            : { state: 'error', message: result.failure.message },
+        );
+      })
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setState({
+          state: 'error',
+          message:
+            cause instanceof Error ? cause.message : 'the read did not answer',
+        });
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadToken]);
 
-export function Storage({
-  view,
-  onChanged,
-  embedded = false,
-}: {
-  view: StorageView;
-  /** Re-read after the manifest moved: this screen does not own that state. */
-  onChanged: () => void;
-  embedded?: boolean;
-}) {
-  const Heading = embedded ? 'h2' : 'h1';
-  return (
-    <div
-      className={cn(
-        'flex w-full flex-col gap-8',
-        !embedded && 'mx-auto max-w-[1040px] px-5 py-6',
-      )}
-    >
-      <header>
-        <Eyebrow>Storage</Eyebrow>
-        <Heading className="mt-1 text-2xl font-semibold tracking-tight">
-          Sources and artifacts
-        </Heading>
-        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-          Where source is staged before a builder fetches it, what has been
-          staged, and where the artifacts a build produced are pushed. A source
-          is not a built artifact — only an uploaded archive of finished output
-          deploys without a build.
-        </p>
-      </header>
-
-      <SourceBuckets view={view.source} onChanged={onChanged} />
-      <StagedBundles bundles={view.bundles} limit={view.bundleLimit} />
-      <ArtifactRegistries
-        registries={view.registries}
-        canHoldCredentials={view.canHoldCredentials}
-        onChanged={onChanged}
-      />
-    </div>
-  );
+  return state;
 }
 
 // --- Source buckets ---------------------------------------------------------
 
-function SourceBuckets({
+/** Where a Source is staged before any build route can fetch it (§4, §15). */
+export function SourceBuckets() {
+  const [reloadToken, setReloadToken] = useState(0);
+  const loaded = useConnection<SourceStorageView>(
+    () => command('listSourceBuckets', {}),
+    reloadToken,
+  );
+  const onChanged = () => setReloadToken((token) => token + 1);
+
+  if (loaded.state === 'loading') {
+    return (
+      <SectionShell>
+        <p className="animate-pulse text-sm text-muted-foreground">
+          Loading source storage…
+        </p>
+      </SectionShell>
+    );
+  }
+  if (loaded.state === 'error' || loaded.value === undefined) {
+    return (
+      <SectionShell>
+        <Failure>{loaded.message ?? 'source storage did not answer'}</Failure>
+      </SectionShell>
+    );
+  }
+  return <SourceBucketList view={loaded.value} onChanged={onChanged} />;
+}
+
+function SourceBucketList({
   view,
   onChanged,
 }: {
@@ -214,19 +235,24 @@ function SourceBuckets({
   };
 
   return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        title="Source storage"
-        blurb="Where an uploaded archive and a repository's source are staged before a builder can fetch them. The default is what a new deploy uses; the creation flow shows it and does not ask."
-        action={
-          view.canVerify ? (
-            <Button variant="outline" onClick={() => setAdding((it) => !it)}>
-              <Plus aria-hidden="true" /> Add a bucket
-            </Button>
-          ) : null
-        }
-      />
-
+    <ConnectionSection
+      name="Cloud Storage"
+      mark={<Logo name="google-cloud" />}
+      status={
+        view.canVerify
+          ? `${view.buckets.length} bucket${view.buckets.length === 1 ? '' : 's'}`
+          : 'unverifiable'
+      }
+      tone={view.canVerify ? 'success' : 'warning'}
+      description="Where an uploaded archive and a repository's source are staged before a builder can fetch them. The default is what a new deploy uses; the creation flow shows it and does not ask."
+      action={
+        view.canVerify ? (
+          <Button variant="outline" onClick={() => setAdding((it) => !it)}>
+            <Plus aria-hidden="true" /> Add a bucket
+          </Button>
+        ) : null
+      }
+    >
       {!view.canVerify ? (
         <Notice>
           Workload Identity Federation is not configured, so Spindrift has no
@@ -284,7 +310,7 @@ function SourceBuckets({
           />
         ))}
       </Card>
-    </section>
+    </ConnectionSection>
   );
 }
 
@@ -374,7 +400,43 @@ const FLAVOUR_LABEL: Record<RegistryRow['flavour'], string> = {
   other: 'Registry',
 };
 
-function ArtifactRegistries({
+/** Where every Artifact is pushed, and where a Target pulls it from (§16). */
+export function ArtifactRegistries() {
+  const [reloadToken, setReloadToken] = useState(0);
+  const loaded = useConnection<OutputOf<'listArtifactRegistries'>>(
+    () => command('listArtifactRegistries', {}),
+    reloadToken,
+  );
+  const onChanged = () => setReloadToken((token) => token + 1);
+
+  if (loaded.state === 'loading') {
+    return (
+      <SectionShell>
+        <p className="animate-pulse text-sm text-muted-foreground">
+          Loading artifact registries…
+        </p>
+      </SectionShell>
+    );
+  }
+  if (loaded.state === 'error' || loaded.value === undefined) {
+    return (
+      <SectionShell>
+        <Failure>
+          {loaded.message ?? 'the registry list did not answer'}
+        </Failure>
+      </SectionShell>
+    );
+  }
+  return (
+    <ArtifactRegistryList
+      registries={loaded.value.registries}
+      canHoldCredentials={loaded.value.canHoldCredentials}
+      onChanged={onChanged}
+    />
+  );
+}
+
+function ArtifactRegistryList({
   registries,
   canHoldCredentials,
   onChanged,
@@ -448,17 +510,18 @@ function ArtifactRegistries({
   };
 
   return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        title="Artifact registries"
-        blurb="Where every artifact a build produces is pushed, and where a Target pulls it from. The same digest goes to all of them; a Target that names no reachable registry pulls from the first."
-        action={
-          <Button variant="outline" onClick={() => setAdding((it) => !it)}>
-            <Plus aria-hidden="true" /> Connect a registry
-          </Button>
-        }
-      />
-
+    <ConnectionSection
+      name="Artifact registries"
+      mark={<Package aria-hidden="true" className="size-5 text-foreground" />}
+      status={`${registries.length} connected`}
+      tone={registries.length > 0 ? 'success' : 'idle'}
+      description="Where every Artifact a Build produces is pushed, and where a Target pulls it from. The same digest goes to all of them; a Target that names no reachable registry pulls from the first."
+      action={
+        <Button variant="outline" onClick={() => setAdding((it) => !it)}>
+          <Plus aria-hidden="true" /> Connect a registry
+        </Button>
+      }
+    >
       {error ? <Failure>{error}</Failure> : null}
 
       {adding ? (
@@ -509,7 +572,7 @@ function ArtifactRegistries({
           />
         ))}
       </Card>
-    </section>
+    </ConnectionSection>
   );
 }
 
@@ -728,112 +791,58 @@ function RegistryCredentialForm({
   );
 }
 
-// --- Bundles ----------------------------------------------------------------
-
-function StagedBundles({
-  bundles,
-  limit,
-}: {
-  bundles: readonly BundleRow[];
-  limit: number;
-}) {
-  return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        title="Bundles"
-        blurb="Every source bundle that has been staged, newest first. A bundle is what a builder is handed; the one that deploys as-is is an uploaded archive of finished output, which no builder ever ran over."
-      />
-
-      {bundles.length === 0 ? (
-        <Card>
-          <CardContent className="text-sm text-muted-foreground">
-            Nothing has been staged yet. Uploading an archive or connecting a
-            repository is what puts the first bundle here.
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="divide-y divide-border">
-          {bundles.map((bundle) => (
-            <BundleRowView
-              key={`${bundle.buildId}:${bundle.digest}`}
-              bundle={bundle}
-            />
-          ))}
-        </Card>
-      )}
-
-      {bundles.length === limit ? (
-        <p className="text-[11px] text-subtle">
-          Showing the newest {limit}. Older bundles are reachable from the App
-          they belong to.
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-function BundleRowView({ bundle }: { bundle: BundleRow }) {
-  return (
-    <div className="flex flex-col gap-1.5 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Archive
-          aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-        <span className="font-mono text-sm font-medium">
-          {shortDigest(bundle.digest)}
-        </span>
-        <span className="text-sm text-muted-foreground">
-          {bundle.app} / {bundle.component}
-        </span>
-        <Badge tone="idle">{bundle.artifactType}</Badge>
-        <Badge tone={bundle.retention === 'durable' ? 'success' : 'idle'}>
-          {bundle.retention}
-        </Badge>
-        {bundle.deployable ? <Badge tone="accent">deployable</Badge> : null}
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-0.5 pl-6 text-[11px] text-subtle">
-        <span className="font-mono">
-          {bundle.location ?? 'no location recorded'}
-        </span>
-        {!bundle.fetchable ? (
-          <span className="text-warning">no builder can fetch this</span>
-        ) : null}
-        <span>{bundle.runner ?? 'no builder ran'}</span>
-        <span>{bundle.status}</span>
-      </div>
-    </div>
-  );
-}
-
-/** `sha256:abc…` — enough to recognise, short enough to sit in a row. */
-function shortDigest(digest: string): string {
-  const [algorithm, hex] = digest.split(':');
-  if (hex === undefined) return digest;
-  return `${algorithm}:${hex.slice(0, 12)}`;
-}
-
 // --- Shared chrome ----------------------------------------------------------
 
-function SectionHeader({
-  title,
-  blurb,
+/** The frame a section keeps while it is loading or refusing. */
+function SectionShell({ children }: { children: ReactNode }) {
+  return <section className="flex flex-col gap-4 py-6">{children}</section>;
+}
+
+/**
+ * One connected system, in the ruled row every provider on this screen uses.
+ *
+ * The same two-column shape as the repository and Target sections: the system
+ * and its one-line state on the left, everything concrete about it on the
+ * right. Matching them is the point — a bucket and a cluster are the same kind
+ * of thing here, and a section that looked different would read as a different
+ * kind of thing.
+ */
+function ConnectionSection({
+  name,
+  mark,
+  status,
+  tone,
+  description,
   action,
+  children,
 }: {
-  title: string;
-  blurb: string;
-  action?: ReactNode;
+  readonly name: string;
+  readonly mark: ReactNode;
+  readonly status: string;
+  readonly tone: 'success' | 'warning' | 'idle';
+  readonly description: string;
+  readonly action?: ReactNode;
+  readonly children: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-4">
+    <section className="grid gap-5 py-6 xl:grid-cols-[240px_minmax(0,1fr)] xl:gap-8">
       <div>
-        <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-          {blurb}
+        <div className="flex items-center gap-2">
+          {mark}
+          <h3 className="font-semibold">{name}</h3>
+        </div>
+        <Badge className="mt-3" tone={tone}>
+          <Dot /> {status}
+        </Badge>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          {description}
         </p>
       </div>
-      {action ? <div className="ml-auto">{action}</div> : null}
-    </div>
+      <div className="flex min-w-0 flex-col gap-4">
+        {action ? <div className="flex justify-end">{action}</div> : null}
+        {children}
+      </div>
+    </section>
   );
 }
 

@@ -712,8 +712,15 @@ export interface TargetListItem {
    * is what a Target owes an operator before they save Settings and take their
    * own edit back. Empty is the ordinary case — and is also what a Target the
    * manifest declares no connection for correctly reports.
+   *
+   * Named `connectionDivergence` rather than `manifestDivergence` — the name
+   * this field used to share with `GetInstallationManifestResult`'s field —
+   * because the two answer different questions over the same
+   * `diffManifestPaths` walk: this one compares a Target's row against its own
+   * manifest entry; that one compares the mounted declaration against the
+   * stored manifest.
    */
-  readonly manifestDivergence: readonly string[];
+  readonly connectionDivergence: readonly string[];
   /**
    * Where an edit of this Target's connection starts, or `null` on an adapter
    * the product has no edit surface for.

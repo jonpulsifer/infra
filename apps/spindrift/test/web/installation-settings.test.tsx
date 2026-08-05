@@ -5,7 +5,7 @@
  * every rule below is a statement about **what is on the screen in a given
  * state**, and none is about interaction.
  *
- * Two things are being asserted, and they are not the same thing:
+ * Three things are being asserted, and they are not the same thing:
  *
  * 1. **A control exists for every manifest value**, derived from the schema, so
  *    a key an operator has to correct is reachable. This is the half seven
@@ -16,6 +16,9 @@
  *    `configureInstallation` distinguishes "your document is wrong" from "this
  *    installation cannot take it", and flattening the second into a form error
  *    would tell an operator to fix a field that is not wrong.
+ * 3. **An adopt act is offered exactly when there is a declaration to adopt**
+ *    (ticket 78). The cost is stated before the press: what a `declared` write
+ *    does to a Target whose connection moves.
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -32,6 +35,8 @@ function screen({
   errors = new Map() as FieldErrors,
   outcome = null as SaveOutcome | null,
   saving = false,
+  divergence = [] as readonly string[],
+  declaration = null as unknown,
 } = {}): string {
   return renderToStaticMarkup(
     <InstallationSettingsView
@@ -40,9 +45,12 @@ function screen({
       errors={errors}
       outcome={outcome}
       saving={saving}
+      divergence={divergence}
+      declaration={declaration}
       onChange={() => undefined}
       onSave={() => undefined}
       onReload={() => undefined}
+      onAdopted={() => undefined}
     />,
   );
 }
@@ -152,5 +160,40 @@ describe('a refusal reads as what it is', () => {
     });
     expect(markup).toContain('This installation was configured.');
     expect(markup).toContain('cluster, cloud-cloudrun');
+  });
+});
+
+describe('adopting a divergent declaration', () => {
+  test('no divergence, no notice and no adopt act', () => {
+    const markup = screen();
+    expect(markup).not.toContain(
+      'The mounted declaration no longer matches this installation.',
+    );
+    expect(markup).not.toContain('Adopt this declaration');
+  });
+
+  test('a divergence with nothing to adopt says so, but offers no press', () => {
+    // Reachable when a caller has paths but no document for them — a test
+    // context that computed one without the other. The notice still names
+    // the disagreement; it just cannot act on it.
+    const markup = screen({ divergence: ['build.zeroConfigFrontend'] });
+    expect(markup).toContain(
+      'The mounted declaration no longer matches this installation.',
+    );
+    expect(markup).toContain('Differs at: build.zeroConfigFrontend.');
+    expect(markup).not.toContain('Adopt this declaration');
+  });
+
+  test('a divergence with a declaration offers the adopt act, and its cost', () => {
+    const markup = screen({
+      divergence: ['build.zeroConfigFrontend'],
+      declaration: manifest,
+    });
+    expect(markup).toContain('Adopt this declaration');
+    // The cost, named beside the button rather than after the press: a
+    // `declared` write is what resets a moved Target connection to unhealthy
+    // pending inspection (`manifest-store.ts`'s `reconcileManifestTargets`).
+    expect(markup).toContain('reset to unhealthy');
+    expect(markup).toContain('awaiting-inspection checklist');
   });
 });

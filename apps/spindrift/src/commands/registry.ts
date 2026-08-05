@@ -39,6 +39,7 @@ import {
 } from './apps/resolve-placement.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
+import { listArtifacts, listArtifactsInput } from './artifacts/list.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
 import { getBuildDetail, getBuildDetailInput } from './builds/get-detail.ts';
 import { listBuilds, listBuildsInput } from './builds/list.ts';
@@ -49,6 +50,10 @@ import {
   setComponentReachInput,
 } from './components/reach.ts';
 import { runComponent, runComponentInput } from './components/run.ts';
+import {
+  setComponentSchedule,
+  setComponentScheduleInput,
+} from './components/schedule.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
 import {
@@ -99,6 +104,7 @@ import {
   listRepositories,
   listRepositoriesInput,
 } from './repositories/list.ts';
+import { listSources, listSourcesInput } from './sources/list.ts';
 import {
   forgetRegistryCredential,
   forgetRegistryCredentialInput,
@@ -107,10 +113,6 @@ import {
   listSourceBuckets,
   listSourceBucketsInput,
 } from './storage/list-buckets.ts';
-import {
-  listStagedBundles,
-  listStagedBundlesInput,
-} from './storage/list-bundles.ts';
 import {
   listArtifactRegistries,
   listArtifactRegistriesInput,
@@ -209,6 +211,10 @@ export const commandRegistry = {
     handler: setComponentReach,
   },
   runComponent: { input: runComponentInput, handler: runComponent },
+  setComponentSchedule: {
+    input: setComponentScheduleInput,
+    handler: setComponentSchedule,
+  },
   setConfig: { input: setConfigInput, handler: setConfig },
   configureInstallation: {
     input: configureInstallationInput,
@@ -269,9 +275,13 @@ export const commandRegistry = {
     input: useArtifactRegistryInput,
     handler: useArtifactRegistry,
   },
-  listStagedBundles: {
-    input: listStagedBundlesInput,
-    handler: listStagedBundles,
+  listSources: {
+    input: listSourcesInput,
+    handler: listSources,
+  },
+  listArtifacts: {
+    input: listArtifactsInput,
+    handler: listArtifacts,
   },
   setRegistryCredential: {
     input: setRegistryCredentialInput,

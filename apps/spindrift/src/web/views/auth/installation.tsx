@@ -67,12 +67,20 @@ export function InstallationSettings() {
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
   const [saving, setSaving] = useState(false);
   const [divergence, setDivergence] = useState<readonly string[]>([]);
+  /**
+   * The mounted declaration, whole — what an "Adopt this declaration" press
+   * sends to `configureInstallation` unedited. `null` until the first load
+   * answers, and whenever nothing is mounted; `ManifestDivergenceNotice` does
+   * not offer the act without it.
+   */
+  const [declaration, setDeclaration] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     const result = await command('getInstallationManifest', {});
     if (result.ok) {
       setDocument(result.value.manifest);
-      setDivergence(result.value.manifestDivergence);
+      setDivergence(result.value.declarationDivergence);
+      setDeclaration(result.value.declaration);
       setLoadError(null);
     } else {
       setLoadError(result.failure.message);
@@ -165,12 +173,22 @@ export function InstallationSettings() {
       outcome={outcome}
       saving={saving}
       divergence={divergence}
+      declaration={declaration}
       onChange={(next) => {
         setDocument(next);
         setOutcome(null);
       }}
       onSave={() => void save()}
       onReload={() => {
+        setErrors(new Map());
+        setOutcome(null);
+        void load();
+      }}
+      onAdopted={() => {
+        // The row changed under this screen exactly as a `configureInstallation`
+        // save does, so it is re-read the same way: what the write left, not
+        // what was sent, and any local edit below it is discarded along with
+        // it — the notice says so before the press that causes it.
         setErrors(new Map());
         setOutcome(null);
         void load();
@@ -222,9 +240,11 @@ export function InstallationSettingsView({
   outcome,
   saving,
   divergence = [],
+  declaration = null,
   onChange,
   onSave,
   onReload,
+  onAdopted,
 }: {
   readonly fields: readonly FormField[];
   readonly document: unknown;
@@ -239,9 +259,25 @@ export function InstallationSettingsView({
    * fact it is not exercising.
    */
   readonly divergence?: readonly string[];
+  /**
+   * The mounted declaration itself, from the same command as `divergence` —
+   * `getInstallationManifest`'s `declaration`. What "Adopt this declaration"
+   * sends to `configureInstallation`, unedited. Optional and defaulted to
+   * `null` for the same reason `divergence` is; the notice offers no adopt
+   * act without it, which a test asserting only `divergence` is still
+   * entitled to leave unset.
+   */
+  readonly declaration?: unknown;
   onChange(document: unknown): void;
   onSave(): void;
   onReload(): void;
+  /**
+   * The row changed underneath this screen by a route other than `onSave` —
+   * an adopt press. Optional because a caller that never passes a
+   * `declaration` has no act to report finishing; `ManifestDivergenceNotice`
+   * does not render the button that would need it.
+   */
+  onAdopted?(): void;
 }) {
   const form = { document, errors, disabled: saving, onChange };
   // Sections are whichever keys have structure. Derived rather than listed, so
@@ -259,7 +295,11 @@ export function InstallationSettingsView({
         onSave();
       }}
     >
-      <ManifestDivergenceNotice paths={divergence} />
+      <ManifestDivergenceNotice
+        paths={divergence}
+        declaration={declaration}
+        onAdopted={onAdopted}
+      />
 
       {/* Above the form, because it is the step that comes before editing: a
           value confirmed from the cloud is a value nobody has to type, and one
@@ -362,13 +402,60 @@ export function InstallationSettingsView({
  * **Paths only**, exactly as `getInstallationManifest` answers them: the list
  * says where the two documents disagree, never what either one says at that
  * path.
+ *
+ * **Adopting sends `declaration` whole, the same way `onSave` sends the
+ * edited document.** `declaration` is already an `AuthoredManifest` —
+ * `configureInstallation`'s own input type — so this is not a patch applied
+ * at `paths`: "apply only the diverging paths" would let a partially valid
+ * document through, which is exactly what a manifest must never be. The cost
+ * is stated next to the button that causes it, before the press rather than
+ * after: a `declared` write resets the assessment of every Target whose
+ * connection moves to an unhealthy, awaiting-inspection checklist
+ * (`manifest-store.ts`'s `reconcileManifestTargets`) — which is what most of
+ * a divergence like this one actually is, because a Target's connection is
+ * exactly what a rollout to `helm-release.yaml` most often moves. Said
+ * plainly rather than behind a second confirming click: the sentence is the
+ * same regardless of which paths differ, so a click that only reveals it
+ * would cost an operator a step without giving them anything to decide with
+ * that they could not already read.
  */
 function ManifestDivergenceNotice({
   paths,
+  declaration,
+  onAdopted,
 }: {
   readonly paths: readonly string[];
+  /** The document an adopt press submits, whole. `null` offers no press. */
+  readonly declaration?: unknown;
+  onAdopted?(): void;
 }) {
+  const [adopting, setAdopting] = useState(false);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
+
   if (paths.length === 0) return null;
+
+  const adopt = async () => {
+    setAdopting(true);
+    setAdoptError(null);
+    try {
+      const result = await command('configureInstallation', {
+        manifest: declaration,
+      });
+      if (result.ok) {
+        onAdopted?.();
+      } else {
+        setAdoptError(result.failure.message);
+      }
+    } catch (cause) {
+      setAdoptError(
+        cause instanceof Error
+          ? cause.message
+          : 'Adopting the declaration failed.',
+      );
+    } finally {
+      setAdopting(false);
+    }
+  };
 
   return (
     <div
@@ -376,18 +463,42 @@ function ManifestDivergenceNotice({
       className="flex items-start gap-2 rounded-md border border-border bg-secondary p-3 text-sm text-foreground"
     >
       <CircleAlert aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
-      <div>
+      <div className="w-full">
         <p className="font-medium">
           The mounted declaration no longer matches this installation.
         </p>
         <p className="mt-0.5">
           Configuration is this screen's to drive, so what is stored below is
-          what is running — the declaration was only ever the seed. Discard the
-          row to re-seed from it instead of editing here.
+          what is running — the declaration was only ever the seed.
         </p>
         <p className="mt-1 text-muted-foreground">
           Differs at: {paths.join(', ')}.
         </p>
+
+        {declaration === null || declaration === undefined ? null : (
+          <div className="mt-2 flex flex-col gap-2">
+            <p className="text-xs text-muted-foreground">
+              Adopting replaces the document below with the declaration above,
+              whole — discarding any unsaved edit here along with it. Every
+              Target whose connection moves is reset to unhealthy, with an
+              awaiting-inspection checklist, until it is re-inspected.
+            </p>
+            {adoptError !== null ? (
+              <p className="text-terminal-destructive">{adoptError}</p>
+            ) : null}
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={adopting}
+                onClick={() => void adopt()}
+              >
+                {adopting ? 'Adopting…' : 'Adopt this declaration'}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
