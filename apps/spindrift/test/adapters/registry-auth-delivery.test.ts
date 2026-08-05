@@ -167,7 +167,9 @@ describe('the cloud build route', () => {
    * the artifact registry 401'd at the export, after the entire build.
    */
   test('mints its own credential into the same document, never over it', async () => {
-    const program = (await stepFor(AUTH)).args.join('\n');
+    // As the step will run it: the service's template expansion turns the
+    // route's `$$` literal-dollar escape back into `$` before sh sees it.
+    const program = (await stepFor(AUTH)).args.join('\n').replaceAll('$$', '$');
 
     // The prelude contributes to the variable the program is the sole reader of.
     expect(program).toContain(`${REGISTRY_AUTH_VAR}="{\\"auths\\":{`);
@@ -175,6 +177,22 @@ describe('the cloud build route', () => {
     // …and never writes a config of its own for the program to clobber. One
     // `mktemp` is one writer; two was the bug.
     expect(program.split('DOCKER_CONFIG=$(mktemp -d)')).toHaveLength(2);
+  });
+
+  /**
+   * The submit-time regression. The build service expands `$UPPERCASE` and
+   * `${UPPERCASE}` in step fields as substitutions and refuses a template
+   * naming one it does not know — observed live: the prelude's
+   * `"$SPINDRIFT_REGISTRY_AUTH"` failed the whole submit with "not a valid
+   * built-in substitution". Lowercase shell variables are invisible to that
+   * grammar; anything it could claim must arrive `$$`-escaped.
+   */
+  test('submits no unescaped dollar the service reads as a substitution', async () => {
+    const step = await stepFor(AUTH);
+
+    for (const field of [...step.args, ...(step.env ?? [])]) {
+      expect(field).not.toMatch(/(?<!\$)\$\{?[A-Z_][A-Z0-9_]*/);
+    }
   });
 
   test('still mints one when this installation stores nothing', async () => {

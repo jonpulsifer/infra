@@ -106,7 +106,11 @@ export async function attested(
       await chmod(path, 0o755);
     }
     const path = join(directory, 'step.sh');
-    await writeFile(path, script);
+    // What the build service does to a step before the container sees it:
+    // template expansion turns its `$$` literal-dollar escape back into `$`.
+    // The route escapes every dollar on the way in, so running the submitted
+    // text verbatim would hand bash a program that is not shell.
+    await writeFile(path, script.replaceAll('$$', '$'));
 
     const child = Bun.spawn(['bash', path], {
       stdout: 'pipe',
