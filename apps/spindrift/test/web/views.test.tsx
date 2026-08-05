@@ -16,7 +16,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { logos } from '../../src/web/client/logos/index.ts';
 import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
-import { ReachEditor, Workspace } from '../../src/web/views/apps/workspace.tsx';
+import {
+  DeleteConfigVarButton,
+  ReachEditor,
+  Workspace,
+} from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
@@ -907,5 +911,76 @@ describe('changing how a Component is reached (§9)', () => {
     for (const cell of ['none', 'private', 'public', 'proxy']) {
       expect(markup).toContain(cell);
     }
+  });
+});
+
+describe('editing config from the workspace (§10)', () => {
+  const view = WORKSPACE_SCENARIOS.service;
+
+  test('every configured key is shown, and nothing about its value is', () => {
+    const markup = workspace(view);
+    for (const key of view.configKeys) {
+      expect(markup).toContain(key);
+    }
+    expect(markup).toContain('value is write-only');
+    // The consequence, stated rather than hidden: this is the same posture
+    // `deployChange`'s own comment takes server-side, kept on the screen.
+    expect(markup).toContain(
+      'redeploys what is running under a new configVersion',
+    );
+  });
+
+  test('the affordance is on the section only where an act is wired', () => {
+    // No form whose Save cannot be called — the same rule §9's Reach card
+    // states above.
+    expect(workspace(view)).not.toContain('Set variable');
+
+    const markup = renderToStaticMarkup(
+      <Workspace
+        view={view}
+        onSetConfig={async () => ({
+          ok: true,
+          written: [],
+          removed: [],
+          notDeployed: null,
+        })}
+      />,
+    );
+    expect(markup).toContain('Set variable');
+  });
+
+  test('pressing Delete on a key dispatches setConfig’s removal shape, and nothing else', () => {
+    // Called directly rather than clicked through a mounted tree, for the
+    // same reason `DeleteAppButton`'s own test in `app-list-identity.test.tsx`
+    // is: what is under test is which value the handler closes over, and
+    // `renderToStaticMarkup` — this file's usual depth — cannot click
+    // anything (see this file's own header).
+    const calls: {
+      entries: readonly { key: string; value: string }[];
+      removals: readonly string[];
+    }[] = [];
+    const onSetConfig = async (change: {
+      entries: readonly { key: string; value: string }[];
+      removals: readonly string[];
+    }) => {
+      calls.push(change);
+      return {
+        ok: true as const,
+        written: [],
+        removed: change.removals,
+        notDeployed: null,
+      };
+    };
+
+    const button = DeleteConfigVarButton({
+      configKey: 'DATABASE_URL',
+      onSetConfig,
+      onError: () => undefined,
+    });
+    (button.props as { onClick: () => void }).onClick();
+
+    // The exact shape `setConfig` takes: the key named, nothing about the
+    // keys left alone — a removal never restates a value it cannot read.
+    expect(calls).toEqual([{ entries: [], removals: ['DATABASE_URL'] }]);
   });
 });

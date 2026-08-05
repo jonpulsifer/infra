@@ -293,6 +293,85 @@ describe('setConfig writes a reference, never a value', () => {
   });
 });
 
+describe('setConfig also removes, naming nothing but the key', () => {
+  test('one key goes, the rest are untouched', async () => {
+    const { component, target } = await fixture();
+    const commands = await context(
+      registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+    );
+    await setConfig(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        entries: [
+          { key: 'TOKEN', value: 'one' },
+          { key: 'DSN', value: 'two' },
+        ],
+      },
+      commands,
+    );
+    const putsBefore = store.puts.length;
+
+    const result = await setConfig(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        removals: ['TOKEN'],
+      },
+      commands,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.removed).toEqual(['TOKEN']);
+    expect(result.value.written).toEqual([]);
+    // DSN's value was never restated, so nothing was written to the store —
+    // a removal is not `replaceConfig`'s upload wearing a shorter name.
+    expect(store.puts.length).toBe(putsBefore);
+
+    const rows = await database()
+      .db.select()
+      .from(configItems)
+      .where(eq(configItems.componentId, component.id));
+    expect(rows.map((row) => row.key)).toEqual(['DSN']);
+  });
+
+  test('a key both set and removed in one call is refused', async () => {
+    const { component, target } = await fixture();
+
+    const result = await setConfig(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        entries: [{ key: 'TOKEN', value: 'one' }],
+        removals: ['TOKEN'],
+      },
+      await context(
+        registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+      ),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('INVALID_INPUT');
+  });
+
+  test('nothing to set and nothing to remove is refused', async () => {
+    const { component, target } = await fixture();
+
+    const result = await setConfig(
+      { componentId: component.id, targetId: target.id },
+      await context(
+        registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+      ),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('INVALID_INPUT');
+  });
+});
+
 describe('a config change produces a new Deploy', () => {
   test('the pair redeploys what is live, under a new configVersion', async () => {
     const { component, target } = await fixture();

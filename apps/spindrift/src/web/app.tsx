@@ -37,6 +37,7 @@ import { AppList } from './views/apps/list.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
 import {
   type RunJob,
+  type SetConfig,
   type SetReach,
   Workspace,
 } from './views/apps/workspace.tsx';
@@ -1189,6 +1190,49 @@ function WorkspaceScreen({
     }
   };
 
+  // The pair this workspace is showing (§10) — bound here, once, so `SetConfig`
+  // itself does not have to carry it on every call. Re-read on success for the
+  // same reason `handleSetReach` is: `configKeys` is a row this act just
+  // changed, and a key that was just deleted has to actually leave the list
+  // rather than being patched out by a guess about what the write did.
+  const handleSetConfig: SetConfig = async (change) => {
+    const pair =
+      state.type === 'success'
+        ? {
+            componentId: state.workspace.componentId,
+            targetId: state.workspace.targetId,
+          }
+        : { componentId: undefined, targetId: undefined };
+    if (pair.componentId === undefined || pair.targetId === undefined) {
+      return {
+        ok: false,
+        message: 'This App has no Component placed on a Target yet',
+      };
+    }
+    try {
+      const result = await command('setConfig', {
+        componentId: pair.componentId,
+        targetId: pair.targetId,
+        entries: [...change.entries],
+        removals: [...change.removals],
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return {
+        ok: true,
+        written: result.value.written,
+        removed: result.value.removed,
+        notDeployed: result.value.notDeployed,
+      };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Saving config failed',
+      };
+    }
+  };
+
   /**
    * Start one run (§17), then re-read: the list on the screen was written
    * before the run existed, and a run that does not appear reads as a press
@@ -1246,6 +1290,7 @@ function WorkspaceScreen({
         onNavigate={onNavigate}
         deletion={deletion}
         onSetReach={handleSetReach}
+        onSetConfig={handleSetConfig}
         {...(runs === null
           ? {}
           : {

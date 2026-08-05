@@ -524,6 +524,13 @@ export interface WorkspaceView {
   readonly urlLive: boolean;
   readonly release: string;
   readonly components: readonly ComponentView[];
+  /**
+   * Every key configured for this pair (§10), sorted — never a value. Core's
+   * store is write-only, so this is the same read `setConfig` uses to know
+   * what is already there, and it is the only shape the workspace is
+   * allowed to render.
+   */
+  readonly configKeys: readonly string[];
   readonly datastores: readonly DatastoreView[];
   readonly activity: readonly ActivityEntry[];
   /**
