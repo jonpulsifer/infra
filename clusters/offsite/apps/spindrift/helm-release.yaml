@@ -400,6 +400,10 @@ spec:
         # second one, and its `registry_namespace` output is this exact value.
         registry:
           - ghcr.io/jonpulsifer
+          # Docker Hub, added live in Settings with its stored credential; the
+          # declaration follows so the two documents agree. Only routes that
+          # can carry the credential publish here (§16).
+          - docker.io/jonpulsifer
           - northamerica-northeast1-docker.pkg.dev/trusted-builds/i
         verifier: ghcr.io/jonpulsifer/spindrift-verifier
         # The authority bluenose's Binary Authorization policy requires an
