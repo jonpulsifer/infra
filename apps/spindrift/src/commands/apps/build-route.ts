@@ -145,7 +145,17 @@ export const setAppBuildRoute: Command<
         reachable.length > 0
           ? reachable
           : context.manifest.supplyChain.registry.slice(0, 1);
-      if (!published.some((registry) => pullable.includes(registry))) {
+      // A reachable list speaks two spellings — the `ghcr.io/owner` namespace,
+      // and the bare host for a Target that reaches every namespace on one
+      // registry (`domain/desired-state.ts` sets that vocabulary). Published
+      // entries are always namespaces, so a bare host claims one as a prefix;
+      // equality alone would refuse every host-declared Target.
+      const meets = published.some((registry) =>
+        pullable.some(
+          (reach) => registry === reach || registry.startsWith(`${reach}/`),
+        ),
+      );
+      if (!meets) {
         return failed(
           'NOT_BUILDABLE',
           `${input.route} publishes to ${published.join(' and ') || 'no registry this installation configures'}, ` +

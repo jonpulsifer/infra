@@ -218,6 +218,27 @@ describe('an App choosing its build route', () => {
   });
 
   /**
+   * The other spelling a reachable list is allowed to use: a bare host, for a
+   * Target that reaches every namespace on one registry. The route publishes
+   * to a namespace under that host, so the two meet — refusing here was the
+   * bug this test pins, because live Targets declare hosts.
+   */
+  test('a Target declaring a bare registry host accepts a route publishing a namespace under it', async () => {
+    await ctx.db
+      .update(targets)
+      .set({
+        discovery: {
+          reachableRegistries: ['registry.example.test'],
+        } as never,
+      })
+      .where(eq(targets.id, targetId));
+
+    const result = await setAppBuildRoute({ appId, route: 'managed' }, ctx);
+
+    expect(result.ok).toBe(true);
+  });
+
+  /**
    * The Target's threshold is the Target's, so raising it takes the choice away
    * — which is the direction being wrong has to fail in.
    */
