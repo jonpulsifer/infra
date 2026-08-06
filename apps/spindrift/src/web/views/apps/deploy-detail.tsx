@@ -68,7 +68,7 @@ import {
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
 import { Logo } from '../../ui/logo.tsx';
-import { cn } from '../../ui/utils.ts';
+import { cn, normaliseUrl } from '../../ui/utils.ts';
 
 /**
  * The mark and the name for a build route's platform.
@@ -500,7 +500,7 @@ function UrlBlock({ view }: { view: DeployView }) {
     <div className="ml-auto flex flex-col items-end gap-1 text-right">
       <Eyebrow>{serving || previous ? 'Serving' : 'Reserved'}</Eyebrow>
       <a
-        href={`https://${view.url}`}
+        href={normaliseUrl(view.url)}
         className={cn(
           'font-mono text-base',
           serving || previous

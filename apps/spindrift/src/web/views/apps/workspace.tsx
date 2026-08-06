@@ -41,7 +41,7 @@ import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
-import { cn } from '../../ui/utils.ts';
+import { cn, normaliseUrl } from '../../ui/utils.ts';
 import {
   AUTH_NOTE,
   AUTHS,
@@ -205,7 +205,7 @@ export function Workspace({
             />
           ) : null}
           <Button variant="outline" asChild>
-            <a href={`https://${view.url}`}>
+            <a href={normaliseUrl(view.url)}>
               Open app <ExternalLink aria-hidden="true" />
             </a>
           </Button>
@@ -286,7 +286,7 @@ function Hero({
             : 'Your App has no release serving yet'}
         </p>
         <a
-          href={`https://${view.url}`}
+          href={normaliseUrl(view.url)}
           className={cn(
             'font-mono text-[15px]',
             view.urlLive
