@@ -31,17 +31,17 @@ import type {
 } from '../config/manifest.schema.ts';
 import {
   capabilitiesOfRow,
-  hostOf,
   type TargetCapabilities,
   type TargetDiscovery,
 } from './capabilities.ts';
-import type {
-  ArtifactType,
-  Auth,
-  ComponentKind,
-  Platform,
-  Reach,
-  Resources,
+import {
+  type ArtifactType,
+  type Auth,
+  type ComponentKind,
+  type Platform,
+  pullableFrom,
+  type Reach,
+  type Resources,
 } from './desired-state.ts';
 
 /**
@@ -529,7 +529,7 @@ export function exclusionsFor(
     artifactTypeFor(requirements.kind, target) === 'image' &&
     can.reachableRegistries.length > 0 &&
     !requirements.registries.some((registry) =>
-      can.reachableRegistries.includes(hostOf(registry)),
+      pullableFrom(registry, can.reachableRegistries),
     )
   ) {
     reasons.push('REGISTRY_UNREACHABLE');

@@ -87,13 +87,27 @@ export function artifactAddress(
   return artifact.refs.find((ref) => pullableFrom(ref, reachable)) ?? null;
 }
 
-/** Whether one reference sits under any of the registries a Target named. */
-function pullableFrom(ref: string, reachable: readonly string[]): boolean {
+/**
+ * Whether one reference sits under any of the registries a Target named.
+ *
+ * The one predicate for "can this Target pull this": `artifactAddress` above
+ * calls it with a concrete pull address, and `exclusionsFor` in
+ * `placement.ts` calls it with the registry namespace itself, before a Build
+ * exists to produce an address — which is exactly what the equality branch is
+ * for, since a real reference always carries more path than its registry and
+ * never needs it.
+ */
+export function pullableFrom(
+  ref: string,
+  reachable: readonly string[],
+): boolean {
   return reachable.some(
     (registry) =>
+      ref === registry ||
       // The namespace spelling, which is the ordinary one. The trailing slash
       // is what stops `…/i` from claiming a reference in `…/images`.
-      ref.startsWith(`${registry}/`) || registryHostOf(ref) === registry,
+      ref.startsWith(`${registry}/`) ||
+      registryHostOf(ref) === registry,
   );
 }
 

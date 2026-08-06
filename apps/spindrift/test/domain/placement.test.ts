@@ -313,6 +313,20 @@ describe('registry reachability at Place', () => {
     ).toEqual([]);
   });
 
+  test('a Target declaring host/namespace is a candidate for that same registry', () => {
+    // The live bug: `folly` declares `ghcr.io/jonpulsifer` (a namespace, not a
+    // bare host) because its packages are public and need no credential. This
+    // is `artifactAddress`'s "matches the namespace spelling an operator
+    // actually writes" (`test/domain/artifact-address.test.ts`), pinned here
+    // too so the two call sites cannot drift apart again.
+    expect(
+      exclusionsFor(
+        target({ discovery: { reachableRegistries: ['ghcr.io/jonpulsifer'] } }),
+        requirements({ registries: ['ghcr.io/jonpulsifer'] }),
+      ),
+    ).toEqual([]);
+  });
+
   test('declaring nothing is no restriction, not "reaches nothing"', () => {
     // Every Target on this installation, until an operator says otherwise —
     // reading an empty list as a refusal would exclude all of them.

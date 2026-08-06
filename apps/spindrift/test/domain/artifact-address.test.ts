@@ -52,6 +52,11 @@ describe('the address a Target pulls an artifact by', () => {
    * `ghcr.io/jonpulsifer`. That never equals `ghcr.io`, so the artifact was
    * refused with "carries no address this Target can pull it by" while sitting
    * in the exact registry the Target had named.
+   *
+   * `test/domain/placement.test.ts`'s "a Target declaring host/namespace is a
+   * candidate for that same registry" pins the same `ghcr.io/jonpulsifer`
+   * spelling through `exclusionsFor`, so a fix here alone is not enough to go
+   * green — both call sites share `pullableFrom` and both tests have to pass.
    */
   test('matches the namespace spelling an operator actually writes', () => {
     expect(
