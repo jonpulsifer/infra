@@ -904,6 +904,41 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   );
 }
 
+/**
+ * A refreshed workspace, keeping the log lines the socket has accumulated.
+ *
+ * A read carries only the server's first page of a runtime tail — every line
+ * after it arrived over a socket and lives in this screen's state — so taking
+ * `runtime` wholesale would wipe the log on every refresh.
+ *
+ * The lines are kept only where both reads are about the same Component on the
+ * same Target. The selection can move while a refresh is in flight, and a
+ * Component's output rendered under another Component's name is a worse answer
+ * than the empty card the next socket page fills.
+ *
+ * Exported for `test/web/workspace-refresh.test.ts`: this is where the
+ * selection and the socket meet, and reaching it through the mounted screen
+ * means pressing a row, which the DOM shim does not simulate.
+ */
+export function refreshedWorkspace(
+  current: WorkspaceView,
+  fresh: WorkspaceView,
+): WorkspaceView {
+  const accumulated = current.runtime;
+  if (
+    accumulated.kind !== 'stream' ||
+    fresh.runtime.kind !== 'stream' ||
+    accumulated.componentId !== fresh.runtime.componentId ||
+    accumulated.targetId !== fresh.runtime.targetId
+  ) {
+    return fresh;
+  }
+  return {
+    ...fresh,
+    runtime: { ...fresh.runtime, lines: accumulated.lines },
+  };
+}
+
 function WorkspaceScreen({
   appName,
   onNavigate,
@@ -996,6 +1031,11 @@ function WorkspaceScreen({
     state.type === 'success' && isInFlight(state.workspace.phase);
   useEffect(() => {
     if (!appName) return;
+    // Dropped by the cleanup, the same way the read above drops its own: the
+    // interval is re-armed whenever the selection moves, so a response still in
+    // flight across that press is about a Component this screen has left, and
+    // writing it would put that Component back on screen until the next tick.
+    let live = true;
     const timer = setInterval(
       () => {
         // With the selection, or the refresh would put the App's first
@@ -1005,30 +1045,15 @@ function WorkspaceScreen({
           ...(component === null ? {} : { component }),
         })
           .then((result) => {
-            if (!result.ok) return;
+            if (!live || !result.ok) return;
             const fresh = result.value.workspace;
-            setState((current) => {
-              // The runtime tail is accumulated by a socket, not by this read —
-              // a fresh workspace carries only the server's first page of it,
-              // so taking it wholesale would wipe the log every few seconds.
-              if (
-                current.type === 'success' &&
-                current.workspace.runtime.kind === 'stream' &&
-                fresh.runtime.kind === 'stream'
-              ) {
-                return {
-                  type: 'success',
-                  workspace: {
-                    ...fresh,
-                    runtime: {
-                      ...fresh.runtime,
-                      lines: current.workspace.runtime.lines,
-                    },
-                  },
-                };
-              }
-              return { type: 'success', workspace: fresh };
-            });
+            setState((current) => ({
+              type: 'success',
+              workspace:
+                current.type === 'success'
+                  ? refreshedWorkspace(current.workspace, fresh)
+                  : fresh,
+            }));
           })
           // A failed refresh is not a reason to replace a workspace that is on
           // screen and readable with an error page. The next tick tries again.
@@ -1036,7 +1061,10 @@ function WorkspaceScreen({
       },
       inFlight ? 2_000 : 20_000,
     );
-    return () => clearInterval(timer);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
   }, [appName, component, inFlight]);
 
   const runtime =
