@@ -98,7 +98,7 @@ export function clusterInput(
 ): KubernetesConnectInput {
   return {
     kind: 'cluster',
-    name: 'cluster',
+    vessel: 'cluster',
     apiServer: 'https://cluster.example.test',
     namespace: 'apps',
     delivery: {
@@ -159,7 +159,7 @@ export function cloudInput(
 ): CloudConnectInput {
   return {
     kind: 'gcp-project',
-    name: 'cloud',
+    vessel: 'cloud',
     project: 'example-vessel',
     region: 'somewhere',
     runEndpoint: CLOUD_ENDPOINTS.run,
@@ -260,12 +260,13 @@ export async function insertVessel(
  */
 export function deployTargetFor(
   adapter: TargetAdapter,
-  name = `target-${adapter}`,
+  vesselName = `vessel-${adapter}`,
 ): DeployTargetRef {
   const vessel = vesselFor(adapter);
   return deployTargetOf(
-    { name, adapter, connection: connectionFor(adapter) },
+    { adapter, connection: connectionFor(adapter) },
     {
+      name: vesselName,
       location: vessel.location!,
       servedHosts: vessel.servedHosts ?? null,
       reachableRegistries: vessel.reachableRegistries ?? null,
@@ -277,7 +278,6 @@ export function deployTargetFor(
 export function targetValues(overrides: Partial<NewTarget> = {}): NewTarget {
   const adapter = overrides.adapter ?? 'kubernetes';
   return {
-    name: `target-${crypto.randomUUID()}`,
     adapter,
     rank: 0,
     // The isolated database seeds one vessel per kind; a Target that wants its

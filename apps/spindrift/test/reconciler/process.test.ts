@@ -36,6 +36,7 @@ import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import {
   FIXTURE_DEPLOYMENT_ENV,
   fixtureManifest,
+  insertVessel,
   targetValues,
 } from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
@@ -401,14 +402,12 @@ async function pendingBuildNoRouteSatisfies() {
     .insert(components)
     .values({ appId: app!.id, name: 'web', kind: 'service' })
     .returning();
+  const vessel = await insertVessel(db, 'kubernetes', {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
   const [target] = await db
     .insert(targets)
-    .values(
-      targetValues({
-        name: `cluster-${crypto.randomUUID()}`,
-        adapter: 'kubernetes',
-      }),
-    )
+    .values(targetValues({ vesselId: vessel.id, adapter: 'kubernetes' }))
     .returning();
   await db
     .insert(componentTargetDesired)
@@ -439,14 +438,12 @@ async function pendingDeploy() {
       auth: 'proxy',
     })
     .returning();
+  const vessel = await insertVessel(db, 'kubernetes', {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
   const [target] = await db
     .insert(targets)
-    .values(
-      targetValues({
-        name: `cluster-${crypto.randomUUID()}`,
-        adapter: 'kubernetes',
-      }),
-    )
+    .values(targetValues({ vesselId: vessel.id, adapter: 'kubernetes' }))
     .returning();
   const [build] = await db
     .insert(builds)

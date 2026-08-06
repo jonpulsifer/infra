@@ -43,13 +43,13 @@ import {
   components,
   componentTargetDesired,
   deploys,
-  targets,
   vessels,
 } from '../../db/schema.ts';
 import {
   deployTargetOf,
   hasTargetConnection,
   hasVesselLocation,
+  targetRowLabel,
 } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
@@ -90,10 +90,11 @@ export const unplaceComponent: Command<
     );
   }
 
-  const [target] = await context.db
-    .select()
-    .from(targets)
-    .where(eq(targets.id, input.targetId));
+  // With the boundary, because half of what names a Target lives there.
+  const target = await context.db.query.targets.findFirst({
+    where: (targets, { eq }) => eq(targets.id, input.targetId),
+    with: { vessel: true },
+  });
   if (target === undefined) {
     return failed('NOT_FOUND', `there is no Target with id ${input.targetId}`);
   }
@@ -110,7 +111,7 @@ export const unplaceComponent: Command<
   if (desired === undefined) {
     return failed(
       'NOT_FOUND',
-      `'${component.name}' is not placed on '${target.name}'`,
+      `'${component.name}' is not placed on ${targetRowLabel(target)}`,
     );
   }
 
@@ -145,7 +146,7 @@ export const unplaceComponent: Command<
     ) {
       return failed(
         'NOT_REMOVABLE',
-        `'${target.name}' is not connected, so nothing can be torn down there`,
+        `${targetRowLabel(target)} is not connected, so nothing can be torn down there`,
       );
     }
     const adapter = context.adapters.deploy(target.adapter);

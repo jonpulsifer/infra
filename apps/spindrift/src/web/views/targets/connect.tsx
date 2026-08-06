@@ -77,9 +77,10 @@ type Scan =
 
 export function ConnectTargetForm(props: {
   kind: VesselKind;
-  name: string;
-  /** True on the "add a Target" path, where no manifest seed named it. */
-  nameEditable?: boolean;
+  /** The boundary being connected. Every surface on it is registered. */
+  vessel: string;
+  /** True on the "add a Vessel" path, where no manifest seed named it. */
+  vesselEditable?: boolean;
   /**
    * The address to start from, which is only ever *this* Target's own.
    *
@@ -91,7 +92,8 @@ export function ConnectTargetForm(props: {
    * operator to restate the one fact the row is certain of.
    */
   apiServer?: string;
-  targets: readonly string[];
+  /** The surfaces this one act registers on that boundary. */
+  surfaces: readonly string[];
   proposal: TargetConnectionProposal;
   connecting: boolean;
   onConnect: (input: ConnectTargetInput) => void;
@@ -111,13 +113,13 @@ export function ConnectTargetForm(props: {
 
 function Heading({
   kind,
-  name,
-  targets,
+  vessel,
+  surfaces,
   proposal,
 }: {
   kind: VesselKind;
-  name: string;
-  targets: readonly string[];
+  vessel: string;
+  surfaces: readonly string[];
   proposal: TargetConnectionProposal;
 }) {
   return (
@@ -128,7 +130,7 @@ function Heading({
         ) : (
           <Layers aria-hidden="true" className="size-4 text-muted-foreground" />
         )}
-        <span className="font-mono text-sm font-semibold">{name}</span>
+        <span className="font-mono text-sm font-semibold">{vessel}</span>
         <Badge tone="idle">
           {kind === 'cluster' ? 'cluster' : 'cloud project'}
         </Badge>
@@ -139,16 +141,18 @@ function Heading({
           </span>
         ) : null}
       </div>
-      {targets.length > 1 ? (
+      {surfaces.length > 1 ? (
         <p className="text-xs text-muted-foreground">
           Registers{' '}
-          {targets.map((target, index) => (
-            <span key={target}>
+          {surfaces.map((surface, index) => (
+            <span key={surface}>
               {index > 0 ? ' and ' : ''}
-              <span className="font-mono">{target}</span>
+              <span className="font-mono">
+                {vessel}/{surface}
+              </span>
             </span>
           ))}{' '}
-          — one project, both of its Targets.
+          — one project, both of its surfaces.
         </p>
       ) : null}
     </>
@@ -158,23 +162,23 @@ function Heading({
 // --- The cluster flow -------------------------------------------------------
 
 function ConnectCluster({
-  name,
-  nameEditable = false,
+  vessel,
+  vesselEditable = false,
   apiServer: knownApiServer = '',
   proposal,
   connecting,
   onConnect,
   onCancel,
 }: {
-  name: string;
-  nameEditable?: boolean;
+  vessel: string;
+  vesselEditable?: boolean;
   apiServer?: string;
   proposal: TargetConnectionProposal;
   connecting: boolean;
   onConnect: (input: ConnectTargetInput) => void;
   onCancel: () => void;
 }) {
-  const [targetName, setTargetName] = useState(name);
+  const [vesselName, setVesselName] = useState(vessel);
   // Per-instance, so never proposed *from another Target*: this is the one field
   // that names *this* cluster, and a second cluster prefilled with the first
   // one's address would read as correct and deploy somewhere else. The caller
@@ -206,18 +210,18 @@ function ConnectCluster({
     }
   };
 
-  const addressed = targetName.trim() !== '' && apiServer.trim() !== '';
+  const addressed = vesselName.trim() !== '' && apiServer.trim() !== '';
 
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-2">
-        {nameEditable ? (
+        {vesselEditable ? (
           <Field
-            name="target-name"
-            label="Target name"
-            value={targetName}
-            onChange={(event) => setTargetName(event.target.value)}
-            hint="What this Target is called here. Placement and rank use it."
+            name="vessel-name"
+            label="Vessel name"
+            value={vesselName}
+            onChange={(event) => setVesselName(event.target.value)}
+            hint="What this boundary is called here. Every surface on it is named for it."
           />
         ) : null}
         <Field
@@ -274,7 +278,7 @@ function ConnectCluster({
       {scan.state === 'read' ? (
         <ClusterComponents
           key={reads}
-          name={targetName.trim()}
+          vessel={vesselName.trim()}
           apiServer={apiServer.trim()}
           probed={scan.probed}
           proposal={proposal}
@@ -295,7 +299,7 @@ function ConnectCluster({
  * a stale pick that the new probe no longer offers.
  */
 function ClusterComponents({
-  name,
+  vessel,
   apiServer,
   probed,
   proposal,
@@ -303,7 +307,7 @@ function ClusterComponents({
   onConnect,
   onCancel,
 }: {
-  name: string;
+  vessel: string;
   apiServer: string;
   probed: Probed;
   proposal: TargetConnectionProposal;
@@ -364,7 +368,7 @@ function ClusterComponents({
     null;
 
   const choices: ClusterConnectChoices = {
-    name,
+    vessel,
     apiServer,
     namespace,
     deliveryNamespace,
@@ -393,7 +397,7 @@ function ClusterComponents({
 
   const servesFlux = probe.deliveryFlavours.includes('flux-helmrelease');
   const ready =
-    name !== '' &&
+    vessel !== '' &&
     namespace !== '' &&
     deliveryNamespace !== '' &&
     chosenSource !== null;
@@ -645,13 +649,13 @@ function Declaration({
  * carried from a working cloud Target; the project id never is.
  */
 function ConnectCloud({
-  name,
+  vessel,
   proposal,
   connecting,
   onConnect,
   onCancel,
 }: {
-  name: string;
+  vessel: string;
   proposal: TargetConnectionProposal;
   connecting: boolean;
   onConnect: (input: ConnectTargetInput) => void;
@@ -705,7 +709,7 @@ function ConnectCloud({
           onClick={() =>
             onConnect({
               kind: 'gcp-project',
-              name,
+              vessel,
               project: project.trim(),
               region: region.trim(),
               runEndpoint: runEndpoint.trim(),

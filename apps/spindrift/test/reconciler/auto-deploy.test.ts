@@ -31,7 +31,11 @@ import {
   SupplyChainHarness,
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -53,9 +57,12 @@ async function deployableApp(autoDeploy: boolean) {
     .insert(components)
     .values({ appId: app!.id, name: 'web', kind: 'service', expose: true })
     .returning();
+  const vessel = await insertVessel(db, 'kubernetes', {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
   const [target] = await db
     .insert(targets)
-    .values(targetValues({ name: `cluster-${crypto.randomUUID()}` }))
+    .values(targetValues({ vesselId: vessel.id }))
     .returning();
   await db.insert(componentTargetDesired).values({
     componentId: component!.id,

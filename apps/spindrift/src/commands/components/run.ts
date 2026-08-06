@@ -27,6 +27,7 @@ import {
   deployTargetOf,
   hasTargetConnection,
   hasVesselLocation,
+  targetLabel,
 } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
@@ -94,7 +95,7 @@ export const runComponent: Command<
   ) {
     return failed(
       'NOT_RUNNABLE',
-      `${placed.target.name} is not connected, so nothing can be started on it`,
+      `${targetLabel({ vessel: placed.vessel.name, adapter: placed.target.adapter })} is not connected, so nothing can be started on it`,
     );
   }
   const adapter = context.adapters.deploy(placed.target.adapter);

@@ -244,8 +244,7 @@ spec:
           reachableRegistries:
             - northamerica-northeast1-docker.pkg.dev
       targets:
-        - name: offsite
-          vessel: offsite
+        - vessel: offsite
           # Every reach: this cluster has a load-balancer address on the lab net
           # and a Cloudflare tunnel in front of it.
           reaches: [none, private, public]
@@ -314,8 +313,7 @@ spec:
                   # itself, which the chart always admits as a sibling.
                   allowedNamespaces:
                     - oauth2-proxy
-        - name: folly
-          vessel: folly
+        - vessel: folly
           # No tunnel of its own is named to Spindrift, so this Target serves
           # what its gateway's RFC1918 address reaches and nothing beyond it.
           # Adding one is this list plus `dns.tunnelHostname`, either here or on
@@ -384,8 +382,7 @@ spec:
                   # always admits as a sibling.
                   allowedNamespaces:
                     - oauth2-proxy
-        - name: bluenose-cloudrun
-          vessel: bluenose
+        - vessel: bluenose
           adapter: cloudrun
           connection:
             region: northamerica-northeast1
@@ -403,8 +400,7 @@ spec:
             # the controller's `actAs` on it are declared in
             # terraform/gcp/projects/bluenose/iam.tf for exactly this.
             serviceAccount: spindrift-runtime@bluenose.iam.gserviceaccount.com
-        - name: bluenose-static
-          vessel: bluenose
+        - vessel: bluenose
           adapter: static
           connection:
             endpoint: https://firebasehosting.googleapis.com

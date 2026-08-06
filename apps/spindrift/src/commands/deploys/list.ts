@@ -18,6 +18,7 @@
 import { inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import type { DeployLedgerItem, DeployPhase } from '../../web/model.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
@@ -104,7 +105,7 @@ export async function releasesOf(
     limit: limit + 1,
     with: {
       component: { with: { app: true } },
-      target: true,
+      target: { with: { vessel: true } },
       build: true,
     },
   });
@@ -136,7 +137,7 @@ export async function releasesOf(
       componentId: row.componentId,
       targetId: row.targetId,
       component: row.component.name,
-      target: row.target.name,
+      target: targetRowLabel(row.target),
       commit: row.build.commit,
       phase: row.phase as DeployPhase,
       when: elapsedSince(row.createdAt, now),

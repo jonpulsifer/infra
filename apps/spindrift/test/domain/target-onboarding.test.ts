@@ -8,6 +8,7 @@
  * API server reads as correct and points somewhere else.
  */
 import { describe, expect, test } from 'bun:test';
+import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
   connectionProposal,
   type OnboardingTargetRow,
@@ -26,7 +27,6 @@ const BLUENOSE_VESSEL = {
 } as const;
 
 const CLUSTER: OnboardingTargetRow = {
-  name: 'offsite',
   adapter: 'kubernetes',
   health: 'healthy',
   vessel: OFFSITE_VESSEL,
@@ -42,7 +42,6 @@ const CLUSTER: OnboardingTargetRow = {
 };
 
 const CLOUD_RUN: OnboardingTargetRow = {
-  name: 'bluenose-cloudrun',
   adapter: 'cloudrun',
   health: 'healthy',
   vessel: BLUENOSE_VESSEL,
@@ -55,7 +54,6 @@ const CLOUD_RUN: OnboardingTargetRow = {
 };
 
 const CLOUD_STATIC: OnboardingTargetRow = {
-  name: 'bluenose-static',
   adapter: 'static',
   health: 'healthy',
   vessel: BLUENOSE_VESSEL,
@@ -66,13 +64,12 @@ const CLOUD_STATIC: OnboardingTargetRow = {
 };
 
 function unconfigured(
-  name: string,
-  adapter: OnboardingTargetRow['adapter'],
+  adapter: TargetAdapter,
   vessel: OnboardingTargetRow['vessel'] = adapter === 'kubernetes'
     ? OFFSITE_VESSEL
     : BLUENOSE_VESSEL,
 ): OnboardingTargetRow {
-  return { name, adapter, health: 'unhealthy', connection: null, vessel };
+  return { adapter, health: 'unhealthy', connection: null, vessel };
 }
 
 describe('what is still waiting to be connected', () => {
@@ -90,61 +87,33 @@ describe('what is still waiting to be connected', () => {
 
   test('a cloud project is one act naming both of its Targets', () => {
     const pending = pendingConnections([
-      unconfigured('bluenose-cloudrun', 'cloudrun'),
-      unconfigured('bluenose-static', 'static'),
+      unconfigured('cloudrun'),
+      unconfigured('static'),
     ]);
 
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({
       kind: 'gcp-project',
-      name: 'bluenose',
-      targets: ['bluenose-cloudrun', 'bluenose-static'],
+      vessel: 'bluenose',
+      surfaces: ['cloudrun', 'static'],
     });
   });
 
   test('half a cloud project still names both Targets the act would write', () => {
-    const pending = pendingConnections([
-      CLOUD_RUN,
-      unconfigured('bluenose-static', 'static'),
-    ]);
+    const pending = pendingConnections([CLOUD_RUN, unconfigured('static')]);
 
     // Connecting re-registers the pair. Listing only the unconfigured half
     // would under-report what the button is about to touch.
-    expect(pending[0]?.targets).toEqual([
-      'bluenose-cloudrun',
-      'bluenose-static',
-    ]);
-  });
-
-  test('a Target whose name carries no adapter suffix is still offered', () => {
-    // This used to be dropped: the act's name was recovered by slicing the
-    // adapter suffix off the row's, so a row that carried none was
-    // unconnectable — a Target the screen listed nowhere and no button could
-    // reach. The boundary is a row now, so the name is read rather than
-    // reconstructed and the convention binds nothing.
-    expect(
-      pendingConnections([unconfigured('anything-at-all', 'cloudrun')]),
-    ).toEqual([
-      {
-        kind: 'gcp-project',
-        name: BLUENOSE_VESSEL.name,
-        targets: [
-          `${BLUENOSE_VESSEL.name}-cloudrun`,
-          `${BLUENOSE_VESSEL.name}-static`,
-        ],
-        proposal: { carriedFrom: null },
-      },
-    ]);
+    expect(pending[0]?.surfaces).toEqual(['cloudrun', 'static']);
   });
 
   test('a cluster is one act named for the vessel it sits on', () => {
-    expect(pendingConnections([unconfigured('folly', 'kubernetes')])).toEqual([
+    expect(pendingConnections([unconfigured('kubernetes')])).toEqual([
       {
         kind: 'cluster',
-        name: OFFSITE_VESSEL.name,
-        // One surface, so it takes the vessel's name unchanged: the suffix
-        // exists to tell siblings apart and there are none.
-        targets: [OFFSITE_VESSEL.name],
+        vessel: OFFSITE_VESSEL.name,
+        // One surface, so it is the whole list §13 gives a cluster.
+        surfaces: ['kubernetes'],
         proposal: { carriedFrom: null },
       },
     ]);
@@ -163,7 +132,7 @@ describe('what a connect may be prefilled with', () => {
     const proposal = connectionProposal([CLUSTER], 'cluster');
 
     expect(proposal).toEqual({
-      carriedFrom: 'offsite',
+      carriedFrom: 'offsite/kubernetes',
       namespace: 'spindrift-apps',
       deliveryFlavour: 'flux-helmrelease',
       sourceRef: { name: 'infra', namespace: 'flux-system' },
@@ -179,7 +148,7 @@ describe('what a connect may be prefilled with', () => {
     );
 
     expect(proposal).toEqual({
-      carriedFrom: 'bluenose-cloudrun',
+      carriedFrom: 'bluenose/cloudrun',
       region: 'northamerica-northeast1',
       runEndpoint: 'https://run.googleapis.example',
       policyEndpoint: 'https://binaryauthorization.googleapis.example',
@@ -189,23 +158,19 @@ describe('what a connect may be prefilled with', () => {
   });
 
   test('it prefers a healthy Target to copy from', () => {
-    const broken: OnboardingTargetRow = {
-      ...CLUSTER,
-      name: 'broken',
-      health: 'unhealthy',
-    };
+    const broken: OnboardingTargetRow = { ...CLUSTER, health: 'unhealthy' };
 
     // Copying a Target that does not work forward is the fastest way to turn
     // one broken Target into two.
     expect(connectionProposal([broken, CLUSTER], 'cluster')).toMatchObject({
-      carriedFrom: 'offsite',
+      carriedFrom: 'offsite/kubernetes',
     });
   });
 
   test('it falls back to an unhealthy Target rather than proposing nothing', () => {
     const broken: OnboardingTargetRow = { ...CLUSTER, health: 'unhealthy' };
     expect(connectionProposal([broken], 'cluster')).toMatchObject({
-      carriedFrom: 'offsite',
+      carriedFrom: 'offsite/kubernetes',
     });
   });
 });

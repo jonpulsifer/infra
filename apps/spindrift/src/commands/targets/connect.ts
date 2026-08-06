@@ -19,12 +19,13 @@
  * leave a website ambiguous between the two renderings. That is also why no
  * `Provider` noun exists: the shared thing is an argument to this command.
  *
- * Connect is **idempotent by name**. Re-running it re-inspects, keeps the
- * Target's id and rank, and — if it had been disconnected — re-adopts what it
- * stranded, by asking the adapter to `observe` each orphaned Deploy (§13:
- * "reconnect re-adopts via `observe`").
+ * Connect is **idempotent by `(vessel, adapter)`** — which is what a Target is,
+ * so there is nothing else it could be idempotent by. Re-running it re-inspects,
+ * keeps each Target's id and rank, and — if it had been disconnected — re-adopts
+ * what it stranded, by asking the adapter to `observe` each orphaned Deploy
+ * (§13: "reconnect re-adopts via `observe`").
  */
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { operatorValuesIssues } from '../../adapters/deploy/kubernetes/values.ts';
 import {
@@ -38,11 +39,14 @@ import {
 } from '../../domain/capabilities.ts';
 import {
   deployTargetOf,
-  surfaceNames,
   type TargetConnection,
   type TargetHealth,
 } from '../../domain/target.ts';
-import type { VesselKind, VesselLocation } from '../../domain/vessel.ts';
+import {
+  surfacesOf,
+  type VesselKind,
+  type VesselLocation,
+} from '../../domain/vessel.ts';
 import {
   inspectTarget,
   readoptTargetDeploys,
@@ -113,8 +117,8 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('cluster'),
-      /** The vessel's name. Its one surface takes it unchanged. */
-      name: targetNameSchema,
+      /** The boundary being connected, by name. Every surface on it is registered. */
+      vessel: targetNameSchema,
       /** §13's prerequisite is OIDC against this, not a credential for it. */
       apiServer: z.url(),
       /** Where an App's workloads land. Never created by Spindrift (§7). */
@@ -132,8 +136,8 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('gcp-project'),
-      /** The vessel's name. Both of its surfaces are derived from it. */
-      name: targetNameSchema,
+      /** The boundary being connected, by name. Both of its surfaces are registered. */
+      vessel: targetNameSchema,
       project: z.string().trim().min(1),
       region: z.string().trim().min(1),
       /**
@@ -176,7 +180,8 @@ export type ConnectTargetInput = z.infer<typeof connectTargetInput>;
 /** One registered Target, as the operator's confirmation shows it. */
 export interface ConnectedTarget {
   readonly id: string;
-  readonly name: string;
+  /** The boundary it is a surface on — the two together are what name it. */
+  readonly vessel: string;
   readonly adapter: TargetAdapter;
   readonly rank: number;
   readonly health: TargetHealth;
@@ -300,7 +305,10 @@ export const connectTarget: Command<
   // surfaces would then be split across.
   const desiredVessel = vesselFor(input);
   const existingVessel = (
-    await context.db.select().from(vessels).where(eq(vessels.name, input.name))
+    await context.db
+      .select()
+      .from(vessels)
+      .where(eq(vessels.name, input.vessel))
   )[0];
   const vessel =
     existingVessel === undefined
@@ -308,7 +316,7 @@ export const connectTarget: Command<
           await context.db
             .insert(vessels)
             .values({
-              name: input.name,
+              name: input.vessel,
               ...desiredVessel,
               createdAt: now,
               updatedAt: now,
@@ -323,19 +331,31 @@ export const connectTarget: Command<
             .returning()
         )[0]!;
 
-  for (const { name, adapter } of surfaceNames(input.kind, input.name)) {
+  // Idempotent by `(vessel, adapter)`, which is what a Target *is*: reconnecting
+  // re-adopts the surface that is already there rather than registering a second
+  // one competing for the same workloads.
+  for (const adapter of surfacesOf(input.kind)) {
     const existing = (
-      await context.db.select().from(targets).where(eq(targets.name, name))
+      await context.db
+        .select()
+        .from(targets)
+        .where(
+          and(eq(targets.vesselId, vessel.id), eq(targets.adapter, adapter)),
+        )
     )[0];
 
     const connection = connectionFor(input, adapter);
     // The flat view the adapter takes, composed from the surface just built and
     // the boundary above it — the same composition the loops perform.
     const ref = deployTargetOf(
-      { name, adapter, connection },
+      { adapter, connection },
       // Built from what was just written rather than re-read: `vesselFor`
       // always states a location, which the nullable column cannot know.
-      { ...desiredVessel, location: desiredVessel.location },
+      {
+        ...desiredVessel,
+        name: input.vessel,
+        location: desiredVessel.location,
+      },
     );
     // One pass of the same loop §13 runs on a schedule — not a second notion of
     // what "healthy" means that happens to run at connect time.
@@ -352,7 +372,6 @@ export const connectTarget: Command<
       const [row] = await context.db
         .insert(targets)
         .values({
-          name,
           adapter,
           vesselId: vessel.id,
           connection,
@@ -368,7 +387,7 @@ export const connectTarget: Command<
         .returning();
       registered.push({
         id: row!.id,
-        name,
+        vessel: input.vessel,
         adapter,
         rank: row!.rank,
         health,
@@ -380,10 +399,6 @@ export const connectTarget: Command<
     const [row] = await context.db
       .update(targets)
       .set({
-        // A reconnect may move a surface onto a different vessel — connecting
-        // the same name against another project is a correction, not a second
-        // Target.
-        vesselId: vessel.id,
         connection,
         health,
         prerequisites,
@@ -408,7 +423,7 @@ export const connectTarget: Command<
 
     registered.push({
       id: row!.id,
-      name,
+      vessel: input.vessel,
       adapter,
       rank: row!.rank,
       health,

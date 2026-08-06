@@ -114,7 +114,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
 
     targetsList.push({
       id: target.id,
-      name: target.name,
+      vessel: target.vessel.name,
       adapter: target.adapter,
       rank: target.rank,
       health: target.health,
@@ -133,7 +133,11 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
       configured: target.connection !== null,
       inspectedAt: target.inspectedAt?.toISOString() ?? null,
       connectionDivergence: targetConnectionDivergence(
-        context.manifest.targets.find((seed) => seed.name === target.name),
+        context.manifest.targets.find(
+          (seed) =>
+            seed.vessel === target.vessel.name &&
+            seed.adapter === target.adapter,
+        ),
         target.connection,
       ),
       // Carried from this Target alone, which is the whole difference between
@@ -182,7 +186,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         const candidate = placement.candidates[0]!;
         optionsList.push({
           targetId: target.id,
-          name: target.name,
+          vessel: target.vessel.name,
           adapter: target.adapter,
           rank: target.rank,
           candidate: true,
@@ -195,7 +199,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         const excluded = placement.nonCandidates[0]!;
         optionsList.push({
           targetId: target.id,
-          name: target.name,
+          vessel: target.vessel.name,
           adapter: target.adapter,
           rank: target.rank,
           candidate: false,
@@ -226,7 +230,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
 
       optionsList.push({
         targetId: target.id,
-        name: target.name,
+        vessel: target.vessel.name,
         adapter: target.adapter,
         rank: target.rank,
         candidate: false,

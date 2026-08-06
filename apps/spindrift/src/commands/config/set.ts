@@ -42,7 +42,6 @@ import {
   configItems,
   PINNED_ENVIRONMENT,
   type Target,
-  targets,
 } from '../../db/schema.ts';
 import { capabilitiesOfRow } from '../../domain/capabilities.ts';
 import {
@@ -52,6 +51,7 @@ import {
   VARIABLE_NAME,
 } from '../../domain/config.ts';
 import type { ComponentKind } from '../../domain/desired-state.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import {
   checkDeployable,
   deliveringConfig,
@@ -220,10 +220,11 @@ export async function configSubject(
     };
   }
 
-  const [target] = await context.db
-    .select()
-    .from(targets)
-    .where(eq(targets.id, input.targetId));
+  // With the boundary, because half of what names a Target lives there.
+  const target = await context.db.query.targets.findFirst({
+    where: (targets, { eq }) => eq(targets.id, input.targetId),
+    with: { vessel: true },
+  });
   if (target === undefined) {
     return {
       failure: {
@@ -242,7 +243,7 @@ export async function configSubject(
     return {
       failure: {
         code: 'NOT_DEPLOYABLE',
-        message: `${target.name} reaches no secret store this installation can write to, so config set here would be delivered by nobody`,
+        message: `${targetRowLabel(target)} reaches no secret store this installation can write to, so config set here would be delivered by nobody`,
       },
     };
   }

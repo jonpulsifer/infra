@@ -26,12 +26,17 @@ import {
   componentTargetDesired,
   targets,
   users,
+  vessels,
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const baseManifest = await fixtureManifest();
@@ -59,15 +64,21 @@ describe('an App choosing its build route', () => {
     await db.delete(components);
     await db.delete(apps);
     await db.delete(targets);
+    // `seed` can run more than once per test (a test that raises the Target's
+    // level calls it again), so the vessel it mints has to go with the Target
+    // it belonged to — `vessels_name_unique` would otherwise refuse the second
+    // insert of the same fixture name.
+    await db.delete(vessels).where(eq(vessels.name, 'target-a'));
     await db.delete(users);
 
     const [operator] = await db
       .insert(users)
       .values({ displayName: 'Operator' })
       .returning();
+    const vessel = await insertVessel(db, 'kubernetes', { name: 'target-a' });
     const [target] = await db
       .insert(targets)
-      .values(targetValues({ name: 'target-a', rank: 1, minBuildLevel }))
+      .values(targetValues({ vesselId: vessel.id, rank: 1, minBuildLevel }))
       .returning();
     targetId = target!.id;
     const [app] = await db

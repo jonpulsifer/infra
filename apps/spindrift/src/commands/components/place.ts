@@ -23,8 +23,9 @@
 
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { targets } from '../../db/schema.ts';
+import { targets, vessels } from '../../db/schema.ts';
 import { VARIABLE_NAME } from '../../domain/config.ts';
+import { targetLabel } from '../../domain/target.ts';
 import { carryReferences } from '../config/carry.ts';
 import { demandSentence, migrationFor } from '../config/migration.ts';
 import {
@@ -87,12 +88,16 @@ export const placeComponent: Command<
   const missing = migration.demanded.filter((key) => !supplied.has(key));
   if (missing.length > 0) {
     const [target] = await context.db
-      .select({ name: targets.name })
+      .select({ vessel: vessels.name, adapter: targets.adapter })
       .from(targets)
+      .innerJoin(vessels, eq(vessels.id, targets.vesselId))
       .where(eq(targets.id, input.targetId));
     return failed(
       'NOT_DEPLOYABLE',
-      demandSentence(missing, target?.name ?? input.targetId),
+      demandSentence(
+        missing,
+        target === undefined ? input.targetId : targetLabel(target),
+      ),
     );
   }
 

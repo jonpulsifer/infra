@@ -61,7 +61,7 @@ export const listApps: Command<
       source,
       kind: comp?.kind ?? 'service',
       phase: (deploy?.phase ?? 'PENDING') as DeployPhase,
-      target: target?.name ?? 'none',
+      target: target?.adapter ?? 'none',
       url: deploy?.url ?? app.vanityDomain ?? '',
       urlLive: deploy?.phase === 'LIVE',
       // `deploy.build` is a real Build row whenever `deploy` is — `deploys`

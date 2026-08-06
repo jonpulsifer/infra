@@ -38,8 +38,10 @@ import {
   components,
   componentTargetDesired,
   targets,
+  vessels,
 } from '../../db/schema.ts';
 import { publishableRegistries } from '../../domain/artifact-name.ts';
+import { targetLabel } from '../../domain/target.ts';
 import { buildRouteFor, refusalForChosenRoute } from '../builds/route.ts';
 import { type Command, failed, ok } from '../types.ts';
 
@@ -86,7 +88,8 @@ export const setAppBuildRoute: Command<
   const placements = await context.db
     .selectDistinct({
       id: targets.id,
-      name: targets.name,
+      vessel: vessels.name,
+      adapter: targets.adapter,
       // §3's derived half, as the standing loop last reported it — not the
       // connection's declaration, because what a Target can pull from is a fact
       // discovery refreshes and a connect-time snapshot rots.
@@ -98,6 +101,7 @@ export const setAppBuildRoute: Command<
       eq(components.id, componentTargetDesired.componentId),
     )
     .innerJoin(targets, eq(targets.id, componentTargetDesired.targetId))
+    .innerJoin(vessels, eq(vessels.id, targets.vesselId))
     .where(eq(components.appId, app.id));
 
   if (input.route !== null) {
@@ -124,7 +128,7 @@ export const setAppBuildRoute: Command<
       const refusal = refusalForChosenRoute(
         selection.candidates,
         input.route,
-        target.name,
+        targetLabel(target),
       );
       if (refusal !== null) return failed('NOT_BUILDABLE', refusal);
 
@@ -159,10 +163,10 @@ export const setAppBuildRoute: Command<
         return failed(
           'NOT_BUILDABLE',
           `${input.route} publishes to ${published.join(' and ') || 'no registry this installation configures'}, ` +
-            `and ${target.name} pulls from ${pullable.join(' or ')} — ` +
+            `and ${targetLabel(target)} pulls from ${pullable.join(' or ')} — ` +
             `so a build of ${app.name} on that route would produce an artifact ` +
-            `${target.name} cannot pull. Store a registry credential for one ` +
-            `${target.name} reaches, or leave ${app.name} on rank order.`,
+            `${targetLabel(target)} cannot pull. Store a registry credential for one ` +
+            `${targetLabel(target)} reaches, or leave ${app.name} on rank order.`,
         );
       }
     }
@@ -176,6 +180,6 @@ export const setAppBuildRoute: Command<
   return ok({
     appId: app.id,
     route: input.route,
-    targets: placements.map((target) => target.name),
+    targets: placements.map(targetLabel),
   });
 };

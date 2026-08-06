@@ -22,16 +22,18 @@ import {
   deploys,
   targets,
 } from '../../src/db/schema.ts';
-import {
-  defaultVesselId,
-  defaultVesselName,
-  withIsolatedDatabase,
-} from '../harness/db.ts';
+import { targetLabel } from '../../src/domain/target.ts';
+import { vesselKindFor } from '../../src/domain/vessel.ts';
+import { defaultVesselName, withIsolatedDatabase } from '../harness/db.ts';
 import {
   SupplyChainHarness,
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const manifest = await fixtureManifest();
@@ -122,9 +124,10 @@ async function scaffold(
   );
   if (!component.ok) throw new Error(component.failure.message);
 
+  const adapter = options.adapter ?? 'kubernetes';
   const [target] = await ctx.db
     .insert(targets)
-    .values(targetValues({ adapter: options.adapter ?? 'kubernetes' }))
+    .values(targetValues({ adapter }))
     .returning();
 
   await ctx.db.insert(componentTargetDesired).values({
@@ -137,6 +140,12 @@ async function scaffold(
     appId: app.value.appId,
     componentId: component.value.componentId,
     target: target!,
+    // `targetValues` leaves `vesselId` at the harness's shared per-kind
+    // fixture vessel, so this is the same label a screen reads off the row.
+    label: targetLabel({
+      vessel: defaultVesselName(vesselKindFor(adapter)),
+      adapter,
+    }),
   };
 }
 
@@ -146,7 +155,7 @@ describe('getBuildDetail command', () => {
     // the build loop to dispatch, and that is the whole act". The press still
     // has to land somewhere, and this is what it lands on.
     const ctx = context();
-    const { componentId, target, appName } = await scaffold(ctx, {
+    const { componentId, appName, label } = await scaffold(ctx, {
       prefix: 'queued',
     });
 
@@ -173,7 +182,7 @@ describe('getBuildDetail command', () => {
     expect(attempt.app).toBe(appName);
     // The desired row is what says where a Component belongs before any intent
     // has named a Target.
-    expect(attempt.target).toBe(target.name);
+    expect(attempt.target).toBe(label);
     expect(attempt.headline).toContain('Building on hosted runner');
     // No intent means nothing was placed and nothing can be rolled back to.
     expect(attempt.resources).toEqual([]);
@@ -555,7 +564,7 @@ describe('getAppWorkspace command', () => {
     if (!createdComp.ok) throw new Error(createdComp.failure.message);
     const [target] = await database()
       .db.insert(targets)
-      .values(targetValues({ adapter: 'static', name: 'cdn' }))
+      .values(targetValues({ adapter: 'static' }))
       .returning();
     await database().db.insert(componentTargetDesired).values({
       componentId: createdComp.value.componentId,
@@ -578,7 +587,7 @@ describe('getAppWorkspace command', () => {
       ok: true,
       value: {
         workspace: {
-          target: 'cdn',
+          target: 'static',
           phase: 'WAITING',
           release: expect.stringMatching(/^Build /),
           components: [
@@ -837,12 +846,14 @@ describe('getDeployDetail command', () => {
     expect(createdComp.ok).toBe(true);
     if (!createdComp.ok) return;
 
+    const metalVessel = await insertVessel(ctx.db, 'kubernetes', {
+      name: `Metal-${crypto.randomUUID().slice(0, 6)}`,
+    });
     const [targetRow] = await ctx.db
       .insert(targets)
       .values({
-        name: `Metal-${crypto.randomUUID().slice(0, 6)}`,
         adapter: 'kubernetes',
-        vesselId: defaultVesselId('cluster'),
+        vesselId: metalVessel.id,
         health: 'healthy',
         rank: 1,
         connection: {
@@ -895,7 +906,9 @@ describe('getDeployDetail command', () => {
     const { deploy } = result.value;
     expect(deploy.app).toBe(appName);
     expect(deploy.component).toBe('web');
-    expect(deploy.target).toBe(targetRow.name);
+    expect(deploy.target).toBe(
+      targetLabel({ vessel: metalVessel.name, adapter: 'kubernetes' }),
+    );
     expect(deploy.commit).toBe('7f3d2c1');
     expect(deploy.phase).toBe('LIVE');
     expect(deploy.urlLive).toBe(true);
@@ -930,12 +943,14 @@ describe('getDeployDetail command', () => {
     expect(createdComp.ok).toBe(true);
     if (!createdComp.ok) return;
 
+    const metalVessel = await insertVessel(ctx.db, 'kubernetes', {
+      name: `Metal-${crypto.randomUUID().slice(0, 6)}`,
+    });
     const [targetRow] = await ctx.db
       .insert(targets)
       .values({
-        name: `Metal-${crypto.randomUUID().slice(0, 6)}`,
         adapter: 'kubernetes',
-        vesselId: defaultVesselId('cluster'),
+        vesselId: metalVessel.id,
         health: 'healthy',
         rank: 1,
         connection: {
@@ -1650,7 +1665,12 @@ describe('deployApp command', () => {
     if (result.ok) return;
 
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
-    expect(result.failure.message).toContain(targetRow!.name);
+    expect(result.failure.message).toContain(
+      targetLabel({
+        vessel: defaultVesselName('cluster'),
+        adapter: 'kubernetes',
+      }),
+    );
     expect(result.failure.message).toContain('disconnected');
 
     // Nothing was written behind the refusal: no second Build, no intent.

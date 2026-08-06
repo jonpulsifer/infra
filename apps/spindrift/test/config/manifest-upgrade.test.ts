@@ -166,18 +166,23 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
 
   test('leave the Targets in order, carrying only their own surface', () => {
     // Rank is read from this array's order, so a rewrite that reordered it
-    // would silently re-rank the installation.
+    // would silently re-rank the installation. `01` predates the
+    // `dropTargetNames` step too, so the chained upgrade also takes the
+    // constructed `name` off every entry — asserted below as its own claim
+    // rather than folded into this array, since that is the newer step's
+    // whole job.
     const upgraded = upgradeManifestDocument(document) as {
-      targets: { name: string; vessel: string; connection?: object }[];
+      targets: { vessel: string; adapter: string; connection?: object }[];
     };
     expect(
-      upgraded.targets.map((target) => [target.name, target.vessel]),
+      upgraded.targets.map((target) => [target.vessel, target.adapter]),
     ).toEqual([
-      ['cluster', 'cluster'],
-      ['cloud-cloudrun', 'cloud'],
-      ['cloud-static', 'cloud'],
+      ['cluster', 'kubernetes'],
+      ['cloud', 'cloudrun'],
+      ['cloud', 'static'],
     ]);
     for (const target of upgraded.targets) {
+      expect(target).not.toHaveProperty('name');
       expect(Object.keys(target.connection ?? {})).not.toContain('apiServer');
       expect(Object.keys(target.connection ?? {})).not.toContain('project');
       expect(Object.keys(target.connection ?? {})).not.toContain('servedHosts');
@@ -188,7 +193,10 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('is a no-op on a document that already declares them', () => {
-    const current = snapshot('02-declared-vessels.yaml');
+    // `02` now upgrades too — `dropTargetNames` still takes its constructed
+    // `name` off every entry. `03` is the shape with neither gap, so this is
+    // where "already current" moved.
+    const current = snapshot('03-target-is-vessel-and-surface.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });

@@ -22,6 +22,7 @@ import {
   configItems,
   PINNED_ENVIRONMENT,
   targets,
+  vessels,
 } from '../../db/schema.ts';
 import { configScopeOf } from '../../domain/config.ts';
 import {
@@ -78,11 +79,13 @@ export async function configScopeFor(
     .select({
       app: apps.name,
       component: components.name,
-      target: targets.name,
+      vessel: vessels.name,
+      adapter: targets.adapter,
     })
     .from(components)
     .innerJoin(apps, eq(components.appId, apps.id))
     .innerJoin(targets, eq(targets.id, targetId))
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(components.id, componentId));
 
   return row === undefined ? null : configScopeOf(row);

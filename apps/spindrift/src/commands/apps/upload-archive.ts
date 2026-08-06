@@ -27,7 +27,7 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { builds, components, targets } from '../../db/schema.ts';
+import { builds, components } from '../../db/schema.ts';
 import type { ArtifactType } from '../../domain/desired-state.ts';
 import { digestSchema } from '../../domain/digest.ts';
 import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
@@ -92,10 +92,11 @@ export const uploadArchive: Command<
     );
   }
 
-  const [target] = await context.db
-    .select()
-    .from(targets)
-    .where(eq(targets.id, input.targetId));
+  // With the boundary, because half of what names a Target lives there.
+  const target = await context.db.query.targets.findFirst({
+    where: (targets, { eq }) => eq(targets.id, input.targetId),
+    with: { vessel: true },
+  });
   if (target === undefined) {
     return failed('NOT_FOUND', `there is no Target with id ${input.targetId}`);
   }

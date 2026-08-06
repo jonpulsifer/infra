@@ -57,6 +57,7 @@ import {
 import {
   clusterInput,
   fixtureManifest,
+  insertVessel,
   targetValues,
 } from '../harness/installation.ts';
 
@@ -148,12 +149,12 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     const ctx = context(harnessRegistry(adapterMap));
 
     // Connect target 1 (primary)
-    const primaryInput = clusterInput({ name: 'primary-k8s' });
+    const primaryInput = clusterInput({ vessel: 'primary-k8s' });
     const res1 = await connectTarget(primaryInput, ctx);
     expect(res1.ok).toBe(true);
 
     // Connect target 2 (secondary)
-    const secondaryInput = clusterInput({ name: 'secondary-k8s' });
+    const secondaryInput = clusterInput({ vessel: 'secondary-k8s' });
     const res2 = await connectTarget(secondaryInput, ctx);
     expect(res2.ok).toBe(true);
 
@@ -163,7 +164,7 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     if (!listRes.ok) return;
 
     expect(listRes.value.targets).toHaveLength(2);
-    const targetNames = listRes.value.targets.map((t) => t.name);
+    const targetNames = listRes.value.targets.map((t) => t.vessel);
     expect(targetNames).toContain('primary-k8s');
     expect(targetNames).toContain('secondary-k8s');
 
@@ -182,8 +183,8 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     ]);
     const ctx = context(harnessRegistry(adapterMap));
 
-    await connectTarget(clusterInput({ name: 'primary-k8s' }), ctx);
-    await connectTarget(clusterInput({ name: 'secondary-k8s' }), ctx);
+    await connectTarget(clusterInput({ vessel: 'primary-k8s' }), ctx);
+    await connectTarget(clusterInput({ vessel: 'secondary-k8s' }), ctx);
 
     await database()
       .db.update(targets)
@@ -196,7 +197,9 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
         },
       });
 
-    const allTargets = await database().db.select().from(targets);
+    const allTargets = await database().db.query.targets.findMany({
+      with: { vessel: true },
+    });
 
     const placementTargets = allTargets.map((t) =>
       placementTargetOf(t, { artifactTypes: ['image'], manifest }),
@@ -240,15 +243,27 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       .values({ appId: app!.id, name: 'web', kind: 'service', expose: true })
       .returning();
 
-    // Connect both Targets using targetValues helper
+    // Connect both Targets using targetValues helper, each on its own vessel.
+    const primaryVessel = await insertVessel(database().db, 'kubernetes', {
+      name: 'primary-k8s',
+    });
+    const secondaryVessel = await insertVessel(database().db, 'kubernetes', {
+      name: 'secondary-k8s',
+    });
     const [t1] = await database()
       .db.insert(targets)
-      .values(targetValues({ name: 'primary-k8s', adapter: 'kubernetes' }))
+      .values(
+        targetValues({ adapter: 'kubernetes', vesselId: primaryVessel.id }),
+      )
       .returning();
     const [t2] = await database()
       .db.insert(targets)
       .values(
-        targetValues({ name: 'secondary-k8s', adapter: 'kubernetes', rank: 1 }),
+        targetValues({
+          adapter: 'kubernetes',
+          vesselId: secondaryVessel.id,
+          rank: 1,
+        }),
       )
       .returning();
 
@@ -487,10 +502,17 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
       .db.insert(components)
       .values({ appId: app!.id, name: 'web', kind: 'service' })
       .returning();
+    const secondaryVessel = await insertVessel(database().db, 'kubernetes', {
+      name: 'secondary-k8s',
+    });
     const [t2] = await database()
       .db.insert(targets)
       .values(
-        targetValues({ name: 'secondary-k8s', adapter: 'kubernetes', rank: 1 }),
+        targetValues({
+          adapter: 'kubernetes',
+          vesselId: secondaryVessel.id,
+          rank: 1,
+        }),
       )
       .returning();
 
@@ -543,9 +565,12 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     const ctx = context(harnessRegistry(adapterMap, supplyChain));
 
     // 1. Target connection
-    const c1 = await connectTarget(clusterInput({ name: 'primary-k8s' }), ctx);
+    const c1 = await connectTarget(
+      clusterInput({ vessel: 'primary-k8s' }),
+      ctx,
+    );
     const c2 = await connectTarget(
-      clusterInput({ name: 'secondary-k8s' }),
+      clusterInput({ vessel: 'secondary-k8s' }),
       ctx,
     );
     expect(c1.ok).toBe(true);

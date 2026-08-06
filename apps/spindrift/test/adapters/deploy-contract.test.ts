@@ -111,7 +111,7 @@ const desired: DesiredState = {
   deploy: 'deploy-1',
   app: 'app',
   component: 'web',
-  target: target.name,
+  target: target.vessel,
   kind: 'service',
   artifact: { type: 'image', digest: 'sha256:beef', refs: [] },
   expose: true,

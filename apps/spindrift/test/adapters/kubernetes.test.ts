@@ -118,7 +118,7 @@ function target(
   connectionOverrides: Partial<KubernetesAdapterConnection> = {},
 ): DeployTarget {
   return {
-    name: 'cluster',
+    vessel: 'cluster',
     adapter: 'kubernetes',
     connection: connection(connectionOverrides),
   };

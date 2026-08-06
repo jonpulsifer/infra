@@ -14,7 +14,11 @@ import type {
 } from '../../src/commands/types.ts';
 import { builds, deploys, targets } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
@@ -140,9 +144,12 @@ describe('global operation ledgers', () => {
     const ctx = context();
     const first = await appComponent(ctx, 'alpha');
     const second = await appComponent(ctx, 'bravo');
+    const follyVessel = await insertVessel(ctx.db, 'kubernetes', {
+      name: 'Folly',
+    });
     const [target] = await ctx.db
       .insert(targets)
-      .values(targetValues({ name: 'Folly' }))
+      .values(targetValues({ vesselId: follyVessel.id }))
       .returning();
 
     const written: number[] = [];
@@ -188,7 +195,7 @@ describe('global operation ledgers', () => {
     expect(listed.value.deploys[0]).toMatchObject({
       appId: second.appId,
       component: 'web',
-      target: 'Folly',
+      target: 'Folly/kubernetes',
       phase: 'APPLYING',
       buildId: expect.any(Number),
     });
@@ -197,9 +204,12 @@ describe('global operation ledgers', () => {
   test('Deploy cursor keeps older rollback entries reachable', async () => {
     const ctx = context();
     const owner = await appComponent(ctx, 'many-deploys');
+    const manyVessel = await insertVessel(ctx.db, 'kubernetes', {
+      name: 'Many',
+    });
     const [target] = await ctx.db
       .insert(targets)
-      .values(targetValues({ name: 'Many' }))
+      .values(targetValues({ vesselId: manyVessel.id }))
       .returning();
     const [build] = await ctx.db
       .insert(builds)

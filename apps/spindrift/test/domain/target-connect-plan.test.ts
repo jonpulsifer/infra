@@ -33,7 +33,7 @@ import {
 } from '../../src/domain/target-onboarding.ts';
 
 const BASE: ClusterConnectChoices = {
-  name: 'metal',
+  vessel: 'metal',
   apiServer: 'https://cluster.invalid:6443',
   namespace: 'apps',
   deliveryNamespace: 'apps',
@@ -147,7 +147,6 @@ describe('a cluster connect plan', () => {
     if (parsed.data.adapter !== 'kubernetes') {
       throw new Error(`declared a ${parsed.data.adapter} Target`);
     }
-    expect(parsed.data.name).toBe('metal');
     expect(parsed.data.vessel).toBe('metal');
     expect(parsed.data.reaches).toEqual(plan.reaches);
     expect(parsed.data.connection?.chartValues).toEqual(plan.chartValues);

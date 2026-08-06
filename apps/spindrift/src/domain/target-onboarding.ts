@@ -1,7 +1,7 @@
 /**
  * What is left to connect, and what to propose for it (§13).
  *
- * The manifest seeds Target **identities**: a name, an adapter, and a rank,
+ * The manifest seeds Target **identities**: a vessel, an adapter, and a rank,
  * with connection facts optional. A seed with no connection produces a row
  * whose checklist reads "Target connection has not been configured" and whose
  * `connection` column is null — a real, visible, half-ready state, exactly as
@@ -15,10 +15,9 @@
  * Two jobs:
  *
  * 1. **Group Targets back into acts.** Connecting a cloud project registers
- *    both of its Targets (§13), so two unconfigured rows named
- *    `<project>-cloudrun` and `<project>-static` are *one* thing to do, named
- *    `<project>`. A screen listing two cards would reintroduce the second noun
- *    §13 removed.
+ *    both of its Targets (§13), so the `cloudrun` and `static` surfaces of one
+ *    project are *one* thing to do, named for the project. A screen listing two
+ *    cards would reintroduce the second noun §13 removed.
  * 2. **Propose what can honestly be proposed.** See
  *    {@link TargetConnectionProposal} — carried from a working Target of the
  *    same adapter, never from a literal, and never for a value that is
@@ -29,12 +28,18 @@ import type {
   PendingTargetConnection,
   TargetConnectionProposal,
 } from '../web/model.ts';
-import { surfaceNames, type TargetConnection } from './target.ts';
-import type { VesselKind } from './vessel.ts';
+import { type TargetConnection, targetLabel } from './target.ts';
+import { surfacesOf, type VesselKind } from './vessel.ts';
+
+/** The donor, spelled the way every other surface names a Target. */
+function labelOf(row: OnboardingTargetRow | undefined): string | null {
+  return row === undefined
+    ? null
+    : targetLabel({ vessel: row.vessel.name, adapter: row.adapter });
+}
 
 /** The columns this reasoning reads, without importing the table. */
 export interface OnboardingTargetRow {
-  readonly name: string;
   readonly adapter: TargetAdapter;
   readonly connection: TargetConnection | null;
   readonly health: 'healthy' | 'unhealthy';
@@ -76,7 +81,7 @@ function kubernetesProposal(
   // address — `https://kubernetes.default.svc` on an in-cluster install —
   // would read as correct and deploy somewhere else.
   return {
-    carriedFrom: from?.name ?? null,
+    carriedFrom: labelOf(from),
     namespace: connection.namespace,
     deliveryFlavour: connection.delivery.flavour,
     ...(connection.delivery.flavour === 'flux-helmrelease'
@@ -111,7 +116,7 @@ function cloudProposal(
   // cloud project and being handed the first project's id is the one mistake
   // this screen could make that nobody would catch by reading.
   return {
-    carriedFrom: run?.name ?? hosting?.name ?? null,
+    carriedFrom: labelOf(run ?? hosting),
     ...(runConnection === null
       ? {}
       : {
@@ -160,15 +165,13 @@ export function pendingConnections(
     const vessel = group[0]!.vessel;
     return {
       kind: vessel.kind,
-      name: vessel.name,
+      vessel: vessel.name,
       // Every surface the act will write, whether or not all of them are
       // unconfigured today: connecting re-registers the whole vessel, and
       // saying so is what stops the confirmation from under-reporting what it
       // is about to touch. Read off the vessel's kind rather than recovered
       // from a name.
-      targets: surfaceNames(vessel.kind, vessel.name).map(
-        (surface) => surface.name,
-      ),
+      surfaces: surfacesOf(vessel.kind),
       proposal: connectionProposal(rows, vessel.kind),
     };
   });
@@ -190,7 +193,8 @@ type Reach = 'none' | 'private' | 'public';
  * `none` and is a real Target.
  */
 export interface ClusterConnectChoices {
-  readonly name: string;
+  /** The boundary being connected, by name. Its one surface is `kubernetes`. */
+  readonly vessel: string;
   readonly apiServer: string;
   /** Where App workloads land. Never created by Spindrift (§7). */
   readonly namespace: string;
@@ -219,7 +223,8 @@ export interface ClusterConnectChoices {
 /** What `connectTarget` takes for a cluster, assembled from the choices. */
 export interface ClusterConnectPlan {
   readonly kind: 'cluster';
-  readonly name: string;
+  /** The boundary being connected. Its surfaces follow from its kind. */
+  readonly vessel: string;
   readonly apiServer: string;
   readonly namespace: string;
   readonly delivery: {
@@ -290,7 +295,7 @@ export function clusterConnectPlan(
 
   return {
     kind: 'cluster',
-    name: choices.name,
+    vessel: choices.vessel,
     apiServer: choices.apiServer,
     namespace: choices.namespace,
     delivery: {
@@ -351,11 +356,9 @@ export function targetSeedOf(
   plan: ClusterConnectPlan,
 ): Record<string, unknown> {
   return {
-    name: plan.name,
-    // A connected cluster's one surface takes the vessel's name unchanged —
-    // the same rule `vesselFor` applies on the connect path, so the document
-    // and the act name the same boundary.
-    vessel: plan.name,
+    // The two facts that identify a Target, and there is no third. The document
+    // and the act name the same boundary and the same surface on it.
+    vessel: plan.vessel,
     adapter: 'kubernetes',
     ...(plan.reaches.length > 0 ? { reaches: plan.reaches } : {}),
     ...(plan.authReaches.length > 0 ? { authReaches: plan.authReaches } : {}),
@@ -378,7 +381,7 @@ export function vesselSeedOf(
   plan: ClusterConnectPlan,
 ): Record<string, unknown> {
   return {
-    name: plan.name,
+    name: plan.vessel,
     kind: 'cluster',
     location: { apiServer: plan.apiServer },
   };

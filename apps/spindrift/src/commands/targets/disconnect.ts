@@ -18,14 +18,28 @@
  */
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
-import { apps, components, deploys, targets } from '../../db/schema.ts';
-import { STRANDABLE_PHASES } from '../../domain/target.ts';
+import {
+  type TargetAdapter,
+  targetAdapterSchema,
+} from '../../config/manifest.schema.ts';
+import {
+  apps,
+  components,
+  deploys,
+  targets,
+  vessels,
+} from '../../db/schema.ts';
+import { STRANDABLE_PHASES, targetLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const disconnectTargetInput = z
   .object({
-    /** Targets are addressed by name; the id is core's, not the operator's. */
-    name: z.string().trim().min(1),
+    /**
+     * The Target, as the two facts that identify it: the boundary it is a
+     * surface on and the runtime it is. The id is core's, not the operator's.
+     */
+    vessel: z.string().trim().min(1),
+    adapter: targetAdapterSchema,
     /** False previews the Deploys that confirmation would orphan. */
     confirm: z.boolean().optional(),
   })
@@ -44,7 +58,9 @@ export interface StrandedDeploy {
 
 export interface DisconnectTargetResult {
   readonly targetId: string;
-  readonly name: string;
+  /** The boundary it is a surface on — the two together are what name it. */
+  readonly vessel: string;
+  readonly adapter: TargetAdapter;
   /** False for an impact review; true once the Target was disconnected. */
   readonly disconnected: boolean;
   /** Named, per §13 — this list is the whole point of the confirmation. */
@@ -58,11 +74,19 @@ export const disconnectTarget: Command<
   const now = context.clock.now();
   const confirmed = input.confirm ?? true;
 
+  // The pair, not a name: `(vessel, adapter)` is what a Target is, and it is the
+  // unique index too, so this resolves at most one row.
   const target = (
-    await context.db.select().from(targets).where(eq(targets.name, input.name))
+    await context.db
+      .select({ id: targets.id })
+      .from(targets)
+      .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+      .where(
+        and(eq(vessels.name, input.vessel), eq(targets.adapter, input.adapter)),
+      )
   )[0];
   if (target === undefined) {
-    return failed('NOT_FOUND', `there is no Target named ${input.name}`);
+    return failed('NOT_FOUND', `there is no ${targetLabel(input)} Target`);
   }
 
   // Read before write: the rows to name in the confirmation are exactly the
@@ -107,7 +131,8 @@ export const disconnectTarget: Command<
 
   return ok({
     targetId: target.id,
-    name: target.name,
+    vessel: input.vessel,
+    adapter: input.adapter,
     disconnected: confirmed,
     stranded: strandable.map((deploy) => ({
       deployId: String(deploy.deployId),

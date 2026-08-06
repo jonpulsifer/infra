@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Blame, FailureReason } from '../../adapters/deploy/contract.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import type {
   ChecklistItem,
   DeployPhase,
@@ -59,7 +60,7 @@ export const getDeployDetail: Command<
           app: true,
         },
       },
-      target: true,
+      target: { with: { vessel: true } },
       build: true,
     },
   });
@@ -195,13 +196,13 @@ export const getDeployDetail: Command<
         : 'Deploy failed';
   } else if (deploy.phase === 'APPLYING') phaseWord = 'Applying';
 
-  let headline = `Deployed to ${deploy.target.name}`;
+  let headline = `Deployed to ${targetRowLabel(deploy.target)}`;
   if (deploy.phase === 'LIVE') {
-    headline = `Reconciled on ${deploy.target.name}`;
+    headline = `Reconciled on ${targetRowLabel(deploy.target)}`;
   } else if (deploy.phase === 'FAILED') {
     headline = deploy.detail ?? 'Deploy failed';
   } else {
-    headline = `Deploying on ${deploy.target.name}`;
+    headline = `Deploying on ${targetRowLabel(deploy.target)}`;
   }
 
   const view: DeployView = {
@@ -212,7 +213,7 @@ export const getDeployDetail: Command<
     appId: deploy.component.app.id,
     app: deploy.component.app.name,
     component: deploy.component.name,
-    target: deploy.target.name,
+    target: targetRowLabel(deploy.target),
     commit: deploy.build.commit,
     phase: deploy.phase as DeployPhase,
     phaseWord,

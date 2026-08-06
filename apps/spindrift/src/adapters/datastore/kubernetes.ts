@@ -22,7 +22,10 @@
  */
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { isLabel } from '../../domain/naming.ts';
-import type { KubernetesAdapterConnection } from '../../domain/target.ts';
+import {
+  type KubernetesAdapterConnection,
+  targetLabel,
+} from '../../domain/target.ts';
 import type {
   DeployPhase,
   DeployTarget,
@@ -108,7 +111,7 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     const connection = connectionOf(target);
     if (connection === null) {
       throw new DatastoreRequestError(
-        `${target.name} is not a Kubernetes Target`,
+        `${targetLabel(target)} is not a Kubernetes Target`,
       );
     }
     if (!isLabel(request.name) || request.name.length > NAME_LIMIT) {

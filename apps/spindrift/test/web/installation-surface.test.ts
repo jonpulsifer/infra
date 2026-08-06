@@ -32,6 +32,7 @@ import {
   loadStoredManifest,
 } from '../../src/config/manifest-store.ts';
 import { installation } from '../../src/db/schema.ts';
+import { targetLabel } from '../../src/domain/target.ts';
 import {
   commandRoutes,
   type DispatchDeps,
@@ -287,11 +288,21 @@ describe('configuring this installation from the browser', () => {
     // reached a different writer would leave a Target declared in the document
     // and absent from the table.
     await seed();
-    const declared = [
-      ...fixture.targets,
-      { name: 'spare', vessel: 'cluster', adapter: 'kubernetes' },
+    // The vessel every existing Target already sits on carries a full set of
+    // surfaces, so a genuinely new Target needs a genuinely new vessel too.
+    const declaredVessels = [
+      ...fixture.vessels,
+      { name: 'spare', kind: 'cluster' as const },
     ];
-    const edited = withValueAt(fixture, ['targets'], declared);
+    const declaredTargets = [
+      ...fixture.targets,
+      { vessel: 'spare', adapter: 'kubernetes' as const },
+    ];
+    const edited = withValueAt(
+      withValueAt(fixture, ['vessels'], declaredVessels),
+      ['targets'],
+      declaredTargets,
+    );
 
     const saved = await post(authenticated, 'configureInstallation', {
       manifest: edited,
@@ -299,15 +310,18 @@ describe('configuring this installation from the browser', () => {
     expect(saved.status).toBe(200);
 
     const rows = await database().db.query.targets.findMany({
+      with: { vessel: true },
       orderBy: (targets, { asc }) => [asc(targets.rank)],
     });
-    expect(rows.map((row) => row.name)).toEqual(
-      declared.map((target) => target.name),
-    );
+    expect(
+      rows.map((row) =>
+        targetLabel({ vessel: row.vessel.name, adapter: row.adapter }),
+      ),
+    ).toEqual(declaredTargets.map((target) => targetLabel(target)));
     // A Target nobody named through the product exists because the manifest
     // said so, which is the whole reason the write and the reconcile are one
     // transaction.
-    expect(rows.some((row) => row.name === 'spare')).toBe(true);
+    expect(rows.some((row) => row.vessel.name === 'spare')).toBe(true);
   });
 
   test('an invalid document is a 422 naming every offending key', async () => {
@@ -329,27 +343,5 @@ describe('configuring this installation from the browser', () => {
     expect(body.failure.code).toBe('INVALID_INPUT');
     expect(body.failure.message).toContain('zones.private');
     expect(await storedManifest()).toEqual(before);
-  });
-
-  test('a document this installation cannot take is a 409, not a field error', async () => {
-    // The distinction the screen renders. 409 rather than 422 because the
-    // request is well formed and the caller has nothing to fix in it — §3's
-    // disabled-with-reasons grammar, over HTTP.
-    await seed();
-    const swapped = withValueAt(
-      fixture,
-      ['targets'],
-      [
-        { name: 'cluster', vessel: 'cluster', adapter: 'kubernetes' },
-        { name: 'cloud-cloudrun', vessel: 'cluster', adapter: 'kubernetes' },
-      ],
-    );
-
-    const response = await post(authenticated, 'configureInstallation', {
-      manifest: swapped,
-    });
-    expect(response.status).toBe(409);
-    const body = (await response.json()) as { failure: { code: string } };
-    expect(body.failure.code).toBe('NOT_DEPLOYABLE');
   });
 });

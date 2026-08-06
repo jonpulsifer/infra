@@ -47,6 +47,7 @@
  * a Target that cannot do a thing: a stated reason, never a silent failure.
  */
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
+import { targetLabel } from '../../domain/target.ts';
 import type { DeployTarget } from '../deploy/contract.ts';
 import type {
   DatastoreAdapter,
@@ -118,7 +119,7 @@ export class CloudDatastoreAdapter implements DatastoreAdapter {
     target: DeployTarget,
     _request: DatastoreRequest,
   ): Promise<DatastoreRef> {
-    throw new CloudDatastoreUnavailableError(target.name);
+    throw new CloudDatastoreUnavailableError(targetLabel(target));
   }
 
   /**

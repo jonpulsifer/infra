@@ -42,7 +42,7 @@ import {
 } from '../../src/reconciler/repo-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeGitHub } from '../harness/fakes/github-api.ts';
-import { targetValues } from '../harness/installation.ts';
+import { insertVessel, targetValues } from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
@@ -125,9 +125,10 @@ async function liveDeploy(appId: string) {
     .insert(components)
     .values({ appId, name: 'api', kind: 'service', expose: true })
     .returning();
+  const vessel = await insertVessel(db, 'kubernetes', { name: 'cluster' });
   const [target] = await db
     .insert(targets)
-    .values(targetValues({ name: 'cluster', rank: 1 }))
+    .values(targetValues({ vesselId: vessel.id, rank: 1 }))
     .returning();
   const [build] = await db
     .insert(builds)

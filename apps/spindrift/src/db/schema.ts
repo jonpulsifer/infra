@@ -918,7 +918,6 @@ export const targets = pgTable(
   'targets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    name: text('name').notNull(),
     adapter: targetAdapter('adapter').notNull(),
     /**
      * The boundary this Target is a surface on.
@@ -984,9 +983,13 @@ export const targets = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // Connect is idempotent by name: reconnecting re-adopts rather than
-    // registering a second Target that would compete for the same workloads.
-    unique('targets_name_unique').on(table.name),
+    // **A Target is its vessel and its surface**, and that pair is naturally
+    // unique — a boundary carries one runtime of each kind. So there is no name
+    // to construct, none to collide, and none to rename when a vessel turns out
+    // to carry a surface nobody knew about. Connect is idempotent by this pair
+    // for the reason it used to be idempotent by name: reconnecting re-adopts
+    // rather than registering a second Target competing for the same workloads.
+    unique('targets_vessel_adapter_unique').on(table.vesselId, table.adapter),
   ],
 );
 

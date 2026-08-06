@@ -26,7 +26,11 @@ import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const baseManifest = await fixtureManifest();
@@ -98,9 +102,10 @@ describe('the run link dispatch records', () => {
       .insert(users)
       .values({ displayName: 'Operator' })
       .returning();
+    const vessel = await insertVessel(db, 'kubernetes', { name: 'target-a' });
     await db
       .insert(targets)
-      .values(targetValues({ name: 'target-a', rank: 1 }));
+      .values(targetValues({ vesselId: vessel.id, rank: 1 }));
 
     ctx = {
       client,

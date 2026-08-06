@@ -37,9 +37,10 @@ import type {
   ArtifactType,
   DesiredState,
 } from '../../../domain/desired-state.ts';
-import type {
-  KubernetesAdapterConnection,
-  KubernetesDelivery,
+import {
+  type KubernetesAdapterConnection,
+  type KubernetesDelivery,
+  targetLabel,
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import { ENGINE_KINDS as DATASTORE_ENGINE_KINDS } from '../../datastore/kubernetes.ts';
@@ -424,7 +425,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      return refuse(`${target.name} is not a Kubernetes Target`);
+      return refuse(`${targetLabel(target)} is not a Kubernetes Target`);
     }
     const api = this.api(connection);
     const placed = await this.placedJob(api, ref);
@@ -536,7 +537,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   ): Promise<JobRuns> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      return refuse(`${target.name} is not a Kubernetes Target`);
+      return refuse(`${targetLabel(target)} is not a Kubernetes Target`);
     }
     const api = this.api(connection);
     const placed = await this.placedJob(api, ref);
@@ -639,7 +640,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      throw new Error(`${target.name} is not a Kubernetes Target`);
+      throw new Error(`${targetLabel(target)} is not a Kubernetes Target`);
     }
     const api = this.api(connection);
 

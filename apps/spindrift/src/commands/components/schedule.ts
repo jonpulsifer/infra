@@ -37,6 +37,7 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { components } from '../../db/schema.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 import { cronExpression } from './create.ts';
 
@@ -94,7 +95,12 @@ export const setComponentSchedule: Command<
 
   const placed = await context.db.query.componentTargetDesired.findMany({
     where: (desired, { eq }) => eq(desired.componentId, row.id),
-    with: { target: { columns: { name: true } } },
+    with: {
+      target: {
+        columns: { adapter: true },
+        with: { vessel: { columns: { name: true } } },
+      },
+    },
   });
 
   return ok({
@@ -106,7 +112,7 @@ export const setComponentSchedule: Command<
     // and nothing is running at those, so nothing there is pending.
     pendingRelease: placed
       .filter((desired) => desired.desiredDeployId !== null)
-      .map(({ target }) => target.name)
+      .map(({ target }) => targetRowLabel(target))
       .sort(),
   });
 };

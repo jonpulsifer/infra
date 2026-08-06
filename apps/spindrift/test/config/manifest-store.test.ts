@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { eq } from 'drizzle-orm';
-import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
+import { and, eq } from 'drizzle-orm';
+import type {
+  AuthoredManifest,
+  TargetAdapter,
+} from '../../src/config/manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
   MANIFEST_INLINE_VAR,
@@ -13,7 +16,7 @@ import {
   writeStoredManifest,
 } from '../../src/config/manifest-store.ts';
 import { createDb } from '../../src/db/client.ts';
-import { installation, targets } from '../../src/db/schema.ts';
+import { installation, targets, vessels } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
   connectionFor,
@@ -21,6 +24,19 @@ import {
 } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
+
+/** The `targets.id` for the surface named by `(vessel, adapter)`. */
+async function targetIdOf(
+  vessel: string,
+  adapter: TargetAdapter = 'kubernetes',
+): Promise<string> {
+  const [row] = await database()
+    .db.select({ id: targets.id })
+    .from(targets)
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+    .where(and(eq(vessels.name, vessel), eq(targets.adapter, adapter)));
+  return row!.id;
+}
 const FIXTURE = new URL(
   '../fixtures/installation.example.yaml',
   import.meta.url,
@@ -43,7 +59,6 @@ const connectedManifest = {
   ],
   targets: [
     {
-      name: 'cluster',
       vessel: 'cluster',
       adapter: 'kubernetes',
       connection: {
@@ -56,7 +71,6 @@ const connectedManifest = {
       },
     },
     {
-      name: 'cloud-cloudrun',
       vessel: 'cloud',
       adapter: 'cloudrun',
       connection: {
@@ -65,7 +79,6 @@ const connectedManifest = {
       },
     },
     {
-      name: 'cloud-static',
       vessel: 'cloud',
       adapter: 'static',
       connection: {
@@ -92,11 +105,12 @@ describe('the stored installation manifest', () => {
     });
 
     const rows = await database().db.query.targets.findMany({
+      with: { vessel: true },
       orderBy: (targets, { asc }) => [asc(targets.rank)],
     });
     expect(
-      rows.map(({ name, adapter, rank, status, health, connection }) => ({
-        name,
+      rows.map(({ vessel, adapter, rank, status, health, connection }) => ({
+        vessel: vessel.name,
         adapter,
         rank,
         status,
@@ -105,7 +119,7 @@ describe('the stored installation manifest', () => {
       })),
     ).toEqual([
       {
-        name: 'cluster',
+        vessel: 'cluster',
         adapter: 'kubernetes',
         rank: 0,
         status: 'disconnected',
@@ -113,7 +127,7 @@ describe('the stored installation manifest', () => {
         connection: null,
       },
       {
-        name: 'cloud-cloudrun',
+        vessel: 'cloud',
         adapter: 'cloudrun',
         rank: 1,
         status: 'disconnected',
@@ -121,7 +135,7 @@ describe('the stored installation manifest', () => {
         connection: null,
       },
       {
-        name: 'cloud-static',
+        vessel: 'cloud',
         adapter: 'static',
         rank: 2,
         status: 'disconnected',
@@ -137,17 +151,18 @@ describe('the stored installation manifest', () => {
     });
 
     const rows = await database().db.query.targets.findMany({
+      with: { vessel: true },
       orderBy: (targets, { asc }) => [asc(targets.rank)],
     });
     expect(
-      rows.map(({ name, status, connection }) => ({
-        name,
+      rows.map(({ vessel, status, connection }) => ({
+        vessel: vessel.name,
         status,
         connection,
       })),
     ).toEqual([
       {
-        name: 'cluster',
+        vessel: 'cluster',
         status: 'connected',
         connection: {
           adapter: 'kubernetes',
@@ -160,7 +175,7 @@ describe('the stored installation manifest', () => {
         },
       },
       {
-        name: 'cloud-cloudrun',
+        vessel: 'cloud',
         status: 'connected',
         connection: {
           adapter: 'cloudrun',
@@ -169,7 +184,7 @@ describe('the stored installation manifest', () => {
         },
       },
       {
-        name: 'cloud-static',
+        vessel: 'cloud',
         status: 'connected',
         connection: {
           adapter: 'static',
@@ -215,7 +230,7 @@ describe('the stored installation manifest', () => {
     await database()
       .db.update(targets)
       .set({ health: 'healthy', updatedAt: old })
-      .where(eq(targets.name, 'cluster'));
+      .where(eq(targets.id, await targetIdOf('cluster')));
     const changed = {
       ...connectedManifest,
       vessels: connectedManifest.vessels.map((vessel) =>
@@ -237,9 +252,15 @@ describe('the stored installation manifest', () => {
     // was asserting this behaviour through the one path that no longer has it.
     await writeStoredManifest(database().db, changed);
 
-    const cluster = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const cluster = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     // The address moved to the boundary, so that is where the edit lands —
     // and the surface it carries is still reassessed, because what changed is
     // still where this Target is.
@@ -282,7 +303,7 @@ describe('the stored installation manifest', () => {
     await database()
       .db.update(targets)
       .set({ connection: corrected, health: 'healthy' })
-      .where(eq(targets.name, 'cluster'));
+      .where(eq(targets.id, await targetIdOf('cluster')));
 
     // The restart. It used to be the whole defect: `loadStoredManifest` writes
     // the stored document back on every boot, and reconciliation re-asserted
@@ -290,9 +311,15 @@ describe('the stored installation manifest', () => {
     // edit lasted exactly until the next pod rolled, silently.
     await loadStoredManifest(database().db, {});
 
-    const cluster = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const cluster = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     expect(cluster?.connection).toEqual(corrected);
     // Nothing was re-declared, so nothing about the Target's assessment was
     // invalidated either — a boot that reset this to unhealthy would make every
@@ -321,14 +348,20 @@ describe('the stored installation manifest', () => {
     await database()
       .db.update(targets)
       .set({ connection: connectionFor('kubernetes'), status: 'connected' })
-      .where(eq(targets.name, 'cluster'));
+      .where(eq(targets.id, await targetIdOf('cluster')));
 
-    const cluster = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const cluster = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     expect(
       targetConnectionDivergence(
-        fixtureManifest.targets.find((target) => target.name === 'cluster'),
+        fixtureManifest.targets.find((target) => target.vessel === 'cluster'),
         cluster?.connection ?? null,
       ),
     ).toEqual([]);
@@ -378,9 +411,15 @@ describe('the stored installation manifest', () => {
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
-    const before = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const before = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     await database()
       .db.update(targets)
       .set({
@@ -395,7 +434,7 @@ describe('the stored installation manifest', () => {
           },
         },
       })
-      .where(eq(targets.name, 'cluster'));
+      .where(eq(targets.id, await targetIdOf('cluster')));
 
     const changed = fixtureText.replace(
       'installation: example',
@@ -405,9 +444,15 @@ describe('the stored installation manifest', () => {
       [MANIFEST_INLINE_VAR]: changed,
     });
 
-    const after = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const after = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     expect(after?.id).toBe(before?.id);
     expect(after?.status).toBe('connected');
     expect(after?.connection).toEqual({
@@ -510,48 +555,19 @@ describe('the stored installation manifest', () => {
     );
   });
 
-  test('an incompatible Target declaration rolls back manifest and rank changes', async () => {
-    await loadStoredManifest(database().db, {
-      [MANIFEST_INLINE_VAR]: fixtureText,
-    });
-    await database()
-      .db.update(targets)
-      .set({ rank: 99 })
-      .where(eq(targets.name, 'cluster'));
-    // Re-seeding is where a declaration can still meet Target rows it did not
-    // create: discarding the installation row leaves the Targets behind.
-    await database().db.delete(installation);
-    const incompatible = {
-      ...fixtureManifest,
-      installation: 'incompatible',
-      targets: [
-        { name: 'cluster', vessel: 'cluster', adapter: 'kubernetes' },
-        { name: 'cloud-cloudrun', vessel: 'cluster', adapter: 'kubernetes' },
-      ],
-    } satisfies AuthoredManifest;
-
-    await expect(
-      loadStoredManifest(database().db, {
-        [MANIFEST_INLINE_VAR]: JSON.stringify(incompatible),
-      }),
-    ).rejects.toThrow(/stored Target uses cloudrun/);
-
-    // The whole seed is one transaction, so a refused Target leaves no
-    // half-seeded installation behind and no rank change from the attempt.
-    expect(await database().db.select().from(installation)).toEqual([]);
-    const cluster = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
-    expect(cluster?.rank).toBe(99);
-  });
-
   test('a declared write updates an existing Target’s asserted reaches, and a boot does not', async () => {
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
     });
-    const seeded = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const seeded = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     // Nobody has said, so the row asserts nothing and the adapter's floor is
     // the whole answer — §3's asserted half is stated, never reported.
     expect(seeded?.reaches).toBeNull();
@@ -574,9 +590,15 @@ describe('the stored installation manifest', () => {
     } as AuthoredManifest;
     await writeStoredManifest(database().db, asserting);
 
-    const declared = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const declared = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     expect(declared?.reaches).toEqual(['none', 'private', 'public']);
     expect(declared?.authReaches).toEqual(['private']);
 
@@ -587,12 +609,18 @@ describe('the stored installation manifest', () => {
     await database()
       .db.update(targets)
       .set({ reaches: ['none'] })
-      .where(eq(targets.name, 'cluster'));
+      .where(eq(targets.id, await targetIdOf('cluster')));
     await writeStoredManifest(database().db, asserting, 'booted');
 
-    const booted = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const booted = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     expect(booted?.reaches).toEqual(['none']);
   });
 
@@ -603,13 +631,19 @@ describe('the stored installation manifest', () => {
     await database()
       .db.update(targets)
       .set({ rank: 99 })
-      .where(eq(targets.name, 'cluster'));
+      .where(eq(targets.id, await targetIdOf('cluster')));
 
     await loadStoredManifest(database().db, {});
 
-    const cluster = await database().db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, 'cluster'),
-    });
+    const cluster = (
+      await database()
+        .db.select()
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(
+          and(eq(vessels.name, 'cluster'), eq(targets.adapter, 'kubernetes')),
+        )
+    )[0]?.targets;
     expect(cluster?.rank).toBe(0);
   });
 

@@ -20,6 +20,7 @@
  * step with the first.
  */
 import type { Blame, FailureReason } from '../adapters/deploy/contract.ts';
+import type { TargetAdapter } from '../config/manifest.schema.ts';
 import type {
   ArtifactType,
   Auth,
@@ -523,6 +524,7 @@ export interface WorkspaceView {
   readonly targetId?: string;
   readonly latestDeployId?: number;
   readonly latestBuildId?: number;
+  /** The runtime surface the placed Target is — the boundary is {@link vessel}. */
   readonly target: string;
   readonly vessel: string;
   readonly prerequisitesMet: boolean;
@@ -568,7 +570,9 @@ export interface WorkspaceView {
  */
 export interface TargetOptionView {
   readonly targetId: string;
-  readonly name: string;
+  /** The boundary this Target is a surface on. Half of what names it. */
+  readonly vessel: string;
+  /** The runtime surface it is. The other half. */
   readonly adapter: string;
   readonly rank: number;
   readonly candidate: boolean;
@@ -655,6 +659,10 @@ export interface AppListItem {
   readonly id: string;
   readonly name: string;
   readonly phase: DeployPhase;
+  /**
+   * The runtime surface the placed Target is, beside the boundary it sits on.
+   * The two together are what identify it; neither alone does.
+   */
   readonly target: string;
   /** The boundary the placed Target is a surface on. Empty when unplaced. */
   readonly vessel: string;
@@ -685,8 +693,13 @@ export interface AppListItem {
 /** A Target as the targets management view lists it. */
 export interface TargetListItem {
   readonly id: string;
-  readonly name: string;
-  readonly adapter: string;
+  /** The boundary this Target is a surface on. Half of what names it. */
+  readonly vessel: string;
+  /**
+   * The runtime surface it is. The other half — and the enum rather than a
+   * string, because the screens post this pair back to `disconnectTarget`.
+   */
+  readonly adapter: TargetAdapter;
   readonly rank: number;
   readonly health: 'healthy' | 'unhealthy';
   /** Prerequisite failure details when target is unhealthy. */
@@ -769,22 +782,22 @@ export interface TargetListItem {
  * A connect act this installation is waiting on (§13).
  *
  * **One entry per vessel**, which is the same thing as one per act: connecting
- * a project registers every surface on it, so `bluenose-cloudrun` and
- * `bluenose-static` are one pending connection named `bluenose`. §13 is
+ * a project registers every surface on it, so a project's `cloudrun` and
+ * `static` surfaces are one pending connection named for the project. §13 is
  * explicit that the split is "a consequence of the model, not a decision", and
  * a screen listing two cards would make the operator learn it.
  *
- * The grouping is now a read rather than a reconstruction. These rows share a
- * `vesselId`; nothing recovers the act's name by slicing a suffix off a
- * Target's, which is what used to make an off-convention name unconnectable.
+ * The grouping is a read rather than a reconstruction. These rows share a
+ * `vesselId`, which is what a Target is a surface on — there is no name to
+ * slice a suffix off of.
  */
 export interface PendingTargetConnection {
   /** What `connectTarget` takes as its `kind` — the vessel's kind. */
   readonly kind: VesselKind;
-  /** What `connectTarget` takes as its `name`. */
-  readonly name: string;
-  /** Every Target name this one act would configure. */
-  readonly targets: readonly string[];
+  /** What `connectTarget` takes as its `vessel`. */
+  readonly vessel: string;
+  /** Every surface on that vessel this one act would configure. */
+  readonly surfaces: readonly string[];
   readonly proposal: TargetConnectionProposal;
 }
 

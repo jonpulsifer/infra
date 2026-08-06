@@ -33,9 +33,16 @@ import type {
  * is constructed against the connection.
  */
 export interface DeployTarget {
-  /** Stable identifier, unique within the installation. */
-  readonly name: string;
-  /** Exactly one adapter type per Target (§13). */
+  /**
+   * The boundary this Target is a surface on, by name.
+   *
+   * Half of the identity, and the half an adapter never dispatches on. It is
+   * here so an adapter that has to name the Target it was handed can say
+   * `<vessel>/<adapter>` — see `targetLabel` — rather than repeat a string core
+   * had constructed for it.
+   */
+  readonly vessel: string;
+  /** Exactly one adapter type per Target (§13), and the other half of its identity. */
   readonly adapter: TargetAdapter;
   /**
    * How this Target is reached, in its adapter's own terms (§13).

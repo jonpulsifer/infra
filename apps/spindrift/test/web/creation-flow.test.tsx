@@ -161,7 +161,7 @@ describe('non-candidate Targets are listed rather than hidden', () => {
 
   test('every connected Target appears, candidate or not', () => {
     for (const target of TARGET_OPTIONS) {
-      expect(markup).toContain(target.name);
+      expect(markup).toContain(target.vessel);
     }
   });
 

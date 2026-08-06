@@ -43,6 +43,7 @@ import {
   targets,
   users,
 } from '../../src/db/schema.ts';
+import { targetLabel } from '../../src/domain/target.ts';
 import { runConfigPass } from '../../src/reconciler/config-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
@@ -54,7 +55,11 @@ import {
   SupplyChainHarness,
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -150,12 +155,16 @@ async function fixture(
 async function connectedTarget(
   options: { name?: string; reachableSecretStores?: readonly string[] } = {},
 ) {
+  const vesselName = options.name ?? `cluster-${crypto.randomUUID()}`;
+  const vessel = await insertVessel(database().db, 'kubernetes', {
+    name: vesselName,
+  });
   const [target] = await database()
     .db.insert(targets)
     .values(
       targetValues({
-        name: options.name ?? `cluster-${crypto.randomUUID()}`,
         adapter: 'kubernetes',
+        vesselId: vessel.id,
         discovery: {
           ...CAPABLE_DISCOVERY,
           reachableSecretStores: (options.reachableSecretStores ?? [
@@ -165,7 +174,10 @@ async function connectedTarget(
       }),
     )
     .returning();
-  return target!;
+  return {
+    ...target!,
+    label: targetLabel({ vessel: vesselName, adapter: 'kubernetes' }),
+  };
 }
 
 type TargetStores = (typeof CAPABLE_DISCOVERY)['reachableSecretStores'];
@@ -831,7 +843,7 @@ describe('retention is core’s, at a depth a rollback can reach', () => {
       },
     ]);
     const left = await store.versions(
-      { app: 'shop', component: 'web', target: target.name },
+      { app: 'shop', component: 'web', target: target.label },
       'TOKEN',
     );
     expect(left).toHaveLength(2);

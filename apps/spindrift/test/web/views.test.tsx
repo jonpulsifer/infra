@@ -863,10 +863,10 @@ describe('the Targets surface', () => {
     const markup = targets([
       {
         kind: 'gcp-project',
-        name: 'a-project',
-        targets: ['a-project-cloudrun', 'a-project-static'],
+        vessel: 'a-project',
+        surfaces: ['cloudrun', 'static'],
         proposal: {
-          carriedFrom: 'other-cloudrun',
+          carriedFrom: 'other/cloudrun',
           region: 'somewhere',
           runEndpoint: 'https://run.example.test',
           hostingEndpoint: 'https://hosting.example.test',

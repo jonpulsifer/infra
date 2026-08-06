@@ -38,6 +38,7 @@ import {
   componentTargetDesired,
   repositories,
   targets,
+  vessels,
 } from '../../db/schema.ts';
 import {
   artifactTags,
@@ -56,6 +57,7 @@ import {
 } from '../../domain/build-route.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
+import { targetLabel } from '../../domain/target.ts';
 import { isFetchableBundleLocation } from '../../storage/archives.ts';
 import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
@@ -161,12 +163,17 @@ async function targetBuildPolicy(
 ): Promise<TargetBuildPolicy | null> {
   if (targetId === undefined) return null;
   const [target] = await context.db
-    .select({ name: targets.name, minBuildLevel: targets.minBuildLevel })
+    .select({
+      vessel: vessels.name,
+      adapter: targets.adapter,
+      minBuildLevel: targets.minBuildLevel,
+    })
     .from(targets)
+    .innerJoin(vessels, eq(vessels.id, targets.vesselId))
     .where(eq(targets.id, targetId));
   if (target === undefined) return null;
   return {
-    name: target.name,
+    name: targetLabel(target),
     minimumLevel: (target.minBuildLevel ?? DEFAULT_MINIMUM_BUILD_LEVEL) as
       | 1
       | 2

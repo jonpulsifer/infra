@@ -63,8 +63,7 @@ vessels:
     location:
       project: spindrift-vessel
 targets:
-  - name: primary
-    vessel: primary
+  - vessel: primary
     adapter: kubernetes
     connection:
       namespace: spindrift-apps
@@ -74,14 +73,12 @@ targets:
         sourceRef:
           name: infra
           namespace: flux-system
-  - name: spindrift-cloudrun
-    vessel: spindrift
+  - vessel: spindrift
     adapter: cloudrun
     connection:
       region: spindrift-region
       endpoint: https://run.googleapis.com
-  - name: spindrift-static
-    vessel: spindrift
+  - vessel: spindrift
     adapter: static
     connection:
       endpoint: https://firebasehosting.googleapis.com

@@ -336,20 +336,19 @@ async function reconcileManifestTargets(
   const reconciledVessels = await reconcileManifestVessels(db, manifest, write);
 
   for (const [rank, target] of manifest.targets.entries()) {
-    const { name, adapter } = target;
+    const { adapter } = target;
     // Non-null because the document-level refinement in `manifest.schema.ts`
     // refuses a Target whose `vessel` names nothing declared, so a validated
     // manifest cannot reach here with a reference that does not resolve.
     const vessel = reconciledVessels.get(target.vessel)!;
     const declaredConnection = connectionFromSeed(target);
+    // By the pair that identifies a Target, which is also its unique index.
+    // There is no adapter mismatch to check for any more: a seed naming a
+    // different adapter is a different Target, not a redefinition of this one.
     const existing = await db.query.targets.findFirst({
-      where: (targets, { eq }) => eq(targets.name, name),
+      where: (targets, { and, eq }) =>
+        and(eq(targets.vesselId, vessel.id), eq(targets.adapter, adapter)),
     });
-    if (existing !== undefined && existing.adapter !== adapter) {
-      throw new ManifestError(
-        `manifest Target ${name} uses ${adapter}, but the stored Target uses ${existing.adapter}`,
-      );
-    }
 
     const awaitingInspection = unreachablePrerequisites(
       'Declared Target connection is awaiting inspection',
@@ -366,7 +365,6 @@ async function reconcileManifestTargets(
     await db
       .insert(targets)
       .values({
-        name,
         adapter,
         vesselId: vessel.id,
         rank,
@@ -386,7 +384,7 @@ async function reconcileManifestTargets(
             : awaitingInspection,
       })
       .onConflictDoUpdate({
-        target: targets.name,
+        target: [targets.vesselId, targets.adapter],
         set: {
           rank,
           // §3's asserted half follows the connection, not the rank: a reach is

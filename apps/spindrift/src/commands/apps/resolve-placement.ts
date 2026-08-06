@@ -26,6 +26,7 @@ import {
   type RequiredDatastore,
   resolvePlacement,
 } from '../../domain/placement.ts';
+import { targetLabel } from '../../domain/target.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
 export const resolveComponentPlacementInput = z
@@ -41,6 +42,7 @@ export type ResolveComponentPlacementInput = z.infer<
 /** One Target the UI renders, candidate or not. */
 export interface PlacementOption {
   readonly targetId: string;
+  /** `<vessel>/<adapter>` — the two facts that identify this Target. */
   readonly name: string;
   readonly rank: number;
   /** Candidates are selectable; non-candidates are listed and disabled (§3). */
@@ -76,10 +78,11 @@ export const resolveComponentPlacement: Command<
     );
   }
 
-  const connected = await context.db
-    .select()
-    .from(targets)
-    .where(eq(targets.status, 'connected'));
+  // With the boundary, because half of what names a Target lives there.
+  const connected = await context.db.query.targets.findMany({
+    where: (targets, { eq }) => eq(targets.status, 'connected'),
+    with: { vessel: true },
+  });
 
   const attached = await context.db
     .select({
@@ -130,7 +133,7 @@ export const resolveComponentPlacement: Command<
   const options: PlacementOption[] = [
     ...placement.candidates.map((candidate) => ({
       targetId: candidate.target.id,
-      name: candidate.target.name,
+      name: targetLabel(candidate.target),
       rank: candidate.target.rank,
       candidate: true,
       artifactType: candidate.artifactType,
@@ -139,7 +142,7 @@ export const resolveComponentPlacement: Command<
     })),
     ...placement.nonCandidates.map((excluded) => ({
       targetId: excluded.target.id,
-      name: excluded.target.name,
+      name: targetLabel(excluded.target),
       rank: excluded.target.rank,
       candidate: false,
       artifactType: null,

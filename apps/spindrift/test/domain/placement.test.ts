@@ -40,7 +40,7 @@ const ARTIFACT_TYPES = {
 function target(
   overrides: {
     id?: string;
-    name?: string;
+    vessel?: string;
     adapter?: CapabilityContext['adapter'];
     rank?: number;
     healthy?: boolean;
@@ -54,7 +54,7 @@ function target(
   const adapter = overrides.adapter ?? 'kubernetes';
   return {
     id: overrides.id ?? `target-${adapter}`,
-    name: overrides.name ?? adapter,
+    vessel: overrides.vessel ?? adapter,
     adapter,
     rank: overrides.rank ?? 0,
     healthy: overrides.healthy ?? true,
@@ -99,8 +99,8 @@ describe('the suggestion follows rank', () => {
   test('the first candidate by global rank is suggested', () => {
     const placement = resolvePlacement(
       [
-        target({ id: 'second', name: 'cloud', adapter: 'cloudrun', rank: 5 }),
-        target({ id: 'first', name: 'cluster', rank: 1 }),
+        target({ id: 'second', vessel: 'cloud', adapter: 'cloudrun', rank: 5 }),
+        target({ id: 'first', vessel: 'cluster', rank: 1 }),
       ],
       // A reach both serve: rank is what this test is about, and a Target
       // filtered out on reach would make it pass for the wrong reason.
@@ -417,8 +417,8 @@ describe('§9: a Private website takes the server-image rendering', () => {
     // the server-image rendering."
     const placement = resolvePlacement(
       [
-        target({ id: 'cdn', name: 'hosting', adapter: 'static', rank: 0 }),
-        target({ id: 'cluster', name: 'cluster', rank: 1 }),
+        target({ id: 'cdn', vessel: 'hosting', adapter: 'static', rank: 0 }),
+        target({ id: 'cluster', vessel: 'cluster', rank: 1 }),
       ],
       requirements({ kind: 'website', reach: 'private', auth: 'proxy' }),
     );
@@ -442,8 +442,8 @@ describe('§9: a Private website takes the server-image rendering', () => {
   test('the same website going public reaches static hosting as files', () => {
     const placement = resolvePlacement(
       [
-        target({ id: 'cdn', name: 'hosting', adapter: 'static', rank: 0 }),
-        target({ id: 'cluster', name: 'cluster', rank: 1 }),
+        target({ id: 'cdn', vessel: 'hosting', adapter: 'static', rank: 0 }),
+        target({ id: 'cluster', vessel: 'cluster', rank: 1 }),
       ],
       requirements({ kind: 'website', reach: 'public', auth: 'none' }),
     );

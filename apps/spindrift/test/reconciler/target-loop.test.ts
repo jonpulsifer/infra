@@ -9,7 +9,7 @@
  * other test in this file could still pass.
  */
 import { describe, expect, test } from 'bun:test';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   connectTarget,
   resolveComponentPlacement,
@@ -32,6 +32,7 @@ import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import {
   clusterInput,
   fixtureManifest,
+  insertVessel,
   targetValues,
 } from '../harness/installation.ts';
 
@@ -86,12 +87,31 @@ function context(registry: AdapterRegistry, clock: Clock): CommandContext {
   };
 }
 
-async function targetRow(name: string) {
+/** The Target row for the surface named by `(vessel, adapter)`. */
+async function targetRow(
+  vessel: string,
+  adapter: TargetAdapter = 'kubernetes',
+) {
   const rows = await database()
     .db.select()
     .from(targets)
-    .where(eq(targets.name, name));
-  return rows[0]!;
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+    .where(and(eq(vessels.name, vessel), eq(targets.adapter, adapter)));
+  return rows[0]!.targets;
+}
+
+/** A Target row on its own, freshly named vessel — what `targetValues({ name })` used to give it. */
+async function insertNamedTarget(
+  name: string,
+  overrides: Partial<Parameters<typeof targetValues>[0]> = {},
+) {
+  const adapter = overrides.adapter ?? 'kubernetes';
+  const vessel = await insertVessel(database().db, adapter, { name });
+  const [row] = await database()
+    .db.insert(targets)
+    .values(targetValues({ ...overrides, adapter, vesselId: vessel.id }))
+    .returning();
+  return row!;
 }
 
 /** The boundary a Target sits on — half of what `refreshTarget` inspects. */
@@ -107,9 +127,7 @@ describe('one pass over every connected Target', () => {
   test('writes the checklist, the discovery, and the derived health', async () => {
     const { registry, of } = fakes();
     const clock = ticking();
-    await database()
-      .db.insert(targets)
-      .values(targetValues({ name: 'cluster' }));
+    await insertNamedTarget('cluster');
 
     clock.advance();
     const [refresh] = await refreshAllTargets(context(registry, clock));
@@ -121,15 +139,15 @@ describe('one pass over every connected Target', () => {
       prerequisitesFor('kubernetes').length,
     );
     expect(row.inspectedAt).toEqual(clock.now());
-    expect(of('kubernetes').inspected.map((t) => t.name)).toEqual(['cluster']);
+    expect(of('kubernetes').inspected.map((t) => t.vessel)).toEqual([
+      'cluster',
+    ]);
   });
 
   test('a disconnected Target is not polled', async () => {
     const { registry, of } = fakes();
     const clock = ticking();
-    await database()
-      .db.insert(targets)
-      .values(targetValues({ name: 'gone', status: 'disconnected' }));
+    await insertNamedTarget('gone', { status: 'disconnected' });
 
     expect(await refreshAllTargets(context(registry, clock))).toEqual([]);
     // Continuing to poll a Target the operator removed would keep someone
@@ -140,9 +158,7 @@ describe('one pass over every connected Target', () => {
   test('the loop never flips connected or disconnected', async () => {
     const { registry } = fakes();
     const clock = ticking();
-    await database()
-      .db.insert(targets)
-      .values(targetValues({ name: 'cluster', health: 'unhealthy' }));
+    await insertNamedTarget('cluster', { health: 'unhealthy' });
 
     await refreshAllTargets(context(registry, clock));
     // Connected and disconnected are the operator's statement. A loop that
@@ -154,9 +170,7 @@ describe('one pass over every connected Target', () => {
   test('health changing is reported, and health staying is not', async () => {
     const { registry, of } = fakes();
     const clock = ticking();
-    await database()
-      .db.insert(targets)
-      .values(targetValues({ name: 'cluster', health: 'unhealthy' }));
+    await insertNamedTarget('cluster', { health: 'unhealthy' });
 
     const [first] = await refreshAllTargets(context(registry, clock));
     expect(first?.healthChangedFrom).toBe('unhealthy');
@@ -175,23 +189,20 @@ describe('one pass over every connected Target', () => {
       adapter: 'kubernetes',
       unreachable: 'the API server is not answering',
     });
-    const [row] = await database()
-      .db.insert(targets)
-      .values(targetValues({ name: 'cluster' }))
-      .returning();
+    const row = await insertNamedTarget('cluster');
 
     const down: AdapterRegistry = { ...registry, deploy: () => unreachable };
     await refreshTarget(
       context(down, clock),
-      row!,
-      await vesselOf(row!.vesselId),
+      row,
+      await vesselOf(row.vesselId),
     );
     expect((await targetRow('cluster')).health).toBe('unhealthy');
 
     await refreshTarget(
       context(registry, clock),
       await targetRow('cluster'),
-      await vesselOf(row!.vesselId),
+      await vesselOf(row.vesselId),
     );
     expect((await targetRow('cluster')).health).toBe('healthy');
   });
@@ -203,7 +214,7 @@ describe('a capability flip changes candidacy on the next pass', () => {
     const clock = ticking();
     const ctx = () => context(registry, clock);
 
-    await connectTarget(clusterInput({ name: 'cluster' }), ctx());
+    await connectTarget(clusterInput({ vessel: 'cluster' }), ctx());
 
     const [app] = await database()
       .db.insert(apps)
@@ -253,9 +264,7 @@ describe('the loop itself', () => {
   test('runs passes until aborted', async () => {
     const { registry, of } = fakes();
     const clock = ticking();
-    await database()
-      .db.insert(targets)
-      .values(targetValues({ name: 'cluster' }));
+    await insertNamedTarget('cluster');
 
     const controller = new AbortController();
     let passes = 0;
@@ -276,9 +285,7 @@ describe('the loop itself', () => {
   test('an already-aborted signal runs no pass at all', async () => {
     const { registry, of } = fakes();
     const clock = ticking();
-    await database()
-      .db.insert(targets)
-      .values(targetValues({ name: 'cluster' }));
+    await insertNamedTarget('cluster');
 
     await runTargetLoop(context(registry, clock), {
       intervalMs: 1,

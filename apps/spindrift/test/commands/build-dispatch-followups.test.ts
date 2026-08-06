@@ -29,7 +29,11 @@ import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -52,14 +56,16 @@ describe('build dispatch follow-ups', () => {
       .values({ displayName: 'Operator' })
       .returning();
 
+    const vesselA = await insertVessel(db, 'kubernetes', { name: 'target-a' });
     const [_targetA] = await db
       .insert(targets)
-      .values(targetValues({ name: 'target-a', rank: 1 }))
+      .values(targetValues({ vesselId: vesselA.id, rank: 1 }))
       .returning();
 
+    const vesselB = await insertVessel(db, 'kubernetes', { name: 'target-b' });
     const [_targetB] = await db
       .insert(targets)
-      .values(targetValues({ name: 'target-b', rank: 2 }))
+      .values(targetValues({ vesselId: vesselB.id, rank: 2 }))
       .returning();
 
     const fakeBuildAdapter = new FakeBuildAdapter();

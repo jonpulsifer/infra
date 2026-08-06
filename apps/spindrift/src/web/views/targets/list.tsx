@@ -174,7 +174,7 @@ export function TargetList({
                     <span className="grid size-6 place-items-center rounded-sm bg-secondary font-mono text-xs text-muted-foreground">
                       {target.rank}
                     </span>
-                    <span className="font-medium">{target.name}</span>
+                    <span className="font-medium">{target.vessel}</span>
                     <span className="ml-auto text-xs text-muted-foreground">
                       {target.adapter}
                     </span>
@@ -327,9 +327,9 @@ function TargetCollection({
           <CardContent>
             <ConnectTargetForm
               kind="cluster"
-              name=""
-              nameEditable
-              targets={[]}
+              vessel=""
+              vesselEditable
+              surfaces={[]}
               proposal={clusterProposal}
               connecting={connecting}
               onConnect={onConnect}
@@ -383,14 +383,14 @@ function PendingConnections({
       <Eyebrow>Waiting to be connected</Eyebrow>
       <Card className="divide-y divide-border border-warning/40">
         {pending.map((entry) => (
-          <div key={entry.name}>
+          <div key={entry.vessel}>
             <div className="flex flex-wrap items-center gap-3 px-4 py-3">
               <AlertTriangle
                 aria-hidden="true"
                 className="size-4 shrink-0 text-warning"
               />
               <span className="font-mono text-sm font-medium">
-                {entry.name}
+                {entry.vessel}
               </span>
               <Badge tone="idle">
                 {entry.kind === 'cluster' ? 'cluster' : 'cloud project'}
@@ -400,23 +400,23 @@ function PendingConnections({
               </span>
               <Button
                 size="sm"
-                variant={open === entry.name ? 'ghost' : 'default'}
+                variant={open === entry.vessel ? 'ghost' : 'default'}
                 className="ml-auto"
                 onClick={() =>
                   setOpen((current) =>
-                    current === entry.name ? null : entry.name,
+                    current === entry.vessel ? null : entry.vessel,
                   )
                 }
               >
-                {open === entry.name ? 'Cancel' : 'Finish setup'}
+                {open === entry.vessel ? 'Cancel' : 'Finish setup'}
               </Button>
             </div>
-            {open === entry.name ? (
+            {open === entry.vessel ? (
               <div className="border-t border-border-soft bg-secondary/40 px-4 py-4">
                 <ConnectTargetForm
                   kind={entry.kind}
-                  name={entry.name}
-                  targets={entry.targets}
+                  vessel={entry.vessel}
+                  surfaces={entry.surfaces}
                   proposal={entry.proposal}
                   connecting={connecting}
                   onConnect={onConnect}
@@ -474,7 +474,7 @@ function TargetCard({
             )}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold">{target.name}</span>
+                <span className="text-sm font-semibold">{target.vessel}</span>
                 <Badge tone={unhealthy ? 'destructive' : 'success'}>
                   <Dot />
                   {target.health}
@@ -566,9 +566,9 @@ function TargetCard({
           <div className="rounded-md border border-border-soft bg-secondary/40 px-4 py-4">
             <ConnectTargetForm
               kind="cluster"
-              name={target.name}
+              vessel={target.vessel}
               apiServer={target.edit.apiServer}
-              targets={[target.name]}
+              surfaces={[target.adapter]}
               proposal={target.edit.proposal}
               connecting={connecting}
               onConnect={onConnect}
@@ -657,7 +657,8 @@ function DisconnectTargetControl({
     setState({ type: 'reviewing' });
     try {
       const result = await command('disconnectTarget', {
-        name: target.name,
+        vessel: target.vessel,
+        adapter: target.adapter,
         confirm: false,
       });
       setState(
@@ -677,7 +678,8 @@ function DisconnectTargetControl({
     setState({ type: 'disconnecting', impact });
     try {
       const result = await command('disconnectTarget', {
-        name: target.name,
+        vessel: target.vessel,
+        adapter: target.adapter,
         confirm: true,
       });
       if (!result.ok) {
@@ -728,7 +730,7 @@ function DisconnectTargetControl({
     <div className="basis-full rounded-sm border border-warning/50 bg-warning-soft p-3 text-sm">
       <p className="font-semibold">
         {state.type === 'done'
-          ? `${target.name} is disconnected.`
+          ? `${target.vessel}/${target.adapter} is disconnected.`
           : `Disconnecting will orphan ${count} current Deploy${count === 1 ? '' : 's'}.`}
       </p>
       {count > 0 ? (
