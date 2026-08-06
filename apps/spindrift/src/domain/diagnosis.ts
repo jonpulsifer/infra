@@ -114,9 +114,42 @@ export function hasDrifted(args: {
    * on. They agreed when the attempt finished and are free to diverge after.
    */
   readonly observedPhase?: DeployPhase;
+  /** The cadence the Component declares, or `null` when it declares none. */
+  readonly desiredSchedule?: string | null;
+  /** `ObservedState.schedule`, forwarded unjudged. */
+  readonly observedSchedule?: string | null;
 }): boolean {
   if (args.phase !== 'LIVE') return false;
   if (args.observedDigest === null) return true;
   if (args.observedPhase === 'FAILED') return true;
+  if (scheduleDrift(args) !== null) return true;
   return args.observedDigest !== args.desiredDigest;
+}
+
+/**
+ * What the cadence disagrees about, in a sentence, or `null` when it does not.
+ *
+ * **The third way a placement can diverge**, after the digest and the delivery
+ * object's own phase. A Cloud Run Job whose Cloud Scheduler job was deleted
+ * reads back perfectly: right digest, `LIVE`, no cadence, and nothing fires it
+ * again. §6 wants that surfaced, so it is drift like any other and is corrected
+ * by the same re-converge a person presses.
+ *
+ * Absent `observedSchedule` is the backend saying it has no separate firing
+ * half — see `ObservedState.schedule` — so it never disagrees, which is what
+ * keeps every service and every Kubernetes placement out of this.
+ */
+export function scheduleDrift(args: {
+  readonly desiredSchedule?: string | null;
+  readonly observedSchedule?: string | null;
+}): string | null {
+  if (args.observedSchedule === undefined) return null;
+  const desired = args.desiredSchedule ?? null;
+  if (desired === args.observedSchedule) return null;
+  if (args.observedSchedule === null) {
+    return `nothing is firing this job — it declares the schedule "${desired}", and the platform holds none`;
+  }
+  return desired === null
+    ? `this job declares no schedule, and the platform is still firing it on "${args.observedSchedule}"`
+    : `this job declares the schedule "${desired}", and the platform is firing it on "${args.observedSchedule}"`;
 }

@@ -1148,6 +1148,90 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
       adapter.destroy(scheduling(), verdict.ref as string),
     ).rejects.toThrow('could not be removed');
   });
+
+  // --- §6: what `observe` can say about the half in front of the Job --------
+
+  test('observe reports the cadence the platform is actually holding', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
+
+    const observed = await adapter.observe(scheduling(), verdict.ref as string);
+    expect(observed?.schedule).toBe('0 3 * * *');
+  });
+
+  test('a scheduler job deleted out of band reads back as no cadence', async () => {
+    // The whole ticket, in three lines. The Job is untouched — right digest,
+    // `LIVE`, nothing to see — and nothing will ever fire it again. A pass
+    // that read only the Cloud Run resource calls this converged.
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
+    expect(await api.tick()).toHaveLength(1);
+
+    api.deschedule('shop-nightly');
+    expect(await api.tick()).toEqual([]);
+
+    const observed = await adapter.observe(scheduling(), verdict.ref as string);
+    expect(observed?.phase).toBe('LIVE');
+    expect(observed?.artifactDigest).toBe('sha256:abc');
+    expect(observed?.schedule).toBeNull();
+  });
+
+  test('a job that declares no schedule reads back the same way', async () => {
+    // Deliberately indistinguishable from the test above: the API answers one
+    // `404` for both, and an adapter that guessed which was which would have to
+    // guess from state it does not hold. §6 puts the judgement in core, which
+    // has the declaration to compare against.
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(scheduling(), nightly({ schedule: undefined })),
+    );
+    expect(
+      (await adapter.observe(scheduling(), verdict.ref as string))?.schedule,
+    ).toBeNull();
+  });
+
+  test('a service reports no cadence at all, rather than an absent one', async () => {
+    // Absent, not `null`. A Service has no firing half, so `null` would say
+    // "something that should be firing this is gone" about every website in
+    // the installation, forever.
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+
+    const observed = await adapter.observe(target(), verdict.ref as string);
+    expect(observed?.phase).toBe('LIVE');
+    expect('schedule' in (observed ?? {})).toBe(false);
+  });
+
+  test('a refusal that does not prove absence is not reported as absence', async () => {
+    // `null` is what makes core announce that a cadence stopped, so only the
+    // two answers that *prove* nothing is there may produce it. A `403`, an
+    // expired token, an unreachable API: every one of those is "I could not
+    // tell", and reporting it as absence would turn a blip into a false alarm
+    // about a schedule that is still firing perfectly well.
+    const api = new FakeCloudRun();
+    const denied = permissionDenied();
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      schedulerEndpoint: api.schedulerEndpoint,
+      pollIntervalMs: 1,
+      sleep: async () => {},
+      fetch: async (request) => {
+        const url = new URL(request.url);
+        return url.origin === new URL(api.schedulerEndpoint).origin &&
+          request.method === 'GET'
+          ? new Response(JSON.stringify(denied.body), {
+              status: denied.status,
+              headers: { 'content-type': 'application/json' },
+            })
+          : api.fetch(request);
+      },
+    });
+    const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
+
+    const observed = await adapter.observe(scheduling(), verdict.ref as string);
+    expect(observed?.phase).toBe('LIVE');
+    expect('schedule' in (observed ?? {})).toBe(false);
+  });
 });
 
 describe('the ref an adapter hands back names its own collection', () => {
