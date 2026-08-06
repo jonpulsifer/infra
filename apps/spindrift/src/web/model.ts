@@ -520,6 +520,15 @@ export interface ComponentView {
 export interface WorkspaceView {
   readonly app: string;
   readonly appId?: string;
+  /**
+   * Which of {@link components} this view's per-Component half is about — its
+   * runtime, its placement, its release and its config keys.
+   *
+   * The selection the read resolved, echoed rather than assumed: a screen that
+   * asked for no Component is answered with the App's first, so the list can
+   * mark the row it is showing without holding a second idea of which one that
+   * is. Absent for an App with no Components at all.
+   */
   readonly componentId?: string;
   readonly targetId?: string;
   readonly latestDeployId?: number;
@@ -529,7 +538,12 @@ export interface WorkspaceView {
   readonly vessel: string;
   readonly prerequisitesMet: boolean;
   readonly phase: DeployPhase;
+  /**
+   * Where {@link componentId} answers, empty for a Component that answers
+   * nowhere — every job, and anything not deployed under a vanity domain.
+   */
   readonly url: string;
+  /** That {@link url} is being served. Never true without one. */
   readonly urlLive: boolean;
   readonly release: string;
   readonly components: readonly ComponentView[];

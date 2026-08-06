@@ -25,6 +25,21 @@ import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
 export const getAppWorkspaceInput = z.object({
   name: z.string().min(1),
+  /**
+   * Which Component the screen is showing, by name.
+   *
+   * The App-first view is one screen with a selection in it, not a screen per
+   * Component — so this narrows what the per-Component half of
+   * {@link WorkspaceView} is read from and nothing else. Absent is the App's
+   * first Component, which is what a screen opened without a selection shows.
+   *
+   * A name rather than an id because `components` is unique per App and this is
+   * a read of one App: the name is enough to resolve, and it is what the row a
+   * person pressed says. It is its own field rather than a pair with a Target
+   * for the same reason — a second dimension is a second field here, not a
+   * different shape.
+   */
+  component: z.string().min(1).optional(),
 });
 export type GetAppWorkspaceInput = z.infer<typeof getAppWorkspaceInput>;
 
@@ -41,6 +56,10 @@ export const getAppWorkspace: Command<
     with: {
       repository: true,
       components: {
+        // Oldest first, so "the App's first Component" names one Component
+        // rather than whichever row the planner returned first — the default
+        // selection is read from this order on every load of the screen.
+        orderBy: (comps, { asc }) => [asc(comps.createdAt)],
         with: {
           deploys: {
             orderBy: (deploys, { desc }) => [desc(deploys.createdAt)],
@@ -86,10 +105,24 @@ export const getAppWorkspace: Command<
     },
   });
 
-  const primaryComponent = app.components[0];
-  const latestDeploy = primaryComponent?.deploys[0];
+  // The Component the screen is showing. Every per-Component read below hangs
+  // off this one — its runtime, the Target it is placed on, its config — so a
+  // job behind a service is reachable by naming it rather than by being first.
+  const selected =
+    input.component === undefined
+      ? app.components[0]
+      : app.components.find((comp) => comp.name === input.component);
+
+  if (input.component !== undefined && selected === undefined) {
+    return failed(
+      'NOT_FOUND',
+      `App '${app.name}' has no Component '${input.component}'`,
+    );
+  }
+
+  const latestDeploy = selected?.deploys[0];
   const latestTarget = latestDeploy?.target;
-  const desiredTarget = primaryComponent?.desiredTargets[0]?.target;
+  const desiredTarget = selected?.desiredTargets[0]?.target;
   const workspaceTarget = latestTarget ?? desiredTarget;
 
   const components: ComponentView[] = app.components.map((comp) => {
@@ -114,7 +147,11 @@ export const getAppWorkspace: Command<
       name: ds.name,
       engine: ds.engine,
       provenance: ds.provenance,
-      attachedTo: primaryComponent?.name ?? app.name,
+      // A Datastore is attached to the App (§11), so the Component named here
+      // is the App's first and never the selection: the same store reporting
+      // two different attachments as the selection moves is a second answer to
+      // a question that has one.
+      attachedTo: app.components[0]?.name ?? app.name,
       target: targetRowLabel(ds.target),
     });
   }
@@ -135,15 +172,12 @@ export const getAppWorkspace: Command<
   // `setConfig` itself uses to know what is already there, and it is the
   // only shape a screen is allowed to show: core's store has no verb that
   // returns a value. Scoped to the same pair the rest of this screen already
-  // picked — `workspaceTarget`, not every Target the Component might be
-  // placed on — because that pair is what a `Set variable` here would act on.
+  // picked — the selected Component and `workspaceTarget`, not every Target it
+  // might be placed on — because that pair is what a `Set variable` here would
+  // act on.
   const configKeys =
-    primaryComponent && workspaceTarget
-      ? await configuredKeys(
-          context.db,
-          primaryComponent.id,
-          workspaceTarget.id,
-        )
+    selected && workspaceTarget
+      ? await configuredKeys(context.db, selected.id, workspaceTarget.id)
       : [];
 
   // Status events only — the checkpoints, not the transcript.
@@ -207,26 +241,31 @@ export const getAppWorkspace: Command<
     });
   }
 
+  // The address the selected Component answers on. A job answers on none — no
+  // adapter puts a url on a job's Deploy — and the App's vanity domain is not
+  // one either: the fallback is for a Component that will serve that domain and
+  // has not deployed yet, which a job never is.
+  const url =
+    latestDeploy?.url ??
+    (selected?.kind === 'job' ? '' : (app.vanityDomain ?? ''));
+
   let runtime: Runtime;
-  if (
-    primaryComponent?.kind === 'website' &&
-    latestTarget?.adapter === 'static'
-  ) {
+  if (selected?.kind === 'website' && latestTarget?.adapter === 'static') {
     runtime = {
       kind: 'none',
       because: 'Static files are served by the Target.',
     };
-  } else if (primaryComponent?.kind === 'job') {
+  } else if (selected?.kind === 'job') {
     runtime = await executionsOf(
       context,
-      primaryComponent.id,
+      selected.id,
       latestDeploy ?? null,
       now,
     );
-  } else if (primaryComponent && latestTarget) {
+  } else if (selected && latestTarget) {
     runtime = {
       kind: 'stream',
-      componentId: primaryComponent.id,
+      componentId: selected.id,
       targetId: latestTarget.id,
       lines: [],
       reach: reachOf(latestTarget.discovery?.logHistorySeconds ?? 0),
@@ -241,22 +280,25 @@ export const getAppWorkspace: Command<
   const workspace: WorkspaceView = {
     app: app.name,
     appId: app.id,
-    componentId: primaryComponent?.id,
+    componentId: selected?.id,
     targetId: workspaceTarget?.id,
     latestDeployId: latestDeploy?.id,
-    latestBuildId: primaryComponent?.builds[0]?.id,
+    latestBuildId: selected?.builds[0]?.id,
     target: workspaceTarget?.adapter ?? 'none',
     vessel: workspaceTarget?.vessel.name ?? 'none',
     prerequisitesMet: workspaceTarget
       ? workspaceTarget.health === 'healthy'
       : false,
-    phase: phaseFor(latestDeploy?.phase, primaryComponent?.builds[0]?.status),
-    url: latestDeploy?.url ?? app.vanityDomain ?? '',
-    urlLive: latestDeploy?.phase === 'LIVE',
+    phase: phaseFor(latestDeploy?.phase, selected?.builds[0]?.status),
+    url,
+    // An address that is serving, which is not the same as a release that is
+    // live: a placed job is LIVE with nothing to open, and this is the fact the
+    // screen's link and its headline hang off.
+    urlLive: url !== '' && latestDeploy?.phase === 'LIVE',
     release: latestDeploy
       ? `Deploy ${latestDeploy.id}`
-      : primaryComponent?.builds[0]
-        ? `Build ${primaryComponent.builds[0].id}`
+      : selected?.builds[0]
+        ? `Build ${selected.builds[0].id}`
         : 'none',
     components,
     configKeys,
