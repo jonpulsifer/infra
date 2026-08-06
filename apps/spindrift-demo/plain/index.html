@@ -38,18 +38,53 @@
     </div>
   </section>
 
-  <section class="fleet">
-    <h2>Fleet Status</h2>
-    <div class="vessels" id="vessels">
-      <!-- populated by client.js -->
+  <!-- Plain static: no server, so Runtime can only identify the host from the
+       URL and tell you there is no environment to read. That honesty is the
+       demo's point — a bare static host has no `HOSTNAME`, no `SPINDRIFT_BUILD`,
+       nothing that moves on a pod restart, because there is no pod. -->
+  <section class="runtime" id="runtime-panel">
+    <div class="runtime-head">
+      <h2>Runtime</h2>
+      <div class="platform">
+        <span class="platform-mark" data-rt-logo></span>
+        <div class="platform-text">
+          <span class="platform-name" data-rt-platform>—</span>
+          <span class="platform-by">detected by <code data-rt-detected>—</code></span>
+        </div>
+      </div>
+    </div>
+    <div class="fact-grid">
+      <div class="fact"><span class="fact-key">hostname</span><code class="fact-val" data-rt-hostname>—</code></div>
+      <div class="fact" data-rt-pid-row><span class="fact-key">pid</span><code class="fact-val" data-rt-pid>—</code></div>
+      <div class="fact" data-rt-port-row><span class="fact-key">port</span><code class="fact-val" data-rt-port>—</code></div>
+      <div class="fact" data-rt-runtime-row><span class="fact-key">runtime</span><code class="fact-val" data-rt-runtime>—</code></div>
+      <div class="fact" data-rt-os-row><span class="fact-key">os</span><code class="fact-val" data-rt-os>—</code></div>
+      <div class="fact"><span class="fact-key">started</span><code class="fact-val" data-rt-started>—</code></div>
+      <div class="fact"><span class="fact-key">uptime</span><code class="fact-val" data-rt-uptime>—</code></div>
+      <div class="fact"><span class="fact-key">spindrift build</span><code class="fact-val" data-rt-build>—</code></div>
     </div>
   </section>
 
-  <section class="logbook">
-    <h2>Deploy Log</h2>
-    <div class="terminal" id="terminal">
-      <div class="terminal-lines" id="terminal-lines"></div>
-      <span class="cursor">▊</span>
+  <section class="envbook">
+    <div class="section-head">
+      <h2>Environment</h2>
+      <span class="section-count"><span data-rt-env-count>0</span> vars</span>
+    </div>
+    <div class="env-list" data-rt-env></div>
+    <p class="env-note">A bare static host serves files from a CDN — there is no container <code>process.env</code> to read here. Point the same scope at <code>src/</code> behind <code>serve.ts</code> to see the live runtime and <code>SPINDRIFT_RUNTIME_LABEL</code>.</p>
+  </section>
+
+  <section class="client" id="client-panel">
+    <h2>Client</h2>
+    <div class="fact-grid">
+      <div class="fact"><span class="fact-key">browser</span><code class="fact-val" data-c-browser>—</code></div>
+      <div class="fact"><span class="fact-key">url</span><code class="fact-val" data-c-href>—</code></div>
+      <div class="fact"><span class="fact-key">language</span><code class="fact-val" data-c-lang>—</code></div>
+      <div class="fact"><span class="fact-key">screen</span><code class="fact-val" data-c-screen>—</code></div>
+      <div class="fact"><span class="fact-key">cores</span><code class="fact-val" data-c-cores>—</code></div>
+      <div class="fact"><span class="fact-key">memory</span><code class="fact-val" data-c-mem>—</code></div>
+      <div class="fact"><span class="fact-key">pixel ratio</span><code class="fact-val" data-c-dpr>—</code></div>
+      <div class="fact"><span class="fact-key">network</span><code class="fact-val" data-c-net>—</code></div>
     </div>
   </section>
 
@@ -58,6 +93,7 @@
   </footer>
 </div>
 
+<script src="runtime.js"></script>
 <script src="client.js"></script>
 </body>
 </html>
