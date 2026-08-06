@@ -4,7 +4,11 @@ locals {
 
   vessel_topology = jsondecode(file("${path.module}/config/vessel-topology.json"))
 
-  spindrift_principal = "principal://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/subject/offsite:system:serviceaccount:spindrift:spindrift"
+  # The pool every cluster workload federates through, one provider per cluster.
+  # Declared in terraform/gcp/projects/homelab-ng/workload-identity.tf.
+  fml_pool = "iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool"
+
+  spindrift_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift:spindrift"
 }
 
 data "google_project" "current" {
