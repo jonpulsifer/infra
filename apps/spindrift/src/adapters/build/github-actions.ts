@@ -30,10 +30,10 @@
  * the Build rather than hidden, because a checklist-only log is a property of
  * where it ran and not a bug in Spindrift.
  */
+
+import { z } from 'zod';
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type { RepositoryRef } from '../../domain/repository.ts';
-import { z } from 'zod';
-import type { BuildRouteDescriptor } from './descriptor.ts';
 import {
   CALLER_WORKFLOW_FILE,
   RUN_NAME_PREFIX,
@@ -48,6 +48,7 @@ import type {
   BuildSpec,
   LogFidelity,
 } from './contract.ts';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
@@ -785,4 +786,3 @@ export const githubActionsDescriptor: BuildRouteDescriptor<{
     });
   },
 };
-

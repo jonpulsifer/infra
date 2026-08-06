@@ -35,7 +35,6 @@ import type { InstallationManifest } from '../config/manifest.ts';
 import { CredentialKeyring } from '../crypto/credential-envelope.ts';
 import type { Database } from '../db/client.ts';
 import type { BuildRouteProfile } from '../domain/build-route.ts';
-import { findBuildRouteDescriptor } from './build/descriptors.ts';
 import type {
   RepositoryAuthorization,
   RepositoryHost,
@@ -53,10 +52,8 @@ import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
-import { CloudBuildRoute } from './build/cloud-build.ts';
 import type { BuildAdapter } from './build/contract.ts';
-import { GitHubActionsBuildRoute } from './build/github-actions.ts';
-import { InClusterBuildRoute } from './build/in-cluster.ts';
+import { findBuildRouteDescriptor } from './build/descriptors.ts';
 import { GcpDiscovery } from './cloud-discovery.ts';
 import type { DatastoreAdapter } from './datastore/contract.ts';
 import { CloudDatastoreAdapter } from './datastore/gcp.ts';
@@ -64,7 +61,7 @@ import { KubernetesDatastoreAdapter } from './datastore/kubernetes.ts';
 import { workloadIdentityToken } from './deploy/cloud/federation.ts';
 import { CloudRunDeployAdapter } from './deploy/cloudrun/index.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
-import { KubernetesApi, type TokenProvider } from './deploy/kubernetes/api.ts';
+import type { TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
 import { StaticDeployAdapter } from './deploy/static/index.ts';
 import type { SecretStore } from './store/contract.ts';
@@ -475,8 +472,7 @@ function createBuildRoute(
   const descriptor = findBuildRouteDescriptor(route.adapter);
   if (!descriptor) return null;
   const token =
-    options.token ??
-    installationServiceAccountToken(options.env ?? Bun.env);
+    options.token ?? installationServiceAccountToken(options.env ?? Bun.env);
   return descriptor.create(route, {
     manifest: options.manifest,
     app,
@@ -486,7 +482,6 @@ function createBuildRoute(
     ...(options.env ? { env: options.env } : {}),
   });
 }
-
 
 /**
  * How this installation reaches a cloud API — a Target's control plane, and the

@@ -37,9 +37,8 @@
  *     Target will admit.
  */
 
-import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import { z } from 'zod';
-import type { BuildRouteDescriptor } from './descriptor.ts';
+import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import {
   buildKitProgramFor,
   dockerConfigFor,
@@ -55,6 +54,7 @@ import type {
   BuildSpec,
   LogFidelity,
 } from './contract.ts';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
@@ -920,4 +920,3 @@ export const cloudBuildDescriptor: BuildRouteDescriptor<{
     });
   },
 };
-

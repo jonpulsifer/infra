@@ -3,7 +3,6 @@ import { buildRouteProfiles } from '../../adapters/registry.ts';
 import { apps, targets } from '../../db/schema.ts';
 import {
   type BuildRouteCandidate,
-  buildRouteCandidates,
   DEFAULT_MINIMUM_BUILD_LEVEL,
   selectBuildRoute,
 } from '../../domain/build-route.ts';

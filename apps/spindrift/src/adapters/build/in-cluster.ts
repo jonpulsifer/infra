@@ -19,9 +19,9 @@
  * this process is already connected to, so its log is one more read against an
  * API the adapter already holds (§4's amendment).
  */
-import type { RegistryFlavour } from '../../domain/artifact-name.ts';
+
 import { z } from 'zod';
-import type { BuildRouteDescriptor } from './descriptor.ts';
+import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import {
   KubernetesApi,
   type KubernetesObject,
@@ -40,6 +40,7 @@ import type {
   BuildSpec,
   LogFidelity,
 } from './contract.ts';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
@@ -350,4 +351,3 @@ export const inClusterDescriptor: BuildRouteDescriptor<{
     });
   },
 };
-
