@@ -456,6 +456,11 @@ export class FakeCloudRun {
     return this.schedules.get(`${this.parent()}/jobs/${id}`);
   }
 
+  /** Somebody deleted the schedule out of band and told nobody. */
+  deschedule(id: string): void {
+    this.schedules.delete(`${this.parent()}/jobs/${id}`);
+  }
+
   /** Every scheduler job in the project, by name — nothing should be orphaned. */
   scheduled(): string[] {
     return [...this.schedules.keys()].sort();
@@ -713,6 +718,16 @@ export class FakeCloudRun {
       }
       this.schedules.delete(addressed);
       return json(200, {});
+    }
+    // What `observe` asks, and the only read this API serves. A job that was
+    // never scheduled and one whose scheduler job was deleted answer the same
+    // `404` here — which is the point: the API cannot tell them apart either.
+    if (method === 'GET') {
+      const held =
+        addressed === null ? undefined : this.schedules.get(addressed);
+      return held === undefined
+        ? json(404, notFound())
+        : json(200, { ...held, state: 'ENABLED' });
     }
     // `patch` addresses the job and `create` addresses its parent — the only
     // difference between the two, other than which of them refuses.

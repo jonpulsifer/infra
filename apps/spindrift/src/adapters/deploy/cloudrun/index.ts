@@ -473,10 +473,27 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     if (read === null) return null;
 
     const status = cloudRunStatus(read);
+    // A Job's placement has a second half nothing else reads. Asked on every
+    // job rather than only scheduled ones, because the whole question is
+    // whether the schedule is *absent*, and only core knows whether that is the
+    // honest answer — an adapter that skipped the read for jobs it believed
+    // unscheduled could only ever believe what it just read.
+    //
+    // ponytail: one extra Cloud Scheduler GET per job per drift pass
+    // (`DEFAULT_DRIFT_INTERVAL_MS`, five minutes). Carry the desired cadence
+    // across the seam instead if a vessel ever holds enough jobs to make that a
+    // real cost.
+    const schedule =
+      placed.collection === JOBS
+        ? await this.observeSchedule(connection, placed.id)
+        : undefined;
     return {
       ref,
       phase: status.phase,
       artifactDigest: servingDigest(read),
+      // Omitted rather than `undefined`: absent is a third state on this field
+      // and a key holding `undefined` is not it.
+      ...(schedule === undefined ? {} : { schedule }),
       ...(status.reason === undefined ? {} : { reason: status.reason }),
       ...(status.detail === undefined ? {} : { detail: status.detail }),
     };
@@ -945,6 +962,39 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       detail: `job ${id} could not be put on the schedule "${schedule}": ${failure.detail}`,
       debug: failure.debug,
     };
+  }
+
+  /**
+   * What is firing this job, or `null` where nothing is.
+   *
+   * **A read that cannot fail into a lie.** `null` here is what makes core
+   * report a stopped schedule, so every way of not knowing has to be `null`'s
+   * opposite — an unreachable API, an expired token, a `403` — or a five
+   * minute uplink blip would announce that a cadence stopped. Only the two
+   * answers that *prove* absence produce `null`: a `404`, and the service
+   * being switched off in this project, which is `unschedule`'s reasoning in
+   * the other direction.
+   */
+  private async observeSchedule(
+    connection: CloudRunAdapterConnection,
+    id: string,
+  ): Promise<string | null | undefined> {
+    const read = await this.scheduler().json<{ schedule?: unknown }>({
+      method: 'GET',
+      path: `/v1/${parentOf(connection)}/${JOBS}/${encodeURIComponent(id)}`,
+    });
+    if (read.ok) {
+      return typeof read.value?.schedule === 'string'
+        ? read.value.schedule
+        : null;
+    }
+    if (
+      read.kind === 'status' &&
+      (read.status === 404 || read.reason === SERVICE_DISABLED)
+    ) {
+      return null;
+    }
+    return undefined;
   }
 
   /** Take this job off its schedule, whether or not it was on one. */

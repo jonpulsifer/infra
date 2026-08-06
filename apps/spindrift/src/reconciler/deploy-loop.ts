@@ -66,6 +66,7 @@ import {
   diagnosisOf,
   failureColumns,
   hasDrifted,
+  scheduleDrift,
 } from '../domain/diagnosis.ts';
 import { displayUrl, hostnameFor } from '../domain/naming.ts';
 import {
@@ -572,10 +573,22 @@ async function observeOne(
   }
   const observed = state?.artifactDigest ?? null;
 
+  // The cadence half of the same comparison, where the backend reports one.
+  // Read off the Component rather than the Deploy: `schedule` is what the
+  // developer declares now, and a cadence they changed since this Deploy is a
+  // difference the platform is meant to be asked to converge on, not one this
+  // pass should paper over.
+  const scheduleArgs = {
+    desiredSchedule: subject.component.schedule,
+    ...(state?.schedule === undefined
+      ? {}
+      : { observedSchedule: state.schedule }),
+  };
   const drifted = hasDrifted({
     phase: deploy.phase,
     desiredDigest: subject.build.artifactDigest ?? '',
     observedDigest: observed,
+    ...scheduleArgs,
     ...(state === null ? {} : { observedPhase: state.phase }),
   });
 
@@ -583,8 +596,16 @@ async function observeOne(
   // argument for storing a diagnosis applies here for the same cause: a
   // Helm error naming the value that no longer renders is not recoverable
   // from anywhere once the object is reconciled again.
-  const driftDetail =
-    drifted && state?.phase === 'FAILED' ? (state.detail ?? null) : null;
+  //
+  // A stopped schedule gets core's sentence rather than the platform's,
+  // because the platform said nothing — the finding *is* the absence, and
+  // "nothing fires this any more" is only a sentence somebody holding the
+  // declaration can write.
+  const driftDetail = !drifted
+    ? null
+    : state?.phase === 'FAILED'
+      ? (state.detail ?? null)
+      : scheduleDrift(scheduleArgs);
 
   // §6 wants drift to be "a visible state", and visible means a row: the UI
   // reads rows, so a finding that lived only for the length of this pass

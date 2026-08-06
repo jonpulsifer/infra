@@ -261,6 +261,30 @@ export interface ObservedState {
   artifactDigest: string;
   reason?: FailureReason;
   detail?: string;
+  /**
+   * The cadence something is actually firing this placement on (§6, §7).
+   *
+   * A placement is not always one object. On `cloudrun` a scheduled job is a
+   * Job *and* a Cloud Scheduler job in front of it, and the second one can be
+   * deleted out of band while the first still reads back perfectly — so a
+   * digest is not the whole answer to "is what was asked for still there".
+   *
+   * Three states, and the third is the reason this is optional rather than
+   * `string | null`:
+   *
+   * - a **string** — the expression the backend holds.
+   * - **`null`** — the backend was asked, and nothing fires it.
+   * - **absent** — there is no separate firing half to be absent. Every
+   *   service, and every Kubernetes placement: a CronJob lives inside the
+   *   release Flux reconciles, so it is already covered by the digest read,
+   *   and reporting `null` for it would mark every service drifted forever.
+   *
+   * **Reported, never judged.** Whether `null` is the honest state or a
+   * schedule somebody deleted is a comparison against the Component's
+   * declaration, which only core holds — the same rule `inspect` follows, so
+   * that two adapters cannot draw the conclusion differently.
+   */
+  schedule?: string | null;
 }
 
 /** The Component-following runtime pipe (§17), distinct from attempt events. */

@@ -74,6 +74,9 @@ async function pendingDeploy(
     auth?: 'none' | 'proxy';
     /** The backend this lands on, which decides who mints the name (§9). */
     adapter?: 'kubernetes' | 'cloudrun';
+    kind?: 'service' | 'job';
+    /** The cadence the Component declares — the desired half of §6's drift. */
+    schedule?: string;
   } = {},
 ) {
   const db = database().db;
@@ -86,10 +89,11 @@ async function pendingDeploy(
     .values({
       appId: app!.id,
       name: 'web',
-      kind: 'service',
+      kind: options.kind ?? 'service',
       expose: true,
       reach: options.reach ?? 'private',
       auth: options.auth ?? 'proxy',
+      ...(options.schedule === undefined ? {} : { schedule: options.schedule }),
     })
     .returning();
   const [target] = await db
@@ -671,6 +675,89 @@ describe('drift is surfaced, never corrected (§6)', () => {
     const row = await deployRow(deploy.id);
     expect(row?.driftedAt).toBeNull();
     expect(row?.driftDetail).toBeNull();
+  });
+
+  test('a schedule that stopped firing is drift, digest and phase or not', async () => {
+    const { deploy } = await pendingDeploy({
+      kind: 'job',
+      schedule: '0 3 * * *',
+    });
+    const adapter = new FakeDeployAdapter({
+      script: [{ verdict: { phase: 'LIVE', ref: 'jobs/nightly' } }],
+    });
+    await runDeployPass(context(adapter));
+
+    // Everything the old pass looked at still agrees: the Job is there, it is
+    // `LIVE`, and it carries the digest that was asked for. What is gone is the
+    // only thing that ever ran it.
+    adapter.place('jobs/nightly', {
+      ref: 'jobs/nightly',
+      phase: 'LIVE',
+      artifactDigest: DIGEST,
+      schedule: null,
+    });
+
+    const pass = await runDeployPass(context(adapter));
+    expect(
+      pass.drift.find((entry) => entry.deployId === deploy.id)?.drifted,
+    ).toBe(true);
+
+    // And it says which of the two halves disagreed. A bare flag on a row whose
+    // digest matches is the operator reading "drifted" beside three fields that
+    // all look right.
+    const row = await deployRow(deploy.id);
+    expect(row?.driftedAt).toEqual(FROZEN);
+    expect(row?.driftDetail).toContain('0 3 * * *');
+    expect(row?.driftDetail).toContain('nothing is firing this job');
+
+    // Surfaced, not corrected — §6 holds here exactly as it does for a digest.
+    expect(adapter.applied).toHaveLength(1);
+  });
+
+  test('a job nobody scheduled is not drifted for having no schedule', async () => {
+    // The honest state for most jobs, and the one a naive fix marks drifted
+    // forever: nothing fires it because nothing was ever asked to.
+    const { deploy } = await pendingDeploy({ kind: 'job' });
+    const adapter = new FakeDeployAdapter({
+      script: [{ verdict: { phase: 'LIVE', ref: 'jobs/nightly' } }],
+    });
+    await runDeployPass(context(adapter));
+
+    adapter.place('jobs/nightly', {
+      ref: 'jobs/nightly',
+      phase: 'LIVE',
+      artifactDigest: DIGEST,
+      schedule: null,
+    });
+
+    const pass = await runDeployPass(context(adapter));
+    expect(
+      pass.drift.find((entry) => entry.deployId === deploy.id)?.drifted,
+    ).toBe(false);
+    expect((await deployRow(deploy.id))?.driftedAt).toBeNull();
+  });
+
+  test('a backend that reports no cadence is never drifted for one', async () => {
+    // Every service, and every Kubernetes placement. The field is absent rather
+    // than `null`, and absent has to mean "not applicable" — the alternative is
+    // every website in the installation permanently drifted.
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({
+      script: [{ verdict: { phase: 'LIVE', ref: 'hr/apps/web' } }],
+    });
+    await runDeployPass(context(adapter));
+
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'LIVE',
+      artifactDigest: DIGEST,
+    });
+
+    const pass = await runDeployPass(context(adapter));
+    expect(
+      pass.drift.find((entry) => entry.deployId === deploy.id)?.drifted,
+    ).toBe(false);
+    expect((await deployRow(deploy.id))?.driftedAt).toBeNull();
   });
 
   test('drift fixed out of band stops being reported, with no dismissal', async () => {
