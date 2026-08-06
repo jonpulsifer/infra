@@ -20,9 +20,11 @@
  * API the adapter already holds (§4's amendment).
  */
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
-import type {
+import { z } from 'zod';
+import type { BuildRouteDescriptor } from './descriptor.ts';
+import {
   KubernetesApi,
-  KubernetesObject,
+  type KubernetesObject,
 } from '../deploy/kubernetes/api.ts';
 import {
   buildKitProgramFor,
@@ -309,3 +311,43 @@ export class InClusterBuildRoute implements BuildAdapter {
     });
   }
 }
+
+export const inClusterDescriptor: BuildRouteDescriptor<{
+  name: string;
+  adapter: 'in-cluster';
+  endpoint: string;
+  namespace: string;
+  image: string;
+  serviceAccount: string;
+}> = {
+  kind: 'in-cluster',
+  displayName: 'in-cluster',
+  logo: 'kubernetes',
+  buildLevel: 1,
+  configSchema: z
+    .object({
+      name: z.string().trim().min(1),
+      adapter: z.literal('in-cluster'),
+      endpoint: z.url(),
+      namespace: z.string().trim().min(1),
+      image: z.string().trim().min(1),
+      serviceAccount: z.string().trim().min(1),
+    })
+    .strict(),
+  create(config, context) {
+    if (!context.token) return null;
+    return new InClusterBuildRoute({
+      name: config.name,
+      api: new KubernetesApi({
+        apiServer: config.endpoint,
+        token: context.token,
+        ...(context.fetch ? { fetch: context.fetch } : {}),
+      }),
+      namespace: config.namespace,
+      image: config.image,
+      serviceAccount: config.serviceAccount,
+      zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
+    });
+  },
+};
+

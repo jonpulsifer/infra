@@ -38,6 +38,8 @@
  */
 
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
+import { z } from 'zod';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import {
   buildKitProgramFor,
   dockerConfigFor,
@@ -877,3 +879,45 @@ function timestampOf(entry: LogEntry): Date | null {
   const at = new Date(entry.timestamp);
   return Number.isNaN(at.getTime()) ? null : at;
 }
+
+export const cloudBuildDescriptor: BuildRouteDescriptor<{
+  name: string;
+  adapter: 'cloud-build';
+  endpoint: string;
+  logsEndpoint: string;
+  project: string;
+  region: string;
+  image: string;
+}> = {
+  kind: 'cloud-build',
+  displayName: 'Cloud Build',
+  logo: 'google-cloud',
+  buildLevel: 3,
+  configSchema: z
+    .object({
+      name: z.string().trim().min(1),
+      adapter: z.literal('cloud-build'),
+      endpoint: z.url(),
+      logsEndpoint: z.url(),
+      project: z.string().trim().min(1),
+      region: z.string().trim().min(1),
+      image: z.string().trim().min(1),
+    })
+    .strict(),
+  create(config, context) {
+    return new CloudBuildRoute({
+      name: config.name,
+      endpoint: config.endpoint,
+      logsEndpoint: config.logsEndpoint,
+      project: config.project,
+      region: config.region,
+      image: config.image,
+      zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
+      signer: context.manifest.supplyChain.signer,
+      attestor: context.manifest.supplyChain.attestor ?? '',
+      token: context.cloud,
+      ...(context.fetch ? { fetch: context.fetch } : {}),
+    });
+  },
+};
+

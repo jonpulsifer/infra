@@ -32,6 +32,8 @@
  */
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type { RepositoryRef } from '../../domain/repository.ts';
+import { z } from 'zod';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import {
   CALLER_WORKFLOW_FILE,
   RUN_NAME_PREFIX,
@@ -752,3 +754,35 @@ function stepState(
   if (conclusion === 'skipped') return null;
   return conclusion === 'success' ? 'SUCCEEDED' : 'FAILED';
 }
+
+export const githubActionsDescriptor: BuildRouteDescriptor<{
+  name: string;
+  adapter: 'github-actions';
+  sealPublicKey?: string;
+}> = {
+  kind: 'github-actions',
+  displayName: 'GitHub Actions',
+  logo: 'github',
+  buildLevel: 2,
+  configSchema: z
+    .object({
+      name: z.string().trim().min(1),
+      adapter: z.literal('github-actions'),
+      sealPublicKey: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+  create(config, context) {
+    const workflow = context.manifest.github.buildWorkflow;
+    if (context.app === null || workflow === null) return null;
+    return new GitHubActionsBuildRoute({
+      name: config.name,
+      host: context.app,
+      buildWorkflow: workflow,
+      zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
+      signer: context.manifest.supplyChain.signer,
+      attestor: context.manifest.supplyChain.attestor ?? '',
+      sealPublicKey: config.sealPublicKey,
+    });
+  },
+};
+
