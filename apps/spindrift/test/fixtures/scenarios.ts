@@ -432,6 +432,7 @@ export const WORKSPACE_SCENARIOS = {
     url: `beacon.${APEX}`,
     urlLive: true,
     release: 'Deploy 42',
+    autoDeploy: false,
     components: [
       {
         id: 'component-beacon-web',
@@ -527,6 +528,7 @@ export const WORKSPACE_SCENARIOS = {
     url: `almanac.${APEX}`,
     urlLive: true,
     release: 'Deploy 17',
+    autoDeploy: false,
     components: [
       {
         id: 'component-almanac-web',
@@ -580,6 +582,7 @@ export const WORKSPACE_SCENARIOS = {
     url: `ledger.${APEX}`,
     urlLive: false,
     release: 'Execution 118',
+    autoDeploy: false,
     components: [
       {
         id: 'component-ledger-nightly',

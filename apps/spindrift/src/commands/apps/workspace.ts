@@ -261,6 +261,7 @@ export const getAppWorkspace: Command<
     datastores: Array.from(datastoresMap.values()),
     activity,
     runtime,
+    autoDeploy: app.sourceKind === 'repo' ? app.autoDeploy : null,
   };
 
   return ok({ workspace });

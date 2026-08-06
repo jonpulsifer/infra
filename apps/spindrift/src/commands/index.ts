@@ -16,6 +16,7 @@
  * named commands and arrive with the milestones that implement them.
  */
 
+export { setAppAutoDeploy } from './apps/auto-deploy.ts';
 export { setAppBuildRoute } from './apps/build-route.ts';
 export { deleteApp } from './apps/delete.ts';
 export { deployApp } from './apps/deploy.ts';

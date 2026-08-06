@@ -547,6 +547,15 @@ export interface WorkspaceView {
    * list of executions rather than a tail it has nothing to put in.
    */
   readonly runtime: Runtime;
+  /**
+   * Whether a push to this App's repository redeploys it (§15).
+   *
+   * `null` for an App deployed from an uploaded archive: no push can reach it,
+   * so "off" would be a state it could be turned out of and this is not one.
+   * The screen renders the absence, never a disabled switch pretending there
+   * is a choice.
+   */
+  readonly autoDeploy: boolean | null;
 }
 
 /**
