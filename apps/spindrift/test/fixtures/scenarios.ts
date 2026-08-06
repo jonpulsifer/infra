@@ -661,6 +661,10 @@ export const WORKSPACE_SCENARIOS = {
    * that Component's while the list still holds both. Until a Component could
    * be selected there was no view of this App in which the job had a run list
    * or a Run now control at all.
+   *
+   * The job answers nowhere, so the address is empty and `urlLive` is false
+   * while the release is LIVE — a placed CronJob is exactly that, and the
+   * App's own vanity domain is the service's address, not this Component's.
    */
   jobBehindService: {
     app: 'quay',
@@ -669,7 +673,7 @@ export const WORKSPACE_SCENARIOS = {
     vessel: 'driftwood',
     prerequisitesMet: true,
     phase: 'LIVE',
-    url: `quay.${APEX}`,
+    url: '',
     urlLive: false,
     release: 'Deploy 61',
     autoDeploy: true,

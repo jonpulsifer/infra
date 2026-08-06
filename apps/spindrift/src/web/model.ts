@@ -538,7 +538,12 @@ export interface WorkspaceView {
   readonly vessel: string;
   readonly prerequisitesMet: boolean;
   readonly phase: DeployPhase;
+  /**
+   * Where {@link componentId} answers, empty for a Component that answers
+   * nowhere — every job, and anything not deployed under a vanity domain.
+   */
   readonly url: string;
+  /** That {@link url} is being served. Never true without one. */
   readonly urlLive: boolean;
   readonly release: string;
   readonly components: readonly ComponentView[];

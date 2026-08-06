@@ -223,11 +223,15 @@ export function Workspace({
               label
             />
           ) : null}
-          <Button variant="outline" asChild>
-            <a href={normaliseUrl(view.url)}>
-              Open app <ExternalLink aria-hidden="true" />
-            </a>
-          </Button>
+          {/* Only where the selected Component answers somewhere: a job has no
+              address, and `Open app` on an empty one reloads this screen. */}
+          {view.url === '' ? null : (
+            <Button variant="outline" asChild>
+              <a href={normaliseUrl(view.url)}>
+                Open app <ExternalLink aria-hidden="true" />
+              </a>
+            </Button>
+          )}
           {onRebuild ? (
             <Button variant="outline" onClick={onRebuild} disabled={deploying}>
               Rebuild
@@ -248,6 +252,7 @@ export function Workspace({
 
       <Hero
         view={view}
+        {...(selected === undefined ? {} : { component: selected })}
         onNavigate={onNavigate}
         {...(onSetAutoDeploy === undefined ? {} : { onSetAutoDeploy })}
       />
@@ -289,13 +294,42 @@ export function Workspace({
   );
 }
 
+/**
+ * What the hero says about the Component the screen is showing.
+ *
+ * Named rather than called "Your App", because everything beside this sentence
+ * — the phase pill, the address, the release, the placement — is one
+ * Component's: an App whose `job` sits behind a serving `service` would
+ * otherwise read "Your App has no release serving yet" over a service that is
+ * serving, and "Your App is live" over a CronJob the moment it is placed.
+ *
+ * A Component with no address is stated as deployed rather than as serving.
+ * Every job is one, and so is a service kept off the network — neither of them
+ * has anything an operator could open, and "no release serving yet" reads as a
+ * release that failed rather than one that was never meant to serve.
+ */
+function heroHeadline(view: WorkspaceView, component?: ComponentView): string {
+  const subject = component?.name ?? 'Your App';
+  if (view.url === '') {
+    return view.phase === 'LIVE'
+      ? `${subject} is deployed`
+      : `${subject} has no release yet`;
+  }
+  return view.urlLive
+    ? `${subject} is live`
+    : `${subject} has no release serving yet`;
+}
+
 /** Live state and URL on the left; placement on the right. */
 function Hero({
   view,
+  component,
   onNavigate,
   onSetAutoDeploy,
 }: {
   view: WorkspaceView;
+  /** The Component this card is about. Absent for an App with none yet. */
+  component?: ComponentView;
   onNavigate?: (path: string) => void;
   onSetAutoDeploy?: SetAutoDeploy;
 }) {
@@ -304,21 +338,23 @@ function Hero({
       <div className="flex flex-col gap-2">
         <PhasePill phase={view.phase}>{view.phase}</PhasePill>
         <p className="text-xl font-semibold tracking-tight">
-          {view.urlLive
-            ? 'Your App is live'
-            : 'Your App has no release serving yet'}
+          {heroHeadline(view, component)}
         </p>
-        <a
-          href={normaliseUrl(view.url)}
-          className={cn(
-            'font-mono text-[15px]',
-            view.urlLive
-              ? 'border-b border-current text-accent-foreground'
-              : 'pointer-events-none text-muted-foreground',
-          )}
-        >
-          {view.url}
-        </a>
+        {/* No address, no link: `normaliseUrl('')` is `''`, and an anchor
+            carrying that reloads the screen it is on. */}
+        {view.url === '' ? null : (
+          <a
+            href={normaliseUrl(view.url)}
+            className={cn(
+              'font-mono text-[15px]',
+              view.urlLive
+                ? 'border-b border-current text-accent-foreground'
+                : 'pointer-events-none text-muted-foreground',
+            )}
+          >
+            {view.url}
+          </a>
+        )}
         {/*
           The release is a link because it is a thing, not a label: §2's Deploy
           is Heroku's Release, and the attempt that produced what is running is

@@ -241,6 +241,14 @@ export const getAppWorkspace: Command<
     });
   }
 
+  // The address the selected Component answers on. A job answers on none — no
+  // adapter puts a url on a job's Deploy — and the App's vanity domain is not
+  // one either: the fallback is for a Component that will serve that domain and
+  // has not deployed yet, which a job never is.
+  const url =
+    latestDeploy?.url ??
+    (selected?.kind === 'job' ? '' : (app.vanityDomain ?? ''));
+
   let runtime: Runtime;
   if (selected?.kind === 'website' && latestTarget?.adapter === 'static') {
     runtime = {
@@ -282,8 +290,11 @@ export const getAppWorkspace: Command<
       ? workspaceTarget.health === 'healthy'
       : false,
     phase: phaseFor(latestDeploy?.phase, selected?.builds[0]?.status),
-    url: latestDeploy?.url ?? app.vanityDomain ?? '',
-    urlLive: latestDeploy?.phase === 'LIVE',
+    url,
+    // An address that is serving, which is not the same as a release that is
+    // live: a placed job is LIVE with nothing to open, and this is the fact the
+    // screen's link and its headline hang off.
+    urlLive: url !== '' && latestDeploy?.phase === 'LIVE',
     release: latestDeploy
       ? `Deploy ${latestDeploy.id}`
       : selected?.builds[0]

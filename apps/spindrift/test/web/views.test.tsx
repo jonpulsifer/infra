@@ -779,6 +779,41 @@ describe('the App workspace', () => {
       // control whose press cannot be answered is worse than no control.
       expect(workspace(view)).not.toContain('aria-pressed');
     });
+
+    test('states the selected Component, not the App, above its release', () => {
+      // The phase pill, the address and the release beside this sentence are
+      // all the job's. "Your App has no release serving yet" over an App whose
+      // service is serving is a sentence about a Component, told about the App.
+      const markup = workspace(view);
+
+      expect(markup).not.toContain('Your App');
+      expect(markup).toContain('nightly is deployed');
+    });
+
+    test('offers nothing to open for a Component that answers nowhere', () => {
+      // A job has no address, and `normaliseUrl('')` is `''` — an `Open app`
+      // anchor carrying that reloads the workspace instead of opening
+      // anything, which reads as a press that did nothing.
+      const markup = workspace(view);
+
+      expect(markup).not.toContain('href=""');
+      expect(markup).not.toContain('Open app');
+    });
+
+    test('still opens the address of a Component that has one', () => {
+      // The other half of the same rule: the service's URL is still a link,
+      // and it is still the headline the screen leads with.
+      const serving: WorkspaceView = {
+        ...view,
+        componentId: 'component-quay-web',
+        url: 'quay.apps.example',
+        urlLive: true,
+      };
+      const markup = workspace(serving);
+
+      expect(markup).toContain('Open app');
+      expect(markup).toContain('web is live');
+    });
   });
 
   test('a service states how far its log reaches', () => {
