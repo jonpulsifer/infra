@@ -44,7 +44,7 @@ const log = (message) =>
   console.log(`[${new Date().toISOString()}] ${message}`);
 
 log(`spindrift-demo-job starting — ${whoAmI()}`);
-log(`plan: ${steps} steps over ${duration}s, exiting ${exitCode}`);
+log(`plan: ${steps} stepz over ${duration}s, exiting ${exitCode}`);
 
 // Emitted one at a time rather than all at once: the log pane is supposed to
 // show a run in progress, and a job that printed everything in the first
