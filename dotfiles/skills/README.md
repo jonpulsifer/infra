@@ -65,7 +65,7 @@ Skills write artifacts to `.agent/context/` in the working repo. This dir is glo
 1. Create `skills/<name>/SKILL.md` with `name:` and `description:` frontmatter. Description should start with "Use when…" and name concrete triggers (under 1024 chars).
 2. No wrapper files needed — `mise.toml` deploys the whole `skills/` directory to all three locations, so the new file is picked up automatically.
 3. If pi-specific, put it in `.pi/agent/skills/<name>/SKILL.md` instead (not shared with claude/gemini).
-4. `mise dotfiles apply --dry-run` to validate, then `mise dotfiles apply`.
+4. `mise run check` to validate, then `mise bootstrap`.
 
 ## Prompt Templates (pi)
 

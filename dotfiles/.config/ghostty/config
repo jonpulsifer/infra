@@ -1,4 +1,4 @@
-# Ghostty — former home/darwin.nix + Linux package
+# Ghostty — cross-platform configuration
 background-blur = true
 background-opacity = 0.9
 bold-is-bright = true
@@ -6,7 +6,5 @@ font-family = "CaskaydiaCove Nerd Font"
 font-size = 12
 font-thicken = false
 theme = "Argonaut"
-{%- if os() == "macos" %}
 
 keybind = global:cmd+backquote=toggle_quick_terminal
-{%- endif %}

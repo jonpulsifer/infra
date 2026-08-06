@@ -1,62 +1,3 @@
-[settings]
-# Relative to this file's directory (config_root), so this works unmodified from any
-# checkout location: a plain git clone, the Nix store copy NixOS activation applies from,
-# or a WSL image. Source resolution for entries below (when `source` is omitted) mirrors
-# the home-relative target path under this root, e.g. target "~/.zshenv" -> "./.zshenv".
-dotfiles.root = "."
-
-[dotfiles]
-# Convenience pointer at the live source tree (a Nix store path on NixOS) — dangles
-# across store-path GC between activations; self-heals on the next one.
-"~/.dotfiles" = { mode = "symlink", source = "." }
-
-"~/.tmux.conf" = { mode = "copy" }
-"~/.vimrc" = { mode = "copy" }
-"~/.zshenv" = { mode = "copy" }
-"~/.config/.bunfig.toml" = { mode = "copy" }
-"~/.config/git/ignore" = { mode = "copy" }
-# `lazy-lock.json` is deliberately absent from the source: lazy.nvim rewrites it on every
-# plugin update, so shipping a copy only produces permanent drift. Copy mode doesn't prune,
-# so each machine keeps its own lock.
-"~/.config/nvim" = { mode = "copy" }
-"~/.local/bin" = { mode = "copy" }
-# Distributes pi's prompts, extensions, agents, and theme. `agent/settings.json` is
-# deliberately absent from the source: pi rewrites it at runtime (lastChangelogVersion,
-# defaultModel), so shipping a copy only produces permanent drift. Copy mode doesn't
-# prune, so the live one is left alone.
-"~/.pi/agent" = { mode = "copy" }
-"~/.claude/settings.json" = { mode = "copy" }
-
-# Common user instructions: one canonical source copied to every harness. Copies avoid
-# runtime links into a checkout or Nix store path that may move or be garbage-collected.
-"~/.agents/AGENTS.md" = { mode = "copy", source = ".agents/AGENTS.md" }
-"~/.claude/CLAUDE.md" = { mode = "copy", source = ".agents/AGENTS.md" }
-"~/.codex/AGENTS.md" = { mode = "copy", source = ".agents/AGENTS.md" }
-"~/.pi/agent/AGENTS.md" = { mode = "copy", source = ".agents/AGENTS.md" }
-"~/.gemini/GEMINI.md" = { mode = "copy", source = ".agents/AGENTS.md" }
-"~/.config/opencode/agents/global.md" = { mode = "copy", source = ".agents/AGENTS.md" }
-
-# Agent skills: source lives in `skills/` (this repo's canonical copy); all three agent
-# tools read from their own location, so each gets its own direct entry.
-"~/.agents/skills" = { mode = "copy", source = "skills" }
-"~/.claude/skills" = { mode = "copy", source = "skills" }
-"~/.gemini/config/skills" = { mode = "copy", source = "skills" }
-
-# Templated: real per-machine/OS/work-personal conditionals live in these files (Tera,
-# using [vars] below + env vars (MISE_ENV for work/personal, WSL_DISTRO_NAME for WSL)
-# + os() for platform detection).
-"~/.config/git/config" = { mode = "template" }
-"~/.ssh/config" = { mode = "template" }
-"~/.gnupg/gpg.conf" = { mode = "template" }
-"~/.config/ghostty/config" = { mode = "template" }
-# Source deliberately NOT at the mirrored path ".config/mise/config.toml": mise's own
-# project-config auto-discovery treats "<cwd>/.config/mise/config.toml" as a candidate
-# settings file, so running any mise command with cwd inside this dotfiles tree would
-# otherwise make mise try to parse this Tera template as its own config and fail.
-"~/.config/mise/config.toml" = { mode = "template", source = "mise-global-config.toml" }
-"~/.config/zsh/.zshrc" = { mode = "template" }
-"~/.claude/statusline.sh" = { mode = "template" }
-
 [vars]
 # Personal identity (default). Work overrides live in mise.work.toml, loaded when
 # MISE_ENV=work. Flat keys only — mise's [vars] doesn't support nested tables.
@@ -71,22 +12,29 @@ gpg_wsl_program = "/mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh
 moonpay_ssh_prefix = ""
 moonpay_instead_of = ""
 
-[bootstrap.hooks]
-# ~/.ssh and ~/.gnupg have no [dotfiles]-native permission mechanism (mise doesn't set
-# 600/700 in any mode) — rework via a bootstrap hook instead of a platform-specific shim.
-# Fires on `mise bootstrap --only dotfiles` too (verified: hooks run around the dotfiles
-# step regardless of --only/--skip scoping), so this covers NixOS, macOS, and WSL alike.
-post-dotfiles = "chmod 700 ~/.gnupg ~/.ssh && chmod 600 ~/.ssh/config"
-
 [tasks.bootstrap]
-# Runs automatically as the "custom task" step of `mise bootstrap` on macOS (step 10:
-# "mise run bootstrap — if a task named 'bootstrap' is defined"). `[bootstrap.packages]`'s
-# brew backend doesn't read a Brewfile and doesn't support casks/taps (which this one
-# needs), so this stays a plain, idempotent `brew bundle` invocation rather than a
-# declarative packages table.
-description = "macOS: brew bundle install from Brewfile"
+description = "Auto-detect OS and delegate to bootstrap:macos or bootstrap:linux"
 run = '''
-if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
-  brew bundle install --no-upgrade --file "{{config_root}}/Brewfile"
+if [ "$(uname -s)" = "Darwin" ]; then
+  mise run bootstrap:macos
+else
+  mise run bootstrap:linux
 fi
 '''
+
+[tasks."bootstrap:macos"]
+description = "macOS bootstrap: Homebrew bundle + symlink dotfiles"
+run = [
+  "if command -v brew >/dev/null 2>&1; then brew bundle install --no-upgrade --file '{{config_root}}/Brewfile'; fi",
+  "mise run dotfiles:deploy",
+]
+
+[tasks."bootstrap:linux"]
+description = "Linux bootstrap: symlink dotfiles"
+run = [
+  "mise run dotfiles:deploy",
+]
+
+[tasks."dotfiles:deploy"]
+description = "Symlink dotfiles into $HOME"
+run = "bash {{config_root}}/scripts/deploy-dotfiles.sh"

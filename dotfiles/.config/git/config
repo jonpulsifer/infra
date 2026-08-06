@@ -1,22 +1,10 @@
-{%- set is_work = get_env(name="MISE_ENV", default="personal") == "work" -%}
-{%- set is_wsl = get_env(name="WSL_DISTRO_NAME", default="") != "" -%}
-{%- set signingkey = vars.git_signingkey -%}
-{%- if not is_work and is_wsl -%}
-{%-   set signingkey = vars.git_signingkey_wsl -%}
-{%- endif -%}
-{%- set gpg_program = "" -%}
-{%- if is_work and os() == "macos" -%}
-{%-   set gpg_program = vars.gpg_darwin_program -%}
-{%- elif is_wsl -%}
-{%-   set gpg_program = vars.gpg_wsl_program -%}
-{%- endif -%}
 [user]
-	name = {{ vars.git_name }}
-	email = {{ vars.git_email }}
-	signingkey = {{ signingkey }}
+	name = Jonathan Pulsifer
+	email = jonathan@pulsifer.ca
+	signingkey = ~/.ssh/id_ed25519
 
 [github]
-	user = {{ vars.git_github_user }}
+	user = jonpulsifer
 
 [color]
 	ui = true
@@ -25,10 +13,8 @@
 	whitespace = trailing-space,space-before-tab
 	excludesfile = ~/.config/git/ignore
 
-{%- if not is_wsl %}
 [gpg]
 	format = ssh
-{%- endif %}
 
 [help]
 	autocorrect = 1
@@ -49,16 +35,18 @@
 [push]
 	default = current
 
-{%- if is_work %}
+[url "git@github.com:jonpulsifer/"]
+	insteadOf = https://github.com/jonpulsifer/
 
-[url "{{ vars.moonpay_ssh_prefix }}"]
-{%- for x in vars.moonpay_instead_of | split(pat=",") %}
-	insteadOf = {{ x }}
-{%- endfor %}
-{%- endif %}
+# Work profile conditional includes
+[includeIf "gitdir:~/src/github.com/moonpay/"]
+	path = config.work
 
-[url "git@github.com:{{ vars.git_github_user }}/"]
-	insteadOf = https://github.com/{{ vars.git_github_user }}/
+[includeIf "hasconfig:remote.*.url:git@github.com:moonpay/**"]
+	path = config.work
+
+[includeIf "hasconfig:remote.*.url:git@github.com:MoonPay/**"]
+	path = config.work
 
 [alias]
 	ad = add
@@ -98,23 +86,9 @@
 	files-by-author = "!git log --author=\"$1\" --name-only --pretty=format: | sort | uniq"
 	check-perms = "!git ls-files -s | awk '{ if (substr($1,1,3) ~ /75[0-7]/) print $2 \" \" $4 }'"
 
-{%- if is_wsl or gpg_program %}
-{%- if is_wsl %}
-[gpg]
-	format = ssh
-
-{%- endif %}
-{%- if gpg_program %}
-[gpg "ssh"]
-	program = "{{ gpg_program }}"
-{%- endif %}
-{%- endif %}
-
 [commit]
 	gpgSign = true
 
-# What `gh auth setup-git` writes, but resolved off PATH instead of the absolute
-# versioned mise install path it hardcodes (which rots on every gh upgrade).
 [credential "https://github.com"]
 	helper = !gh auth git-credential
 [credential "https://gist.github.com"]
