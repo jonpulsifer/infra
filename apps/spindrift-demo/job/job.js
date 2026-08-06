@@ -44,6 +44,7 @@ const log = (message) =>
   console.log(`[${new Date().toISOString()}] ${message}`);
 
 log(`spindrift-demo-job starting — ${whoAmI()}`);
+log(`build: ${process.env.SPINDRIFT_BUILD ?? 'unknown'}`);
 log(`plan: ${steps} stepz over ${duration}s, exiting ${exitCode}`);
 
 // Emitted one at a time rather than all at once: the log pane is supposed to

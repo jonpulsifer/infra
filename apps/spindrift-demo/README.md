@@ -11,6 +11,47 @@ deploying one proves something about exactly one path.
 | `railpack/` | service | railpack | Detection picking a frontend on its own, because there is no Dockerfile in the scope. |
 | `job/` | job | railpack | A Component that runs once and stops, on either backend. |
 
+## Runtime identity
+
+The demos show facts that change with a rollout instead of a simulated fleet.
+`src/` receives server facts from `serve.ts` and shows the hosting platform,
+hostname, process start time and uptime, build identity, a curated set of safe
+platform environment variables, and the browser's own facts. The same JSON is
+available at `/__runtime__`; `/healthz` is the cheap liveness answer.
+
+`plain/` is deliberately different: a CDN serving static files has no process
+or `process.env` to inspect. It identifies Firebase Hosting, Cloudflare Pages,
+Vercel, and Cloud Run from the requested hostname and shows client facts, then
+states that server facts do not exist for that scope.
+
+The platform mark and detection signal are:
+
+| Platform | Signal | Mark |
+| --- | --- | --- |
+| Firebase App Hosting | `FIREBASE_CONFIG` plus `K_SERVICE` | Firebase |
+| Google Cloud Run | `K_SERVICE`, `K_CONFIGURATION`, `K_REVISION`, or `CLOUD_RUN_JOB` | Google Cloud |
+| Kubernetes | `KUBERNETES_SERVICE_HOST` | Kubernetes |
+| Cloudflare Pages | `CF_PAGES`, or a `*.pages.dev` hostname | Cloudflare |
+| Vercel | `VERCEL` or `VERCEL_ENV`, or a `*.vercel.app` hostname | Vercel |
+| AWS | `AWS_EXECUTION_ENV`, `ECS_CONTAINER_METADATA_URI_V4`, or `AWS_REGION` | AWS |
+
+The demo carries marks for every platform above, plus Cloudflare Workers for a
+Workers deployment. A custom static domain with no matching hostname or server
+marker renders a generic globe instead of making a guess.
+
+`Dockerfile` exposes its `BUILD_COMMIT` build argument at runtime as
+`SPINDRIFT_BUILD`. Supply a source revision for that argument when a SHA is
+available; the page also carries its baked commit, branch, and build timestamp.
+`SPINDRIFT_RUNTIME_LABEL` is an optional runtime variable for deliberately
+proving that a configuration change reached a new process. Only the curated
+platform identifiers and those two `SPINDRIFT_*` values are rendered; arbitrary
+configuration, secrets, Firebase config, and the Kubernetes service address
+never reach the page.
+
+`railpack/` reports the same server identity in its `/` JSON and exposes
+`/env` as a names-plus-curated-safe-values inspection endpoint. `job/` logs
+its backend identity and `SPINDRIFT_BUILD` at the start of every execution.
+
 ## Why two of them carry no `spindrift.yaml` and one does
 
 `job/` has to declare itself. Detection infers only `service` and `website` —
@@ -52,5 +93,6 @@ cd job && DURATION_SECONDS=3 npm start        # exits 0
 cd job && EXIT_CODE=7 npm start               # exits 7, writes to stderr
 ```
 
-`src/` and `plain/` are served by the `serve.ts` beside them; `bun run dev`
-from this directory builds `src/` and serves it hot.
+`bun run dev` from this directory builds `src/` and serves it hot through
+`serve.ts`. `plain/` is a static directory; point a static-file host at it to
+exercise the client-only identity surface.

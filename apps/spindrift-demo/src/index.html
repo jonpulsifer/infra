@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<!--{{RUNTIME}}-->
 </head>
 <body>
 
@@ -29,39 +30,75 @@
     <div class="build-rows">
       <div class="build-row">
         <span class="key">commit</span>
-        <code class="val">{{BUILD_COMMIT}}</code>
+        <code class="val"><!--BUILD_COMMIT--></code>
       </div>
       <div class="build-row">
         <span class="key">branch</span>
-        <code class="val">{{BUILD_BRANCH}}</code>
+        <code class="val"><!--BUILD_BRANCH--></code>
       </div>
       <div class="build-row">
         <span class="key">stamped</span>
-        <code class="val">{{BUILD_TIME}}</code>
+        <code class="val"><!--BUILD_TIME--></code>
       </div>
     </div>
   </section>
 
-  <section class="fleet">
-    <h2>Fleet Status</h2>
-    <div class="vessels" id="vessels">
-      <!-- populated by client.js -->
+  <!-- Runtime: the real environment this page is served from, not a mock. -->
+  <section class="runtime" id="runtime-panel">
+    <div class="runtime-head">
+      <h2>Runtime</h2>
+      <div class="platform">
+        <span class="platform-mark" data-rt-logo></span>
+        <div class="platform-text">
+          <span class="platform-name" data-rt-platform>—</span>
+          <span class="platform-by">detected by <code data-rt-detected>—</code></span>
+        </div>
+      </div>
+    </div>
+    <div class="fact-grid">
+      <div class="fact"><span class="fact-key">hostname</span><code class="fact-val" data-rt-hostname>—</code></div>
+      <div class="fact" data-rt-pid-row><span class="fact-key">pid</span><code class="fact-val" data-rt-pid>—</code></div>
+      <div class="fact" data-rt-port-row><span class="fact-key">port</span><code class="fact-val" data-rt-port>—</code></div>
+      <div class="fact" data-rt-runtime-row><span class="fact-key">runtime</span><code class="fact-val" data-rt-runtime>—</code></div>
+      <div class="fact" data-rt-os-row><span class="fact-key">os</span><code class="fact-val" data-rt-os>—</code></div>
+      <div class="fact"><span class="fact-key">started</span><code class="fact-val" data-rt-started>—</code></div>
+      <div class="fact"><span class="fact-key">uptime</span><code class="fact-val" data-rt-uptime>—</code></div>
+      <div class="fact"><span class="fact-key">now</span><code class="fact-val" data-rt-utcnow>—</code></div>
+      <div class="fact"><span class="fact-key">spindrift build</span><code class="fact-val" data-rt-build>—</code></div>
     </div>
   </section>
 
-  <section class="logbook">
-    <h2>Deploy Log</h2>
-    <div class="terminal" id="terminal">
-      <div class="terminal-lines" id="terminal-lines"></div>
-      <span class="cursor">▊</span>
+  <!-- Environment: only known-safe platform identifiers, never arbitrary config. -->
+  <section class="envbook">
+    <div class="section-head">
+      <h2>Environment</h2>
+      <span class="section-count"><span data-rt-env-count>0</span> vars</span>
+    </div>
+    <div class="env-list" data-rt-env></div>
+    <p class="env-note">Only known-safe platform identifiers are shown. Set <code>SPINDRIFT_RUNTIME_LABEL</code> to make an intentional runtime-config change visible; arbitrary app config and secrets never reach the page.</p>
+  </section>
+
+  <!-- Client: what the browser carries, the other half of "what changed". -->
+  <section class="client" id="client-panel">
+    <h2>Client</h2>
+    <div class="fact-grid">
+      <div class="fact"><span class="fact-key">browser</span><code class="fact-val" data-c-browser>—</code></div>
+      <div class="fact"><span class="fact-key">url</span><code class="fact-val" data-c-href>—</code></div>
+      <div class="fact"><span class="fact-key">language</span><code class="fact-val" data-c-lang>—</code></div>
+      <div class="fact"><span class="fact-key">screen</span><code class="fact-val" data-c-screen>—</code></div>
+      <div class="fact"><span class="fact-key">cores</span><code class="fact-val" data-c-cores>—</code></div>
+      <div class="fact"><span class="fact-key">memory</span><code class="fact-val" data-c-mem>—</code></div>
+      <div class="fact"><span class="fact-key">pixel ratio</span><code class="fact-val" data-c-dpr>—</code></div>
+      <div class="fact"><span class="fact-key">network</span><code class="fact-val" data-c-net>—</code></div>
     </div>
   </section>
 
   <footer class="foot">
-    <p>⚡ static site demo · <span id="render-ms"></span> ms to paint</p>
+    <p>⚡ static site demo · <span id="render-ms"></span> ms to paint · runtime facts live from <code>/__runtime__</code></p>
   </footer>
 </div>
 
+<script src="runtime.js"></script>
 <script src="client.js"></script>
 </body>
 </html>
