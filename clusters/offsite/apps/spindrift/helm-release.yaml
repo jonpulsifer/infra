@@ -290,9 +290,16 @@ spec:
                 # The chart requires this whenever a Component has config: the
                 # ExternalSecret names the store, and an unset name renders an
                 # object that never syncs behind a workload that waits forever.
+                #
+                # This cluster's access path to the store of record
+                # `secretStore` below names, declared in
+                # `clusters/base/platform/gcp-secret-manager`. It has to be the
+                # same store: core writes the item, this object fetches it, and
+                # a name pointing at a different vault renders an ExternalSecret
+                # that syncs nothing.
                 secretStore:
                   kind: ClusterSecretStore
-                  name: onepassword-connect
+                  name: gcp-secret-manager
                 dns:
                   # That gateway's pinned LoadBalancer address. RFC1918, so
                   # publishing it is the private boundary rather than a hole in
@@ -357,9 +364,13 @@ spec:
                   name: oauth2-proxy-authz
                   namespace: oauth2-proxy
                   port: 4181
+                # This cluster's own access path to the same store of record —
+                # `clusters/base/platform/gcp-secret-manager` puts one in every
+                # Target cluster, which is what makes a re-placement between the
+                # two free: the reference moves and no value has to.
                 secretStore:
                   kind: ClusterSecretStore
-                  name: onepassword-connect
+                  name: gcp-secret-manager
                 dns:
                   # That gateway's pinned address, free in this cluster's
                   # `LB_RANGE`. The connect screen reads it off the Gateway's
@@ -397,10 +408,30 @@ spec:
           adapter: static
           connection:
             endpoint: https://firebasehosting.googleapis.com
+      # §10's one store of record, and the only one every Target here reaches.
+      #
+      # A Cloud Run revision resolves a pinned secret reference out of its own
+      # project and cannot be told to resolve it anywhere else, so a fleet with
+      # a cloud vessel in it has exactly one candidate for a store every Target
+      # shares. The clusters are the side that can hold several access paths, so
+      # the clusters are the side that moved: each carries a `gcpsm`
+      # ClusterSecretStore in front of this same project
+      # (`clusters/base/platform/gcp-secret-manager`), which is what the two
+      # Targets above name.
+      #
+      # `container` is the vessel's project. `bluenose` holds the secrets for
+      # every Target, including the two clusters — the store of record is one
+      # place, and where it lives is a property of the store, not of who reads
+      # it.
+      #
+      # No credential here. Core writes over the same federation every cloud
+      # Target already goes through (`storeTokenFor` in
+      # `apps/spindrift/src/adapters/registry.ts`), so this installation stores
+      # no secret-store bearer at all.
       secretStore:
-        adapter: onepassword
-        endpoint: http://onepassword-connect.external-secrets.svc.cluster.local:8080
-        container: homelab
+        adapter: gcp-secret-manager
+        endpoint: https://secretmanager.googleapis.com
+        container: bluenose
       supplyChain:
         # northamerica-northeast1, which is where the key is:
         # `google_kms_crypto_key.signer` takes `local.region`, and

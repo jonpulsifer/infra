@@ -293,6 +293,79 @@ describe('setConfig writes a reference, never a value', () => {
   });
 });
 
+/**
+ * §10's "one store of record, several access paths", where a fleet has more
+ * than one store of record in it.
+ *
+ * A Target that reaches a *different* real store is not the same case as one
+ * that reaches nothing. The first would look fine at the seam above — there is
+ * a store, and core has one — which is exactly the arrangement in which a
+ * relaxed check writes the value into the store core happens to hold and hands
+ * the workload a reference its own operator cannot resolve. Nothing fails; the
+ * process comes up with an empty environment, and the deploy is green.
+ *
+ * So the assertion is over both halves: the refusal, **and** that nothing was
+ * written. A refusal that had already put the value somewhere is the same
+ * silent failure with an error message on top.
+ */
+describe('a store of record is per Target, and core writes to nobody else’s', () => {
+  test('a Target in front of another vault is refused, and nothing is written', async () => {
+    const { component } = await fixture();
+    // Reaches a store, and a real one — just not the one this installation has
+    // an access path to, which is the whole of what makes it undeliverable.
+    const elsewhereOnly = await connectedTarget({
+      reachableSecretStores: ['onepassword'],
+    });
+
+    const result = await setConfig(
+      {
+        componentId: component.id,
+        targetId: elsewhereOnly.id,
+        entries: [{ key: 'TOKEN', value: 'one' }],
+      },
+      await context(
+        registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+      ),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(store.puts).toEqual([]);
+    expect(await database().db.select().from(configItems)).toEqual([]);
+  });
+
+  test('a Target that reaches both writes to the installation’s store', async () => {
+    // The shape every cluster in this fleet has: its own access path to the
+    // store of record, and a second store it also reaches. Config must not
+    // split across the two on the order a discovery happened to list them, or
+    // two Components on one cluster end up in different vaults and a
+    // re-placement between clusters stops being free.
+    const { component } = await fixture();
+    const both = await connectedTarget({
+      reachableSecretStores: ['onepassword', manifest.secretStore.adapter],
+    });
+
+    const result = await setConfig(
+      {
+        componentId: component.id,
+        targetId: both.id,
+        entries: [{ key: 'TOKEN', value: 'one' }],
+      },
+      await context(
+        registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' }), {
+          [manifest.secretStore.adapter]: store,
+          onepassword: elsewhere,
+        }),
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(store.puts.map((put) => put.key)).toEqual(['TOKEN']);
+    expect(elsewhere.puts).toEqual([]);
+  });
+});
+
 describe('setConfig also removes, naming nothing but the key', () => {
   test('one key goes, the rest are untouched', async () => {
     const { component, target } = await fixture();

@@ -198,9 +198,18 @@ export function createAdapterRegistry(
           repositories: () => app.availableRepositories(),
           installationFor: (fullName) => app.installationFor(fullName),
         };
+  // **Not the projected service account token this cluster is reached with.**
+  // That one is minted for this cluster's own API server and a cloud API
+  // refuses it; the failure would be a `401` on every cloud deploy, blamed on
+  // the Target. What belongs here is a federated token, which is what
+  // `cloudTokenFor` mints — see `cloud/federation.ts`. The cloud build route
+  // submits with it too, so it is resolved before the routes are built.
+  const cloud = cloudTokenFor(options);
+
   const store = createSecretStore(
     options.manifest,
-    options.storeToken ?? storeToken(options.env ?? Bun.env),
+    options.storeToken ?? storeTokenFor(options.manifest, cloud, options.env),
+    options.fetch,
   );
   const supplyChain = new CoreSupplyChain(
     new SlsaVerifier(),
@@ -213,14 +222,6 @@ export function createAdapterRegistry(
       signerKey: options.manifest.supplyChain.signer,
     }),
   );
-
-  // **Not the projected service account token this cluster is reached with.**
-  // That one is minted for this cluster's own API server and a cloud API
-  // refuses it; the failure would be a `401` on every cloud deploy, blamed on
-  // the Target. What belongs here is a federated token, which is what
-  // `cloudTokenFor` mints — see `cloud/federation.ts`. The cloud build route
-  // submits with it too, so it is resolved before the routes are built.
-  const cloud = cloudTokenFor(options);
 
   // A fourth consumer of that one provider rather than a fourth credential.
   const discovery = new GcpDiscovery({
@@ -591,18 +592,12 @@ function cloudTokenFor(options: RegistryOptions): TokenProvider {
 }
 
 /**
- * The bearer token core writes to the store with.
+ * The bearer token core writes to a 1Password Connect store with.
  *
  * Read per call, never captured: the installation Secret is the only place it
  * lives, and a value read once at boot is a value that stops working the moment
  * the Secret is rotated. The name is the software's, identical in every
  * installation — it names no installation, so it is not a §20 literal.
- *
- * §13's "native OIDC federation, nothing stored" is where this ends up for the
- * cloud store: the pod already projects a token with a cloud audience, and
- * exchanging it belongs with the cloud Targets that need it. Until then the
- * access path is a token the installation Secret carries, which is the same
- * posture the 1Password Connect path has permanently.
  */
 export const STORE_TOKEN_VARIABLE = 'SPINDRIFT_STORE_TOKEN';
 
@@ -618,12 +613,47 @@ export function storeToken(env: Record<string, string | undefined> = Bun.env) {
   };
 }
 
+/**
+ * The access path core writes to the store of record over, per adapter (§10).
+ *
+ * §13's "native OIDC federation, nothing stored" is not a posture the two stores
+ * share, because the credential each takes is not the same kind of thing. A
+ * Connect token is a long-lived bearer an operator issues, so it lives in the
+ * installation Secret. A Google access token expires in an hour and is minted
+ * from the projected token this pod already carries, so a copy in a Secret would
+ * be a credential that is stale before the second write — the federation that
+ * every cloud Target already goes through is the only usable path to it.
+ *
+ * So the store's credential follows the store, and the same provider serves the
+ * cloud Targets, the build routes, discovery, and now the cloud store. Nothing
+ * new is stored, and an installation on Secret Manager needs no
+ * `SPINDRIFT_STORE_TOKEN` at all.
+ */
+export function storeTokenFor(
+  manifest: InstallationManifest,
+  cloud: TokenProvider,
+  env: Record<string, string | undefined> = Bun.env,
+): () => string | Promise<string> {
+  const adapter = manifest.secretStore.adapter satisfies StoreAdapter;
+  switch (adapter) {
+    case 'gcp-secret-manager':
+      return cloud;
+    case 'onepassword':
+      return storeToken(env);
+  }
+}
+
 /** The store this installation's manifest selects, over the path it names. */
 export function createSecretStore(
   manifest: InstallationManifest,
   token: () => string | Promise<string> = storeToken(),
+  fetch?: Fetcher,
 ): SecretStore {
-  const endpoint = { baseUrl: manifest.secretStore.endpoint, token };
+  const endpoint = {
+    baseUrl: manifest.secretStore.endpoint,
+    token,
+    ...(fetch ? { fetch } : {}),
+  };
   const adapter = manifest.secretStore.adapter satisfies StoreAdapter;
   switch (adapter) {
     case 'onepassword':
