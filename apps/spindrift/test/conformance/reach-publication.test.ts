@@ -24,8 +24,15 @@
  * is precisely what made a record derived from the gateway indistinguishable
  * from a record the chart stated. They are independent inputs, so the fixture
  * separates them and the assertion names which one the record came from.
+ *
+ * **The controller is not our side either, and it is half the mechanism.** A
+ * `DNSEndpoint` nobody reads and a route held out of a source nobody runs is a
+ * Component whose name goes dark, with every object in the cluster still
+ * rendered exactly right. So the controller's configuration is read out of
+ * `clusters/` rather than assumed, once per cluster Spindrift deploys through.
  */
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import type {
   DeployEvent,
   DeployTarget,
@@ -35,11 +42,22 @@ import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/in
 import type { DesiredState } from '../../src/domain/desired-state.ts';
 import { type RenderedObject, renderAppChart } from '../harness/app-chart.ts';
 import {
+  controllerFor,
+  installedControllers,
+} from '../harness/external-dns-installation.ts';
+import {
   CONTROLLER,
   type GatewayStatus,
   publish,
 } from '../harness/fakes/external-dns.ts';
 import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
+
+/** Every cluster's controller, as that cluster declares it. */
+const CONTROLLERS = await installedControllers();
+
+/** The declaration naming the clusters a Component can be placed on. */
+const REPO_ROOT = join(import.meta.dir, '../../../..');
+const LIVE_RELEASE = 'clusters/offsite/apps/spindrift/helm-release.yaml';
 
 /** The Apps gateway every route in the namespace attaches to. */
 const GATEWAY: GatewayStatus = {
@@ -155,82 +173,97 @@ async function drain(
   return step.value;
 }
 
-describe('reach decides the record that is published', () => {
-  test('private is an unproxied address record at the Target’s own address', async () => {
-    const publication = publish(await renderRelease({ reach: 'private' }), [
-      GATEWAY,
-    ]);
+/** One run per cluster, because each runs its own controller. */
+const PER_CLUSTER = CONTROLLERS.map(
+  (controller) => [controller.cluster, controller] as const,
+);
 
-    // The address is the Target's, not the gateway's — `10.89.0.68` is what a
-    // record derived from the parent would have carried, and it appears
-    // nowhere. Unproxied because the value is RFC1918: the record type is the
-    // boundary, so nothing has to be attached to it to keep it one.
-    expect(publication.records).toEqual([
-      {
-        dnsName: CANONICAL,
-        recordType: 'A',
-        targets: [PRIVATE_ADDRESS],
-        proxied: false,
-        claimedBy: 'crd/blog-web',
-      },
-    ]);
-    expect(publication.contended).toEqual([]);
-  });
+describe.each(PER_CLUSTER)(
+  'reach decides the record published on %s',
+  (_cluster, controller) => {
+    test('private is an unproxied address record at the Target’s own address', async () => {
+      const publication = publish(
+        await renderRelease({ reach: 'private' }),
+        [GATEWAY],
+        controller,
+      );
 
-  test('public is a proxied CNAME at the Target’s tunnel', async () => {
-    const publication = publish(await renderRelease({ reach: 'public' }), [
-      GATEWAY,
-    ]);
+      // The address is the Target's, not the gateway's — `10.89.0.68` is what a
+      // record derived from the parent would have carried, and it appears
+      // nowhere. Unproxied because the value is RFC1918: the record type is the
+      // boundary, so nothing has to be attached to it to keep it one.
+      expect(publication.records).toEqual([
+        {
+          dnsName: CANONICAL,
+          recordType: 'A',
+          targets: [PRIVATE_ADDRESS],
+          proxied: false,
+          claimedBy: 'crd/blog-web',
+        },
+      ]);
+      expect(publication.contended).toEqual([]);
+    });
 
-    // A hostname can only ever be a CNAME, which is the half the route source
-    // structurally could not express: it publishes an address, and asking the
-    // zone provider to proxy one is the refusal that soft-errored a whole-zone
-    // sync every five minutes.
-    expect(publication.records).toEqual([
-      {
-        dnsName: CANONICAL,
-        recordType: 'CNAME',
-        targets: [TUNNEL_HOSTNAME],
-        proxied: true,
-        claimedBy: 'crd/blog-web',
-      },
-    ]);
-    expect(publication.contended).toEqual([]);
-  });
+    test('public is a proxied CNAME at the Target’s tunnel', async () => {
+      const publication = publish(
+        await renderRelease({ reach: 'public' }),
+        [GATEWAY],
+        controller,
+      );
 
-  test('none publishes nothing at all', async () => {
-    // A Component with no reach has no route, so there is no name to answer
-    // for. A record here would be an alternate origin it asked not to have.
-    const publication = publish(await renderRelease({ reach: 'none' }), [
-      GATEWAY,
-    ]);
-    expect(publication.records).toEqual([]);
-  });
+      // A hostname can only ever be a CNAME, which is the half the route source
+      // structurally could not express: it publishes an address, and asking the
+      // zone provider to proxy one is the refusal that soft-errored a whole-zone
+      // sync every five minutes.
+      expect(publication.records).toEqual([
+        {
+          dnsName: CANONICAL,
+          recordType: 'CNAME',
+          targets: [TUNNEL_HOSTNAME],
+          proxied: true,
+          claimedBy: 'crd/blog-web',
+        },
+      ]);
+      expect(publication.contended).toEqual([]);
+    });
 
-  test('every name the route serves is published at the one reach', async () => {
-    // The canonical name and the vanity name are the same Component at the same
-    // reach. A record covering only the first leaves the second answered by
-    // whatever wildcard the zone still has, which is the failure retiring one
-    // was supposed to end.
-    const publication = publish(
-      await renderRelease({
-        reach: 'public',
-        hostname: { canonical: CANONICAL, vanity: VANITY },
-      }),
-      [GATEWAY],
-    );
-    expect(publication.records.map((record) => record.dnsName)).toEqual([
-      CANONICAL,
-      VANITY,
-    ]);
-    for (const record of publication.records) {
-      expect(record.recordType).toBe('CNAME');
-      expect(record.targets).toEqual([TUNNEL_HOSTNAME]);
-      expect(record.proxied).toBe(true);
-    }
-    expect(publication.contended).toEqual([]);
-  });
-});
+    test('none publishes nothing at all', async () => {
+      // A Component with no reach has no route, so there is no name to answer
+      // for. A record here would be an alternate origin it asked not to have.
+      const publication = publish(
+        await renderRelease({ reach: 'none' }),
+        [GATEWAY],
+        controller,
+      );
+      expect(publication.records).toEqual([]);
+    });
+
+    test('every name the route serves is published at the one reach', async () => {
+      // The canonical name and the vanity name are the same Component at the same
+      // reach. A record covering only the first leaves the second answered by
+      // whatever wildcard the zone still has, which is the failure retiring one
+      // was supposed to end.
+      const publication = publish(
+        await renderRelease({
+          reach: 'public',
+          hostname: { canonical: CANONICAL, vanity: VANITY },
+        }),
+        [GATEWAY],
+        controller,
+      );
+      expect(publication.records.map((record) => record.dnsName)).toEqual([
+        CANONICAL,
+        VANITY,
+      ]);
+      for (const record of publication.records) {
+        expect(record.recordType).toBe('CNAME');
+        expect(record.targets).toEqual([TUNNEL_HOSTNAME]);
+        expect(record.proxied).toBe(true);
+      }
+      expect(publication.contended).toEqual([]);
+    });
+  },
+);
 
 /**
  * A guard nobody has seen fail is not a guard.
@@ -239,56 +272,139 @@ describe('reach decides the record that is published', () => {
  * stands in for the publication mechanism regressing rather than for a fixture
  * someone typed. The assertions are the ones above, run against the damage.
  */
-describe('publication that stops honouring reach fails here', () => {
-  /** The route stops holding itself out of the route source. */
-  function unheldOut(objects: readonly RenderedObject[]): RenderedObject[] {
-    return objects.map((object) => {
-      if (object.kind !== 'HTTPRoute') return object;
-      const { [CONTROLLER]: _held, ...annotations } =
-        object.metadata.annotations ?? {};
-      return { ...object, metadata: { ...object.metadata, annotations } };
+describe.each(PER_CLUSTER)(
+  'publication on %s that stops honouring reach fails here',
+  (_cluster, controller) => {
+    /** The route stops holding itself out of the route source. */
+    function unheldOut(objects: readonly RenderedObject[]): RenderedObject[] {
+      return objects.map((object) => {
+        if (object.kind !== 'HTTPRoute') return object;
+        const { [CONTROLLER]: _held, ...annotations } =
+          object.metadata.annotations ?? {};
+        return { ...object, metadata: { ...object.metadata, annotations } };
+      });
+    }
+
+    /** The chart stops stating the record. */
+    function unstated(objects: readonly RenderedObject[]): RenderedObject[] {
+      return objects.filter((object) => object.kind !== 'DNSEndpoint');
+    }
+
+    test('a route that stops holding itself out claims its own name a second time', async () => {
+      const rendered = await renderRelease({ reach: 'public' });
+      const publication = publish(unheldOut(rendered), [GATEWAY], controller);
+
+      // Two sources, one name, two record types — the state that fails a
+      // whole-zone sync rather than one record. It is also what says the hold-out
+      // is load-bearing on this cluster: a controller not running the route
+      // source could not contend, and this would fail.
+      expect(publication.contended).toEqual([CANONICAL]);
+      expect(publication.records).toHaveLength(2);
     });
-  }
 
-  /** The chart stops stating the record. */
-  function unstated(objects: readonly RenderedObject[]): RenderedObject[] {
-    return objects.filter((object) => object.kind !== 'DNSEndpoint');
-  }
+    test('a Component whose record is no longer stated answers off the gateway', async () => {
+      const rendered = await renderRelease({ reach: 'public' });
+      const publication = publish(
+        unheldOut(unstated(rendered)),
+        [GATEWAY],
+        controller,
+      );
 
-  test('a route that stops holding itself out claims its own name a second time', async () => {
-    const rendered = await renderRelease({ reach: 'public' });
-    const publication = publish(unheldOut(rendered), [GATEWAY]);
+      // Nothing is contended and nothing errors: one source, one record, and a
+      // `public` Component answering an RFC1918 address on the public internet.
+      // Reach was ignored and the zone is perfectly healthy about it, which is
+      // the shape of failure this suite exists for.
+      expect(publication.contended).toEqual([]);
+      expect(publication.records).toEqual([
+        {
+          dnsName: CANONICAL,
+          recordType: 'A',
+          targets: GATEWAY.addresses,
+          proxied: false,
+          claimedBy: 'httproute/blog-web',
+        },
+      ]);
+    });
 
-    // Two sources, one name, two record types — the state that fails a
-    // whole-zone sync rather than one record.
-    expect(publication.contended).toEqual([CANONICAL]);
-    expect(publication.records).toHaveLength(2);
+    test('a record nothing states and nothing derives is no record', async () => {
+      // The hold-out on its own is not a fix: with the DNSEndpoint gone it is
+      // just a name that resolves nowhere. Both halves are the mechanism.
+      const rendered = await renderRelease({ reach: 'public' });
+      expect(
+        publish(unstated(rendered), [GATEWAY], controller).records,
+      ).toEqual([]);
+    });
+
+    test('a controller that stops reading stated records publishes nothing', async () => {
+      // The half of the mechanism that is not Spindrift's code, mutated where it
+      // is declared: drop `crd` from this cluster's sources and the DNSEndpoint
+      // is read by nobody while the route is still held out, so no source claims
+      // the name — and `--policy=sync` then deletes the record already there.
+      // Every object the chart renders is untouched and still correct.
+      const rendered = await renderRelease({ reach: 'public' });
+      const deaf = {
+        ...controller,
+        sources: controller.sources.filter((source) => source !== 'crd'),
+      };
+      expect(publish(rendered, [GATEWAY], deaf).records).toEqual([]);
+    });
+  },
+);
+
+/**
+ * The controller these tests model is the one the clusters declare.
+ *
+ * Reading it is only worth anything if it is read for every cluster a Component
+ * can land on, and if an installation the model does not actually cover fails
+ * rather than being quietly approximated. Both are asserted here.
+ */
+describe('the modelled controller is the declared one', () => {
+  test('every Kubernetes Target runs a controller read off its own cluster', async () => {
+    const release = Bun.YAML.parse(
+      await Bun.file(join(REPO_ROOT, LIVE_RELEASE)).text(),
+    ) as {
+      spec?: {
+        values?: {
+          manifest?: { targets?: { vessel?: string; adapter?: string }[] };
+        };
+      };
+    };
+    const clusters = (release.spec?.values?.manifest?.targets ?? [])
+      .filter((target) => target.adapter === 'kubernetes')
+      .map((target) => target.vessel)
+      .filter((vessel) => vessel !== undefined);
+
+    expect(clusters.length).toBeGreaterThan(0);
+    for (const cluster of clusters) {
+      expect(CONTROLLERS.map((controller) => controller.cluster)).toContain(
+        cluster,
+      );
+    }
   });
 
-  test('a Component whose record is no longer stated answers off the gateway', async () => {
-    const rendered = await renderRelease({ reach: 'public' });
-    const publication = publish(unheldOut(unstated(rendered)), [GATEWAY]);
-
-    // Nothing is contended and nothing errors: one source, one record, and a
-    // `public` Component answering an RFC1918 address on the public internet.
-    // Reach was ignored and the zone is perfectly healthy about it, which is
-    // the shape of failure this suite exists for.
-    expect(publication.contended).toEqual([]);
-    expect(publication.records).toEqual([
-      {
-        dnsName: CANONICAL,
-        recordType: 'A',
-        targets: GATEWAY.addresses,
-        proxied: false,
-        claimedBy: 'httproute/blog-web',
-      },
-    ]);
-  });
-
-  test('a record nothing states and nothing derives is no record', async () => {
-    // The hold-out on its own is not a fix: with the DNSEndpoint gone it is
-    // just a name that resolves nowhere. Both halves are the mechanism.
-    const rendered = await renderRelease({ reach: 'public' });
-    expect(publish(unstated(rendered), [GATEWAY]).records).toEqual([]);
+  test('an argument the model does not account for is refused, not ignored', () => {
+    // `--annotation-prefix` renames every annotation key, including the one the
+    // route holds itself out with. A model that shrugged at an unfamiliar
+    // argument would keep holding the route out of a source that had stopped
+    // seeing the hold-out — one name, two record types, whole-zone sync down.
+    const overlay = {
+      resources: ['../../../base/networking/external-dns'],
+      patches: [
+        {
+          target: { kind: 'HelmRelease', name: 'external-dns' },
+          patch:
+            '- op: add\n' +
+            '  path: /spec/values/extraArgs/-\n' +
+            '  value: --annotation-prefix=dns.example.test/\n',
+        },
+      ],
+    };
+    expect(() =>
+      controllerFor(
+        'somewhere',
+        { spec: { values: { sources: ['crd'], extraArgs: [] } } },
+        overlay,
+      ),
+    ).toThrow(/--annotation-prefix/);
   });
 });

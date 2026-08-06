@@ -590,6 +590,15 @@ its gateway's own address are pinned apart there: live they are equal, which is
 what made a record derived from the gateway and a record the chart stated
 indistinguishable.
 
+Which sources that controller runs is the other half of the mechanism and is not
+Spindrift's to declare, so it is read from `clusters/` rather than assumed
+(`test/harness/external-dns-installation.ts`), once for every cluster a
+Component can be placed on. A sources list that loses `crd` is a `DNSEndpoint`
+nobody reads while every route is still held out — no source claims the name and
+`--policy=sync` deletes the record — with each rendered object still exactly
+right. Any argument that model does not account for fails there rather than
+being approximated.
+
 The live-from-creation status name and a vanity leg standing in front of a
 backend that cannot carry the name itself still have no `DNSEndpoint` to
 render, because both need a name before any Component exists to hang one on.
