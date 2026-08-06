@@ -155,7 +155,9 @@ jobs:
             turbo-${{ runner.os }}-main-
             turbo-${{ runner.os }}-
       # The App chart's goldens run `helm template` under `bun test`, where the
-      # chart lives (packages/charts).
+      # chart lives (packages/charts). spindrift's own suite templates the same
+      # chart to assert what the record `reach` publishes ends up being, so the
+      # binary is a requirement of both packages rather than one.
       - name: Set up Helm
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
