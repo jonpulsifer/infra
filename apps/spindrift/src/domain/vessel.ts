@@ -121,7 +121,15 @@ export interface Vessel {
    * sits on, which is why it is stated once here rather than per surface.
    */
   readonly servedHosts: readonly string[];
-  /** §3, and boundary-shaped for the same reason. */
+  /**
+   * §3, and boundary-shaped for the same reason.
+   *
+   * An entry is a bare host (`ghcr.io`) or a host/namespace (`ghcr.io/owner`),
+   * and both spellings are accepted everywhere this is read —
+   * {@link import('./desired-state.ts').pullableFrom} is the one predicate
+   * that decides it, for both a Build's pull address and, before a Build
+   * exists, the registry namespace itself.
+   */
   readonly reachableRegistries: readonly string[];
 }
 
