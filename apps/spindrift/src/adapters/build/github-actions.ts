@@ -782,4 +782,3 @@ export const githubActionsDescriptor = {
     });
   },
 } satisfies BuildRouteDescriptor;
-

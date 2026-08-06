@@ -344,4 +344,3 @@ export const inClusterDescriptor = {
     });
   },
 } satisfies BuildRouteDescriptor;
-

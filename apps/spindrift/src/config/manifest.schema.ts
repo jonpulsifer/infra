@@ -115,7 +115,6 @@ export const buildRouteSchema = z.discriminatedUnion('adapter', [
   inClusterDescriptor.configSchema,
 ]);
 
-
 const kubernetesDeliverySchema = z.discriminatedUnion('flavour', [
   z
     .object({
