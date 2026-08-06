@@ -12,7 +12,6 @@ brew "uv"
 brew "watchman"
 
 # cloud and containers
-brew "awscli"
 cask "gcloud-cli"
 cask "docker-desktop"
 
