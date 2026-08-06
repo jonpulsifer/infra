@@ -38,7 +38,7 @@ import {
   deployTargetOf,
   type TargetConnection,
 } from '../../src/domain/target.ts';
-import { vesselKindFor } from '../../src/domain/vessel.ts';
+import type { VesselKind } from '../../src/domain/vessel.ts';
 import { defaultVesselId } from './db.ts';
 
 const FIXTURE = join(import.meta.dir, '../fixtures/installation.example.yaml');
@@ -220,9 +220,28 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
   }
 }
 
+/**
+ * Which of the seeded vessels a fixture Target of this adapter sits on.
+ *
+ * A **fixture convention, not a domain rule.** The domain has no reverse lookup
+ * from a surface to a kind of boundary — a project may run a cluster, and which
+ * surfaces a vessel carries is what its Targets say — so this is only the
+ * arrangement `withIsolatedDatabase` seeds, spelled once so every fixture
+ * reaches the same row.
+ */
+const FIXTURE_VESSEL_KIND = {
+  kubernetes: 'cluster',
+  cloudrun: 'gcp-project',
+  static: 'gcp-project',
+} as const satisfies Record<TargetAdapter, VesselKind>;
+
+export function fixtureVesselKind(adapter: TargetAdapter): VesselKind {
+  return FIXTURE_VESSEL_KIND[adapter];
+}
+
 /** The boundary one adapter's surfaces sit on. */
 export function vesselFor(adapter: TargetAdapter): NewVessel {
-  const kind = vesselKindFor(adapter);
+  const kind = fixtureVesselKind(adapter);
   return {
     name: `vessel-${crypto.randomUUID()}`,
     kind,
@@ -282,7 +301,7 @@ export function targetValues(overrides: Partial<NewTarget> = {}): NewTarget {
     rank: 0,
     // The isolated database seeds one vessel per kind; a Target that wants its
     // own passes it. See `defaultVesselId`.
-    vesselId: defaultVesselId(vesselKindFor(adapter)),
+    vesselId: defaultVesselId(fixtureVesselKind(adapter)),
     connection: connectionFor(adapter),
     health: 'healthy',
     // The cluster fixture wires an ExternalAuth backend, so it asserts the edge

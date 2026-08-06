@@ -23,7 +23,6 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { targetLabel } from '../../src/domain/target.ts';
-import { vesselKindFor } from '../../src/domain/vessel.ts';
 import { defaultVesselName, withIsolatedDatabase } from '../harness/db.ts';
 import {
   SupplyChainHarness,
@@ -31,6 +30,7 @@ import {
 } from '../harness/fakes/supply-chain.ts';
 import {
   fixtureManifest,
+  fixtureVesselKind,
   insertVessel,
   targetValues,
 } from '../harness/installation.ts';
@@ -143,7 +143,7 @@ async function scaffold(
     // `targetValues` leaves `vesselId` at the harness's shared per-kind
     // fixture vessel, so this is the same label a screen reads off the row.
     label: targetLabel({
-      vessel: defaultVesselName(vesselKindFor(adapter)),
+      vessel: defaultVesselName(fixtureVesselKind(adapter)),
       adapter,
     }),
   };

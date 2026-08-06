@@ -35,50 +35,62 @@ import type { TargetAdapter } from '../config/manifest.schema.ts';
 /**
  * What kind of boundary this is.
  *
+ * **The discriminant {@link VesselLocation} needs, and nothing else.** It says
+ * which shape "where this boundary is" has — `{ apiServer }`, `{ project }`,
+ * later `{ host }` — and it decides no behaviour: it does not say which
+ * surfaces a vessel carries, it is not reversible from an adapter, and it gates
+ * no manifest entry. Which surfaces are on a vessel is what its Targets say,
+ * established by probing the boundary rather than read out of its kind.
+ *
  * Named for the tenancy container itself rather than for the adapter that
- * drives a surface on it, because those are different axes: a `gcp-project`
- * carries two adapters, and `kubernetes` is one adapter on a `cluster`. Every
- * future value is vendor-shaped in the same way, naming one provider's tenancy
- * container, which is what makes them additive.
+ * drives a surface on it, because those are different axes. Every future value
+ * is vendor-shaped in the same way, naming one provider's tenancy container,
+ * which is what makes them additive.
  */
 export const VESSEL_KINDS = ['cluster', 'gcp-project'] as const;
 
 export type VesselKind = (typeof VESSEL_KINDS)[number];
 
 /**
- * The surfaces each kind of vessel carries (§13's split, as a table).
+ * The surfaces a connect act probes a vessel of this kind **for**.
  *
- * This replaces `targetNames()` and `CLOUD_ADAPTERS`. One connect act registers
- * one row per entry here, which is the same behaviour as before — stated as a
- * fact about the vessel kind rather than as a branch on the word "cloud".
+ * A list of questions, not an answer. An entry here means "ask this boundary
+ * whether it carries this runtime"; what it carries is whatever the probe
+ * established, and the Target rows are where that lands. So a project whose
+ * Cloud Run API is switched off is probed for `cloudrun` and has none, and the
+ * same surface may appear under two kinds without either becoming ambiguous —
+ * a probe answers per vessel, and a table cannot.
  *
- * Adding a backend is adding a row — one vessel kind mapped to the surfaces it
- * serves — and needs nothing else in this file.
+ * Adding a backend is adding a row and nothing else in this file.
  */
-export const SURFACES_BY_VESSEL_KIND = {
+export const PROBED_SURFACES_BY_VESSEL_KIND = {
   cluster: ['kubernetes'],
   'gcp-project': ['cloudrun', 'static'],
 } as const satisfies Record<VesselKind, readonly TargetAdapter[]>;
 
-/** The surfaces one connect act registers on a vessel of this kind. */
-export function surfacesOf(kind: VesselKind): readonly TargetAdapter[] {
-  return SURFACES_BY_VESSEL_KIND[kind];
+/** What one connect act asks a vessel of this kind about. */
+export function surfacesToProbe(kind: VesselKind): readonly TargetAdapter[] {
+  return PROBED_SURFACES_BY_VESSEL_KIND[kind];
 }
 
-/** Which kind of vessel carries this surface. */
-export function vesselKindFor(adapter: TargetAdapter): VesselKind {
-  for (const kind of VESSEL_KINDS) {
-    if (
-      (SURFACES_BY_VESSEL_KIND[kind] as readonly string[]).includes(adapter)
-    ) {
-      return kind;
-    }
-  }
-  // Unreachable while the table above covers every adapter, which
-  // `satisfies Record<VesselKind, ...>` and the test in
-  // `test/domain/vessel.test.ts` between them keep true.
-  throw new Error(`no vessel kind carries the ${adapter} surface`);
-}
+/**
+ * What one probe established about one surface on one vessel.
+ *
+ * Three arms rather than a boolean, and the third is the load-bearing one: a
+ * read either produced an answer or it did not, exactly as
+ * `adapters/cloud-discovery.ts` splits `found` from `unavailable`. `absent`
+ * says *this boundary does not carry this runtime* — a fact an operator can act
+ * on, and the one answer that withholds a Target. `undetermined` says nothing
+ * was established, which is what a `403`, a disabled federation or a failed
+ * read produce, and it registers the Target unhealthy with the sentence
+ * attached: rendering a confident absence off a refused read would tell an
+ * operator their project has no Cloud Run when all that happened is nobody
+ * could look.
+ */
+export type SurfaceProbe =
+  | { readonly kind: 'carried' }
+  | { readonly kind: 'absent'; readonly detail: string }
+  | { readonly kind: 'undetermined'; readonly detail: string };
 
 /**
  * Where the boundary is, in its own kind's terms.
@@ -110,10 +122,15 @@ export interface GcpProjectLocation {
  * Everything here is a fact about the boundary — true for every surface on it,
  * and therefore impossible for two of them to disagree about. A fact that is
  * true of one surface and not another belongs on the Target.
+ *
+ * **There is no `surfaces` here.** Which runtimes this boundary carries is the
+ * set of Targets that reference it, and a second copy of that would be a copy
+ * the two can disagree about.
  */
 export interface Vessel {
   readonly id: string;
   readonly name: string;
+  /** {@link VESSEL_KINDS} — the shape of {@link location}, and nothing else. */
   readonly kind: VesselKind;
   readonly location: VesselLocation;
   /**

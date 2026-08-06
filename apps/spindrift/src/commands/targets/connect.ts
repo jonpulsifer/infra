@@ -14,10 +14,20 @@
  * to look at and nothing for the loop to re-check.
  *
  * **The act is credential-shaped though the noun is flat.** Connecting a cloud
- * project registers *both* of that project's Targets — `cloudrun` and `static` —
- * because placement determines artifact shape and a single "Cloud" Target would
- * leave a website ambiguous between the two renderings. That is also why no
- * `Provider` noun exists: the shared thing is an argument to this command.
+ * project asks about *both* of that project's surfaces — `cloudrun` and
+ * `static` — because placement determines artifact shape and a single "Cloud"
+ * Target would leave a website ambiguous between the two renderings. That is
+ * also why no `Provider` noun exists: the shared thing is an argument to this
+ * command.
+ *
+ * **What it asks about and what it registers are different lists.**
+ * `surfacesToProbe` names the questions; the Targets are the answers. A project
+ * whose Cloud Run API is switched off gets no `cloudrun` Target — it gets a
+ * checklist saying the surface is not there, and connect still succeeds. A
+ * surface the probe could not settle *does* get its Target, unhealthy, with the
+ * sentence attached: withholding a row on a refused read would state an absence
+ * nobody established. Neither arm ever removes a Target that already exists —
+ * a row that has been deployed to is not a probe's to delete.
  *
  * Connect is **idempotent by `(vessel, adapter)`** — which is what a Target is,
  * so there is nothing else it could be idempotent by. Re-running it re-inspects,
@@ -43,7 +53,7 @@ import {
   type TargetHealth,
 } from '../../domain/target.ts';
 import {
-  surfacesOf,
+  surfacesToProbe,
   type VesselKind,
   type VesselLocation,
 } from '../../domain/vessel.ts';
@@ -189,9 +199,32 @@ export interface ConnectedTarget {
   readonly prerequisites: readonly PrerequisiteResult[];
 }
 
+/** A surface this act probed for and established the vessel does not carry. */
+export interface AbsentSurface {
+  readonly vessel: string;
+  readonly adapter: TargetAdapter;
+  /**
+   * The checklist as the probe answered it.
+   *
+   * Every row unmet, and the one that establishes the absence carries the
+   * sentence — the same grammar a registered Target's unmet item has, because
+   * "there is no Cloud Run here" and "Cloud Run here is unhealthy" are the same
+   * kind of thing to read and act on.
+   */
+  readonly prerequisites: readonly PrerequisiteResult[];
+  /** What the probe established, in one sentence. */
+  readonly detail: string;
+}
+
 export interface ConnectTargetResult {
-  /** One entry for a cluster, two for a cloud project (§13). */
+  /** One entry per surface the probe did not rule out (§13). */
   readonly targets: readonly ConnectedTarget[];
+  /**
+   * Surfaces the probe established are not on this vessel, and so were not
+   * registered. Empty is the ordinary case; a non-empty entry is why a project
+   * an operator expected two Targets from produced one.
+   */
+  readonly absent: readonly AbsentSurface[];
   /** Deploys a previous disconnect stranded that are still running (§13). */
   readonly readopted: readonly string[];
 }
@@ -297,6 +330,7 @@ export const connectTarget: Command<
 
   const now = context.clock.now();
   const registered: ConnectedTarget[] = [];
+  const absent: AbsentSurface[] = [];
   const readopted: string[] = [];
 
   // The boundary first, because every surface below is a row that references
@@ -334,7 +368,7 @@ export const connectTarget: Command<
   // Idempotent by `(vessel, adapter)`, which is what a Target *is*: reconnecting
   // re-adopts the surface that is already there rather than registering a second
   // one competing for the same workloads.
-  for (const adapter of surfacesOf(input.kind)) {
+  for (const adapter of surfacesToProbe(input.kind)) {
     const existing = (
       await context.db
         .select()
@@ -359,8 +393,26 @@ export const connectTarget: Command<
     );
     // One pass of the same loop §13 runs on a schedule — not a second notion of
     // what "healthy" means that happens to run at connect time.
-    const { prerequisites, discovery } = await inspectTarget(context, ref);
+    const { prerequisites, discovery, surface } = await inspectTarget(
+      context,
+      ref,
+    );
     const health = deriveHealth(prerequisites, adapter);
+
+    if (surface.kind === 'absent' && existing === undefined) {
+      // The only branch that writes nothing. An established absence is a fact
+      // about this boundary, so registering the surface anyway would put a row
+      // on the placement screen that nothing can ever be placed on — and
+      // §14 forbids the one remediation that would make it true, which is
+      // Spindrift switching the service on.
+      absent.push({
+        vessel: input.vessel,
+        adapter,
+        prerequisites,
+        detail: surface.detail,
+      });
+      continue;
+    }
 
     if (existing === undefined) {
       // §13: "Rank is one global ordered list." A new Target joins the end of
@@ -431,5 +483,5 @@ export const connectTarget: Command<
     });
   }
 
-  return ok({ targets: registered, readopted });
+  return ok({ targets: registered, absent, readopted });
 };

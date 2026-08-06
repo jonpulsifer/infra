@@ -58,7 +58,7 @@ import {
   targetLabel,
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
-import { cloudChecklist } from '../cloud/checklist.ts';
+import { cloudChecklist, cloudSurfaceProbe } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
 import { cloudWriteFailure, orderedChecklist } from '../cloud/verdict.ts';
 import type {
@@ -758,15 +758,19 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       query: { pageSize: '1' },
     });
 
-    const prerequisites = cloudChecklist(probe, {
+    const subject = {
       project: connection.project,
       service: SERVICE_NAME,
       scope: `${connection.project} in ${connection.region}`,
-    });
+    };
 
     return {
-      prerequisites: orderedChecklist(prerequisites, this.adapter),
+      prerequisites: orderedChecklist(
+        cloudChecklist(probe, subject),
+        this.adapter,
+      ),
       discovery: await this.discover(connection),
+      surface: cloudSurfaceProbe(probe, subject),
     };
   }
 

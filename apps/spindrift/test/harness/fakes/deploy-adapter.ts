@@ -69,6 +69,15 @@ export interface FakeDeployAdapterOptions {
   /** When set, `inspect` throws — the Target that cannot be reached at all. */
   unreachable?: string;
   /**
+   * When set, `inspect` reports the boundary does not carry this surface.
+   *
+   * The far side saying "there is no such runtime here" — a cloud project with
+   * the service switched off — which is a different answer from a refused read
+   * and has to be arrangeable separately from {@link unreachable} for a test to
+   * tell core's two responses apart.
+   */
+  surfaceAbsent?: string;
+  /**
    * When set, `apply` throws instead of returning a verdict.
    *
    * §6 contracts `apply` not to throw — "an adapter that cannot place the
@@ -286,14 +295,21 @@ export class FakeDeployAdapter implements DeployAdapter {
       // the adapter is allowed to fail, and core has to survive it.
       throw new Error(this.options.unreachable);
     }
+    const absent = this.options.surfaceAbsent;
     const unmet = this.options.unmet ?? {};
     return {
       prerequisites: prerequisitesFor(this.adapter).map((name) =>
-        unmet[name] === undefined
-          ? { name, met: true }
-          : { name, met: false, detail: unmet[name] },
+        absent !== undefined
+          ? { name, met: false, detail: absent }
+          : unmet[name] === undefined
+            ? { name, met: true }
+            : { name, met: false, detail: unmet[name] },
       ),
       discovery: { ...CAPABLE_DISCOVERY, ...this.options.discovery },
+      surface:
+        absent === undefined
+          ? { kind: 'carried' }
+          : { kind: 'absent', detail: absent },
     };
   }
 

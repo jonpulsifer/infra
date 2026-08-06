@@ -192,6 +192,42 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
     }
   });
 
+  test('take their kind from the address stated, not from the adapter', () => {
+    // The reverse lookup this step used to make assumed each surface belonged
+    // to exactly one kind of boundary. A project that runs a cluster breaks
+    // that assumption, and the old code would have called this vessel a
+    // `cluster` because its surface is `kubernetes`. What the document
+    // actually says is a project.
+    const upgraded = upgradeManifestDocument({
+      targets: [
+        {
+          name: 'inside-a-project',
+          adapter: 'kubernetes',
+          connection: { project: 'example-vessel', namespace: 'apps' },
+        },
+      ],
+    }) as { vessels: unknown[] };
+    expect(upgraded.vessels).toEqual([
+      {
+        name: 'inside-a-project',
+        kind: 'gcp-project',
+        location: { project: 'example-vessel' },
+      },
+    ]);
+  });
+
+  test('and a boundary no address was stated for gets no invented kind', () => {
+    // No address means the document does not say what shape this boundary has,
+    // and there is nothing left to infer it from. This step declares nothing
+    // rather than guessing, so validation reports the document instead of a
+    // kind nothing would ever check. (`dropTargetNames` still runs — the two
+    // steps are independent.)
+    const upgraded = upgradeManifestDocument({
+      targets: [{ name: 'nowhere', adapter: 'kubernetes' }],
+    });
+    expect(upgraded).not.toHaveProperty('vessels');
+  });
+
   test('is a no-op on a document that already declares them', () => {
     // `02` now upgrades too — `dropTargetNames` still takes its constructed
     // `name` off every entry. `03` is the shape with neither gap, so this is

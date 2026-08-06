@@ -21,10 +21,6 @@
  */
 import { z } from 'zod';
 import type { FederationConfig } from '../adapters/deploy/cloud/federation.ts';
-// `src/domain/vessel.ts` imports `TargetAdapter` back from here, and that is a
-// type-only edge, so the cycle is erased at runtime. Restating the table here
-// to avoid it would be the duplication that table exists to end.
-import { surfacesOf } from '../domain/vessel.ts';
 
 /** A non-empty string with no surrounding whitespace. */
 const nonEmptyString = z.string().trim().min(1);
@@ -597,8 +593,10 @@ export const installationManifestSchema = z
      * hosting several runtimes, so the convention would only get more
      * load-bearing, never less.
      *
-     * Target names keep their suffixes. They are decorative now, which is the
-     * point: nothing parses them.
+     * A vessel states where the boundary is and what it can reach. It does not
+     * state which surfaces are on it — those are the `targets[]` entries that
+     * name it, and what a boundary really carries is established by probing it
+     * at connect.
      */
     vessels: z
       .array(vesselSeedSchema)
@@ -626,8 +624,7 @@ export const installationManifestSchema = z
   })
   .strict()
   /**
-   * Every Target names a declared vessel, and one whose kind carries its
-   * surface.
+   * Every Target names a vessel this document declares.
    *
    * At the document level rather than on `targets`, because it is the one rule
    * in this schema that reads two keys at once. It replaces the
@@ -638,29 +635,23 @@ export const installationManifestSchema = z
    * by name and has nothing honest to do with a Target whose boundary is not
    * in the document.
    *
-   * The kind check is what keeps `SURFACES_BY_VESSEL_KIND` the single statement
-   * of which runtimes a boundary carries: a `cloudrun` Target on a `cluster` is
-   * refused here rather than reaching an adapter that has no way to place it.
+   * **It asks whether this vessel declares this surface, not whether its kind
+   * carries the adapter.** A `targets[]` entry *is* the declaration — the
+   * uniqueness refine above is what keeps a vessel from declaring the same
+   * surface twice — and which runtimes a boundary actually has is established
+   * by probing it at connect. Holding the document to a table of surfaces per
+   * kind would refuse a project that genuinely runs a cluster, and would do it
+   * on the authority of a value whose only job is the shape of `location`.
    */
   .superRefine((manifest, context) => {
-    const kinds = new Map(manifest.vessels.map((v) => [v.name, v.kind]));
+    const declared = new Set(manifest.vessels.map((vessel) => vessel.name));
     manifest.targets.forEach((target, index) => {
-      const kind = kinds.get(target.vessel);
-      if (kind === undefined) {
-        context.addIssue({
-          code: 'custom',
-          path: ['targets', index, 'vessel'],
-          message: `no vessel named ${target.vessel} is declared`,
-        });
-        return;
-      }
-      if (!(surfacesOf(kind) as readonly string[]).includes(target.adapter)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['targets', index, 'vessel'],
-          message: `a ${kind} vessel does not carry a ${target.adapter} surface`,
-        });
-      }
+      if (declared.has(target.vessel)) return;
+      context.addIssue({
+        code: 'custom',
+        path: ['targets', index, 'vessel'],
+        message: `no vessel named ${target.vessel} is declared`,
+      });
     });
   });
 
