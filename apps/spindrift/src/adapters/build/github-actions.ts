@@ -756,11 +756,7 @@ function stepState(
   return conclusion === 'success' ? 'SUCCEEDED' : 'FAILED';
 }
 
-export const githubActionsDescriptor: BuildRouteDescriptor<{
-  name: string;
-  adapter: 'github-actions';
-  sealPublicKey?: string;
-}> = {
+export const githubActionsDescriptor = {
   kind: 'github-actions',
   displayName: 'GitHub Actions',
   logo: 'github',
@@ -785,4 +781,5 @@ export const githubActionsDescriptor: BuildRouteDescriptor<{
       sealPublicKey: config.sealPublicKey,
     });
   },
-};
+} satisfies BuildRouteDescriptor;
+

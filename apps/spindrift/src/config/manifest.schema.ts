@@ -93,7 +93,12 @@ export const storeAdapterSchema = z.enum(['onepassword', 'gcp-secret-manager']);
  * below is a list an operator writes rather than one of these three per
  * installation. §4: "which routes exist is an installation's configuration."
  */
-import { BUILD_ROUTE_DESCRIPTORS } from '../adapters/build/descriptors.ts';
+import {
+  BUILD_ROUTE_DESCRIPTORS,
+  cloudBuildDescriptor,
+  githubActionsDescriptor,
+  inClusterDescriptor,
+} from '../adapters/build/descriptors.ts';
 
 export const buildRouteAdapterSchema = z.enum(
   BUILD_ROUTE_DESCRIPTORS.map((d) => d.kind) as [string, ...string[]],
@@ -104,14 +109,12 @@ export const buildRouteAdapterSchema = z.enum(
  *
  * A discriminated union derived from registered descriptors.
  */
-export const buildRouteSchema = z.discriminatedUnion(
-  'adapter',
-  BUILD_ROUTE_DESCRIPTORS.map((d) => d.configSchema) as [
-    z.ZodTypeAny,
-    z.ZodTypeAny,
-    ...z.ZodTypeAny[],
-  ],
-);
+export const buildRouteSchema = z.discriminatedUnion('adapter', [
+  githubActionsDescriptor.configSchema,
+  cloudBuildDescriptor.configSchema,
+  inClusterDescriptor.configSchema,
+]);
+
 
 const kubernetesDeliverySchema = z.discriminatedUnion('flavour', [
   z

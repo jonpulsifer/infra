@@ -1,13 +1,15 @@
-import { cloudBuildDescriptor } from './cloud-build.ts';
 import type { BuildRouteDescriptor } from './descriptor.ts';
 import { githubActionsDescriptor } from './github-actions.ts';
+import { cloudBuildDescriptor } from './cloud-build.ts';
 import { inClusterDescriptor } from './in-cluster.ts';
 
-export const BUILD_ROUTE_DESCRIPTORS: readonly BuildRouteDescriptor[] = [
+export { githubActionsDescriptor, cloudBuildDescriptor, inClusterDescriptor };
+
+export const BUILD_ROUTE_DESCRIPTORS = [
   githubActionsDescriptor,
   cloudBuildDescriptor,
   inClusterDescriptor,
-];
+] as const;
 
 export function findBuildRouteDescriptor(
   kind: string,

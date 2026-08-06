@@ -313,14 +313,7 @@ export class InClusterBuildRoute implements BuildAdapter {
   }
 }
 
-export const inClusterDescriptor: BuildRouteDescriptor<{
-  name: string;
-  adapter: 'in-cluster';
-  endpoint: string;
-  namespace: string;
-  image: string;
-  serviceAccount: string;
-}> = {
+export const inClusterDescriptor = {
   kind: 'in-cluster',
   displayName: 'in-cluster',
   logo: 'kubernetes',
@@ -350,4 +343,5 @@ export const inClusterDescriptor: BuildRouteDescriptor<{
       zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
     });
   },
-};
+} satisfies BuildRouteDescriptor;
+

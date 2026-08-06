@@ -880,15 +880,7 @@ function timestampOf(entry: LogEntry): Date | null {
   return Number.isNaN(at.getTime()) ? null : at;
 }
 
-export const cloudBuildDescriptor: BuildRouteDescriptor<{
-  name: string;
-  adapter: 'cloud-build';
-  endpoint: string;
-  logsEndpoint: string;
-  project: string;
-  region: string;
-  image: string;
-}> = {
+export const cloudBuildDescriptor = {
   kind: 'cloud-build',
   displayName: 'Cloud Build',
   logo: 'google-cloud',
@@ -919,4 +911,5 @@ export const cloudBuildDescriptor: BuildRouteDescriptor<{
       ...(context.fetch ? { fetch: context.fetch } : {}),
     });
   },
-};
+} satisfies BuildRouteDescriptor;
+
