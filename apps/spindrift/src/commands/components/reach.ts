@@ -37,6 +37,7 @@ import {
   authHasARoute,
   type Reach,
 } from '../../domain/desired-state.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const setComponentReachInput = z
@@ -64,8 +65,8 @@ export interface SetComponentReachResult {
   readonly reach: Reach;
   readonly auth: Auth;
   /**
-   * The Targets whose current release still places the previous answer, by
-   * name and sorted.
+   * The Targets whose current release still places the previous answer, as
+   * `<vessel>/<adapter>` and sorted.
    *
    * Empty means there is nothing to press Deploy for — either this Component
    * has never been placed, or what is desired already asks for what was just
@@ -103,7 +104,10 @@ export const setComponentReach: Command<
   const placed = await context.db.query.componentTargetDesired.findMany({
     where: (desired, { eq }) => eq(desired.componentId, row.id),
     with: {
-      target: { columns: { name: true } },
+      target: {
+        columns: { adapter: true },
+        with: { vessel: { columns: { name: true } } },
+      },
       desiredDeploy: { columns: { desired: true } },
     },
   });
@@ -119,7 +123,7 @@ export const setComponentReach: Command<
           (desiredDeploy.desired.reach !== input.reach ||
             desiredDeploy.desired.auth !== input.auth),
       )
-      .map(({ target }) => target.name)
+      .map(({ target }) => targetRowLabel(target))
       .sort(),
   });
 };

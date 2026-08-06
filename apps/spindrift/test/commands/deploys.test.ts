@@ -43,6 +43,7 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { configVersionOf } from '../../src/domain/config-version.ts';
+import { targetLabel } from '../../src/domain/target.ts';
 import { policyDrift } from '../../src/supply-chain/posture.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
@@ -51,7 +52,11 @@ import {
   SupplyChainHarness,
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
@@ -141,17 +146,28 @@ async function fixture(
       ...(options.auth === undefined ? {} : { auth: options.auth }),
     })
     .returning();
+  const adapter = options.adapter ?? 'kubernetes';
+  const vessel = await insertVessel(db, adapter, {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
   const [target] = await db
     .insert(targets)
     .values(
       targetValues({
-        name: `cluster-${crypto.randomUUID()}`,
-        adapter: options.adapter ?? 'kubernetes',
+        adapter,
+        vesselId: vessel.id,
         discovery: null,
       }),
     )
     .returning();
-  return { app: app!, component: component!, target: target! };
+  return {
+    app: app!,
+    component: component!,
+    target: target!,
+    // `<vessel>/<adapter>` — the same label `targetRowLabel` renders into a
+    // refusal message, precomputed here because the row alone cannot say it.
+    label: targetLabel({ vessel: vessel.name, adapter }),
+  };
 }
 
 /** A Build that is ready to deploy: succeeded, with an artifact of one shape. */
@@ -281,7 +297,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
     // this Target when the developer was offered it; nothing re-asked when the
     // Deploy was created, so "the Target says it cannot and it happened anyway"
     // was the whole of the defect — a declared boundary that was advisory.
-    const { component, target } = await fixture();
+    const { component, target, label } = await fixture();
     // `auth: 'none'` so this is a claim about reach alone — the authenticated
     // edge is the test below, and a Component carrying both would be refused
     // twice and prove neither.
@@ -303,7 +319,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
     expect(refused.failure.code).toBe('NOT_DEPLOYABLE');
-    expect(refused.failure.message).toContain(target.name);
+    expect(refused.failure.message).toContain(label);
     expect(refused.failure.message).toContain(
       'no way to serve a public address',
     );
@@ -426,7 +442,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
   });
 
   test('raised policy leaves LIVE serving but blocks every new placement', async () => {
-    const { component, target } = await fixture();
+    const { component, target, label } = await fixture();
     const build = await succeededBuild(component.id, 4);
     const first = await createDeploy(
       { componentId: component.id, targetId: target.id, buildId: build.id },
@@ -469,7 +485,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
       ok: false,
       failure: {
         code: 'NOT_DEPLOYABLE',
-        message: `Build ${build.id} achieved verified Build Level 2, and ${target.name} currently requires L3`,
+        message: `Build ${build.id} achieved verified Build Level 2, and ${label} currently requires L3`,
       },
     });
   });
@@ -571,12 +587,15 @@ describe('createDeploy writes an intent, and only an intent', () => {
 
   test('Cloud Run image deploys share the same admission gate (§16)', async () => {
     const { component } = await fixture({ adapter: 'cloudrun' });
+    const cloudVessel = await insertVessel(database().db, 'cloudrun', {
+      name: `cloud-${crypto.randomUUID()}`,
+    });
     const [cloudTarget] = await database()
       .db.insert(targets)
       .values(
         targetValues({
-          name: `cloud-${crypto.randomUUID()}`,
           adapter: 'cloudrun',
+          vesselId: cloudVessel.id,
           discovery: null,
         }),
       )
@@ -736,7 +755,7 @@ describe('deployApp selects which Component it acts on', () => {
       .returning();
 
     const result = await deployApp(
-      { name: app.name, component: nightly!.name, target: target.name },
+      { name: app.name, component: nightly!.name, target: target.id },
       context(registryOf(capableAdapter())),
     );
 
@@ -756,19 +775,22 @@ describe('deployApp selects which Component it acts on', () => {
       targetId: target.id,
       updatedAt: FROZEN,
     });
+    const elsewhereVessel = await insertVessel(database().db, 'kubernetes', {
+      name: `cluster-${crypto.randomUUID()}`,
+    });
     const [elsewhere] = await database()
       .db.insert(targets)
       .values(
         targetValues({
-          name: `cluster-${crypto.randomUUID()}`,
           adapter: 'kubernetes',
+          vesselId: elsewhereVessel.id,
           discovery: null,
         }),
       )
       .returning();
 
     const result = await deployApp(
-      { name: app.name, target: elsewhere!.name },
+      { name: app.name, target: elsewhere!.id },
       context(registryOf(capableAdapter())),
     );
 
@@ -1158,7 +1180,7 @@ describe('§6: rollback is an ordinary deploy', () => {
   });
 
   test('rollback cannot bypass the Target’s current build policy', async () => {
-    const { component, target } = await fixture();
+    const { component, target, label } = await fixture();
     const older = await succeededBuild(component.id, 42);
     const newer = await succeededBuild(component.id, 43, 'image', 3);
     const deployed = await createDeploy(
@@ -1181,7 +1203,7 @@ describe('§6: rollback is an ordinary deploy', () => {
       ok: false,
       failure: {
         code: 'NOT_DEPLOYABLE',
-        message: `Build ${older.id} achieved verified Build Level 2, and ${target.name} currently requires L3`,
+        message: `Build ${older.id} achieved verified Build Level 2, and ${label} currently requires L3`,
       },
     });
   });

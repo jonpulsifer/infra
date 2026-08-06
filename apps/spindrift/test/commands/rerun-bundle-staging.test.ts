@@ -28,7 +28,11 @@ import type {
 } from '../../src/domain/source-bundle.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -116,9 +120,12 @@ describe('the bundle a rerun stages', () => {
       .insert(components)
       .values({ appId: app!.id, name: 'web', kind: 'service' })
       .returning();
+    const vessel = await insertVessel(ctx.db, 'kubernetes', {
+      name: `target-${name}`,
+    });
     const [target] = await ctx.db
       .insert(targets)
-      .values(targetValues({ name: `target-${name}`, adapter: 'kubernetes' }))
+      .values(targetValues({ vesselId: vessel.id, adapter: 'kubernetes' }))
       .returning();
     await ctx.db
       .insert(componentTargetDesired)

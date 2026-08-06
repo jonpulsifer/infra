@@ -43,6 +43,7 @@ import {
   hasTargetConnection,
   hasVesselLocation,
   type TargetHealth,
+  targetLabel,
 } from '../domain/target.ts';
 import { reconcilerLoopDuration } from '../telemetry/index.ts';
 
@@ -118,7 +119,7 @@ export async function restoreDeclaredTargetConnections(
 ): Promise<readonly string[]> {
   const declared = new Set(
     manifest.targets.flatMap((target) =>
-      target.connection === undefined ? [] : [target.name],
+      target.connection === undefined ? [] : [targetLabel(target)],
     ),
   );
   if (declared.size === 0) return [];
@@ -132,7 +133,9 @@ export async function restoreDeclaredTargetConnections(
 
   for (const { target, vessel } of disconnected) {
     if (
-      !declared.has(target.name) ||
+      !declared.has(
+        targetLabel({ vessel: vessel.name, adapter: target.adapter }),
+      ) ||
       !hasTargetConnection(target) ||
       !hasVesselLocation(vessel)
     ) {
@@ -210,7 +213,8 @@ export async function readoptTargetDeploys(
 /** What one Target's refresh did. */
 export interface TargetRefresh {
   readonly targetId: string;
-  readonly name: string;
+  /** `<vessel>/<adapter>`, for the log line this pass writes. */
+  readonly target: string;
   readonly health: TargetHealth;
   /** Set when this pass changed the Target's health. */
   readonly healthChangedFrom?: TargetHealth;
@@ -226,15 +230,19 @@ export interface TargetRefresh {
  */
 export async function refreshTarget(
   context: TargetLoopContext,
-  target: Pick<Target, 'id' | 'name' | 'adapter' | 'health' | 'connection'>,
-  /** The boundary half of what the adapter is handed. */
-  vessel: Pick<Vessel, 'location' | 'servedHosts' | 'reachableRegistries'>,
+  target: Pick<Target, 'id' | 'adapter' | 'health' | 'connection'>,
+  /** The boundary half of what the adapter is handed, and of what names it. */
+  vessel: Pick<
+    Vessel,
+    'name' | 'location' | 'servedHosts' | 'reachableRegistries'
+  >,
 ): Promise<TargetRefresh> {
+  const label = targetLabel({ vessel: vessel.name, adapter: target.adapter });
   if (!hasTargetConnection(target)) {
-    throw new Error(`Target ${target.name} has no connection to refresh`);
+    throw new Error(`Target ${label} has no connection to refresh`);
   }
   if (!hasVesselLocation(vessel)) {
-    throw new Error(`Target ${target.name} sits on a vessel with no location`);
+    throw new Error(`Target ${label} sits on a vessel with no location`);
   }
   const now = context.clock.now();
   const { prerequisites, discovery } = await inspectTarget(
@@ -256,7 +264,7 @@ export async function refreshTarget(
 
   return {
     targetId: target.id,
-    name: target.name,
+    target: label,
     health,
     ...(health === target.health ? {} : { healthChangedFrom: target.health }),
   };

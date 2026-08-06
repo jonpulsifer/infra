@@ -42,14 +42,16 @@
  * one here would name an artifact that does not exist (§4: "a build records an
  * artifact rather than deploying one").
  */
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { targetAdapterSchema } from '../../config/manifest.schema.ts';
 import {
   type apps,
   builds,
   componentTargetDesired,
   repositories,
   targets,
+  vessels,
 } from '../../db/schema.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { isFetchableBundleLocation } from '../../storage/archives.ts';
@@ -84,7 +86,8 @@ export const deployAppInput = z
      */
     component: z.string().trim().min(1).optional(),
     /**
-     * The Target for a Component deploying for the first time, by name or id.
+     * The Target for a Component deploying for the first time — its id, or the
+     * two facts that identify it spelled `<vessel>/<adapter>`.
      *
      * Only a first deploy needs it: placement is a fact a deploy writes, so a
      * Component that has never deployed has none to read back — `placeComponent`
@@ -354,13 +357,24 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
 
   let targetId = placedTargetId;
   if (input.target !== undefined) {
-    const wantsId = z.uuid().safeParse(input.target).success;
-    const [named] = await context.db
-      .select({ id: targets.id })
-      .from(targets)
-      .where(
-        wantsId ? eq(targets.id, input.target) : eq(targets.name, input.target),
-      );
+    // Either an id, or the `<vessel>/<adapter>` spelling split back into the
+    // two facts it states. Anything else resolves nothing, which is the honest
+    // answer — half an identity does not name a Target.
+    const [vessel, surface] = input.target.split('/');
+    const adapter = targetAdapterSchema.safeParse(surface);
+    const identifies = z.uuid().safeParse(input.target).success
+      ? eq(targets.id, input.target)
+      : vessel !== undefined && adapter.success
+        ? and(eq(vessels.name, vessel), eq(targets.adapter, adapter.data))
+        : null;
+    const [named] =
+      identifies === null
+        ? []
+        : await context.db
+            .select({ id: targets.id })
+            .from(targets)
+            .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+            .where(identifies);
     if (named === undefined) {
       return failed('NOT_FOUND', `there is no Target '${input.target}'`);
     }

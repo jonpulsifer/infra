@@ -51,7 +51,7 @@ const CONNECTION: StaticAdapterConnection = {
 };
 
 const TARGET: DeployTarget = {
-  name: 'hosting',
+  vessel: 'hosting',
   adapter: 'static',
   connection: CONNECTION,
 };

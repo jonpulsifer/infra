@@ -174,7 +174,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
   ],
   targets: [
     {
-      name: 'primary',
       vessel: 'primary',
       adapter: 'kubernetes',
       connection: {
@@ -187,7 +186,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       },
     },
     {
-      name: 'spindrift-cloudrun',
       vessel: 'spindrift',
       adapter: 'cloudrun',
       connection: {
@@ -196,7 +194,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       },
     },
     {
-      name: 'spindrift-static',
       vessel: 'spindrift',
       adapter: 'static',
       connection: {

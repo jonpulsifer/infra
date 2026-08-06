@@ -41,7 +41,6 @@ import {
   components,
   componentTargetDesired,
   deploys,
-  targets,
 } from '../../db/schema.ts';
 import { DEFAULT_MINIMUM_BUILD_LEVEL } from '../../domain/build-route.ts';
 import type { DesiredDocument } from '../../domain/desired-state.ts';
@@ -52,6 +51,7 @@ import {
   reachExclusions,
   sentence,
 } from '../../domain/placement.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import { demandSentence, migrationFor } from '../config/migration.ts';
 import { type PinnedConfig, readPinnedConfig } from '../config/pinned.ts';
 import {
@@ -321,10 +321,11 @@ export async function checkDeployable(
     return refuse('NOT_FOUND', `Component ${component.name} has no App`);
   }
 
-  const [target] = await context.db
-    .select()
-    .from(targets)
-    .where(eq(targets.id, input.targetId));
+  // With the boundary, because half of what names a Target lives there.
+  const target = await context.db.query.targets.findFirst({
+    where: (targets, { eq }) => eq(targets.id, input.targetId),
+    with: { vessel: true },
+  });
   if (target === undefined) {
     return failed('NOT_FOUND', `there is no Target with id ${input.targetId}`);
   }
@@ -350,7 +351,7 @@ export async function checkDeployable(
   if (target.status !== 'connected') {
     return refuse(
       'NOT_DEPLOYABLE',
-      `${target.name} is disconnected, so nothing new can be placed on it`,
+      `${targetRowLabel(target)} is disconnected, so nothing new can be placed on it`,
     );
   }
 
@@ -378,7 +379,7 @@ export async function checkDeployable(
     if (build.verifiedBuildLevel < requiredLevel) {
       return refuse(
         'NOT_DEPLOYABLE',
-        `Build ${build.id} achieved verified Build Level ${build.verifiedBuildLevel}, and ${target.name} currently requires L${requiredLevel}`,
+        `Build ${build.id} achieved verified Build Level ${build.verifiedBuildLevel}, and ${targetRowLabel(target)} currently requires L${requiredLevel}`,
       );
     }
     // Cryptographically real admission: the recorded signature is re-verified
@@ -412,7 +413,7 @@ export async function checkDeployable(
   if (build.targetShape !== shape) {
     return refuse(
       'NOT_DEPLOYABLE',
-      `Build ${build.id} produced ${build.targetShape}, and ${target.name} takes ${shape} — this placement needs a rebuild`,
+      `Build ${build.id} produced ${build.targetShape}, and ${targetRowLabel(target)} takes ${shape} — this placement needs a rebuild`,
     );
   }
 
@@ -440,7 +441,7 @@ export async function checkDeployable(
       .join('; ');
     return refuse(
       'NOT_DEPLOYABLE',
-      `${target.name} does not serve this Component's ${component.reach} reach — ${why}`,
+      `${targetRowLabel(target)} does not serve this Component's ${component.reach} reach — ${why}`,
     );
   }
 
@@ -458,7 +459,7 @@ export async function checkDeployable(
   if (migration.demanded.length > 0) {
     return refuse(
       'NOT_DEPLOYABLE',
-      demandSentence(migration.demanded, target.name),
+      demandSentence(migration.demanded, targetRowLabel(target)),
     );
   }
 
@@ -474,7 +475,7 @@ export async function checkDeployable(
       desired: {
         app: app.name,
         component: component.name,
-        target: target.name,
+        target: targetRowLabel(target),
         kind: component.kind,
         // Optional on `DesiredState`, so absent rather than null — the chart
         // branches on emptiness and the adapters spread this straight through.

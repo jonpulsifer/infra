@@ -91,7 +91,7 @@ describe('listTargets and listRepositories over route boundary', () => {
 
   test('listTargets returns persisted targets and options for authenticated user', async () => {
     const ctx = await makeContext(null);
-    await connectTarget(clusterInput({ name: 'folly-cluster' }), ctx);
+    await connectTarget(clusterInput({ vessel: 'folly-cluster' }), ctx);
 
     const routes = serve(ctx, true);
     // The requirements travel in the payload, so options over the route
@@ -111,15 +111,19 @@ describe('listTargets and listRepositories over route boundary', () => {
     };
     expect(body.ok).toBe(true);
     expect(body.value.targets).toHaveLength(1);
-    expect(body.value.targets[0].name).toBe('folly-cluster');
+    expect(body.value.targets[0].vessel).toBe('folly-cluster');
     expect(body.value.options).toHaveLength(1);
-    expect(body.value.options[0].name).toBe('folly-cluster');
+    expect(body.value.options[0].vessel).toBe('folly-cluster');
   });
 
   test('listTargets reports prerequisite failure details for unhealthy targets over HTTP', async () => {
     const ctx = await makeContext(null);
-    await connectTarget(clusterInput({ name: 'unhealthy-cluster' }), ctx);
+    await connectTarget(clusterInput({ vessel: 'unhealthy-cluster' }), ctx);
 
+    const [unhealthyVessel] = await ctx.db
+      .select({ id: schema.vessels.id })
+      .from(schema.vessels)
+      .where(eq(schema.vessels.name, 'unhealthy-cluster'));
     await ctx.db
       .update(schema.targets)
       .set({
@@ -132,7 +136,7 @@ describe('listTargets and listRepositories over route boundary', () => {
           },
         ],
       })
-      .where(eq(schema.targets.name, 'unhealthy-cluster'));
+      .where(eq(schema.targets.vesselId, unhealthyVessel!.id));
 
     const routes = serve(ctx, true);
     const res = await routes[pathFor('listTargets')]!(

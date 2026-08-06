@@ -11,7 +11,7 @@
  * recorded a placement would make asking the question change the App.
  */
 import { describe, expect, test } from 'bun:test';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   connectTarget,
   resolveComponentPlacement,
@@ -29,8 +29,10 @@ import {
   datastores,
   deploys,
   targets,
+  vessels,
 } from '../../src/db/schema.ts';
 import type { ComponentKind } from '../../src/domain/desired-state.ts';
+import { targetLabel } from '../../src/domain/target.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import {
@@ -82,13 +84,20 @@ function context(registry: AdapterRegistry): CommandContext {
 
 /** The cluster and the two cloud Targets, in rank order, all healthy. */
 async function connectEverything(registry: AdapterRegistry) {
-  await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+  await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
   await connectTarget(
-    cloudInput({ name: 'vessel', region: 'here' }),
+    cloudInput({ vessel: 'vessel', region: 'here' }),
     context(registry),
   );
-  const rows = await database().db.select().from(targets);
-  return new Map(rows.map((row) => [row.name, row]));
+  const rows = await database().db.query.targets.findMany({
+    with: { vessel: true },
+  });
+  return new Map(
+    rows.map((row) => [
+      targetLabel({ vessel: row.vessel.name, adapter: row.adapter }),
+      row,
+    ]),
+  );
 }
 
 async function seedComponent(
@@ -125,13 +134,15 @@ describe('resolution is derived, and it is a query', () => {
     const { component } = await seedComponent();
 
     const placement = await place(registry, component.id);
-    expect(placement.suggestedTargetId).toBe(connected.get('cluster')!.id);
+    expect(placement.suggestedTargetId).toBe(
+      connected.get('cluster/kubernetes')!.id,
+    );
     // Every Target appears, candidate or not, in one rank-ordered list — §3's
     // grammar of listed-and-annotated rather than quietly filtered away.
     expect(placement.options.map((option) => option.name)).toEqual([
-      'cluster',
-      'vessel-cloudrun',
-      'vessel-static',
+      'cluster/kubernetes',
+      'vessel/cloudrun',
+      'vessel/static',
     ]);
     // Only the cluster. A `private` reach is an address on the operator's own
     // network, and neither cloud backend has one to publish — which is a
@@ -149,7 +160,7 @@ describe('resolution is derived, and it is a query', () => {
     const { component } = await seedComponent();
 
     const placement = await place(registry, component.id);
-    const cdn = placement.options.find((o) => o.name === 'vessel-static')!;
+    const cdn = placement.options.find((o) => o.name === 'vessel/static')!;
     expect(cdn.candidate).toBe(false);
     expect(cdn.artifactType).toBeNull();
     expect(cdn.reasons).toContain('KIND_UNSUPPORTED');
@@ -160,20 +171,27 @@ describe('resolution is derived, and it is a query', () => {
     const registry = fakes();
     await connectEverything(registry);
     // A reach the operator states, because §3 says nothing reports one (§13).
+    const staticTarget = (
+      await database()
+        .db.select({ id: targets.id })
+        .from(targets)
+        .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+        .where(and(eq(vessels.name, 'vessel'), eq(targets.adapter, 'static')))
+    )[0]!;
     await database()
       .db.update(targets)
       .set({ reaches: ['none', 'private', 'public'] })
-      .where(eq(targets.name, 'vessel-static'));
+      .where(eq(targets.id, staticTarget.id));
     const { component } = await seedComponent('website', 'public', 'none');
 
     const placement = await place(registry, component.id);
-    const cdn = placement.options.find((o) => o.name === 'vessel-static')!;
+    const cdn = placement.options.find((o) => o.name === 'vessel/static')!;
     expect(cdn.candidate).toBe(true);
     expect(cdn.artifactType).toBe('files');
     // The cloud runtime serves a public reach too — its own URL, no tunnel
     // needed — so what separates the two here is artifact shape rather than
     // candidacy, and rank is the tie-break §3 leaves to a human.
-    const run = placement.options.find((o) => o.name === 'vessel-cloudrun')!;
+    const run = placement.options.find((o) => o.name === 'vessel/cloudrun')!;
     expect(run.candidate).toBe(true);
     expect(run.artifactType).toBe('image');
   });
@@ -193,14 +211,16 @@ describe('resolution is derived, and it is a query', () => {
     // in front of the Job it renders. What the schedule still decides is the
     // *static* Target, which renders no job at all.
     const placement = await place(registry, component.id);
-    const run = placement.options.find((o) => o.name === 'vessel-cloudrun')!;
+    const run = placement.options.find((o) => o.name === 'vessel/cloudrun')!;
     expect(run.candidate).toBe(true);
     expect(run.reasons).toEqual([]);
-    const cluster = placement.options.find((o) => o.name === 'cluster')!;
+    const cluster = placement.options.find(
+      (o) => o.name === 'cluster/kubernetes',
+    )!;
     expect(cluster.candidate).toBe(true);
     // Rank is the tie-break §3 leaves to a human, and the cluster ranks first.
     expect(placement.suggestedTargetId).toBe(cluster.targetId);
-    const cdn = placement.options.find((o) => o.name === 'vessel-static')!;
+    const cdn = placement.options.find((o) => o.name === 'vessel/static')!;
     expect(cdn.candidate).toBe(false);
     expect(cdn.reasons).toContain('KIND_UNSUPPORTED');
     // NO_SCHEDULER's sentence opens by granting that this Target runs a job, so
@@ -224,7 +244,7 @@ describe('resolution is derived, and it is a query', () => {
         engine: 'postgres',
         provenance: 'managed',
         appId: app.id,
-        targetId: connected.get('cluster')!.id,
+        targetId: connected.get('cluster/kubernetes')!.id,
       });
 
     const placement = await place(registry, component.id);
@@ -284,14 +304,14 @@ describe('an attached cluster-local Datastore constrains the App', () => {
         engine: 'postgres',
         provenance: 'managed',
         appId: app.id,
-        targetId: connected.get('cluster')!.id,
+        targetId: connected.get('cluster/kubernetes')!.id,
       });
 
     const placement = await place(registry, component.id);
     expect(
       placement.options.filter((o) => o.candidate).map((o) => o.name),
-    ).toEqual(['cluster']);
-    const cloud = placement.options.find((o) => o.name === 'vessel-cloudrun')!;
+    ).toEqual(['cluster/kubernetes']);
+    const cloud = placement.options.find((o) => o.name === 'vessel/cloudrun')!;
     expect(cloud.reasons).toEqual(['DATASTORE_IS_CLUSTER_LOCAL']);
   });
 
@@ -309,7 +329,7 @@ describe('an attached cluster-local Datastore constrains the App', () => {
         engine: 'postgres',
         provenance: 'managed',
         appId: null,
-        targetId: connected.get('cluster')!.id,
+        targetId: connected.get('cluster/kubernetes')!.id,
       });
 
     const placement = await place(registry, component.id);

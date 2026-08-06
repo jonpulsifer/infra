@@ -34,6 +34,7 @@ import {
   configItems,
   PINNED_ENVIRONMENT,
   targets,
+  vessels,
 } from '../db/schema.ts';
 import { CONFIG_RETENTION, configScopeOf, reapable } from '../domain/config.ts';
 import { reconcilerLoopDuration } from '../telemetry/index.ts';
@@ -66,12 +67,14 @@ export async function runConfigPass(
       key: configItems.key,
       app: apps.name,
       component: components.name,
-      target: targets.name,
+      vessel: vessels.name,
+      adapter: targets.adapter,
     })
     .from(configItems)
     .innerJoin(components, eq(configItems.componentId, components.id))
     .innerJoin(apps, eq(components.appId, apps.id))
     .innerJoin(targets, eq(configItems.targetId, targets.id))
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
     .where(eq(configItems.environment, PINNED_ENVIRONMENT));
 
   const reports: ReapReport[] = [];

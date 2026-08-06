@@ -26,6 +26,7 @@ import {
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
 import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import { routeForTarget } from '../builds/route.ts';
 import type { CreateAppResult } from '../create-app.ts';
 import {
@@ -373,11 +374,11 @@ async function prepareCreation(
   draft: typeof creationDraftSchema._output,
   context: CommandContext,
 ) {
-  const [target] = await context.db
-    .select()
-    .from(targets)
-    .where(eq(targets.id, draft.targetId))
-    .limit(1);
+  // With the boundary, because half of what names a Target lives there.
+  const target = await context.db.query.targets.findFirst({
+    where: (targets, { eq }) => eq(targets.id, draft.targetId),
+    with: { vessel: true },
+  });
   if (!target) {
     return failed<PreparedCreation>(
       'NOT_FOUND',
@@ -410,11 +411,12 @@ async function prepareCreation(
     ) {
       return failed<PreparedCreation>(
         'NOT_DEPLOYABLE',
-        `${target.name} cannot take uploaded finished files`,
+        `${targetRowLabel(target)} cannot take uploaded finished files`,
       );
     }
     const route = supplied ? null : await routeForTarget(target.id, context);
-    if (!supplied && route === null) return noBuildRoute(target.name);
+    if (!supplied && route === null)
+      return noBuildRoute(targetRowLabel(target));
     return ok({
       repositoryId: null,
       commit: draft.source.digest,
@@ -448,7 +450,7 @@ async function prepareCreation(
     );
   }
   const route = await routeForTarget(target.id, context);
-  if (route === null) return noBuildRoute(target.name);
+  if (route === null) return noBuildRoute(targetRowLabel(target));
   let staged: StagedSourceBundle;
   try {
     staged = await stager.stageRepository({
@@ -596,10 +598,10 @@ async function revalidate(
   draft: typeof creationDraftSchema._output,
   context: CommandContext,
 ): Promise<readonly Blocker[]> {
-  const connected = await context.db
-    .select()
-    .from(targets)
-    .where(eq(targets.status, 'connected'));
+  const connected = await context.db.query.targets.findMany({
+    where: (targets, { eq }) => eq(targets.status, 'connected'),
+    with: { vessel: true },
+  });
   const placement = resolvePlacement(
     connected.map((target) =>
       placementTargetOf(target, {
@@ -666,7 +668,7 @@ async function revalidate(
   ) {
     blockers.push({
       code: 'TARGET_UNAVAILABLE',
-      title: `${selectedTarget.name} cannot take uploaded finished files.`,
+      title: `${targetRowLabel(selectedTarget)} cannot take uploaded finished files.`,
       remediation:
         'Choose a static Target for this supplied artifact, or upload source that Spindrift can build for this Target.',
     });
@@ -680,7 +682,7 @@ async function revalidate(
   ) {
     blockers.push({
       code: 'BUILD_ROUTE_UNAVAILABLE',
-      title: `No eligible build route can build for ${selectedTarget.name}.`,
+      title: `No eligible build route can build for ${targetRowLabel(selectedTarget)}.`,
       remediation:
         'Configure a route that clears this Target’s minimum Build Level, then review the draft again.',
     });

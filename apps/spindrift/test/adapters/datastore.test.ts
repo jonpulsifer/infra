@@ -35,7 +35,7 @@ import {
 
 function targetOn(fake: FakeKubernetes): DeployTarget {
   return {
-    name: 'metal',
+    vessel: 'metal',
     adapter: 'kubernetes',
     connection: {
       adapter: 'kubernetes',
@@ -284,7 +284,7 @@ describe('the cloud adapter', () => {
   test('refuses to provision and names the fact it is missing', async () => {
     const adapter = new CloudDatastoreAdapter();
     const target: DeployTarget = {
-      name: 'bluenose',
+      vessel: 'bluenose',
       adapter: 'cloudrun',
       connection: {
         adapter: 'cloudrun',

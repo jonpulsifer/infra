@@ -36,7 +36,11 @@ import {
 } from '../../src/db/schema.ts';
 import { configVersionOf } from '../../src/domain/config-version.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const manifest = await fixtureManifest();
@@ -99,9 +103,15 @@ async function seedLiveApp(
   );
   if (!component.ok) throw new Error(component.failure.message);
 
+  // Each App gets its own vessel: this fixture is called more than once per
+  // test, and a Target's identity is now `(vessel, adapter)` rather than a
+  // generated name, so sharing the default vessel would collide on it.
+  const vessel = await insertVessel(ctx.db, 'kubernetes', {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
   const [target] = await ctx.db
     .insert(targets)
-    .values(targetValues({ adapter: 'kubernetes' }))
+    .values(targetValues({ adapter: 'kubernetes', vesselId: vessel.id }))
     .returning();
   await ctx.db.insert(componentTargetDesired).values({
     componentId: component.value.componentId,

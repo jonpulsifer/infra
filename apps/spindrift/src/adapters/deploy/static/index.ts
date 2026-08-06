@@ -39,7 +39,10 @@ import {
   artifactAddress,
   type DesiredState,
 } from '../../../domain/desired-state.ts';
-import type { StaticAdapterConnection } from '../../../domain/target.ts';
+import {
+  type StaticAdapterConnection,
+  targetLabel,
+} from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import { cloudChecklist } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
@@ -331,7 +334,7 @@ export class StaticDeployAdapter implements DeployAdapter {
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      throw new Error(`${target.name} is not a static hosting Target`);
+      throw new Error(`${targetLabel(target)} is not a static hosting Target`);
     }
 
     const probe = await this.http(connection).json<unknown>({

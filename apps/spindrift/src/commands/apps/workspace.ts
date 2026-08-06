@@ -8,6 +8,8 @@ import {
   hasTargetConnection,
   hasVesselLocation,
   type TargetConnection,
+  targetLabel,
+  targetRowLabel,
 } from '../../domain/target.ts';
 import type { VesselLocation } from '../../domain/vessel.ts';
 import type {
@@ -67,7 +69,7 @@ export const getAppWorkspace: Command<
       },
       datastores: {
         with: {
-          target: true,
+          target: { with: { vessel: true } },
         },
       },
     },
@@ -80,7 +82,7 @@ export const getAppWorkspace: Command<
   const unattachedDatastores = await context.db.query.datastores.findMany({
     where: (ds, { isNull }) => isNull(ds.appId),
     with: {
-      target: true,
+      target: { with: { vessel: true } },
     },
   });
 
@@ -113,7 +115,7 @@ export const getAppWorkspace: Command<
       engine: ds.engine,
       provenance: ds.provenance,
       attachedTo: primaryComponent?.name ?? app.name,
-      target: ds.target?.name ?? 'none',
+      target: targetRowLabel(ds.target),
     });
   }
 
@@ -124,7 +126,7 @@ export const getAppWorkspace: Command<
         engine: ds.engine,
         provenance: ds.provenance,
         attachedTo: null,
-        target: ds.target?.name ?? 'none',
+        target: targetRowLabel(ds.target),
       });
     }
   }
@@ -192,7 +194,7 @@ export const getAppWorkspace: Command<
     activity.push({
       kind: 'deploy',
       title: `Deploy ${latestDeploy.id} ${latestDeploy.phase.toLowerCase()}`,
-      detail: latestDeploy.detail ?? `Target: ${latestTarget?.name ?? 'none'}`,
+      detail: latestDeploy.detail ?? `Target: ${targetRowLabel(latestTarget)}`,
       when: elapsedSince(latestDeploy.createdAt, now),
       status:
         latestDeploy.phase === 'LIVE'
@@ -243,7 +245,7 @@ export const getAppWorkspace: Command<
     targetId: workspaceTarget?.id,
     latestDeployId: latestDeploy?.id,
     latestBuildId: primaryComponent?.builds[0]?.id,
-    target: workspaceTarget?.name ?? 'none',
+    target: workspaceTarget?.adapter ?? 'none',
     vessel: workspaceTarget?.vessel.name ?? 'none',
     prerequisitesMet: workspaceTarget
       ? workspaceTarget.health === 'healthy'
@@ -290,10 +292,10 @@ interface PlacedJob {
   readonly ref: string | null;
   readonly target: {
     readonly id: string;
-    readonly name: string;
     readonly adapter: TargetAdapter;
     readonly connection: TargetConnection | null;
     readonly vessel: {
+      readonly name: string;
       readonly location: VesselLocation | null;
       readonly servedHosts: readonly string[] | null;
       readonly reachableRegistries: readonly string[] | null;
@@ -342,7 +344,7 @@ async function executionsOf(
   if (!hasTargetConnection(surface) || !hasVesselLocation(vessel)) {
     return {
       kind: 'none',
-      because: `${surface.name} is not connected, so its runs cannot be read.`,
+      because: `${targetLabel({ vessel: vessel.name, adapter: surface.adapter })} is not connected, so its runs cannot be read.`,
     };
   }
   const adapter = context.adapters.deploy(surface.adapter);
@@ -371,7 +373,7 @@ async function executionsOf(
     return {
       ...runnable,
       executions: [],
-      because: `The runs on ${surface.name} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
+      because: `The runs on ${targetLabel({ vessel: vessel.name, adapter: surface.adapter })} could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
     };
   }
   // A refusal is the adapter saying this ref names no job it can report on —

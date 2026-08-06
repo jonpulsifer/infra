@@ -28,7 +28,11 @@ import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const builder = new FakeBuildAdapter({ name: 'hosted' });
@@ -95,8 +99,9 @@ async function context(
 }
 
 async function seedCapabilities(
-  targetOverrides: Parameters<typeof targetValues>[0] = {},
+  targetOverrides: Parameters<typeof targetValues>[0] & { name?: string } = {},
 ) {
+  const { name = 'cluster', ...overrides } = targetOverrides;
   const [repository] = await database()
     .db.insert(repositories)
     .values({
@@ -107,15 +112,20 @@ async function seedCapabilities(
       access: 'active',
     })
     .returning();
+  const vessel = await insertVessel(
+    database().db,
+    overrides.adapter ?? 'kubernetes',
+    { name },
+  );
   const [target] = await database()
     .db.insert(targets)
     .values(
       targetValues({
-        name: 'cluster',
+        vesselId: vessel.id,
         rank: 1,
         reaches: ['none', 'private', 'public'],
         discovery: CAPABLE_DISCOVERY,
-        ...targetOverrides,
+        ...overrides,
       }),
     )
     .returning();

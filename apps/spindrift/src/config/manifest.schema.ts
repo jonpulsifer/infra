@@ -202,12 +202,15 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
  * **Only facts true of this runtime surface and not of its neighbours.** Where
  * the boundary is, and what it can reach, are declared once on the vessel this
  * names.
+ *
+ * **There is no `name`.** `vessel` and `adapter` are what identify a Target, so
+ * a third field could only restate them or contradict them — and the spelling it
+ * used to carry was a suffix that appeared only where a vessel had two surfaces,
+ * which made the day a vessel gained one a day the other had to be renamed.
  */
 export const targetSeedSchema = z.discriminatedUnion('adapter', [
   z
     .object({
-      /** Stable identifier, unique within the installation. */
-      name: targetNameSchema,
       /** The vessel this Target is a surface on, by name (§13). */
       vessel: targetNameSchema,
       adapter: z.literal('kubernetes'),
@@ -237,7 +240,6 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
     .strict(),
   z
     .object({
-      name: targetNameSchema,
       vessel: targetNameSchema,
       adapter: z.literal('cloudrun'),
       connection: z
@@ -255,7 +257,6 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
     .strict(),
   z
     .object({
-      name: targetNameSchema,
       vessel: targetNameSchema,
       adapter: z.literal('static'),
       connection: z
@@ -618,8 +619,9 @@ export const installationManifestSchema = z
       .min(1)
       .refine(
         (targets) =>
-          new Set(targets.map((t) => t.name)).size === targets.length,
-        'target names must be unique',
+          new Set(targets.map((t) => `${t.vessel}/${t.adapter}`)).size ===
+          targets.length,
+        'a vessel carries one surface of each kind',
       ),
   })
   .strict()

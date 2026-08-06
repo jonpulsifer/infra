@@ -69,9 +69,10 @@ describe('every manifest value is reachable', () => {
 
   test('a nested key is reached by its own path', () => {
     // Dotted paths are what let a Zod issue be rendered against the input that
-    // caused it. `targets.0.name` names one row of one array.
+    // caused it. `targets.0.vessel` names one row of one array — a Target has
+    // no name of its own, so `vessel` is the field this now pins.
     expect(markup).toContain('name="dns.zones.private"');
-    expect(markup).toContain('name="targets.0.name"');
+    expect(markup).toContain('name="targets.0.vessel"');
   });
 
   test('the pinned zero-config frontend is one of them', () => {

@@ -52,7 +52,47 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return addDeclaredVessels(document);
+  return dropTargetNames(addDeclaredVessels(document));
+}
+
+/**
+ * Take the constructed `name` off every Target entry.
+ *
+ * A Target is `(vessel, adapter)`. Its `name` was those two joined by a hyphen —
+ * or the vessel's name alone where the vessel had only one surface, since the
+ * suffix existed to tell siblings apart. That made it decorative once the vessel
+ * became a key of its own, and made it a rename hazard the moment a vessel could
+ * discover a surface it did not have before.
+ *
+ * **Nothing is derived from it.** The two lines under it were already
+ * authoritative, so this discards the field rather than reading it — which is
+ * also why this step is safe to run over a document {@link addDeclaredVessels}
+ * has just rewritten: that function *put* `vessel` on every entry.
+ *
+ * Runs second for that reason, and returns its argument untouched when no entry
+ * carries the key, which is what keeps this a no-op on a current document.
+ */
+function dropTargetNames(document: unknown): unknown {
+  const manifest = asDocument(document);
+  if (manifest === null) return document;
+
+  const seeds = Array.isArray(manifest.targets) ? manifest.targets : null;
+  if (seeds === null) return document;
+  if (!seeds.some((seed) => asDocument(seed) !== null && 'name' in seed)) {
+    return document;
+  }
+
+  return {
+    ...manifest,
+    // Rebuilt in place, in order: `reconcileManifestTargets` reads a Target's
+    // rank from its position in this array.
+    targets: seeds.map((seed) => {
+      const target = asDocument(seed);
+      if (target === null) return seed;
+      const { name: _discarded, ...rest } = target;
+      return rest;
+    }),
+  };
 }
 
 /**

@@ -14,12 +14,10 @@
 import { describe, expect, test } from 'bun:test';
 import { configureInstallation } from '../../src/commands/index.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
-import type {
-  AuthoredManifest,
-  InstallationManifest,
-} from '../../src/config/manifest.schema.ts';
+import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
 import { loadStoredManifest } from '../../src/config/manifest-store.ts';
 import { installation } from '../../src/db/schema.ts';
+import { targetLabel } from '../../src/domain/target.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { authoredFixture, fixtureManifest } from '../harness/installation.ts';
 
@@ -83,16 +81,19 @@ describe('configuring an installation', () => {
     // The act that can create a Target without anyone naming one. A write that
     // skipped reconciliation would leave it declared and absent.
     const rows = await database().db.query.targets.findMany({
+      with: { vessel: true },
       orderBy: (targets, { asc }) => [asc(targets.rank)],
     });
-    expect(rows.map((row) => row.name)).toEqual(
-      manifest.targets.map((target) => target.name),
-    );
+    expect(
+      rows.map((row) =>
+        targetLabel({ vessel: row.vessel.name, adapter: row.adapter }),
+      ),
+    ).toEqual(manifest.targets.map((target) => targetLabel(target)));
 
     const result = await configureInstallation({ manifest }, context());
     expect(result.ok).toBe(true);
     expect((result.ok ? result.value.targets : []).slice()).toEqual(
-      manifest.targets.map((target) => target.name),
+      manifest.targets.map((target) => targetLabel(target)),
     );
   });
 
@@ -127,30 +128,6 @@ describe('configuring an installation', () => {
     );
 
     expect(await storedManifest()).toEqual(before);
-  });
-
-  test('refuses a Target whose adapter disagrees with the stored one', async () => {
-    await seed();
-    // Schema-valid — a Target may be declared with no connection — so the
-    // refusal has to come from reconciliation meeting the stored row, which is
-    // the only place the disagreement is visible.
-    const swapped = {
-      ...manifest,
-      targets: [
-        { name: 'cluster', vessel: 'cluster', adapter: 'kubernetes' },
-        { name: 'cloud-cloudrun', vessel: 'cluster', adapter: 'kubernetes' },
-      ],
-    } as InstallationManifest;
-
-    const result = await configureInstallation(
-      { manifest: swapped },
-      context(),
-    );
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.failure.code).toBe('NOT_DEPLOYABLE');
-    // One transaction: the refused Target takes the manifest write with it.
-    expect((await storedManifest())?.installation).toBe(manifest.installation);
   });
 });
 

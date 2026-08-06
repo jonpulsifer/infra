@@ -31,6 +31,7 @@ import type {
   CommandContext,
 } from '../../src/commands/types.ts';
 import { apps, builds, components, targets } from '../../src/db/schema.ts';
+import { targetLabel } from '../../src/domain/target.ts';
 import {
   type DeployLoopContext,
   runDeployPass,
@@ -41,7 +42,11 @@ import {
   SupplyChainHarness,
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -106,12 +111,15 @@ async function fixture(
       auth: 'none',
     })
     .returning();
+  const vessel = await insertVessel(db, 'kubernetes', {
+    name: `cloudrun-${crypto.randomUUID()}`,
+  });
   const [target] = await db
     .insert(targets)
     .values(
       targetValues({
-        name: `cloudrun-${crypto.randomUUID()}`,
         adapter: 'kubernetes',
+        vesselId: vessel.id,
         discovery: null,
       }),
     )
@@ -131,7 +139,13 @@ async function fixture(
       signature: testSignature(DIGEST, FROZEN.toISOString()),
     })
     .returning();
-  return { app: app!, component: component!, target: target!, build: build! };
+  return {
+    app: app!,
+    component: component!,
+    target: target!,
+    build: build!,
+    label: targetLabel({ vessel: vessel.name, adapter: 'kubernetes' }),
+  };
 }
 
 async function componentRow(id: string) {
@@ -189,7 +203,10 @@ describe('the edit writes a Component and leaves a Deploy to be pressed', () => 
   });
 
   test('a Target already placed is named, and nothing is deployed', async () => {
-    const { component, target, build } = await fixture('job', '0 3 * * *');
+    const { component, target, build, label } = await fixture(
+      'job',
+      '0 3 * * *',
+    );
     const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
     const adapters = registryOf(adapter);
     await createDeploy(
@@ -206,7 +223,7 @@ describe('the edit writes a Component and leaves a Deploy to be pressed', () => 
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.pendingRelease).toEqual([target.name]);
+    expect(result.value.pendingRelease).toEqual([label]);
     // Same rule as `setComponentReach`: writing the row asks the platform for
     // nothing. A second `apply` here would be this command re-placing a live
     // release nobody pressed Deploy for.

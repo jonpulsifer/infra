@@ -17,7 +17,7 @@
  * it never wrote would pass a test of its own output.
  */
 import { describe, expect, test } from 'bun:test';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import {
   connectTarget,
@@ -42,10 +42,11 @@ import {
   components,
   deploys,
   targets,
+  vessels,
 } from '../../src/db/schema.ts';
 import { deployState } from '../../src/domain/target.ts';
 import { restoreDeclaredTargetConnections } from '../../src/reconciler/target-loop.ts';
-import { defaultVesselId, withIsolatedDatabase } from '../harness/db.ts';
+import { withIsolatedDatabase } from '../harness/db.ts';
 import {
   FakeDeployAdapter,
   type FakeDeployAdapterOptions,
@@ -56,6 +57,7 @@ import {
   clusterInput,
   connectionFor,
   fixtureManifest,
+  insertVessel,
 } from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
@@ -111,13 +113,17 @@ function context(registry: AdapterRegistry): CommandContext {
   };
 }
 
-/** The Target row as the database holds it. */
-async function targetRow(name: string) {
+/** The Target row as the database holds it, addressed by `(vessel, adapter)`. */
+async function targetRow(
+  vessel: string,
+  adapter: TargetAdapter = 'kubernetes',
+) {
   const rows = await database()
     .db.select()
     .from(targets)
-    .where(eq(targets.name, name));
-  return rows[0];
+    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+    .where(and(eq(vessels.name, vessel), eq(targets.adapter, adapter)));
+  return rows[0]?.targets;
 }
 
 /** An App -> Component -> Build -> Deploy chain, live on one Target. */
@@ -159,7 +165,7 @@ describe('connect always succeeds', () => {
   test('a reachable cluster is registered healthy, at the end of the rank', async () => {
     const { registry, of } = fakes();
     const result = await connectTarget(
-      clusterInput({ name: 'cluster' }),
+      clusterInput({ vessel: 'cluster' }),
       context(registry),
     );
 
@@ -178,7 +184,7 @@ describe('connect always succeeds', () => {
       kubernetes: { unreachable: 'dial tcp: no route to host' },
     });
     const result = await connectTarget(
-      clusterInput({ name: 'cluster' }),
+      clusterInput({ vessel: 'cluster' }),
       context(registry),
     );
 
@@ -195,7 +201,7 @@ describe('connect always succeeds', () => {
   test('a Target whose adapter this installation does not ship', async () => {
     const { registry } = fakes({ kubernetes: null });
     const result = await connectTarget(
-      clusterInput({ name: 'cluster' }),
+      clusterInput({ vessel: 'cluster' }),
       context(registry),
     );
 
@@ -210,7 +216,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
   test('connecting a cloud project registers both of its Targets', async () => {
     const { registry } = fakes();
     const result = await connectTarget(
-      cloudInput({ name: 'vessel', region: 'here' }),
+      cloudInput({ vessel: 'vessel', region: 'here' }),
       context(registry),
     );
 
@@ -226,13 +232,13 @@ describe('the act is credential-shaped though the noun is flat', () => {
     // Each Target keeps only the endpoint its own adapter drives: one connect
     // act asked for both, and neither Target carries the other's. The runtime
     // identity splits the same way — only this surface runs anything.
-    expect((await targetRow('vessel-cloudrun'))?.connection).toEqual({
+    expect((await targetRow('vessel', 'cloudrun'))?.connection).toEqual({
       adapter: 'cloudrun',
       region: 'here',
       endpoint: CLOUD_ENDPOINTS.run,
       serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
     });
-    expect((await targetRow('vessel-static'))?.connection).toEqual({
+    expect((await targetRow('vessel', 'static'))?.connection).toEqual({
       adapter: 'static',
       endpoint: CLOUD_ENDPOINTS.hosting,
     });
@@ -240,10 +246,10 @@ describe('the act is credential-shaped though the noun is flat', () => {
 
   test('connect is idempotent by name and keeps the rank', async () => {
     const { registry } = fakes();
-    const input = clusterInput({ name: 'cluster' });
+    const input = clusterInput({ vessel: 'cluster' });
 
     await connectTarget(
-      cloudInput({ name: 'vessel', project: 'p', region: 'r' }),
+      cloudInput({ vessel: 'vessel', project: 'p', region: 'r' }),
       context(registry),
     );
     const first = await connectTarget(input, context(registry));
@@ -260,7 +266,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
 
   test('a reconnect updates what the operator asserted about reach', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
     expect((await targetRow('cluster'))?.reaches).toBeNull();
 
     // The connect screen derives both of these — `reaches` from the gateway's
@@ -272,7 +278,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
     // discarded and no way to see why.
     await connectTarget(
       clusterInput({
-        name: 'cluster',
+        vessel: 'cluster',
         reaches: ['none', 'private', 'public'],
         authReaches: ['private'],
       }),
@@ -286,12 +292,16 @@ describe('the act is credential-shaped though the noun is flat', () => {
 
   test('connect fills a manifest-seeded Target without changing its rank', async () => {
     const { registry } = fakes();
+    // The vessel a manifest seed already declared, by name — connect must
+    // re-adopt it rather than mint a second one under the same name.
+    const vessel = await insertVessel(database().db, 'kubernetes', {
+      name: 'cluster',
+    });
     const [seed] = await database()
       .db.insert(targets)
       .values({
-        name: 'cluster',
         adapter: 'kubernetes',
-        vesselId: defaultVesselId('cluster'),
+        vesselId: vessel.id,
         rank: 4,
         status: 'disconnected',
         connection: null,
@@ -300,7 +310,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
       .returning();
 
     const result = await connectTarget(
-      clusterInput({ name: 'cluster' }),
+      clusterInput({ vessel: 'cluster' }),
       context(registry),
     );
 
@@ -315,22 +325,23 @@ describe('the act is credential-shaped though the noun is flat', () => {
 
   test('one cloud connect fills its matched manifest-seeded pair', async () => {
     const { registry } = fakes();
+    const vessel = await insertVessel(database().db, 'cloudrun', {
+      name: 'vessel',
+    });
     const seeds = await database()
       .db.insert(targets)
       .values([
         {
-          name: 'vessel-cloudrun',
           adapter: 'cloudrun',
-          vesselId: defaultVesselId('gcp-project'),
+          vesselId: vessel.id,
           rank: 2,
           status: 'disconnected',
           connection: null,
           health: 'unhealthy',
         },
         {
-          name: 'vessel-static',
           adapter: 'static',
-          vesselId: defaultVesselId('gcp-project'),
+          vesselId: vessel.id,
           rank: 3,
           status: 'disconnected',
           connection: null,
@@ -340,7 +351,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
       .returning();
 
     const result = await connectTarget(
-      cloudInput({ name: 'vessel' }),
+      cloudInput({ vessel: 'vessel' }),
       context(registry),
     );
 
@@ -368,7 +379,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
 describe('an operator’s Target correction outlives the next boot', () => {
   /** The manifest as Git declares it, naming whichever gateway it still names. */
   function declaredWithGateway(gateway: { name: string; namespace: string }) {
-    const input = clusterInput({ name: 'cluster' });
+    const input = clusterInput({ vessel: 'cluster' });
     const platform = input.chartValues?.platform as Record<string, unknown>;
     return {
       ...toAuthoredManifest(manifest),
@@ -381,7 +392,6 @@ describe('an operator’s Target correction outlives the next boot', () => {
       ],
       targets: [
         {
-          name: 'cluster',
           vessel: 'cluster',
           adapter: 'kubernetes' as const,
           connection: {
@@ -413,7 +423,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
 
     // The correction, through the only act there is for it.
     const connected = await connectTarget(
-      clusterInput({ name: 'cluster' }),
+      clusterInput({ vessel: 'cluster' }),
       context(registry),
     );
     expect(connected.ok).toBe(true);
@@ -437,7 +447,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
       { ...context(registry), manifest: booted },
     );
     if (!listed.ok) throw new Error('listTargets refused');
-    const cluster = listed.value.targets.find((t) => t.name === 'cluster');
+    const cluster = listed.value.targets.find((t) => t.vessel === 'cluster');
     expect(cluster?.connectionDivergence).toEqual([
       'connection.chartValues.platform.gateway.name',
       'connection.chartValues.platform.gateway.namespace',
@@ -450,7 +460,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
     // Target's own address, which is the one field a fresh connect refuses to
     // propose and the one field an edit must not make the operator retype.
     expect(cluster?.edit?.apiServer).toBe(clusterInput().apiServer);
-    expect(cluster?.edit?.proposal.carriedFrom).toBe('cluster');
+    expect(cluster?.edit?.proposal.carriedFrom).toBe('cluster/kubernetes');
   });
 
   test('a Target whose row matches its manifest entry reports no divergence', async () => {
@@ -463,7 +473,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
     const booted = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
     });
-    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
 
     const listed = await listTargets(
       {},
@@ -471,7 +481,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
     );
     if (!listed.ok) throw new Error('listTargets refused');
     expect(
-      listed.value.targets.find((t) => t.name === 'cluster')
+      listed.value.targets.find((t) => t.vessel === 'cluster')
         ?.connectionDivergence,
     ).toEqual([]);
   });
@@ -480,12 +490,12 @@ describe('an operator’s Target correction outlives the next boot', () => {
 describe('disconnect strands rather than stops', () => {
   test('an impact review names Deploys without changing state', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
     const target = (await targetRow('cluster'))!;
     const { app, component } = await seedLiveDeploy(target.id, 'preview-ref');
 
     const result = await disconnectTarget(
-      { name: 'cluster', confirm: false },
+      { vessel: 'cluster', adapter: 'kubernetes', confirm: false },
       context(registry),
     );
     if (!result.ok) throw new Error('disconnect review refused');
@@ -504,12 +514,12 @@ describe('disconnect strands rather than stops', () => {
 
   test('live Deploys go orphaned and are named, and nothing is destroyed', async () => {
     const { registry, of } = fakes();
-    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
     const target = (await targetRow('cluster'))!;
     const { app, component } = await seedLiveDeploy(target.id, 'ref-1');
 
     const result = await disconnectTarget(
-      { name: 'cluster' },
+      { vessel: 'cluster', adapter: 'kubernetes' },
       context(registry),
     );
 
@@ -544,9 +554,9 @@ describe('disconnect strands rather than stops', () => {
 
   test('disconnecting a Target with nothing on it strands nothing', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'cluster' }), context(registry));
+    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
     const result = await disconnectTarget(
-      { name: 'cluster' },
+      { vessel: 'cluster', adapter: 'kubernetes' },
       context(registry),
     );
     if (!result.ok) throw new Error('disconnect refused');
@@ -556,7 +566,7 @@ describe('disconnect strands rather than stops', () => {
   test('an unknown Target is a refusal with an identity', async () => {
     const { registry } = fakes();
     const result = await disconnectTarget(
-      { name: 'nowhere' },
+      { vessel: 'nowhere', adapter: 'kubernetes' },
       context(registry),
     );
     expect(result.ok).toBe(false);
@@ -568,12 +578,15 @@ describe('disconnect strands rather than stops', () => {
 describe('reconnect re-adopts via observe', () => {
   test('a workload the adapter still sees is adopted back', async () => {
     const { registry, of } = fakes();
-    const input = clusterInput({ name: 'cluster' });
+    const input = clusterInput({ vessel: 'cluster' });
 
     await connectTarget(input, context(registry));
     const target = (await targetRow('cluster'))!;
     await seedLiveDeploy(target.id, 'ref-1');
-    await disconnectTarget({ name: 'cluster' }, context(registry));
+    await disconnectTarget(
+      { vessel: 'cluster', adapter: 'kubernetes' },
+      context(registry),
+    );
 
     // The adapter is the authority on what is still running. Teach the fake
     // that the workload survived the disconnect.
@@ -600,12 +613,15 @@ describe('reconnect re-adopts via observe', () => {
 
   test('a workload that is gone stays orphaned rather than resurrected', async () => {
     const { registry } = fakes();
-    const input = clusterInput({ name: 'cluster' });
+    const input = clusterInput({ vessel: 'cluster' });
 
     await connectTarget(input, context(registry));
     const target = (await targetRow('cluster'))!;
     await seedLiveDeploy(target.id, 'ref-1');
-    await disconnectTarget({ name: 'cluster' }, context(registry));
+    await disconnectTarget(
+      { vessel: 'cluster', adapter: 'kubernetes' },
+      context(registry),
+    );
 
     // The fake was never told about `ref-1`, so `observe` reports nothing —
     // which is the honest state, and core must not overwrite it with memory.
@@ -622,11 +638,14 @@ describe('reconnect re-adopts via observe', () => {
 
   test('a declarative reconnect waits for adapters, then re-adopts', async () => {
     const { registry, of } = fakes();
-    const input = clusterInput({ name: 'cluster' });
+    const input = clusterInput({ vessel: 'cluster' });
     await connectTarget(input, context(registry));
     const target = (await targetRow('cluster'))!;
     await seedLiveDeploy(target.id, 'ref-1');
-    await disconnectTarget({ name: 'cluster' }, context(registry));
+    await disconnectTarget(
+      { vessel: 'cluster', adapter: 'kubernetes' },
+      context(registry),
+    );
     of('kubernetes').place('ref-1', {
       ref: 'ref-1',
       phase: 'LIVE',
@@ -636,15 +655,14 @@ describe('reconnect re-adopts via observe', () => {
       ...manifest,
       vessels: [
         {
-          name: input.name,
+          name: input.vessel,
           kind: 'cluster',
           location: { apiServer: input.apiServer },
         },
       ],
       targets: [
         {
-          name: input.name,
-          vessel: input.name,
+          vessel: input.vessel,
           adapter: 'kubernetes',
           connection: {
             namespace: input.namespace,
@@ -688,9 +706,12 @@ describe('listTargets', () => {
 
   test('lists connected targets with rank, health, and candidate placement options', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
     await connectTarget(
-      cloudInput({ name: 'cloudrun-app' }),
+      clusterInput({ vessel: 'folly-k8s' }),
+      context(registry),
+    );
+    await connectTarget(
+      cloudInput({ vessel: 'cloudrun-app' }),
       context(registry),
     );
 
@@ -701,19 +722,22 @@ describe('listTargets', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.targets).toHaveLength(3); // 1 k8s + 2 cloud (cloudrun, static)
-      expect(result.value.targets[0]?.name).toBe('folly-k8s');
+      expect(result.value.targets[0]?.vessel).toBe('folly-k8s');
       expect(result.value.targets[0]?.health).toBe('healthy');
       expect(result.value.options.length).toBeGreaterThan(0);
-      const option = result.value.options.find((o) => o.name === 'folly-k8s');
+      const option = result.value.options.find((o) => o.vessel === 'folly-k8s');
       expect(option?.candidate).toBe(true);
     }
   });
 
   test('resolves placement against the requirements it was given, not a default', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
     await connectTarget(
-      cloudInput({ name: 'cloudrun-app' }),
+      clusterInput({ vessel: 'folly-k8s' }),
+      context(registry),
+    );
+    await connectTarget(
+      cloudInput({ vessel: 'cloudrun-app' }),
       context(registry),
     );
 
@@ -742,7 +766,10 @@ describe('listTargets', () => {
 
   test('says nothing about placement when it is not told what is being placed', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
+    await connectTarget(
+      clusterInput({ vessel: 'folly-k8s' }),
+      context(registry),
+    );
 
     // A partial triple is not a partial answer: placement needs all three, and
     // filling the gaps with plausible values is what made this command answer
@@ -757,8 +784,11 @@ describe('listTargets', () => {
 
   test('states the real naming boundary, never a fabricated domain', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
-    await connectTarget(cloudInput({ name: 'vessel' }), context(registry));
+    await connectTarget(
+      clusterInput({ vessel: 'folly-k8s' }),
+      context(registry),
+    );
+    await connectTarget(cloudInput({ vessel: 'vessel' }), context(registry));
 
     const result = await listTargets(
       { kind: 'website', reach: 'public', auth: 'none' },
@@ -800,7 +830,10 @@ describe('listTargets', () => {
     // point both reaches at the same zone. Two identical clauses joined by
     // " · " would be true but unreadable, so this pins the collapse.
     const { registry } = fakes();
-    await connectTarget(clusterInput({ name: 'folly-k8s' }), context(registry));
+    await connectTarget(
+      clusterInput({ vessel: 'folly-k8s' }),
+      context(registry),
+    );
 
     const oneZoneManifest = {
       ...manifest,

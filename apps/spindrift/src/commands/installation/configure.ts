@@ -31,6 +31,7 @@ import {
 } from '../../config/manifest.schema.ts';
 import { ManifestError, validateManifest } from '../../config/manifest.ts';
 import { writeStoredManifest } from '../../config/manifest-store.ts';
+import { targetLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const configureInstallationInput = z
@@ -56,9 +57,9 @@ export interface ConfigureInstallationResult {
   readonly installation: string;
   /**
    * The Targets the written manifest declares, in its own order — which is
-   * §16's admin rank. Returned because writing a manifest is the one act that
-   * can create a Target without anyone naming one, and a confirmation that did
-   * not say so would hide it.
+   * §16's admin rank — each as `<vessel>/<adapter>`. Returned because writing a
+   * manifest is the one act that can create a Target without anyone naming one,
+   * and a confirmation that did not say so would hide it.
    */
   readonly targets: readonly string[];
 }
@@ -77,22 +78,17 @@ export const configureInstallation: Command<
     throw cause;
   }
 
-  try {
-    await writeStoredManifest(context.db, manifest);
-  } catch (cause) {
-    // The one refusal reconciliation makes: a declared Target whose adapter
-    // disagrees with the stored row's. It is a fact about the installation
-    // rather than a malformed field, which is the distinction `NOT_DEPLOYABLE`
-    // draws — the caller is not being told to fix a key.
-    if (cause instanceof ManifestError) {
-      return failed('NOT_DEPLOYABLE', cause.message);
-    }
-    throw cause;
-  }
+  // **Reconciliation makes no refusal of its own.** It used to make exactly one
+  // — a declared Target whose adapter disagreed with the stored row's — and that
+  // state stopped being expressible when the adapter became half of what
+  // identifies a Target: a seed naming a different one names a different Target,
+  // not a redefinition of this one. Everything left that a document can get
+  // wrong is a key, and `validateManifest` above names it.
+  await writeStoredManifest(context.db, manifest);
 
   return ok({
     installation: manifest.installation,
-    targets: manifest.targets.map((target) => target.name),
+    targets: manifest.targets.map(targetLabel),
   });
 };
 

@@ -25,7 +25,11 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
@@ -93,9 +97,12 @@ async function seed(
     .returning();
 
   for (let index = 0; index < (input.placements ?? 0); index += 1) {
+    const vessel = await insertVessel(ctx.db, 'kubernetes', {
+      name: `${input.name}-target-${index}`,
+    });
     const [target] = await ctx.db
       .insert(targets)
-      .values(targetValues({ name: `${input.name}-target-${index}` }))
+      .values(targetValues({ vesselId: vessel.id }))
       .returning();
     await ctx.db.insert(deploys).values({
       componentId: component!.id,

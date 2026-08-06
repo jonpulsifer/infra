@@ -312,7 +312,9 @@ export function NewApp({
         <Row
           label="Target"
           unsettled={target === undefined || !target.candidate}
-          value={target?.name ?? 'none'}
+          value={
+            target === undefined ? 'none' : `${target.vessel}/${target.adapter}`
+          }
           tone={
             target === undefined ? null : (
               <TargetHealth healthy={target.candidate} />
@@ -338,7 +340,7 @@ export function NewApp({
                 }
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold">{option.name}</span>
+                  <span className="text-sm font-semibold">{option.vessel}</span>
                   <Badge tone="idle">{option.adapter}</Badge>
                   {option.candidate && option.artifactType ? (
                     <Badge tone="accent">{option.artifactType}</Badge>

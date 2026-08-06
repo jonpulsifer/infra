@@ -46,8 +46,9 @@ import {
   datastores,
   deploys,
   targets,
+  vessels,
 } from '../../db/schema.ts';
-import { STRANDABLE_PHASES } from '../../domain/target.ts';
+import { STRANDABLE_PHASES, targetLabel } from '../../domain/target.ts';
 import { type ConfigSubject, configSubject, reapKey } from '../config/set.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
@@ -188,13 +189,15 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
             deployId: deploys.id,
             url: deploys.url,
             component: components.name,
-            target: targets.name,
+            vessel: vessels.name,
+            adapter: targets.adapter,
             componentKind: components.kind,
             schedule: components.schedule,
           })
           .from(deploys)
           .innerJoin(components, eq(deploys.componentId, components.id))
           .innerJoin(targets, eq(deploys.targetId, targets.id))
+          .innerJoin(vessels, eq(targets.vesselId, vessels.id))
           .where(
             and(
               inArray(deploys.componentId, componentIds),
@@ -238,7 +241,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     stranded: strandable.map((deploy) => ({
       deployId: String(deploy.deployId),
       component: deploy.component,
-      target: deploy.target,
+      target: targetLabel(deploy),
       url: deploy.url,
       firing: deploy.componentKind === 'job' && deploy.schedule !== null,
     })),

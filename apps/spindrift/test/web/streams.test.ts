@@ -23,7 +23,11 @@ import {
 } from '../../src/web/streams.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
@@ -41,9 +45,12 @@ async function seedAttempt() {
     .db.insert(components)
     .values({ appId: app!.id, name: 'web', kind: 'service' })
     .returning();
+  const vessel = await insertVessel(database().db, 'kubernetes', {
+    name: 'cluster',
+  });
   const [target] = await database()
     .db.insert(targets)
-    .values(targetValues({ name: 'cluster' }))
+    .values(targetValues({ vesselId: vessel.id }))
     .returning();
   const [build] = await database()
     .db.insert(builds)
@@ -231,9 +238,9 @@ describe('authenticated attempt stream', () => {
         kind: 'runtime',
         adapter: new ThrowingAdapter(),
         target: {
-          name: 'cluster',
+          vessel: 'cluster',
           adapter: 'kubernetes',
-          connection: targetValues({ name: 'cluster' }).connection!,
+          connection: targetValues({ adapter: 'kubernetes' }).connection!,
         },
         subject: { app: 'live-app', component: 'web' },
         cursor: 'durable-cursor',

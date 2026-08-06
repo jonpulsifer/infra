@@ -44,7 +44,11 @@ import {
 } from '../harness/fakes/deploy-adapter.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -103,12 +107,15 @@ async function fixture(
     .insert(components)
     .values({ appId: app!.id, name: 'web', kind, expose: true })
     .returning();
+  const vessel = await insertVessel(db, 'kubernetes', {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
   const [target] = await db
     .insert(targets)
     .values(
       targetValues({
-        name: `cluster-${crypto.randomUUID()}`,
         adapter: 'kubernetes',
+        vesselId: vessel.id,
         ...(options.minBuildLevel === undefined
           ? {}
           : { minBuildLevel: options.minBuildLevel }),

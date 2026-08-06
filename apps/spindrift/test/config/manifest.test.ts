@@ -125,12 +125,16 @@ describe('boot fails loudly', () => {
     );
   });
 
-  test('on duplicate target names', () => {
+  test('on a Target that repeats another’s vessel and adapter', () => {
+    // A Target has no name of its own — `(vessel, adapter)` is the pair that
+    // identifies it, and it is the pair a document cannot repeat.
     const document = fixtureText.replace(
-      'name: cloud-cloudrun\n',
-      'name: cluster\n',
+      '  - vessel: cloud\n    adapter: static',
+      '  - vessel: cluster\n    adapter: kubernetes',
     );
-    expect(() => parseManifest(document, 'test')).toThrow(/unique/);
+    expect(() => parseManifest(document, 'test')).toThrow(
+      /a vessel carries one surface of each kind/,
+    );
   });
 
   test('when a Target names a vessel the document does not declare', () => {
@@ -140,8 +144,8 @@ describe('boot fails loudly', () => {
     // which is what `reconcileManifestTargets` needs, since it looks a vessel
     // up by name and has nothing honest to do without one.
     const document = fixtureText.replace(
-      '    vessel: cloud\n    adapter: static',
-      '    vessel: hosting\n    adapter: static',
+      '  - vessel: cloud\n    adapter: static',
+      '  - vessel: hosting\n    adapter: static',
     );
     expect(() => parseManifest(document, 'test')).toThrow(
       /targets\.2\.vessel: no vessel named hosting is declared/,
@@ -154,8 +158,8 @@ describe('boot fails loudly', () => {
     // `cloudrun` surface on a cluster is refused here rather than reaching an
     // adapter that has no way to place it.
     const document = fixtureText.replace(
-      '    vessel: cloud\n    adapter: cloudrun',
-      '    vessel: cluster\n    adapter: cloudrun',
+      '  - vessel: cloud\n    adapter: cloudrun',
+      '  - vessel: cluster\n    adapter: cloudrun',
     );
     expect(() => parseManifest(document, 'test')).toThrow(
       /a cluster vessel does not carry a cloudrun surface/,

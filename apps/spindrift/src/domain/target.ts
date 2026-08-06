@@ -12,6 +12,11 @@
  * project's Targets and the shared thing between them is an argument to a
  * command, not an entity.
  *
+ * **The name is the one clause that did not survive.** §60 gave the boundary a
+ * row, which made the name a string built out of two columns beside it; a Target
+ * is `(vessel, adapter)` and carries no third field. See {@link TargetIdentity}
+ * for why constructing one was worse than merely redundant.
+ *
  * Two states this file owns:
  *
  * - **Health is a standing checklist, not a connect-time verdict.** Connect
@@ -22,7 +27,7 @@
  *   `observe`, and the confirmation names what it strands."
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
-import { surfacesOf, type VesselKind, type VesselLocation } from './vessel.ts';
+import type { VesselLocation } from './vessel.ts';
 
 /**
  * How to reach one Target, in whatever terms its adapter needs.
@@ -195,10 +200,14 @@ export type KubernetesDelivery =
       server: string;
     };
 
-/** What the deploy contract's verbs need to name one Target (§6). */
-export interface DeployTargetRef {
-  readonly name: string;
-  readonly adapter: TargetAdapter;
+/**
+ * What the deploy contract's verbs need to name one Target (§6).
+ *
+ * Identity plus how to reach it. The identity is the vessel and the surface —
+ * see {@link TargetIdentity} — which is what an adapter puts in a sentence when
+ * it has to name the Target it was handed.
+ */
+export interface DeployTargetRef extends TargetIdentity {
   readonly connection: AdapterConnection;
 }
 
@@ -245,6 +254,7 @@ export type StaticAdapterConnection = Extract<
 
 /** The Vessel columns {@link deployTargetOf} reads, without importing the row. */
 export interface VesselRef {
+  readonly name: string;
   readonly location: VesselLocation;
   readonly servedHosts: readonly string[] | null;
   readonly reachableRegistries: readonly string[] | null;
@@ -275,7 +285,6 @@ export function hasVesselLocation<
  */
 export function deployTargetOf(
   target: {
-    name: string;
     adapter: TargetAdapter;
     connection: TargetConnection;
   },
@@ -293,7 +302,7 @@ export function deployTargetOf(
       : { project: vessel.location.project };
 
   return {
-    name: target.name,
+    vessel: vessel.name,
     adapter: target.adapter,
     // The union is discriminated on `adapter`, and the surface half already
     // carries it, so the spread lands in exactly one arm.
@@ -356,29 +365,54 @@ export function deployState(deploy: DeployStateInput): DeployState {
 export const STRANDABLE_PHASES = ['APPLYING', 'WAITING', 'LIVE'] as const;
 
 /**
- * The surfaces one connect act registers, and what to call each (§13).
+ * What identifies one Target: the boundary it is on, and the runtime it is.
  *
- * §13's split stands: a cluster is one Target and a cloud project is two, and
- * which two is a fact about the boundary rather than a choice the operator
- * makes. What changed is that the boundary is now a row, so this returns the
- * surfaces of a {@link VesselKind} rather than branching on the word "cloud" —
- * see `SURFACES_BY_VESSEL_KIND` in `vessel.ts`, which is the whole of that fact.
+ * There is no third field, and that is the point. A Target used to carry a
+ * constructed `name` — the vessel's, plus the adapter as a suffix where the
+ * vessel had siblings to tell apart — and that name was decorative the moment
+ * §60 gave the boundary a row of its own. Constructing it was worse than
+ * redundant: the suffix appeared only where a vessel carried more than one
+ * surface, so a vessel *discovering* a second surface would have had to rename
+ * the first, and a Target cannot be renamed.
  *
- * **The suffix is now decorative.** It is a readable name for a surface, and
- * nothing parses it back out: which vessel a Target belongs to is its
- * `vesselId`. A Target named anything at all groups correctly, which is the
- * behaviour `cloudProjectOf` used to deny.
- *
- * A single-surface vessel takes the vessel's own name unchanged: the suffix
- * exists to tell siblings apart, and a vessel with one surface has none.
+ * The pair is naturally unique — a boundary carries one runtime of each kind —
+ * so it is the unique index too (`targets_vessel_adapter_unique`).
  */
-export function surfaceNames(
-  kind: VesselKind,
-  vessel: string,
-): { name: string; adapter: TargetAdapter }[] {
-  const surfaces = surfacesOf(kind);
-  return surfaces.map((adapter) => ({
-    name: surfaces.length === 1 ? vessel : `${vessel}-${adapter}`,
-    adapter,
-  }));
+export interface TargetIdentity {
+  readonly vessel: string;
+  readonly adapter: TargetAdapter;
+}
+
+/**
+ * One Target, spelled for a human: `<vessel>/<adapter>`.
+ *
+ * Two segments where there was one, and legible in a way the flat name was not:
+ * `bluenose` is visibly a boundary and `bluenose/cloudrun` is visibly a surface
+ * on it, rather than two sibling strings that read as peers.
+ *
+ * **Nothing parses this back out.** It is written into sentences and into store
+ * item names; every act that addresses a Target takes its id, or its vessel and
+ * adapter as two fields.
+ */
+export function targetLabel(target: TargetIdentity): string {
+  return `${target.vessel}/${target.adapter}`;
+}
+
+/**
+ * {@link targetLabel} over a `targets` row with its vessel joined.
+ *
+ * The join is the point: a Target row on its own cannot say what it is, because
+ * half of what names it lives on the boundary. `'none'` is the answer for an
+ * absent row — a Component that has never been placed has no Target, which is a
+ * fact rather than a missing lookup.
+ */
+export function targetRowLabel(
+  target:
+    | { adapter: TargetAdapter; vessel: { name: string } }
+    | null
+    | undefined,
+): string {
+  return target == null
+    ? 'none'
+    : targetLabel({ vessel: target.vessel.name, adapter: target.adapter });
 }

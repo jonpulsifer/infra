@@ -161,7 +161,7 @@ export function Overview({
       (target): Concern => ({
         id: `target:${target.id}`,
         category: 'target',
-        title: target.name,
+        title: `${target.vessel}/${target.adapter}`,
         detail: `${target.adapter} Target · ${target.status}`,
         status: target.configured ? target.health : 'setup',
         tone:
@@ -174,7 +174,7 @@ export function Overview({
         summary:
           target.prerequisiteFailures?.[0] ??
           (target.configured
-            ? `Target ${target.name} connected via ${target.adapter}.`
+            ? `Target ${target.vessel}/${target.adapter} is connected.`
             : 'This Target still needs its connection completed.'),
         path: '/settings/connections',
         search: `${target.adapter} ${target.prerequisiteFailures?.join(' ') ?? ''}`,

@@ -670,7 +670,7 @@ export const WORKSPACE_SCENARIO_NAMES = Object.keys(
 export const TARGET_OPTIONS: readonly TargetOptionView[] = [
   {
     targetId: 'metal',
-    name: 'Metal',
+    vessel: 'metal',
     adapter: 'kubernetes',
     rank: 1,
     candidate: true,
@@ -681,7 +681,7 @@ export const TARGET_OPTIONS: readonly TargetOptionView[] = [
   },
   {
     targetId: 'cloud',
-    name: 'Cloud Run',
+    vessel: 'vessel-a',
     adapter: 'cloudrun',
     rank: 2,
     candidate: true,
@@ -692,7 +692,7 @@ export const TARGET_OPTIONS: readonly TargetOptionView[] = [
   },
   {
     targetId: 'static',
-    name: 'Static hosting',
+    vessel: 'vessel-a',
     adapter: 'static',
     rank: 3,
     candidate: false,
@@ -703,7 +703,7 @@ export const TARGET_OPTIONS: readonly TargetOptionView[] = [
   },
   {
     targetId: 'remote',
-    name: 'Remote cluster',
+    vessel: 'remote',
     adapter: 'kubernetes',
     rank: 4,
     candidate: false,
@@ -889,7 +889,7 @@ const CLOUD_CHECKLIST = [
 export const TARGET_LIST: readonly TargetListItem[] = [
   {
     id: 'target-primary',
-    name: 'Primary',
+    vessel: 'primary',
     adapter: 'kubernetes',
     rank: 1,
     health: 'healthy',
@@ -909,12 +909,12 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     ],
     edit: {
       apiServer: 'https://primary.example:6443',
-      proposal: { carriedFrom: 'Primary', namespace: 'apps' },
+      proposal: { carriedFrom: 'primary/kubernetes', namespace: 'apps' },
     },
   },
   {
     id: 'target-cloudrun',
-    name: 'Cloud Run · vessel-a',
+    vessel: 'vessel-a',
     adapter: 'cloudrun',
     rank: 2,
     health: 'healthy',
@@ -931,7 +931,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
   },
   {
     id: 'target-static',
-    name: 'Firebase · vessel-a',
+    vessel: 'vessel-a',
     adapter: 'static',
     rank: 3,
     health: 'healthy',
@@ -948,7 +948,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
   },
   {
     id: 'target-secondary',
-    name: 'Secondary',
+    vessel: 'secondary',
     adapter: 'kubernetes',
     rank: 4,
     health: 'unhealthy',
@@ -973,7 +973,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     connectionDivergence: [],
     edit: {
       apiServer: 'https://secondary.example:6443',
-      proposal: { carriedFrom: 'Secondary', namespace: 'apps' },
+      proposal: { carriedFrom: 'secondary/kubernetes', namespace: 'apps' },
     },
   },
 ];

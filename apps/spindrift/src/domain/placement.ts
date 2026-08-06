@@ -84,7 +84,8 @@ export type Exclusion = (typeof EXCLUSIONS)[number];
 /** One Target as placement sees it: rank, health, and what it can do. */
 export interface PlacementTarget {
   readonly id: string;
-  readonly name: string;
+  /** The boundary this Target is a surface on — half of what names it. */
+  readonly vessel: string;
   readonly adapter: TargetAdapter;
   /** §13: "Rank is one global ordered list." Lower is considered first. */
   readonly rank: number;
@@ -190,7 +191,8 @@ export interface Placement {
  */
 interface RankedTargetRow {
   id: string;
-  name: string;
+  /** The joined boundary row. A Target is not addressable or nameable without it. */
+  vessel: { name: string };
   adapter: TargetAdapter;
   rank: number;
   health: 'healthy' | 'unhealthy';
@@ -231,7 +233,7 @@ export function placementTargetOf(
 ): PlacementTarget {
   return {
     id: target.id,
-    name: target.name,
+    vessel: target.vessel.name,
     adapter: target.adapter,
     rank: target.rank,
     healthy: target.health === 'healthy',

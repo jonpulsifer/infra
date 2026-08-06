@@ -33,6 +33,7 @@ import {
   deploys,
   targets,
 } from '../../src/db/schema.ts';
+import { targetLabel } from '../../src/domain/target.ts';
 import {
   claimNextDeploy,
   DEFAULT_CLAIM_TIMEOUT_MS,
@@ -47,7 +48,11 @@ import {
   FakeDeployAdapter,
   type ScriptedAttempt,
 } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
@@ -96,14 +101,13 @@ async function pendingDeploy(
       ...(options.schedule === undefined ? {} : { schedule: options.schedule }),
     })
     .returning();
+  const adapter = options.adapter ?? 'kubernetes';
+  const vessel = await insertVessel(db, adapter, {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
   const [target] = await db
     .insert(targets)
-    .values(
-      targetValues({
-        name: `cluster-${crypto.randomUUID()}`,
-        adapter: options.adapter ?? 'kubernetes',
-      }),
-    )
+    .values(targetValues({ vesselId: vessel.id, adapter }))
     .returning();
   const [build] = await db
     .insert(builds)
@@ -125,7 +129,7 @@ async function pendingDeploy(
       desired: aDesiredDocument({
         app: app!.name,
         component: component!.name,
-        target: target!.name,
+        target: targetLabel({ vessel: vessel.name, adapter }),
         reach: options.reach ?? 'private',
         auth: options.auth ?? 'proxy',
       }),

@@ -38,7 +38,11 @@ import {
   SupplyChainHarness,
   testSignature,
 } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -111,12 +115,16 @@ async function fixture(options: {
       auth: 'none',
     })
     .returning();
+  // Its own vessel: a Target is (vessel, adapter), so two fixtures sharing the
+  // harness default would collide on that pair rather than on a name.
+  const adapter = options.adapter ?? 'kubernetes';
+  const vessel = await insertVessel(db, adapter);
   const [target] = await db
     .insert(targets)
     .values(
       targetValues({
-        name: `target-${crypto.randomUUID()}`,
-        adapter: options.adapter ?? 'kubernetes',
+        adapter,
+        vesselId: vessel.id,
         discovery: null,
       }),
     )

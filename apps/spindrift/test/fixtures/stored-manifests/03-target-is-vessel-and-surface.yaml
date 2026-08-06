@@ -1,0 +1,115 @@
+# A stored manifest as this build writes one: a Target is its vessel and its
+# surface, and carries no name of its own.
+#
+# `02` gave a Target both — a `vessel` reference *and* a constructed `name` that
+# was the vessel's, plus the adapter as a suffix where the vessel carried more
+# than one surface. The suffix was decorative from the moment the vessel became
+# a row, and worse than redundant: it appeared only where there were siblings to
+# tell apart, so a vessel discovering a second surface would have had to rename
+# the first. `manifest-upgrade.ts` drops the field rather than deriving anything
+# from it, because the two lines under it were already authoritative.
+#
+# **The newest file in this corpus, and the test asserts this build needs no
+# upgrade to read it.** That is the forcing function: change the manifest schema
+# in any way that stops accepting this document, and the assertion fails. The
+# fix is never to edit this file — it is to copy it to the next number, edit
+# *that* to the new shape, and teach `manifest-upgrade.ts` how to get from here
+# to there. Doing it the other way round is exactly how a schema change reaches
+# production able to discard a configured installation.
+#
+# `installation` differs from every declaration this suite mounts, for the
+# reason `01` gives.
+installation: stored-without-target-names
+
+controlPlane:
+  hostname: spindrift.example.test
+
+auth:
+  gateway: null
+
+dns:
+  zones:
+    private: apps.example.test
+    public: example.test
+
+sources:
+  buckets:
+    - example-source-bucket
+  defaultBucket: example-source-bucket
+
+cloud:
+  artifactsProject: example-artifacts
+  homeVesselProject: example-home
+
+charts:
+  app: example/spindrift-app
+
+supplyChain:
+  registry: registry.example.test/artifacts
+  verifier: verifier.example.test
+  signer: gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer
+
+github:
+  clientId: Iv1.example
+  oauthBaseUrl: https://git.example.test
+  apiBaseUrl: https://api.git.example.test
+  buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
+
+build:
+  routes:
+    - name: hosted
+      adapter: github-actions
+  zeroConfigFrontend: registry.example.test/zero-config:pinned
+
+secretStore:
+  adapter: gcp-secret-manager
+  endpoint: https://secrets.example.test
+  container: example-secrets
+
+vessels:
+  - name: cluster
+    kind: cluster
+    location:
+      apiServer: https://cluster.example.test
+    reachableRegistries:
+      - registry.example.test
+    servedHosts:
+      - apps.example.test
+  - name: cloud
+    kind: gcp-project
+    location:
+      project: example-vessel
+    reachableRegistries:
+      - mirror.example.test
+    servedHosts:
+      - hosting.example.test
+      - run.example.test
+
+targets:
+  - vessel: cluster
+    adapter: kubernetes
+    reaches: [none, private]
+    authReaches: [private]
+    connection:
+      namespace: apps
+      delivery:
+        flavour: flux-helmrelease
+        namespace: apps
+        sourceRef:
+          name: infra
+          namespace: flux-system
+      chartValues:
+        platform:
+          gateway:
+            name: cluster-gateway
+            namespace: gateway
+  - vessel: cloud
+    adapter: cloudrun
+    connection:
+      region: example-region
+      endpoint: https://run.example.test
+      serviceAccount: runtime@example-vessel.iam.gserviceaccount.com
+  - vessel: cloud
+    adapter: static
+    connection:
+      endpoint: https://hosting.example.test

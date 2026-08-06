@@ -61,7 +61,7 @@ function target(
   overrides: Partial<CloudRunAdapterConnection> = {},
 ): DeployTarget {
   return {
-    name: 'cloud',
+    vessel: 'cloud',
     adapter: 'cloudrun',
     connection: { ...CONNECTION, ...overrides },
   };

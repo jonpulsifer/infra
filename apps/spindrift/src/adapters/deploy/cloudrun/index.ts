@@ -53,7 +53,10 @@ import {
   artifactAddress,
   type DesiredState,
 } from '../../../domain/desired-state.ts';
-import type { CloudRunAdapterConnection } from '../../../domain/target.ts';
+import {
+  type CloudRunAdapterConnection,
+  targetLabel,
+} from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import { cloudChecklist } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
@@ -707,7 +710,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     if (connection === null) {
       return {
         kind: 'none',
-        because: `${target.name} is not a Cloud Run Target`,
+        because: `${targetLabel(target)} is not a Cloud Run Target`,
       };
     }
     const placed = parseRef(connection, ref);
@@ -745,7 +748,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      throw new Error(`${target.name} is not a Cloud Run Target`);
+      throw new Error(`${targetLabel(target)} is not a Cloud Run Target`);
     }
     const http = this.http(connection);
 

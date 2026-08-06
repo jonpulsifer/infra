@@ -216,6 +216,13 @@ that Target's vessel is the boundary the Component runs in. Nothing on the App
 records this, because a second answer to one question can only disagree with the
 first.
 
+**A Target has no name.** `Target = Vessel × surface` is its identity as well as
+its definition: the pair is naturally unique — a boundary carries one runtime of
+each kind — so it is the unique index, it is what `connectTarget` and
+`disconnectTarget` take, and it is what the screens show, as
+`<vessel>/<adapter>`. There is nothing to construct and so nothing to rename when
+a vessel turns out to carry a surface nobody had registered.
+
 A Target is flat and has exactly one adapter type. That one connect act asks for
 both control APIs, and each Target keeps only the endpoint its own adapter
 drives: an endpoint is connection material for exactly the reason a cluster's

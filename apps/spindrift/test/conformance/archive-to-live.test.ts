@@ -77,7 +77,11 @@ import {
   FakeDeployAdapter,
 } from '../harness/fakes/deploy-adapter.ts';
 import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const baseManifest = await fixtureManifest();
@@ -146,11 +150,14 @@ async function installation(options: { sourceCommit?: string } = {}) {
   // test is about is the chain and not placement's exclusion rules — those have
   // their own tests, and a Target excluded here would fail this one somewhere
   // unrelated to why.
+  const offsiteVessel = await insertVessel(db, 'kubernetes', {
+    name: 'offsite',
+  });
   const [target] = await db
     .insert(targets)
     .values(
       targetValues({
-        name: 'offsite',
+        vesselId: offsiteVessel.id,
         rank: 0,
         reaches: ['none', 'private', 'public'],
         discovery: CAPABLE_DISCOVERY,

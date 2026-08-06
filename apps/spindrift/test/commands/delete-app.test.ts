@@ -40,7 +40,11 @@ import {
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { fixtureManifest, targetValues } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
@@ -94,11 +98,18 @@ function context(registry: AdapterRegistry): CommandContext {
   };
 }
 
-/** A connected Target to hang Deploys off. */
+/** A connected Target to hang Deploys off, on its own named vessel. */
 async function seedTarget(name: string) {
+  const vessel = await insertVessel(database().db, 'kubernetes', { name });
   const [target] = await database()
     .db.insert(targets)
-    .values(targetValues({ name, adapter: 'kubernetes', health: 'healthy' }))
+    .values(
+      targetValues({
+        vesselId: vessel.id,
+        adapter: 'kubernetes',
+        health: 'healthy',
+      }),
+    )
     .returning();
   return target!;
 }
@@ -289,7 +300,7 @@ describe('a live workload is named and left running', () => {
       {
         deployId: String(seeded.deploy!.id),
         component: 'web',
-        target: 'folly',
+        target: 'folly/kubernetes',
         url: 'web.example.test',
         firing: false,
       },

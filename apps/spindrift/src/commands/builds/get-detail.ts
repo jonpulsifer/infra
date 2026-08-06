@@ -14,6 +14,7 @@
  */
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
+import { targetRowLabel } from '../../domain/target.ts';
 import type { DeployPhase, DeployView } from '../../web/model.ts';
 import { type Command, failed, ok } from '../types.ts';
 import { buildViewOf, sourceViewOf } from './view.ts';
@@ -52,7 +53,10 @@ export const getBuildDetail: Command<
       component: {
         with: {
           app: true,
-          desiredTargets: { limit: 1, with: { target: true } },
+          desiredTargets: {
+            limit: 1,
+            with: { target: { with: { vessel: true } } },
+          },
         },
       },
       deploys: {
@@ -92,14 +96,14 @@ export const getBuildDetail: Command<
     appId: build.component.app.id,
     app: build.component.app.name,
     component: build.component.name,
-    target: target?.name ?? 'not placed',
+    target: target === undefined ? 'not placed' : targetRowLabel(target),
     commit: build.commit,
     phase: PHASE[build.status],
     phaseWord: buildView === null ? 'Extracted' : PHASE_WORD[build.status],
     headline: headlineFor(
       build.status,
       buildView?.runner ?? null,
-      target?.name ?? null,
+      target === undefined ? null : targetRowLabel(target),
     ),
     url: build.component.app.vanityDomain ?? '',
     // A Build never serves anything: §6's exposure is only ever changed by an

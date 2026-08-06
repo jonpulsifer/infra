@@ -20,7 +20,8 @@
  *   `destroy`.
  */
 import type { ConfigScope, SecretVersion } from '../adapters/store/contract.ts';
-import type { StoreAdapter } from '../config/manifest.schema.ts';
+import type { StoreAdapter, TargetAdapter } from '../config/manifest.schema.ts';
+import { targetLabel } from './target.ts';
 
 /**
  * §10: "Retention N = 10, the same depth as artifacts."
@@ -41,16 +42,24 @@ export const CONFIG_RETENTION = 10;
  */
 export const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** The store scope a (App, Component, Target) triple names (§10). */
+/**
+ * The store scope a (App, Component, Target) triple names (§10).
+ *
+ * The Target arrives as the two facts that identify it and is spelled
+ * `<vessel>/<adapter>` here, in the one place that spelling is decided — the
+ * store's item name is derived from this, so a second construction of it
+ * elsewhere would be a second set of items for one scope.
+ */
 export function configScopeOf(names: {
   app: string;
   component: string;
-  target: string;
+  vessel: string;
+  adapter: TargetAdapter;
 }): ConfigScope {
   return {
     app: names.app,
     component: names.component,
-    target: names.target,
+    target: targetLabel(names),
   };
 }
 
