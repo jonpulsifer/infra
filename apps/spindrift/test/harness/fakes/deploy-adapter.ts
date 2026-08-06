@@ -87,6 +87,8 @@ export interface FakeDeployAdapterOptions {
   noRuns?: string;
   /** When set, `run` throws — the far side that was asked correctly and failed. */
   runThrows?: string;
+  /** When set, `destroy` throws — the far side refusing to tear down what is there. */
+  destroyThrows?: string;
   /**
    * When set, `executions` throws while `run` still works.
    *
@@ -218,6 +220,9 @@ export class FakeDeployAdapter implements DeployAdapter {
 
   async destroy(_target: DeployTarget, ref: DeployRef): Promise<void> {
     this.destroyed.push(ref);
+    if (this.options.destroyThrows !== undefined) {
+      throw new Error(this.options.destroyThrows);
+    }
     this.placed.delete(ref);
   }
 

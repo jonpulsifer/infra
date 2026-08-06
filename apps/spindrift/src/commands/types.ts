@@ -284,6 +284,14 @@ export type CommandFailureCode =
    * to render the same button state.
    */
   | 'NOT_RUNNABLE'
+  /**
+   * `unplaceComponent` could not tear a placement down: the Target is not
+   * connected, this installation has no adapter for it, or the adapter's
+   * `destroy` itself threw. One code for all three, the same argument
+   * `NOT_RUNNABLE` makes — the sentence differs, the operator's next move
+   * (read it, fix the thing it names, try again) does not.
+   */
+  | 'NOT_REMOVABLE'
   /** The caller saved an older revision than the server currently owns. */
   | 'STALE_EDIT';
 
