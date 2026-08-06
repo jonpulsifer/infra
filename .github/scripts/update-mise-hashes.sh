@@ -14,7 +14,7 @@ compute_sri() {
 	local arch="$1"
 	local url="https://github.com/jdx/mise/releases/download/v${VERSION}/mise-v${VERSION}-linux-${arch}.tar.gz"
 	local hash
-	hash=$(curl -fsSL "$url" | openssl dgst -sha256 -binary | base64 -w0) || {
+	hash=$(nix-prefetch-url --type sha256 "$url") || {
 		echo "ERROR: failed to download or hash $arch tarball ($url)" >&2
 		exit 1
 	}
@@ -22,7 +22,7 @@ compute_sri() {
 		echo "ERROR: empty hash for $arch ($url)" >&2
 		exit 1
 	fi
-	echo "sha256-${hash}"
+	nix hash convert --hash-algo sha256 --to sri "$hash"
 }
 
 ARM64_HASH=$(compute_sri "arm64")
