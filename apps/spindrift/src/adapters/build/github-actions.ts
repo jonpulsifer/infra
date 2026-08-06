@@ -30,6 +30,7 @@
  * the Build rather than hidden, because a checklist-only log is a property of
  * where it ran and not a bug in Spindrift.
  */
+
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type { RepositoryRef } from '../../domain/repository.ts';
 import {
@@ -46,6 +47,7 @@ import type {
   BuildSpec,
   LogFidelity,
 } from './contract.ts';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
@@ -752,3 +754,26 @@ function stepState(
   if (conclusion === 'skipped') return null;
   return conclusion === 'success' ? 'SUCCEEDED' : 'FAILED';
 }
+
+import { githubActionsConfigSchema } from '../../config/build-route-schemas.ts';
+
+export const githubActionsDescriptor = {
+  kind: 'github-actions',
+  displayName: 'GitHub Actions',
+  logo: 'github',
+  buildLevel: 2,
+  configSchema: githubActionsConfigSchema,
+  create(config, context) {
+    const workflow = context.manifest.github.buildWorkflow;
+    if (context.app === null || workflow === null) return null;
+    return new GitHubActionsBuildRoute({
+      name: config.name,
+      host: context.app,
+      buildWorkflow: workflow,
+      zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
+      signer: context.manifest.supplyChain.signer,
+      attestor: context.manifest.supplyChain.attestor ?? '',
+      sealPublicKey: config.sealPublicKey,
+    });
+  },
+} satisfies BuildRouteDescriptor;

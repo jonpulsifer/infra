@@ -19,10 +19,11 @@
  * this process is already connected to, so its log is one more read against an
  * API the adapter already holds (§4's amendment).
  */
+
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
-import type {
+import {
   KubernetesApi,
-  KubernetesObject,
+  type KubernetesObject,
 } from '../deploy/kubernetes/api.ts';
 import {
   buildKitProgramFor,
@@ -38,6 +39,7 @@ import type {
   BuildSpec,
   LogFidelity,
 } from './contract.ts';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
@@ -309,3 +311,28 @@ export class InClusterBuildRoute implements BuildAdapter {
     });
   }
 }
+
+import { inClusterConfigSchema } from '../../config/build-route-schemas.ts';
+
+export const inClusterDescriptor = {
+  kind: 'in-cluster',
+  displayName: 'in-cluster',
+  logo: 'kubernetes',
+  buildLevel: 1,
+  configSchema: inClusterConfigSchema,
+  create(config, context) {
+    if (!context.token) return null;
+    return new InClusterBuildRoute({
+      name: config.name,
+      api: new KubernetesApi({
+        apiServer: config.endpoint,
+        token: context.token,
+        ...(context.fetch ? { fetch: context.fetch } : {}),
+      }),
+      namespace: config.namespace,
+      image: config.image,
+      serviceAccount: config.serviceAccount,
+      zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
+    });
+  },
+} satisfies BuildRouteDescriptor;

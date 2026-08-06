@@ -53,6 +53,7 @@ import type {
   BuildSpec,
   LogFidelity,
 } from './contract.ts';
+import type { BuildRouteDescriptor } from './descriptor.ts';
 import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
@@ -877,3 +878,28 @@ function timestampOf(entry: LogEntry): Date | null {
   const at = new Date(entry.timestamp);
   return Number.isNaN(at.getTime()) ? null : at;
 }
+
+import { cloudBuildConfigSchema } from '../../config/build-route-schemas.ts';
+
+export const cloudBuildDescriptor = {
+  kind: 'cloud-build',
+  displayName: 'Cloud Build',
+  logo: 'google-cloud',
+  buildLevel: 3,
+  configSchema: cloudBuildConfigSchema,
+  create(config, context) {
+    return new CloudBuildRoute({
+      name: config.name,
+      endpoint: config.endpoint,
+      logsEndpoint: config.logsEndpoint,
+      project: config.project,
+      region: config.region,
+      image: config.image,
+      zeroConfigFrontend: context.manifest.build.zeroConfigFrontend,
+      signer: context.manifest.supplyChain.signer,
+      attestor: context.manifest.supplyChain.attestor ?? '',
+      token: context.cloud,
+      ...(context.fetch ? { fetch: context.fetch } : {}),
+    });
+  },
+} satisfies BuildRouteDescriptor;

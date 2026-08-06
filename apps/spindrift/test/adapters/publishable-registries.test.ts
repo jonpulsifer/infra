@@ -53,7 +53,7 @@ describe('the registries a route can publish to', () => {
     const route = new GitHubActionsBuildRoute({
       name: 'hosted',
       host: {} as never,
-      buildWorkflow: 'o/r/.github/workflows/b.yml@' + '0'.repeat(40),
+      buildWorkflow: `o/r/.github/workflows/b.yml@${'0'.repeat(40)}`,
       zeroConfigFrontend: 'zc',
       signer: '',
       attestor: '',

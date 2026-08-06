@@ -118,6 +118,8 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'slsa-verifier',
   'verify-image',
   'verify-signature',
+  // UI logo mark name exported by build descriptor.
+  'google-cloud',
   // Default infra storage bucket — the first-party source bucket declared in
   // DEFAULT_PLACEHOLDER_MANIFEST and the manifest schema fixture.
   'bluenose-spindrift-source',

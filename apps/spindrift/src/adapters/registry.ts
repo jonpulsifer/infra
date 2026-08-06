@@ -52,10 +52,8 @@ import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
-import { CloudBuildRoute } from './build/cloud-build.ts';
 import type { BuildAdapter } from './build/contract.ts';
-import { GitHubActionsBuildRoute } from './build/github-actions.ts';
-import { InClusterBuildRoute } from './build/in-cluster.ts';
+import { findBuildRouteDescriptor } from './build/descriptors.ts';
 import { GcpDiscovery } from './cloud-discovery.ts';
 import type { DatastoreAdapter } from './datastore/contract.ts';
 import { CloudDatastoreAdapter } from './datastore/gcp.ts';
@@ -63,7 +61,7 @@ import { KubernetesDatastoreAdapter } from './datastore/kubernetes.ts';
 import { workloadIdentityToken } from './deploy/cloud/federation.ts';
 import { CloudRunDeployAdapter } from './deploy/cloudrun/index.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
-import { KubernetesApi, type TokenProvider } from './deploy/kubernetes/api.ts';
+import type { TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
 import { StaticDeployAdapter } from './deploy/static/index.ts';
 import type { SecretStore } from './store/contract.ts';
@@ -453,37 +451,17 @@ export function createAdapterRegistry(
 export function buildRouteProfiles(
   manifest: InstallationManifest,
 ): BuildRouteProfile[] {
-  return manifest.build.routes.map((route) => ({
-    name: route.name,
-    level: BUILD_ROUTE_LEVELS[route.adapter],
-  }));
+  return manifest.build.routes.map((route) => {
+    const descriptor = findBuildRouteDescriptor(route.adapter);
+    return {
+      name: route.name,
+      level: descriptor?.buildLevel ?? 1,
+    };
+  });
 }
 
 /**
- * Each route kind's profile level (§16).
- *
- * A table rather than a construction, because a level has to be readable
- * *without* building the route: placement asks whether a Target could ever use
- * a route, and building one to find out would mean an installation missing a
- * credential also lost the ability to explain why.
- *
- * Kept in step with the classes themselves by `test/adapters/build-routes.test.ts`,
- * which constructs each one and compares.
- */
-const BUILD_ROUTE_LEVELS = {
-  'github-actions': 2,
-  'cloud-build': 3,
-  'in-cluster': 1,
-} as const satisfies Record<BuildRouteConfig['adapter'], 1 | 2 | 3>;
-
-/**
  * One configured route, or `null` where this process cannot construct it.
- *
- * The hosted route is the only one that can come back `null`: it runs through
- * the repository host, and an installation with no OAuth store has no repository
- * integration at all (§15). The other two authorize with tokens read at the
- * moment of use, so they construct even where those tokens are absent — and
- * fail loudly on the first build rather than silently at boot.
  */
 function createBuildRoute(
   route: BuildRouteConfig,
@@ -491,67 +469,18 @@ function createBuildRoute(
   app: GitHubApp | null,
   cloud: TokenProvider,
 ): BuildAdapter | null {
-  const { manifest } = options;
-  const zeroConfigFrontend = manifest.build.zeroConfigFrontend;
-
-  switch (route.adapter) {
-    case 'github-actions': {
-      const workflow = manifest.github.buildWorkflow;
-      // Both halves are §15's: no OAuth-backed host means no repository
-      // integration, and no pinned workflow means there is nothing to dispatch.
-      // Either way this installation has not finished wiring hosted CI.
-      if (app === null || workflow === null) return null;
-      return new GitHubActionsBuildRoute({
-        name: route.name,
-        host: app,
-        buildWorkflow: workflow,
-        zeroConfigFrontend,
-        signer: manifest.supplyChain.signer,
-        attestor: manifest.supplyChain.attestor ?? '',
-        // Absent unless the manifest configured one, which is what keeps
-        // `carriesRegistryCredential` false and `dispatchBuild` refusing a
-        // stored credential on this route until an operator pastes a key in.
-        sealPublicKey: route.sealPublicKey,
-      });
-    }
-    case 'cloud-build':
-      return new CloudBuildRoute({
-        name: route.name,
-        endpoint: route.endpoint,
-        logsEndpoint: route.logsEndpoint,
-        project: route.project,
-        region: route.region,
-        image: route.image,
-        zeroConfigFrontend,
-        // The same two the hosted route takes, and for the same §16 reason: an
-        // attestation is not the registry signature core makes, and a cloud
-        // Target's admission reads the one core cannot put there.
-        signer: manifest.supplyChain.signer,
-        attestor: manifest.supplyChain.attestor ?? '',
-        // The same federated token the cloud Targets are reached with, and for
-        // the same §13 reason: the build service is a cloud API in the shared
-        // artifacts project, the workload identity this process already carries
-        // is granted on it, and a second stored credential for it would be a
-        // credential §13 says does not exist.
-        token: cloud,
-        ...(options.fetch ? { fetch: options.fetch } : {}),
-      });
-    case 'in-cluster':
-      return new InClusterBuildRoute({
-        name: route.name,
-        api: new KubernetesApi({
-          apiServer: route.endpoint,
-          token:
-            options.token ??
-            installationServiceAccountToken(options.env ?? Bun.env),
-          ...(options.fetch ? { fetch: options.fetch } : {}),
-        }),
-        namespace: route.namespace,
-        image: route.image,
-        serviceAccount: route.serviceAccount,
-        zeroConfigFrontend,
-      });
-  }
+  const descriptor = findBuildRouteDescriptor(route.adapter);
+  if (!descriptor) return null;
+  const token =
+    options.token ?? installationServiceAccountToken(options.env ?? Bun.env);
+  return descriptor.create(route, {
+    manifest: options.manifest,
+    app,
+    cloud,
+    token,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.env ? { env: options.env } : {}),
+  });
 }
 
 /**

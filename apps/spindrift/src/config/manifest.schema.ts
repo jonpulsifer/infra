@@ -93,90 +93,12 @@ export const storeAdapterSchema = z.enum(['onepassword', 'gcp-secret-manager']);
  * below is a list an operator writes rather than one of these three per
  * installation. §4: "which routes exist is an installation's configuration."
  */
-export const buildRouteAdapterSchema = z.enum([
-  'github-actions',
-  'cloud-build',
-  'in-cluster',
-]);
+import {
+  buildRouteAdapterSchema,
+  buildRouteSchema,
+} from './build-route-schemas.ts';
 
-/**
- * One configured build route.
- *
- * A discriminated union rather than a bag of optional keys, for the same reason
- * `TargetConnection` is one: a `github-actions` route with a cluster namespace
- * is not a state this model has a name for.
- *
- * **No credential appears in any variant** (§13). Each route's access path is
- * resolved per request — the encrypted OAuth credential for hosted CI, a
- * federated token for the cloud builder, the projected service account token
- * in-cluster.
- */
-export const buildRouteSchema = z.discriminatedUnion('adapter', [
-  z
-    .object({
-      /** What this route is called, as `Target.buildRoutes` names it. */
-      name: nonEmptyString,
-      adapter: z.literal('github-actions'),
-      /**
-       * The public half of this route's sealing keypair, SPKI PEM.
-       *
-       * A dispatch's inputs are rendered in the run header (§15), so a stored
-       * registry credential cannot travel to this route in the clear —
-       * `GitHubActionsBuildRoute.carriesRegistryCredential` says why at
-       * length. Present, that credential is sealed to this key before it ever
-       * reaches the dispatch, and the reusable workflow opens it with the
-       * matching private key, which lives only as this repository's
-       * `SPINDRIFT_BUILD_SEAL_KEY` Actions secret — never here, never in git.
-       * Absent, this route carries no credential and `dispatchBuild` keeps
-       * refusing a build that needs one.
-       */
-      sealPublicKey: nonEmptyString.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      name: nonEmptyString,
-      adapter: z.literal('cloud-build'),
-      /**
-       * The build service's API root, without a trailing slash. A value for
-       * the same reason `github.apiBaseUrl` is one: a regional or
-       * perimeter-fronted endpoint is a legitimate installation choice.
-       */
-      endpoint: z.url(),
-      /** Where the build's own logs are read from — §4's "logs are read". */
-      logsEndpoint: z.url(),
-      /** The project builds run in — §14's shared artifacts project. */
-      project: nonEmptyString,
-      /** The location builds are submitted to. */
-      region: nonEmptyString,
-      /**
-       * The BuildKit image the build step runs, pinned by the installation.
-       *
-       * Present here as well as on the in-cluster route because §4 makes the
-       * engine one thing that runs in several places — the route decides where,
-       * never what.
-       */
-      image: nonEmptyString,
-    })
-    .strict(),
-  z
-    .object({
-      name: nonEmptyString,
-      adapter: z.literal('in-cluster'),
-      /** The API server the build Job is created against. */
-      endpoint: z.url(),
-      /** The namespace it is created in. Never created by Spindrift. */
-      namespace: nonEmptyString,
-      /** The BuildKit image the Job runs, pinned by the installation. */
-      image: nonEmptyString,
-      /**
-       * The service account the Job runs as — how it authorizes a push
-       * without this process holding a registry credential.
-       */
-      serviceAccount: nonEmptyString,
-    })
-    .strict(),
-]);
+export { buildRouteAdapterSchema, buildRouteSchema };
 
 const kubernetesDeliverySchema = z.discriminatedUnion('flavour', [
   z
