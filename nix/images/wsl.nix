@@ -7,6 +7,7 @@
 {
   imports = [
     inputs.nixos-wsl.nixosModules.default
+    ../system/home-manager.nix
     ../system/user.nix
     ../system/nixos.nix
     ../system/mise-dotfiles.nix

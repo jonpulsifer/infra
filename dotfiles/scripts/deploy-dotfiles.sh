@@ -33,7 +33,13 @@ link_file "${DOTFILES_DIR}/.config/.bunfig.toml" "${HOME}/.config/.bunfig.toml"
 link_file "${DOTFILES_DIR}/.config/git" "${HOME}/.config/git"
 link_file "${DOTFILES_DIR}/.config/ghostty/config" "${HOME}/.config/ghostty/config"
 link_file "${DOTFILES_DIR}/.config/nvim" "${HOME}/.config/nvim"
-link_file "${DOTFILES_DIR}/.config/zsh" "${HOME}/.config/zsh"
+# On NixOS hosts where home-manager owns zsh (HM_ACTIVATED=1), skip deploying
+# the .config/zsh dir: home-manager writes ~/.config/zsh/.zshrc itself, and a
+# symlink here would shadow its generated file. Everything else (.zshenv,
+# git, ssh, ...) still deploys.
+if [[ "${HM_ACTIVATED:-0}" != "1" ]]; then
+  link_file "${DOTFILES_DIR}/.config/zsh" "${HOME}/.config/zsh"
+fi
 link_file "${DOTFILES_DIR}/.local/bin" "${HOME}/.local/bin"
 link_file "${DOTFILES_DIR}/.ssh/config" "${HOME}/.ssh/config"
 link_file "${DOTFILES_DIR}/.gnupg/gpg.conf" "${HOME}/.gnupg/gpg.conf"

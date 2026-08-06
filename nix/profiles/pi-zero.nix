@@ -28,10 +28,12 @@
 
   # Everything here would have to be cross-compiled onto a single-core board
   # with nothing to pull from: mise publishes no armv6l binary at all, and the
-  # node exporter and full terminfo database are pure cost on a host whose job
-  # is to drive one radio.
+  # node exporter, full terminfo database, and home-manager's shell-tool suite
+  # (btop, neovim, fzf, ...) are pure cost on a host whose job is to drive one
+  # radio.
   homelab.fleet = {
     miseDotfiles = false;
+    homeManager = false;
     metrics = false;
     terminfo = false;
   };
