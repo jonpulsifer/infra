@@ -72,13 +72,17 @@ async function liveDeclaration() {
  * that the document this repository declares is not one that would hand an
  * operator a wizard.
  *
- * The two agree today where it matters. The offsite web pod's boot warning
- * reports the row and the declaration already disagreeing at nine paths —
- * `charts.app`, and both Targets' `delivery.sourceRef.name`/`.namespace` and
- * `chartValues.platform.externalAuth.name`/`.port` — and none of the four this
- * predicate reads is among them. The row's own values are `offsite`,
- * `Iv1.918d699f36ee7afc`, `["ghcr.io/jonpulsifer", …]` and `onepassword`: the
- * same two answered, the same two at the stand-in.
+ * The offsite web pod's boot warning reports the row and the declaration
+ * disagreeing at `charts.app`, at both Targets'
+ * `delivery.sourceRef.name`/`.namespace` and
+ * `chartValues.platform.externalAuth.name`/`.port`, and — since the fleet moved
+ * onto one store of record — at the whole `secretStore` block and both Targets'
+ * `chartValues.platform.secretStore.name`. The row still says `onepassword`,
+ * which is what `configureInstallation` carries across.
+ *
+ * That divergence is what this file cannot see and does not claim to. The
+ * predicate below reads the declaration, and the assertion is about which of
+ * its four genuine choices are answered — not about which document is live.
  */
 describe('the declaration this repository deploys is configured', () => {
   test('it is not a document that would replace the product with a wizard', async () => {
@@ -87,22 +91,22 @@ describe('the declaration this repository deploys is configured', () => {
     expect(isUnconfiguredInstallation(manifest)).toBe(false);
   });
 
-  test('two of its four genuine choices really are the stand-in', async () => {
+  test('one of its four genuine choices really is the stand-in', async () => {
     // The reason the claim above is worth a test rather than a glance, and the
     // reason the predicate is "all four" rather than "any": this installation
-    // speaks as the same GitHub App the placeholder names and delivers through
-    // the same one of two store adapters. A predicate that asked whether *any*
-    // genuine choice was still a stand-in would answer unconfigured here, and
-    // an operator signing in to a working installation would be handed a wizard.
+    // speaks as the same GitHub App the placeholder names. A predicate that
+    // asked whether *any* genuine choice was still a stand-in would answer
+    // unconfigured here, and an operator signing in to a working installation
+    // would be handed a wizard.
     const manifest = await liveDeclaration();
 
     expect(manifest.github.clientId).toBe(
       DEFAULT_PLACEHOLDER_MANIFEST.github.clientId,
     );
-    expect(manifest.secretStore.adapter).toBe(
+    // And the three it answers, which are what make it configured.
+    expect(manifest.secretStore.adapter).not.toBe(
       DEFAULT_PLACEHOLDER_MANIFEST.secretStore.adapter,
     );
-    // And the two it answers, which are what make it configured.
     expect(manifest.installation).not.toBe(
       DEFAULT_PLACEHOLDER_MANIFEST.installation,
     );
