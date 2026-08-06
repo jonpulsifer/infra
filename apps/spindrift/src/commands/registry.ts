@@ -55,6 +55,10 @@ import {
   setComponentSchedule,
   setComponentScheduleInput,
 } from './components/schedule.ts';
+import {
+  unplaceComponent,
+  unplaceComponentInput,
+} from './components/unplace.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
 import {
@@ -219,6 +223,10 @@ export const commandRegistry = {
   setComponentSchedule: {
     input: setComponentScheduleInput,
     handler: setComponentSchedule,
+  },
+  unplaceComponent: {
+    input: unplaceComponentInput,
+    handler: unplaceComponent,
   },
   setConfig: { input: setConfigInput, handler: setConfig },
   configureInstallation: {
