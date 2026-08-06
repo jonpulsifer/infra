@@ -605,6 +605,42 @@ describe('the App workspace', () => {
     expect(buttons).toBeGreaterThanOrEqual(view.activity.length);
   });
 
+  test('an App that can receive a push offers the switch that makes it', () => {
+    // §15's dispatcher and the webhook both read `apps.autoDeploy`, and until
+    // now nothing anywhere could write it — the feature shipped permanently
+    // off. This is the control that turns it on.
+    const markup = renderToStaticMarkup(
+      <Workspace
+        view={WORKSPACE_SCENARIOS.service}
+        onSetAutoDeploy={async () => ({ ok: true })}
+      />,
+    );
+    expect(markup).toContain('Deploy on push: off');
+  });
+
+  test('an App no push can reach is not offered a dead switch', () => {
+    // `autoDeploy: null` is the archive App: there is no repository, so there
+    // is no state to be turned out of. §3's grammar disables a choice and says
+    // why; this is not a choice at all, so the honest render is nothing.
+    const archive = {
+      ...WORKSPACE_SCENARIOS.service,
+      autoDeploy: null,
+    } as const satisfies WorkspaceView;
+
+    const markup = renderToStaticMarkup(
+      <Workspace view={archive} onSetAutoDeploy={async () => ({ ok: true })} />,
+    );
+    expect(markup).not.toContain('Deploy on push');
+  });
+
+  test('a screen wiring no acts renders no switch either', () => {
+    // The same rule the reach and config editors follow: a control whose Save
+    // cannot be called is worse than no control.
+    expect(workspace(WORKSPACE_SCENARIOS.service)).not.toContain(
+      'Deploy on push',
+    );
+  });
+
   test('a website states that it has no runtime', () => {
     // §17: the `static` adapter gets an honest empty state, and §18 puts it one
     // level down rather than disabling a tab. `kind: 'none'` carries the reason

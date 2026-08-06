@@ -38,6 +38,7 @@ import { AppList } from './views/apps/list.tsx';
 import { NewApp } from './views/apps/new/index.tsx';
 import {
   type RunJob,
+  type SetAutoDeploy,
   type SetConfig,
   type SetReach,
   Workspace,
@@ -1206,6 +1207,31 @@ function WorkspaceScreen({
     }
   };
 
+  // Deploy on push (§15). No re-read of the workspace: the toggle already
+  // holds the answer it just wrote, and the reload `handleSetReach` needs is
+  // because reach changes a *derived* row. This changes exactly the field the
+  // control is showing.
+  const handleSetAutoDeploy: SetAutoDeploy = async (autoDeploy) => {
+    const appId = state.type === 'success' ? state.workspace.appId : undefined;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to set the switch on' };
+    }
+    try {
+      const result = await command('setAppAutoDeploy', { appId, autoDeploy });
+      return result.ok
+        ? { ok: true }
+        : { ok: false, message: result.failure.message };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Saving deploy-on-push failed',
+      };
+    }
+  };
+
   // The pair this workspace is showing (§10) — bound here, once, so `SetConfig`
   // itself does not have to carry it on every call. Re-read on success for the
   // same reason `handleSetReach` is: `configKeys` is a row this act just
@@ -1306,6 +1332,7 @@ function WorkspaceScreen({
         onNavigate={onNavigate}
         deletion={deletion}
         onSetReach={handleSetReach}
+        onSetAutoDeploy={handleSetAutoDeploy}
         onSetConfig={handleSetConfig}
         {...(runs === null
           ? {}

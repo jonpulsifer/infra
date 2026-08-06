@@ -68,6 +68,20 @@ export type SetReach = (change: {
 >;
 
 /**
+ * Turning deploy-on-push on or off for this App (§15).
+ *
+ * Sends the state it wants rather than "flip it", which is what
+ * `setAppAutoDeploy` takes and for the reason stated there: two presses racing
+ * a toggle disagree about where they left it, and two presses racing a set do
+ * not.
+ */
+export type SetAutoDeploy = (
+  autoDeploy: boolean,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
  * Starting one run of a job, as the screen above needs it answered (§17).
  *
  * The same shape {@link SetReach} takes and for the same reason: the press has
@@ -113,6 +127,7 @@ export function Workspace({
   onSetReach,
   onSetConfig,
   onRunJob,
+  onSetAutoDeploy,
   onFollowExecution,
   executionLines,
 }: {
@@ -154,6 +169,13 @@ export function Workspace({
    * is what decides, because it is the only branch with runs to start.
    */
   onRunJob?: RunJob;
+  /**
+   * Absent where deploy-on-push is not editable from here, for the same reason
+   * {@link onSetReach} is. Also absent for an archive App — but that one the
+   * view already says with `autoDeploy: null`, so the control is not rendered
+   * at all rather than rendered dead.
+   */
+  onSetAutoDeploy?: SetAutoDeploy;
   /** Follow one run's output, or nothing when the name is `null`. */
   onFollowExecution?: (execution: string | null) => void;
   /** The lines of whichever run is being followed. */
@@ -205,7 +227,11 @@ export function Workspace({
         </div>
       </header>
 
-      <Hero view={view} onNavigate={onNavigate} />
+      <Hero
+        view={view}
+        onNavigate={onNavigate}
+        {...(onSetAutoDeploy === undefined ? {} : { onSetAutoDeploy })}
+      />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Components
@@ -244,9 +270,11 @@ export function Workspace({
 function Hero({
   view,
   onNavigate,
+  onSetAutoDeploy,
 }: {
   view: WorkspaceView;
   onNavigate?: (path: string) => void;
+  onSetAutoDeploy?: SetAutoDeploy;
 }) {
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
@@ -297,8 +325,88 @@ function Hero({
             ? 'All prerequisites passing'
             : 'A prerequisite is unmet'}
         </p>
+        {/*
+          Beside placement rather than in the header, because it is not an act:
+          the header holds the two buttons that make something happen now, and
+          a switch that changes what happens *next time* sitting between them
+          is the one misread that costs a surprise deploy.
+
+          Rendered only where the App can receive a push at all — `autoDeploy`
+          is `null` for an archive App, and a disabled switch would offer a
+          choice that does not exist.
+        */}
+        {view.autoDeploy !== null && onSetAutoDeploy ? (
+          <AutoDeployToggle
+            autoDeploy={view.autoDeploy}
+            onSetAutoDeploy={onSetAutoDeploy}
+          />
+        ) : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Deploy on push, on or off (§15).
+ *
+ * **Optimistic, and it says so when it was wrong.** The press flips the label
+ * immediately and puts it back if the command refuses — a switch that waits for
+ * a round trip before moving reads as broken, and this one is cheap to undo.
+ *
+ * No confirmation. Turning it *on* is the direction with consequences, and the
+ * consequence is a deploy that would have happened anyway the moment somebody
+ * pressed Deploy — §15's dispatcher calls the same `deployApp`, so nothing here
+ * can do something the button above it could not.
+ */
+function AutoDeployToggle({
+  autoDeploy,
+  onSetAutoDeploy,
+}: {
+  autoDeploy: boolean;
+  onSetAutoDeploy: SetAutoDeploy;
+}) {
+  const [on, setOn] = useState(autoDeploy);
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const flip = async () => {
+    const wanted = !on;
+    setOn(wanted);
+    setSaving(true);
+    setRefusal(null);
+    try {
+      const result = await onSetAutoDeploy(wanted);
+      if (!result.ok) {
+        setOn(!wanted);
+        setRefusal(result.message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-1 flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={flip}
+        disabled={saving}
+        aria-pressed={on}
+        className={cn(
+          'rounded-md border px-2 py-1 text-xs transition-colors',
+          on
+            ? 'border-accent/40 bg-accent-soft text-accent-foreground'
+            : 'border-border-soft text-muted-foreground hover:text-foreground',
+        )}
+      >
+        Deploy on push: {on ? 'on' : 'off'}
+      </button>
+      {refusal ? (
+        <p className="max-w-[22rem] text-left text-xs text-destructive">
+          {refusal}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
