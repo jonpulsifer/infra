@@ -23,6 +23,10 @@
   # sdImage outputs on this x86_64 host instead of needing a native aarch64
   # builder or a remote builder.
   boot.binfmt.emulatedSystems = [ "aarch64-linux" ];
+  # WSL sometimes exposes binfmt_misc read-only. Skip the upstream unit in
+  # that case so a system switch succeeds; it starts normally when WSL makes
+  # the filesystem writable again.
+  systemd.services.systemd-binfmt.unitConfig.ConditionPathIsReadWrite = "/proc/sys/fs/binfmt_misc";
   # NixOS's binfmt module takes over the whole binfmt_misc table on
   # activation; without this, adding the aarch64 registration above wipes
   # out WSL2's own .exe interop handler and breaks running Windows binaries
