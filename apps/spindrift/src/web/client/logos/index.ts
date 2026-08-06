@@ -11,7 +11,6 @@
  * Size these with CSS against the `viewBox`; do not assume a common ratio.
  */
 import argoCd from './argo-cd.svg';
-import aws from './aws.svg';
 import certManager from './cert-manager.svg';
 import cilium from './cilium.svg';
 import cloudflare from './cloudflare.svg';
@@ -34,7 +33,6 @@ import vercel from './vercel.svg';
 
 export const logos = {
   'argo-cd': argoCd,
-  aws,
   'cert-manager': certManager,
   cilium,
   cloudflare,
