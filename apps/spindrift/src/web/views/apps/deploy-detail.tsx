@@ -60,7 +60,6 @@ import { useEffect, useRef, useState } from 'react';
  * this table has not is a missing key rather than a crash: the runner's name
  * is still rendered, only unaccompanied.
  */
-import { BUILD_ROUTE_DESCRIPTORS } from '../../../adapters/build/descriptors.ts';
 import type { LogoName } from '../../client/logos/index.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
@@ -87,13 +86,11 @@ import {
 import { Logo } from '../../ui/logo.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
 
-const BUILD_ADAPTER: Record<string, { logo: LogoName; label: string }> =
-  Object.fromEntries(
-    BUILD_ROUTE_DESCRIPTORS.map((d) => [
-      d.kind,
-      { logo: d.logo as LogoName, label: d.displayName },
-    ]),
-  );
+const BUILD_ADAPTER: Record<string, { logo: LogoName; label: string }> = {
+  'github-actions': { logo: 'github', label: 'GitHub Actions' },
+  'cloud-build': { logo: 'google-cloud', label: 'Cloud Build' },
+  'in-cluster': { logo: 'kubernetes', label: 'in-cluster' },
+};
 
 /**
  * What the operator can do from here, and which one is running.

@@ -20,7 +20,6 @@
  * API the adapter already holds (§4's amendment).
  */
 
-import { z } from 'zod';
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import {
   KubernetesApi,
@@ -313,21 +312,14 @@ export class InClusterBuildRoute implements BuildAdapter {
   }
 }
 
+import { inClusterConfigSchema } from '../../config/build-route-schemas.ts';
+
 export const inClusterDescriptor = {
   kind: 'in-cluster',
   displayName: 'in-cluster',
   logo: 'kubernetes',
   buildLevel: 1,
-  configSchema: z
-    .object({
-      name: z.string().trim().min(1),
-      adapter: z.literal('in-cluster'),
-      endpoint: z.url(),
-      namespace: z.string().trim().min(1),
-      image: z.string().trim().min(1),
-      serviceAccount: z.string().trim().min(1),
-    })
-    .strict(),
+  configSchema: inClusterConfigSchema,
   create(config, context) {
     if (!context.token) return null;
     return new InClusterBuildRoute({

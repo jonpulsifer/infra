@@ -37,7 +37,6 @@
  *     Target will admit.
  */
 
-import { z } from 'zod';
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import {
   buildKitProgramFor,
@@ -880,22 +879,14 @@ function timestampOf(entry: LogEntry): Date | null {
   return Number.isNaN(at.getTime()) ? null : at;
 }
 
+import { cloudBuildConfigSchema } from '../../config/build-route-schemas.ts';
+
 export const cloudBuildDescriptor = {
   kind: 'cloud-build',
   displayName: 'Cloud Build',
   logo: 'google-cloud',
   buildLevel: 3,
-  configSchema: z
-    .object({
-      name: z.string().trim().min(1),
-      adapter: z.literal('cloud-build'),
-      endpoint: z.url(),
-      logsEndpoint: z.url(),
-      project: z.string().trim().min(1),
-      region: z.string().trim().min(1),
-      image: z.string().trim().min(1),
-    })
-    .strict(),
+  configSchema: cloudBuildConfigSchema,
   create(config, context) {
     return new CloudBuildRoute({
       name: config.name,
