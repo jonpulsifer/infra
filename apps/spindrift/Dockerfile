@@ -47,7 +47,7 @@ RUN bun install --frozen-lockfile --production
 # First-party artifact verifier (§35). Replaces upstream release binaries (cosign & slsa-verifier).
 FROM ghcr.io/jonpulsifer/spindrift-verifier:latest@sha256:e0e8bfd252f4e3551f706a2ca3b65b94fd32c5bd3858cec2cfc868d03a2740a6 AS supply-chain-tools
 
-FROM cgr.dev/chainguard/node:latest@sha256:d9238e6b5989a4a80ea19e9751c1e139217a4ad6ee7023e0b4988871e2c2e333 AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:d8d2883b26d4fde4e524d0068cd78abbb23c7c2113a22e67a02cc73a9182552d AS runner
 ENV NODE_ENV=production \
   PORT=3000
 WORKDIR /app
