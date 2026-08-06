@@ -92,7 +92,7 @@ export function ConnectTargetForm(props: {
    * operator to restate the one fact the row is certain of.
    */
   apiServer?: string;
-  /** The surfaces this one act registers on that boundary. */
+  /** The surfaces this one act probes that boundary for. */
   surfaces: readonly string[];
   proposal: TargetConnectionProposal;
   connecting: boolean;
@@ -143,7 +143,7 @@ function Heading({
       </div>
       {surfaces.length > 1 ? (
         <p className="text-xs text-muted-foreground">
-          Registers{' '}
+          Asks for{' '}
           {surfaces.map((surface, index) => (
             <span key={surface}>
               {index > 0 ? ' and ' : ''}
@@ -152,7 +152,7 @@ function Heading({
               </span>
             </span>
           ))}{' '}
-          — one project, both of its surfaces.
+          — one project, and a Target for each one it finds.
         </p>
       ) : null}
     </>

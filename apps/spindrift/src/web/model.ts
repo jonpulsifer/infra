@@ -796,7 +796,13 @@ export interface PendingTargetConnection {
   readonly kind: VesselKind;
   /** What `connectTarget` takes as its `vessel`. */
   readonly vessel: string;
-  /** Every surface on that vessel this one act would configure. */
+  /**
+   * Every surface this one act would probe that vessel for.
+   *
+   * What it registers is what the probe establishes, which may be fewer: a
+   * boundary that turns out not to carry one of these gets a sentence saying
+   * so instead of a Target.
+   */
   readonly surfaces: readonly string[];
   readonly proposal: TargetConnectionProposal;
 }

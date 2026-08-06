@@ -80,11 +80,30 @@ function kindIcon(kind: ComponentKind) {
   }
 }
 
+/**
+ * What a connect established is not on the boundary it probed.
+ *
+ * Stated rather than left to be inferred from a Target that is not in the list:
+ * "this project has no Cloud Run" and "the connect only half worked" look
+ * identical from a list of what exists, and only one of them is true.
+ */
+function AbsentSurfaces({ absent }: { absent: readonly string[] }) {
+  if (absent.length === 0) return null;
+  return (
+    <div className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+      {absent.map((sentence) => (
+        <p key={sentence}>{sentence}</p>
+      ))}
+    </div>
+  );
+}
+
 export function TargetList({
   targets,
   pending,
   connecting,
   error,
+  absent = [],
   onConnect,
   onChanged,
   onNavigate,
@@ -94,6 +113,8 @@ export function TargetList({
   pending: readonly PendingTargetConnection[];
   connecting: boolean;
   error: string | null;
+  /** One sentence per surface the last connect found was not there. */
+  absent?: readonly string[];
   onConnect: (input: ConnectTargetInput) => void;
   onChanged?: () => void;
   onNavigate?: (path: string) => void;
@@ -128,6 +149,11 @@ export function TargetList({
       <>
         {error ? (
           <section className="py-4 text-sm text-destructive">{error}</section>
+        ) : null}
+        {absent.length > 0 ? (
+          <section className="py-4">
+            <AbsentSurfaces absent={absent} />
+          </section>
         ) : null}
         <ProviderTargets
           name="Google Cloud"
@@ -224,6 +250,8 @@ export function TargetList({
           {error}
         </div>
       ) : null}
+
+      <AbsentSurfaces absent={absent} />
 
       <TargetCollection
         targets={configured}
