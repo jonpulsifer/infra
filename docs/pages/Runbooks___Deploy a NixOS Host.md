@@ -54,7 +54,8 @@ tags:: runbook, nixos
 	  nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel --no-link
 	  ```
 - # Dotfiles
-	- Dotfiles are mise-managed from the in-repo `dotfiles/` tree. `nix/system/mise-dotfiles.nix` carries that subtree into the system closure and runs `mise bootstrap --only dotfiles` during activation.
-	- There is no dotfiles flake input and no home-manager integration.
+	- Dotfiles are mise-managed from the in-repo `dotfiles/` tree. `nix/system/mise-dotfiles.nix` carries that subtree into the system closure and runs `mise run bootstrap` during activation.
+	- Shell tooling (eza, fzf, neovim, bat, ripgrep, fd, delta, jq, gh, btop, sd, 1password-cli) and zsh plugins (pure, fzf-tab, autosuggestions, syntax-highlighting, kube-ps1) come from home-manager for the `jawn` user via `nix/system/home-manager.nix` and `nix/home/jawn.nix`. Activation sets `HM_ACTIVATED=1` so `scripts/deploy-dotfiles.sh` skips deploying `~/.config/zsh` on those hosts.
+	- `mise bootstrap --only dotfiles` no longer exists; the bootstrap task routes by OS.
 - # Auto-upgrade caveat
 	- Hosts auto-rebuild from GitHub `main`. A config deployed from a branch can be reverted by the next auto-upgrade unless the branch merges promptly. Treat a branch deploy as a test unless it has merged.

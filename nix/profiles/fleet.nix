@@ -10,12 +10,14 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 {
   imports = [
     ./base.nix
     ../system/ddnsd.nix
+    ../system/home-manager.nix
     ../system/mise-dotfiles.nix
     ../system/nixos.nix
     ../system/ssh.nix

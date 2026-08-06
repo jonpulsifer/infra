@@ -16,6 +16,16 @@
       '';
     };
 
+    homeManager = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Wire home-manager for the jawn user so programs.<x> drive shell
+        tooling (bat, btop, fzf, neovim, gh, git-delta, eza, zsh plugins).
+        Turn off where the platform can't build them (armv6l).
+      '';
+    };
+
     metrics = lib.mkOption {
       type = lib.types.bool;
       default = true;

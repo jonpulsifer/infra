@@ -8,9 +8,9 @@ One unified config; **work** (`MISE_ENV=work`) overrides git identity (MoonPay g
 
 These dotfiles manage **configuration, user CLI tooling, and AI agent skills** across macOS and Linux/NixOS.
 
-- **Homebrew (macOS):** Core shell utilities (`eza`, `fzf`, `neovim`, `bat`, `ripgrep`, `fd`, `git-delta`, `jq`, `gh`, `btop`), Casks (`docker-desktop`, `1password-cli`, `claude-code`, `secretive`), and fonts.
-- **Nix (Linux/NixOS):** System closure, daemons, and system CLI packages (`git`, `zsh`, `eza`, `fzf`, `neovim`, `bat`, `ripgrep`, `fd`, `delta`, `jq`, `gh`, `btop`, `mise`).
-- **Mise (Cross-platform):** Runtimes (`bun`, `node`), K8s/Cloud tools (`kubectl`, `helm`, `k9s`), AI agent CLIs, Zsh plugins (`http:` backend), and task orchestrator (`mise bootstrap`).
+- **Homebrew (macOS):** Core shell utilities (`eza`, `fzf`, `neovim`, `bat`, `ripgrep`, `fd`, `git-delta`, `jq`, `gh`, `btop`, `sd`), Casks (`docker-desktop`, `1password-cli`, `claude-code`, `secretive`), and fonts.
+- **Nix (Linux/NixOS):** System closure and daemons; home-manager-managed shell tooling for the `jawn` user (`eza`, `fzf`, `neovim`, `bat`, `ripgrep`, `fd`, `delta`, `jq`, `gh`, `btop`, `sd`, `1password-cli`) plus zsh plugins (`pure`, `fzf-tab`, `autosuggestions`, `syntax-highlighting`, `kube-ps1`) — see `nix/home/jawn.nix`.
+- **Mise (Cross-platform):** Runtimes (`bun`, `node`), K8s/Cloud tools (`kubectl`, `helm`, `k9s`), AI agent CLIs, macOS-only zsh plugins (`http:` backend), and task orchestrator (`mise bootstrap`).
 
 ## Install
 
