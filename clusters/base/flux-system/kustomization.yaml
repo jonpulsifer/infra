@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - arc-system.yaml
   - external-secrets-operator.yaml
+  - gcp-secret-manager.yaml
   - kyverno.yaml
   - onepassword-connect.yaml
   - sandbox.yaml
