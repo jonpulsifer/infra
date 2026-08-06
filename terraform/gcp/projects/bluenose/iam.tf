@@ -42,6 +42,15 @@ resource "google_service_account_iam_member" "spindrift_act_as_runtime" {
   member             = google_service_account.spindrift_controller.member
 }
 
+# Cloud Run resolves a revision's secret environment variables as the runtime
+# service account. Spindrift owns the dynamically named secrets in this project,
+# so the runtime needs a project-wide read path that includes future secrets.
+resource "google_project_iam_member" "spindrift_runtime_secret_reader" {
+  project = local.project
+  role    = "roles/secretmanager.secretAccessor"
+  member  = google_service_account.spindrift_runtime.member
+}
+
 locals {
   spindrift_project_roles = toset([
     "roles/cloudsql.admin",
