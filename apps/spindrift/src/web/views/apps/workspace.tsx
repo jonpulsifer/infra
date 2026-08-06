@@ -126,6 +126,7 @@ export function Workspace({
   deletion,
   onSetReach,
   onSetConfig,
+  onSelectComponent,
   onRunJob,
   onSetAutoDeploy,
   onFollowExecution,
@@ -164,6 +165,15 @@ export function Workspace({
    */
   onSetConfig?: SetConfig;
   /**
+   * Show another Component of this App, by name.
+   *
+   * The Components list is the selector, because it is already the list of what
+   * there is to look at. Absent where the screen reads a fixed view — a row
+   * that could be pressed and changed nothing would be worse than a row that
+   * cannot.
+   */
+  onSelectComponent?: (component: string) => void;
+  /**
    * Start one run of this App's job (§17). Absent where the screen wires no
    * acts, and absent for every Component that is not a job — the runtime card
    * is what decides, because it is the only branch with runs to start.
@@ -181,14 +191,23 @@ export function Workspace({
   /** The lines of whichever run is being followed. */
   executionLines?: readonly LogLine[];
 }) {
-  const primary = view.components[0];
+  /*
+    Which Component the rest of this screen is about — its runtime, its config
+    keys, its placement and its release. `componentId` is the selection the
+    read resolved; a view carrying none is showing the App's first Component,
+    which is the same answer, so this is a lookup rather than a second guess at
+    what the card below belongs to.
+  */
+  const selected =
+    view.components.find((component) => component.id === view.componentId) ??
+    view.components[0];
 
   return (
     <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-4 px-5 py-6">
       <header className="flex flex-wrap items-end gap-4">
         <div>
           <Eyebrow>
-            {primary ? `${primary.kind} · ${primary.name}` : 'app'}
+            {selected ? `${selected.kind} · ${selected.name}` : 'app'}
           </Eyebrow>
           <h1 className="text-2xl font-semibold tracking-tight">{view.app}</h1>
         </div>
@@ -236,13 +255,16 @@ export function Workspace({
       <div className="grid gap-4 md:grid-cols-2">
         <Components
           components={view.components}
+          {...(selected === undefined ? {} : { selectedId: selected.id })}
           {...(onSetReach === undefined ? {} : { onSetReach })}
+          {...(onSelectComponent === undefined ? {} : { onSelectComponent })}
         />
         <Datastores datastores={view.datastores} />
       </div>
 
       <ConfigSection
         configKeys={view.configKeys}
+        {...(selected === undefined ? {} : { component: selected.name })}
         {...(onSetConfig === undefined ? {} : { onSetConfig })}
       />
 
@@ -256,6 +278,7 @@ export function Workspace({
         <Activity entries={view.activity} onNavigate={onNavigate} />
         <Runtime
           view={view}
+          {...(selected === undefined ? {} : { component: selected.name })}
           onNavigate={onNavigate}
           {...(onRunJob ? { onRun: onRunJob } : {})}
           {...(onFollowExecution ? { onFollowExecution } : {})}
@@ -454,19 +477,53 @@ function Row({
   title,
   detail,
   trailing,
+  onSelect,
+  selected,
 }: {
   badge: ReactNode;
   title: string;
   detail: string;
   trailing?: ReactNode;
+  /**
+   * Make the row itself the act of picking it.
+   *
+   * The badge and the two lines become the button and `trailing` stays outside
+   * it, because a row's own act sits there — nesting one button inside another
+   * is not something a browser renders, so the region that selects has to stop
+   * short of it.
+   */
+  onSelect?: () => void;
+  selected?: boolean;
 }) {
-  return (
-    <div className="flex items-center gap-3 border-b border-border-soft py-2.5 last:border-b-0">
+  const body = (
+    <>
       {badge}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{title}</p>
         <p className="truncate text-xs text-muted-foreground">{detail}</p>
       </div>
+    </>
+  );
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 border-b border-border-soft py-2.5 last:border-b-0',
+        selected && 'border-l-2 border-l-accent pl-2',
+      )}
+    >
+      {onSelect ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          onClick={onSelect}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left hover:bg-secondary/40"
+        >
+          {body}
+        </button>
+      ) : (
+        body
+      )}
       {trailing ?? (
         <ChevronRight
           aria-hidden="true"
@@ -477,12 +534,27 @@ function Row({
   );
 }
 
+/**
+ * Every Component of this App, and which one the screen is showing.
+ *
+ * **The list is the selector.** The runtime card, the Run now control and the
+ * config keys all belong to one Component, and this is the only place that says
+ * which — an App whose `job` sits behind its `service` reaches that job's runs
+ * by the row being pressed here, and reaches them nowhere else. The row being
+ * shown is marked, because a screen rendering a second Component's runs with
+ * nothing saying whose they are is worse than one that cannot render them.
+ */
 function Components({
   components,
+  selectedId,
   onSetReach,
+  onSelectComponent,
 }: {
   components: readonly ComponentView[];
+  /** The row this screen's runtime, config and placement are about. */
+  selectedId?: string;
   onSetReach?: SetReach;
+  onSelectComponent?: (component: string) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -500,6 +572,10 @@ function Components({
               badge={<Badge tone="accent">{component.kind}</Badge>}
               title={component.name}
               detail={`${component.phase} · ${component.reach}${component.auth === 'proxy' ? ' + auth' : ''} · ${component.artifact}`}
+              selected={component.id === selectedId}
+              {...(onSelectComponent === undefined
+                ? {}
+                : { onSelect: () => onSelectComponent(component.name) })}
               trailing={
                 onSetReach ? (
                   <Button
@@ -702,7 +778,7 @@ function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
 }
 
 /**
- * The App's environment configuration (§10).
+ * The selected Component's environment configuration (§10).
  *
  * Keys only, ever — the same posture core's config commands take, kept all
  * the way to the screen: nothing here has ever been handed a value, so there
@@ -710,12 +786,19 @@ function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
  * "Set variable" is the one form underneath, because `setConfig` upserts —
  * naming a key that already exists overwrites it, so add and edit are one
  * act, not two the operator has to choose between.
+ *
+ * The Component is named above the list because config is scoped to one
+ * (Component, Target) pair and this App may have several: a heading that said
+ * only "Config" was the same list claiming to be the App's.
  */
 function ConfigSection({
   configKeys,
+  component,
   onSetConfig,
 }: {
   configKeys: readonly string[];
+  /** Whose keys these are. Absent for an App with no Components yet. */
+  component?: string;
   onSetConfig?: SetConfig;
 }) {
   const [adding, setAdding] = useState(false);
@@ -724,7 +807,11 @@ function ConfigSection({
   return (
     <Card>
       <SectionHeader
-        eyebrow="App configuration"
+        eyebrow={
+          component === undefined
+            ? 'App configuration'
+            : `Configuration for ${component}`
+        }
         title="Config"
         {...(onSetConfig
           ? {
@@ -1077,12 +1164,19 @@ function ActivityRow({
  */
 function Runtime({
   view,
+  component,
   onNavigate,
   onRun,
   onFollowExecution,
   executionLines,
 }: {
   view: WorkspaceView;
+  /**
+   * Whose output this is. An App has as many runtimes as it has Components and
+   * this card shows one of them, so the card says which — "Recent runs" over an
+   * App with a service and two jobs names none of them.
+   */
+  component?: string;
   onNavigate?: (path: string) => void;
   /**
    * Start one run (§17). Absent where the screen has no act wired — the
@@ -1124,7 +1218,11 @@ function Runtime({
   return (
     <Card>
       <SectionHeader
-        eyebrow="Component output"
+        eyebrow={
+          component === undefined
+            ? 'Component output'
+            : `Output of ${component}`
+        }
         title={TITLE[runtime.kind]}
         action={ACTION[runtime.kind]}
         onAction={

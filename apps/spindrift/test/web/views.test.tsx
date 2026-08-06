@@ -726,6 +726,61 @@ describe('the App workspace', () => {
     expect(withAct).toContain('Run now');
   });
 
+  describe('an App whose job is not its first Component', () => {
+    // The defect this fixture exists for: the screen listed every Component and
+    // could act on none but the first, so an App shaped like this one had no
+    // surface for its job at all — no run list, no Run now, no config of its
+    // own — while `runComponent` would have taken its pair happily.
+    const view = WORKSPACE_SCENARIOS.jobBehindService;
+
+    test('shows the runs of the Component it is showing, not of the first', () => {
+      const markup = workspace(view);
+
+      expect(markup).toContain('Recent runs');
+      expect(markup).toContain('nightly-29154360');
+      // And says whose runs they are. An App with a service and two jobs has
+      // three runtimes, and a card headed only "Recent runs" names none of them.
+      expect(markup).toContain('Output of nightly');
+      expect(markup).toContain('Configuration for nightly');
+      expect(markup).toContain('RETENTION_DAYS');
+    });
+
+    test('offers Run now for that job', () => {
+      // `{kind: 'executions'}` is what renders the control, and it was
+      // unreachable for a job behind a service at any URL.
+      const markup = renderToStaticMarkup(
+        <Workspace view={view} onRunJob={async () => ({ ok: true })} />,
+      );
+      expect(markup).toContain('Run now');
+    });
+
+    test('leads with the selected Component rather than the first', () => {
+      // The eyebrow over the App's name says what is being looked at, and the
+      // hero underneath it is that Component's placement and release.
+      expect(workspace(view)).toContain('job · nightly');
+    });
+
+    test('makes the Components list the selector, and marks the selection', () => {
+      const markup = renderToStaticMarkup(
+        <Workspace view={view} onSelectComponent={() => undefined} />,
+      );
+
+      // Both rows are pressable — the list is what there is to look at, so it
+      // is also how another one is chosen — and exactly one is pressed.
+      expect(markup.split('aria-pressed="true"').length - 1).toBe(1);
+      expect(markup.split('aria-pressed="false"').length - 1).toBe(1);
+      for (const component of view.components) {
+        expect(markup).toContain(component.name);
+      }
+    });
+
+    test('renders no selector where the screen wires no selection', () => {
+      // The same rule the reach, config and auto-deploy controls follow: a
+      // control whose press cannot be answered is worse than no control.
+      expect(workspace(view)).not.toContain('aria-pressed');
+    });
+  });
+
   test('a service states how far its log reaches', () => {
     // §17: `logHistory` "is how far back `since` can honestly reach... so a
     // Target never *lacks* logs; it only has a shorter memory, and the UI

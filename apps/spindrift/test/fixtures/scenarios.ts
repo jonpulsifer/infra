@@ -652,6 +652,77 @@ export const WORKSPACE_SCENARIOS = {
       ],
     },
   },
+
+  /**
+   * The App the workspace could not show: a `job` behind a `service`.
+   *
+   * `componentId` is the job's, so this is the screen after somebody pressed
+   * the second row — the runtime, the config keys and the placement are all
+   * that Component's while the list still holds both. Until a Component could
+   * be selected there was no view of this App in which the job had a run list
+   * or a Run now control at all.
+   */
+  jobBehindService: {
+    app: 'quay',
+    componentId: 'component-quay-nightly',
+    target: 'Kubernetes',
+    vessel: 'driftwood',
+    prerequisitesMet: true,
+    phase: 'LIVE',
+    url: `quay.${APEX}`,
+    urlLive: false,
+    release: 'Deploy 61',
+    autoDeploy: true,
+    components: [
+      {
+        id: 'component-quay-web',
+        name: 'web',
+        kind: 'service',
+        phase: 'LIVE',
+        artifact: 'image · sha256:41ba…c7d0',
+        reach: 'private',
+        auth: 'proxy',
+      },
+      {
+        id: 'component-quay-nightly',
+        name: 'nightly',
+        kind: 'job',
+        phase: 'LIVE',
+        artifact: 'image · sha256:41ba…c7d0',
+        reach: 'none',
+        auth: 'none',
+      },
+    ],
+    // The job's, not the service's — the pair a `Set variable` on this screen
+    // would write to is the pair the screen is showing.
+    configKeys: ['RETENTION_DAYS'],
+    datastores: [],
+    activity: [
+      {
+        kind: 'deploy',
+        title: 'Deploy 61 live',
+        detail: 'CronJob reconciled; nothing triggers it but a person.',
+        when: '3h ago',
+        status: 'ok',
+        deployId: 61,
+        buildId: null,
+      },
+    ],
+    runtime: {
+      kind: 'executions',
+      componentId: 'component-quay-nightly',
+      targetId: 'target-quay-metal',
+      retained: 10,
+      executions: [
+        {
+          name: 'nightly-29154360',
+          outcome: 'passed',
+          detail: '412 rows pruned in 0m11s',
+          when: '3h ago',
+        },
+      ],
+    },
+  },
 } as const satisfies Record<string, WorkspaceView>;
 
 export type WorkspaceScenarioName = keyof typeof WORKSPACE_SCENARIOS;

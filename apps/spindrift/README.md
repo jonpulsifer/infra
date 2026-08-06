@@ -122,6 +122,11 @@ choices made while building them:
   sections; its three newest Build/Deploy checkpoints link to the attempts they
   came from, while the global ledgers retain the complete cursor-paged history.
   A website states that it has no runtime instead of showing an empty log.
+  **The Components list is the selector**, and the screen's per-Component half
+  — the runtime, the config keys, the placement and the release — is whichever
+  row is pressed: `getAppWorkspace` takes that Component by name and answers
+  with the App's first when none is named, which is how an App's job reaches
+  its run list and its Run now control from behind its service.
 - **Create** (`views/apps/new/`) — Source → Component → Place → Configure →
   Review, defaults carrying every step, preflight folded into Review. The
   server-owned draft survives refresh and rejects stale concurrent edits. An
