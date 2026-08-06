@@ -18,3 +18,4 @@ spec:
         selector:
           dnsZones:
             - ${SECRET_DOMAIN}
+            - embarrassing.ca

@@ -20,3 +20,4 @@ spec:
             - ${SECRET_DOMAIN}
             - ${GATEWAY_ZONE}
             - ${SPINDRIFT_DOMAIN}
+            - embarrassing.ca

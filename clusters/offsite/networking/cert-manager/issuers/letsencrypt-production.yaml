@@ -20,3 +20,4 @@ spec:
             - ${CLOUDFLARE_ZONE}
             - ${GATEWAY_ZONE}
             - ${SPINDRIFT_DOMAIN}
+            - embarrassing.ca
