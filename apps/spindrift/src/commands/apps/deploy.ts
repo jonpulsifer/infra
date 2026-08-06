@@ -288,6 +288,11 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         : eqOp(appsTable.name, input.name),
     with: {
       components: {
+        // Oldest first, the same order `getAppWorkspace` reads them in: "the
+        // App's first Component" is what a deploy that names none acts on and
+        // what the screen shows by default, and an unordered read makes those
+        // two the same sentence about different Components.
+        orderBy: (componentsTable, { asc }) => [asc(componentsTable.createdAt)],
         with: {
           deploys: {
             orderBy: (deploysTable, { desc }) => [desc(deploysTable.createdAt)],

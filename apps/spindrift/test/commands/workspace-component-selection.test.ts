@@ -13,9 +13,11 @@
  * own, and every claim below is about the second one being reachable by name.
  */
 import { describe, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import { createApp } from '../../src/commands/create-app.ts';
 import {
   createComponent,
+  deployApp,
   getAppWorkspace,
   runComponent,
 } from '../../src/commands/index.ts';
@@ -33,7 +35,10 @@ import {
 } from '../../src/db/schema.ts';
 import { defaultVesselName, withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
-import { SupplyChainHarness } from '../harness/fakes/supply-chain.ts';
+import {
+  SupplyChainHarness,
+  testSignature,
+} from '../harness/fakes/supply-chain.ts';
 import {
   fixtureManifest,
   insertVessel,
@@ -86,6 +91,7 @@ async function placed(
 
   await ctx.db.insert(componentTargetDesired).values({ componentId, targetId });
 
+  const artifactDigest = `sha256:${'a'.repeat(64)}`;
   const [build] = await ctx.db
     .insert(builds)
     .values({
@@ -93,9 +99,14 @@ async function placed(
       commit: 'abc1234',
       targetShape: 'image',
       artifactType: 'image',
-      artifactDigest: `sha256:${'a'.repeat(64)}`,
+      artifactDigest,
       status: 'SUCCEEDED',
       runner: 'hosted runner',
+      // What §16's gate admits. A Build without provenance and a signature over
+      // its artifact is one no press on Deploy could ever release, so a fixture
+      // carrying none could not state what Deploy does with the selection.
+      verifiedBuildLevel: 2,
+      signature: testSignature(artifactDigest),
     })
     .returning();
 
@@ -357,6 +368,66 @@ describe('an App whose job sits behind its service', () => {
 
     expect(started.ok).toBe(true);
     expect(backend.runsStarted).toEqual(['fake-deploy-nightly']);
+  });
+
+  test('deploys the Component it is showing, not the App’s first', async () => {
+    // The Deploy button sits in the header that states the selection's kind,
+    // phase, placement and release, and it writes an intent for one Component:
+    // `deployApp` takes the App's first unless it is told which, so the id the
+    // screen is showing is the one it has to press with. A press that built
+    // `web` from a screen reading `job · nightly` is the failure.
+    const backend = withARun();
+    const ctx = context(backend);
+    const app = await serviceThenJob(ctx, backend);
+
+    const view = await getAppWorkspace(
+      { name: app.appName, component: 'nightly' },
+      ctx,
+    );
+    expect(view.ok).toBe(true);
+    if (!view.ok) return;
+    const showing = view.value.workspace.componentId;
+    if (showing === undefined) throw new Error('the screen shows no Component');
+
+    const pressed = await deployApp(
+      { name: app.appName, component: showing },
+      ctx,
+    );
+
+    expect(pressed.ok).toBe(true);
+    if (!pressed.ok) return;
+    expect(pressed.value.deployId).not.toBeNull();
+    const [written] = await ctx.db
+      .select()
+      .from(deploys)
+      .where(eq(deploys.id, pressed.value.deployId as number));
+    expect(written?.componentId).toBe(app.nightly.componentId);
+    expect(written?.targetId).toBe(app.nightly.targetId);
+  });
+
+  test('names the same first Component a deploy that names none acts on', async () => {
+    // "The App's first Component" is said twice — by the screen that opens with
+    // no selection and by a deploy that names none — and a row order is not a
+    // fact SQL hands out for free, so both commands order by `createdAt` and
+    // this is the claim that they agree. Two answers here is the same defect
+    // read backwards: the header describing one Component, Deploy pressing
+    // another.
+    const backend = withARun();
+    const ctx = context(backend);
+    const app = await serviceThenJob(ctx, backend);
+
+    const view = await getAppWorkspace({ name: app.appName }, ctx);
+    const pressed = await deployApp({ name: app.appName }, ctx);
+
+    expect(view.ok).toBe(true);
+    expect(pressed.ok).toBe(true);
+    if (!view.ok || !pressed.ok) return;
+    const [written] = await ctx.db
+      .select()
+      .from(deploys)
+      .where(eq(deploys.id, pressed.value.deployId as number));
+    expect(view.value.workspace.componentId).toBe(app.web.componentId);
+    expect(written?.componentId).toBe(app.web.componentId);
   });
 
   test('refuses a Component this App does not have', async () => {

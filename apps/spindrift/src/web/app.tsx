@@ -1184,6 +1184,12 @@ function WorkspaceScreen({
       const result = await command('deployApp', {
         name: state.workspace.appId ?? appName,
         rebuild,
+        // A deploy is a press on one Component, and the header these buttons
+        // sit in reads the selected Component's kind, phase and placement — so
+        // it is that Component's release they start, not the App's first one's.
+        ...(state.workspace.componentId === undefined
+          ? {}
+          : { component: state.workspace.componentId }),
       });
       if (result.ok) {
         // Both arms navigate. §4 makes "a Build started" a different act from
