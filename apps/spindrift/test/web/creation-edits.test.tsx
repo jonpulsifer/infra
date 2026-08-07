@@ -18,14 +18,19 @@ import {
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Draft } from '../../src/domain/creation-draft.ts';
-import { blockersFor } from '../../src/domain/creation-draft.ts';
+import { blockersFor, draftReducer } from '../../src/domain/creation-draft.ts';
 import type { TransportFailure } from '../../src/web/client.ts';
 import {
   deployDraft,
+  LOST_TITLE,
   UNSAVED_TITLE,
 } from '../../src/web/views/apps/new/deploy.ts';
 import type { InspectedScope } from '../../src/web/views/apps/new/detect.ts';
-import { NewApp } from '../../src/web/views/apps/new/index.tsx';
+import {
+  type DetectionTrouble,
+  NewApp,
+  standingTrouble,
+} from '../../src/web/views/apps/new/index.tsx';
 import { WRITE_DELAY } from '../../src/web/views/apps/new/writes.ts';
 import {
   INITIAL_DRAFT,
@@ -93,6 +98,49 @@ describe('Deploy after a save that failed', () => {
     });
 
     expect(outcome).toEqual({ act: 'refused', failure: REFUSED });
+  });
+
+  test('a stale revision is the press to recover from, not one to report', async () => {
+    // The press finds it whenever the last edit had already been saved: the
+    // flush sends nothing, so completing is the first thing carrying the
+    // revision the other tab superseded. Reported, it renders the server's
+    // own "reload it before saving" with no control that reloads, and every
+    // press after it fails identically.
+    const outcome = await deployDraft({
+      flush: async () => {},
+      unsaved: () => null,
+      complete: async () => ({
+        ok: false as const,
+        failure: {
+          code: 'STALE_EDIT',
+          message: 'this creation draft changed in another browser',
+        },
+      }),
+    });
+
+    expect(outcome).toEqual({ act: 'stale' });
+  });
+
+  test('a completion that never answered says the App may exist', async () => {
+    // A dropped connection or a proxy's own error page: `command` throws
+    // rather than resolving, and the press used to leave the button disabled
+    // reading "Creating…" with nothing on screen and no way back.
+    const outcome = await deployDraft({
+      flush: async () => {},
+      unsaved: () => null,
+      complete: async () => {
+        throw new Error(
+          'dispatch of completeCreationDraft answered 502 with no command result',
+        );
+      },
+    });
+
+    expect(outcome.act).toBe('lost');
+    expect(outcome.act === 'lost' && outcome.title).toBe(LOST_TITLE);
+    expect(outcome.act === 'lost' && outcome.failure.message).toContain('502');
+    expect(outcome.act === 'lost' && outcome.failure.message).toContain(
+      'Check Apps',
+    );
   });
 });
 
@@ -295,6 +343,71 @@ describe('a repository nothing could be read from', () => {
     expect(screen.text()).not.toContain('Spindrift stops before Build #1');
 
     screen.unmount();
+  });
+});
+
+/**
+ * How long the sentence a read left stays on screen.
+ *
+ * The blocker above is derived from it, so this is what decides whether a
+ * repository nothing could read keeps Deploy off. Exercised as the decision it
+ * is: the shim has no event system, and every one of these is an edit.
+ */
+describe('the sentence a read left', () => {
+  const unread: DetectionTrouble = {
+    kind: 'unread',
+    repo: 'example/almanac',
+    message: 'GitHub is rate-limiting Spindrift.',
+  };
+
+  test('survives an edit that cannot have made the repository readable', () => {
+    // Both of these used to clear it, and neither reads anything: the
+    // directory field re-reads on blur, and the tile is the same source again.
+    // Cleared, Deploy is enabled on a kind nothing checked in a tree nothing
+    // looked in — which is the whole of what the blocker exists to stop.
+    const typed = draftReducer(repoDraft, {
+      type: 'subpath',
+      subpath: 'apps/a',
+    });
+    const looked = draftReducer(repoDraft, { type: 'entry', entry: 'repo' });
+
+    expect(standingTrouble(typed, unread)).toBe(unread);
+    expect(standingTrouble(looked, unread)).toBe(unread);
+  });
+
+  test('goes when the draft names another repository', () => {
+    const switched = draftReducer(repoDraft, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://vcs.example/example/ledger.git',
+    });
+
+    expect(standingTrouble(switched, unread)).toBeNull();
+  });
+
+  test('and when the source stops being a repository at all', () => {
+    const uploading = draftReducer(repoDraft, {
+      type: 'entry',
+      entry: 'upload',
+    });
+
+    expect(standingTrouble(uploading, unread)).toBeNull();
+  });
+
+  test('one about a directory goes when the directory does', () => {
+    // The other half: this one *was* read, and it is a statement about
+    // `docs` — which the next keystroke in that field makes untrue.
+    const about: DetectionTrouble = {
+      kind: 'unsupported',
+      repo: 'example/almanac',
+      scope: 'docs',
+      message: 'Spindrift does not know how to build docs in example/almanac',
+    };
+    const named = draftReducer(repoDraft, { type: 'subpath', subpath: 'docs' });
+    const moved = draftReducer(named, { type: 'subpath', subpath: 'apps/web' });
+
+    expect(standingTrouble(named, about)).toBe(about);
+    expect(standingTrouble(moved, about)).toBeNull();
   });
 });
 

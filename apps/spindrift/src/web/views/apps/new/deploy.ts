@@ -17,6 +17,11 @@
  * while nobody was looking made Deploy a button that erased the only sentence
  * explaining itself and did nothing. The failure is the answer to the press,
  * and this returns it.
+ *
+ * Which is why the outcomes are five rather than three. Two of the ways the
+ * press can end are not refusals to report: a stale revision is the same
+ * recoverable state a refused save is, and a completion that never answered is
+ * not the server saying no — it is nobody knowing what it did.
  */
 import type {
   ClientResult,
@@ -29,6 +34,9 @@ type Completion = OutputOf<'completeCreationDraft'>;
 /** Said when Deploy is refused by a save nobody watched fail. */
 export const UNSAVED_TITLE = 'Nothing was created — this draft is not saved';
 
+/** Said when the completing command never answered at all. */
+export const LOST_TITLE = 'Spindrift did not hear back';
+
 export type DeployOutcome =
   /** The draft never reached the server, so nothing was completed. */
   | {
@@ -36,8 +44,26 @@ export type DeployOutcome =
       readonly failure: TransportFailure;
       readonly title: string;
     }
+  /**
+   * The draft moved under this tab, so completing it is the same recovery a
+   * refused save is: the revision this tab holds is a version that no longer
+   * exists, and pressing again sends it again. Its own arm because it is the
+   * one refusal the screen can answer rather than report.
+   */
+  | { readonly act: 'stale' }
   /** The completing command itself refused. */
   | { readonly act: 'refused'; readonly failure: TransportFailure }
+  /**
+   * It was sent and nothing came back — a dropped connection, or a proxy
+   * answering with its own error page. Distinct from a refusal because the
+   * server may well have created the App: the only honest thing to say is that
+   * this is unknown, which a button stuck on "Creating…" does not say.
+   */
+  | {
+      readonly act: 'lost';
+      readonly failure: TransportFailure;
+      readonly title: string;
+    }
   /** It ran. The App may still be null — a blocked draft creates nothing. */
   | { readonly act: 'completed'; readonly result: Completion };
 
@@ -53,8 +79,21 @@ export async function deployDraft(steps: {
   if (failure !== null) {
     return { act: 'unsaved', failure, title: UNSAVED_TITLE };
   }
-  const result = await steps.complete();
-  return result.ok
-    ? { act: 'completed', result: result.value }
+  let result: ClientResult<Completion>;
+  try {
+    result = await steps.complete();
+  } catch (cause) {
+    return {
+      act: 'lost',
+      failure: {
+        code: 'INTERNAL',
+        message: `${cause instanceof Error ? cause.message : 'the request did not complete'} — nothing here knows whether the App was created. Check Apps before pressing Deploy again.`,
+      },
+      title: LOST_TITLE,
+    };
+  }
+  if (result.ok) return { act: 'completed', result: result.value };
+  return result.failure.code === 'STALE_EDIT'
+    ? { act: 'stale' }
     : { act: 'refused', failure: result.failure };
 }

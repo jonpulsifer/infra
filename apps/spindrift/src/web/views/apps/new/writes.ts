@@ -27,6 +27,18 @@ export interface DraftWrites<Draft> {
   edit(draft: Draft): void;
   /** Send whatever is scheduled now, and resolve once the chain has drained. */
   flush(): Promise<void>;
+  /**
+   * Drop every edit that has not reached the server yet.
+   *
+   * For the one case where sending them would be worse than losing them: the
+   * draft on screen has been replaced by the server's, so an edit written
+   * against the version before it is not a newer answer, it is an older
+   * document about to be written at the newer revision — and it would land,
+   * because the revision guard is all the server checks. Both the timer and
+   * anything already queued behind the save in flight, since the save that
+   * recovers is itself in that chain.
+   */
+  discard(): void;
 }
 
 /** Long enough to swallow a burst of typing, short enough to feel immediate. */
@@ -52,6 +64,14 @@ export function draftWrites<Draft>({
   let scheduled: { draft: Draft } | null = null;
   let chain = Promise.resolve();
   let inFlight = 0;
+  /**
+   * Which run of edits the queue is on.
+   *
+   * A queued save is a closure the chain has already accepted, so `discard`
+   * cannot reach into it — it moves the count instead, and a save whose count
+   * has been left behind resolves without being sent.
+   */
+  let run = 0;
 
   const send = () => {
     if (timer !== null) {
@@ -60,6 +80,7 @@ export function draftWrites<Draft>({
     }
     if (scheduled === null) return;
     const { draft } = scheduled;
+    const sending = run;
     scheduled = null;
     inFlight += 1;
     onWriting(true);
@@ -67,7 +88,9 @@ export function draftWrites<Draft>({
       inFlight -= 1;
       if (inFlight === 0) onWriting(false);
     };
-    chain = chain.then(() => save(draft)).then(settle, settle);
+    chain = chain
+      .then(() => (sending === run ? save(draft) : undefined))
+      .then(settle, settle);
   };
 
   return {
@@ -79,6 +102,14 @@ export function draftWrites<Draft>({
     async flush() {
       send();
       await chain;
+    },
+    discard() {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      scheduled = null;
+      run += 1;
     },
   };
 }

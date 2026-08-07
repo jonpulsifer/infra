@@ -87,6 +87,23 @@ describe('a burst of edits', () => {
 
     expect(saved).toEqual(['almanac']);
   });
+
+  test('and the flush after a discard sends nothing', async () => {
+    const saved: string[] = [];
+    const writes = draftWrites<string>({
+      save: async (draft) => {
+        saved.push(draft);
+      },
+      onWriting: () => {},
+      delay: 10_000,
+    });
+
+    writes.edit('almanac');
+    writes.discard();
+    await writes.flush();
+
+    expect(saved).toEqual([]);
+  });
 });
 
 describe('two saves', () => {
@@ -114,6 +131,41 @@ describe('two saves', () => {
 
     recorded.release();
     await writes.flush();
+  });
+
+  test('one refused as stale takes the edits behind it with it', async () => {
+    // What the screen's recovery needs. The draft on screen has just been
+    // replaced by the server's, so an edit written against the version that
+    // lost is not a newer answer — it is an older document, and sending it
+    // writes it at the revision just recovered, where the guard accepts it.
+    // The edit is already in the chain by then, because the save that
+    // recovers is the link in front of it.
+    const recorded = recorder();
+    const writes = draftWrites<string>({
+      save: recorded.save,
+      onWriting: () => {},
+      delay: 5,
+    });
+
+    writes.edit('local-a');
+    await tick(15);
+    expect(recorded.saved).toEqual(['local-a']);
+
+    writes.edit('local-ab');
+    await tick(15);
+    writes.discard();
+    recorded.release();
+    await writes.flush();
+
+    expect(recorded.saved).toEqual(['local-a']);
+
+    // And only what was pending: the next edit is an answer about the draft
+    // now on screen, so it saves.
+    writes.edit('recovered-and-edited');
+    await tick(15);
+    recorded.release();
+    await writes.flush();
+    expect(recorded.saved).toEqual(['local-a', 'recovered-and-edited']);
   });
 
   test('a save that throws does not wedge every save after it', async () => {
