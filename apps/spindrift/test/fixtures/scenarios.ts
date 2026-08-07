@@ -826,7 +826,6 @@ export const INITIAL_DRAFT: Draft = {
     { name: 'LOG_LEVEL', supplied: true },
     { name: 'DATABASE_URL', supplied: false },
   ],
-  step: 0,
 };
 
 /**

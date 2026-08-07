@@ -28,27 +28,6 @@ export const ENTRIES = [
   },
 ] as const;
 
-/**
- * The five decisions, as the flow used to walk them.
- *
- * Kept as vocabulary and no longer as a rail. §18 named the sequence Source →
- * Component → Place → Configure → Review, and stories 31 and 32 say what that
- * sequence is *for*: "defaults carrying every step" and "corrections and
- * configuration hidden behind progressive disclosure". Five screens with a
- * Continue button under each is one way to render that, and it turned out to
- * be the way that made every default look like a question.
- *
- * So the decisions still exist, in this order, as the order of the summary
- * rows on one screen. What went away is the walking.
- */
-export const DECISIONS = [
-  'Source',
-  'Component',
-  'Place',
-  'Configure',
-  'Review',
-] as const;
-
 // Exported because §3's requirements are derived from exactly these three, so
 // any command that resolves placement validates them against the same words the
 // draft does.
@@ -201,17 +180,25 @@ export const creationDraftSchema = z
      * statement about one tree.
      */
     scopeByOperator: z.boolean().optional(),
-    /**
-     * Which step of the old rail this draft was left on.
-     *
-     * Optional, unread, and still here: drafts are durable rows, and a strict
-     * schema that dropped the key would refuse every draft saved before the
-     * flow became one screen. It costs a line to keep and a migration to
-     * remove.
-     */
-    step: z.number().int().min(0).optional(),
   })
   .strict();
+
+/**
+ * The same document, read from a stored row.
+ *
+ * Drafts are durable jsonb, so a row written before a key was retired still
+ * carries it — and the strict schema above, which is what a save is validated
+ * against, would refuse the operator's own draft the moment they touched it.
+ * Reading through this drops what is no longer named, so the browser never
+ * receives a key it would hand straight back. That is the whole migration: the
+ * column is jsonb and every retired key was optional.
+ */
+const storedDraftSchema = z.object(creationDraftSchema.shape);
+
+export function storedDraft(draft: Draft): Draft {
+  const parsed = storedDraftSchema.safeParse(draft);
+  return parsed.success ? (parsed.data as Draft) : draft;
+}
 
 export type Draft = z.infer<typeof creationDraftSchema>;
 export type EntryId = Draft['entry'];
