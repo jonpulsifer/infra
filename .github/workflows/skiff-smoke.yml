@@ -28,9 +28,13 @@ jobs:
     steps:
       - name: The store came from the host, warm
         run: |
-          nix-store -q --requisites /run/current-system | wc -l
-          echo "store entries visible: $(ls /nix/store | wc -l)"
-          test "$(ls /nix/store | wc -l)" -gt 1000
+          # Not through a pipe: a pipeline reports the last command's status,
+          # which would hide nix-store failing outright.
+          registered=$(nix-store -q --requisites /run/current-system | wc -l)
+          visible=$(ls /nix/store | wc -l)
+          echo "registered: $registered   visible: $visible"
+          test "$registered" -gt 100
+          test "$visible" -gt 1000
 
       - name: The overlay takes writes
         run: nix-store --add /etc/hostname

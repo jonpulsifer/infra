@@ -166,15 +166,10 @@ in
       "run-bosun.mount"
     ];
     wants = [ "network-online.target" ];
-    path = with pkgs; [
-      bash
-      coreutils
-      curl
-      git
-      gnutar
-      gzip
-      docker
-    ];
+    # A job gets what a login shell on this machine would get. Without the
+    # system profile a hull built around a warm /nix/store hands jobs no `nix`
+    # to use it with.
+    path = [ "/run/current-system/sw" ];
     environment = {
       RUNNER_ROOT = runnerRoot;
       HOME = runnerRoot;
