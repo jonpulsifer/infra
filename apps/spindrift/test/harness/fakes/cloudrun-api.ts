@@ -935,14 +935,27 @@ function notFound(): unknown {
  * service is off — the human message is the part that names one, and no test
  * reads it.
  */
-export function serviceDisabled(): { status: number; body: unknown } {
+export function serviceDisabled(consumer?: string): {
+  status: number;
+  body: unknown;
+} {
   return {
     status: 403,
     body: {
       error: {
         message: 'this API has not been used in this project',
         status: 'PERMISSION_DENIED',
-        details: [{ '@type': ERROR_INFO, reason: 'SERVICE_DISABLED' }],
+        details: [
+          {
+            '@type': ERROR_INFO,
+            reason: 'SERVICE_DISABLED',
+            // ErrorInfo names the project whose switch is off — the call's
+            // consumer, which is not necessarily the project in the URL.
+            ...(consumer === undefined
+              ? {}
+              : { metadata: { consumer: `projects/${consumer}` } }),
+          },
+        ],
       },
     },
   };

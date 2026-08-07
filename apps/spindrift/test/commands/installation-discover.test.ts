@@ -196,6 +196,36 @@ describe('a refusal is never an empty answer', () => {
     expect(fact.reason).not.toContain('may not list');
   });
 
+  test('a disabled API names the consumer its ErrorInfo names, not the URL', async () => {
+    // The live shape this pins: Cloud KMS switched on in the project being
+    // read, switched off in the project the federated token bills. GCP
+    // refuses the call over the *consumer's* switch and says so in
+    // ErrorInfo; a sentence echoing the URL's project sends an operator to
+    // the console to verify an API that was never the problem.
+    const { context } = installation({
+      projects: [PROJECT],
+      refuse: {
+        keyManagement: {
+          status: 403,
+          reason: 'SERVICE_DISABLED',
+          consumer: 'example-billing',
+          message: 'Cloud KMS API has not been used in project example-billing',
+        },
+      },
+    });
+
+    const fact = factAt(
+      await discover(context, { project: PROJECT, kmsLocation: 'a-region' }),
+      'supplyChain',
+      'signer',
+    );
+
+    expect(fact.kind).toBe('unavailable');
+    if (fact.kind !== 'unavailable') return;
+    expect(fact.reason).toContain('not enabled in example-billing');
+    expect(fact.reason).not.toContain(`not enabled in ${PROJECT}`);
+  });
+
   test('a project with no buckets is found, with none', async () => {
     const { context } = installation({
       projects: [PROJECT],

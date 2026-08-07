@@ -338,7 +338,11 @@ function reasonFor(
     failure.reason === SERVICE_DISABLED ||
     failure.body.includes(SERVICE_DISABLED)
   ) {
-    return `the ${subject.service} API is not enabled, so ${subject.scope} could not be listed`;
+    // The refusal's ErrorInfo names the project whose switch is off — the
+    // federated token's own, routinely not the one the call was aimed at.
+    return failure.consumer === null
+      ? `the ${subject.service} API is not enabled, so ${subject.scope} could not be listed`
+      : `the ${subject.service} API is not enabled in ${failure.consumer} — the project this installation's calls bill to — so ${subject.scope} could not be listed`;
   }
   if (failure.status === 401 || failure.status === 403) {
     return `the federated identity may not list ${subject.scope}: ${failure.message}`;

@@ -91,7 +91,7 @@ export function cloudChecklist(
       PLATFORM_API: {
         met: false,
         assessed: true,
-        detail: `the ${subject.service} API is not enabled on ${subject.project}`,
+        detail: `the ${subject.service} API is not enabled on ${disabledProject(probe.consumer, subject)}`,
       },
       OIDC_FEDERATION: notAssessed(subject.service),
       VESSEL: notAssessed(subject.service),
@@ -162,6 +162,17 @@ export function cloudSurfaceProbe(
     probe.reason === SERVICE_DISABLED ||
     probe.body.includes(SERVICE_DISABLED)
   ) {
+    // Only when the switch that is off is this project's. A refusal whose
+    // ErrorInfo names a *different* consumer — the federated token's own
+    // project — establishes nothing about what this vessel carries, and
+    // reading it as an absence would delete a Target over the installation's
+    // own misconfiguration.
+    if (probe.consumer !== null && probe.consumer !== subject.project) {
+      return {
+        kind: 'undetermined',
+        detail: `the ${subject.service} API is not enabled on ${probe.consumer}, the project this installation’s calls bill to — nothing was established about ${subject.project}`,
+      };
+    }
     return {
       kind: 'absent',
       detail: `the ${subject.service} API is not enabled on ${subject.project}, so it carries no ${subject.service} surface`,
@@ -171,6 +182,24 @@ export function cloudSurfaceProbe(
     kind: 'undetermined',
     detail: `${subject.service} answered ${probe.status}: ${probe.message}`,
   };
+}
+
+/**
+ * The project whose switch the refusal is actually about.
+ *
+ * GCP refuses a call whose *consumer* — the project the federated token bills
+ * — has the service off, whatever project the URL names, and its ErrorInfo
+ * names that consumer. Echoing `subject.project` when the two differ sends an
+ * operator to the console to verify an API that was never the problem.
+ */
+function disabledProject(
+  consumer: string | null,
+  subject: CloudChecklistSubject,
+): string {
+  if (consumer === null || consumer === subject.project) {
+    return subject.project;
+  }
+  return `${consumer} — the project this installation’s calls bill to, not ${subject.project}`;
 }
 
 /** Every item unmet, with one sentence — the Target nothing is known about. */
