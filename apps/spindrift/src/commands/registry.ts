@@ -147,6 +147,10 @@ import {
 import { listTargets, listTargetsInput } from './targets/list.ts';
 import { probeCluster, probeClusterInput } from './targets/probe.ts';
 import {
+  openPrerequisiteRemediation,
+  openPrerequisiteRemediationInput,
+} from './targets/remediate.ts';
+import {
   type Command,
   type CommandContext,
   type CommandIssue,
@@ -255,6 +259,10 @@ export const commandRegistry = {
     handler: inspectRepository,
   },
   probeCluster: { input: probeClusterInput, handler: probeCluster },
+  openPrerequisiteRemediation: {
+    input: openPrerequisiteRemediationInput,
+    handler: openPrerequisiteRemediation,
+  },
   connectTarget: { input: connectTargetInput, handler: connectTarget },
   disconnectTarget: {
     input: disconnectTargetInput,
