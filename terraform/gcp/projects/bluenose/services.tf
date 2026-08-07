@@ -6,6 +6,11 @@ resource "google_project_service" "service" {
     # token bills its quota here — and GCP refuses a call whose consumer
     # project has not enabled the API, whatever project the URL names.
     "cloudbuild.googleapis.com",
+    # The signer keys live in trusted-builds, but the controller's federated
+    # token bills its quota here — same rule as cloudbuild above. Without this,
+    # the home vessel's SIGNER_KEY probe answers SERVICE_DISABLED for a keyring
+    # that exists and is listable, because the refusal names the consumer.
+    "cloudkms.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     # A Cloud Run Job holds no cron expression, so a Component that declares a
     # schedule is a Cloud Scheduler job calling `jobs.run` in front of it.

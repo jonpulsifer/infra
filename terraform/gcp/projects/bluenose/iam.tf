@@ -51,6 +51,25 @@ resource "google_project_iam_member" "spindrift_runtime_secret_reader" {
   member  = google_service_account.spindrift_runtime.member
 }
 
+# Connect-time discovery offers this project's buckets as staging candidates,
+# and the home vessel's SOURCE_BUCKET probe asks the same question. Both are
+# `storage.buckets.list` and nothing else — object access stays per-bucket
+# (`storage.tf` grants it on the one bucket Spindrift stages into), and no
+# predefined role carries the list permission without dragging object reads
+# along, so this is a custom role rather than `roles/viewer`.
+resource "google_project_iam_custom_role" "bucket_lister" {
+  role_id     = "spindriftBucketLister"
+  title       = "Spindrift bucket lister"
+  description = "List the project's buckets, nothing else"
+  permissions = ["storage.buckets.list"]
+}
+
+resource "google_project_iam_member" "spindrift_bucket_lister" {
+  project = local.project
+  role    = google_project_iam_custom_role.bucket_lister.id
+  member  = google_service_account.spindrift_controller.member
+}
+
 locals {
   spindrift_project_roles = toset([
     "roles/cloudsql.admin",
