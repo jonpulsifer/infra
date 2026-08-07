@@ -33,7 +33,7 @@ import {
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Draft } from '../../src/domain/creation-draft.ts';
-import { blockersFor } from '../../src/domain/creation-draft.ts';
+import { blockersFor, draftReducer } from '../../src/domain/creation-draft.ts';
 import type { ComponentKind } from '../../src/domain/desired-state.ts';
 import {
   type InspectedScope,
@@ -381,6 +381,36 @@ describe('a draft somebody already answered', () => {
     expect(saved).toEqual([]);
 
     screen.unmount();
+  });
+
+  test('but choosing another repository is not a reopen', async () => {
+    // The guard is durable state, which is what makes it survive the reload it
+    // exists for — and what made it survive the picker. A second repository
+    // arrived already answered by the first one's read, so nothing was applied
+    // to it: the kind, the sentence and the ruled-out kinds stayed the previous
+    // repository's, with no blocker and Deploy enabled.
+    const answered = draftReducer(clean, {
+      type: 'detect',
+      scope: 'apps/api',
+      kind: 'job',
+      reason: 'a job is declared in spindrift.yaml',
+      unavailable: { website: 'no static output is emitted here' },
+    });
+    const switched = draftReducer(answered, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://github.com/example/ledger.git',
+    });
+    const found = [detected('.', 'website', 'Astro — `astro` is a dependency')];
+
+    expect(
+      outcomeOf(switched, {
+        fullName: 'example/ledger',
+        scope: undefined,
+        found,
+        merged: found,
+      }).act,
+    ).toBe('detect');
   });
 
   test('a reason read elsewhere says which directory it is about', async () => {

@@ -264,6 +264,24 @@ export interface CreationDraftView {
   readonly ready: boolean;
 }
 
+/**
+ * What a draft claims about a repository nothing has read.
+ *
+ * One statement of it, because two states mean it: a draft that has just been
+ * created, and a draft that has just been pointed at another repository. Both
+ * have read nothing about the tree they name, and `scope: undefined` is what
+ * says so — it is the flag the browser's read consults before proposing.
+ */
+function openingDetection(): Detection {
+  return {
+    kind: 'service',
+    reason:
+      'the default is a long-running service until detection says otherwise',
+    available: ['service', 'website', 'job'],
+    unavailable: {},
+  };
+}
+
 /** Defaults are selected from current persisted installation capabilities. */
 export function initialCreationDraft(input: {
   /** The repository to open on, with the clone URL its host serves it at. */
@@ -299,13 +317,7 @@ export function initialCreationDraft(input: {
         },
     appName: name,
     componentName: 'web',
-    detection: {
-      kind: 'service',
-      reason:
-        'the default is a long-running service until detection says otherwise',
-      available: ['service', 'website', 'job'],
-      unavailable: {},
-    },
+    detection: openingDetection(),
     kind: 'service',
     vessel: {
       name: input.vessel,
@@ -444,6 +456,12 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
         // The directory went back to the root with the tree it named, so
         // whoever typed the old one has not typed this one.
         scopeByOperator: undefined,
+        // And so did the read. The sentence, the ruled-out kinds and the scope
+        // are all statements about the previous repository, and the scope is
+        // what makes a draft count as answered — carried over, the read of the
+        // repository just chosen finds the question already settled and applies
+        // nothing, leaving the rows below describing somewhere else.
+        detection: openingDetection(),
       };
     }
     // Typing a directory is the operator answering where the App is, so it

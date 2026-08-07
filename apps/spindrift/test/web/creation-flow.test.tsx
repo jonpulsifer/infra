@@ -450,6 +450,30 @@ describe('the draft reducer', () => {
     expect(next.scopeByOperator).toBeUndefined();
   });
 
+  test('another repository is another read, so the detection resets', () => {
+    // The scope is what `outcomeOf` reads to decide a draft has been answered.
+    // Carried across a repository change, the read of the repository just
+    // chosen applies nothing and the rows below keep describing the previous
+    // one — a kind, a sentence, and ruled-out kinds from somewhere else.
+    const read = draftReducer(INITIAL_DRAFT, {
+      type: 'detect',
+      scope: 'apps/api',
+      kind: 'job',
+      reason: 'a job is declared in spindrift.yaml',
+      unavailable: { website: 'no static output is emitted here' },
+    });
+    const next = draftReducer(read, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://github.com/example/ledger.git',
+    });
+
+    expect(next.detection.scope).toBeUndefined();
+    expect(next.detection.unavailable).toEqual({});
+    expect(next.detection.available).toEqual(['service', 'website', 'job']);
+    expect(next.detection.reason).not.toContain('spindrift.yaml');
+  });
+
   test('a directory the operator typed is recorded as theirs', () => {
     // Durable rather than session state, because the guard it feeds is about
     // the read that runs when a saved draft is reopened.
