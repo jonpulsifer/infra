@@ -8,7 +8,7 @@ resource "google_firebase_project" "spindrift" {
   project  = local.project
 
   depends_on = [
-    google_project_service.service["firebase.googleapis.com"],
+    module.vessel,
     module.firebase_project_policies,
   ]
 }

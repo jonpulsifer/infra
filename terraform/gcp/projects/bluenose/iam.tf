@@ -1,15 +1,14 @@
-resource "google_service_account" "spindrift_runtime" {
-  account_id   = "spindrift-runtime"
-  display_name = "Spindrift workload runtime"
-
-  depends_on = [google_project_service.service["iam.googleapis.com"]]
-}
+# The identities every vessel repeats — the runtime service account, the
+# controller's project roles, the bucket-lister custom role — live in the
+# spindrift-vessel module (vessel.tf). What stays here is home-vessel-only:
+# the controller service account itself, its federation bindings, and the
+# clusters' read path into this vessel's Secret Manager.
 
 resource "google_service_account" "spindrift_controller" {
   account_id   = "spindrift-controller"
   display_name = "Spindrift platform controller"
 
-  depends_on = [google_project_service.service["iam.googleapis.com"]]
+  depends_on = [module.vessel]
 }
 
 resource "google_service_account_iam_member" "spindrift_controller_workload_identity" {
@@ -32,46 +31,13 @@ resource "google_service_account_iam_member" "spindrift_controller_token_creator
   member             = local.spindrift_principal
 }
 
-# Attaching an identity to something is a separate permission from creating the
-# something. The controller writes both a Cloud Run revision and a Cloud
-# Scheduler job that authenticate as the runtime account, and neither call is
-# admitted without `iam.serviceAccounts.actAs` on it.
-resource "google_service_account_iam_member" "spindrift_act_as_runtime" {
-  service_account_id = google_service_account.spindrift_runtime.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = google_service_account.spindrift_controller.member
-}
-
-# Cloud Run resolves a revision's secret environment variables as the runtime
-# service account. Spindrift owns the dynamically named secrets in this project,
-# so the runtime needs a project-wide read path that includes future secrets.
-resource "google_project_iam_member" "spindrift_runtime_secret_reader" {
-  project = local.project
-  role    = "roles/secretmanager.secretAccessor"
-  member  = google_service_account.spindrift_runtime.member
-}
-
-# Connect-time discovery offers this project's buckets as staging candidates,
-# and the home vessel's SOURCE_BUCKET probe asks the same question. Both are
-# `storage.buckets.list` and nothing else — object access stays per-bucket
-# (`storage.tf` grants it on the one bucket Spindrift stages into), and no
-# predefined role carries the list permission without dragging object reads
-# along, so this is a custom role rather than `roles/viewer`.
-resource "google_project_iam_custom_role" "bucket_lister" {
-  role_id     = "spindriftBucketLister"
-  title       = "Spindrift bucket lister"
-  description = "List the project's buckets, nothing else"
-  permissions = ["storage.buckets.list"]
-}
-
-resource "google_project_iam_member" "spindrift_bucket_lister" {
-  project = local.project
-  role    = google_project_iam_custom_role.bucket_lister.id
-  member  = google_service_account.spindrift_controller.member
-}
-
+# The roles the controller holds on this vessel. Declared in this file rather
+# than beside the module call for the reason services.tf gives: Spindrift's
+# generated remediation stanzas append `google_project_iam_member` resources
+# to a vessel root's iam.tf and dedupe by grepping it for the quoted role
+# string.
 locals {
-  spindrift_project_roles = toset([
+  spindrift_project_roles = [
     "roles/cloudsql.admin",
     # A Cloud Run Job carries no cron expression, so a scheduled Component is a
     # Cloud Scheduler job the controller keeps beside the Job.
@@ -90,7 +56,7 @@ locals {
     "roles/run.admin",
     "roles/secretmanager.admin",
     "roles/serviceusage.serviceUsageConsumer",
-  ])
+  ]
 }
 
 # `roles/run.invoker` is deliberately absent from the list above, and the
@@ -102,14 +68,6 @@ locals {
 # Granting it here instead would hand the controller the right to invoke every
 # Cloud Run resource in the project, for the life of the project, to save a
 # per-Job call it already makes.
-
-resource "google_project_iam_member" "spindrift" {
-  for_each = local.spindrift_project_roles
-
-  project = local.project
-  role    = each.key
-  member  = google_service_account.spindrift_controller.member
-}
 
 # The delivery half of the same store. Spindrift writes a config item here with
 # `roles/secretmanager.admin` above; the Target the Component runs on fetches it

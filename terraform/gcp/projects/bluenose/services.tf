@@ -1,5 +1,10 @@
-resource "google_project_service" "service" {
-  for_each = toset([
+# APIs enabled on this vessel, applied through the spindrift-vessel module.
+# Declared in this file rather than beside the module call: Spindrift's
+# generated remediation stanzas append `google_project_service` resources to a
+# vessel root's services.tf and dedupe by grepping it for the quoted service
+# string, so the list has to live where the generator looks.
+locals {
+  vessel_services = [
     "artifactregistry.googleapis.com",
     "binaryauthorization.googleapis.com",
     # The build submit targets trusted-builds, but the controller's federated
@@ -30,9 +35,5 @@ resource "google_project_service" "service" {
     "serviceusage.googleapis.com",
     "sqladmin.googleapis.com",
     "storage.googleapis.com",
-  ])
-
-  project            = local.project
-  service            = each.key
-  disable_on_destroy = false
+  ]
 }
