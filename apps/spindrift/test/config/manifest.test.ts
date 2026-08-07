@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {
+  controlPlaneVesselOf,
+  homeVesselOf,
+  homeVesselProjectOf,
+  isDeclaredInstallationVessel,
+  sharedServicesOf,
+} from '../../src/config/manifest.schema.ts';
+import {
   assertTrustedGatewayBoundary,
   loadManifest,
   MANIFEST_INLINE_VAR,
@@ -16,7 +23,7 @@ const fixtureText = await Bun.file(FIXTURE).text();
 describe('the fixture installation', () => {
   test('boots clean from a file', async () => {
     const manifest = await loadManifest({ [MANIFEST_PATH_VAR]: FIXTURE });
-    expect(manifest.installation).toBe('example');
+    expect(manifest.installation.name).toBe('example');
     expect(manifest.auth.gateway).toBeNull();
     expect(manifest.dns.zones.private).toBe('apps.example.test');
     expect(manifest.secretStore.adapter).toBe('gcp-secret-manager');
@@ -29,15 +36,15 @@ describe('the fixture installation', () => {
 
   test('boots clean from an inline document', async () => {
     const manifest = await loadManifest({ [MANIFEST_INLINE_VAR]: fixtureText });
-    expect(manifest.installation).toBe('example');
+    expect(manifest.installation.name).toBe('example');
   });
 
   test('is read from the path when both are set', async () => {
     const manifest = await loadManifest({
       [MANIFEST_PATH_VAR]: FIXTURE,
-      [MANIFEST_INLINE_VAR]: 'installation: inline',
+      [MANIFEST_INLINE_VAR]: 'installation:\n  name: inline',
     });
-    expect(manifest.installation).toBe('example');
+    expect(manifest.installation.name).toBe('example');
   });
 });
 
@@ -94,7 +101,7 @@ describe('boot fails loudly', () => {
     }
     expect(message).toContain('dns');
     expect(message).toContain('auth');
-    expect(message).toContain('cloud');
+    expect(message).toContain('vessels');
     expect(message).toContain('charts');
     expect(message).toContain('github');
     expect(message).toContain('secretStore');
@@ -102,10 +109,7 @@ describe('boot fails loudly', () => {
   });
 
   test('on a required key that is present but empty', () => {
-    const document = fixtureText.replace(
-      'installation: example',
-      "installation: ''",
-    );
+    const document = fixtureText.replace('name: example', "name: ''");
     expect(() => parseManifest(document, 'test')).toThrow(/installation/);
   });
 
@@ -239,5 +243,95 @@ describe('the reusable build workflow ref', () => {
       'test',
     );
     expect(manifest.github.buildWorkflow).toBeNull();
+  });
+});
+
+/**
+ * The two pointers, resolved the way a Target's `vessel` already is.
+ *
+ * Both are scalars naming a declared vessel, so cardinality comes free and the
+ * only thing left to check is that the reference resolves — which is the same
+ * document-level rule `targets[].vessel` goes through, and the same reason:
+ * nothing below has anything honest to do with a name that is not there.
+ */
+describe('the vessels this installation is built on', () => {
+  const fixture = Bun.YAML.parse(fixtureText) as Record<string, unknown>;
+
+  function withInstallation(
+    installation: Record<string, unknown>,
+    vessels: unknown = fixture.vessels,
+  ) {
+    return JSON.stringify({ ...fixture, installation, vessels });
+  }
+
+  test('a pointer naming nothing declared is refused, by path', () => {
+    expect(() =>
+      parseManifest(
+        withInstallation({
+          name: 'example',
+          controlPlaneVessel: 'nowhere',
+          homeVessel: 'cloud',
+        }),
+        'test',
+      ),
+    ).toThrow(/installation.controlPlaneVessel: no vessel named nowhere/);
+  });
+
+  test('the home vessel must declare the shared services', () => {
+    // `cluster` declares no `shared`, so pointing `homeVessel` at it leaves the
+    // source bucket, the store container and the artifacts project unstated —
+    // three values with no second place to read them from.
+    expect(() =>
+      parseManifest(
+        withInstallation({
+          name: 'example',
+          controlPlaneVessel: 'cluster',
+          homeVessel: 'cluster',
+        }),
+        'test',
+      ),
+    ).toThrow(/must declare its shared services/);
+  });
+
+  test('no other vessel may declare them', () => {
+    // The other half, and the one that keeps the read total: two vessels
+    // carrying a `sourceBucket` is two answers with nothing to choose between.
+    const vessels = (fixture.vessels as Record<string, unknown>[]).map(
+      (vessel) => ({
+        ...vessel,
+        shared: {
+          sourceBucket: 'a-bucket',
+          artifactsProject: 'a-project',
+          secretStoreContainer: 'a-container',
+        },
+      }),
+    );
+    expect(() =>
+      parseManifest(
+        withInstallation(
+          fixture.installation as Record<string, unknown>,
+          vessels,
+        ),
+        'test',
+      ),
+    ).toThrow(/may declare shared services/);
+  });
+
+  test('what a reader gets is the home vessel’s, resolved once', async () => {
+    const manifest = await loadManifest({ [MANIFEST_PATH_VAR]: FIXTURE });
+    expect(homeVesselOf(manifest).name).toBe('cloud');
+    expect(controlPlaneVesselOf(manifest).name).toBe('cluster');
+    expect(sharedServicesOf(manifest)).toEqual({
+      sourceBucket: 'example-source-bucket',
+      artifactsProject: 'example-artifacts',
+      secretStoreContainer: 'example-secrets',
+    });
+    // Absent rather than a throw: this fixture seeds identity and rank and
+    // leaves how to reach each boundary to the connect act.
+    expect(homeVesselProjectOf(manifest)).toBeNull();
+    expect(isDeclaredInstallationVessel(manifest, 'cloud')).toBe(true);
+    expect(isDeclaredInstallationVessel(manifest, 'somewhere-else')).toBe(
+      false,
+    );
   });
 });

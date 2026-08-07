@@ -29,6 +29,7 @@ import {
   BUILD_ATTEMPT,
   DEPLOY_SCENARIOS,
   TARGET_LIST,
+  VESSEL_LIST,
   WORKSPACE_SCENARIOS,
 } from '../fixtures/scenarios.ts';
 
@@ -908,6 +909,7 @@ describe('the Targets surface', () => {
       <TargetList
         targets={TARGET_LIST}
         pending={pending}
+        vessels={VESSEL_LIST}
         connecting={false}
         error={null}
         onConnect={() => undefined}
@@ -936,6 +938,7 @@ describe('the Targets surface', () => {
       <TargetList
         targets={TARGET_LIST}
         pending={[]}
+        vessels={VESSEL_LIST}
         connecting={false}
         error={null}
         onConnect={() => undefined}

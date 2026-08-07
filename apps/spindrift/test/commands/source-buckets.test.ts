@@ -14,6 +14,7 @@ import type {
   AdapterRegistry,
   CommandContext,
 } from '../../src/commands/types.ts';
+import { sharedServicesOf } from '../../src/config/manifest.schema.ts';
 import {
   readStoredManifest,
   writeStoredManifest,
@@ -99,9 +100,21 @@ async function context(bucketStatus = 200): Promise<CommandContext> {
   };
 }
 
+/**
+ * The declared list and the one staging picks, read back from the row.
+ *
+ * Two keys from two places now, and deliberately asserted together: the list is
+ * `sources.buckets` and the choice is the home vessel's `shared.sourceBucket`,
+ * so a write that moved one without the other is a manifest whose staging
+ * bucket is not among its buckets.
+ */
 async function storedBuckets() {
   const stored = await readStoredManifest(database().db);
-  return stored?.sources;
+  if (stored === null) return null;
+  return {
+    buckets: stored.sources.buckets,
+    defaultBucket: sharedServicesOf(stored).sourceBucket,
+  };
 }
 
 describe('declaring a source bucket', () => {

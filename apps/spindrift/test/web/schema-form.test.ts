@@ -115,9 +115,12 @@ describe('what a field knows about itself', () => {
   });
 
   test('an optional key is marked optional', () => {
-    const sources = field(fields, 'sources').node;
-    if (sources.kind !== 'object') throw new Error('sources is not an object');
-    expect(field(sources.fields, 'defaultBucket').optional).toBe(true);
+    const supplyChain = field(fields, 'supplyChain').node;
+    if (supplyChain.kind !== 'object') {
+      throw new Error('supplyChain is not an object');
+    }
+    expect(field(supplyChain.fields, 'attestor').optional).toBe(true);
+    expect(field(supplyChain.fields, 'signer').optional).toBe(false);
   });
 
   test('an enum becomes its own members, read from the schema', () => {

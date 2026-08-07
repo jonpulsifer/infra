@@ -65,17 +65,27 @@ export interface DiscoveredCandidate {
    * What is written at the fact's path when this candidate is chosen, verbatim.
    *
    * Carried rather than derived because the two are not always the same shape:
-   * `sources.buckets` is a list and takes `[name]`, while `sources.defaultBucket`
-   * takes the same name bare. A screen deriving that would be a screen with an
-   * opinion about the schema, which is exactly what it must not have.
+   * `sources.buckets` is a list and takes `[name]`, while the home vessel's
+   * `shared.sourceBucket` takes the same name bare. A screen deriving that
+   * would be a screen with an opinion about the schema, which is exactly what
+   * it must not have.
    */
   readonly value: unknown;
 }
 
 /** One manifest path, and what discovery could say about it. */
 export type DiscoveredFact = {
-  /** Where the chosen value belongs, as `forms/document.ts` addresses it. */
-  readonly path: readonly string[];
+  /**
+   * Where the chosen value belongs, as `forms/document.ts` addresses it.
+   *
+   * Numbers as well as keys, because three of these facts are properties of one
+   * *vessel* rather than of a top-level block: the home vessel is an entry in
+   * `vessels`, and its index is how a document addresses it. `withValueAt`
+   * already distinguishes the two — a numeric step indexes an array and a
+   * string step keys an object — so this is the path type that layer has, not a
+   * second one beside it.
+   */
+  readonly path: readonly (string | number)[];
 } & Discovered<DiscoveredCandidate>;
 
 export interface DiscoverInstallationFactsResult {
@@ -138,23 +148,30 @@ export const discoverInstallationFacts: Command<
       : signingKeysIn(discovery, project, kmsLocation),
   ]);
 
-  const suggestedVessel = homeVesselOf(context.manifest.cloud.federation);
+  const suggestedVessel = credentialProject(context.manifest.cloud.federation);
+  // Three of the five facts are the home vessel's own properties, so they are
+  // addressed through its position in `vessels`. Non-negative because the
+  // document-level refinement refuses a manifest whose `homeVessel` names
+  // nothing declared, so a validated one always resolves.
+  const home = context.manifest.vessels.findIndex(
+    (vessel) => vessel.name === context.manifest.installation.homeVessel,
+  );
 
   return ok({
     facts: [
       withSuggestion(
-        mapped(['cloud', 'homeVesselProject'], projects, plain),
+        mapped(['vessels', home, 'location', 'project'], projects, plain),
         suggestedVessel,
       ),
-      mapped(['cloud', 'artifactsProject'], projects, plain),
+      mapped(['vessels', home, 'shared', 'artifactsProject'], projects, plain),
       // The same one read, answered against both keys: a bucket chosen for one
-      // and not the other leaves a manifest whose default is not among its
-      // buckets, which validates and then stages nowhere.
+      // and not the other leaves a manifest whose staging bucket is not among
+      // its buckets, which validates and then stages nowhere.
       mapped(['sources', 'buckets'], buckets, (name) => ({
         label: name,
         value: [name],
       })),
-      mapped(['sources', 'defaultBucket'], buckets, plain),
+      mapped(['vessels', home, 'shared', 'sourceBucket'], buckets, plain),
       mapped(['supplyChain', 'signer'], signers, plain),
     ],
   });
@@ -207,7 +224,7 @@ async function signingKeysIn(
 
 /** One read, against one manifest path, in whichever arm it came back in. */
 function mapped(
-  path: readonly string[],
+  path: readonly (string | number)[],
   discovered: Discovered<string>,
   to: (value: string) => DiscoveredCandidate,
 ): DiscoveredFact {
@@ -254,13 +271,13 @@ function withSuggestion(
 }
 
 /**
- * The home vessel this installation's own identity lives in, if it says.
+ * The project this installation's own identity lives in, if the credential says.
  *
  * Labelled with its provenance, not with the bare id: what is written is the
  * project, but what is read is where the answer came from — this deployment's
  * own credential rather than anything the cloud was asked.
  */
-function homeVesselOf(
+function credentialProject(
   federation: FederationConfig,
 ): DiscoveredCandidate | null {
   const url = federation.impersonationUrl;

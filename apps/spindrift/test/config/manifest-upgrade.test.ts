@@ -92,7 +92,15 @@ describe('every stored manifest this project has ever written', () => {
     // The document that was stored is the document that was loaded. If a schema
     // change made this row unreadable, `installation` would read `example` —
     // the declaration's — and everything the operator configured would be gone.
-    expect(loaded.installation).toBe(document.installation as string);
+    // The `installation` block on the row, whatever shape the snapshot wrote
+    // it in: a document from before the pointers existed carried the label
+    // bare, and the upgrade is what turns it into the block with the two
+    // vessels named beside it.
+    expect(loaded.installation.name).toBe(
+      typeof document.installation === 'string'
+        ? document.installation
+        : (document.installation as { name: string }).name,
+    );
     expect(warnings.filter((message) => message.includes('re-seeded'))).toEqual(
       [],
     );
@@ -160,6 +168,15 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
         // taking one would be the bug the vessel exists to prevent.
         servedHosts: ['hosting.example.test', 'run.example.test'],
         reachableRegistries: ['mirror.example.test'],
+        // The four keys that described this boundary without saying so.
+        // `cloud.homeVesselProject` named `example-home`, which was never a
+        // declared vessel, so the first cloud boundary takes the role rather
+        // than a second one being minted out of the string.
+        shared: {
+          sourceBucket: 'example-source-bucket',
+          artifactsProject: 'example-artifacts',
+          secretStoreContainer: 'example-secrets',
+        },
       },
     ]);
   });
@@ -277,10 +294,101 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('is a no-op on a document that already declares them', () => {
-    // `02` now upgrades too — `dropTargetNames` still takes its constructed
-    // `name` off every entry. `03` is the shape with neither gap, so this is
-    // where "already current" moved.
-    const current = snapshot('03-target-is-vessel-and-surface.yaml');
+    // `03` now upgrades too — it still states the home vessel's properties as
+    // four loose keys. `04` is the shape with none of the three gaps, so this
+    // is where "already current" moved.
+    const current = snapshot('04-installation-home-vessel.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
+  });
+});
+
+/**
+ * The four loose strings, collapsed onto the boundary they were describing.
+ *
+ * The hazard the upgrade removes is not that the old document was unreadable —
+ * it is that nothing said `cloud.homeVesselProject`, `cloud.artifactsProject`,
+ * `sources.defaultBucket` and `secretStore.container` were four properties of
+ * one place, so nothing noticed when they stopped being.
+ */
+describe('the two vessels an installation is built on, recovered once', () => {
+  test('the home vessel is the boundary the old project id named', () => {
+    // `03` names `example-home`, which no vessel declares, so the first cloud
+    // boundary takes the role. Minting a vessel out of the string would be
+    // recovering a boundary from a name, which is what `vessels` exists to stop.
+    const upgraded = upgradeManifestDocument(
+      snapshot('03-target-is-vessel-and-surface.yaml'),
+    ) as {
+      installation: {
+        name: string;
+        controlPlaneVessel: string;
+        homeVessel: string;
+      };
+      vessels: { name: string; shared?: unknown }[];
+      sources: Record<string, unknown>;
+      secretStore: Record<string, unknown>;
+      cloud?: unknown;
+    };
+
+    expect(upgraded.installation).toEqual({
+      name: 'stored-without-target-names',
+      // Rank 0: the control plane's own boundary is its in-cluster
+      // destination, and array position is rank.
+      controlPlaneVessel: 'cluster',
+      homeVessel: 'cloud',
+    });
+    expect(
+      upgraded.vessels.find((vessel) => vessel.name === 'cloud')?.shared,
+    ).toEqual({
+      sourceBucket: 'example-source-bucket',
+      artifactsProject: 'example-artifacts',
+      secretStoreContainer: 'example-secrets',
+    });
+    // And exactly one vessel carries them, which is what the refinement needs.
+    expect(
+      upgraded.vessels.filter((vessel) => vessel.shared !== undefined),
+    ).toHaveLength(1);
+
+    // The keys they came from are gone rather than duplicated: a value in two
+    // places is a value two readers can disagree about.
+    expect(upgraded.cloud).toBeUndefined();
+    expect(upgraded.sources).not.toHaveProperty('defaultBucket');
+    expect(upgraded.secretStore).not.toHaveProperty('container');
+  });
+
+  test('a document whose home project is a declared boundary keeps that one', () => {
+    // The live shape: `cloud.homeVesselProject` and the vessel's own
+    // `location.project` were the same value, which is the whole reason the
+    // collapse is expressible at all.
+    const document = snapshot('03-target-is-vessel-and-surface.yaml') as Record<
+      string,
+      unknown
+    >;
+    const cloud = document.cloud as Record<string, unknown>;
+    const upgraded = upgradeManifestDocument({
+      ...document,
+      cloud: { ...cloud, homeVesselProject: 'example-vessel' },
+    }) as { installation: { homeVessel: string } };
+    expect(upgraded.installation.homeVessel).toBe('cloud');
+  });
+
+  test('a document with no staging default takes the first declared bucket', () => {
+    // `sources.defaultBucket` was optional and `sources.buckets` has a minimum
+    // of one, so the fallback the old readers applied is the one carried
+    // forward — the alternative is a document that fails validation and takes
+    // the re-seed path this module exists to keep unreachable.
+    const document = snapshot('03-target-is-vessel-and-surface.yaml') as Record<
+      string,
+      unknown
+    >;
+    const sources = document.sources as Record<string, unknown>;
+    const { defaultBucket: _dropped, ...withoutDefault } = sources;
+    const upgraded = upgradeManifestDocument({
+      ...document,
+      sources: withoutDefault,
+    }) as { vessels: { name: string; shared?: { sourceBucket: string } }[] };
+    expect(
+      upgraded.vessels.find((vessel) => vessel.name === 'cloud')?.shared
+        ?.sourceBucket,
+    ).toBe('example-source-bucket');
   });
 });

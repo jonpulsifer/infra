@@ -11,10 +11,11 @@ import { installation, targets, vessels } from '../db/schema.ts';
 import { unreachablePrerequisites } from '../domain/capabilities.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import type { VesselKind, VesselLocation } from '../domain/vessel.ts';
-import type {
-  AuthoredManifest,
-  InstallationManifest,
-  TargetSeed,
+import {
+  type AuthoredManifest,
+  type InstallationManifest,
+  isDeclaredInstallationVessel,
+  type TargetSeed,
 } from './manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
@@ -73,7 +74,14 @@ export async function loadStoredManifest(
     console.warn(
       `installation manifest: the stored manifest is not valid for this build, so this installation is being re-seeded from the mounted declaration — anything configured through the UI that the declaration does not carry is lost: ${unreadable.message}`,
     );
-  } else if (stored !== null && declaration !== null) {
+  }
+  const declared =
+    stored === null
+      ? (declaration ?? DEFAULT_PLACEHOLDER_MANIFEST)
+      : declaration === null
+        ? stored
+        : governedByDeclaration(stored, declaration);
+  if (unreadable === null && stored !== null && declaration !== null) {
     // The generic half of this warning has existed since the rule did — "a
     // declaration is mounted and ignored" — and it is not enough. Proven live:
     // a rollout moved a Target's gateway in the declaration; the stored row
@@ -82,14 +90,17 @@ export async function loadStoredManifest(
     // the Target's gateway with it. §6: "drift is detected and surfaced, never
     // silently corrected" — naming the paths is that rule applied to the
     // manifest itself, not just to what it deploys.
-    const divergentPaths = diffManifestPaths(declaration, stored);
+    //
+    // Against the document actually being used rather than against the row, so
+    // the governed slice does not appear as divergence a boot has already
+    // resolved: what this names is what is genuinely ignored.
+    const divergentPaths = diffManifestPaths(declaration, declared);
     console.warn(
       divergentPaths.length === 0
         ? 'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it'
         : `installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it. It now disagrees with the stored row at: ${divergentPaths.join(', ')}`,
     );
   }
-  const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
   // `booted` exactly when the document being written is the one the
   // installation already had — see {@link ManifestWrite}. A stored row this
   // build could not parse leaves `stored` null, which is right: that boot is
@@ -100,6 +111,76 @@ export async function loadStoredManifest(
     stored === null ? 'declared' : 'booted',
   );
   return resolveManifest(declared, env);
+}
+
+/**
+ * The stored document with the two vessels this installation is built on taken
+ * from the mounted declaration.
+ *
+ * **The one slice a declaration governs.** Everywhere else the row wins, because
+ * configuration is the UI's to drive and a rollout must not revert what an
+ * operator just configured. These two are the exception, and the reason is that
+ * the failure they protect against is not a reverted edit but an installation
+ * that cannot come back: a control plane pointed at a boundary that is not
+ * there, or a home vessel whose bucket, store and signer nobody can reach.
+ *
+ * Both pointers move with the entries, so a declaration may hand the role to a
+ * different boundary in one edit. The old home's `shared` block goes with the
+ * role — the schema admits exactly one vessel carrying it — and a governed
+ * vessel the row does not have yet is added rather than dropped.
+ *
+ * **A merge that will not validate is not applied.** A declaration and the image
+ * that understands it land in separate merges, so a document this build reads
+ * differently is the ordinary shape of a rollout rather than a fault; taking the
+ * row whole is the same fallback `declaredManifest` already makes one step
+ * earlier, and it keeps a healthy installation running.
+ */
+function governedByDeclaration(
+  stored: AuthoredManifest,
+  declaration: AuthoredManifest,
+): AuthoredManifest {
+  const governed = new Set([
+    declaration.installation.controlPlaneVessel,
+    declaration.installation.homeVessel,
+  ]);
+  const declared = new Map(
+    declaration.vessels
+      .filter((vessel) => governed.has(vessel.name))
+      .map((vessel) => [vessel.name, vessel] as const),
+  );
+  const kept = stored.vessels.map((vessel) => {
+    const replacement = declared.get(vessel.name);
+    if (replacement !== undefined) return replacement;
+    // Only the outgoing home can be carrying this, and it is not the home any
+    // more — two vessels declaring the shared services is two answers to one
+    // question and the schema refuses it.
+    const { shared: _handedOver, ...withoutShared } = vessel;
+    return withoutShared;
+  });
+  const merged = {
+    ...stored,
+    installation: {
+      ...stored.installation,
+      controlPlaneVessel: declaration.installation.controlPlaneVessel,
+      homeVessel: declaration.installation.homeVessel,
+    },
+    vessels: [
+      ...kept,
+      ...[...declared.values()].filter(
+        (vessel) =>
+          !stored.vessels.some((existing) => existing.name === vessel.name),
+      ),
+    ],
+  };
+  try {
+    return validateManifest(merged, 'the governed installation vessels');
+  } catch (cause) {
+    if (!(cause instanceof ManifestError)) throw cause;
+    console.warn(
+      `installation manifest: the declaration's installation vessels do not compose with the stored document for this build, so the stored one is being used whole: ${cause.message}`,
+    );
+    return stored;
+  }
 }
 
 /**
@@ -514,7 +595,27 @@ interface ReconciledVessel {
   readonly moved: boolean;
 }
 
-/** Create or update the vessels a manifest describes, and return their ids. */
+/**
+ * Create or update the vessels a manifest describes, and return their ids.
+ *
+ * **Two names are governed and every other vessel is seeded.** The vessel this
+ * control plane runs on and the vessel holding its shared services take the
+ * `declared` treatment on every boot: the row is reconciled from the mounted
+ * declaration whether or not it already exists, and a moved boundary reassesses
+ * its surfaces. Every other vessel keeps the module's own rule — a declaration
+ * seeds and does not govern — so a boot leaves alone whatever an operator
+ * corrected through the connect screen.
+ *
+ * This narrows that rule rather than inverting it, and the narrowing is what
+ * makes the pointers safe: you should not be able to click your way into an
+ * unbootable control plane or a home vessel pointing at nothing, and the two
+ * screens that could do it are the ones that now render these read-only.
+ *
+ * **No prune policy is owed**, which is the other thing scoping it this way
+ * buys. A governed set that can shrink has to answer what "no longer declared"
+ * means, and Spindrift never removes a workload, so the answer would be forced
+ * to orphan anyway. A fixed two-element set never asks the question.
+ */
 async function reconcileManifestVessels(
   db: Pick<Database, 'insert' | 'query'>,
   manifest: AuthoredManifest,
@@ -522,11 +623,13 @@ async function reconcileManifestVessels(
 ): Promise<Map<string, ReconciledVessel>> {
   const reconciled = new Map<string, ReconciledVessel>();
   for (const [name, vessel] of vesselRowsOf(manifest)) {
+    const governed = isDeclaredInstallationVessel(manifest, name);
+    const asserted = write === 'declared' || governed;
     const existing = await db.query.vessels.findFirst({
       where: (vessels, { eq }) => eq(vessels.name, name),
     });
     const moved =
-      write === 'declared' &&
+      asserted &&
       vessel.location !== null &&
       !Bun.deepEquals(existing?.location, vessel.location, true);
     const [row] = await db
@@ -534,12 +637,19 @@ async function reconcileManifestVessels(
       .values({ name, ...vessel })
       .onConflictDoUpdate({
         target: vessels.name,
-        set: {
-          kind: vessel.kind,
-          location: vessel.location,
-          servedHosts: vessel.servedHosts,
-          reachableRegistries: vessel.reachableRegistries,
-        },
+        set: asserted
+          ? {
+              kind: vessel.kind,
+              location: vessel.location,
+              servedHosts: vessel.servedHosts,
+              reachableRegistries: vessel.reachableRegistries,
+            }
+          : // Nothing became anything on a `booted` write of an ungoverned
+            // vessel, so the row wins outright. `name` is what the conflict
+            // matched on, so writing it back changes nothing and is what makes
+            // this a no-op update rather than a statement that needs a second
+            // code path.
+            { name },
       })
       .returning({ id: vessels.id });
     reconciled.set(name, { id: row!.id, moved });

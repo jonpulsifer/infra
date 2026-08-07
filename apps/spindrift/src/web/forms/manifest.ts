@@ -13,7 +13,7 @@
 import { installationManifestSchema } from '../../config/manifest.schema.ts';
 import type { Path } from './document.ts';
 import type { FieldErrors } from './render.tsx';
-import { describeObject, type FormField } from './schema.ts';
+import { describeObject, type FormField, type FormNode } from './schema.ts';
 
 /**
  * The manifest's top-level keys, as fields, in the order the schema declares
@@ -40,14 +40,37 @@ export function manifestFields(): readonly FormField[] {
  * the one that drifted would be the one nobody was reading.
  */
 export function manifestFieldAt(at: Path): FormField | null {
-  let fields: readonly FormField[] = FIELDS;
-  let found: FormField | null = null;
-  for (const step of at) {
-    found = fields.find((field) => field.key === step) ?? null;
-    if (found === null) return null;
-    fields = found.node.kind === 'object' ? found.node.fields : [];
+  return fieldAt({ kind: 'object', fields: FIELDS }, at);
+}
+
+/**
+ * The field one path names inside one node.
+ *
+ * Two things beyond walking object keys, and both are what a path into
+ * `vessels` needs. A **numeric** step descends into an array's element, which
+ * is a shape and not a field — so a path that ends on one answers null rather
+ * than naming the array. A **union** is tried arm by arm, with the whole
+ * remaining path against each: a vessel's `location` exists on both arms and
+ * carries a different key on each, so an arm that merely has the first segment
+ * is not the arm that has the path.
+ */
+function fieldAt(node: FormNode, path: Path): FormField | null {
+  const [step, ...rest] = path;
+  if (step === undefined) return null;
+  if (node.kind === 'union') {
+    for (const variant of node.variants) {
+      const found = fieldAt(variant.node, path);
+      if (found !== null) return found;
+    }
+    return null;
   }
-  return found;
+  if (typeof step === 'number') {
+    return node.kind === 'array' ? fieldAt(node.element, rest) : null;
+  }
+  if (node.kind !== 'object') return null;
+  const field = node.fields.find((each) => each.key === step);
+  if (field === undefined) return null;
+  return rest.length === 0 ? field : fieldAt(field.node, rest);
 }
 
 /**

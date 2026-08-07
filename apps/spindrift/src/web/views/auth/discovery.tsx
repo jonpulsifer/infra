@@ -240,7 +240,7 @@ export function DiscoveredFactList({
             {/* The last segment, humanized. Never a key written here — the
                 path came from the command, and the schema owns which keys
                 exist. */}
-            {humanize(fact.path[fact.path.length - 1] ?? '')}
+            {humanize(String(fact.path[fact.path.length - 1] ?? ''))}
           </dt>
           <dd className="text-sm">
             {fact.kind === 'unavailable' ? (

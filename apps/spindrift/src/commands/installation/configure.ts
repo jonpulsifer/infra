@@ -87,7 +87,7 @@ export const configureInstallation: Command<
   await writeStoredManifest(context.db, manifest);
 
   return ok({
-    installation: manifest.installation,
+    installation: manifest.installation.name,
     targets: manifest.targets.map(targetLabel),
   });
 };

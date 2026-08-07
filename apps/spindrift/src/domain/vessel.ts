@@ -30,7 +30,10 @@
  * so `DeployAdapter`, `DeployTarget`, and every conformance test are untouched.
  * This is a core-side normalization, not a change to §6's contract.
  */
-import type { TargetAdapter } from '../config/manifest.schema.ts';
+import type {
+  AuthoredManifest,
+  TargetAdapter,
+} from '../config/manifest.schema.ts';
 
 /**
  * What kind of boundary this is.
@@ -71,6 +74,155 @@ export const PROBED_SURFACES_BY_VESSEL_KIND = {
 /** What one connect act asks a vessel of this kind about. */
 export function surfacesToProbe(kind: VesselKind): readonly TargetAdapter[] {
   return PROBED_SURFACES_BY_VESSEL_KIND[kind];
+}
+
+/**
+ * What one vessel is to this installation, as opposed to what it is made of.
+ *
+ * The second axis of the prerequisite catalogue below. `kind` says what shape a
+ * boundary's address has; this says what the installation asks of it — and the
+ * two are independent, which is why they are two axes rather than more kinds.
+ *
+ * A vessel can hold more than one role: nothing stops an installation whose
+ * control plane runs on the same boundary its shared services live in, and a
+ * scalar role would have to pick one and drop the other's rows.
+ */
+export const VESSEL_ROLES = ['home', 'controlPlane', 'app'] as const;
+
+export type VesselRole = (typeof VESSEL_ROLES)[number];
+
+/**
+ * Which roles this installation's manifest puts on one vessel, by name.
+ *
+ * `app` is the answer for everything the two pointers do not name — not an
+ * absence, because an ordinary deploy boundary is a role rather than the lack of
+ * one, and the catalogue has to be able to key off it.
+ */
+export function vesselRolesOf(
+  manifest: Pick<AuthoredManifest, 'installation'>,
+  vessel: string,
+): readonly VesselRole[] {
+  const roles: VesselRole[] = [];
+  if (vessel === manifest.installation.homeVessel) roles.push('home');
+  if (vessel === manifest.installation.controlPlaneVessel) {
+    roles.push('controlPlane');
+  }
+  return roles.length === 0 ? ['app'] : roles;
+}
+
+/**
+ * Every prerequisite a vessel can be asked about, as distinct from a surface on
+ * one (§13's checklist is `PREREQUISITES` in `capabilities.ts`).
+ *
+ * These are the four the home vessel exists to hold, and none of them belongs to
+ * a Target: a source bucket is where a build's bytes are staged before any
+ * placement is known, an artifacts project is shared across every vessel (§14),
+ * the store of record is one place whatever reaches it, and the signer is a key
+ * core calls rather than a Target does. Assessing them on a Target would put the
+ * same row on three screens and let them disagree.
+ */
+export const VESSEL_PREREQUISITES = [
+  'SOURCE_BUCKET',
+  'SECRET_STORE',
+  'SIGNER_KEY',
+  'ARTIFACTS_PROJECT',
+] as const;
+
+export type VesselPrerequisite = (typeof VESSEL_PREREQUISITES)[number];
+
+/**
+ * The checklist one vessel is assessed against, by kind **and** role.
+ *
+ * `PREREQUISITES_BY_ADAPTER` keys off adapter for the reason `capabilities.ts`
+ * states — "a checklist row that can never fail is a row that teaches a reader
+ * the wrong thing about what was checked" — and the same argument runs one axis
+ * over. An app vessel has no source bucket, no store container and no signer of
+ * its own; showing it four permanently-green rows would say those were checked
+ * when nothing looked.
+ *
+ * Kind matters as well as role because every one of these reads is a cloud API
+ * call. A cluster that somehow held the shared services would be assessed
+ * against nothing rather than against four questions no code here knows how to
+ * ask it — which is the honest answer until something does.
+ */
+export const VESSEL_PREREQUISITES_BY_KIND_AND_ROLE = {
+  cluster: { home: [], controlPlane: [], app: [] },
+  'gcp-project': {
+    home: ['SOURCE_BUCKET', 'SECRET_STORE', 'SIGNER_KEY', 'ARTIFACTS_PROJECT'],
+    controlPlane: [],
+    app: [],
+  },
+} as const satisfies Record<
+  VesselKind,
+  Record<VesselRole, readonly VesselPrerequisite[]>
+>;
+
+/**
+ * What a vessel of this kind in these roles is asked, in display order.
+ *
+ * The union over its roles rather than one row, so a boundary that is both the
+ * home and the control plane is asked everything either role owes. Ordered by
+ * {@link VESSEL_PREREQUISITES} so two vessels never show the same rows in
+ * different orders.
+ */
+export function vesselPrerequisitesFor(
+  kind: VesselKind,
+  roles: readonly VesselRole[],
+): readonly VesselPrerequisite[] {
+  const asked = new Set(
+    roles.flatMap((role) => [
+      ...VESSEL_PREREQUISITES_BY_KIND_AND_ROLE[kind][role],
+    ]),
+  );
+  return VESSEL_PREREQUISITES.filter((name) => asked.has(name));
+}
+
+/** One checklist item on a vessel, and the sentence behind an unmet one. */
+export interface VesselPrerequisiteResult {
+  readonly name: VesselPrerequisite;
+  readonly met: boolean;
+  /** Why it is unmet. §3's grammar: an exclusion carries its reason. */
+  readonly detail?: string;
+}
+
+/**
+ * The checklist for a vessel nothing could be asked about.
+ *
+ * The vessel-level twin of `unreachablePrerequisites`: an installation with no
+ * federation, or a process with no cloud client, produces every catalogued row
+ * unmet with the fault stated rather than no rows at all.
+ */
+export function unreachableVesselPrerequisites(
+  detail: string,
+  kind: VesselKind,
+  roles: readonly VesselRole[],
+): readonly VesselPrerequisiteResult[] {
+  return vesselPrerequisitesFor(kind, roles).map((name) => ({
+    name,
+    met: false,
+    detail,
+  }));
+}
+
+/**
+ * Healthy is every catalogued item met — including the vacuous case.
+ *
+ * An app vessel is asked nothing and is therefore healthy, which is the right
+ * answer rather than a loophole: it holds nothing this installation depends on,
+ * so there is nothing about it that can be broken here. The Targets on it carry
+ * their own checklist and fail on their own terms.
+ */
+export function deriveVesselHealth(
+  prerequisites: readonly VesselPrerequisiteResult[],
+  kind: VesselKind,
+  roles: readonly VesselRole[],
+): 'healthy' | 'unhealthy' {
+  const met = new Set(
+    prerequisites.filter((item) => item.met).map((i) => i.name),
+  );
+  return vesselPrerequisitesFor(kind, roles).every((name) => met.has(name))
+    ? 'healthy'
+    : 'unhealthy';
 }
 
 /**

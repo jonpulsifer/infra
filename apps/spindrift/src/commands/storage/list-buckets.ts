@@ -2,6 +2,7 @@
  * `listSourceBuckets` — list first-party GCS buckets for archive sources and artifacts.
  */
 import { z } from 'zod';
+import { sharedServicesOf } from '../../config/manifest.schema.ts';
 import { type Command, ok } from '../types.ts';
 
 export const listSourceBucketsInput = z.object({}).strict();
@@ -10,6 +11,7 @@ export type ListSourceBucketsInput = z.infer<typeof listSourceBucketsInput>;
 
 export interface ListSourceBucketsResult {
   readonly buckets: readonly string[];
+  /** The home vessel's `shared.sourceBucket` — what a staging picks. */
   readonly defaultBucket: string;
   /**
    * Whether this installation can reach a bucket to check one at all (§13).
@@ -26,10 +28,9 @@ export const listSourceBuckets: Command<
   ListSourceBucketsInput,
   ListSourceBucketsResult
 > = async (_input, context) => {
-  const { buckets, defaultBucket } = context.manifest.sources;
   return ok({
-    buckets,
-    defaultBucket: defaultBucket ?? buckets[0] ?? '',
+    buckets: context.manifest.sources.buckets,
+    defaultBucket: sharedServicesOf(context.manifest).sourceBucket,
     canVerify: context.manifest.cloud.federation !== null,
   });
 };

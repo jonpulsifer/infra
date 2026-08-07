@@ -36,10 +36,14 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
-import { surfacesToProbe } from '../../../domain/vessel.ts';
+import { surfacesToProbe, type VesselRole } from '../../../domain/vessel.ts';
 import type { LogoName } from '../../client/logos/index.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
-import type { PendingTargetConnection, TargetListItem } from '../../model.ts';
+import type {
+  PendingTargetConnection,
+  TargetListItem,
+  VesselListItem,
+} from '../../model.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
@@ -102,6 +106,7 @@ function AbsentSurfaces({ absent }: { absent: readonly string[] }) {
 export function TargetList({
   targets,
   pending,
+  vessels,
   connecting,
   error,
   absent = [],
@@ -112,6 +117,8 @@ export function TargetList({
 }: {
   targets: readonly TargetListItem[];
   pending: readonly PendingTargetConnection[];
+  /** The boundaries themselves, with the checklist that is theirs. */
+  vessels: readonly VesselListItem[];
   connecting: boolean;
   error: string | null;
   /** One sentence per surface the last connect found was not there. */
@@ -156,6 +163,7 @@ export function TargetList({
             <AbsentSurfaces absent={absent} />
           </section>
         ) : null}
+        <VesselChecklists vessels={vessels} />
         <ProviderTargets
           name="Google Cloud"
           logo="google-cloud"
@@ -253,6 +261,8 @@ export function TargetList({
       ) : null}
 
       <AbsentSurfaces absent={absent} />
+
+      <VesselChecklists vessels={vessels} />
 
       <TargetCollection
         targets={configured}
@@ -395,6 +405,90 @@ function TargetCollection({
   );
 }
 
+/**
+ * The boundaries themselves, with the checklist that is theirs.
+ *
+ * A section of its own rather than rows inside each Target card, because a
+ * vessel may carry two surfaces and this is one fact about the boundary — folded
+ * into the Targets it would be the same four answers rendered twice, which is
+ * the duplication the vessel noun exists to remove.
+ *
+ * **Only the boundaries something is asked of appear here.** An app vessel's
+ * catalogue is empty, so it has no rows, and a section listing it with nothing
+ * under it would say something was checked when nothing was.
+ */
+function VesselChecklists({
+  vessels,
+}: {
+  readonly vessels: readonly VesselListItem[];
+}) {
+  const assessed = vessels.filter(
+    (vessel) => vessel.prerequisites.length > 0 || declaredRole(vessel.roles),
+  );
+  if (assessed.length === 0) return null;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <Eyebrow>Boundaries this installation is built on</Eyebrow>
+      <Card className="divide-y divide-border">
+        {assessed.map((vessel) => (
+          <div key={vessel.name} className="flex flex-col gap-2 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Server aria-hidden="true" className="size-4 shrink-0" />
+              <span className="text-sm font-semibold">{vessel.name}</span>
+              <Badge tone="idle">{vessel.kind}</Badge>
+              {vessel.prerequisites.length > 0 ? (
+                <Badge
+                  tone={vessel.health === 'healthy' ? 'success' : 'destructive'}
+                >
+                  <Dot />
+                  {vessel.health}
+                </Badge>
+              ) : null}
+              <span className="text-xs text-muted-foreground">
+                {declaredRole(vessel.roles) ?? 'an ordinary deploy boundary'}
+              </span>
+            </div>
+            {vessel.prerequisites.map((item) => (
+              <div
+                key={item.name}
+                className="flex items-start gap-2 px-1 text-xs"
+              >
+                {item.met ? (
+                  <Check
+                    aria-hidden="true"
+                    className="mt-0.5 size-3.5 shrink-0 text-success"
+                  />
+                ) : (
+                  <X
+                    aria-hidden="true"
+                    className="mt-0.5 size-3.5 shrink-0 text-destructive"
+                  />
+                )}
+                <span className="font-mono">{item.name}</span>
+                {item.detail ? (
+                  <span className="text-muted-foreground">— {item.detail}</span>
+                ) : null}
+              </div>
+            ))}
+            {/*
+              Labelled as of-a-moment, for the reason a Target's checklist is:
+              this is the last pass of the loop, and saying when stops it from
+              being read as now. A boundary nobody has been past yet says so
+              rather than reading as four questions that passed.
+            */}
+            <p className="text-[11px] text-subtle">
+              {vessel.inspectedAt === null
+                ? 'never inspected'
+                : `last checked ${new Date(vessel.inspectedAt).toLocaleString()}`}
+            </p>
+          </div>
+        ))}
+      </Card>
+    </section>
+  );
+}
+
 /** The unfinished half, at the top, with the form that finishes it. */
 function PendingConnections({
   pending,
@@ -460,6 +554,25 @@ function PendingConnections({
   );
 }
 
+/**
+ * What this Target's boundary is to the installation, as a sentence fragment —
+ * `null` for an ordinary one.
+ *
+ * Both roles when a boundary carries both, because an installation whose
+ * control plane runs where its shared services live is one boundary doing two
+ * jobs, and naming only the first would leave the other unexplained.
+ */
+function declaredRole(roles: readonly VesselRole[]): string | null {
+  const named = roles.flatMap((role) =>
+    role === 'home'
+      ? ['this installation’s home vessel']
+      : role === 'controlPlane'
+        ? ['where this control plane runs']
+        : [],
+  );
+  return named.length === 0 ? null : named.join(' and ');
+}
+
 function TargetCard({
   target,
   connecting,
@@ -476,6 +589,7 @@ function TargetCard({
   const [editing, setEditing] = useState(false);
   const met = target.prerequisites.filter((item) => item.met).length;
   const logo = ADAPTER_LOGO[target.adapter];
+  const declared = declaredRole(target.vesselRoles);
 
   return (
     <Card className={cn(unhealthy && 'border-destructive/40')}>
@@ -553,7 +667,7 @@ function TargetCard({
               surface again, which is how a project whose Cloud Run API was off
               at connect time gets that Target once it is switched on.
             */}
-            {target.edit ? (
+            {declared === null && target.edit ? (
               <Button
                 variant={editing ? 'ghost' : 'outline'}
                 size="sm"
@@ -562,7 +676,7 @@ function TargetCard({
                 {editing ? 'Cancel' : 'Edit connection'}
               </Button>
             ) : null}
-            {target.status === 'connected' ? (
+            {declared === null && target.status === 'connected' ? (
               <DisconnectTargetControl target={target} onChanged={onChanged} />
             ) : null}
           </div>
@@ -594,6 +708,27 @@ function TargetCard({
             </span>
           </div>
         ) : null}
+
+        {declared === null ? null : (
+          /*
+            Read-only, and the sentence is why rather than a disabled button.
+            This boundary reconciles from the mounted declaration on every boot,
+            so an edit made here would survive exactly until the next restart —
+            with the screen that accepted it then showing the old values and no
+            reason. Disconnect is refused for the same reason one level down:
+            `disconnectTarget` guards it, because neither pointer is a foreign
+            key and nothing else would stop it.
+          */
+          <div className="flex items-start gap-2 rounded-md border border-border-soft bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+            <Server aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              {target.vessel} is {declared}. It is declared by the installation
+              manifest and reconciled from it on every boot, so its connection
+              is edited there rather than here — and its surfaces cannot be
+              disconnected.
+            </span>
+          </div>
+        )}
 
         {editing && target.edit ? (
           <div className="rounded-md border border-border-soft bg-secondary/40 px-4 py-4">

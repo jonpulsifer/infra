@@ -16,9 +16,11 @@ import { DEFAULT_REAP_INTERVAL_MS, runConfigLoop } from './config-loop.ts';
 import { DEFAULT_INTERVALS, runDeployLoop } from './deploy-loop.ts';
 import { runRepoLoop } from './repo-loop.ts';
 import { runTargetLoop } from './target-loop.ts';
+import { runVesselLoop } from './vessel-loop.ts';
 
 export type ReconcilerLoopName =
   | 'target'
+  | 'vessel'
   | 'repository'
   | 'config'
   | 'build'
@@ -163,6 +165,19 @@ export async function runReconciler(
           intervalMs: DEFAULT_TARGET_INTERVAL_MS,
           signal,
           onPass: () => passed('target'),
+        }),
+    },
+    {
+      // The boundary's own checklist, at the Target loop's cadence and for the
+      // same reason: a connect-time snapshot rots, and a bucket that stopped
+      // being writable is a fact that has to be re-established rather than
+      // remembered.
+      name: 'vessel',
+      run: (signal) =>
+        runVesselLoop(context, {
+          intervalMs: DEFAULT_TARGET_INTERVAL_MS,
+          signal,
+          onPass: () => passed('vessel'),
         }),
     },
     {

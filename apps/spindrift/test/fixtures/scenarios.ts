@@ -28,6 +28,7 @@ import type {
   RepositoryOptionView,
   TargetListItem,
   TargetOptionView,
+  VesselListItem,
   WorkspaceView,
 } from '../../src/web/model.ts';
 import type { Draft } from '../../src/web/views/apps/new/draft.ts';
@@ -987,6 +988,11 @@ export const TARGET_LIST: readonly TargetListItem[] = [
       apiServer: 'https://primary.example:6443',
       proposal: { carriedFrom: 'primary/kubernetes', namespace: 'apps' },
     },
+    // The boundary this control plane runs on, so the card renders read-only:
+    // no edit, no disconnect, and the sentence saying where its values come
+    // from. It is an ordinary deploy Target besides, which is why it is here
+    // rather than in a list of its own.
+    vesselRoles: ['controlPlane'],
   },
   {
     id: 'target-cloudrun',
@@ -1004,6 +1010,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     // A cloud project has no `platform` values and no probe to read itself
     // back through, so there is nothing here for an edit form to open onto.
     edit: null,
+    vesselRoles: ['home'],
   },
   {
     id: 'target-static',
@@ -1021,6 +1028,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     // A cloud project has no `platform` values and no probe to read itself
     // back through, so there is nothing here for an edit form to open onto.
     edit: null,
+    vesselRoles: ['home'],
   },
   {
     id: 'target-secondary',
@@ -1052,5 +1060,48 @@ export const TARGET_LIST: readonly TargetListItem[] = [
       apiServer: 'https://secondary.example:6443',
       proposal: { carriedFrom: 'secondary/kubernetes', namespace: 'apps' },
     },
+    vesselRoles: ['app'],
+  },
+];
+
+/** Vessel demo data — the boundaries the Targets above are surfaces on. */
+export const VESSEL_LIST: readonly VesselListItem[] = [
+  {
+    name: 'primary',
+    kind: 'cluster',
+    roles: ['controlPlane'],
+    health: 'healthy',
+    // The catalogue asks a cluster nothing, whatever its role: a source bucket,
+    // a store container, an artifacts project and a signing key are reads no
+    // code here knows how to make against a cluster, and four permanently green
+    // rows would say otherwise.
+    prerequisites: [],
+    inspectedAt: '2026-08-02T12:00:00.000Z',
+  },
+  {
+    name: 'vessel-a',
+    kind: 'gcp-project',
+    roles: ['home'],
+    health: 'unhealthy',
+    prerequisites: [
+      { name: 'SOURCE_BUCKET', met: true },
+      { name: 'SECRET_STORE', met: true },
+      {
+        name: 'SIGNER_KEY',
+        met: false,
+        detail:
+          'no signing key with that reference is in this location, or its purpose is not signing',
+      },
+      { name: 'ARTIFACTS_PROJECT', met: true },
+    ],
+    inspectedAt: '2026-08-02T12:00:00.000Z',
+  },
+  {
+    name: 'secondary',
+    kind: 'cluster',
+    roles: ['app'],
+    health: 'healthy',
+    prerequisites: [],
+    inspectedAt: '2026-08-02T12:00:00.000Z',
   },
 ];

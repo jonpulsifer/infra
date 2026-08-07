@@ -155,8 +155,14 @@ describe('an installation nobody has configured says so', () => {
   // Continue on an edited name and nothing else.
   const answeringOne: readonly (readonly [string, AuthoredManifest])[] = [
     [
-      'installation',
-      { ...DEFAULT_PLACEHOLDER_MANIFEST, installation: 'offsite' },
+      'installation.name',
+      {
+        ...DEFAULT_PLACEHOLDER_MANIFEST,
+        installation: {
+          ...DEFAULT_PLACEHOLDER_MANIFEST.installation,
+          name: 'offsite',
+        },
+      },
     ],
     [
       'github.clientId',

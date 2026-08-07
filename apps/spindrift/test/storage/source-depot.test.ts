@@ -31,15 +31,24 @@ const federation = {
 };
 
 const manifest = {
-  sources: {
-    buckets: ['bluenose-spindrift-source'],
-    defaultBucket: 'bluenose-spindrift-source',
+  installation: {
+    name: 'a-test',
+    controlPlaneVessel: 'here',
+    homeVessel: 'home',
   },
-  cloud: {
-    artifactsProject: 'artifacts',
-    homeVesselProject: 'vessel',
-    federation,
-  },
+  vessels: [
+    {
+      name: 'home',
+      kind: 'gcp-project',
+      location: { project: 'vessel' },
+      shared: {
+        sourceBucket: 'bluenose-spindrift-source',
+        artifactsProject: 'artifacts',
+        secretStoreContainer: 'vessel',
+      },
+    },
+  ],
+  cloud: { federation },
 } as unknown as Parameters<typeof sourceDepotFor>[0];
 
 /** A far side that answers the token exchange, the upload, and `signBlob`. */

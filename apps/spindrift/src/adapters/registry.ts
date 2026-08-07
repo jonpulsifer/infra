@@ -26,10 +26,11 @@
 
 import { createHash } from 'node:crypto';
 import type { AdapterRegistry } from '../commands/types.ts';
-import type {
-  BuildRouteConfig,
-  StoreAdapter,
-  TargetAdapter,
+import {
+  type BuildRouteConfig,
+  type StoreAdapter,
+  sharedServicesOf,
+  type TargetAdapter,
 } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
 import { CredentialKeyring } from '../crypto/credential-envelope.ts';
@@ -583,17 +584,17 @@ export function createSecretStore(
     token,
     ...(fetch ? { fetch } : {}),
   };
+  // The container is the home vessel's, because that is the boundary the store
+  // of record lives in — one place, whatever reaches it.
+  const { secretStoreContainer } = sharedServicesOf(manifest);
   const adapter = manifest.secretStore.adapter satisfies StoreAdapter;
   switch (adapter) {
     case 'onepassword':
-      return new OnePasswordStore({
-        ...endpoint,
-        vault: manifest.secretStore.container,
-      });
+      return new OnePasswordStore({ ...endpoint, vault: secretStoreContainer });
     case 'gcp-secret-manager':
       return new SecretManagerStore({
         ...endpoint,
-        project: manifest.secretStore.container,
+        project: secretStoreContainer,
       });
   }
 }

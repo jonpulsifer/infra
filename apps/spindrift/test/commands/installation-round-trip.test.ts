@@ -59,10 +59,10 @@ function context(): CommandContext {
 }
 
 async function seed(): Promise<void> {
-  const { federation: _derived, ...cloud } = manifest.cloud;
+  const { cloud: _derived, ...authored } = manifest;
   await database()
     .db.insert(installation)
-    .values({ id: 1, manifest: { ...manifest, cloud } })
+    .values({ id: 1, manifest: authored })
     .onConflictDoNothing();
 }
 
@@ -105,7 +105,7 @@ describe('the installation settings round trip', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect('federation' in result.value.manifest.cloud).toBe(false);
+    expect(result.value.manifest).not.toHaveProperty('cloud');
   });
 
   test('a value edited on what the read answers writes back', async () => {

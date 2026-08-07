@@ -29,7 +29,10 @@
  * rather than a document this act half-rewrote.
  */
 import { z } from 'zod';
-import type { AuthoredManifest } from '../../config/manifest.schema.ts';
+import {
+  type AuthoredManifest,
+  sharedServicesOf,
+} from '../../config/manifest.schema.ts';
 import { ManifestError, validateManifest } from '../../config/manifest.ts';
 import {
   readStoredManifest,
@@ -117,13 +120,23 @@ export const useSourceBucket: Command<
   const buckets = stored.sources.buckets.includes(input.bucketName)
     ? stored.sources.buckets
     : [...stored.sources.buckets, input.bucketName];
-  const defaultBucket = input.makeDefault
+  // Which bucket a staging picks is a property of the home vessel, so making
+  // one the default is a write to that vessel rather than to `sources`. The
+  // list and the choice therefore move in one document, which is what keeps a
+  // default that is not among the buckets unrepresentable.
+  const shared = sharedServicesOf(stored);
+  const sourceBucket = input.makeDefault
     ? input.bucketName
-    : (stored.sources.defaultBucket ?? buckets[0]);
+    : shared.sourceBucket;
 
   const next: AuthoredManifest = {
     ...stored,
-    sources: { ...stored.sources, buckets, defaultBucket },
+    sources: { ...stored.sources, buckets },
+    vessels: stored.vessels.map((vessel) =>
+      vessel.name === stored.installation.homeVessel
+        ? { ...vessel, shared: { ...shared, sourceBucket } }
+        : vessel,
+    ),
   };
 
   try {
@@ -144,9 +157,7 @@ export const useSourceBucket: Command<
 
   return ok({
     buckets,
-    // Non-null by construction: `sources.buckets` has a minimum of one, and the
-    // bucket just verified is in it.
-    defaultBucket: defaultBucket ?? input.bucketName,
+    defaultBucket: sourceBucket,
     location: verified.location,
     permissions: verified.permissions,
   });

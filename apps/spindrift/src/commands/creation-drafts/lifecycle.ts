@@ -110,7 +110,10 @@ export const startCreationDraft: Command<
       draft: initialCreationDraft({
         repository: repository?.fullName ?? null,
         targetId: target?.id ?? null,
-        vessel: context.manifest.cloud.homeVesselProject,
+        // The vessel by name rather than by project id: the draft states which
+        // boundary this installation's home is, and a project is one shape a
+        // boundary's address happens to have.
+        vessel: context.manifest.installation.homeVessel,
       }),
       createdAt: now,
       updatedAt: now,

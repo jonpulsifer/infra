@@ -246,6 +246,34 @@ that Target's vessel is the boundary the Component runs in. Nothing on the App
 records this, because a second answer to one question can only disagree with the
 first.
 
+**Two vessels are the installation's own**, and the manifest names them:
+`installation.controlPlaneVessel` is where this control plane runs, and
+`installation.homeVessel` is where its shared services live — the source bucket,
+the store of record, the artifacts project and the signer. They are scalar
+pointers rather than a flag, so cardinality is free and "this vessel is
+undeletable" is *something points at it* rather than a column. The home vessel
+carries those services as its own properties (`shared`), which is what stops a
+bucket, a store and a project id from being four unrelated strings that nothing
+requires to describe the same place.
+
+Both reconcile from the mounted declaration **on every boot** and render
+read-only, which narrows — and does not invert — the rule that a declaration
+seeds and does not govern: every other vessel is still seed-once-then-UI-owns.
+Neither can be disconnected, guarded explicitly in the command path because
+neither pointer is a foreign key. **The home vessel's checklist may be red while
+the control plane runs on it**; that is already true of the manifest, and the
+guards are what make it safe.
+
+**A vessel has a checklist of its own**, keyed by kind × role the way
+`PREREQUISITES_BY_ADAPTER` keys off adapter
+(`VESSEL_PREREQUISITES_BY_KIND_AND_ROLE`). The home cloud vessel is asked
+whether its source bucket is there, whether the store answers, whether the
+signer is a key with a signing purpose and whether the artifacts project is
+visible; an app vessel is asked nothing, so it is never shown a green row for
+something nobody checked. `src/reconciler/vessel-loop.ts` is the standing pass,
+and it stores what was observed and never what was concluded — health is derived
+at read time, exactly as a Target's is.
+
 **A Target has no name.** `Target = Vessel × surface` is its identity as well as
 its definition: the pair is naturally unique — a boundary carries one runtime of
 each kind — so it is the unique index, it is what `connectTarget` and
@@ -762,7 +790,16 @@ validated value from Postgres. Boot fails loudly, naming every offending key,
 when a declaration or stored document is invalid, or when both are absent.
 Target connection facts in the document are desired state; omitting them leaves
 an in-product connection untouched. Nothing has a default, because a default
-here would name someone's homelab.
+here would name someone's homelab. The two vessels
+`installation.controlPlaneVessel` and `installation.homeVessel` name are the one
+exception to seeds-but-does-not-govern, for the reason above.
+
+A document written under an older schema is brought forward rather than
+discarded — `src/config/manifest-upgrade.ts`, run inside validation, because a
+row this build cannot parse is a row it treats as unseeded and re-seeds over.
+`test/fixtures/stored-manifests/` holds one frozen snapshot per shape a stored
+document has ever had and every one of them has to boot; the newest must need no
+upgrade at all, which is what makes the next schema change prove itself.
 
 ## Usage
 

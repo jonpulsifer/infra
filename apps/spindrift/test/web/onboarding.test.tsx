@@ -75,7 +75,7 @@ function screen({
 
 /** Every control this build could render for the manifest, by its own name. */
 const CONTROLS = {
-  installation: 'name="installation"',
+  installation: 'name="installation.name"',
   clientId: 'name="github.clientId"',
   registry: 'name="supplyChain.registry.0"',
   // Not asked by any step, and the check that step 2 is a step rather than the
@@ -139,7 +139,7 @@ describe('each step asks its own question and nothing else', () => {
     // Confirmation, not authorship: the control arrives carrying the value the
     // row has, so an operator who agrees with it presses Continue.
     expect(screen({ step: 0 })).toContain(
-      `value="${DEFAULT_PLACEHOLDER_MANIFEST.installation}"`,
+      `value="${DEFAULT_PLACEHOLDER_MANIFEST.installation.name}"`,
     );
   });
 });
@@ -192,7 +192,7 @@ describe('a refusal is the same three things it is on the settings screen', () =
   test('an invalid value is shown against the control that produced it', () => {
     const markup = screen({
       step: 0,
-      errors: new Map([['installation', ['Too small: expected string']]]),
+      errors: new Map([['installation.name', ['Too small: expected string']]]),
     });
     expect(markup).toContain('Too small: expected string');
   });
@@ -203,14 +203,14 @@ describe('a refusal is the same three things it is on the settings screen', () =
     // `installation` raised on the last step is an issue rendered against a
     // control three steps back — the operator is told the manifest was refused
     // and shown nothing that says what to do. `finish` navigates on this.
-    expect(stepAsking('installation')).toBe(0);
+    expect(stepAsking('installation.name')).toBe(0);
     expect(stepAsking('github.clientId')).toBe(1);
     // By prefix: an issue names the value that is wrong, a step names the key it
     // asks for, and an array control's elements are neither of the other's.
     expect(stepAsking('supplyChain.registry.0')).toBe(3);
     // And a value no step asks about is not forced onto one. Discovery writes
     // cloud facts this screen never offers a control for.
-    expect(stepAsking('sources.defaultBucket')).toBe(-1);
+    expect(stepAsking('secretStore.endpoint')).toBe(-1);
   });
 });
 

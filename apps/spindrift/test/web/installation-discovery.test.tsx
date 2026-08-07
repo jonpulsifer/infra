@@ -39,7 +39,9 @@ import { fixtureManifest } from '../harness/installation.ts';
 
 const FACTS: readonly DiscoveredFact[] = [
   {
-    path: ['cloud', 'homeVesselProject'],
+    // The home vessel's own project, addressed through its position in
+    // `vessels` — three of the five facts are that boundary's properties now.
+    path: ['vessels', 1, 'location', 'project'],
     kind: 'found',
     candidates: [{ label: 'example-home', value: 'example-home' }],
     suggested: { label: 'example-home', value: 'example-home' },
@@ -82,15 +84,15 @@ describe('what the panel shows', () => {
   });
 
   test('headings are the schema keys humanized, not written here', () => {
-    expect(markup).toContain('Home vessel project');
+    expect(markup).toContain('Project');
     expect(markup).toContain('Signer');
   });
 });
 
 describe('confirming a value edits the document at the path it came with', () => {
   const document = {
-    cloud: { homeVesselProject: 'typed-by-hand' },
-    sources: { buckets: [], defaultBucket: 'typed-by-hand' },
+    vessels: [{ name: 'cluster' }, { location: { project: 'typed-by-hand' } }],
+    sources: { buckets: [] },
   };
 
   test('the value lands at the path, and nothing else moves', () => {
@@ -100,15 +102,15 @@ describe('confirming a value edits the document at the path it came with', () =>
     // rather than by an expectation.
     if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
     expect(applyDiscovered(document, fact, fact.candidates[0]!)).toEqual({
-      cloud: { homeVesselProject: 'example-home' },
-      sources: { buckets: [], defaultBucket: 'typed-by-hand' },
+      vessels: [{ name: 'cluster' }, { location: { project: 'example-home' } }],
+      sources: { buckets: [] },
     });
   });
 
   test('a list-valued key takes the shape its candidate carried', () => {
     // The reason a candidate carries a value at all: `sources.buckets` is a
-    // list and `sources.defaultBucket` is not, and a panel deriving that would
-    // be a panel with an opinion about the schema.
+    // list and the home vessel's `shared.sourceBucket` is not, and a panel
+    // deriving that would be a panel with an opinion about the schema.
     const bucket: DiscoveredCandidate = {
       label: 'a-bucket',
       value: ['a-bucket'],
@@ -155,7 +157,7 @@ describe('the panel is part of the settings surface', () => {
     // Order, not just presence: a confirmation offered underneath the field it
     // would have saved a typo in is a confirmation nobody reaches first.
     expect(markup.indexOf('name="discovery.project"')).toBeLessThan(
-      markup.indexOf('name="cloud.homeVesselProject"'),
+      markup.indexOf('name="sources.buckets.0"'),
     );
   });
 });

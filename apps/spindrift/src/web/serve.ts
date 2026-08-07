@@ -214,7 +214,7 @@ export async function start(
     clock: systemClock,
     relyingParty: {
       id: manifest.controlPlane.hostname,
-      name: manifest.installation,
+      name: manifest.installation.name,
       origin: `https://${manifest.controlPlane.hostname}`,
     },
     enrolmentToken: Bun.env[ENROLMENT_TOKEN_VAR]?.trim() || null,
@@ -257,8 +257,8 @@ export async function start(
     websocket: streamWebSocket,
   });
 
-  logInfo(`spindrift web → ${server.url} (${manifest.installation})`, {
+  logInfo(`spindrift web → ${server.url} (${manifest.installation.name})`, {
     url: String(server.url),
-    installation: manifest.installation,
+    installation: manifest.installation.name,
   });
 }
