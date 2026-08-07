@@ -79,7 +79,7 @@
       );
 
       fleet = import ./nix/lib/registry.nix {
-        inherit lib;
+        inherit lib pkgsFor;
         registry = import ./nix/hosts;
         inherit
           (import ./nix/lib/mkHost.nix {

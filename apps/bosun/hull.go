@@ -20,8 +20,12 @@ type hullManifest struct {
 	Devices []hullDevice `json:"devices,omitempty"`
 }
 
+// hullDevice is one declared guest device: exactly one of its fields is set.
+// A share is a virtiofs directory bosun runs a virtiofsd for; a disk is a
+// file the hull ships, handed to the guest as a virtio-blk device.
 type hullDevice struct {
-	Share hullShare `json:"share"`
+	Share *hullShare `json:"share,omitempty"`
+	Disk  *hullDisk  `json:"disk,omitempty"`
 }
 
 type hullShare struct {
@@ -30,12 +34,18 @@ type hullShare struct {
 	RO   bool   `json:"ro"`
 }
 
+type hullDisk struct {
+	Path string `json:"path"` // relative to the hull directory, like kernel and initrd
+	RO   bool   `json:"ro"`
+}
+
 // hull is a loaded manifest plus the digest bosun computed for it. id is
 // deliberately absent from hull.json — a digest cannot live inside the file
 // it digests — so bosun computes it here: sha256 over hull.json's bytes plus
-// the kernel and initrd files it names, in that order. Device share hosts
-// are not hashed: they are host-side bind targets (e.g. /nix/store), not
-// content the hull ships.
+// the kernel and initrd files it names, then each disk in declaration order.
+// Device share hosts are not hashed: they are host-side bind targets (e.g.
+// /nix/store), not content the hull ships. Disks are hashed: a rootfs image
+// is exactly the content a hull ships.
 type hull struct {
 	dir      string
 	manifest hullManifest
@@ -55,9 +65,25 @@ func loadHull(dir string) (*hull, error) {
 		return nil, fmt.Errorf("hull manifest %s: kernel, initrd, and cmdline are required", dir)
 	}
 
+	shipped := []string{m.Kernel, m.Initrd}
+	for i, dev := range m.Devices {
+		switch {
+		case dev.Share != nil && dev.Disk == nil:
+		case dev.Disk != nil && dev.Share == nil:
+			if dev.Disk.Path == "" {
+				return nil, fmt.Errorf("hull manifest %s: devices[%d].disk.path is required", dir, i)
+			}
+			shipped = append(shipped, dev.Disk.Path)
+		default:
+			return nil, fmt.Errorf("hull manifest %s: devices[%d] must declare exactly one of share or disk", dir, i)
+		}
+	}
+
+	// ponytail: hashes every shipped file (a rootfs disk is GBs) on each
+	// spawn; cache by (path, mtime) if refill latency ever matters.
 	h := sha256.New()
 	h.Write(raw)
-	for _, name := range []string{m.Kernel, m.Initrd} {
+	for _, name := range shipped {
 		if err := hashFile(h, filepath.Join(dir, name)); err != nil {
 			return nil, fmt.Errorf("hashing hull file %s: %w", name, err)
 		}
@@ -116,8 +142,13 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 	if p.apiSock, err = sockPath(runtimeDir, id+".api"); err != nil {
 		return skiffPaths{}, err
 	}
+	// Parallel to devices; a disk needs no helper daemon, so its slot stays
+	// empty.
 	p.deviceSocks = make([]string, len(devices))
 	for i, dev := range devices {
+		if dev.Share == nil {
+			continue
+		}
 		if p.deviceSocks[i], err = sockPath(runtimeDir, id+"."+dev.Share.Tag+".fs"); err != nil {
 			return skiffPaths{}, err
 		}
@@ -138,7 +169,16 @@ func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 		"--fs", fmt.Sprintf("tag=bosun,socket=%s", p.credSock),
 	}
 	for i, dev := range h.manifest.Devices {
-		args = append(args, "--fs", fmt.Sprintf("tag=%s,socket=%s", dev.Share.Tag, p.deviceSocks[i]))
+		switch {
+		case dev.Share != nil:
+			args = append(args, "--fs", fmt.Sprintf("tag=%s,socket=%s", dev.Share.Tag, p.deviceSocks[i]))
+		case dev.Disk != nil:
+			ro := "off"
+			if dev.Disk.RO {
+				ro = "on"
+			}
+			args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=%s", filepath.Join(h.dir, dev.Disk.Path), ro))
+		}
 	}
 	args = append(args,
 		"--net", fmt.Sprintf("vhost_user=on,socket=%s", p.netSock),
