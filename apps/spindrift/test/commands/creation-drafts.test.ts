@@ -159,6 +159,21 @@ describe('creation drafts', () => {
     expect(row?.count).toBe(1);
   });
 
+  test('the draft it opens on clones from the host the manifest names', async () => {
+    // The public host is a value this installation could have and not a
+    // template to write into the source: an enterprise deployment serves its
+    // own, and a draft carrying the wrong one stages nothing.
+    await seedCapabilities();
+    const started = await startCreationDraft({}, await context());
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.value.draft.source).toMatchObject({
+      kind: 'repo',
+      repo: 'example/app',
+      url: 'https://git.example.test/example/app.git',
+    });
+  });
+
   test('refresh recovers the same server-owned draft for its operator', async () => {
     await seedCapabilities();
     const ctx = await context();

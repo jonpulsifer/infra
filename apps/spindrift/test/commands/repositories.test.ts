@@ -720,6 +720,9 @@ describe('listRepositories', () => {
         repositoryId: '99',
         fullName: 'example/available',
         defaultBranch: 'trunk',
+        // The manifest's repository host, not the public one: an enterprise
+        // installation clones from its own, and the browser reads no manifest.
+        cloneUrl: 'https://git.example.test/example/available.git',
         rowExists: false,
       },
     ]);

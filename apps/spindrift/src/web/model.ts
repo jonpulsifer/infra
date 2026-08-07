@@ -639,6 +639,14 @@ interface RepositoryIdentityView {
   readonly fullName: string;
   /** The branch Spindrift watches. */
   readonly defaultBranch: string;
+  /**
+   * Where this repository is cloned from.
+   *
+   * Composed here rather than in the browser because the repository host is an
+   * installation fact (§20) and the browser reads no manifest: a client-side
+   * template would name the public host on an installation that has its own.
+   */
+  readonly cloneUrl: string;
 }
 
 /**

@@ -40,6 +40,9 @@ export type RepositoryChoiceState =
 export interface RepositoryChoice {
   readonly fullName: string;
   readonly defaultBranch: string;
+  /** Carried from the response rather than templated: the host is the
+   * installation's, and this component has no way to know it. */
+  readonly cloneUrl: string;
   readonly state: RepositoryChoiceState;
 }
 
@@ -70,6 +73,7 @@ export function repositoryChoices(
     rows.set(repo.fullName, {
       fullName: repo.fullName,
       defaultBranch: repo.defaultBranch,
+      cloneUrl: repo.cloneUrl,
       state: repo.alreadyDeploys ? 'deploys' : 'connected',
     });
   }
@@ -78,6 +82,7 @@ export function repositoryChoices(
     rows.set(repo.fullName, {
       fullName: repo.fullName,
       defaultBranch: repo.defaultBranch,
+      cloneUrl: repo.cloneUrl,
       state: 'grant-only',
     });
   }
@@ -94,7 +99,7 @@ export function RepoPicker({
   repos: readonly RepositoryChoice[];
   /** The fullName of the currently selected repo, or `null`. */
   selected: string | null;
-  onSelect: (repo: RepositoryChoice, url: string) => void;
+  onSelect: (repo: RepositoryChoice) => void;
 }) {
   const [filter, setFilter] = useState('');
   const normalised = filter.toLowerCase();
@@ -138,9 +143,7 @@ export function RepoPicker({
               <button
                 key={repo.fullName}
                 type="button"
-                onClick={() =>
-                  onSelect(repo, `https://github.com/${repo.fullName}.git`)
-                }
+                onClick={() => onSelect(repo)}
                 className={cn(
                   'flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors',
                   isSelected

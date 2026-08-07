@@ -65,6 +65,7 @@ describe('what the picker offers', () => {
           repositoryId: '1',
           fullName: 'example-org/site',
           defaultBranch: 'main',
+          cloneUrl: 'https://vcs.example/example-org/site.git',
           rowExists: true,
         },
       ],

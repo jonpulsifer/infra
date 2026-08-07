@@ -29,7 +29,10 @@ const MIGRATION = join(
 
 const draftValues = () =>
   initialCreationDraft({
-    repository: 'jonpulsifer/infra',
+    repository: {
+      fullName: 'jonpulsifer/infra',
+      cloneUrl: 'https://vcs.example/jonpulsifer/infra.git',
+    },
     targetId: crypto.randomUUID(),
     vessel: 'bluenose',
   });

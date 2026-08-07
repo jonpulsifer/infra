@@ -829,36 +829,49 @@ export const INITIAL_DRAFT: Draft = {
   step: 0,
 };
 
+/**
+ * The repository host this fixture installation runs against.
+ *
+ * Deliberately not the public one: a clone URL composed from the manifest is
+ * indistinguishable from a hardcoded template while the fixture agrees with it.
+ */
+const VCS = 'https://vcs.example';
+
 /** Repositories Spindrift holds a row for, two of which have an App on them. */
 export const REPOSITORY_OPTIONS: readonly RepositoryOptionView[] = [
   {
     repositoryId: 100001,
     fullName: 'example-org/infra',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/infra.git`,
     alreadyDeploys: true,
   },
   {
     repositoryId: 100002,
     fullName: 'example-org/hub',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/hub.git`,
     alreadyDeploys: true,
   },
   {
     repositoryId: 100003,
     fullName: 'example-org/site',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/site.git`,
     alreadyDeploys: false,
   },
   {
     repositoryId: 100004,
     fullName: 'example-org/api',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/api.git`,
     alreadyDeploys: true,
   },
   {
     repositoryId: 100005,
     fullName: 'example-org/weather-card',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/weather-card.git`,
     alreadyDeploys: false,
   },
 ];
@@ -874,24 +887,28 @@ export const REPOSITORY_GRANT: readonly GrantedRepositoryView[] = [
     repositoryId: 100001,
     fullName: 'example-org/infra',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/infra.git`,
     rowExists: true,
   },
   {
     repositoryId: 100003,
     fullName: 'example-org/site',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/site.git`,
     rowExists: true,
   },
   {
     repositoryId: 200001,
     fullName: 'example-org/almanac',
     defaultBranch: 'main',
+    cloneUrl: `${VCS}/example-org/almanac.git`,
     rowExists: false,
   },
   {
     repositoryId: 200002,
     fullName: 'example-org/ledger',
     defaultBranch: 'trunk',
+    cloneUrl: `${VCS}/example-org/ledger.git`,
     rowExists: false,
   },
 ];

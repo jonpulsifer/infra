@@ -264,12 +264,16 @@ export interface CreationDraftView {
 
 /** Defaults are selected from current persisted installation capabilities. */
 export function initialCreationDraft(input: {
-  readonly repository: string | null;
+  /** The repository to open on, with the clone URL its host serves it at. */
+  readonly repository: {
+    readonly fullName: string;
+    readonly cloneUrl: string;
+  } | null;
   readonly targetId: string | null;
   readonly vessel: string;
 }): Draft {
   const name =
-    (input.repository?.split('/').pop() ?? 'app')
+    (input.repository?.fullName.split('/').pop() ?? 'app')
       .toLowerCase()
       .replaceAll(/[^a-z0-9-]/g, '-')
       .replaceAll(/^-+|-+$/g, '') || 'app';
@@ -279,8 +283,8 @@ export function initialCreationDraft(input: {
     source: repo
       ? {
           kind: 'repo',
-          repo,
-          url: `https://github.com/${repo}.git`,
+          repo: repo.fullName,
+          url: repo.cloneUrl,
           subpath: '.',
         }
       : {

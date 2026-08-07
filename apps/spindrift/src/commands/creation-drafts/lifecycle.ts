@@ -24,7 +24,7 @@ import {
   placementTargetOf,
   resolvePlacement,
 } from '../../domain/placement.ts';
-import { repositoryRefOf } from '../../domain/repository.ts';
+import { cloneUrlFor, repositoryRefOf } from '../../domain/repository.ts';
 import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
 import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
 import { targetRowLabel } from '../../domain/target.ts';
@@ -111,7 +111,16 @@ export const startCreationDraft: Command<
       id,
       userId: context.principal.id,
       draft: initialCreationDraft({
-        repository: repository?.fullName ?? null,
+        repository:
+          repository === undefined
+            ? null
+            : {
+                fullName: repository.fullName,
+                cloneUrl: cloneUrlFor(
+                  context.manifest.github.oauthBaseUrl,
+                  repository.fullName,
+                ),
+              },
         targetId: target?.id ?? null,
         // The vessel by name rather than by project id: the draft states which
         // boundary this installation's home is, and a project is one shape a

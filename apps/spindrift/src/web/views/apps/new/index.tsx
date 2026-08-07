@@ -276,11 +276,11 @@ export function NewApp({
   };
 
   /** Selecting a repository reads it. Nothing is written until Deploy. */
-  const selectRepo = (repo: RepositoryChoice, url: string) => {
+  const selectRepo = (repo: RepositoryChoice) => {
     dispatch({
       type: 'repo',
       fullName: repo.fullName,
-      url,
+      url: repo.cloneUrl,
       connect: repo.state === 'grant-only',
     });
     scopesRef.current = [];
@@ -720,7 +720,7 @@ function SourceRow({
   detectionError: string | null;
   /** Detection is offering candidates and the draft names none of them. */
   unchosen: boolean;
-  onSelectRepo: (repo: RepositoryChoice, url: string) => void;
+  onSelectRepo: (repo: RepositoryChoice) => void;
   onChooseScope: (scope: InspectedScope) => void;
   onSettleSubpath: () => void;
 }) {

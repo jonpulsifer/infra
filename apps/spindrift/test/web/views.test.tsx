@@ -200,6 +200,7 @@ describe('the GitHub repository connector', () => {
             repositoryId: '99',
             fullName: 'example/app',
             defaultBranch: 'main',
+            cloneUrl: 'https://vcs.example/example/app.git',
             rowExists: false,
           },
         ]}

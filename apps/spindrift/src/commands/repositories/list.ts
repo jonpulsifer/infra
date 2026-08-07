@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { RepositoryAuthorizationRequiredError } from '../../domain/repository.ts';
+import {
+  cloneUrlFor,
+  RepositoryAuthorizationRequiredError,
+} from '../../domain/repository.ts';
 import { reconcileRepository } from '../../reconciler/repo-loop.ts';
 import type {
   GrantedRepositoryView,
@@ -127,16 +130,19 @@ export const listRepositories: Command<
   const connectedByName = new Map(
     reposList.map((repo) => [repo.fullName, repo] as const),
   );
+  const webBaseUrl = context.manifest.github.oauthBaseUrl;
   const availableList: GrantedRepositoryView[] = available.map((repo) => ({
     repositoryId: repo.repositoryId,
     fullName: repo.fullName,
     defaultBranch: repo.defaultBranch,
+    cloneUrl: cloneUrlFor(webBaseUrl, repo.fullName),
     rowExists: connectedByName.has(repo.fullName),
   }));
   const optionsList: RepositoryOptionView[] = allRepos.map((repo) => ({
     repositoryId: repo.id,
     fullName: repo.fullName,
     defaultBranch: repo.defaultBranch,
+    cloneUrl: cloneUrlFor(webBaseUrl, repo.fullName),
     alreadyDeploys: subpathsByRepoId.has(repo.id),
   }));
 
