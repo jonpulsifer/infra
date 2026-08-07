@@ -16,7 +16,7 @@ spec:
     image:
       repository: ghcr.io/jonpulsifer/atlantis
       tag: latest@sha256:35e2eadfb38f5ca8d426170a73e0abcf833dfc001a93b02f0b59c2a0f965b3e1
-    orgAllowlist: github.com/jonpulsifer/*
+    orgAllowlist: github.com/jonpulsifer/infra
     environment:
       ATLANTIS_AUTOMERGE: "true"
       ATLANTIS_ALLOW_COMMANDS: "version,plan,apply,unlock,approve_policies,cancel,import"
@@ -75,7 +75,7 @@ spec:
     repoConfig: |
       ---
       repos:
-      - id: /^github.com/jonpulsifer/.*$/
+      - id: github.com/jonpulsifer/infra
         branch: /^main$/
         apply_requirements: []
         workflow: default
