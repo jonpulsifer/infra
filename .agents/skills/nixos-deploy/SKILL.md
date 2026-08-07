@@ -31,7 +31,7 @@ background: `docs/pages/Architecture___NixOS.md`. Host inventory:
 - **A branch deploy is temporary.** Hosts auto-upgrade from `main` daily at
   03:37, so an unmerged config silently reverts. Merge promptly or treat the
   deploy as a test.
-- Kubernetes nodes are declared **inline in `flake.nix`**, not in `nix/hosts/`.
+- Every host, k8s nodes included, is declared in `nix/hosts/` and registered in `nix/hosts/default.nix`.
   Only the Pis and the GCE VM have a `nix/hosts/<name>.nix`.
 - `radiopi0` and `blinkypi0` are armv6l with no binary cache and
   `system.autoUpgrade` disabled — they cross-build on `forge` (aarch64) and are

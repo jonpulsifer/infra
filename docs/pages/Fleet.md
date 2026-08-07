@@ -3,7 +3,7 @@ icon:: 🖥️
 - Every host in the homelab. Each has a page under `Fleet/` carrying its hardware sheet — vendor, model, serial, CPU, RAM, storage, firmware — and its physical quirks.
 - Roles, cluster membership, and node addresses are **not** recorded here. Hosts are declared in `flake.nix`; network facts live in the topology SSOT described on [[Architecture/Kubernetes]]. Read those.
 - ## Kubernetes nodes
-	- Declared inline in `flake.nix`. See [[Architecture/Kubernetes]] for cluster composition.
+	- Declared in `nix/hosts/`. See [[Architecture/Kubernetes]] for cluster composition.
 	- | Host | Cluster | Hardware |
 	  | ---- | ------- | -------- |
 	  | [[Fleet/optiplex]] | folly | Dell OptiPlex 3050 micro, i7-7700T |
