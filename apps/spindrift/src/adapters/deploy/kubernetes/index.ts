@@ -929,6 +929,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         results.get(name) ?? {
           name,
           met: false,
+          assessed: false,
           detail: 'not assessed',
         },
     );

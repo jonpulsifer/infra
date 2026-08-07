@@ -158,16 +158,18 @@ describe('the client bundle', () => {
     // console line honest against each other.
     expect(built.stdout).toContain(`${files.length} files`);
 
-    // Measured on this branch: ~5.4 MiB for this exact build, once the
-    // registry stopped being reachable. Before the fix, with the whole
-    // command layer pulled in through `client.ts` -> `dispatch.ts` ->
-    // `registry.ts`, the same build was ~8.7 MiB (the number
-    // `2026-08-01`'s ticket comment records). The ceiling below sits at
-    // 6 MiB: comfortably above today's measured size — headroom for
-    // ordinary UI growth — and comfortably below what reintroducing the
-    // registry edge would cost (+~3 MiB), so that regression trips this
-    // rather than shipping unnoticed the way it did the first time.
-    const CEILING_BYTES = 6 * 1024 * 1024;
+    // Measured today: ~6.0 MiB for this exact build — the creation screen's
+    // scope chooser and the checklist's remediation stanzas are ordinary UI
+    // growth on top of the ~5.4 MiB measured when the registry edge was cut.
+    // Before that cut, with the whole command layer pulled in through
+    // `client.ts` -> `dispatch.ts` -> `registry.ts`, the same build was
+    // ~8.7 MiB (the number `2026-08-01`'s ticket comment records). The
+    // ceiling below sits at 6.5 MiB: comfortably above today's measured
+    // size — headroom for ordinary UI growth — and comfortably below what
+    // reintroducing the registry edge would cost (+~3 MiB), so that
+    // regression trips this rather than shipping unnoticed the way it did
+    // the first time.
+    const CEILING_BYTES = 6.5 * 1024 * 1024;
     expect(bytes).toBeLessThan(CEILING_BYTES);
   });
 });

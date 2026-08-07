@@ -287,4 +287,55 @@ describe('one pass over the boundaries', () => {
       ),
     ).toMatchObject({ health: 'unhealthy', healthChangedFrom: 'healthy' });
   });
+
+  test('a row an operator cleared elsewhere goes green on the next pass', async () => {
+    // The whole reason a remediation is a pull request and not a mutation. The
+    // change is applied by whatever applies Terraform; nothing tells this loop
+    // that it was, and nothing has to — the next pass reads the boundary again
+    // and the row moves on its own. There is no recheck act in this test
+    // because there is none in the product.
+    const manifest = installationWith(HOME_PROJECT);
+    await database()
+      .db.insert(vessels)
+      .values({
+        name: manifest.installation.homeVessel,
+        kind: 'gcp-project',
+        location: { kind: 'gcp-project', project: HOME_PROJECT },
+      });
+
+    const missing = { buckets: { [HOME_PROJECT]: ['some-other-bucket'] } };
+    await refreshAllVessels(context({ manifest, discovery: missing }));
+
+    const stored = async () =>
+      (await database().db.select().from(vessels)).find(
+        (row) => row.name === manifest.installation.homeVessel,
+      )!;
+
+    const before = await stored();
+    expect(
+      before.prerequisites?.find((item) => item.name === 'SOURCE_BUCKET')?.met,
+    ).toBe(false);
+    expect(
+      deriveVesselHealth(before.prerequisites!, before.kind, ['home']),
+    ).toBe('unhealthy');
+
+    // The boundary now holds what the stanza would have declared.
+    const after = (await refreshAllVessels(context({ manifest }))).find(
+      (pass) => pass.vessel === manifest.installation.homeVessel,
+    )!;
+    expect(after).toMatchObject({
+      health: 'healthy',
+      healthChangedFrom: 'unhealthy',
+    });
+
+    const row = await stored();
+    expect(
+      row.prerequisites?.find((item) => item.name === 'SOURCE_BUCKET')?.met,
+    ).toBe(true);
+    // And the row still carries only what was observed: what would have cleared
+    // it is composed when somebody reads the checklist, never written here.
+    for (const item of row.prerequisites ?? []) {
+      expect(item.remediation).toBeUndefined();
+    }
+  });
 });

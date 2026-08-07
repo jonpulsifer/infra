@@ -174,6 +174,10 @@ function notAskable(reason: string): Promise<Discovered<string>> {
  * the value is not there, and a refused read says nothing was established.
  * Collapsing them would report a mistyped bucket and an unreachable API with the
  * same sentence, which is the laundering `cloud-discovery.ts` exists to prevent.
+ *
+ * `assessed` is that same split as a field rather than as prose, so a reader
+ * downstream keeps it without matching on the sentence: a refused listing must
+ * not produce a stanza declaring a bucket nobody established was missing.
  */
 function holds(
   name: VesselPrerequisite,
@@ -182,7 +186,7 @@ function holds(
   absent: string,
 ): VesselPrerequisiteResult {
   if (listed.kind === 'unavailable') {
-    return { name, met: false, detail: listed.reason };
+    return { name, met: false, assessed: false, detail: listed.reason };
   }
   return listed.candidates.includes(value)
     ? { name, met: true }
@@ -197,6 +201,7 @@ async function storeReach(
     return {
       name: 'SECRET_STORE',
       met: false,
+      assessed: false,
       detail:
         'this installation has no adapter for the secret store its manifest names',
     };
@@ -205,9 +210,13 @@ async function storeReach(
     await store.versions(STORE_PROBE.scope, STORE_PROBE.key);
     return { name: 'SECRET_STORE', met: true };
   } catch (cause) {
+    // Both stores answer an absent item with an empty list and throw for
+    // everything else, so a throw here is the store declining to be read
+    // rather than a fact about what is in it.
     return {
       name: 'SECRET_STORE',
       met: false,
+      assessed: false,
       detail: cause instanceof Error ? cause.message : String(cause),
     };
   }

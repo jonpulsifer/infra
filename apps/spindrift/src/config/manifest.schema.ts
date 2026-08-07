@@ -178,11 +178,40 @@ export const sharedServicesSchema = z
   })
   .strict();
 
+/**
+ * A repository-relative directory, checked the way §5's named scope is: no
+ * leading slash and no traversal, and nothing said about the tree's layout.
+ *
+ * The layout is the installation's, not this software's — an installation whose
+ * roots live somewhere else is not misconfigured — so the only thing enforced is
+ * that the path stays inside the repository it is resolved against.
+ */
+const repositoryPath = nonEmptyString.refine(
+  (value) => !value.startsWith('/') && !value.split(/[\\/]/).includes('..'),
+  'must stay inside the repository',
+);
+
 const vesselFacts = {
   name: targetNameSchema,
   servedHosts: z.array(nonEmptyString).optional(),
   reachableRegistries: z.array(nonEmptyString).optional(),
   shared: sharedServicesSchema.optional(),
+  /**
+   * Where this boundary is declared in the infrastructure repository, as a
+   * directory relative to its root.
+   *
+   * What a generated remediation is *for*: §13's checklist states what is unmet
+   * and `domain/remediation.ts` states the Terraform that clears it, and a
+   * stanza with nowhere to go is a snippet. Declared here rather than derived
+   * from a naming convention, because a convention would let this software
+   * invent a path nothing in that repository has ever agreed to — and then
+   * open a pull request against it.
+   *
+   * Optional, and its absence is the honest answer rather than a gap: a
+   * boundary somebody connected through the UI genuinely has no root, and the
+   * remediation for it says exactly that instead of naming a directory.
+   */
+  terraformRoot: repositoryPath.optional(),
 };
 
 /**
@@ -585,6 +614,26 @@ export const installationManifestSchema = z
             'must be owner/repo/.github/workflows/<file>@<40-character commit sha>',
           )
           .nullable(),
+        /**
+         * The repository holding this installation's infrastructure, as
+         * `owner/name` — where a generated remediation is opened as a pull
+         * request.
+         *
+         * Not the connected-repository set: those are somebody's applications,
+         * and a change to a boundary belongs where the boundary is declared.
+         * One key rather than one per vessel because the roots the vessels
+         * point at are directories inside it.
+         *
+         * Optional, with the same posture `buildWorkflow`'s null has: an
+         * installation whose infrastructure this host cannot reach has no
+         * honest value to put here, and a placeholder would be a pull request
+         * opened against a repository nobody reviews. Absent means a
+         * remediation is rendered and copied rather than opened, and nothing
+         * else changes.
+         */
+        infrastructureRepository: nonEmptyString
+          .regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/, 'must be owner/name')
+          .optional(),
       })
       .strict(),
 
@@ -861,6 +910,22 @@ export function isDeclaredInstallationVessel(
     vessel === manifest.installation.homeVessel ||
     vessel === manifest.installation.controlPlaneVessel
   );
+}
+
+/**
+ * Where this boundary is declared in the infrastructure repository, or `null`
+ * when nothing declares it.
+ *
+ * By name against the document rather than off the row, because it is a fact
+ * about where the *declaration* lives: a boundary connected through the UI has
+ * a row and no root, which is the state the null arm exists for.
+ */
+export function terraformRootOf(
+  manifest: Pick<AuthoredManifest, 'vessels'>,
+  vessel: string,
+): string | null {
+  const declared = manifest.vessels.find((seed) => seed.name === vessel);
+  return declared?.terraformRoot ?? null;
 }
 
 /**

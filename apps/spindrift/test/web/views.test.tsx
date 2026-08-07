@@ -1051,6 +1051,71 @@ describe('the Targets surface', () => {
     expect(markup).toContain('unhealthy');
   });
 
+  test('an unmet row carries the change that clears it, and where it goes', () => {
+    // §13's checklist stated the diagnosis and stopped. What an operator needs
+    // next is the fix, so the row carries it — with its destination, because a
+    // stanza with no path is a snippet.
+    const markup = words(targets());
+    expect(markup).toContain('Remediation');
+    expect(markup).toContain('google_storage_bucket');
+    expect(markup).toContain('terraform/projects/cloud/storage.tf');
+    expect(markup).toContain('Copy');
+    expect(markup).toContain('Open a pull request');
+    // And the promise the act keeps: applying is what clears the row, and the
+    // standing check is what notices.
+    expect(markup).toContain('Spindrift changes nothing here');
+  });
+
+  test('a row with no generated change says so rather than showing an empty box', () => {
+    // The same found-versus-unavailable split `cloud-discovery.ts` keeps: an
+    // empty disclosure would say a change exists and is empty.
+    const markup = words(targets());
+    expect(markup).toContain('No generated remediation');
+    expect(markup).toContain('cannot be changed afterwards');
+    // A row cleared somewhere other than Terraform names the tree that owns it
+    // rather than offering a pull request against the wrong one.
+    expect(markup).toContain('GitOps tree rather than Terraform');
+  });
+
+  test('a boundary with no Terraform root is told so, never given a path', () => {
+    const rootless = VESSEL_LIST.map((vessel) => ({
+      ...vessel,
+      prerequisites: vessel.prerequisites.map((item) =>
+        item.remediation?.kind === 'generated'
+          ? {
+              ...item,
+              remediation: {
+                ...item.remediation,
+                destination: {
+                  kind: 'absent' as const,
+                  vessel: vessel.name,
+                  file: 'storage.tf',
+                },
+              },
+            }
+          : item,
+      ),
+    }));
+    const markup = words(
+      renderToStaticMarkup(
+        <TargetList
+          targets={TARGET_LIST}
+          pending={[]}
+          vessels={rootless}
+          connecting={false}
+          error={null}
+          onConnect={() => undefined}
+        />,
+      ),
+    );
+    expect(markup).toContain('has no Terraform root');
+    expect(markup).toContain('what one would contain');
+    // There is nowhere to open it, so the act is not offered — and the stanza
+    // still is, because copying it is the move that remains.
+    expect(markup).not.toContain('Open a pull request');
+    expect(markup).toContain('google_storage_bucket');
+  });
+
   test('a boundary nobody has been past says so rather than reading as passed', () => {
     // §18's rule in reverse: a snapshot has to say when, and never-assessed is
     // a different state from assessed-and-everything-met.
