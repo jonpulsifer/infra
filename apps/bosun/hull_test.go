@@ -76,7 +76,7 @@ func TestChArgsWithDevices(t *testing.T) {
 		dir: "/hulls/nixos",
 		manifest: hullManifest{
 			Kernel: "vmlinux", Initrd: "initrd", Cmdline: "console=ttyS0",
-			Devices: []hullDevice{{Share: hullShare{Tag: "ro-store", Host: "/nix/store", RO: true}}},
+			Devices: []hullDevice{{Share: &hullShare{Tag: "ro-store", Host: "/nix/store", RO: true}}},
 		},
 		digest: "deadbeef",
 	}
@@ -99,6 +99,40 @@ func TestChArgsWithDevices(t *testing.T) {
 		"--console", "off",
 		"--serial", "file=/var/log/bosun/sk02.log",
 		"--cmdline", "console=ttyS0 bosun.skiff=sk02 bosun.hull=sha256:deadbeef",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("argv mismatch:\n got:  %v\n want: %v", got, want)
+	}
+}
+
+func TestChArgsWithDisk(t *testing.T) {
+	h := &hull{
+		dir: "/hulls/ubuntu",
+		manifest: hullManifest{
+			Kernel: "vmlinux", Initrd: "initrd", Cmdline: "console=ttyS0",
+			Devices: []hullDevice{{Disk: &hullDisk{Path: "rootfs.img", RO: true}}},
+		},
+		digest: "deadbeef",
+	}
+	class := Class{VCPUs: 2, Memory: "2048M"}
+	paths, err := resolvePaths("/run/bosun", "/var/log/bosun", "sk03", h.manifest.Devices)
+	if err != nil {
+		t.Fatalf("resolvePaths: %v", err)
+	}
+
+	got := chArgs(h, class, "sk03", paths)
+	want := []string{
+		"--kernel", "/hulls/ubuntu/vmlinux",
+		"--initramfs", "/hulls/ubuntu/initrd",
+		"--cpus", "boot=2",
+		"--memory", "size=2048M,shared=on",
+		"--fs", "tag=bosun,socket=/run/bosun/sk03.fs",
+		"--disk", "path=/hulls/ubuntu/rootfs.img,readonly=on",
+		"--net", "vhost_user=on,socket=/run/bosun/sk03.net",
+		"--api-socket", "/run/bosun/sk03.api",
+		"--console", "off",
+		"--serial", "file=/var/log/bosun/sk03.log",
+		"--cmdline", "console=ttyS0 bosun.skiff=sk03 bosun.hull=sha256:deadbeef",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv mismatch:\n got:  %v\n want: %v", got, want)
@@ -192,6 +226,45 @@ func TestHullDigestStableAndCoversNamedFiles(t *testing.T) {
 	}
 	if h5.digest == h1.digest {
 		t.Fatal("digest did not change when cmdline changed")
+	}
+}
+
+func TestHullDigestCoversDiskContent(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "vmlinux"), "kernel-bytes")
+	writeFile(t, filepath.Join(dir, "initrd"), "initrd-bytes")
+	writeFile(t, filepath.Join(dir, "rootfs.img"), "rootfs-bytes")
+	manifest := `{"kernel":"vmlinux","initrd":"initrd","cmdline":"console=ttyS0","devices":[{"disk":{"path":"rootfs.img","ro":true}}]}`
+	writeFile(t, filepath.Join(dir, "hull.json"), manifest)
+
+	h1, err := loadHull(dir)
+	if err != nil {
+		t.Fatalf("loadHull: %v", err)
+	}
+	writeFile(t, filepath.Join(dir, "rootfs.img"), "different-rootfs-bytes")
+	h2, err := loadHull(dir)
+	if err != nil {
+		t.Fatalf("loadHull: %v", err)
+	}
+	if h1.digest == h2.digest {
+		t.Fatal("digest did not change when disk content changed")
+	}
+}
+
+func TestLoadHullRejectsMalformedDevices(t *testing.T) {
+	for name, devices := range map[string]string{
+		"neither":      `[{}]`,
+		"both":         `[{"share":{"tag":"t","host":"/h"},"disk":{"path":"d.img"}}]`,
+		"missing path": `[{"disk":{"ro":true}}]`,
+	} {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "vmlinux"), "kernel-bytes")
+		writeFile(t, filepath.Join(dir, "initrd"), "initrd-bytes")
+		writeFile(t, filepath.Join(dir, "hull.json"),
+			`{"kernel":"vmlinux","initrd":"initrd","cmdline":"console=ttyS0","devices":`+devices+`}`)
+		if _, err := loadHull(dir); err == nil {
+			t.Fatalf("%s: expected error", name)
+		}
 	}
 }
 

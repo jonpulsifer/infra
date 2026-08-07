@@ -6,9 +6,14 @@
   lib,
   mkHost,
   registry,
+  pkgsFor,
 }:
 let
   isHost = entry: (entry.kind or "host") == "host";
+  # A plain derivation, not a NixOS closure: callPackage'd straight from its
+  # module. The Ubuntu hull is the first — a guest with no NixOS in it has no
+  # nixosConfiguration to hang an artifact off.
+  isPackage = entry: (entry.kind or "host") == "package";
 
   defaultSystem = "x86_64-linux";
 in
@@ -41,7 +46,7 @@ rec {
       ]
       ++ (crossHostModules.${name} or [ ]);
     }
-  ) registry;
+  ) (lib.filterAttrs (_: entry: !isPackage entry) registry);
 
   # Hosts you can ssh to: what `nix run .` fans out over.
   deployHosts = lib.attrNames (lib.filterAttrs (_: isHost) registry);
@@ -55,9 +60,15 @@ rec {
   # running `nix build`.
   packagesFor =
     system:
-    lib.mapAttrs (name: entry: nixosConfigurations.${name}.config.system.build.${entry.artifact}) (
+    lib.mapAttrs (
+      name: entry:
+      if isPackage entry then
+        pkgsFor.${entry.system or defaultSystem}.callPackage entry.module { }
+      else
+        nixosConfigurations.${name}.config.system.build.${entry.artifact}
+    ) (
       lib.filterAttrs (
-        _: entry: entry ? artifact && (entry.packageSystem or defaultSystem) == system
+        _: entry: (entry ? artifact || isPackage entry) && (entry.packageSystem or defaultSystem) == system
       ) registry
     );
 }

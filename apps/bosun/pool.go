@@ -190,6 +190,9 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 	s.helpers = append(s.helpers, credProc)
 
 	for i, dev := range h.manifest.Devices {
+		if dev.Share == nil {
+			continue // a disk rides cloud-hypervisor's own --disk; no helper
+		}
 		dp, err := p.launch.Start(virtiofsd, virtiofsdArgs(s.paths.deviceSocks[i], dev.Share.Host, dev.Share.RO), helpersLog, helpersLog)
 		if err != nil {
 			return fmt.Errorf("start device virtiofsd %s: %w", dev.Share.Tag, err)
