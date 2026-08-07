@@ -1,0 +1,57 @@
+# What happens between pressing Deploy and a workload existing — as a timeline,
+# because the interesting part is the order: the intent commits under a lock,
+# the reconciler claims it under a different one, and the phases after that come
+# from the adapter rather than from core's own idea of readiness.
+#
+# The Deploys screen renders this above its ledger; the wiki embeds the same
+# file. Rendered by `mise run diagrams`.
+
+vars: {
+  d2-config: {
+    theme-id: 0
+    dark-theme-id: 200
+    pad: 20
+  }
+}
+
+shape: sequence_diagram
+
+op: operator
+web: web
+db: Postgres
+rec: reconciler
+adapter: deploy adapter
+platform: the platform
+
+op -> web: press Deploy
+web -> db: "SELECT … FOR UPDATE\non the one (Component, Target) row"
+db -> web: what the last intent committed
+web -> db: write the intent — PENDING\nwith the config document, not its hash
+web -> op: the Deploy id
+
+loop: {
+  rec -> db: "claim: FOR UPDATE SKIP LOCKED"
+  db -> rec: one intent
+  rec -> db: "APPLYING — then the lock goes\n(a lock does not survive a restart, a phase does)"
+  rec -> adapter: apply the DesiredState
+  adapter -> platform: "HelmRelease · Cloud Run Service · static release"
+  platform -> adapter: what it actually said
+  adapter -> rec: phase, verdict, raw payload
+  rec -> db: "record it — cluster events expire in about an hour,\nthis copy is the one that exists tomorrow"
+}
+
+green: {
+  rec -> db: RUNNING, with the address the adapter reported
+  db -> op: over the authenticated stream
+}
+
+red: {
+  rec -> db: "FAILED — reason, detail, raw payload"
+  db -> op: "the previous release is still serving —\nexposure is never touched by a failure"
+}
+
+drift: {
+  rec -> adapter: "poll — seconds in flight, minutes once converged"
+  adapter -> rec: drift
+  rec -> db: "reported, never corrected —\nthe re-converge is an ordinary Deploy somebody presses"
+}

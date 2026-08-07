@@ -1,0 +1,72 @@
+# §2's chain, read left to right: a Source plus a Build is an Artifact, and an
+# Artifact plus config is a Deploy. The Supply chain screen renders this above
+# its three ledgers; the wiki embeds the same file.
+#
+# Rendered by `mise run diagrams`. It lives here rather than in docs/ because
+# the image build prunes to this package — an asset the client imports has to
+# be reachable from inside it.
+
+vars: {
+  d2-config: {
+    layout-engine: dagre
+    theme-id: 0
+    dark-theme-id: 200
+    pad: 20
+  }
+}
+
+direction: right
+
+source: Source {
+  repo: connected repo\ncommit
+  upload: uploaded archive
+}
+
+route: "Build — three routes, one BuildKit program" {
+  hosted: hosted CI\nyour Actions minutes
+  cloud: cloud builder
+  job: in-cluster Job\nL1
+  engine: "Dockerfile if present,\nelse the pinned frontend" {style.stroke-dash: 4}
+  hosted -> engine
+  cloud -> engine
+  job -> engine
+}
+
+gate: "Gate — verify → sign → record" {
+  grid-columns: 1
+  verify: pinned verifier over an immutable ref
+  cap: level capped by the route
+  sign: KMS signer, only past the threshold
+}
+
+artifact: Artifact {
+  shape: cylinder
+}
+
+config: "Config — pinned references, never values" {
+  style.stroke-dash: 4
+}
+
+deploy: Deploy {
+  shape: hexagon
+}
+
+serving: serving, at a URL
+
+source.repo -> route.hosted: runs in the repo
+source.upload -> route.cloud
+source.upload -> route.job
+# Logs are read and never pushed, so there is nowhere for a runner to hand back
+# a digest either: it prints one base64 marker line and core reads it out of the
+# log it was already fetching. The route checks that digest rather than copying
+# it — the join is only a check if the runner can disagree.
+route.engine -> gate: one base64 line in the log, checked not copied
+gate -> artifact
+artifact -> deploy
+config -> deploy
+deploy -> serving: admission checks the signature
+
+# An archive of finished output is a SUCCEEDED Build with no route consulted:
+# there is nothing to run, and running one would produce a second digest over
+# the same bytes.
+source.upload -> artifact: supplied — no route consulted

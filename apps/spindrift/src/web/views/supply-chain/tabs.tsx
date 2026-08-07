@@ -17,6 +17,8 @@
  * The tabs are plain links into the existing routes, so `/builds` and
  * `/builds/<id>` keep meaning exactly what they meant.
  */
+import supplyChainFlow from '../../client/diagrams/supply-chain.svg';
+import { Flow } from '../../components/flow.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
 import { cn } from '../../ui/utils.ts';
 
@@ -40,29 +42,36 @@ export function SupplyChainTabs({
   readonly onNavigate: (path: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <Eyebrow>Supply chain</Eyebrow>
-      <nav
-        aria-label="Supply chain"
-        className="flex gap-1 rounded-sm border border-border bg-card p-1"
-      >
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            aria-current={current === tab.id ? 'page' : undefined}
-            onClick={() => onNavigate(tab.path)}
-            className={cn(
-              'rounded-sm px-3 py-1.5 text-sm transition-colors',
-              current === tab.id
-                ? 'bg-secondary font-semibold text-foreground'
-                : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Eyebrow>Supply chain</Eyebrow>
+        <nav
+          aria-label="Supply chain"
+          className="flex gap-1 rounded-sm border border-border bg-card p-1"
+        >
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              aria-current={current === tab.id ? 'page' : undefined}
+              onClick={() => onNavigate(tab.path)}
+              className={cn(
+                'rounded-sm px-3 py-1.5 text-sm transition-colors',
+                current === tab.id
+                  ? 'bg-secondary font-semibold text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+      <Flow
+        src={supplyChainFlow}
+        label="How a Source becomes something that is serving"
+        alt="Source and Build produce an Artifact through one BuildKit program on any of three routes; the gate verifies, caps the level and signs; the Artifact plus pinned config references becomes a Deploy, admitted by a signature check."
+      />
     </div>
   );
 }
