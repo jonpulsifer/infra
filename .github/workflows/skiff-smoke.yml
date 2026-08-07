@@ -17,13 +17,18 @@ name: Skiff Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      label:
+        description: Which class to run on
+        type: string
+        default: skiff-nixos
 
 permissions:
   contents: read
 
 jobs:
   skiff:
-    runs-on: skiff-nixos
+    runs-on: ${{ inputs.label }}
     timeout-minutes: 10
     steps:
       - name: The store came from the host, warm
