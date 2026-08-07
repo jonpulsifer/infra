@@ -596,6 +596,11 @@ describe('the cloud build route', () => {
     expect(api.programs).toHaveLength(1);
     expect(api.programs[0]).toContain('buildctl-daemonless.sh');
     expect(api.programs[0]).toContain(FRONTEND);
+    // Attestations reach `buildctl` as frontend options. `--attest=type=…` is
+    // buildx's flag; passing it here fails the whole invocation before any
+    // step runs, and every managed build did until this was caught live.
+    expect(api.programs[0]).toContain('--opt attest:provenance=mode=max');
+    expect(api.programs[0]).not.toMatch(/^\s*--attest/m);
   });
 
   test('the log arrives while the build runs', async () => {
@@ -1097,8 +1102,8 @@ describe('the BuildKit program', () => {
   test('an empty build-arg set leaves no blank continuation line', () => {
     // A `\` continuation followed by a blank line ends the command there, and
     // the flag on the next line becomes a command of its own — observed live
-    // as `sh: --attest=type=provenance,mode=max: not found` on the first
-    // Component built with no build args.
+    // as `sh: --opt: not found` on the first Component built with no build
+    // args.
     const bare = buildKitProgram({
       bundleUrl: 'staged://bundle',
       bundleDigest: 'sha256:bundle',
@@ -1111,7 +1116,7 @@ describe('the BuildKit program', () => {
     expect(bare).not.toMatch(/\\\n\s*\n\s*--/);
     // The populated program holds the same invariant.
     expect(program).not.toMatch(/\\\n\s*\n\s*--/);
-    expect(bare).toContain('--attest=type=provenance,mode=max');
+    expect(bare).toContain('--opt attest:provenance=mode=max');
   });
 
   test('builds a Dockerfile against the bundle root, not the scope', () => {
@@ -1224,8 +1229,8 @@ describe('the BuildKit program', () => {
 
   test('ends by printing the one line core reads', () => {
     expect(program).toContain('spindrift-result');
-    expect(program).toContain('--attest=type=provenance,mode=max');
-    expect(program).toContain('--attest=type=sbom');
+    expect(program).toContain('--opt attest:provenance=mode=max');
+    expect(program).toContain('--opt attest:sbom=');
     expect(program).toContain('"buildkitProvenanceRef":"%s"');
     expect(program).toContain('"sbomRef":"%s"');
     // A folded payload is a payload core cannot decode.
