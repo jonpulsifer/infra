@@ -1143,6 +1143,10 @@ export const VESSEL_LIST: readonly VesselListItem[] = [
             kind: 'root',
             path: 'terraform/projects/cloud/storage.tf',
           },
+          declares: [
+            '"google_storage_bucket" "spindrift_source"',
+            '"example-source-bucket"',
+          ],
           terraform:
             'resource "google_storage_bucket" "spindrift_source" {\n  name = "example-source-bucket"\n}\n',
         },
