@@ -1,8 +1,9 @@
 # riptide: folly worker node, rooted on NVMe. Also the first bosun host.
-{ inputs, ... }:
+{ config, inputs, ... }:
 {
   imports = [
     ../profiles/k8s-node.nix
+    ../system/sops.nix
     ../system/tailscale-disable.nix
     ../../apps/bosun/module.nix
   ];
@@ -11,13 +12,24 @@
 
   homelab.disko.device = "/dev/nvme0n1";
 
+  sops.defaultSopsFile = ../secrets/riptide.sops.yaml;
+  # bosun reads this once at startup, so a rotated token needs the unit
+  # bounced -- which is what restartUnits does on the activation that
+  # rewrites the secret.
+  sops.secrets."bosun-github-token" = {
+    owner = "bosun";
+    group = "bosun";
+    mode = "0400";
+    restartUnits = [ "bosun.service" ];
+  };
+
   # A skiff mounts this host's /nix/store, so the hull's closure has to be
   # here rather than merely buildable: naming the package is what puts it in
   # riptide's store.
   services.bosun = {
     enable = true;
     repo = "jonpulsifer/infra";
-    tokenFile = "/var/secrets/bosun-github-token";
+    tokenFile = config.sops.secrets."bosun-github-token".path;
     classes.skiff-nixos = {
       hull = "${inputs.self.packages.x86_64-linux.hull-nixos}";
       vcpus = 4;
