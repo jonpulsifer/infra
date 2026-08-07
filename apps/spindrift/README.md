@@ -146,6 +146,16 @@ choices made while building them:
   gets §15's row and configuration pull request from `completeCreationDraft`,
   through `connectRepository` itself — which is what keeps "an abandoned draft
   leaves nothing behind" literally true rather than nearly true.
+  **Editing it cannot strand the operator.** Writes coalesce behind a trailing
+  debounce and still go one at a time, so the revision guard keeps its ordering
+  while typing a name costs one round trip; leaving the screen sends what is
+  scheduled. Deploy flushes those writes and answers with the save that failed
+  rather than completing a draft the server does not have, and a save refused
+  as stale re-reads the draft, resyncs the revision and says another tab won.
+  A name the schema will refuse is marked at the field from that same schema, a
+  repository nothing could be read from is a prerequisite rather than a
+  sentence, and the id appearing in `/apps/new/<id>` is a rewrite rather than a
+  navigation — which is why that one screen is keyed on its route.
 - **Authentication Settings** (`views/auth/settings.tsx`) — additive passkeys
   and the optional Gateway binding. Every mutation requires a fresh passkey
   assertion, and the final account-root passkey cannot be removed.
