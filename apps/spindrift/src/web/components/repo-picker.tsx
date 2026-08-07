@@ -1,16 +1,25 @@
 /**
  * The repository picker for the creation flow's Source step (§20, Task 24).
  *
- * Lists repositories currently granted to the authorized GitHub App
- * installation. A developer selects one, and the selection populates the
- * draft's source with the repo's fullName and a composed clone URL. The picker
- * does not create connections—a missing repository is authorized and connected
- * from the Repositories screen first.
+ * **It lists the grant, not the database.** `listRepositories` answers with two
+ * lists on one response — the durable connections Spindrift holds rows for, and
+ * the repositories GitHub currently grants this installation — and a picker
+ * showing only the first is a picker that reads "No repositories available" on
+ * a fresh install where the operator has already granted five. So the two are
+ * merged here, and every row says which of the three it is, because they are
+ * three different things to press: one already has an App deploying from it,
+ * one is connected and has none, and one is offered by GitHub and connects when
+ * the App is created.
+ *
+ * Selecting writes nothing either way. Reading a repository is
+ * `inspectRepository`, which writes nothing at all; Deploy is the committing
+ * act, and it is there that a grant-only repository gets its row and its
+ * configuration pull request.
  *
  * The filter is a client-side substring match against fullName. It is fast
  * enough for the single-operator scale v1 targets, and the picker never
- * fetches — the list arrives as a prop from the same API call that populated
- * the creation flow.
+ * fetches — the lists arrive as props from the same API call that populated the
+ * creation flow.
  */
 import { GitBranch, Search } from 'lucide-react';
 import { useState } from 'react';
@@ -18,15 +27,74 @@ import type { RepositoryOptionView } from '../model.ts';
 import { Badge } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 
+/** What one row is, in the operator's terms. */
+export type RepositoryChoiceState =
+  /** An App already deploys from it. */
+  | 'deploys'
+  /** Spindrift holds a row for it and nothing deploys from it yet. */
+  | 'connected'
+  /** GitHub grants it and Spindrift holds no row: Deploy connects it. */
+  | 'grant-only';
+
+/** One repository, as a row an operator can read the state of. */
+export interface RepositoryChoice {
+  readonly fullName: string;
+  readonly defaultBranch: string;
+  readonly state: RepositoryChoiceState;
+}
+
+const STATE_BADGE = {
+  deploys: { tone: 'success', label: 'already deploys' },
+  connected: { tone: 'accent', label: 'connected' },
+  'grant-only': { tone: 'idle', label: 'connects on Deploy' },
+} as const satisfies Record<
+  RepositoryChoiceState,
+  { tone: 'success' | 'accent' | 'idle'; label: string }
+>;
+
+/**
+ * The grant and the connections, as one list.
+ *
+ * The two `connected` booleans on the response mean different things — on a
+ * connection it means an App deploys from it, on a grant entry it means a row
+ * exists — so neither is read as a state here. The state is derived from which
+ * list a repository is in and what its own list says about it, which is the
+ * only reading that cannot be wrong about the other list.
+ */
+export function repositoryChoices(
+  connections: readonly RepositoryOptionView[],
+  grant: readonly RepositoryOptionView[],
+): readonly RepositoryChoice[] {
+  const rows = new Map<string, RepositoryChoice>();
+  for (const repo of connections) {
+    rows.set(repo.fullName, {
+      fullName: repo.fullName,
+      defaultBranch: repo.defaultBranch,
+      state: repo.connected ? 'deploys' : 'connected',
+    });
+  }
+  for (const repo of grant) {
+    if (rows.has(repo.fullName)) continue;
+    rows.set(repo.fullName, {
+      fullName: repo.fullName,
+      defaultBranch: repo.defaultBranch,
+      state: 'grant-only',
+    });
+  }
+  return [...rows.values()].sort((left, right) =>
+    left.fullName.localeCompare(right.fullName),
+  );
+}
+
 export function RepoPicker({
   repos,
   selected,
   onSelect,
 }: {
-  repos: readonly RepositoryOptionView[];
+  repos: readonly RepositoryChoice[];
   /** The fullName of the currently selected repo, or `null`. */
   selected: string | null;
-  onSelect: (fullName: string, url: string) => void;
+  onSelect: (repo: RepositoryChoice, url: string) => void;
 }) {
   const [filter, setFilter] = useState('');
   const normalised = filter.toLowerCase();
@@ -60,20 +128,18 @@ export function RepoPicker({
           <p className="px-2 py-4 text-center text-sm text-muted-foreground">
             {filter
               ? 'No repositories match that filter.'
-              : 'No repositories available.'}
+              : 'GitHub grants this installation no repositories. Authorize GitHub, or add repositories to the App installation, from Settings → Connections.'}
           </p>
         ) : (
           filtered.map((repo) => {
             const isSelected = selected === repo.fullName;
+            const badge = STATE_BADGE[repo.state];
             return (
               <button
-                key={repo.repositoryId}
+                key={repo.fullName}
                 type="button"
                 onClick={() =>
-                  onSelect(
-                    repo.fullName,
-                    `https://github.com/${repo.fullName}.git`,
-                  )
+                  onSelect(repo, `https://github.com/${repo.fullName}.git`)
                 }
                 className={cn(
                   'flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors',
@@ -92,11 +158,9 @@ export function RepoPicker({
                 <Badge tone="idle" className="shrink-0">
                   {repo.defaultBranch}
                 </Badge>
-                {repo.connected ? (
-                  <Badge tone="success" className="shrink-0">
-                    connected
-                  </Badge>
-                ) : null}
+                <Badge tone={badge.tone} className="shrink-0">
+                  {badge.label}
+                </Badge>
               </button>
             );
           })
@@ -104,7 +168,9 @@ export function RepoPicker({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Missing a repository? Authorize or connect it from Repositories first.
+        Selecting reads the repository and writes nothing. A repository GitHub
+        grants gets its row and its configuration pull request when the App is
+        created, and never before.
       </p>
     </div>
   );

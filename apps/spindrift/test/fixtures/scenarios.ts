@@ -827,7 +827,11 @@ export const INITIAL_DRAFT: Draft = {
   step: 0,
 };
 
-/** Available repositories from the GitHub App installation. */
+/**
+ * Repositories Spindrift holds a row for. `connected` here means an App
+ * already deploys from it — `listRepositories`'s own reading of the word on
+ * this list.
+ */
 export const REPOSITORY_OPTIONS: readonly RepositoryOptionView[] = [
   {
     repositoryId: 100001,
@@ -857,6 +861,42 @@ export const REPOSITORY_OPTIONS: readonly RepositoryOptionView[] = [
     repositoryId: 100005,
     fullName: 'example-org/weather-card',
     defaultBranch: 'main',
+    connected: false,
+  },
+];
+
+/**
+ * Repositories the GitHub App installation currently grants. `connected` here
+ * means Spindrift holds a row for it — the other reading of the same word, on
+ * the other list of the same response, which is why the picker derives a state
+ * instead of rendering either boolean.
+ *
+ * Two of them are on no other list: a grant Spindrift has never connected is
+ * the ordinary state of a fresh installation.
+ */
+export const REPOSITORY_GRANT: readonly RepositoryOptionView[] = [
+  {
+    repositoryId: 100001,
+    fullName: 'example-org/infra',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 100003,
+    fullName: 'example-org/site',
+    defaultBranch: 'main',
+    connected: true,
+  },
+  {
+    repositoryId: 200001,
+    fullName: 'example-org/almanac',
+    defaultBranch: 'main',
+    connected: false,
+  },
+  {
+    repositoryId: 200002,
+    fullName: 'example-org/ledger',
+    defaultBranch: 'trunk',
     connected: false,
   },
 ];

@@ -132,7 +132,17 @@ choices made while building them:
   Review, defaults carrying every step, preflight folded into Review. The
   server-owned draft survives refresh and rejects stale concurrent edits. An
   unmet prerequisite stops before any App, Component, Build, or Deploy exists,
-  keeps the draft, and names what clears it.
+  keeps the draft, and names what clears it. **It offers what exists rather
+  than deciding from it.** The picker is every repository the GitHub grant
+  carries merged with the ones Spindrift holds rows for, each row saying which
+  it is; detection runs on the repository the draft opens on, and every
+  directory it read is a row — buildable ones selectable with their reason, the
+  rest wearing what was found instead (§3). A sole candidate is a proposal and
+  two are a question, so nothing is picked for anybody. **Selecting writes
+  nothing**: `inspectRepository` is a read, and a repository the grant offers
+  gets §15's row and configuration pull request from `completeCreationDraft`,
+  through `connectRepository` itself — which is what keeps "an abandoned draft
+  leaves nothing behind" literally true rather than nearly true.
 - **Authentication Settings** (`views/auth/settings.tsx`) — additive passkeys
   and the optional Gateway binding. Every mutation requires a fresh passkey
   assertion, and the final account-root passkey cannot be removed.
