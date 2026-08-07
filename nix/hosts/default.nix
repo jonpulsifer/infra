@@ -121,4 +121,12 @@
     module = ../images/gce.nix;
     artifact = "googleComputeImage";
   };
+
+  # A skiff's kernel and initrd, plus the manifest that says how to boot them.
+  # Built and launched on the same box; nothing deploys it.
+  hull-nixos = {
+    kind = "image";
+    module = ../images/hull-nixos.nix;
+    artifact = "hull";
+  };
 }
