@@ -19,7 +19,11 @@ import {
   type Draft,
   draftReducer,
 } from '../../src/web/views/apps/new/draft.ts';
-import { NewApp } from '../../src/web/views/apps/new/index.tsx';
+import {
+  CreationLoadFailure,
+  CreationSkeleton,
+  NewApp,
+} from '../../src/web/views/apps/new/index.tsx';
 import {
   INITIAL_DRAFT,
   REPOSITORY_GRANT,
@@ -150,6 +154,53 @@ describe('the whole plan is on one screen', () => {
 
   test('the vessel is marked immutable while it is still a choice', () => {
     expect(markup).toContain('immutable once created');
+  });
+});
+
+describe('while the screen is still loading', () => {
+  test('the placeholder is the rows that are coming, not one pulsing line', () => {
+    // A card of six rows arrives as a card of six rows. The alternative is a
+    // sentence that says nothing about what will be on the screen, followed by
+    // a layout shift that costs the reader their place.
+    const markup = renderToStaticMarkup(<CreationSkeleton phase="draft" />);
+    for (const label of [
+      'Source',
+      'Component',
+      'Target',
+      'URL',
+      'Reach',
+      'Vessel',
+    ]) {
+      expect(markup).toContain(label);
+    }
+    expect(markup).toContain('aria-busy="true"');
+  });
+
+  test('it names which of the two reads is outstanding', () => {
+    // The second read cannot start until the first has answered — placement is
+    // resolved for the draft (§3) — so "loading" means two different waits.
+    expect(renderToStaticMarkup(<CreationSkeleton phase="draft" />)).toContain(
+      'Recovering the draft',
+    );
+    expect(
+      renderToStaticMarkup(<CreationSkeleton phase="options" />),
+    ).toContain('Targets and repositories');
+  });
+});
+
+describe('when neither read answered', () => {
+  const markup = renderToStaticMarkup(
+    <CreationLoadFailure
+      message="the database was unreachable"
+      onRetry={() => {}}
+    />,
+  );
+
+  test('the failure is named and retryable', () => {
+    // Every read behind this screen is idempotent, so a dead end here is a
+    // choice rather than a consequence.
+    expect(markup).toContain('the database was unreachable');
+    expect(markup).toContain('Try again');
   });
 });
 

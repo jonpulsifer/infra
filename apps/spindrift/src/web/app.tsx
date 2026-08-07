@@ -5,7 +5,7 @@
  * here is chrome that exists to reach them.
  */
 import { Monitor, Moon, Sun } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
 import { command, type InputOf, type OutputOf } from './client.ts';
@@ -37,7 +37,12 @@ import { Eyebrow } from './ui/card.tsx';
 import { cn } from './ui/utils.ts';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { AppList } from './views/apps/list.tsx';
-import { NewApp } from './views/apps/new/index.tsx';
+import {
+  type CreationLoad,
+  CreationLoadFailure,
+  CreationSkeleton,
+  NewApp,
+} from './views/apps/new/index.tsx';
 import {
   type RunJob,
   type SetAutoDeploy,
@@ -382,14 +387,16 @@ export function Screen({
     return <SourcesScreen onNavigate={onNavigate} />;
   if (path.startsWith('/artifacts'))
     return <ArtifactsScreen onNavigate={onNavigate} />;
+  // The one screen keyed on the route rather than on the object in it, because
+  // it is the one screen that *names* its object partway through: a draft
+  // starts, the path is rewritten to `/apps/new/<id>`, and a key reading that
+  // id would tear down the screen that just created it. `NewAppScreen` keeps
+  // its own record of which draft is loaded and keys `NewApp` on it, so a
+  // different draft still resets everything a different draft should.
   if (path.startsWith('/apps/new')) {
     const draftId = path.replace(/^\/apps\/new\/?/, '') || null;
     return (
-      <NewAppScreen
-        key={draftId ?? 'new'}
-        draftId={draftId}
-        onNavigate={onNavigate}
-      />
+      <NewAppScreen key="apps-new" draftId={draftId} onNavigate={onNavigate} />
     );
   }
   if (path.startsWith('/deploys')) {
@@ -2248,7 +2255,7 @@ function NewAppScreen({
   onNavigate: (path: string) => void;
 }) {
   const [state, setState] = useState<
-    | { type: 'loading' }
+    | { type: 'loading'; phase: CreationLoad }
     | { type: 'error'; message: string }
     | {
         type: 'success';
@@ -2257,16 +2264,32 @@ function NewAppScreen({
         repoGrant: readonly GrantedRepositoryView[];
         draft: import('../domain/creation-draft.ts').CreationDraftView;
       }
-  >({ type: 'loading' });
+  >({ type: 'loading', phase: 'draft' });
+  const [attempt, setAttempt] = useState(0);
   // React Strict Mode replays effects in development. Supplying the identity
   // makes both starts the same authenticated act instead of leaving an orphan.
-  const [startId] = useState(() => crypto.randomUUID());
+  const startId = useRef(crypto.randomUUID());
+  /** The draft on screen, so this screen's own URL rewrite is not navigation. */
+  const loaded = useRef<string | null>(null);
 
   useEffect(() => {
+    // The path naming the draft this screen started is the rewrite below
+    // arriving back through the router. Reloading for it would re-run both
+    // reads and throw away everything typed since — which is the whole of what
+    // remounting on the id used to cost.
+    if (draftId !== null && draftId === loaded.current) return;
+    if (draftId === null && loaded.current !== null) {
+      // `New App` pressed while a draft is open: a genuinely new one needs an
+      // identity of its own, or `startCreationDraft` idempotently answers with
+      // the draft already on screen.
+      startId.current = crypto.randomUUID();
+      loaded.current = null;
+    }
     let live = true;
+    setState({ type: 'loading', phase: 'draft' });
     const draftRequest =
       draftId === null
-        ? command('startCreationDraft', { id: startId })
+        ? command('startCreationDraft', { id: startId.current })
         : command('getCreationDraft', { id: draftId });
     // The Targets read follows the draft rather than racing it: placement is
     // derived from what is being created (§3), so asking before the draft
@@ -2279,6 +2302,7 @@ function NewAppScreen({
         setState({ type: 'error', message: draftRes.failure.message });
         return;
       }
+      setState({ type: 'loading', phase: 'options' });
       const { kind, reach, auth } = draftRes.value.draft;
       const [targetRes, repoRes] = await Promise.all([
         command('listTargets', { kind, reach, auth }),
@@ -2293,6 +2317,7 @@ function NewAppScreen({
         setState({ type: 'error', message: repoRes.failure.message });
         return;
       }
+      loaded.current = draftRes.value.id;
       setState({
         type: 'success',
         targetOptions: targetRes.value.options,
@@ -2313,26 +2338,16 @@ function NewAppScreen({
     return () => {
       live = false;
     };
-  }, [draftId, onNavigate, startId]);
+  }, [draftId, onNavigate, attempt]);
 
-  if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading creation options...
-        </p>
-      </div>
-    );
-  }
+  if (state.type === 'loading') return <CreationSkeleton phase={state.phase} />;
 
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load creation options</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
-      </div>
+      <CreationLoadFailure
+        message={state.message}
+        onRetry={() => setAttempt((value) => value + 1)}
+      />
     );
   }
 

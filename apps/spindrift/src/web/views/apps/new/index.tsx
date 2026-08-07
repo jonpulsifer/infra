@@ -100,6 +100,86 @@ function unchosenScope(
   ];
 }
 
+/** The two reads this screen opens with, in the order they are made. */
+export type CreationLoad = 'draft' | 'options';
+
+const LOADING_NOTE = {
+  draft: 'Recovering the draft…',
+  options: 'Reading the Targets and repositories it can use…',
+} as const satisfies Record<CreationLoad, string>;
+
+/**
+ * The screen's own shape, while the two reads it opens with are in flight.
+ *
+ * A screen that is a card of decided rows loads as a card of rows: one pulsing
+ * sentence says a page is coming and nothing about what will be on it, and the
+ * layout shift when the real rows arrive is the reader losing their place. The
+ * caption names the read actually outstanding, because the second one cannot
+ * start until the first has answered — the draft says what to resolve placement
+ * for (§3) — so "still loading" has two different meanings here.
+ */
+export function CreationSkeleton({ phase }: { phase: CreationLoad }) {
+  return (
+    <div
+      aria-busy="true"
+      className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-5 py-6"
+    >
+      <header>
+        <Eyebrow>New App</Eyebrow>
+        <div className="mt-2 h-7 w-64 animate-pulse rounded-md bg-secondary" />
+        <p className="mt-2 text-sm text-muted-foreground">
+          {LOADING_NOTE[phase]}
+        </p>
+      </header>
+      <Card>
+        {['Source', 'Component', 'Target', 'URL', 'Reach', 'Vessel'].map(
+          (label) => (
+            <div
+              key={label}
+              className="flex items-center gap-3 border-b border-border-soft px-4 py-3 last:border-b-0"
+            >
+              <span className="w-[84px] shrink-0 text-xs text-muted-foreground">
+                {label}
+              </span>
+              <span className="h-4 flex-1 animate-pulse rounded bg-secondary" />
+            </div>
+          ),
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Neither read answered, so there is no draft to show.
+ *
+ * Every one of the three reads behind this screen is idempotent — a start
+ * replays onto the draft id it was handed, and the other two are queries — so
+ * the retry is free, and without it a transient failure left the operator on a
+ * screen with a sentence and nothing to press.
+ */
+export function CreationLoadFailure({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-5 py-6">
+      <div className="rounded-sm border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+        <p className="text-sm font-medium">Failed to load creation options</p>
+        <p className="mt-1 text-sm">{message}</p>
+      </div>
+      <div>
+        <Button variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function NewApp({
   initial,
   targets: initialTargets,
