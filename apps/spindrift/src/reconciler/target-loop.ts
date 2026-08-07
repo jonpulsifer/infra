@@ -44,6 +44,7 @@ import {
   hasVesselLocation,
   type TargetHealth,
   targetLabel,
+  unstatedAddress,
 } from '../domain/target.ts';
 import type { SurfaceProbe } from '../domain/vessel.ts';
 import { reconcilerLoopDuration } from '../telemetry/index.ts';
@@ -101,6 +102,20 @@ export async function inspectTarget(
       // what it carries. Reading it as an absence would let an installation
       // that ships one adapter conclude that no vessel anywhere has the others.
       surface: { kind: 'undetermined', detail },
+    };
+  }
+  const unstated = unstatedAddress(target);
+  if (unstated !== null) {
+    // The vessel's location is of the other kind's shape, so the flat view
+    // this was handed has a hole where the surface's address goes. Asking the
+    // adapter anyway is a request against `projects/undefined` and a sentence
+    // naming `undefined` back to the operator; the checklist says which
+    // address is missing instead. Undetermined for the same reason as above —
+    // nobody asked the boundary anything.
+    return {
+      prerequisites: unreachablePrerequisites(unstated, target.adapter),
+      discovery: null,
+      surface: { kind: 'undetermined', detail: unstated },
     };
   }
   try {

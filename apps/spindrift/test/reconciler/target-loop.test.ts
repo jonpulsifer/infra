@@ -208,6 +208,36 @@ describe('one pass over every connected Target', () => {
   });
 });
 
+describe('a surface whose vessel states the other kind of address', () => {
+  test('says which address is missing instead of asking the adapter', async () => {
+    // The manifest allows this pairing on purpose — which runtimes a boundary
+    // carries is established by probing it, not by a table of surfaces per
+    // kind — so a `cloudrun` surface can sit on a cluster. What it must not do
+    // is reach the adapter: composed from a cluster's address the connection
+    // carries no project, and Cloud Run would request `projects/undefined`
+    // every tick and hand the operator a sentence with `undefined` in it.
+    const { registry, of } = fakes();
+    const clock = ticking();
+    const vessel = await insertVessel(database().db, 'kubernetes', {
+      name: 'cluster',
+    });
+    const [row] = await database()
+      .db.insert(targets)
+      .values(targetValues({ adapter: 'cloudrun', vesselId: vessel.id }))
+      .returning();
+
+    const refresh = await refreshTarget(context(registry, clock), row!, vessel);
+
+    expect(refresh.health).toBe('unhealthy');
+    expect(of('cloudrun').inspected).toEqual([]);
+    // §3's grammar: an unmet checklist item carrying the reason, which is what
+    // makes the Target a non-candidate with something an operator can act on.
+    const stored = await targetRow('cluster', 'cloudrun');
+    expect(stored.prerequisites?.[0]?.detail).toContain('states no project');
+    expect(stored.prerequisites?.every((item) => !item.met)).toBe(true);
+  });
+});
+
 describe('a capability flip changes candidacy on the next pass', () => {
   test('without a reconnect', async () => {
     const { registry, of } = fakes();

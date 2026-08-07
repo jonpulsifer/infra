@@ -305,13 +305,49 @@ export function deployTargetOf(
     vessel: vessel.name,
     adapter: target.adapter,
     // The union is discriminated on `adapter`, and the surface half already
-    // carries it, so the spread lands in exactly one arm.
+    // carries it, so the spread lands in exactly one arm. The cast is what
+    // {@link unstatedAddress} exists to check: `where` is the boundary's own
+    // kind's address, and only the compiler is told it is the one this arm
+    // needs.
     connection: {
       ...target.connection,
       ...reach,
       ...where,
     } as AdapterConnection,
   };
+}
+
+/**
+ * The address this surface needs that its vessel's location does not state.
+ *
+ * `null` when {@link deployTargetOf} composed a whole connection, which is the
+ * ordinary case. Each arm of {@link AdapterConnection} requires exactly one
+ * address — `apiServer` for `kubernetes`, `project` for both cloud surfaces —
+ * and a boundary states only its own kind's, so a surface on a boundary of the
+ * other shape composes to a connection with a hole where its address goes.
+ *
+ * **That pairing is a document somebody may write, deliberately.** Which
+ * runtimes a boundary carries is established by probing it rather than by a
+ * table of surfaces per kind, so the manifest no longer refuses a project that
+ * runs a cluster — it just has no way to address one yet. What must not happen
+ * is an adapter being handed the hole: Cloud Run would request
+ * `projects/undefined` on every pass of the loop and report a sentence with
+ * `undefined` in it to the operator. So this is an unmet checklist item
+ * instead, which is §3's grammar for exactly this — a stated reason a Target is
+ * a non-candidate.
+ */
+export function unstatedAddress(target: DeployTargetRef): string | null {
+  const { connection } = target;
+  // `in` rather than a property read: the arm the compiler picked is the one
+  // the cast asserted, so the key is only actually there when the boundary's
+  // location was the matching shape.
+  const stated =
+    target.adapter === 'kubernetes'
+      ? 'apiServer' in connection && connection.apiServer !== ''
+      : 'project' in connection && connection.project !== '';
+  if (stated) return null;
+  const address = target.adapter === 'kubernetes' ? 'apiServer' : 'project';
+  return `this vessel's location states no ${address}, so a ${target.adapter} surface on it has no address to be reached at`;
 }
 
 /**
