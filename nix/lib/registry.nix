@@ -60,15 +60,17 @@ rec {
   # running `nix build`.
   packagesFor =
     system:
-    lib.mapAttrs (
-      name: entry:
-      if isPackage entry then
-        pkgsFor.${entry.system or defaultSystem}.callPackage entry.module { }
-      else
-        nixosConfigurations.${name}.config.system.build.${entry.artifact}
-    ) (
-      lib.filterAttrs (
-        _: entry: (entry ? artifact || isPackage entry) && (entry.packageSystem or defaultSystem) == system
-      ) registry
-    );
+    lib.mapAttrs
+      (
+        name: entry:
+        if isPackage entry then
+          pkgsFor.${entry.system or defaultSystem}.callPackage entry.module { }
+        else
+          nixosConfigurations.${name}.config.system.build.${entry.artifact}
+      )
+      (
+        lib.filterAttrs (
+          _: entry: (entry ? artifact || isPackage entry) && (entry.packageSystem or defaultSystem) == system
+        ) registry
+      );
 }
