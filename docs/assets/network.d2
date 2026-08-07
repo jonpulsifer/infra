@@ -1,0 +1,106 @@
+# Homelab network: two sites, one tunnel, two edges.
+#
+# Every address here is restated from the topology SSOT — each site's
+# `cluster-topology.json` and folly's `lab-topology.json`. Change those first,
+# then `mise run diagrams`.
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 0
+    dark-theme-id: 200
+    pad: 20
+  }
+}
+
+direction: right
+
+folly: folly (on-site) {
+  udm: UDM Pro · ASN 64512 {shape: hexagon}
+
+  vlans: "VLANs — firewall zone Lab holds the last two" {
+    grid-columns: 1
+    mgmt: Management — 10.1.0.0/24
+    iot: iot · 666 — 10.66.6.0/26
+    future: future · 1337 — 10.13.37.0/28
+    lab: Lab Net · 2 — 10.2.0.0/24
+    k8s: Kubernetes · 8 — 10.3.0.0/26
+  }
+
+  cluster: folly cluster {
+    nodes: optiplex (cp) · riptide · shale
+    cilium: Cilium · ASN 64513 {shape: hexagon}
+    pods: pods 10.100.0.0/20
+    svc: services 10.10.0.0/16
+    lb: LB VIPs 10.3.0.64/26
+    gw: per-app Gateways
+  }
+
+  dns: "capsule · spore — CoreDNS sinkhole + Chrony\ndns.lolwtf.ca · time.lolwtf.ca"
+
+  udm -> vlans
+  vlans.mgmt -> dns
+  vlans.k8s -> cluster.nodes
+  cluster.cilium -> udm: eBGP — LoadBalancerIP
+  cluster.cilium -> cluster.pods
+  cluster.cilium -> cluster.lb
+  cluster.gw -> cluster.lb
+}
+
+offsite: offsite (remote site) {
+  ucg: UCG Max · ASN 64512 {shape: hexagon}
+
+  vlans: "VLANs — both in the default Internal zone" {
+    grid-columns: 1
+    default: Default — 192.168.1.0/24
+    k8s: Kubernetes · 2 — 10.89.0.0/28
+  }
+
+  cluster: offsite cluster {
+    nodes: retrofit (cp) · oldschool
+    cilium: Cilium · ASN 64513 {shape: hexagon}
+    pods: pods 10.101.0.0/20
+    svc: services 10.11.0.0/16
+    lb: LB VIPs 10.89.0.64/26
+    gw: one shared cluster-gateway
+  }
+
+  ucg -> vlans
+  vlans.k8s -> cluster.nodes
+  cluster.cilium -> ucg: eBGP — Cluster + External + LoadBalancerIP
+  cluster.cilium -> cluster.pods
+  cluster.cilium -> cluster.lb
+  cluster.gw -> cluster.lb
+}
+
+tunnel: Site Magic · wgsts1000 {
+  shape: hexagon
+  style.multiple: true
+}
+
+folly.udm <-> tunnel: "OSPF — node subnets\niBGP — VIPs + pod CIDRs" {style.bold: true}
+offsite.ucg <-> tunnel: "OSPF — node subnets\niBGP — VIPs + pod CIDRs" {style.bold: true}
+
+cf: Cloudflare {
+  dns: external-dns
+  site: site tunnels
+  spin: Spindrift wildcard tunnel
+  zones: lolwtf.ca · lolwtf.dev
+  dns -> zones
+  site -> zones
+  spin -> zones
+}
+
+ts: "Tailscale — pirate-musical.ts.net" {
+  conn: "Connector subnet routers\nadvertise LAN + node CIDR + LB range"
+  note: the node hosts run no client {style.stroke-dash: 4}
+}
+
+folly.cluster.gw -> cf.site: private A at LB VIP
+offsite.cluster.gw -> cf.site
+offsite.cluster.gw -> cf.spin: proxied CNAME
+folly.cluster.gw -> cf.dns
+offsite.cluster.gw -> cf.dns
+
+folly -> ts.conn
+offsite -> ts.conn

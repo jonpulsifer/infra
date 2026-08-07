@@ -191,6 +191,20 @@ a { color: var(--link); }
 strong { color: var(--title); }
 mark { background: rgba(251,191,36,.3); color: inherit; border-radius: 3px; padding: 0 0.15em; }
 img { max-width: 100%; border-radius: 10px; }
+
+/* A figure: the whole image links to itself, because a diagram scaled into this
+   column loses its labels.
+
+   The frame follows `prefers-color-scheme` rather than `html.dark`, unlike
+   everything else here. A rendered d2 SVG bakes both palettes behind that same
+   query and paints its own background, and an <img> element's document is its
+   own — the class this page toggles never reaches inside it. So the frame is
+   matched to the diagram it holds rather than to the page around it, which is
+   the mismatch a reader would actually notice. */
+.fig { display: block; margin: 0.6em 0; border: 1px solid var(--line); border-radius: 10px; padding: 0.6em; background: #fff; }
+@media (prefers-color-scheme: dark) { .fig { background: #1e1e2e; } }
+.fig:hover { border-color: var(--link); }
+.fig img { display: block; border-radius: 0; }
 .dim { color: var(--fg2); }
 
 /* ── code ── */

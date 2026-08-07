@@ -28,6 +28,21 @@ const REPO = "https://github.com/jonpulsifer/infra";
 const LOGOS = join(ROOT, "apps", "spindrift", "src", "web", "client", "logos");
 const logoNames = new Set<string>();
 
+/**
+ * Rendered d2 diagrams, served at `/assets/`.
+ *
+ * Two sources for the same reason the marks have one: a diagram the spindrift
+ * client imports has to survive `turbo prune spindrift`, so the flows it shows
+ * on its own screens live inside that package and the wiki reads them from
+ * there. Everything drawn only for the wiki lives in `docs/assets/`. Both are
+ * `mise run docs:diagrams` output, committed, because neither this build nor
+ * the image build has d2.
+ */
+const ASSETS = [
+  join(DOCS, "assets"),
+  join(ROOT, "apps", "spindrift", "src", "web", "client", "diagrams"),
+];
+
 // ── model ────────────────────────────────────────────────────────────────────
 
 interface Block {
@@ -115,7 +130,12 @@ function inline(s: string, page: Page, refs?: Set<string>): string {
   s = esc(s);
   const codes: string[] = [];
   s = s.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
-  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, `<img alt="$1" src="$2" loading="lazy">`);
+  // Linked to itself: a diagram wide enough to be worth drawing is wider than
+  // this column, and `max-width: 100%` alone shrinks its labels to nothing.
+  s = s.replace(
+    /!\[([^\]]*)\]\(([^)\s]+)\)/g,
+    `<a class="fig" href="$2" title="$1 — open full size"><img alt="$1" src="$2" loading="lazy"></a>`,
+  );
   s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, `<a href="$2" rel="noopener">$1</a>`);
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, `<a href="$2">$1</a>`);
   s = s.replace(/\[\[([^\]]+)\]\]/g, (_, n) => {
@@ -443,6 +463,14 @@ async function build() {
 
   await cp(LOGOS, join(OUT, "logos"), { recursive: true, filter: (s) => !s.endsWith(".ts") });
   for (const f of await readdir(join(OUT, "logos"))) logoNames.add(f.replace(/\.svg$/, ""));
+
+  for (const dir of ASSETS) {
+    await cp(dir, join(OUT, "assets"), {
+      recursive: true,
+      // The .d2 sources stay in the repo; only what a browser can render ships.
+      filter: (s) => !s.endsWith(".d2"),
+    });
+  }
 
   await loadPages();
   await collectRefs();

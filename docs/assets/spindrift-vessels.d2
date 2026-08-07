@@ -1,0 +1,78 @@
+# Spindrift's vessels and the cloud they federate into.
+#
+# A Vessel is the boundary that admits a call or refuses it. A Target is one
+# runtime surface on a vessel, and a Target is what a Component is placed on.
+# Terraform owns every boundary and Flux owns each cluster's platform
+# prerequisites; Spindrift only places workloads inside one.
+#
+# Labels stay short on purpose — the prose on Architecture/Spindrift carries the
+# sentences, this carries the shape. Edges stay few for the same reason: the
+# ownership story belongs in the prose beside it rather than drawn as an arrow
+# every box, which is what turned an earlier revision into spaghetti.
+
+vars: {
+  d2-config: {
+    layout-engine: dagre
+    theme-id: 0
+    dark-theme-id: 200
+    pad: 20
+  }
+}
+
+direction: down
+
+control: "Spindrift — a platform workload on offsite, never its own App" {
+  style.fill-pattern: dots
+  grid-columns: 3
+  web: web
+  rec: reconciler
+  db: Postgres {shape: cylinder}
+}
+
+cloud: "The cloud underneath — bluenose and trusted-builds" {
+  grid-columns: 3
+  kms: "KMS signer (trusted-builds)\ncore signs one digest" {shape: hexagon}
+  reg: "registry (trusted-builds)\npull-only for vessels" {shape: cylinder}
+  sm: "Secret Manager (bluenose)\nthe one store of record" {shape: cylinder}
+}
+
+targets: Targets {
+  grid-columns: 4
+
+  fk: "folly/kubernetes" {
+    grid-columns: 1
+    ns: HelmRelease → spindrift-apps
+    kyverno: Kyverno {shape: hexagon}
+    ess: gcpsm store
+  }
+  ok: "offsite/kubernetes" {
+    grid-columns: 1
+    ns: HelmRelease → spindrift-apps
+    kyverno: Kyverno {shape: hexagon}
+    ess: gcpsm store
+  }
+  cr: "bluenose/cloudrun" {
+    grid-columns: 1
+    svc: Service revision
+    ba: Binary Authorization {shape: hexagon}
+    ref: secretKeyRef, resolved in-project
+  }
+  st: "bluenose/static" {
+    grid-columns: 1
+    site: version → release
+    none: reaches no store {style.stroke-dash: 4}
+  }
+}
+
+control -> cloud.sm: put → a pinned reference comes back
+control -> cloud.kms: verify → sign → record
+control -> cloud: every call federates through fml-pool {style.stroke-dash: 4}
+control -> targets: "place — cluster API · runtime API · five static calls" {style.bold: true}
+
+cloud.reg -> targets.fk.kyverno
+cloud.reg -> targets.ok.kyverno
+cloud.reg -> targets.cr.ba
+
+cloud.sm -> targets.fk.ess: one store
+cloud.sm -> targets.ok.ess: two paths
+cloud.sm -> targets.cr.ref: native, third path
