@@ -418,7 +418,22 @@ describe('the credential is the only copy of the federation', () => {
           cloud: { federation: { audience: '//iam.stale.test/pools/stale' } },
         },
       }),
-    ).rejects.toThrow('manifest.cloud.federation is not a manifest key');
+    ).rejects.toThrow('manifest.cloud is not a manifest key');
+  });
+
+  test('refuses a declaration that states the home vessel’s projects', async () => {
+    // The whole `cloud` key, not the federation alone: the artifacts project
+    // and the project the home vessel is are properties of the vessel
+    // `installation.homeVessel` names, so a document restating them there is
+    // two answers to one question and is refused at render time.
+    await expect(
+      render({
+        manifest: {
+          installation: 'declared',
+          cloud: { artifactsProject: 'stale-artifacts' },
+        },
+      }),
+    ).rejects.toThrow('properties of the vessel installation.homeVessel names');
   });
 
   test('refuses a declaration that names the chart it was installed from', async () => {
@@ -509,7 +524,16 @@ describe('a chart-only install seeds its own relying party', () => {
     // The genuine choices stay at their stand-ins, so the seeded document is
     // still one `isUnconfiguredInstallation` (apps/spindrift/src/config/manifest.ts)
     // reads as unconfigured.
-    expect(seeded.installation).toBe('default');
+    const installation = seeded.installation as Record<string, string>;
+    expect(installation.name).toBe('default');
+    // And both pointers name vessels this same document declares. A chart-only
+    // install boots from nothing else, so a pointer that resolves to nothing
+    // here is an installation that refuses its own seed.
+    const declared = (seeded.vessels as { name: string }[]).map(
+      (vessel) => vessel.name,
+    );
+    expect(declared).toContain(installation.controlPlaneVessel);
+    expect(declared).toContain(installation.homeVessel);
     expect((seeded.github as { clientId?: string }).clientId).toBe(
       'Iv1.918d699f36ee7afc',
     );
