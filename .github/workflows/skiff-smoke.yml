@@ -28,6 +28,8 @@ permissions:
 
 jobs:
   skiff:
+    # The NixOS family's assertions; the Ubuntu family has its own job below.
+    if: ${{ !startsWith(inputs.label, 'skiff-ubuntu') }}
     runs-on: ${{ inputs.label }}
     timeout-minutes: 10
     steps:
@@ -56,3 +58,36 @@ jobs:
         run: |
           tr ' ' '\n' < /proc/cmdline | grep '^bosun\.'
           test "$(systemd-detect-virt)" = kvm
+
+  # The Ubuntu hull is the ubuntu-latest-fidelity family: an FHS guest with
+  # no Nix in it, flattened from the same runner image ARC runs. What is
+  # worth asserting is exactly that fidelity — plus the same docker and
+  # identity guarantees every skiff makes.
+  skiff-ubuntu:
+    if: ${{ startsWith(inputs.label, 'skiff-ubuntu') }}
+    runs-on: ${{ inputs.label }}
+    timeout-minutes: 10
+    steps:
+      - name: This is Ubuntu, and apt works
+        run: |
+          . /etc/os-release
+          test "$ID" = ubuntu
+          sudo apt-get update -qq
+          sudo apt-get install -qqy --no-install-recommends sl
+          test -x /usr/games/sl
+
+      - name: The ARC image toolchain is present
+        run: |
+          git --version
+          node --version
+          jq --version
+
+      - name: Docker runs a container
+        run: |
+          docker version --format '{{.Server.Version}}'
+          docker run --rm alpine echo container-ok
+
+      - name: This is a skiff, and it knows which one
+        run: |
+          tr ' ' '\n' < /proc/cmdline | grep '^bosun\.'
+          grep -q 'Cloud Hypervisor' /sys/class/dmi/id/sys_vendor

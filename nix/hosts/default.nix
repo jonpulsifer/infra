@@ -9,8 +9,10 @@
 #   tags          Tailscale ACL tags. For a k8s node, the cluster tag ("folly"
 #                 or "offsite") is also what selects its cluster — see
 #                 ../profiles/k8s-node.nix.
-#   kind          "host" (deployable, gets the fleet baseline) or "image"
-#                 (built and flashed/imported, gets only ../profiles/base.nix)
+#   kind          "host" (deployable, gets the fleet baseline), "image"
+#                 (built and flashed/imported, gets only ../profiles/base.nix),
+#                 or "package" (a plain derivation, no NixOS closure at all:
+#                 `module` is callPackage'd and `artifact` does not apply)
 #   baseline      override the baseline implied by `kind`
 #   module        the configuration (default ./<name>.nix)
 #   artifact      attribute under config.system.build to expose as a package
@@ -128,5 +130,12 @@
     kind = "image";
     module = ../images/hull-nixos.nix;
     artifact = "hull";
+  };
+
+  # The FHS skiff: kernel, initrd, and a flattened runner-image rootfs disk.
+  # Not a NixOS closure — the guest carries no Nix at all.
+  hull-ubuntu = {
+    kind = "package";
+    module = ../images/hull-ubuntu.nix;
   };
 }

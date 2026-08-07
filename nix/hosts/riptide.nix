@@ -24,5 +24,14 @@
       memory = "2048M";
       warm = 1;
     };
+    # The FHS family: apt, dockerd, and the ARC image's toolchain, no Nix.
+    # More memory than skiff-nixos because jobs here apt-get and docker build
+    # inside the guest rather than leaning on a warm host store.
+    classes.skiff-ubuntu = {
+      hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
+      vcpus = 4;
+      memory = "4096M";
+      warm = 1;
+    };
   };
 }
