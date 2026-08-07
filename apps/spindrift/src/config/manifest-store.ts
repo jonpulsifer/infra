@@ -184,6 +184,46 @@ function governedByDeclaration(
 }
 
 /**
+ * The sentence refusing a document the next boot would take back, or `null` for
+ * one it would leave standing.
+ *
+ * **The guard every write path owes the governed slice.** `loadStoredManifest`
+ * re-applies {@link governedByDeclaration} on every boot, so an operator edit to
+ * the two pointers or to either vessel they name is accepted, saved, and
+ * reverted at the next pod restart — with the screen that took it then showing
+ * the old values and no reason why. That is the failure `ManifestWrite` records
+ * having already happened once to a Target's connection; refusing here is the
+ * same answer one noun up, and it is what makes the two names safe to govern.
+ *
+ * Derived by running the merge and diffing rather than by a second list of the
+ * governed keys: the check and the governance are then the same code, so a
+ * pointer that starts governing something new cannot start being editable at
+ * the same moment.
+ *
+ * Paths, never values, for the reason {@link diffManifestPaths} gives. `null`
+ * with no declaration mounted, because there is then nothing to govern and the
+ * row is the operator's outright.
+ */
+export function governedSliceRefusal(
+  manifest: AuthoredManifest,
+  declaration: AuthoredManifest | null | undefined,
+): string | null {
+  if (declaration == null) return null;
+  // Both sides through the same parse. The schema normalizes as it validates —
+  // `supplyChain.registry` is authored as a string or a list and comes out a
+  // list — and {@link governedByDeclaration} validates what it merges, so
+  // diffing that against an unnormalized document would report every
+  // normalization as a path a boot reverts and refuse a document nobody edited.
+  const normalized = validateManifest(manifest, 'the submitted manifest');
+  const reverted = diffManifestPaths(
+    governedByDeclaration(normalized, declaration),
+    normalized,
+  );
+  if (reverted.length === 0) return null;
+  return `the vessels this installation is built on are declared, and it reconciles them from the mounted declaration on every boot — so this document would be taken back at: ${reverted.join(', ')}. Change the declaration instead.`;
+}
+
+/**
  * What a write of the stored manifest **is**, which is what decides whether a
  * declared Target connection lands on the row.
  *
@@ -435,13 +475,22 @@ async function reconcileManifestTargets(
       'Declared Target connection is awaiting inspection',
       adapter,
     );
+    // The declaration asserting its own copy of this connection over the row,
+    // which only a `declared` write does — see {@link ManifestWrite}.
+    const connectionAsserted =
+      write === 'declared' &&
+      declaredConnection !== null &&
+      !Bun.deepEquals(existing?.connection, declaredConnection, true);
     // Either half moving invalidates the assessment: the surface's own facts,
-    // or the boundary they are facts about.
-    const hasConnectionChange =
-      vessel.moved ||
-      (write === 'declared' &&
-        declaredConnection !== null &&
-        !Bun.deepEquals(existing?.connection, declaredConnection, true));
+    // or the boundary they are facts about. Only the first of the two moves the
+    // connection, and keeping them apart is what makes a governed vessel safe to
+    // reconcile on a boot: there `declaredConnection` is the stored document's
+    // own copy — `null` for every Target the manifest seeds without connection
+    // facts — so writing it would silently discard the connection an operator
+    // supplied through the connect screen, on the strength of a boundary edit
+    // that said nothing about it. The row would still read `connected` while
+    // `hasTargetConnection` skipped it everywhere.
+    const reassess = vessel.moved || connectionAsserted;
 
     await db
       .insert(targets)
@@ -479,14 +528,29 @@ async function reconcileManifestTargets(
           // declaration can correct a reach without touching the connection,
           // and folded in there that edit would land nothing.
           ...(write === 'declared' ? assertedBySeed(target) : {}),
-          ...(hasConnectionChange
+          ...(connectionAsserted
             ? {
                 ...(existing?.status === 'disconnected'
                   ? {}
                   : { status: 'connected' as const }),
                 connection: declaredConnection,
+              }
+            : {}),
+          ...(reassess
+            ? {
                 health: 'unhealthy' as const,
-                prerequisites: awaitingInspection,
+                // The reason the checklist was thrown away, in the words of
+                // whichever half moved. A boundary that moved under a Target
+                // nobody declared a connection for is not "a declared Target
+                // connection awaiting inspection", and reading that on a
+                // screen would send an operator looking for a declaration
+                // that says nothing about it.
+                prerequisites: connectionAsserted
+                  ? awaitingInspection
+                  : unreachablePrerequisites(
+                      'The boundary this Target is on moved and is awaiting inspection',
+                      adapter,
+                    ),
                 discovery: null,
                 inspectedAt: null,
                 updatedAt: sql`now()`,
@@ -640,9 +704,24 @@ async function reconcileManifestVessels(
         set: asserted
           ? {
               kind: vessel.kind,
-              location: vessel.location,
-              servedHosts: vessel.servedHosts,
-              reachableRegistries: vessel.reachableRegistries,
+              // Stated facts only. Omitted rather than nulled for the reason
+              // {@link assertedBySeed} gives about reach: a declaration that
+              // says nothing about where a boundary is has not said it is
+              // nowhere, and the connect screen is where an address most often
+              // comes from — §13 makes `location` optional on a seed precisely
+              // so a boundary can be declared and addressed later. Nulling here
+              // wiped that address on every boot of a governed vessel. A new
+              // row still gets `null`, because there an unstated fact is
+              // genuinely unknown rather than known elsewhere.
+              ...(vessel.location === null
+                ? {}
+                : { location: vessel.location }),
+              ...(vessel.servedHosts === null
+                ? {}
+                : { servedHosts: vessel.servedHosts }),
+              ...(vessel.reachableRegistries === null
+                ? {}
+                : { reachableRegistries: vessel.reachableRegistries }),
             }
           : // Nothing became anything on a `booted` write of an ungoverned
             // vessel, so the row wins outright. `name` is what the conflict

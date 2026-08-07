@@ -259,10 +259,18 @@ requires to describe the same place.
 Both reconcile from the mounted declaration **on every boot** and render
 read-only, which narrows — and does not invert — the rule that a declaration
 seeds and does not govern: every other vessel is still seed-once-then-UI-owns.
-Neither can be disconnected, guarded explicitly in the command path because
-neither pointer is a foreign key. **The home vessel's checklist may be red while
-the control plane runs on it**; that is already true of the manifest, and the
-guards are what make it safe.
+Read-only on the screens and refused underneath them: a write that would edit
+either of them names the paths a boot would take back rather than saving a value
+the next restart discards. Neither can be disconnected, guarded explicitly in
+the command path because neither pointer is a foreign key. **The home vessel's
+checklist may be red while the control plane runs on it**; that is already true
+of the manifest, and the guards are what make it safe.
+
+A boot reconciling those two moves the boundary and reassesses the surfaces on
+it; it does not re-assert the manifest's copy of a connection, and it does not
+null a fact the declaration is silent about. Both would undo the connect act on
+every restart, which is the same rule `ManifestWrite` already keeps one noun
+down.
 
 **A vessel has a checklist of its own**, keyed by kind × role the way
 `PREREQUISITES_BY_ADAPTER` keys off adapter
