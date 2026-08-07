@@ -864,6 +864,49 @@ export function isDeclaredInstallationVessel(
 }
 
 /**
+ * Every path in a document a mounted declaration governs, as
+ * `web/forms/document.ts` addresses one — the two pointers, and whichever
+ * entries of `vessels` they name. `[]` when nothing is mounted, which is when
+ * nothing is governed.
+ *
+ * **By name resolved against the document, never by a position carried from
+ * anywhere else.** `vessels` is an array an editing surface adds to and removes
+ * from, so a position computed before an edit addresses a different entry after
+ * it.
+ *
+ * Both arguments are `unknown` because both callers hold one: the declaration
+ * arrives over the wire and the document is mid-edit, and a predicate that only
+ * answered for a document that already validates would stop locking exactly
+ * while a mistake was being typed.
+ */
+export function governedManifestPaths(
+  declaration: unknown,
+  document: unknown,
+): readonly (readonly (string | number)[])[] {
+  const pointers = (declaration as { installation?: Record<string, unknown> })
+    ?.installation;
+  const governed = new Set(
+    (['controlPlaneVessel', 'homeVessel'] as const)
+      .map((key) => pointers?.[key])
+      .filter((name): name is string => typeof name === 'string'),
+  );
+  if (governed.size === 0) return [];
+
+  const declared = (document as { vessels?: unknown })?.vessels;
+  const entries = Array.isArray(declared) ? declared : [];
+  return [
+    ['installation', 'controlPlaneVessel'],
+    ['installation', 'homeVessel'],
+    ...entries.flatMap((vessel, index) => {
+      const name = (vessel as { name?: unknown })?.name;
+      return typeof name === 'string' && governed.has(name)
+        ? [['vessels', index] as readonly (string | number)[]]
+        : [];
+    }),
+  ];
+}
+
+/**
  * Project a resolved manifest back down to the document an operator may write.
  *
  * The inverse of the join `resolveManifest` performs, and it exists because an

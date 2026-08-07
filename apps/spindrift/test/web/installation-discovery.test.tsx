@@ -27,21 +27,24 @@ import type {
   DiscoveredCandidate,
   DiscoveredFact,
 } from '../../src/commands/installation/discover.ts';
+import { HOME_VESSEL } from '../../src/commands/installation/discover.ts';
 import { manifestFields } from '../../src/web/forms/manifest.ts';
 import {
   applyDiscovered,
   askInstallationCloud,
   DiscoveredFactList,
   DiscoveryRefusal,
+  unwritable,
 } from '../../src/web/views/auth/discovery.tsx';
 import { InstallationSettingsView } from '../../src/web/views/auth/installation.tsx';
 import { fixtureManifest } from '../harness/installation.ts';
 
 const FACTS: readonly DiscoveredFact[] = [
   {
-    // The home vessel's own project, addressed through its position in
-    // `vessels` — three of the five facts are that boundary's properties now.
-    path: ['vessels', 1, 'location', 'project'],
+    // The home vessel's own project, addressed by the pointer that names it —
+    // three of the five facts are that boundary's properties now, and the
+    // position it holds is the document's to give at the moment of the press.
+    path: ['vessels', HOME_VESSEL, 'location', 'project'],
     kind: 'found',
     candidates: [{ label: 'example-home', value: 'example-home' }],
     suggested: { label: 'example-home', value: 'example-home' },
@@ -91,7 +94,11 @@ describe('what the panel shows', () => {
 
 describe('confirming a value edits the document at the path it came with', () => {
   const document = {
-    vessels: [{ name: 'cluster' }, { location: { project: 'typed-by-hand' } }],
+    installation: { homeVessel: 'home' },
+    vessels: [
+      { name: 'cluster' },
+      { name: 'home', location: { project: 'typed-by-hand' } },
+    ],
     sources: { buckets: [] },
   };
 
@@ -102,9 +109,54 @@ describe('confirming a value edits the document at the path it came with', () =>
     // rather than by an expectation.
     if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
     expect(applyDiscovered(document, fact, fact.candidates[0]!)).toEqual({
-      vessels: [{ name: 'cluster' }, { location: { project: 'example-home' } }],
+      installation: { homeVessel: 'home' },
+      vessels: [
+        { name: 'cluster' },
+        { name: 'home', location: { project: 'example-home' } },
+      ],
       sources: { buckets: [] },
     });
+  });
+
+  test('the vessel is found by name, not at the position the answer carried', () => {
+    // An entry removed between the ask and the press moves every entry after
+    // it. A position carried from the server would then address whichever
+    // boundary slid into it, and `location.project` has no refinement that
+    // would refuse the value.
+    const fact = FACTS[0]!;
+    if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
+    const shifted = { ...document, vessels: [document.vessels[1]!] };
+    expect(applyDiscovered(shifted, fact, fact.candidates[0]!)).toEqual({
+      ...document,
+      vessels: [{ name: 'home', location: { project: 'example-home' } }],
+    });
+  });
+
+  test('a document with nowhere to put the answer is left alone', () => {
+    const fact = FACTS[0]!;
+    if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
+    const homeless = { ...document, vessels: [{ name: 'cluster' }] };
+    expect(applyDiscovered(homeless, fact, fact.candidates[0]!)).toBe(homeless);
+    expect(unwritable(fact, homeless)).toContain('not declared');
+  });
+
+  test('a value the declaration owns is said, not offered', () => {
+    // The panel edits the same document the form below it locks, so a candidate
+    // for a governed path is a button whose only outcome is a refused save.
+    const fact = FACTS[0]!;
+    if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
+    const reason = unwritable(fact, document, (at) => at[0] === 'vessels');
+    expect(reason).toContain('mounted declaration');
+
+    const markup = renderToStaticMarkup(
+      <DiscoveredFactList
+        facts={[fact]}
+        unwritable={() => reason}
+        onApply={() => undefined}
+      />,
+    );
+    expect(markup).toContain('mounted declaration');
+    expect(markup).not.toContain('example-home');
   });
 
   test('a list-valued key takes the shape its candidate carried', () => {

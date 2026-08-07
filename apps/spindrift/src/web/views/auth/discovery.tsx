@@ -28,7 +28,9 @@ import type {
   DiscoveredCandidate,
   DiscoveredFact,
 } from '../../../commands/installation/discover.ts';
+import { placementOf } from '../../../commands/installation/discover.ts';
 import { command } from '../../client.ts';
+import type { Path } from '../../forms/document.ts';
 import { withValueAt } from '../../forms/document.ts';
 import { humanize } from '../../forms/schema.ts';
 import { Button } from '../../ui/button.tsx';
@@ -92,10 +94,22 @@ export async function askInstallationCloud(narrowing: {
 export function DiscoveryPanel({
   document,
   disabled = false,
+  locked,
   onChange,
 }: {
   readonly document: unknown;
   readonly disabled?: boolean;
+  /**
+   * Whether the value at a path is somebody else's to write — the same
+   * predicate the form below this panel locks its controls with.
+   *
+   * Offering a value for a field a save would refuse is the shape of button
+   * `commands/targets/disconnect.ts` refuses to render: an act that cannot
+   * happen, shown as one that can. The reason is said in place of the
+   * candidates rather than by greying them, because a disabled button with no
+   * sentence reads as a cloud that answered nothing.
+   */
+  locked?(at: Path): boolean;
   onChange(document: unknown): void;
 }) {
   const [project, setProject] = useState('');
@@ -159,6 +173,7 @@ export function DiscoveryPanel({
           <DiscoveredFactList
             facts={facts}
             disabled={disabled || busy}
+            unwritable={(fact) => unwritable(fact, document, locked)}
             onApply={(fact, candidate) =>
               onChange(applyDiscovered(document, fact, candidate))
             }
@@ -210,7 +225,34 @@ export function applyDiscovered(
   fact: DiscoveredFact,
   candidate: DiscoveredCandidate,
 ): unknown {
-  return withValueAt(document, fact.path, candidate.value);
+  const at = placementOf(fact, document);
+  // A document with nowhere to put this is left alone rather than written at
+  // the position the answer was produced for: an entry removed between the ask
+  // and the press would make that position address a different boundary.
+  if (at === null) return document;
+  return withValueAt(document, at, candidate.value);
+}
+
+/**
+ * Why a confirmed value would not land, or `null` when it would.
+ *
+ * Two ways of not landing and one sentence each, because they send an operator
+ * to two different places: a document the answer has no home in is something to
+ * fix in the form below, and a value the declaration owns is something to fix
+ * in the declaration.
+ */
+export function unwritable(
+  fact: DiscoveredFact,
+  document: unknown,
+  locked?: (at: Path) => boolean,
+): string | null {
+  const at = placementOf(fact, document);
+  if (at === null) {
+    return 'the vessel this answers for is not declared in the document below';
+  }
+  return locked?.(at) === true
+    ? 'this is declared by the mounted declaration and reconciled from it on every boot, so it is not written here'
+    : null;
 }
 
 /**
@@ -223,10 +265,13 @@ export function applyDiscovered(
 export function DiscoveredFactList({
   facts,
   disabled = false,
+  unwritable,
   onApply,
 }: {
   readonly facts: readonly DiscoveredFact[];
   readonly disabled?: boolean;
+  /** {@link unwritable}, threaded by the panel. Omitted answers everything writable. */
+  unwritable?(fact: DiscoveredFact): string | null;
   onApply(fact: DiscoveredFact, candidate: DiscoveredCandidate): void;
 }) {
   return (
@@ -245,6 +290,8 @@ export function DiscoveredFactList({
           <dd className="text-sm">
             {fact.kind === 'unavailable' ? (
               <span className="text-muted-foreground">{fact.reason}</span>
+            ) : unwritable?.(fact) ? (
+              <span className="text-muted-foreground">{unwritable(fact)}</span>
             ) : fact.candidates.length === 0 ? (
               <span className="text-muted-foreground">
                 Nothing of this kind exists here.
