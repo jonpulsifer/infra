@@ -1,6 +1,8 @@
 icon:: cilium
 tags:: architecture
 
+- ![Two sites, one Site Magic tunnel, and the two edges in front of them](/assets/network.svg)
+	- Source is `docs/assets/network.d2`; `mise run docs:diagrams` re-renders it. Every address in it is restated from the topology SSOTs below, so change those first.
 - Networking spans all four layers: UniFi VLANs and BGP at Layer 1/3 (`terraform/network/`), Cilium and the Gateway API inside each cluster at Layer 2 (`clusters/*/networking/`), Cloudflare and Tailscale gluing sites together at Layer 3. This page is the single place the whole story lives. Cluster composition is on [[Architecture/Kubernetes]]; host hardware is on [[Fleet]]; live discovery of the running UniFi controller is the `unifi-network` skill ([[Runbooks/Inspect UniFi Network]]).
 - ## Sites and fabric
 	- Two UniFi consoles, each its own Terraform root: `terraform/network/unifi/folly/` on-site and `terraform/network/unifi/offsite/` at the remote site. They're joined by exactly **one** inter-site data plane: a UniFi Site Magic WireGuard tunnel (`wgsts1000`).

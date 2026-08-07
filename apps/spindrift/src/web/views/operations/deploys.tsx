@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import deployFlow from '../../client/diagrams/deploy.svg';
 import { command, type OutputOf } from '../../client.ts';
 import { Checklist } from '../../components/checklist.tsx';
+import { Flow } from '../../components/flow.tsx';
 import {
   DefinitionGrid,
   type ExplorerItem,
@@ -58,6 +60,11 @@ export function DeployLedger({
         eyebrow="Placement ledger"
         title="Deploys"
         description="Verified artifacts are placed and observed here. Build failures stay in Builds; runtime and rollout evidence stays with the Deploy."
+      />
+      <Flow
+        src={deployFlow}
+        label="What happens between pressing Deploy and a workload existing"
+        alt="The intent commits under a locking read on the one Component-and-Target row; the reconciler claims it with SKIP LOCKED and lets the lock go, applies through the deploy adapter, and records the phases the platform reported. A failure never touches exposure — the previous release is still serving."
       />
       <ObjectExplorer
         items={items}
