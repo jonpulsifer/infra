@@ -9,32 +9,36 @@ if command -v mise >/dev/null 2>&1; then
   export MISE_NODE_COMPILE=false
 fi
 
-{% if os() == "macos" -%}
-# Homebrew — all macOS hosts
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # Homebrew — all macOS hosts
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  fi
+
+  # Homebrew hardening + ergonomics
+  export HOMEBREW_NO_ANALYTICS=1
+  export HOMEBREW_NO_ENV_HINTS=1
+  export HOMEBREW_NO_INSECURE_REDIRECT=1
+  export HOMEBREW_REQUIRE_TAP_TRUST=1
+  export HOMEBREW_CASK_OPTS=--require-sha
+  export HOMEBREW_UPGRADE_GREEDY=1
+  # Network-isolated sandbox for postinstall/test (no-op until Homebrew 5.2.0)
+  export HOMEBREW_SANDBOX_POSTINSTALL_NETWORK=deny
+  export HOMEBREW_SANDBOX_TEST_NETWORK=deny
+  export PATH="/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/bin:$PATH"
+  export PATH="/opt/homebrew/opt/ruby/bin:$PATH"
+  if command -v gem >/dev/null 2>&1; then
+    export PATH="$(gem env gemdir 2>/dev/null)/bin:$PATH"
+  fi
+
+  [[ -s "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc" ]] && \
+    source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc"
 fi
 
-# Homebrew hardening + ergonomics
-export HOMEBREW_NO_ANALYTICS=1
-export HOMEBREW_NO_ENV_HINTS=1
-export HOMEBREW_NO_INSECURE_REDIRECT=1
-export HOMEBREW_REQUIRE_TAP_TRUST=1
-export HOMEBREW_CASK_OPTS=--require-sha
-export HOMEBREW_UPGRADE_GREEDY=1
-# Network-isolated sandbox for postinstall/test (no-op until Homebrew 5.2.0)
-export HOMEBREW_SANDBOX_POSTINSTALL_NETWORK=deny
-export HOMEBREW_SANDBOX_TEST_NETWORK=deny
-export PATH="/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/bin:$PATH"
-export PATH="/opt/homebrew/opt/ruby/bin:$PATH"
-if command -v gem >/dev/null 2>&1; then
-  export PATH="$(gem env gemdir 2>/dev/null)/bin:$PATH"
+# --- Profile detection ---
+if [[ "${MISE_ENV:-personal}" == "work" ]]; then
+  export WORK_ENV=1
 fi
-
-[[ -s "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc" ]] && \
-  source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc"
-
-{% endif -%}
 
 # --- Early zstyles (before prompt/plugins) ---
 setopt TRANSIENT_RPROMPT

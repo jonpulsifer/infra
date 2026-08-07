@@ -36,7 +36,7 @@ spec:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
     # carry — the manifest below has to satisfy both.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:0d487fc03cd0006846e72833bfbe4eea8155ae5fff6679311666186545ec3db4
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:30a9f9c9fe074e8fb7af1acd96e6093b1d4ff706b2fa34665f35e13a9eae1e99
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
@@ -161,7 +161,7 @@ spec:
             # and `buildctl-daemonless.sh`. Pinned by digest: the image is the
             # engine every build on this route runs, and a moving tag is an
             # engine that changes underneath a reproducible build.
-            image: moby/buildkit:v0.32.0@sha256:1f8167fcb0eca5b7126353d35299386945cbb8949cc516c592a49f80cfce4fa2
+            image: moby/buildkit:v0.32.1@sha256:c2ffdf4f39cb9d0fd0f63413d9354721cb83868a3f2f29583c3504a0c43a254b
         # Railpack publishes the frontend as its own repository. Pinned to a
         # version rather than a moving tag: it is the only input to a
         # zero-config build that no digest covers.

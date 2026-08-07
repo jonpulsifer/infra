@@ -122,6 +122,12 @@ choices made while building them:
   sections; its three newest Build/Deploy checkpoints link to the attempts they
   came from, while the global ledgers retain the complete cursor-paged history.
   A website states that it has no runtime instead of showing an empty log.
+  **The Components list is the selector**, and the screen's per-Component half
+  — the headline, the runtime, the config keys, the placement, the release and
+  the Component `Deploy` and `Rebuild` act on — is whichever row is pressed:
+  `getAppWorkspace` takes that Component by name and answers with the App's
+  first when none is named, which is how an App's job reaches its run list and
+  its Run now control from behind its service.
 - **Create** (`views/apps/new/`) — Source → Component → Place → Configure →
   Review, defaults carrying every step, preflight folded into Review. The
   server-owned draft survives refresh and rejects stale concurrent edits. An
@@ -577,6 +583,27 @@ external-dns's `gateway-httproute` source from also publishing the same
 hostname off the shared gateway's own address — a route can never state its own
 per-Component target, so letting both sources publish raced the same name at
 two record types.
+
+**What the objects become is asserted, not the objects.** A rendering golden is
+green whenever the manifests are right, and they were right throughout the life
+of the defect that split these two objects apart — the controller published
+something else. `test/conformance/reach-publication.test.ts` runs a
+`DesiredState` through the real adapter, renders the chart with the values that
+reach the cluster, and reads the result through a model of the controller's two
+sources (`test/harness/fakes/external-dns.ts`), so what is asserted is the
+record rather than the document asking for it. The Target's private address and
+its gateway's own address are pinned apart there: live they are equal, which is
+what made a record derived from the gateway and a record the chart stated
+indistinguishable.
+
+Which sources that controller runs is the other half of the mechanism and is not
+Spindrift's to declare, so it is read from `clusters/` rather than assumed
+(`test/harness/external-dns-installation.ts`), once for every cluster a
+Component can be placed on. A sources list that loses `crd` is a `DNSEndpoint`
+nobody reads while every route is still held out — no source claims the name and
+`--policy=sync` deletes the record — with each rendered object still exactly
+right. Any argument that model does not account for fails there rather than
+being approximated.
 
 The live-from-creation status name and a vanity leg standing in front of a
 backend that cannot carry the name itself still have no `DNSEndpoint` to

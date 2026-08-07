@@ -2,12 +2,22 @@
 brew "mise"
 brew "git"
 
-# shell and developer tools
+# shell and core developer tools
+brew "bat"
+brew "btop"
 brew "cloudflared"
+brew "eza"
+brew "fd"
+brew "fzf"
+brew "gh"
+brew "git-delta"
 brew "jq"
+brew "neovim"
 brew "nvm"
 brew "pre-commit"
+brew "ripgrep"
 brew "ruby"
+brew "sd"
 brew "uv"
 brew "watchman"
 

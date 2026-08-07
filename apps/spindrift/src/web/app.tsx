@@ -904,6 +904,41 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   );
 }
 
+/**
+ * A refreshed workspace, keeping the log lines the socket has accumulated.
+ *
+ * A read carries only the server's first page of a runtime tail — every line
+ * after it arrived over a socket and lives in this screen's state — so taking
+ * `runtime` wholesale would wipe the log on every refresh.
+ *
+ * The lines are kept only where both reads are about the same Component on the
+ * same Target. The selection can move while a refresh is in flight, and a
+ * Component's output rendered under another Component's name is a worse answer
+ * than the empty card the next socket page fills.
+ *
+ * Exported for `test/web/workspace-refresh.test.ts`: this is where the
+ * selection and the socket meet, and reaching it through the mounted screen
+ * means pressing a row, which the DOM shim does not simulate.
+ */
+export function refreshedWorkspace(
+  current: WorkspaceView,
+  fresh: WorkspaceView,
+): WorkspaceView {
+  const accumulated = current.runtime;
+  if (
+    accumulated.kind !== 'stream' ||
+    fresh.runtime.kind !== 'stream' ||
+    accumulated.componentId !== fresh.runtime.componentId ||
+    accumulated.targetId !== fresh.runtime.targetId
+  ) {
+    return fresh;
+  }
+  return {
+    ...fresh,
+    runtime: { ...fresh.runtime, lines: accumulated.lines },
+  };
+}
+
 function WorkspaceScreen({
   appName,
   onNavigate,
@@ -921,6 +956,16 @@ function WorkspaceScreen({
   const [deployError, setDeployError] = useState<string | null>(null);
   /** Bumped when an act changed state the workspace has already read. */
   const [reloadToken, setReloadToken] = useState(0);
+  /**
+   * Which Component the screen is showing, or `null` for the App's first.
+   *
+   * Held here rather than in the URL: picking a Component is inspection within
+   * one screen, the same call the object explorers make. It is `null` rather
+   * than the first Component's name because the server answers that question —
+   * a client that named a default would be a second answer to it, wrong for
+   * every App whose Components are not in the order this guessed.
+   */
+  const [component, setComponent] = useState<string | null>(null);
   /**
    * Which run's output is open, and the lines read so far (§17).
    *
@@ -941,7 +986,10 @@ function WorkspaceScreen({
       setState({ type: 'not-found', message: 'No App name provided' });
       return;
     }
-    command('getAppWorkspace', { name: appName })
+    command('getAppWorkspace', {
+      name: appName,
+      ...(component === null ? {} : { component }),
+    })
       .then((result) => {
         if (!live) return;
         if (result.ok) {
@@ -964,7 +1012,7 @@ function WorkspaceScreen({
     return () => {
       live = false;
     };
-  }, [appName, reloadToken]);
+  }, [appName, component, reloadToken]);
 
   /**
    * Keep the workspace current while something is moving.
@@ -983,34 +1031,29 @@ function WorkspaceScreen({
     state.type === 'success' && isInFlight(state.workspace.phase);
   useEffect(() => {
     if (!appName) return;
+    // Dropped by the cleanup, the same way the read above drops its own: the
+    // interval is re-armed whenever the selection moves, so a response still in
+    // flight across that press is about a Component this screen has left, and
+    // writing it would put that Component back on screen until the next tick.
+    let live = true;
     const timer = setInterval(
       () => {
-        void command('getAppWorkspace', { name: appName })
+        // With the selection, or the refresh would put the App's first
+        // Component back on screen every few seconds.
+        void command('getAppWorkspace', {
+          name: appName,
+          ...(component === null ? {} : { component }),
+        })
           .then((result) => {
-            if (!result.ok) return;
+            if (!live || !result.ok) return;
             const fresh = result.value.workspace;
-            setState((current) => {
-              // The runtime tail is accumulated by a socket, not by this read —
-              // a fresh workspace carries only the server's first page of it,
-              // so taking it wholesale would wipe the log every few seconds.
-              if (
-                current.type === 'success' &&
-                current.workspace.runtime.kind === 'stream' &&
-                fresh.runtime.kind === 'stream'
-              ) {
-                return {
-                  type: 'success',
-                  workspace: {
-                    ...fresh,
-                    runtime: {
-                      ...fresh.runtime,
-                      lines: current.workspace.runtime.lines,
-                    },
-                  },
-                };
-              }
-              return { type: 'success', workspace: fresh };
-            });
+            setState((current) => ({
+              type: 'success',
+              workspace:
+                current.type === 'success'
+                  ? refreshedWorkspace(current.workspace, fresh)
+                  : fresh,
+            }));
           })
           // A failed refresh is not a reason to replace a workspace that is on
           // screen and readable with an error page. The next tick tries again.
@@ -1018,8 +1061,11 @@ function WorkspaceScreen({
       },
       inFlight ? 2_000 : 20_000,
     );
-    return () => clearInterval(timer);
-  }, [appName, inFlight]);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [appName, component, inFlight]);
 
   const runtime =
     state.type === 'success' && state.workspace.runtime.kind === 'stream'
@@ -1166,6 +1212,12 @@ function WorkspaceScreen({
       const result = await command('deployApp', {
         name: state.workspace.appId ?? appName,
         rebuild,
+        // A deploy is a press on one Component, and the header these buttons
+        // sit in reads the selected Component's kind, phase and placement — so
+        // it is that Component's release they start, not the App's first one's.
+        ...(state.workspace.componentId === undefined
+          ? {}
+          : { component: state.workspace.componentId }),
       });
       if (result.ok) {
         // Both arms navigate. §4 makes "a Build started" a different act from
@@ -1276,6 +1328,18 @@ function WorkspaceScreen({
   };
 
   /**
+   * Show another Component of this App.
+   *
+   * The open run tail is dropped with the same press: an execution name belongs
+   * to the Component that produced it, so carrying one across the selection
+   * would subscribe to a run the newly selected Component has never had.
+   */
+  const handleSelectComponent = (name: string) => {
+    setFollowing(null);
+    setComponent(name);
+  };
+
+  /**
    * Start one run (§17), then re-read: the list on the screen was written
    * before the run existed, and a run that does not appear reads as a press
    * that did nothing.
@@ -1334,6 +1398,7 @@ function WorkspaceScreen({
         onSetReach={handleSetReach}
         onSetAutoDeploy={handleSetAutoDeploy}
         onSetConfig={handleSetConfig}
+        onSelectComponent={handleSelectComponent}
         {...(runs === null
           ? {}
           : {

@@ -112,7 +112,7 @@ description = "List shell scripts in this repo"
 hide = true
 dir = "dotfiles"
 run = """
-grep -rl '^#!/usr/bin/env bash' .local/bin/* 2>/dev/null
+grep -rl '^#!/usr/bin/env bash' .local/bin/* scripts/* 2>/dev/null
 """
 
 [tasks.format]
@@ -141,12 +141,7 @@ description = "Run format check and lint"
 dir = "dotfiles"
 depends = ["format:check", "lint"]
 
-[tasks.diff]
-description = "Show mise dotfiles status"
+[tasks.deploy]
+description = "Run dotfiles bootstrap deployment"
 dir = "dotfiles"
-run = "mise dotfiles status"
-
-[tasks.dry-run]
-description = "Dry-run mise dotfiles apply"
-dir = "dotfiles"
-run = "mise dotfiles apply --dry-run"
+run = "mise run bootstrap"

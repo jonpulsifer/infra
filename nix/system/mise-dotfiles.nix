@@ -37,9 +37,9 @@ lib.mkIf (config.homelab.fleet.miseDotfiles && (user.isNormalUser or false)) {
       HOME="${user.home}" MISE_YES=1 ${wslEnv}\
       ${pkgs.sudo}/bin/sudo --preserve-env=${preserveEnv} -u ${user.name} \
         ${mise}/bin/mise trust -y ${dotfilesSource} 2>/dev/null || true
-      HOME="${user.home}" MISE_YES=1 ${wslEnv}\
-      ${pkgs.sudo}/bin/sudo --preserve-env=${preserveEnv} -u ${user.name} \
-        ${mise}/bin/mise bootstrap --only dotfiles -y --cd ${dotfilesSource} 2>/dev/null || true
+      HOME="${user.home}" MISE_YES=1 ${wslEnv}HM_ACTIVATED=1 \
+      ${pkgs.sudo}/bin/sudo --preserve-env=${preserveEnv},HM_ACTIVATED -u ${user.name} \
+        ${mise}/bin/mise run bootstrap -y --cd ${dotfilesSource} 2>/dev/null || true
     '';
   };
 }

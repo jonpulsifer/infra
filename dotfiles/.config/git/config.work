@@ -1,0 +1,10 @@
+[user]
+	email = jonathan@moonpay.com
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay
+
+[gpg "ssh"]
+	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
+
+[url "git@github.com:moonpay/"]
+	insteadOf = git@github.com:MoonPay/
+	insteadOf = https://github.com/moonpay/

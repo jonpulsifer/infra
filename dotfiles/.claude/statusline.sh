@@ -72,10 +72,9 @@ G_FILE=$'\xEF\x80\x96'         # U+F016 nf-fa-file_o
 G_HOURGLASS=$'\xEF\x89\x92'    # U+F252 nf-fa-hourglass_half
 G_CALENDAR=$'\xEF\x81\xB3'     # U+F073 nf-fa-calendar
 G_GAUGE=$'\xEF\x83\xA4'        # U+F0E4 nf-fa-tachometer
-{%- set is_work = get_env(name="MISE_ENV", default="personal") == "work" %}
-{% if is_work -%}
-G_WALLET='🌕'                 # Full moon for MoonPay
-{% endif -%}
+if [ "${MISE_ENV:-personal}" = "work" ]; then
+  G_WALLET='🌕'                 # Full moon for MoonPay
+fi
 
 # -- Helper: human-readable token counts --------------------------------------
 fmt_tok() {
@@ -164,7 +163,7 @@ quota_seg() {
     "$C_DGRAY" "$(fmt_left "$left")" "$RST"
 }
 
-{% if is_work -%}
+if [ "${MISE_ENV:-personal}" = "work" ]; then
 # -- MoonPay wallet balance (cached, non-blocking) ----------------------------
 MP_CACHE="${TMPDIR:-/tmp}/claude-statusline-mp-balance"
 MP_CACHE_LOCK="${MP_CACHE}.lock"
@@ -248,8 +247,7 @@ get_wallet_balance() {
   disown 2>/dev/null
   return 1
 }
-
-{% endif -%}
+fi
 # -- Git info ------------------------------------------------------------------
 GIT="git --no-optional-locks -C $cwd"
 GIT_BRANCH="" GIT_REMOTE_URL="" GIT_CHANGED=0
@@ -310,25 +308,25 @@ if [ -n "$lines_add" ] && [ "$lines_add" != "null" ] && [ -n "$lines_rm" ] && [ 
   fi
 fi
 
-{% if is_work -%}
-# Wallet balance (MoonPay MPC — Solana)
 wallet_seg=""
-if wallet_data=$(get_wallet_balance 2>/dev/null); then
-  if [ -n "$wallet_data" ] && [ "$wallet_data" != "EMPTY" ]; then
-    tokens=""
-    while IFS=: read -r sym amt val; do
-      [ -z "$sym" ] && continue
-      amt_fmt=$(awk "BEGIN{v=$amt; if(v>=1) printf \"%.2f\",v; else if(v>=0.001) printf \"%.4f\",v; else printf \"%.6f\",v}")
-      val_fmt=$(awk "BEGIN{printf \"%.2f\", $val}")
-      [ -n "$tokens" ] && tokens+=" ${C_DGRAY}|${RST} "
-      tokens+="${C_MINT}${B}${sym}${RST}${C_GRAY}: ${amt_fmt} ${C_GOLD}(\$${val_fmt})${RST}"
-    done <<< "$wallet_data"
-    [ -n "$tokens" ] && wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${tokens}"
-  else
-    wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${C_GOLD}\$0.00${RST} ${C_GRAY}— fund me! 💸💰${RST}"
+if [ "${MISE_ENV:-personal}" = "work" ]; then
+  # Wallet balance (MoonPay MPC — Solana)
+  if wallet_data=$(get_wallet_balance 2>/dev/null); then
+    if [ -n "$wallet_data" ] && [ "$wallet_data" != "EMPTY" ]; then
+      tokens=""
+      while IFS=: read -r sym amt val; do
+        [ -z "$sym" ] && continue
+        amt_fmt=$(awk "BEGIN{v=$amt; if(v>=1) printf \"%.2f\",v; else if(v>=0.001) printf \"%.4f\",v; else printf \"%.6f\",v}")
+        val_fmt=$(awk "BEGIN{printf \"%.2f\", $val}")
+        [ -n "$tokens" ] && tokens+=" ${C_DGRAY}|${RST} "
+        tokens+="${C_MINT}${B}${sym}${RST}${C_GRAY}: ${amt_fmt} ${C_GOLD}(\$${val_fmt})${RST}"
+      done <<< "$wallet_data"
+      [ -n "$tokens" ] && wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${tokens}"
+    else
+      wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${C_GOLD}\$0.00${RST} ${C_GRAY}— fund me! 💸💰${RST}"
+    fi
   fi
 fi
-{% endif -%}
 
 # Plan quotas: 5-hour session window and 7-day weekly window
 quota_5h_seg=$(quota_seg "$G_HOURGLASS" "$rl_5h_pct" "$rl_5h_reset" 18000)
