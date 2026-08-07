@@ -130,6 +130,10 @@ let
     $bb ip link set eth0 up
     $bb udhcpc -i eth0 -q -n -s /opt/bosun/udhcpc-script
 
+    # A plain tmpfs: docker's overlayfs snapshotter cannot put upper/work
+    # dirs on the root overlay itself (EINVAL on mount).
+    $bb mkdir -p /var/lib/docker
+    $bb mount -t tmpfs -o mode=0710 tmpfs /var/lib/docker
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       dockerd >/var/log/dockerd.log 2>&1 &
     echo "skiff-mark setup-done $($bb cut -d' ' -f1 /proc/uptime)"
@@ -196,7 +200,7 @@ let
               rm -rf "root/$dir/''${name#.wh.}"
             fi
           done
-          tar -xf "$layer" -C root --no-same-owner --exclude='*/.wh.*'
+          tar -xf "$layer" -C root --no-same-owner --exclude='*/.wh.*' --exclude='.wh.*'
         done
 
         # dockerd, containerd, runc and friends.
@@ -214,23 +218,13 @@ let
         # kmod; busybox answers.
         [ -e root/sbin/modprobe ] || ln -sf /opt/bosun/busybox root/sbin/modprobe
 
-        # Jobs written for ubuntu-latest say `sudo apt-get`; this guest runs
-        # them as root already, and the runner image ships no sudo.
-        # ponytail: flag-stripping shim; real sudo debs if a job ever needs -u
-        if [ ! -e root/usr/bin/sudo ]; then
-          cat > root/usr/bin/sudo <<'EOF'
-        #!/bin/sh
-        while [ $# -gt 0 ]; do
-          case "$1" in
-            --) shift; break ;;
-            -*) shift ;;
-            *) break ;;
-          esac
-        done
-        exec "$@"
-        EOF
-          chmod 755 root/usr/bin/sudo
-        fi
+        # Jobs written for ubuntu-latest say `sudo apt-get`, and they run as
+        # root here. The image's sudoers grants only the `sudo` group (the
+        # runner user) and includes no sudoers.d, so root needs its own line
+        # in the main file.
+        chmod u+w root/etc/sudoers
+        echo 'root ALL=(ALL:ALL) NOPASSWD:ALL' >> root/etc/sudoers
+        chmod 440 root/etc/sudoers
 
         mkdir -p root/opt/bosun root/run/bosun
         install -m755 ${busybox}/bin/busybox root/opt/bosun/busybox
@@ -240,15 +234,30 @@ let
         install -m644 ${inittab} root/etc/inittab
         rm -f root/etc/resolv.conf
 
+        # Modes the sandbox build cannot express on disk: tar umask-masks
+        # sticky bits and chmod'ing setuid is forbidden in the sandbox, so
+        # both are stamped into the squashfs instead of the staging tree.
+        # ponytail: a hardcoded list; generate from the layer tars if more
+        # setuid tools ever matter.
+        printf '%s\n' \
+          'tmp m 1777 0 0' \
+          'var/tmp m 1777 0 0' \
+          'usr/bin/sudo m 4755 0 0' \
+          'usr/bin/su m 4755 0 0' \
+          > pseudo.defs
+
         mkdir $out
         mksquashfs root $out/rootfs.img \
-          -comp zstd -all-root -no-progress -noappend -processors $NIX_BUILD_CORES
+          -comp zstd -all-root -no-progress -noappend -processors $NIX_BUILD_CORES \
+          -pf pseudo.defs
       '';
 
   manifest = {
     kernel = "vmlinux";
     initrd = "initrd";
-    cmdline = "console=ttyS0 panic=-1";
+    # loglevel=4: full dmesg to the serial file costs ~0.3 s of the ~1 s
+    # boot; warnings still land. Raise it when debugging a boot.
+    cmdline = "console=ttyS0 panic=-1 loglevel=4";
     devices = [
       {
         disk = {
