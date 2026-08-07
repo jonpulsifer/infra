@@ -7,7 +7,7 @@
  * default nobody chose. A static render cannot observe an effect, so this file
  * mounts the screen and answers its one read.
  *
- * Three properties, and they are the three ways this went wrong before:
+ * Four properties, and they are the four ways this went wrong before:
  *
  * 1. **It asks.** A draft carries `detection` from the moment it exists, with
  *    the sentence "until detection says otherwise" — so a screen that never
@@ -18,6 +18,9 @@
  * 3. **It does not choose.** One candidate is a proposal; two is a question,
  *    and taking the alphabetically first is a decision nobody can see being
  *    made.
+ * 4. **It does not re-choose.** The same read runs on every reopen of a
+ *    durable draft, and applying its proposal a second time reverts — durably,
+ *    through the save that follows — what somebody already corrected.
  */
 import {
   afterAll,
@@ -31,6 +34,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Draft } from '../../src/domain/creation-draft.ts';
 import { blockersFor } from '../../src/domain/creation-draft.ts';
+import type { ComponentKind } from '../../src/domain/desired-state.ts';
+import {
+  type InspectedScope,
+  inspection,
+  mergeScopes,
+  outcomeOf,
+} from '../../src/web/views/apps/new/detect.ts';
 import { NewApp } from '../../src/web/views/apps/new/index.tsx';
 import {
   INITIAL_DRAFT,
@@ -44,7 +54,11 @@ const CANDIDATES = TARGET_OPTIONS.filter((target) => target.candidate).map(
   (target) => target.targetId,
 );
 
-const detected = (scope: string, kind: string, reason: string) => ({
+const detected = (
+  scope: string,
+  kind: ComponentKind,
+  reason: string,
+): InspectedScope => ({
   scope,
   outcome: 'detected',
   kind,
@@ -57,22 +71,24 @@ const detected = (scope: string, kind: string, reason: string) => ({
   unavailable: { job: 'jobs are asserted, never inferred' },
 });
 
-const unsupported = (scope: string, detail: string) => ({
+const unsupported = (scope: string, detail: string): InspectedScope => ({
   scope,
   outcome: 'unsupported',
   detail,
 });
 
 /** What `inspectRepository` answers, per test. */
-let scopes: readonly unknown[] = [];
+let scopes: readonly InspectedScope[] = [];
 /** Every command the screen called, in order. */
 let called: string[] = [];
+/** Every draft the screen wrote back, in order. */
+let saved: Draft[] = [];
 
 let dom: DomShim;
 
 beforeAll(() => {
   dom = installDomShim({
-    fetch: async (url: string) => {
+    fetch: async (url: string, init: { body: string }) => {
       const name = url.split('/').pop() ?? '';
       called.push(name);
       if (name === 'inspectRepository') {
@@ -90,6 +106,9 @@ beforeAll(() => {
         };
       }
       if (name === 'saveCreationDraft') {
+        // Recorded rather than counted: what the screen decided on its own is
+        // only visible in what it wrote back.
+        saved.push((JSON.parse(init.body) as { draft: Draft }).draft);
         return {
           json: async () => ({
             ok: true,
@@ -111,6 +130,7 @@ afterAll(() => dom.restore());
 beforeEach(() => {
   scopes = [];
   called = [];
+  saved = [];
 });
 
 async function mount(draft: Draft) {
@@ -290,5 +310,216 @@ describe('every directory it read is on the screen', () => {
     expect(text).toContain('a library rather than an App.');
 
     screen.unmount();
+  });
+});
+
+/**
+ * Reopening a draft is not correcting it.
+ *
+ * Drafts are durable rows reachable by URL (`/apps/new/:draftId`), so the read
+ * that fills in a fresh draft runs again on every reload and every back
+ * navigation. Applying its proposal the second time reverts what somebody
+ * already decided — and the save that follows every action makes the reversion
+ * permanent, which is what turns a cosmetic flicker into a draft that deploys a
+ * different directory than the one on screen.
+ */
+describe('a draft somebody already answered', () => {
+  test('a corrected kind and a typed Component survive the read on open', async () => {
+    scopes = [
+      detected('apps/api', 'service', 'Bun — a start script is declared'),
+    ];
+
+    const screen = await mount({
+      ...clean,
+      kind: 'job',
+      componentName: 'api-worker',
+      detection: {
+        kind: 'service',
+        reason: 'Bun — a start script is declared',
+        available: ['service', 'website', 'job'],
+        unavailable: {},
+        scope: 'apps/api',
+      },
+      source: {
+        kind: 'repo',
+        repo: 'example/almanac',
+        url: 'https://github.com/example/almanac.git',
+        subpath: 'apps/api',
+      },
+    });
+
+    // It still asks — the directories stay on screen to choose from.
+    expect(called).toContain('inspectRepository');
+    expect(screen.text()).toContain('api-worker · job');
+    // And it wrote nothing, because it decided nothing.
+    expect(saved).toEqual([]);
+
+    screen.unmount();
+  });
+
+  test('a directory the operator typed is not swapped for the one candidate', async () => {
+    // The sole-candidate proposal is the right answer for a draft nobody has
+    // answered. Here somebody named `apps/ddnsd` — a directory this read has
+    // nothing to say about — and moving them to `apps/hub` would deploy
+    // somewhere they never asked for.
+    scopes = [
+      detected('apps/hub', 'service', 'Bun — a start script is declared'),
+    ];
+
+    const screen = await mount({
+      ...clean,
+      scopeByOperator: true,
+      source: {
+        kind: 'repo',
+        repo: 'example/almanac',
+        url: 'https://github.com/example/almanac.git',
+        subpath: 'apps/ddnsd',
+      },
+    });
+
+    expect(screen.text()).toContain('example/almanac · apps/ddnsd');
+    expect(saved).toEqual([]);
+
+    screen.unmount();
+  });
+
+  test('a reason read elsewhere says which directory it is about', async () => {
+    // The draft names `docs` and the sentence under Component was read in
+    // `apps/api`. Rendering it bare would describe a directory nobody named.
+    scopes = [
+      detected('apps/api', 'service', 'Bun — a start script is declared'),
+    ];
+
+    const screen = await mount({
+      ...clean,
+      scopeByOperator: true,
+      detection: {
+        kind: 'service',
+        reason: 'Bun — a start script is declared',
+        available: ['service', 'website', 'job'],
+        unavailable: {},
+        scope: 'apps/api',
+      },
+      source: {
+        kind: 'repo',
+        repo: 'example/almanac',
+        url: 'https://github.com/example/almanac.git',
+        subpath: 'docs',
+      },
+    });
+
+    expect(screen.text()).toContain('read in apps/api');
+    expect(screen.text()).toContain('root directory now names docs');
+
+    screen.unmount();
+  });
+});
+
+/**
+ * A read about one directory answers about that directory.
+ *
+ * This is the settled-subpath path — `onBlur`/Enter on the root directory
+ * field — and the property is the whole of it: whatever comes back is about
+ * the path that was named, so the reason on screen can never be a sentence
+ * about somewhere else. The decision is exercised here rather than through the
+ * mounted screen because the DOM shim deliberately has no event system
+ * (`test/harness/dom.ts`); the request shape and the decision are what a
+ * settled edit *is*.
+ */
+describe('a read about one directory', () => {
+  const repo: Draft = {
+    ...clean,
+    source: {
+      kind: 'repo',
+      repo: 'example/almanac',
+      url: 'https://github.com/example/almanac.git',
+      subpath: 'docs',
+    },
+    scopeByOperator: true,
+  };
+  const known = [
+    detected('apps/hub', 'service', 'Bun — a start script is declared'),
+    detected('apps/site', 'website', 'Astro — `astro` is a dependency'),
+  ];
+
+  test('it names the directory rather than searching the tree', () => {
+    expect(inspection('example/almanac', 'docs')).toEqual({
+      fullName: 'example/almanac',
+      scopes: ['docs'],
+    });
+    expect(inspection('example/almanac')).toEqual({
+      fullName: 'example/almanac',
+    });
+  });
+
+  test('its answer replaces that one row and leaves the rest standing', () => {
+    const merged = mergeScopes(known, [
+      detected('apps/hub', 'website', 'Astro — `astro` is a dependency'),
+      unsupported('docs', 'just prose in this directory.'),
+    ]);
+
+    expect(merged.map((scope) => scope.scope)).toEqual([
+      'apps/hub',
+      'apps/site',
+      'docs',
+    ]);
+    expect(merged[0]).toMatchObject({ kind: 'website' });
+    expect(merged[1]).toEqual(known[1]!);
+  });
+
+  test('a directory it can build is what the draft takes', () => {
+    const found = [
+      detected('docs', 'website', 'Astro — `astro` is a dependency'),
+    ];
+
+    expect(
+      outcomeOf(repo, {
+        fullName: 'example/almanac',
+        scope: 'docs',
+        found,
+        merged: mergeScopes(known, found),
+      }),
+    ).toEqual({
+      act: 'detect',
+      action: {
+        type: 'detect',
+        scope: 'docs',
+        kind: 'website',
+        reason: 'Astro — `astro` is a dependency',
+        unavailable: { job: 'jobs are asserted, never inferred' },
+      },
+    });
+  });
+
+  test('one it cannot says so about that directory, and moves nothing', () => {
+    const found = [unsupported('docs', 'just prose in this directory.')];
+    const outcome = outcomeOf(repo, {
+      fullName: 'example/almanac',
+      scope: 'docs',
+      found,
+      merged: mergeScopes(known, found),
+    });
+
+    expect(outcome.act).toBe('refuse');
+    expect(outcome.act === 'refuse' && outcome.message).toContain('docs');
+    expect(outcome.act === 'refuse' && outcome.message).toContain(
+      'just prose in this directory.',
+    );
+  });
+
+  test('a sole candidate elsewhere is not an answer about the named directory', () => {
+    // The snap-back: with one candidate in the repository, a settled edit to a
+    // directory detection cannot build used to fall through to the candidate
+    // and rewrite the path out from under whoever typed it.
+    const found = [unsupported('docs', 'just prose in this directory.')];
+
+    expect(
+      outcomeOf(repo, {
+        fullName: 'example/almanac',
+        scope: 'docs',
+        found,
+        merged: mergeScopes([known[0]!], found),
+      }).act,
+    ).toBe('refuse');
   });
 });

@@ -291,6 +291,10 @@ describe('the draft reducer', () => {
     // The scope names the Component, and the source follows it.
     expect(next.componentName).toBe('web');
     expect(next.source.kind === 'repo' && next.source.subpath).toBe('apps/web');
+    // And the reason records the directory it is about, so a draft reopened
+    // later can tell "already read" from "never asked" without a string match
+    // on the placeholder sentence.
+    expect(next.detection.scope).toBe('apps/web');
   });
 
   test('a detection overrides a corrected kind, because it is about a new directory', () => {
@@ -355,11 +359,28 @@ describe('the draft reducer', () => {
   });
 
   test('another repository is another tree, so the directory resets', () => {
-    const next = draftReducer(INITIAL_DRAFT, {
+    const named = draftReducer(INITIAL_DRAFT, {
+      type: 'subpath',
+      subpath: 'apps/ddnsd',
+    });
+    const next = draftReducer(named, {
       type: 'repo',
       fullName: 'example/ledger',
       url: 'https://github.com/example/ledger.git',
     });
     expect(next.source.kind === 'repo' && next.source.subpath).toBe('.');
+    // With the claim on it: the root is nobody's word, so the next read of the
+    // new tree is free to propose one.
+    expect(next.scopeByOperator).toBeUndefined();
+  });
+
+  test('a directory the operator typed is recorded as theirs', () => {
+    // Durable rather than session state, because the guard it feeds is about
+    // the read that runs when a saved draft is reopened.
+    const next = draftReducer(INITIAL_DRAFT, {
+      type: 'subpath',
+      subpath: 'apps/ddnsd',
+    });
+    expect(next.scopeByOperator).toBe(true);
   });
 });

@@ -114,6 +114,17 @@ const detection = z
     reason: z.string().min(1),
     available: z.array(componentKind),
     unavailable: z.partialRecord(componentKind, z.string().min(1)),
+    /**
+     * The directory the sentence above is about.
+     *
+     * Absent means nothing has read one — which is what a fresh draft means by
+     * "until detection says otherwise", and what every draft written before
+     * `inspectRepository` existed means too. Present, it is what makes the
+     * reason checkable against the directory the draft names: a sentence about
+     * `apps/hub` shown under a root directory reading `docs` is a sentence
+     * about somewhere else.
+     */
+    scope: z.string().min(1).optional(),
   })
   .strict();
 
@@ -165,6 +176,16 @@ export const creationDraftSchema = z
      * re-deriving over it is the flow overwriting a decision it asked for.
      */
     appNameByOperator: z.boolean().optional(),
+    /**
+     * Whether the directory is the operator's word rather than a proposal.
+     *
+     * The same discipline as `appNameByOperator`, and durable for the same
+     * reason: a draft is a row somebody comes back to, so a flag that lived
+     * only in the open tab would let reopening the draft move a directory they
+     * typed. Cleared whenever the repository changes, because a path is a
+     * statement about one tree.
+     */
+    scopeByOperator: z.boolean().optional(),
     /**
      * Which step of the old rail this draft was left on.
      *
@@ -385,6 +406,7 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
           reason: action.reason,
           available,
           unavailable: action.unavailable,
+          scope: action.scope,
         },
         // A detected scope names the Component: `apps/api` is `api`, and a
         // root scope keeps whatever the repository is called.
@@ -413,13 +435,20 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
           ...(action.connect === true ? { connect: true as const } : {}),
         },
         appName: draft.appNameByOperator ? draft.appName : name,
+        // The directory went back to the root with the tree it named, so
+        // whoever typed the old one has not typed this one.
+        scopeByOperator: undefined,
       };
     }
+    // Typing a directory is the operator answering where the App is, so it
+    // stands however detection reads it (story 32) and it survives the draft
+    // being closed and reopened.
     case 'subpath':
       return draft.source.kind === 'repo'
         ? {
             ...draft,
             source: { ...draft.source, subpath: action.subpath },
+            scopeByOperator: true,
           }
         : draft;
     case 'archive':

@@ -138,8 +138,11 @@ choices made while building them:
   it is; detection runs on the repository the draft opens on, and every
   directory it read is a row — buildable ones selectable with their reason, the
   rest wearing what was found instead (§3). A sole candidate is a proposal and
-  two are a question, so nothing is picked for anybody. **Selecting writes
-  nothing**: `inspectRepository` is a read, and a repository the grant offers
+  two are a question, so nothing is picked for anybody — and a draft somebody
+  has already answered is read again without being re-decided, because the
+  draft records which directory its reason is about and which answers are the
+  operator's. **Selecting writes nothing**: `inspectRepository` is a read, and
+  a repository the grant offers
   gets §15's row and configuration pull request from `completeCreationDraft`,
   through `connectRepository` itself — which is what keeps "an abandoned draft
   leaves nothing behind" literally true rather than nearly true.

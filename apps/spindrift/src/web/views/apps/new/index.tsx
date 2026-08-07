@@ -33,7 +33,6 @@ import type {
 import {
   type ClientResult,
   command,
-  type OutputOf,
   type TransportFailure,
 } from '../../../client.ts';
 import {
@@ -47,6 +46,12 @@ import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { Field } from '../../../ui/field.tsx';
+import {
+  type InspectedScope,
+  inspection,
+  mergeScopes,
+  outcomeOf,
+} from './detect.ts';
 import { blockersFor, type Draft, draftReducer, ENTRIES } from './draft.ts';
 import {
   Advanced,
@@ -61,32 +66,6 @@ import {
   TargetHealth,
   VesselRow,
 } from './summary.tsx';
-
-/** One directory `inspectRepository` had something to say about. */
-type InspectedScope = OutputOf<'inspectRepository'>['scopes'][number];
-type DetectedScope = Extract<InspectedScope, { outcome: 'detected' }>;
-
-/** A fresh answer about one directory, in place, with the rest left alone. */
-function mergeScopes(
-  current: readonly InspectedScope[],
-  found: readonly InspectedScope[],
-): readonly InspectedScope[] {
-  const replaced = new Map(found.map((scope) => [scope.scope, scope] as const));
-  const merged = current.map((scope) => replaced.get(scope.scope) ?? scope);
-  const seen = new Set(current.map((scope) => scope.scope));
-  return [...merged, ...found.filter((scope) => !seen.has(scope.scope))];
-}
-
-/**
- * The one candidate, or nothing.
- *
- * §5's discovery is "a list for a human to choose from", and one entry is the
- * case where choosing is not a decision anybody makes differently. Two is.
- */
-function soleDetected(scopes: readonly InspectedScope[]): DetectedScope | null {
-  const detected = scopes.filter((scope) => scope.outcome === 'detected');
-  return detected.length === 1 ? detected[0]! : null;
-}
 
 /**
  * What stands between a repository with several Apps in it and a Deploy.
@@ -150,10 +129,6 @@ export function NewApp({
   // unanswerable, and dropping the ones it could would leave the screen picking.
   const [scopes, setScopes] = useState<readonly InspectedScope[] | null>(null);
   const scopesRef = useRef<readonly InspectedScope[]>([]);
-  // Whether the operator typed the directory rather than choosing one. Their
-  // name stands even where detection has nothing to say about it — §5's ladder
-  // is a proposal, and story 32 keeps the assertion available.
-  const [subpathNamed, setSubpathNamed] = useState(false);
   const draftRef = useRef(initial.draft);
   const revisionRef = useRef(initial.revision);
   const saves = useRef(Promise.resolve());
@@ -166,7 +141,19 @@ export function NewApp({
   const detected = (scopes ?? []).filter(
     (scope) => scope.outcome === 'detected',
   );
-  const unchosen = unchosenScope(draft, detected, subpathNamed);
+  const unchosen = unchosenScope(
+    draft,
+    detected,
+    draft.scopeByOperator === true,
+  );
+  // The sentence under Component is a statement about one directory, and the
+  // draft can name another one — an edit that has not settled yet, or a
+  // directory detection could make nothing of. Saying which is what keeps the
+  // reason from reading as though it were about the path on screen.
+  const readElsewhere =
+    draft.source.kind === 'repo' &&
+    draft.detection.scope !== undefined &&
+    draft.detection.scope !== draft.source.subpath;
   const localBlockers = [...blockersFor(draft, candidateIds), ...unchosen];
   const blockers = [
     ...localBlockers,
@@ -238,11 +225,8 @@ export function NewApp({
    * Read a repository and offer what is in it.
    *
    * One read of the real default branch, through the same ladder that writes
-   * `spindrift.yaml`. Every directory it answered about is kept and shown; a
-   * proposal is applied **only** when detection found exactly one thing to
-   * propose, or when the draft already names one of the directories it found.
-   * Two candidates is a choice, and a screen that picks the alphabetically
-   * first of them has searched and then decided, which is the worst of both.
+   * `spindrift.yaml`. Every directory it answered about is kept and shown, and
+   * `outcomeOf` decides what — if anything — the draft may take from it.
    *
    * `scope` names one directory, which is what an edited subpath asks about —
    * §5's "named, never searched". Its answer replaces that directory's row and
@@ -258,7 +242,7 @@ export function NewApp({
     try {
       const result = await command(
         'inspectRepository',
-        scope === undefined ? { fullName } : { fullName, scopes: [scope] },
+        inspection(fullName, scope),
       );
       if (!result.ok) {
         setDetectionError(result.failure.message);
@@ -270,33 +254,14 @@ export function NewApp({
       scopesRef.current = merged;
       setScopes(merged);
 
-      // The directory the draft names wins when detection has an answer for
-      // it, so a subpath edit is answered about the directory it named. A sole
-      // candidate is the only other thing safe to apply: one is a proposal,
-      // two is a question.
-      const named = found.find(
-        (candidate) => candidate.scope === draftRef.current.source.subpath,
-      );
-      const proposal =
-        named?.outcome === 'detected' ? named : soleDetected(merged);
-      if (proposal !== null) {
-        dispatch({
-          type: 'detect',
-          scope: proposal.scope,
-          kind: proposal.kind,
-          reason: proposal.reason,
-          unavailable: proposal.unavailable,
-        });
-        return;
-      }
-      // More than one candidate: the chooser below is the answer, and saying
-      // anything else here would be an error message about a working repo.
-      if (merged.some((candidate) => candidate.outcome === 'detected')) return;
-      setDetectionError(
-        named?.outcome === 'unsupported'
-          ? `Spindrift does not know how to build ${named.scope} in ${fullName}: ${named.detail} Name another directory, or pick the kind yourself.`
-          : `Spindrift found nothing it knows how to build in ${fullName}. Every directory it read is listed below with what it found instead — name one yourself and pick the kind, or add a spindrift.yaml.`,
-      );
+      const outcome = outcomeOf(draftRef.current, {
+        fullName,
+        scope,
+        found,
+        merged,
+      });
+      if (outcome.act === 'detect') dispatch(outcome.action);
+      if (outcome.act === 'refuse') setDetectionError(outcome.message);
     } catch (cause) {
       setDetectionError(
         cause instanceof Error ? cause.message : 'the repository was not read',
@@ -316,13 +281,11 @@ export function NewApp({
     });
     scopesRef.current = [];
     setScopes(null);
-    setSubpathNamed(false);
     void inspect(repo.fullName);
   };
 
   const chooseScope = (scope: InspectedScope) => {
     if (scope.outcome !== 'detected') return;
-    setSubpathNamed(false);
     dispatch({
       type: 'detect',
       scope: scope.scope,
@@ -343,7 +306,8 @@ export function NewApp({
   // presses anything. A draft claims a kind from the moment it exists, and a
   // screen that renders that claim without ever asking is the screen this
   // whole flow was supposed to replace. Reading writes nothing, so the only
-  // thing it costs a draft nobody finishes is one request.
+  // thing it costs a draft nobody finishes is one request — and `outcomeOf`
+  // is what keeps a reopened draft reading rather than re-deciding.
   const opened = useRef(false);
   useEffect(() => {
     if (opened.current) return;
@@ -412,14 +376,19 @@ export function NewApp({
           onSelectRepo={selectRepo}
           onChooseScope={chooseScope}
           onSettleSubpath={settleSubpath}
-          onNameSubpath={() => setSubpathNamed(true)}
         />
 
         <Row
           label="Component"
-          unsettled={detectionError !== null || unchosen.length > 0}
+          unsettled={
+            detectionError !== null || unchosen.length > 0 || readElsewhere
+          }
           value={`${draft.componentName} · ${draft.kind}`}
-          why={draft.detection.reason}
+          why={
+            readElsewhere && draft.source.kind === 'repo'
+              ? `${draft.detection.reason} — read in ${draft.detection.scope}, and the root directory now names ${draft.source.subpath}.`
+              : draft.detection.reason
+          }
           tone={
             draft.kind === draft.detection.kind ? null : (
               <Badge tone="warning">corrected</Badge>
@@ -737,7 +706,6 @@ function SourceRow({
   onSelectRepo,
   onChooseScope,
   onSettleSubpath,
-  onNameSubpath,
 }: {
   draft: Draft;
   dispatch: Dispatch<DraftAction>;
@@ -751,7 +719,6 @@ function SourceRow({
   onSelectRepo: (repo: RepositoryChoice, url: string) => void;
   onChooseScope: (scope: InspectedScope) => void;
   onSettleSubpath: () => void;
-  onNameSubpath: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
@@ -856,10 +823,9 @@ function SourceRow({
               name="subpath"
               label="Root directory"
               value={draft.source.subpath}
-              onChange={(event) => {
-                onNameSubpath();
-                dispatch({ type: 'subpath', subpath: event.target.value });
-              }}
+              onChange={(event) =>
+                dispatch({ type: 'subpath', subpath: event.target.value })
+              }
               // Settled rather than per-keystroke: the reason on screen is a
               // statement about one directory, and re-reading `apps/w` on the
               // way to `apps/web` would describe a directory nobody named.
