@@ -7,16 +7,26 @@ resource "google_artifact_registry_repository" "images" {
     enablement_config = "DISABLED"
   }
 
+  # Everything goes after a day, tagged included, and that is the point. This
+  # repository is staging for Cloud Run, not an archive: every build pushes one
+  # digest to GHCR, Docker Hub and here, the first two host it for free, and
+  # retaining it in a billed repository is paying twice for the same bytes.
+  #
+  # Nothing serving depends on it — "Cloud Run keeps this copy of the container
+  # image as long as it is used by a serving revision". What it costs is a
+  # redeploy older than a day, which rebuilds; rollbacks here happen well inside
+  # the window. The digest is still in GHCR either way, but Cloud Run cannot
+  # pull that index, which is the whole reason this repository exists.
+  #
+  # `tag_state` is stated rather than defaulted because the default *is* `ANY`,
+  # and a policy that reads `delete-untagged` while deleting everything invites
+  # someone to "fix" it into a bill.
   cleanup_policy_dry_run = false
   cleanup_policies {
-    id     = "delete-untagged"
+    id     = "delete-after-a-day"
     action = "DELETE"
     condition {
-      # Without this the provider sends `ANY`, and the policy this id promises
-      # is one that deletes every artifact a day after it is built — including
-      # the tagged one a live Service is running, which then cannot redeploy
-      # or roll back because its digest no longer resolves.
-      tag_state  = "UNTAGGED"
+      tag_state  = "ANY"
       older_than = "24h"
     }
   }
