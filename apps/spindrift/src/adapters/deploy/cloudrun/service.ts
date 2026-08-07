@@ -86,9 +86,9 @@ export function ingressFor(reach: Reach): string {
  * Whether anyone at all may invoke the Service (§9).
  *
  * Both halves have to say so. `auth: none` alone is not enough, because it is
- * also what a Component with no route says, and binding `allUsers` on the
- * strength of that would open the invoker check on the one Component that asked
- * to be unroutable. Only a deliberately public and deliberately unauthenticated
+ * also what a Component with no route says, and disabling the invoker check on
+ * the strength of that would open it on the one Component that asked to be
+ * unroutable. Only a deliberately public and deliberately unauthenticated
  * Component relaxes it; every other cell keeps the runtime's own invoker check,
  * which is the authenticated edge §9 wants and the reason no non-public cell has
  * a bypassable origin here.
@@ -121,6 +121,15 @@ export function cloudRunService(
   return {
     labels,
     ingress: ingressFor(desired.reach),
+    // §9's open cell, carried by the Service itself rather than by an IAM
+    // binding. `allUsers` is a principal no org policy admits — bluenose holds
+    // two documented overrides just to let it through — where this field is
+    // the runtime's own way of saying "no invoker check", constrained by
+    // `run.managed.requireInvokerIam` (org default ALLOW). Written explicitly
+    // in both directions, never omitted: tightening must flip it in the same
+    // PATCH that rolls the template, so there is no revision the old openness
+    // could outlive.
+    invokerIamDisabled: allowsUnauthenticated(desired.reach, desired.auth),
     ...(context.useProjectAdmissionPolicy
       ? { binaryAuthorization: { useDefault: true } }
       : {}),
@@ -239,13 +248,19 @@ export interface InvokerPolicy {
 }
 
 /**
- * The IAM policy that matches one exposure state.
+ * The IAM policy every Service carries: nobody may invoke through IAM.
  *
  * A whole policy rather than a binding to add, because the verb this is handed
  * to replaces what is there: §9's "transitions fail closed" needs the *removal*
- * of public reach to be as expressible as the grant, and a client that could
- * only add would leave a tightened Component reachable by the binding nobody
- * took away.
+ * of a grant to be as expressible as one, and a client that could only add
+ * would leave a tightened Component reachable by the binding nobody took away.
+ *
+ * Constant, because the open cell no longer lives here: `{public, none}` is
+ * the Service's own `invokerIamDisabled` (see {@link cloudRunService}), so no
+ * exposure state puts a principal in this policy — which is what lets the org
+ * keep domain-restricted sharing enforced over the vessel. Asserting the empty
+ * policy on the public cell is still load-bearing once: it strips the
+ * `allUsers` binding earlier versions of this adapter minted.
  *
  * **A named gap, in the direction that fails closed.** §9 gives `Private` "one
  * admin-configured Private audience per Target", and no Target carries one yet
@@ -255,15 +270,9 @@ export interface InvokerPolicy {
  * treats the authenticated edge as the largest non-Spindrift dependency (Risk
  * 2), and the audience belongs with it rather than being invented here.
  */
-export function invokerPolicy(reach: Reach, auth: Auth): InvokerPolicy {
-  return {
-    policy: {
-      bindings: allowsUnauthenticated(reach, auth)
-        ? [{ role: 'roles/run.invoker', members: ['allUsers'] }]
-        : [],
-    },
-  };
-}
+export const CLOSED_INVOKER_POLICY: InvokerPolicy = {
+  policy: { bindings: [] },
+};
 
 /**
  * The longest name the runtime accepts for a Service or a Job — the same

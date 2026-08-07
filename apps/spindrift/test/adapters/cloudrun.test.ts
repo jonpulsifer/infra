@@ -162,7 +162,13 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
     expect(ingressFor('public')).toBe(INGRESS.all);
   });
 
-  test('only a public reach with no auth leaves an open invoker', async () => {
+  test('only a public reach with no auth disables the invoker check', async () => {
+    // The open cell travels as the Service's own `invokerIamDisabled`, never
+    // as an IAM binding: `allUsers` is a principal the org's
+    // domain-restricted sharing refuses (the fake refuses it the same way),
+    // so a public Component that reached for the binding would be red in a
+    // vessel. Every cell still asserts the closed policy — the empty write is
+    // what strips a binding an earlier version of this adapter minted.
     for (const [reach, auth] of [
       ['none', 'none'],
       ['private', 'proxy'],
@@ -174,13 +180,14 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
       );
       expect(verdict.phase).toBe('LIVE');
 
+      const document = api.service('shop-web');
+      expect(document?.invokerIamDisabled).toBe(
+        reach === 'public' && auth === 'none',
+      );
       const policy = api.policy('shop-web') as {
         policy: { bindings: { members: string[] }[] };
       };
-      const members = policy.policy.bindings.flatMap(
-        (binding) => binding.members,
-      );
-      expect(members.includes('allUsers')).toBe(reach === 'public');
+      expect(policy.policy.bindings).toEqual([]);
     }
   });
 
@@ -220,7 +227,10 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
     expect(grantAt).toBeGreaterThan(placedAt);
   });
 
-  test('a public deploy whose grant fails is red, not quietly private', async () => {
+  test('a deploy whose policy assert fails is red, not quietly open', async () => {
+    // The empty policy is still load-bearing on the public cell: it is what
+    // strips an `allUsers` binding an earlier adapter minted, so a refusal to
+    // write it cannot be shrugged off as cosmetic.
     const { adapter } = adapterFor({ refuseIam: permissionDenied() });
     const { verdict } = await drain(
       adapter.apply(target(), desired({ reach: 'public', auth: 'none' })),
@@ -234,33 +244,37 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
   test('a 404 excuses a policy that grants nothing, and only that one', async () => {
     // The adapter forgives `404` on a policy write, because a resource that is
     // not there yet cannot have one and an empty policy is a statement already
-    // true of it. A *granting* policy is the opposite case: it did not land,
-    // and going green on it would report a public Component as reachable when
-    // nothing was ever opened.
+    // true of it. A Service's policy never grants — public reach is the
+    // document's own field — so a `404` on either direction of a Service
+    // deploy is the ordinary case and the deploy proceeds.
+    for (const exposure of [
+      { reach: 'public', auth: 'none' },
+      { reach: 'private', auth: 'none' },
+    ] as const) {
+      const { adapter } = adapterFor({
+        refuseIam: { status: 404, body: { error: { status: 'NOT_FOUND' } } },
+      });
+      const { verdict } = await drain(
+        adapter.apply(target(), desired(exposure)),
+      );
+      expect(verdict.phase).toBe('LIVE');
+    }
+
+    // The *granting* policy that must not be excused is a scheduled Job's:
+    // its binding is what admits the scheduler's identity, and going green
+    // without it would report a cadence nothing can ever fire.
     const granting = adapterFor({
       refuseIam: { status: 404, body: { error: { status: 'NOT_FOUND' } } },
     });
-    const opened = await drain(
+    const scheduled = await drain(
       granting.adapter.apply(
-        target(),
-        desired({ reach: 'public', auth: 'none' }),
+        target({
+          serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
+        }),
+        desired({ kind: 'job', reach: 'none', schedule: '0 3 * * *' }),
       ),
     );
-    expect(opened.verdict.phase).toBe('FAILED');
-
-    // The same refusal on the write that closes: the tightening pass runs
-    // before the Service exists, so `404` there is the ordinary case rather
-    // than a failure, and the deploy goes on to place it.
-    const closing = adapterFor({
-      refuseIam: { status: 404, body: { error: { status: 'NOT_FOUND' } } },
-    });
-    const tightened = await drain(
-      closing.adapter.apply(
-        target(),
-        desired({ reach: 'private', auth: 'none' }),
-      ),
-    );
-    expect(tightened.verdict.phase).toBe('LIVE');
+    expect(scheduled.verdict.phase).toBe('FAILED');
   });
 });
 
