@@ -97,7 +97,14 @@ spec:
     # from cluster-settings, `SECRET_DOMAIN` from cluster-secrets — so the zone
     # is read rather than restated, the same way `hostname` above reads it.
     manifest:
-      installation: offsite
+      # What this installation is, and the two vessels it is built on. Both
+      # pointers name a vessel declared below: `offsite` is where this control
+      # plane runs — and an ordinary deploy Target besides — and `bluenose`
+      # holds the shared services every Target reads through.
+      installation:
+        name: offsite
+        controlPlaneVessel: offsite
+        homeVessel: bluenose
       controlPlane:
         hostname: spindrift.${SECRET_DOMAIN}
       dns:
@@ -166,12 +173,11 @@ spec:
         # version rather than a moving tag: it is the only input to a
         # zero-config build that no digest covers.
         zeroConfigFrontend: ghcr.io/railwayapp/railpack-frontend:v0.35.0
-      cloud:
-        # Federation is not a manifest key: it is read from the
-        # `external_account` credential the chart renders from the two
-        # serviceAccount.token values above.
-        artifactsProject: trusted-builds
-        homeVesselProject: bluenose
+      # No `cloud` block. Federation is not a manifest key: it is read from the
+      # `external_account` credential the chart renders from the two
+      # serviceAccount.token values above. The two keys that used to sit beside
+      # it — the artifacts project and the home vessel's own project — are
+      # properties of `bluenose` below, where nothing can disagree with them.
       charts:
         # The App chart as an artifact, which is what makes every Target's
         # release independent of a checkout of this repository. The reference
@@ -187,9 +193,12 @@ spec:
         oauthBaseUrl: https://github.com
         buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
       sources:
+        # Which of these staging picks is `shared.sourceBucket` on the home
+        # vessel: the bucket lives in that project, so stating it anywhere else
+        # is a default that can name a bucket in a project this document does
+        # not otherwise mention.
         buckets:
           - bluenose-spindrift-source
-        defaultBucket: bluenose-spindrift-source
       # The tenancy boundaries this installation deploys into. Where a boundary
       # is, and what it can reach, are facts about the boundary and are stated
       # here once — a Target below states only what is true of its own runtime
@@ -230,6 +239,21 @@ spec:
           kind: gcp-project
           location:
             project: bluenose
+          # The shared services, on the boundary that holds them.
+          # `installation.homeVessel` names this vessel, so this block is
+          # required here and refused on every other.
+          #
+          # `secretStoreContainer` is this project: `bluenose` holds the secrets
+          # for every Target, including the two clusters — the store of record
+          # is one place, and where it lives is a property of the store, not of
+          # who reads it. `artifactsProject` is deliberately *not* this project:
+          # artifacts and signing material live in `trusted-builds` beside the
+          # registry, and collapsing the two would be the one place this vessel
+          # is asked to be somewhere it is not.
+          shared:
+            sourceBucket: bluenose-spindrift-source
+            artifactsProject: trusted-builds
+            secretStoreContainer: bluenose
           # The artifact registry and nothing else. Cloud Run pulls through a
           # cache mirror that cannot parse the OCI index pushed to GHCR, so
           # naming the registry it *can* read is what keeps a Deploy here from
@@ -415,10 +439,8 @@ spec:
       # (`clusters/base/platform/gcp-secret-manager`), which is what the two
       # Targets above name.
       #
-      # `container` is the vessel's project. `bluenose` holds the secrets for
-      # every Target, including the two clusters — the store of record is one
-      # place, and where it lives is a property of the store, not of who reads
-      # it.
+      # Which container holds the items is `shared.secretStoreContainer` on the
+      # home vessel, because it is a property of that boundary.
       #
       # No credential here. Core writes over the same federation every cloud
       # Target already goes through (`storeTokenFor` in
@@ -427,7 +449,6 @@ spec:
       secretStore:
         adapter: gcp-secret-manager
         endpoint: https://secretmanager.googleapis.com
-        container: bluenose
       supplyChain:
         # northamerica-northeast1, which is where the key is:
         # `google_kms_crypto_key.signer` takes `local.region`, and

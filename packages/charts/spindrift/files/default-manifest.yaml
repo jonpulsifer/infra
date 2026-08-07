@@ -14,7 +14,10 @@
 # test at apps/spindrift/test/conformance/chart-only-enrolment.test.ts diffs
 # this file against the code's copy so that drift is a red test rather than a
 # live surprise.
-installation: default
+installation:
+  name: default
+  controlPlaneVessel: primary
+  homeVessel: spindrift
 controlPlane:
   hostname: {{ .Values.hostname | quote }}
 auth:
@@ -26,10 +29,6 @@ dns:
 sources:
   buckets:
     - bluenose-spindrift-source
-  defaultBucket: bluenose-spindrift-source
-cloud:
-  artifactsProject: spindrift-artifacts
-  homeVesselProject: spindrift-vessel
 charts:
   app: packages/charts/spindrift-app
 supplyChain:
@@ -52,7 +51,6 @@ build:
 secretStore:
   adapter: onepassword
   endpoint: http://onepassword-connect.external-secrets.svc.cluster.local:8080
-  container: spindrift-vault
 vessels:
   - name: primary
     kind: cluster
@@ -62,6 +60,10 @@ vessels:
     kind: gcp-project
     location:
       project: spindrift-vessel
+    shared:
+      sourceBucket: bluenose-spindrift-source
+      artifactsProject: spindrift-artifacts
+      secretStoreContainer: spindrift-vault
 targets:
   - vessel: primary
     adapter: kubernetes
