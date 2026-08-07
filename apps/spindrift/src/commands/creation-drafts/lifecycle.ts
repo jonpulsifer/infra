@@ -6,6 +6,7 @@ import {
   components,
   componentTargetDesired,
   creationDrafts,
+  type Repository,
   repositories,
   targets,
 } from '../../db/schema.ts';
@@ -27,8 +28,10 @@ import { repositoryRefOf } from '../../domain/repository.ts';
 import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
 import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
 import { targetRowLabel } from '../../domain/target.ts';
+import { reconcileRepository } from '../../reconciler/repo-loop.ts';
 import { routeForTarget } from '../builds/route.ts';
 import type { CreateAppResult } from '../create-app.ts';
+import { connectRepository } from '../repositories/connect.ts';
 import {
   type Command,
   type CommandContext,
@@ -428,11 +431,19 @@ async function prepareCreation(
     });
   }
 
-  const [repository] = await context.db
-    .select()
-    .from(repositories)
-    .where(eq(repositories.fullName, draft.source.repo))
-    .limit(1);
+  let repository = await repositoryRow(context, draft.source.repo);
+  if (
+    draft.source.connect === true &&
+    (repository?.access !== 'active' || repository.authoritativeCommit === null)
+  ) {
+    const connected = await connectAndAdopt(
+      draft.source.repo,
+      draft.source.subpath,
+      context,
+    );
+    if (!connected.ok) return connected;
+    repository = connected.value;
+  }
   if (
     repository?.access !== 'active' ||
     repository.authoritativeCommit === null
@@ -482,6 +493,55 @@ function noBuildRoute(target: string) {
     'NOT_BUILDABLE',
     `this installation has no eligible build route for ${target}`,
   );
+}
+
+async function repositoryRow(context: CommandContext, fullName: string) {
+  const [row] = await context.db
+    .select()
+    .from(repositories)
+    .where(eq(repositories.fullName, fullName))
+    .limit(1);
+  return row;
+}
+
+/**
+ * Connect the repository this draft deploys from, as part of creating the App.
+ *
+ * The wizard lets an operator read any repository the GitHub grant offers, and
+ * reading writes nothing — so a repository Spindrift holds no row for arrives
+ * here, at the one committing act, and is connected through §15's own command
+ * rather than through a second way of connecting. The scope is the directory
+ * the draft names, so the configuration pull request covers what is about to be
+ * deployed and nothing else.
+ *
+ * The reconcile that follows is what makes the new row stageable: `connect`
+ * adopts nothing by design (§15), and a row with no authoritative commit has no
+ * source to build. Reading the default branch here is the same pass the repo
+ * loop makes on its own schedule, taken now so that creation does not wait a
+ * tick for a commit that is already there.
+ */
+async function connectAndAdopt(
+  fullName: string,
+  subpath: string,
+  context: CommandContext,
+): Promise<CommandResult<Repository>> {
+  const connected = await connectRepository(
+    { fullName, scopes: [subpath] },
+    context,
+  );
+  if (!connected.ok) return connected;
+
+  const row = await repositoryRow(context, fullName);
+  if (row === undefined) {
+    throw new Error(`connecting ${fullName} wrote no repository row`);
+  }
+  const host = context.adapters.repository?.() ?? null;
+  if (host === null) return ok(row);
+  await reconcileRepository(
+    { db: context.db, clock: context.clock, host },
+    row,
+  );
+  return ok((await repositoryRow(context, fullName)) ?? row);
 }
 
 async function completedCreation(
@@ -628,7 +688,7 @@ async function revalidate(
     .map((candidate) => candidate.target.id);
   const blockers = [...blockersFor(draft, candidateIds)];
 
-  if (draft.source.kind === 'repo') {
+  if (draft.source.kind === 'repo' && draft.source.repo !== '') {
     const [repository] = await context.db
       .select({
         access: repositories.access,
@@ -637,20 +697,29 @@ async function revalidate(
       .from(repositories)
       .where(eq(repositories.fullName, draft.source.repo))
       .limit(1);
-    if (repository?.access !== 'active') {
-      blockers.push({
-        code: 'REPOSITORY_UNAVAILABLE',
-        title: `The repository ${draft.source.repo} is no longer available.`,
-        remediation:
-          'Restore the GitHub App installation access or choose another repository. The draft is kept.',
-      });
-    } else if (repository.authoritativeCommit === null) {
-      blockers.push({
-        code: 'SOURCE_UNAVAILABLE',
-        title: `The repository ${draft.source.repo} has no authoritative commit ready.`,
-        remediation:
-          'Wait for default-branch reconciliation, then review this draft again.',
-      });
+    // A repository the GitHub grant offers and this installation holds no row
+    // for is connected by completion itself (§15), so its absence is not a
+    // prerequisite to clear beforehand: `connectRepository`'s own refusal is
+    // what says it could not be. `blockersFor` still refuses a draft that names
+    // no repository at all.
+    const connectsOnDeploy =
+      repository === undefined && draft.source.connect === true;
+    if (!connectsOnDeploy) {
+      if (repository?.access !== 'active') {
+        blockers.push({
+          code: 'REPOSITORY_UNAVAILABLE',
+          title: `The repository ${draft.source.repo} is no longer available.`,
+          remediation:
+            'Restore the GitHub App installation access or choose another repository. The draft is kept.',
+        });
+      } else if (repository.authoritativeCommit === null) {
+        blockers.push({
+          code: 'SOURCE_UNAVAILABLE',
+          title: `The repository ${draft.source.repo} has no authoritative commit ready.`,
+          remediation:
+            'Wait for default-branch reconciliation, then review this draft again.',
+        });
+      }
     }
   }
 

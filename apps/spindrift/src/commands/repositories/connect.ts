@@ -32,8 +32,8 @@ import {
   configurationTransaction,
   openConfigurationPullRequest,
 } from '../../integrations/github/config-pr.ts';
-import { GitHubAccessError } from '../../integrations/github/http.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { unreadable } from './access.ts';
 
 /** `owner/name` — the only handle the repository API takes. */
 const fullName = z
@@ -221,39 +221,25 @@ export const connectRepository: Command<
   // to nothing.
   const buildWorkflow = context.manifest.github?.buildWorkflow ?? null;
 
+  // Every read below refuses through the one taxonomy (`access.ts`): §15's
+  // lost-access rule reaches back to here — a repository the App cannot see is
+  // a fact about the world, reported as a refusal the operator can act on,
+  // never an exception the dispatch surface turns into a 500 — and the other
+  // two codes are not that fact. The creation wizard reaches this command with
+  // a repository it has just read successfully, so an hour's quota answering
+  // "cannot reach" would contradict the screen that offered the button.
   let ref: ReturnType<typeof repositoryRefOf>;
   try {
     ref = await host.installationFor(input.fullName);
   } catch (cause) {
-    if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
-      return failed(
-        'NOT_FOUND',
-        `Spindrift cannot reach ${input.fullName}: authorize GitHub and check that the App installation selects it`,
-      );
-    }
-    return failed(
-      'NOT_FOUND',
-      `Spindrift cannot reach ${input.fullName}: ${cause instanceof Error ? cause.message : String(cause)}`,
-    );
+    return unreadable(input.fullName, cause);
   }
 
   let defaultBranch: string;
   try {
     ({ defaultBranch } = await host.repository(ref, input.fullName));
   } catch (cause) {
-    // §15's lost-access rule reaches back to here: a repository the App cannot
-    // see is a fact about the world, reported as a refusal the operator can act
-    // on, never an exception the dispatch surface turns into a 500.
-    if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
-      return failed(
-        'NOT_FOUND',
-        `Spindrift cannot reach ${input.fullName}: check that the App installation still selects it`,
-      );
-    }
-    return failed(
-      'NOT_FOUND',
-      `Spindrift cannot reach ${input.fullName}: ${cause instanceof Error ? cause.message : String(cause)}`,
-    );
+    return unreadable(input.fullName, cause);
   }
 
   let scopes: ConfigurationScope[];
@@ -266,18 +252,7 @@ export const connectRepository: Command<
       defaultBranch,
     ));
   } catch (cause) {
-    if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
-      return failed(
-        'NOT_FOUND',
-        `Spindrift lost access to ${input.fullName} while reading it`,
-      );
-    }
-    return failed(
-      'NOT_DEPLOYABLE',
-      `Spindrift could not read ${input.fullName}: ${
-        cause instanceof Error ? cause.message : String(cause)
-      }`,
-    );
+    return unreadable(input.fullName, cause);
   }
 
   if (scopes.length === 0) {

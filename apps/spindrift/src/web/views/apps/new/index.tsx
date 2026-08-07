@@ -24,8 +24,9 @@
  * found.
  */
 import { AlertTriangle, Loader2, Rocket } from 'lucide-react';
-import { type Dispatch, useRef, useState } from 'react';
+import { type Dispatch, useEffect, useRef, useState } from 'react';
 import type {
+  Blocker,
   CreationDraftView,
   DraftAction,
 } from '../../../../domain/creation-draft.ts';
@@ -34,13 +35,23 @@ import {
   command,
   type TransportFailure,
 } from '../../../client.ts';
-import { RepoPicker } from '../../../components/repo-picker.tsx';
+import {
+  RepoPicker,
+  type RepositoryChoice,
+  repositoryChoices,
+} from '../../../components/repo-picker.tsx';
 import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
 import { reportSessionExpired } from '../../../session-events.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { Field } from '../../../ui/field.tsx';
+import {
+  type InspectedScope,
+  inspection,
+  mergeScopes,
+  outcomeOf,
+} from './detect.ts';
 import { blockersFor, type Draft, draftReducer, ENTRIES } from './draft.ts';
 import {
   Advanced,
@@ -56,15 +67,48 @@ import {
   VesselRow,
 } from './summary.tsx';
 
+/**
+ * What stands between a repository with several Apps in it and a Deploy.
+ *
+ * The draft names a directory from the moment it exists — the root — and
+ * deploying that because nobody corrected it is the silent first-hit this
+ * screen refuses to make. So while detection is offering more than one
+ * candidate and the draft names none of them, there is a prerequisite to clear,
+ * stated the way every other unmet prerequisite on this screen is.
+ *
+ * A directory the operator typed is an answer, however detection reads it, and
+ * a repository detection could make nothing of leaves the assertion path open:
+ * §5's ladder proposes, and story 32 keeps the escape hatch.
+ */
+function unchosenScope(
+  draft: Draft,
+  detected: readonly InspectedScope[],
+  named: boolean,
+): readonly Blocker[] {
+  if (draft.source.kind !== 'repo' || named || detected.length < 2) return [];
+  if (detected.some((scope) => scope.scope === draft.source.subpath)) return [];
+  return [
+    {
+      code: 'SOURCE_UNAVAILABLE',
+      title: `Nothing is chosen to deploy from ${draft.source.repo}.`,
+      remediation: `Detection found ${detected.length} directories it knows how to build. Pick one under Source, or name another yourself.`,
+    },
+  ];
+}
+
 export function NewApp({
   initial,
   targets: initialTargets,
   repos,
+  available,
   onCreated,
 }: {
   initial: CreationDraftView;
   targets: readonly TargetOptionView[];
+  /** Repositories Spindrift holds a row for. */
   repos: readonly RepositoryOptionView[];
+  /** Repositories GitHub currently grants this installation. */
+  available: readonly RepositoryOptionView[];
   onCreated?: (app: { readonly id: string; readonly name: string }) => void;
 }) {
   const [draft, setDraft] = useState(initial.draft);
@@ -79,6 +123,12 @@ export function NewApp({
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectionError, setDetectionError] = useState<string | null>(null);
+  // Everything the last read said about this repository, unsummarized. The
+  // wizard's job is to offer it, so it is kept as it arrived: dropping the
+  // scopes detection could not make sense of would leave "why not here"
+  // unanswerable, and dropping the ones it could would leave the screen picking.
+  const [scopes, setScopes] = useState<readonly InspectedScope[] | null>(null);
+  const scopesRef = useRef<readonly InspectedScope[]>([]);
   const draftRef = useRef(initial.draft);
   const revisionRef = useRef(initial.revision);
   const saves = useRef(Promise.resolve());
@@ -88,7 +138,23 @@ export function NewApp({
   const candidateIds = targets
     .filter((target) => target.candidate)
     .map((target) => target.targetId);
-  const localBlockers = blockersFor(draft, candidateIds);
+  const detected = (scopes ?? []).filter(
+    (scope) => scope.outcome === 'detected',
+  );
+  const unchosen = unchosenScope(
+    draft,
+    detected,
+    draft.scopeByOperator === true,
+  );
+  // The sentence under Component is a statement about one directory, and the
+  // draft can name another one — an edit that has not settled yet, or a
+  // directory detection could make nothing of. Saying which is what keeps the
+  // reason from reading as though it were about the path on screen.
+  const readElsewhere =
+    draft.source.kind === 'repo' &&
+    draft.detection.scope !== undefined &&
+    draft.detection.scope !== draft.source.subpath;
+  const localBlockers = [...blockersFor(draft, candidateIds), ...unchosen];
   const blockers = [
     ...localBlockers,
     ...serverBlockers.filter(
@@ -96,6 +162,7 @@ export function NewApp({
     ),
   ];
   const target = targets.find((option) => option.targetId === draft.targetId);
+  const choices = repositoryChoices(repos, available);
 
   const dispatch: Dispatch<DraftAction> = (action) => {
     const previous = draftRef.current;
@@ -155,39 +222,46 @@ export function NewApp({
   };
 
   /**
-   * Choosing a repository is choosing everything the repository implies.
+   * Read a repository and offer what is in it.
    *
    * One read of the real default branch, through the same ladder that writes
-   * `spindrift.yaml`. Failing to detect is not failing to select — the repo is
-   * still the source, the kind is still correctable, and the sentence says
-   * which of the two happened.
+   * `spindrift.yaml`. Every directory it answered about is kept and shown, and
+   * `outcomeOf` decides what — if anything — the draft may take from it.
+   *
+   * `scope` names one directory, which is what an edited subpath asks about —
+   * §5's "named, never searched". Its answer replaces that directory's row and
+   * leaves the rest of the list alone, so correcting a path does not throw away
+   * the candidates beside it.
+   *
+   * Failing to read is not failing to select: the repo is still the source, the
+   * kind is still correctable, and the sentence says which of the two happened.
    */
-  const selectRepo = async (fullName: string, url: string) => {
-    dispatch({ type: 'repo', fullName, url });
+  const inspect = async (fullName: string, scope?: string) => {
     setDetecting(true);
     setDetectionError(null);
     try {
-      const result = await command('inspectRepository', { fullName });
+      const result = await command(
+        'inspectRepository',
+        inspection(fullName, scope),
+      );
       if (!result.ok) {
         setDetectionError(result.failure.message);
         return;
       }
-      const found = result.value.scopes.find(
-        (scope) => scope.outcome === 'detected',
-      );
-      if (found === undefined || found.outcome !== 'detected') {
-        setDetectionError(
-          `Spindrift found nothing it knows how to build in ${fullName}. Pick the kind yourself, or add a spindrift.yaml.`,
-        );
-        return;
-      }
-      dispatch({
-        type: 'detect',
-        scope: found.scope,
-        kind: found.kind,
-        reason: found.reason,
-        unavailable: found.unavailable,
+      const found = result.value.scopes;
+      const merged =
+        scope === undefined ? found : mergeScopes(scopesRef.current, found);
+      scopesRef.current = merged;
+      setScopes(merged);
+
+      const outcome = outcomeOf(draftRef.current, {
+        fullName,
+        scope,
+        found,
+        merged,
       });
+      if (outcome.act === 'detect') dispatch(outcome.action);
+      if (outcome.act === 'refuse') setDetectionError(outcome.message);
     } catch (cause) {
       setDetectionError(
         cause instanceof Error ? cause.message : 'the repository was not read',
@@ -196,6 +270,52 @@ export function NewApp({
       setDetecting(false);
     }
   };
+
+  /** Selecting a repository reads it. Nothing is written until Deploy. */
+  const selectRepo = (repo: RepositoryChoice, url: string) => {
+    dispatch({
+      type: 'repo',
+      fullName: repo.fullName,
+      url,
+      connect: repo.state === 'grant-only',
+    });
+    scopesRef.current = [];
+    setScopes(null);
+    void inspect(repo.fullName);
+  };
+
+  const chooseScope = (scope: InspectedScope) => {
+    if (scope.outcome !== 'detected') return;
+    dispatch({
+      type: 'detect',
+      scope: scope.scope,
+      kind: scope.kind,
+      reason: scope.reason,
+      unavailable: scope.unavailable,
+    });
+  };
+
+  /** A settled subpath edit asks about the directory it now names. */
+  const settleSubpath = () => {
+    const source = draftRef.current.source;
+    if (source.kind !== 'repo' || source.repo === '' || !source.subpath) return;
+    void inspect(source.repo, source.subpath);
+  };
+
+  // Detection runs for the repository the draft opens on, before anybody
+  // presses anything. A draft claims a kind from the moment it exists, and a
+  // screen that renders that claim without ever asking is the screen this
+  // whole flow was supposed to replace. Reading writes nothing, so the only
+  // thing it costs a draft nobody finishes is one request — and `outcomeOf`
+  // is what keeps a reopened draft reading rather than re-deciding.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current) return;
+    opened.current = true;
+    const source = initial.draft.source;
+    if (source.kind !== 'repo' || source.repo === '') return;
+    void inspect(source.repo);
+  }, []);
 
   /** The terminal act: revalidate and create under one database lock. */
   async function start() {
@@ -232,9 +352,11 @@ export function NewApp({
       <header>
         <Eyebrow>New App</Eyebrow>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-          {draft.source.kind === 'repo'
-            ? `Deploy from ${draft.source.repo}`
-            : 'Deploy an upload'}
+          {draft.source.kind !== 'repo'
+            ? 'Deploy an upload'
+            : draft.source.repo === ''
+              ? 'Deploy from a repository'
+              : `Deploy from ${draft.source.repo}`}
         </h1>
         <p className="mt-1 max-w-prose text-sm text-muted-foreground">
           Everything below already has an answer. Read down, correct what is
@@ -246,17 +368,27 @@ export function NewApp({
         <SourceRow
           draft={draft}
           dispatch={dispatch}
-          repos={repos}
+          repos={choices}
+          scopes={scopes}
           detecting={detecting}
           detectionError={detectionError}
+          unchosen={unchosen.length > 0}
           onSelectRepo={selectRepo}
+          onChooseScope={chooseScope}
+          onSettleSubpath={settleSubpath}
         />
 
         <Row
           label="Component"
-          unsettled={detectionError !== null}
+          unsettled={
+            detectionError !== null || unchosen.length > 0 || readElsewhere
+          }
           value={`${draft.componentName} · ${draft.kind}`}
-          why={draft.detection.reason}
+          why={
+            readElsewhere && draft.source.kind === 'repo'
+              ? `${draft.detection.reason} — read in ${draft.detection.scope}, and the root directory now names ${draft.source.subpath}.`
+              : draft.detection.reason
+          }
           tone={
             draft.kind === draft.detection.kind ? null : (
               <Badge tone="warning">corrected</Badge>
@@ -567,16 +699,26 @@ function SourceRow({
   draft,
   dispatch,
   repos,
+  scopes,
   detecting,
   detectionError,
+  unchosen,
   onSelectRepo,
+  onChooseScope,
+  onSettleSubpath,
 }: {
   draft: Draft;
   dispatch: Dispatch<DraftAction>;
-  repos: readonly RepositoryOptionView[];
+  repos: readonly RepositoryChoice[];
+  /** What the last read said, or `null` before anything has been read. */
+  scopes: readonly InspectedScope[] | null;
   detecting: boolean;
   detectionError: string | null;
-  onSelectRepo: (fullName: string, url: string) => void;
+  /** Detection is offering candidates and the draft names none of them. */
+  unchosen: boolean;
+  onSelectRepo: (repo: RepositoryChoice, url: string) => void;
+  onChooseScope: (scope: InspectedScope) => void;
+  onSettleSubpath: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
@@ -621,11 +763,21 @@ function SourceRow({
   return (
     <Row
       label="Source"
-      unsettled={draft.source.kind === 'archive' && !draft.source.location}
-      value={
+      // Opens itself on anything unresolved, because §3's grammar only works
+      // when the alternatives are visible: a sentence about a directory
+      // Spindrift could not build is unreadable while the list of directories
+      // it did read is behind a disclosure.
+      unsettled={
         draft.source.kind === 'repo'
-          ? `${draft.source.repo} · ${draft.source.subpath}`
-          : draft.source.filename
+          ? draft.source.repo === '' || unchosen || detectionError !== null
+          : !draft.source.location
+      }
+      value={
+        draft.source.kind !== 'repo'
+          ? draft.source.filename
+          : draft.source.repo === ''
+            ? 'no repository chosen'
+            : `${draft.source.repo} · ${draft.source.subpath}`
       }
       tone={
         detecting ? (
@@ -659,8 +811,13 @@ function SourceRow({
           <div className="flex flex-col gap-3">
             <RepoPicker
               repos={repos}
-              selected={draft.source.repo}
+              selected={draft.source.repo === '' ? null : draft.source.repo}
               onSelect={onSelectRepo}
+            />
+            <ScopeChooser
+              subpath={draft.source.subpath}
+              scopes={scopes}
+              onChoose={onChooseScope}
             />
             <Field
               name="subpath"
@@ -669,7 +826,14 @@ function SourceRow({
               onChange={(event) =>
                 dispatch({ type: 'subpath', subpath: event.target.value })
               }
-              hint="Named, never searched — Spindrift does not roam the tree. Detection filled this in."
+              // Settled rather than per-keystroke: the reason on screen is a
+              // statement about one directory, and re-reading `apps/w` on the
+              // way to `apps/web` would describe a directory nobody named.
+              onBlur={onSettleSubpath}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') onSettleSubpath();
+              }}
+              hint="Named, never searched — Spindrift does not roam the tree. Leave the field to read the directory it now names."
             />
           </div>
         ) : (
@@ -715,6 +879,55 @@ function SourceRow({
         )}
       </div>
     </Row>
+  );
+}
+
+/**
+ * Every directory the repository was read for, as a list to choose from.
+ *
+ * §5 says discovery "proposes a list of candidate directories for a human to
+ * choose from", and this is that list rather than a summary of it. A directory
+ * detection knows how to build is selectable and wears the kind and the
+ * sentence behind it; one it does not is here too, disabled, wearing what it
+ * found instead — §3's grammar, which only works if the alternatives are
+ * visible. An empty list means nothing has been read yet, which is a different
+ * thing from a repository with nothing in it.
+ */
+function ScopeChooser({
+  subpath,
+  scopes,
+  onChoose,
+}: {
+  subpath: string;
+  scopes: readonly InspectedScope[] | null;
+  onChoose: (scope: InspectedScope) => void;
+}) {
+  if (scopes === null || scopes.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Eyebrow>Directories Spindrift read</Eyebrow>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {scopes.map((scope) => (
+          <Choice
+            key={scope.scope}
+            selected={scope.outcome === 'detected' && scope.scope === subpath}
+            disabled={scope.outcome !== 'detected'}
+            title={scope.scope}
+            note={
+              scope.outcome === 'detected'
+                ? `${scope.kind} — ${scope.reason}`
+                : scope.detail
+            }
+            onClick={() => onChoose(scope)}
+          />
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Choosing one detects that directory and names the Component after it.
+        Nothing is picked for you when there is more than one.
+      </p>
+    </div>
   );
 }
 

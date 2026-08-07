@@ -22,6 +22,7 @@ import {
 import { NewApp } from '../../src/web/views/apps/new/index.tsx';
 import {
   INITIAL_DRAFT,
+  REPOSITORY_GRANT,
   REPOSITORY_OPTIONS,
   TARGET_OPTIONS,
 } from '../fixtures/scenarios.ts';
@@ -48,6 +49,7 @@ const render = (draft: Draft) =>
       }}
       targets={TARGET_OPTIONS}
       repos={REPOSITORY_OPTIONS}
+      available={REPOSITORY_GRANT}
     />,
   );
 
@@ -190,6 +192,9 @@ describe('the draft reducer', () => {
       entry: 'website',
     });
     expect(next.kind).toBe('website');
+    // …and leaves the source alone: `Service` and `Website` name a kind, not a
+    // place to get the code from.
+    expect(next.source).toEqual(INITIAL_DRAFT.source);
   });
 
   test("a tile that names no kind leaves detection's proposal standing", () => {
@@ -198,6 +203,76 @@ describe('the draft reducer', () => {
       entry: 'upload',
     });
     expect(next.kind).toBe(INITIAL_DRAFT.detection.kind);
+  });
+
+  test('the Upload tile switches the source to an archive', () => {
+    // The defect this pins: the tile set an entry and a kind and nothing else,
+    // so pressing it from a repository draft left the repository picker on
+    // screen and the draft still deploying from a repository.
+    const next = draftReducer(INITIAL_DRAFT, {
+      type: 'entry',
+      entry: 'upload',
+    });
+    expect(next.source.kind).toBe('archive');
+  });
+
+  /** A draft that has only ever been an upload — the fresh-install shape. */
+  const uploadOnly: Draft = {
+    ...INITIAL_DRAFT,
+    entry: 'upload',
+    source: {
+      kind: 'archive',
+      filename: 'upload.zip',
+      digest: `sha256:${'0'.repeat(64)}`,
+      location: null,
+      contents: 'source',
+      subpath: '.',
+    },
+  };
+
+  test('the repo tiles open on a picker when no repository has been named', () => {
+    const linking = draftReducer(uploadOnly, { type: 'entry', entry: 'repo' });
+
+    expect(linking.source).toMatchObject({ kind: 'repo', repo: '' });
+    // Which is a draft nothing can be created from, said out loud rather than
+    // discovered at Deploy.
+    expect(
+      blockersFor(linking, CANDIDATES).map((blocker) => blocker.title),
+    ).toContain('No repository is chosen.');
+  });
+
+  test('discovering is linking a repo, with its directories to choose from', () => {
+    const next = draftReducer(uploadOnly, { type: 'entry', entry: 'discover' });
+    expect(next.source.kind).toBe('repo');
+  });
+
+  test('a staged archive survives a look at the repo tiles', () => {
+    // Pressing the other tile is a look. Costing somebody a staged upload for
+    // it is how a tile becomes one nobody presses twice.
+    const staged = draftReducer(uploadOnly, {
+      type: 'archive',
+      filename: 'dist.zip',
+      digest: `sha256:${'a'.repeat(64)}`,
+      location: 'https://bundles.example.test/dist.zip',
+    });
+    const back = draftReducer(
+      draftReducer(staged, { type: 'entry', entry: 'repo' }),
+      { type: 'entry', entry: 'upload' },
+    );
+
+    expect(back.source).toMatchObject({
+      kind: 'archive',
+      location: 'https://bundles.example.test/dist.zip',
+    });
+  });
+
+  test('and so does the repository that was picked', () => {
+    const back = draftReducer(
+      draftReducer(INITIAL_DRAFT, { type: 'entry', entry: 'upload' }),
+      { type: 'entry', entry: 'repo' },
+    );
+
+    expect(back.source).toEqual(INITIAL_DRAFT.source);
   });
 
   test('a detection replaces the proposal, the kind, and the scope together', () => {
@@ -216,9 +291,16 @@ describe('the draft reducer', () => {
     // The scope names the Component, and the source follows it.
     expect(next.componentName).toBe('web');
     expect(next.source.kind === 'repo' && next.source.subpath).toBe('apps/web');
+    // And the reason records the directory it is about, so a draft reopened
+    // later can tell "already read" from "never asked" without a string match
+    // on the placeholder sentence.
+    expect(next.detection.scope).toBe('apps/web');
   });
 
-  test('a detection overrides a correction, because it is about a new directory', () => {
+  test('a detection overrides a corrected kind, because it is about a new directory', () => {
+    // Still true of the *kind*, and deliberately not of the App name below: a
+    // kind is an answer about a directory, so an answer about a different
+    // directory replaces it. A name is an answer about the App.
     const corrected = draftReducer(INITIAL_DRAFT, {
       type: 'kind',
       kind: 'job',
@@ -232,5 +314,73 @@ describe('the draft reducer', () => {
     });
 
     expect(next.kind).toBe('website');
+  });
+
+  test('a repository nobody named derives the App name from it', () => {
+    const next = draftReducer(INITIAL_DRAFT, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://github.com/example/ledger.git',
+    });
+    expect(next.appName).toBe('ledger');
+  });
+
+  test('an App name the operator typed survives re-selecting the repository', () => {
+    const named = draftReducer(INITIAL_DRAFT, {
+      type: 'field',
+      field: 'appName',
+      value: 'almanac-staging',
+    });
+    const reselected = draftReducer(named, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://github.com/example/ledger.git',
+    });
+    const redetected = draftReducer(reselected, {
+      type: 'detect',
+      scope: 'apps/api',
+      kind: 'service',
+      reason: 'a fresh read',
+      unavailable: {},
+    });
+
+    expect(reselected.appName).toBe('almanac-staging');
+    expect(redetected.appName).toBe('almanac-staging');
+  });
+
+  test('selecting a repository the grant offers marks it to connect on Deploy', () => {
+    const next = draftReducer(INITIAL_DRAFT, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://github.com/example/ledger.git',
+      connect: true,
+    });
+    expect(next.source).toMatchObject({ connect: true, subpath: '.' });
+  });
+
+  test('another repository is another tree, so the directory resets', () => {
+    const named = draftReducer(INITIAL_DRAFT, {
+      type: 'subpath',
+      subpath: 'apps/ddnsd',
+    });
+    const next = draftReducer(named, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://github.com/example/ledger.git',
+    });
+    expect(next.source.kind === 'repo' && next.source.subpath).toBe('.');
+    // With the claim on it: the root is nobody's word, so the next read of the
+    // new tree is free to propose one.
+    expect(next.scopeByOperator).toBeUndefined();
+  });
+
+  test('a directory the operator typed is recorded as theirs', () => {
+    // Durable rather than session state, because the guard it feeds is about
+    // the read that runs when a saved draft is reopened.
+    const next = draftReducer(INITIAL_DRAFT, {
+      type: 'subpath',
+      subpath: 'apps/ddnsd',
+    });
+    expect(next.scopeByOperator).toBe(true);
   });
 });

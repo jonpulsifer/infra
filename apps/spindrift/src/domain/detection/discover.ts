@@ -81,10 +81,14 @@ function ignored(path: string): boolean {
 /**
  * Candidate directories, in the order a screen should list them.
  *
- * Workspace membership wins when the repository declares it: a Bun, npm, yarn
- * or pnpm workspace has already said where its packages are, and guessing past
- * a declaration would be inventing an answer somebody wrote down. Everything
- * else falls back to a bounded walk for a directory carrying a manifest.
+ * Two questions, both asked, and the answers merged. A Bun, npm, yarn or pnpm
+ * workspace has already said where its packages are, so a declared package goes
+ * first: somebody wrote it down, and a walk's guess does not outrank that. But a
+ * declaration is a statement about one ecosystem's packages and never about the
+ * repository — a Go service beside a JS workspace is declared by nothing, and
+ * treating the workspace list as the whole answer is how a monorepo offers four
+ * of its seventeen directories. So the bounded manifest walk runs as well, and
+ * what it finds beyond the declaration is appended.
  *
  * The root is **not** included. The caller has already asked about it — that is
  * the first question detection answers — and discovery is what happens when the
@@ -96,18 +100,19 @@ export async function discoverScopes(
   const declared = (await workspaceDirectories(tree)).filter(
     (directory) => !ignored(directory),
   );
-  if (declared.length > 0) return declared.slice(0, MAX_CANDIDATES);
 
-  const candidates = new Set<string>();
+  const walked = new Set<string>();
   for (const path of await tree.paths()) {
     if (ignored(path)) continue;
     const segments = path.split('/');
     const file = segments.pop();
     if (file === undefined || !CANDIDATE_MANIFESTS.has(file)) continue;
     if (segments.length === 0 || segments.length > MAX_DEPTH) continue;
-    candidates.add(segments.join('/'));
+    walked.add(segments.join('/'));
   }
-  return [...candidates].sort().slice(0, MAX_CANDIDATES);
+  for (const directory of declared) walked.delete(directory);
+
+  return [...declared, ...[...walked].sort()].slice(0, MAX_CANDIDATES);
 }
 
 /**

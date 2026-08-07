@@ -2249,6 +2249,7 @@ function NewAppScreen({
         type: 'success';
         targetOptions: readonly TargetOptionView[];
         repoOptions: readonly RepositoryOptionView[];
+        repoGrant: readonly RepositoryOptionView[];
         draft: import('../domain/creation-draft.ts').CreationDraftView;
       }
   >({ type: 'loading' });
@@ -2291,6 +2292,7 @@ function NewAppScreen({
         type: 'success',
         targetOptions: targetRes.value.options,
         repoOptions: repoRes.value.options,
+        repoGrant: repoRes.value.available,
         draft: draftRes.value,
       });
       if (draftId === null) {
@@ -2335,6 +2337,7 @@ function NewAppScreen({
       initial={state.draft}
       targets={state.targetOptions}
       repos={state.repoOptions}
+      available={state.repoGrant}
       onCreated={(app) => onNavigate(`/apps/${app.id}`)}
     />
   );

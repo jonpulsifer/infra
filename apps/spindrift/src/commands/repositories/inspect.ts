@@ -28,8 +28,8 @@ import { declaredPlanner } from '../../domain/detection/declared.ts';
 import { scanRepository } from '../../domain/detection/discover.ts';
 import type { DetectionProposal } from '../../domain/detection/ladder.ts';
 import { gitHubTree } from '../../domain/detection/tree.ts';
-import { GitHubAccessError } from '../../integrations/github/http.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { unreadable } from './access.ts';
 
 /** `owner/name` — the only handle the repository API takes. */
 const fullName = z
@@ -161,16 +161,7 @@ export const inspectRepository: Command<
     ({ defaultBranch } = await host.repository(ref, input.fullName));
     commit = await host.branchHead(ref, input.fullName, defaultBranch);
   } catch (cause) {
-    if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
-      return failed(
-        'NOT_FOUND',
-        `Spindrift cannot reach ${input.fullName}: authorize GitHub and check that the App installation selects it`,
-      );
-    }
-    return failed(
-      'NOT_FOUND',
-      `Spindrift cannot reach ${input.fullName}: ${cause instanceof Error ? cause.message : String(cause)}`,
-    );
+    return unreadable(input.fullName, cause);
   }
 
   let scopes: readonly InspectedScope[];
@@ -190,18 +181,7 @@ export const inspectRepository: Command<
           },
     );
   } catch (cause) {
-    if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
-      return failed(
-        'NOT_FOUND',
-        `Spindrift lost access to ${input.fullName} while reading it`,
-      );
-    }
-    return failed(
-      'NOT_DEPLOYABLE',
-      `Spindrift could not read ${input.fullName} at ${commit.slice(0, 7)}: ${
-        cause instanceof Error ? cause.message : String(cause)
-      }`,
-    );
+    return unreadable(input.fullName, cause);
   }
 
   return ok({
