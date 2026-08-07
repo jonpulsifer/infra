@@ -1,0 +1,49 @@
+name: Skiff Smoke
+
+# A skiff is an ephemeral microVM that serves exactly one job and halts. This
+# is the proof that it can carry one, on demand.
+#
+# What is worth asserting is what a skiff does differently from the ARC
+# runners, and each of these was a live question while the hull was built:
+#   - the guest's /nix/store is the host's, shared read-only over virtiofs,
+#     with a writable overlay on top, so `nix` works with a warm store
+#   - nix-ld resolves the FHS interpreter that downloaded release binaries ask
+#     for, which is the exact failure the ARC image documents
+#   - docker is socket-activated rather than started at boot, so the first
+#     command that needs it is also what starts it
+#
+# The runner deregisters itself afterwards and the skiff powers off; bosun
+# notices the VMM exit and boots a replacement. Nothing here cleans up.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  skiff:
+    runs-on: skiff-nixos
+    timeout-minutes: 10
+    steps:
+      - name: The store came from the host, warm
+        run: |
+          nix-store -q --requisites /run/current-system | wc -l
+          echo "store entries visible: $(ls /nix/store | wc -l)"
+          test "$(ls /nix/store | wc -l)" -gt 1000
+
+      - name: The overlay takes writes
+        run: nix-store --add /etc/hostname
+
+      - name: nix-ld resolves the FHS interpreter
+        run: test -e /lib64/ld-linux-x86-64.so.2
+
+      - name: Docker starts on demand and runs a container
+        run: |
+          docker version --format '{{.Server.Version}}'
+          docker run --rm alpine echo container-ok
+
+      - name: This is a skiff, and it knows which one
+        run: |
+          tr ' ' '\n' < /proc/cmdline | grep '^bosun\.'
+          test "$(systemd-detect-virt)" = kvm
