@@ -35,6 +35,7 @@ import {
 } from '../../config/manifest.schema.ts';
 import { ManifestError, validateManifest } from '../../config/manifest.ts';
 import {
+  governedSliceRefusal,
   readStoredManifest,
   writeStoredManifest,
 } from '../../config/manifest-store.ts';
@@ -139,21 +140,32 @@ export const useSourceBucket: Command<
     ),
   };
 
+  let updated: AuthoredManifest;
   try {
     // Validated on the way out even though only two keys moved: the document
     // that gets written is the one that has to be valid, and a stored manifest
     // that was already drifting from the schema must not be made durable again
     // by an act that never looked at the rest of it.
-    await writeStoredManifest(
-      context.db,
-      validateManifest(next, 'the updated manifest'),
-    );
+    updated = validateManifest(next, 'the updated manifest');
   } catch (cause) {
     if (cause instanceof ManifestError) {
       return failed('NOT_DEPLOYABLE', cause.message);
     }
     throw cause;
   }
+
+  // Which bucket a staging picks is the home vessel's, and an installation that
+  // mounts a declaration takes that vessel from it on every boot. Making a
+  // default here would then leave the added bucket standing and the choice
+  // reverted — an act half-applied, with nothing on screen saying which half.
+  // Refused whole rather than half-applied: adding without choosing is the
+  // other arm of this same command, and it is still open.
+  const governed = governedSliceRefusal(updated, context.declaration);
+  if (governed !== null) {
+    return failed('NOT_DEPLOYABLE', governed);
+  }
+
+  await writeStoredManifest(context.db, updated);
 
   return ok({
     buckets,

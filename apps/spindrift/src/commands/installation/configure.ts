@@ -30,7 +30,10 @@ import {
   installationManifestSchema,
 } from '../../config/manifest.schema.ts';
 import { ManifestError, validateManifest } from '../../config/manifest.ts';
-import { writeStoredManifest } from '../../config/manifest-store.ts';
+import {
+  governedSliceRefusal,
+  writeStoredManifest,
+} from '../../config/manifest-store.ts';
 import { targetLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
@@ -76,6 +79,18 @@ export const configureInstallation: Command<
       return failed('INVALID_INPUT', cause.message);
     }
     throw cause;
+  }
+
+  // The one slice this screen may not drive. A boot re-applies the declaration
+  // to the two vessels this installation is built on, so taking an edit to them
+  // here would be saving a value the next restart discards — the refusal is
+  // what turns that into something an operator reads before it happens. A
+  // `NOT_DEPLOYABLE` fact rather than an `INVALID_INPUT` field error: nothing
+  // in the document is malformed, and no amount of re-typing makes this
+  // installation take it.
+  const governed = governedSliceRefusal(manifest, context.declaration);
+  if (governed !== null) {
+    return failed('NOT_DEPLOYABLE', governed);
   }
 
   // **Reconciliation makes no refusal of its own.** It used to make exactly one
