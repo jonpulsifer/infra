@@ -295,6 +295,32 @@ something nobody checked. `src/reconciler/vessel-loop.ts` is the standing pass,
 and it stores what was observed and never what was concluded — health is derived
 at read time, exactly as a Target's is.
 
+**An unmet row carries the change that clears it.** A sentence is the diagnosis;
+the fix is always Terraform here, because Terraform owns every boundary this
+installation stands on. `src/domain/remediation.ts` generates the stanza from
+what the probe actually observed — the one service it found switched off, the
+project it named, the bucket this installation stages into — and the vessel's
+declared `terraformRoot` is where it belongs. **Composed at read time, never
+stored**: a stanza moves when a root is declared or a surface is connected, and
+the loops keep their rule of storing what was observed and deriving what it
+means. `openPrerequisiteRemediation` opens it as a pull request against
+`github.infrastructureRepository`, following `integrations/github/config-pr.ts`
+exactly — one prerequisite's change, one file, and **nothing else written**: no
+row moves, and applying it is what clears the checklist, which the standing loop
+notices on its own.
+
+Two things it deliberately will not do. **It never invents a location**: a
+boundary declaring no root gets "this vessel has no Terraform root; here is what
+one would contain", and the act refuses rather than creating a root whose
+backend and provider pin nothing here observed. And **it never emits a
+placeholder**: a grant needs the exact principal, which is a fact Spindrift holds
+only where its federation impersonates a service account, so an installation
+federating directly gets no stanza and the reason instead. Most rows are like
+that by nature — a delivery operator, a chart source and a writable store are
+cleared inside a cluster, and a vessel is a project §14 forbids creating — so
+"no generated remediation" is a state with a sentence rather than an empty box,
+the same split `cloud-discovery.ts` keeps between `found: []` and `unavailable`.
+
 **A Target has no name.** `Target = Vessel × surface` is its identity as well as
 its definition: the pair is naturally unique — a boundary carries one runtime of
 each kind — so it is the unique index, it is what `connectTarget` and
