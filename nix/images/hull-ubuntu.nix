@@ -165,13 +165,18 @@ let
     export ACTIONS_RUNNER_INPUT_JITCONFIG="$(/opt/bosun/busybox cat /run/bosun/jitconfig)"
     cd /home/runner
     echo "skiff-mark runner-exec $(/opt/bosun/busybox cut -d' ' -f1 /proc/uptime)"
-    exec ./bin/Runner.Listener run
+    # Not exec'd, and the poweroff lives here rather than in an inittab
+    # `once` entry: measured on riptide, busybox init never reached the
+    # `once` line after this wait entry finished, leaving a deregistered
+    # guest running forever. The shell that ran the runner halts the machine.
+    ./bin/Runner.Listener run
+    echo "skiff-mark runner-exit $(/opt/bosun/busybox cut -d' ' -f1 /proc/uptime)"
+    /opt/bosun/busybox poweroff -f
   '';
 
   inittab = pkgs.writeText "inittab" ''
     ::sysinit:/opt/bosun/setup
     ::wait:/opt/bosun/run
-    ::once:/opt/bosun/busybox poweroff -f
     ::ctrlaltdel:/opt/bosun/busybox poweroff -f
   '';
 
