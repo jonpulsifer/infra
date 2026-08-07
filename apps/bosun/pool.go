@@ -24,9 +24,10 @@ type skiff struct {
 	paths    skiffPaths
 	mintedAt time.Time // when the JIT config was minted; its ~1h expiry is measured from here
 
-	mu         sync.Mutex
-	everOnline bool      // true once the runner has reported online at least once
-	busySince  time.Time // zero until the runner first reports busy; maxLifetime is measured from here
+	mu            sync.Mutex
+	everOnline    bool      // true once the runner has reported online at least once
+	offlineStreak int       // consecutive offline observations; reset by any other status
+	busySince     time.Time // zero until the runner first reports busy; maxLifetime is measured from here
 
 	helpersLog *os.File
 	helpers    []proc // virtiofsd(s) + passt
@@ -313,9 +314,12 @@ func (p *pool) pollOnce(ctx context.Context) {
 //   - First online observation: revoke the JIT credential host-side. virtiofs
 //     passes the delete through, so it vanishes in-guest with no guest
 //     cooperation, and untrusted job code never sees a live credential again.
-//   - Offline after having been online: the guest is wedged. ch-remote ping
+//   - Offline after having been online: the guest may be wedged. ch-remote ping
 //     cannot tell a hung guest from a healthy one — both answer with a live
-//     VMM — so GitHub's own view of the runner is the only signal.
+//     VMM — so GitHub's own view of the runner is the only signal. It takes
+//     wedgeThreshold consecutive offline observations, because a runner
+//     briefly loses its connection whenever the network hiccups and one
+//     observation is not worth killing a job over.
 //   - Busy transition: recorded once, so maxLifetime is measured from when
 //     the job started, not from boot (which would let warm idle time eat a
 //     job's budget).
@@ -334,6 +338,12 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	if justConnected {
 		s.everOnline = true
 	}
+	if status == "offline" {
+		s.offlineStreak++
+	} else {
+		s.offlineStreak = 0
+	}
+	offlineStreak := s.offlineStreak
 	if busy && s.busySince.IsZero() {
 		s.busySince = time.Now()
 	}
@@ -350,8 +360,8 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	}
 
 	switch {
-	case status == "offline" && everOnline:
-		logger.Warn("wedged guest: went offline with the VMM still alive")
+	case status == "offline" && everOnline && offlineStreak >= wedgeThreshold:
+		logger.Warn("wedged guest: went offline with the VMM still alive", "consecutive_polls", offlineStreak)
 		killBestEffort(s.ch, logger, "wedged cloud-hypervisor")
 	case !busySince.IsZero() && p.exceededLifetime(s.class, busySince):
 		logger.Info("max lifetime exceeded, recycling", "busy_for", time.Since(busySince))

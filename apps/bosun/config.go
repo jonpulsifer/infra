@@ -65,6 +65,13 @@ const (
 	// must never claim it.
 	selfHosted = "self-hosted"
 
+	// wedgeThreshold is how many consecutive offline observations it takes to
+	// call a guest wedged. A runner drops its connection whenever the network
+	// hiccups -- observed live, one minute after a transient
+	// "connection reset by peer" on the poll itself -- and killing on the
+	// first observation kills whatever job the skiff was running.
+	wedgeThreshold = 3
+
 	// jitExpiry is how long a generated JIT config is valid if never
 	// consumed. Idle recycling is derived from it: a skiff that never goes
 	// online within this window is holding a dead credential.

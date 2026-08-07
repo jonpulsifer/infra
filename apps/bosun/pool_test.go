@@ -192,7 +192,9 @@ func TestWedgedGuestIsKilled(t *testing.T) {
 	p.pollOnce(ctx) // connects, goes busy
 
 	gh.setStatus(first.runnerID, "offline", true)
-	p.pollOnce(ctx) // wedge: offline after having been online
+	for i := 0; i < wedgeThreshold; i++ {
+		p.pollOnce(ctx) // wedge: offline after having been online, repeatedly
+	}
 
 	waitFor(t, "wedged skiff is killed and replaced", func() bool {
 		p.mu.Lock()
@@ -249,5 +251,40 @@ func TestSweepOnEmptyRuntimeDirIsANoop(t *testing.T) {
 	}
 	if len(gh.deleted) != 0 {
 		t.Fatalf("expected no deletes, got %v", gh.deleted)
+	}
+}
+
+// TestTransientOfflineDoesNotKill covers the incident this debounce exists for:
+// a runner briefly lost its connection to GitHub, and killing on the first
+// offline observation destroyed a healthy skiff a minute later. Anything short
+// of wedgeThreshold consecutive observations, or a streak broken by a single
+// online, must leave the skiff alone -- it may be running a job.
+func TestTransientOfflineDoesNotKill(t *testing.T) {
+	p, gh, _ := testPool(t)
+	ctx := context.Background()
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+
+	gh.setStatus(first.runnerID, "online", true)
+	p.pollOnce(ctx)
+
+	for i := 0; i < wedgeThreshold-1; i++ {
+		gh.setStatus(first.runnerID, "offline", true)
+		p.pollOnce(ctx)
+	}
+	// one good observation resets the streak, exactly as a reconnect would
+	gh.setStatus(first.runnerID, "online", true)
+	p.pollOnce(ctx)
+	for i := 0; i < wedgeThreshold-1; i++ {
+		gh.setStatus(first.runnerID, "offline", true)
+		p.pollOnce(ctx)
+	}
+
+	p.mu.Lock()
+	_, stillThere := p.skiffs[first.id]
+	n := len(p.skiffs)
+	p.mu.Unlock()
+	if !stillThere || n != 1 {
+		t.Fatalf("a skiff that never hit %d consecutive offline polls was killed anyway (present=%v, pool=%d)", wedgeThreshold, stillThere, n)
 	}
 }
