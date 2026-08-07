@@ -704,6 +704,23 @@ export interface AppListItem {
   readonly artifact: string;
 }
 
+/**
+ * A cloud boundary's own facts, which an edit restates rather than re-derives.
+ *
+ * `connectTarget` writes the whole connection and the whole vessel row, so a
+ * fact the form does not send back is a fact the edit deletes — the identity a
+ * scheduled job fires as, the hosts §33 resolves against, the registries §3
+ * reads. None of them may be *proposed* to a different project, which is
+ * exactly why they travel beside the boundary's own id rather than in
+ * {@link TargetConnectionProposal}.
+ */
+export interface CloudBoundaryFacts {
+  readonly serviceAccount?: string;
+  readonly servedHosts?: string[];
+  readonly reachableRegistries?: string[];
+  readonly logHistorySeconds?: number;
+}
+
 /** A Target as the targets management view lists it. */
 export interface TargetListItem {
   readonly id: string;
@@ -772,24 +789,42 @@ export interface TargetListItem {
    */
   readonly connectionDivergence: readonly string[];
   /**
-   * Where an edit of this Target's connection starts, or `null` on an adapter
-   * the product has no edit surface for.
+   * Where an edit of this Target's connection starts, or `null` where there is
+   * no connection to start from.
    *
-   * Editing is `connectTarget` again — idempotent by name, and already the act
-   * that writes these facts (§13). What it needs that a fresh connect does not
-   * is *this* Target's own address: `TargetConnectionProposal` deliberately
-   * omits `apiServer` because a second cluster prefilled with the first one's
-   * would read as correct and deploy somewhere else, and that reasoning is
-   * exactly inverted here — this is the one Target the address does name.
+   * Editing is `connectTarget` again — idempotent by `(vessel, adapter)`, and
+   * already the act that writes these facts (§13). What it needs that a fresh
+   * connect does not is *this* boundary's own address:
+   * `TargetConnectionProposal` deliberately omits `apiServer` and `project`
+   * because a second boundary prefilled with the first one's would read as
+   * correct and deploy somewhere else, and that reasoning is exactly inverted
+   * here — this is the one boundary the address does name.
    *
-   * `null` for `cloudrun` and `static`: `platform` chart values are a cluster's,
-   * and a cloud project has no probe to read itself back through, so the edit
-   * this field exists for has nothing to offer there.
+   * **It is also the only re-probe an operator has.** One connect asks the
+   * boundary about every surface `surfacesToProbe` names, so re-running it is
+   * how a project whose Cloud Run API was switched off at connect time gets its
+   * `cloudrun` Target the day somebody switches it on. The absence a connect
+   * reported is deliberately not stored — what a boundary carries is a fact
+   * about the boundary, and a copy of it here would be a copy that goes stale
+   * the moment the API is enabled — so being able to ask again is what stands
+   * in for remembering the answer.
+   *
+   * Discriminated on the vessel's kind, because the address the form starts
+   * from is the location's shape.
    */
-  readonly edit: {
-    readonly apiServer: string;
-    readonly proposal: TargetConnectionProposal;
-  } | null;
+  readonly edit:
+    | {
+        readonly kind: 'cluster';
+        readonly apiServer: string;
+        readonly proposal: TargetConnectionProposal;
+      }
+    | {
+        readonly kind: 'gcp-project';
+        readonly project: string;
+        readonly carried: CloudBoundaryFacts;
+        readonly proposal: TargetConnectionProposal;
+      }
+    | null;
 }
 
 /**
@@ -810,7 +845,13 @@ export interface PendingTargetConnection {
   readonly kind: VesselKind;
   /** What `connectTarget` takes as its `vessel`. */
   readonly vessel: string;
-  /** Every surface on that vessel this one act would configure. */
+  /**
+   * Every surface this one act would probe that vessel for.
+   *
+   * What it registers is what the probe establishes, which may be fewer: a
+   * boundary that turns out not to carry one of these gets a sentence saying
+   * so instead of a Target.
+   */
   readonly surfaces: readonly string[];
   readonly proposal: TargetConnectionProposal;
 }

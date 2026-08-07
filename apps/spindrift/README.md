@@ -205,9 +205,33 @@ that owns the federation, and that can `404`. A cluster is one. A cloud project
 is one. A **Target** is one runtime surface on a vessel — `Target = Vessel ×
 surface` — and a Target is what an App's Component is placed on.
 
-That is why connecting one cloud project registers two Targets, `cloudrun` and
+That is why connecting one cloud project asks about two surfaces, `cloudrun` and
 `static`: placement determines artifact shape, and a single "Cloud" Target would
 leave a website ambiguous between the Cloud Run rendering and the static one.
+
+**Which surfaces a vessel carries is discovered, not derived from its kind.**
+Connect probes the boundary for each surface and registers a Target for each one
+it finds; a project whose Cloud Run API is switched off gets no `cloudrun`
+Target and a sentence saying why. A `kind` decides one thing — which shape
+`location` has — and the probe list (`PROBED_SURFACES_BY_VESSEL_KIND`) is a list
+of questions rather than an answer, which is what stops a project that runs a
+cluster from needing a `gcp-project-with-gke` kind. "Which surfaces does this
+vessel carry" is a query over `targets`, and there is no second copy of it.
+
+**"Not there" and "could not tell" are different answers.** Only an established
+absence withholds a Target; a refused read, a missing federation or an
+unreachable endpoint registers the Target unhealthy with the sentence attached,
+because a confident absence rendered off a failed read is the one thing worse
+than an unhealthy row. Nothing ever removes a Target that already exists — a
+surface that stops answering keeps its row and fails the checklist, and the
+standing loop refreshes rows without ever creating or deleting one.
+
+**A surface found later joins the vessel when somebody asks again.** The absence
+is deliberately not stored: what a boundary carries is a fact about the
+boundary, and a copy of it here would go stale the moment the API is switched
+on. So the answer to "it exists now" is the connect act run again, which the
+Targets screen offers on a boundary that is already connected, and which changes
+no Target that was already there.
 
 The split decides where every fact lives. What is true of the boundary, and
 therefore of every surface on it — where it is, which hosts it serves, which

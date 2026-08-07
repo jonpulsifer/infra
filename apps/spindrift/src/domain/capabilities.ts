@@ -46,6 +46,7 @@ import type {
   Reach,
   Resources,
 } from './desired-state.ts';
+import type { SurfaceProbe } from './vessel.ts';
 
 /**
  * Every prerequisite any Target can be asked about (§13).
@@ -194,6 +195,17 @@ export interface TargetDiscovery {
 export interface TargetInspection {
   prerequisites: readonly PrerequisiteResult[];
   discovery: TargetDiscovery;
+  /**
+   * Whether the boundary turned out to carry this surface at all.
+   *
+   * The adapter's to answer rather than core's, for the reason the checklist
+   * is: only the thing that made the call knows whether the runtime answered,
+   * refused, or is not switched on here. Core decides what to *do* about it —
+   * `connectTarget` withholds a Target for an `absent` surface and registers an
+   * `undetermined` one unhealthy — so this stays an observation like every
+   * other field on this type.
+   */
+  surface: SurfaceProbe;
 }
 
 /**

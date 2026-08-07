@@ -205,10 +205,13 @@ export const targetAdapter = pgEnum('target_adapter', [
  * The tenancy boundary a Target is a surface on — `VesselKind` in
  * `src/domain/vessel.ts`.
  *
- * A different axis from {@link targetAdapter}, which names the runtime: a
- * `gcp-project` carries two adapters, and `kubernetes` is one adapter on a
- * `cluster`. Kept as an independent enum here for the reason the adapter one
- * is.
+ * A different axis from {@link targetAdapter}, which names the runtime, and a
+ * narrower one than it looks: this decides the shape of `vessels.location` and
+ * nothing else. Which runtimes are on a boundary is the set of Targets that
+ * reference it, established by probing at connect — so nothing reads this
+ * column to learn what a vessel carries, and nothing reads an adapter back to
+ * this column either. Kept as an independent enum here for the reason the
+ * adapter one is.
  */
 export const vesselKind = pgEnum('vessel_kind', VESSEL_KINDS);
 

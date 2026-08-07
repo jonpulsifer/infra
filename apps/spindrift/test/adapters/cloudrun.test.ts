@@ -513,6 +513,39 @@ describe('§13: one probe, three answers', () => {
     expect(vessel?.met).toBe(false);
     expect(vessel?.detail).toContain('never creates a vessel');
   });
+
+  test('and the same probe says whether the project carries this surface', async () => {
+    const { adapter } = adapterFor();
+    expect((await adapter.inspect(target())).surface).toEqual({
+      kind: 'carried',
+    });
+
+    // The service being off in this project *is* the surface not being there:
+    // no revision can ever be placed, and §14 forbids the one remediation.
+    const off = adapterFor({ refuseList: serviceDisabled() });
+    const disabled = (await off.adapter.inspect(target())).surface;
+    expect(disabled.kind).toBe('absent');
+    expect(disabled.kind === 'absent' && disabled.detail).toContain(
+      'not enabled',
+    );
+  });
+
+  test('but a refusal establishes nothing about what is here', async () => {
+    // The distinction `cloud-discovery.ts` draws between found-empty and
+    // unavailable, applied to a surface: neither of these says the runtime is
+    // absent, and reading them that way would delete a Target over an IAM
+    // grant. A cloud API answers `404` for a project this identity may not see
+    // as readily as for one that is not there, which is why it is here too.
+    for (const refuseList of [
+      permissionDenied(),
+      { status: 404, body: { error: { message: 'no project' } } },
+    ]) {
+      const { adapter } = adapterFor({ refuseList });
+      expect((await adapter.inspect(target())).surface.kind).toBe(
+        'undetermined',
+      );
+    }
+  });
 });
 
 describe('§8 and §32: what this Target is honest about', () => {

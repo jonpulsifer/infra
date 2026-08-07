@@ -159,6 +159,7 @@ const refuses: DeployAdapter = {
         met: true,
       })),
       discovery: CAPABLE_DISCOVERY,
+      surface: { kind: 'carried' as const },
     };
   },
 };

@@ -192,6 +192,90 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
     }
   });
 
+  test('take their kind from the address stated, not from the adapter', () => {
+    // The reverse lookup this step used to make assumed each surface belonged
+    // to exactly one kind of boundary. A project that runs a cluster breaks
+    // that assumption, and the old code would have called this vessel a
+    // `cluster` because its surface is `kubernetes`. What the document
+    // actually says is a project.
+    const upgraded = upgradeManifestDocument({
+      targets: [
+        {
+          name: 'inside-a-project',
+          adapter: 'kubernetes',
+          connection: { project: 'example-vessel', namespace: 'apps' },
+        },
+      ],
+    }) as { vessels: unknown[] };
+    expect(upgraded.vessels).toEqual([
+      {
+        name: 'inside-a-project',
+        kind: 'gcp-project',
+        location: { project: 'example-vessel' },
+      },
+    ]);
+  });
+
+  test('and a boundary no address was stated for keeps the row it has', () => {
+    // A seed with no connection was a legal document — it is the half-ready
+    // state a manifest seeds and an operator finishes in-product — so there is
+    // nothing here to read a shape off. The kind is the one `0022_vessels.sql`
+    // wrote for the same row rather than a fresh guess, and the location is
+    // omitted rather than invented.
+    const upgraded = upgradeManifestDocument({
+      targets: [{ name: 'nowhere', adapter: 'kubernetes' }],
+    }) as { vessels: unknown[] };
+    expect(upgraded.vessels).toEqual([{ name: 'nowhere', kind: 'cluster' }]);
+  });
+
+  test('and one address-less seed does not take the whole document down', () => {
+    // The failure this guards is the module's own: `vessels` is required, so a
+    // document that came back without it fails validation, and
+    // `loadStoredManifest` reads that as an unseeded installation and re-seeds
+    // from the mounted declaration. Every boundary that *did* state an address
+    // would go with it.
+    const seeded = snapshot('01-suffix-paired-vessels.yaml') as {
+      targets: Record<string, unknown>[];
+    };
+    delete seeded.targets[0]?.connection;
+
+    const upgraded = upgradeManifestDocument(seeded) as {
+      vessels: { name: string; location?: unknown }[];
+    };
+    expect(upgraded.vessels.map((vessel) => vessel.name)).toEqual([
+      'cluster',
+      'cloud',
+    ]);
+    expect(upgraded.vessels[0]).not.toHaveProperty('location');
+    expect(() => validateManifest(upgraded, 'test')).not.toThrow();
+  });
+
+  test('and a cluster keeps its whole name, suffix and all', () => {
+    // The suffix told two surfaces of one project apart, so a cluster never
+    // carried one and `<name>-kubernetes` is just a name. Stripping it renames
+    // the boundary away from the row `0022_vessels.sql` created — which
+    // `reconcileManifestVessels` looks up by name, so it would insert a second
+    // vessel and strand the Target already attached to the first.
+    const upgraded = upgradeManifestDocument({
+      targets: [
+        {
+          name: 'folly-kubernetes',
+          adapter: 'kubernetes',
+          connection: {
+            apiServer: 'https://folly.example.test',
+            namespace: 'apps',
+          },
+        },
+      ],
+    }) as { vessels: { name: string }[]; targets: { vessel: string }[] };
+    expect(upgraded.vessels.map((vessel) => vessel.name)).toEqual([
+      'folly-kubernetes',
+    ]);
+    expect(upgraded.targets.map((target) => target.vessel)).toEqual([
+      'folly-kubernetes',
+    ]);
+  });
+
   test('is a no-op on a document that already declares them', () => {
     // `02` now upgrades too — `dropTargetNames` still takes its constructed
     // `name` off every entry. `03` is the shape with neither gap, so this is

@@ -45,6 +45,7 @@ import {
   vessels,
 } from '../../src/db/schema.ts';
 import { deployState } from '../../src/domain/target.ts';
+import { surfacesToProbe } from '../../src/domain/vessel.ts';
 import { restoreDeclaredTargetConnections } from '../../src/reconciler/target-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
@@ -323,6 +324,203 @@ describe('the act is credential-shaped though the noun is flat', () => {
     );
   });
 
+  test('and registers only the surfaces the probe found', async () => {
+    // The forcing case, from the other side: a project with no Cloud Run gets
+    // no `cloudrun` Target. Connect still succeeds — the vessel is there, the
+    // surface that answered is there, and the one that is not gets the
+    // checklist that says so.
+    const { registry } = fakes({
+      cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
+    });
+    const result = await connectTarget(
+      cloudInput({ vessel: 'vessel', project: 'p' }),
+      context(registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    expect(result.value.targets.map((t) => t.adapter)).toEqual(['static']);
+    expect(await targetRow('vessel', 'cloudrun')).toBeUndefined();
+    expect(await targetRow('vessel', 'static')).toBeDefined();
+
+    const [missing] = result.value.absent;
+    expect(missing?.adapter).toBe('cloudrun');
+    expect(missing?.vessel).toBe('vessel');
+    expect(missing?.detail).toContain('not enabled');
+    // A checklist row saying so, in the same grammar an unmet item on a
+    // registered Target has: §13's stated reason, about a surface rather than
+    // about a Target's health.
+    expect(missing?.prerequisites.every((item) => !item.met)).toBe(true);
+  });
+
+  test('but a surface it could not settle is registered, unhealthy', async () => {
+    // "Found nothing" and "could not tell" are different answers. A refused
+    // read establishes no absence, so withholding the Target would put a
+    // confident "this project has no Cloud Run" on screen off a `403` — and
+    // there would then be no row for the loop to re-check when the grant
+    // lands.
+    const { registry } = fakes({
+      cloudrun: { unreachable: 'the federated identity may not act here' },
+    });
+    const result = await connectTarget(
+      cloudInput({ vessel: 'vessel' }),
+      context(registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    expect(result.value.absent).toEqual([]);
+    expect(result.value.targets.map((t) => t.adapter)).toEqual([
+      'cloudrun',
+      'static',
+    ]);
+    const row = await targetRow('vessel', 'cloudrun');
+    expect(row?.health).toBe('unhealthy');
+    expect(row?.prerequisites?.[0]?.detail).toContain('may not act here');
+  });
+
+  test('the surfaces on a vessel are its rows, not its kind', async () => {
+    // Which runtimes a boundary carries is a query over `targets`, and there
+    // is no second copy of it to disagree: the probe list still asks a cloud
+    // project about both surfaces, and this project answered for one.
+    const { registry } = fakes({
+      cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
+    });
+    await connectTarget(
+      cloudInput({ vessel: 'vessel', project: 'p' }),
+      context(registry),
+    );
+
+    const carried = await database()
+      .db.select({ adapter: targets.adapter })
+      .from(targets)
+      .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+      .where(eq(vessels.name, 'vessel'));
+    expect(carried.map((row) => row.adapter)).toEqual(['static']);
+    expect(surfacesToProbe('gcp-project')).toEqual(['cloudrun', 'static']);
+  });
+
+  test('a surface found later joins the vessel, changing no Target that was there', async () => {
+    // The whole point of a Target being `(vessel, adapter)`: the surface that
+    // was already registered is not renamed, re-ranked or rewritten to make
+    // room for the one that turned up.
+    const off = fakes({
+      cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
+    });
+    await connectTarget(
+      cloudInput({ vessel: 'vessel', project: 'p' }),
+      context(off.registry),
+    );
+    const before = await targetRow('vessel', 'static');
+
+    // Someone enables the API, and the connect is run again.
+    const on = fakes();
+    const result = await connectTarget(
+      cloudInput({ vessel: 'vessel', project: 'p' }),
+      context(on.registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    expect(await targetRow('vessel', 'static')).toEqual(before);
+    const added = await targetRow('vessel', 'cloudrun');
+    expect(added?.health).toBe('healthy');
+    // It joins the end of the one global rank list rather than displacing the
+    // surface that was connected first.
+    expect(added?.rank).toBe(1);
+    expect(before?.rank).toBe(0);
+  });
+
+  test('a surface that stops answering keeps its Target rather than losing it', async () => {
+    // The asymmetry is deliberate. A row that exists has been placed on, and a
+    // probe is not a mandate to delete what an operator connected — so the
+    // absence lands as an unhealthy checklist, which is a thing to act on
+    // rather than a Target that vanished.
+    await connectTarget(
+      cloudInput({ vessel: 'vessel', project: 'p' }),
+      context(fakes().registry),
+    );
+
+    const { registry } = fakes({
+      cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
+    });
+    const result = await connectTarget(
+      cloudInput({ vessel: 'vessel', project: 'p' }),
+      context(registry),
+    );
+
+    if (!result.ok) throw new Error('connect refused');
+    expect(result.value.absent).toEqual([]);
+    const row = await targetRow('vessel', 'cloudrun');
+    expect(row?.health).toBe('unhealthy');
+    expect(row?.prerequisites?.[0]?.detail).toContain('not enabled');
+  });
+
+  test('and the screen keeps the act that asks again once it is switched on', async () => {
+    // The absence is deliberately not stored: what a boundary carries is a fact
+    // about the boundary, and a copy of it here would be a copy that goes stale
+    // the moment somebody enables the API. What stands in for remembering the
+    // answer is being able to ask again — which needs a control on a vessel
+    // whose remaining surfaces are already connected, or the only route left is
+    // declaring the surface in Git.
+    await connectTarget(
+      cloudInput({ vessel: 'elsewhere', project: 'other' }),
+      context(fakes().registry),
+    );
+    const off = fakes({
+      cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
+    });
+    await connectTarget(
+      cloudInput({
+        vessel: 'vessel',
+        project: 'p',
+        servedHosts: ['hosting.example.test'],
+      }),
+      context(off.registry),
+    );
+
+    const listed = await listTargets({}, context(off.registry));
+    if (!listed.ok) throw new Error('listTargets refused');
+    const edit = listed.value.targets.find(
+      (target) => target.vessel === 'vessel' && target.adapter === 'static',
+    )?.edit;
+    if (edit?.kind !== 'gcp-project') {
+      throw new Error('the surface that answered offers no edit');
+    }
+    // This boundary's own id, which a fresh connect refuses to propose and an
+    // edit must not make the operator retype. The endpoints and the region are
+    // installation-wide, so the project that does run Cloud Run supplies them.
+    expect(edit.project).toBe('p');
+    expect(edit.proposal.runEndpoint).toBe(CLOUD_ENDPOINTS.run);
+    expect(edit.proposal.region).toBe(cloudInput().region);
+    // And what one act writes that the form has no field to ask for again:
+    // sending the form back without these is the edit deleting them.
+    expect(edit.carried.servedHosts).toEqual(['hosting.example.test']);
+
+    // The same act, from exactly what the screen is holding.
+    const on = fakes();
+    const again = await connectTarget(
+      {
+        kind: 'gcp-project',
+        vessel: 'vessel',
+        project: edit.project,
+        region: edit.proposal.region!,
+        runEndpoint: edit.proposal.runEndpoint!,
+        hostingEndpoint: edit.proposal.hostingEndpoint!,
+        ...edit.carried,
+      },
+      context(on.registry),
+    );
+
+    if (!again.ok) throw new Error('connect refused');
+    expect(again.value.targets.map((target) => target.adapter)).toEqual([
+      'cloudrun',
+      'static',
+    ]);
+    const [boundary] = await database()
+      .db.select({ servedHosts: vessels.servedHosts })
+      .from(vessels)
+      .where(eq(vessels.name, 'vessel'));
+    expect(boundary?.servedHosts).toEqual(['hosting.example.test']);
+  });
+
   test('one cloud connect fills its matched manifest-seeded pair', async () => {
     const { registry } = fakes();
     const vessel = await insertVessel(database().db, 'cloudrun', {
@@ -459,7 +657,10 @@ describe('an operator’s Target correction outlives the next boot', () => {
     // The screen that made the correction possible: the edit opens on this
     // Target's own address, which is the one field a fresh connect refuses to
     // propose and the one field an edit must not make the operator retype.
-    expect(cluster?.edit?.apiServer).toBe(clusterInput().apiServer);
+    expect(cluster?.edit).toMatchObject({
+      kind: 'cluster',
+      apiServer: clusterInput().apiServer,
+    });
     expect(cluster?.edit?.proposal.carriedFrom).toBe('cluster/kubernetes');
   });
 

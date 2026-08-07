@@ -28,11 +28,7 @@
  * and boots each one; adding a shape to that corpus is how a future schema
  * change proves it did not make the re-seed reachable.
  */
-import {
-  unionOfClaims,
-  type VesselKind,
-  vesselKindFor,
-} from '../domain/vessel.ts';
+import { unionOfClaims, type VesselKind } from '../domain/vessel.ts';
 
 /** A JSON object, as a document is before anything has validated it. */
 type Document = Record<string, unknown>;
@@ -109,6 +105,26 @@ function dropTargetNames(document: unknown): unknown {
  * this key existed, so an installation upgraded here gets the same vessel rows
  * it already has: the same names, and the same union of what two surfaces of
  * one boundary each claimed about it.
+ *
+ * **The kind comes from the document wherever the document states it.** What
+ * kind of boundary this is means only what shape its location has, and the old
+ * connection stated that shape directly: an `apiServer` is a cluster and a
+ * `project` is a cloud project. Reading it back off the surface's adapter would
+ * assume each surface belongs to exactly one kind — the assumption a project
+ * that runs a cluster breaks — and would do it inside the one function nothing
+ * else can check.
+ *
+ * A Target seeded and not yet connected stated no address at all, and that is a
+ * shape the old schema allowed and the current one still does: `location` is
+ * optional on a vessel seed for the same reason the column is nullable. Such a
+ * document says nothing to read a shape off, so the kind falls back to the one
+ * `0022_vessels.sql` wrote on the same evidence — `cluster` for a kubernetes
+ * surface, `gcp-project` for a cloud one. That is not a guess about the
+ * boundary: it is what this installation's vessel row already says, and
+ * disagreeing with it would mint a second vessel beside the migrated one.
+ * Declaring nothing would be worse than either — `vessels` is required, so the
+ * document would fail validation and `loadStoredManifest` would re-seed from
+ * the mounted declaration, which is the loss this module stands between.
  */
 function addDeclaredVessels(document: unknown): unknown {
   const manifest = asDocument(document);
@@ -121,7 +137,9 @@ function addDeclaredVessels(document: unknown): unknown {
     string,
     {
       name: string;
-      kind: VesselKind;
+      /** The kind `0022_vessels.sql` gave this boundary. A fallback only. */
+      backfilled: VesselKind;
+      kind?: VesselKind;
       location?: Document;
       served: (readonly string[] | undefined)[];
       registries: (readonly string[] | undefined)[];
@@ -145,21 +163,26 @@ function addDeclaredVessels(document: unknown): unknown {
       return document;
     }
 
+    // A cluster's Target keeps its whole name. The suffix existed to tell two
+    // surfaces of one project apart, so a cluster never carried one — which
+    // makes `<name>-kubernetes` a legal name that stripping would rename the
+    // boundary out of. `0022_vessels.sql` derives both names exactly this way,
+    // and agreeing with it is what makes this an upgrade of the rows an
+    // installation has rather than a second set beside them.
     const vesselName =
       adapter === 'kubernetes' ? name : stripSuffix(name, `-${adapter}`);
-    const kind = vesselKindFor(adapter);
     const vessel = vessels.get(vesselName) ?? {
       name: vesselName,
-      kind,
+      backfilled: adapter === 'kubernetes' ? 'cluster' : 'gcp-project',
       served: [],
       registries: [],
     };
 
     const connection = asDocument(target.connection);
     if (connection !== null) {
-      // The first surface to state where the boundary is settles it; under the
-      // old schema the pairing rule was what made two surfaces of one project
-      // agree about that.
+      // The first surface to state where the boundary is settles it, and with
+      // it the kind; under the old schema the pairing rule was what made two
+      // surfaces of one project agree about that.
       const {
         apiServer,
         project,
@@ -167,14 +190,11 @@ function addDeclaredVessels(document: unknown): unknown {
         reachableRegistries,
         ...surface
       } = connection;
-      vessel.location ??=
-        kind === 'cluster'
-          ? apiServer === undefined
-            ? undefined
-            : { apiServer }
-          : project === undefined
-            ? undefined
-            : { project };
+      const boundary = boundaryOf(apiServer, project);
+      if (boundary !== null && vessel.kind === undefined) {
+        vessel.kind = boundary.kind;
+        vessel.location = boundary.location;
+      }
       vessel.served.push(asStrings(servedHosts));
       // `static` never carried this key, so it contributes nothing rather than
       // an empty claim — `undefined` is unstated and `[]` is stated-and-empty.
@@ -188,28 +208,41 @@ function addDeclaredVessels(document: unknown): unknown {
     vessels.set(vesselName, vessel);
   }
 
+  const declared: Document[] = [];
+  for (const {
+    name,
+    backfilled,
+    kind,
+    location,
+    served,
+    registries,
+  } of vessels.values()) {
+    declared.push({
+      name,
+      // What the document stated; where it stated nothing, the answer the
+      // backfill already wrote for this row.
+      kind: kind ?? backfilled,
+      // Omitted rather than present-and-undefined when no surface said where
+      // the boundary is: the column is nullable for the same reason, and a key
+      // that is there holding nothing is a third state nobody reads.
+      ...(location === undefined ? {} : { location }),
+      // The union rather than a winner, matching the backfill: two surfaces
+      // of one boundary *could* state different reach under the old schema,
+      // and silently taking one would be the bug the vessel exists to
+      // prevent. Omitted entirely when no surface stated it, because absent
+      // and `[]` mean different things.
+      ...(served.some((claim) => claim !== undefined)
+        ? { servedHosts: unionOfClaims(served) }
+        : {}),
+      ...(registries.some((claim) => claim !== undefined)
+        ? { reachableRegistries: unionOfClaims(registries) }
+        : {}),
+    });
+  }
+
   return {
     ...manifest,
-    vessels: [...vessels.values()].map(
-      ({ served, registries, location, ...vessel }): Document => ({
-        ...vessel,
-        // Omitted rather than present-and-undefined when no surface said where
-        // the boundary is: the column is nullable for the same reason, and a
-        // key that is there holding nothing is a third state nobody reads.
-        ...(location === undefined ? {} : { location }),
-        // The union rather than a winner, matching the backfill: two surfaces
-        // of one boundary *could* state different reach under the old schema,
-        // and silently taking one would be the bug the vessel exists to
-        // prevent. Omitted entirely when no surface stated it, because absent
-        // and `[]` mean different things.
-        ...(served.some((claim) => claim !== undefined)
-          ? { servedHosts: unionOfClaims(served) }
-          : {}),
-        ...(registries.some((claim) => claim !== undefined)
-          ? { reachableRegistries: unionOfClaims(registries) }
-          : {}),
-      }),
-    ),
+    vessels: declared,
     // Rebuilt in place, in order: `reconcileManifestTargets` reads a Target's
     // rank from its position in this array.
     targets,
@@ -218,6 +251,28 @@ function addDeclaredVessels(document: unknown): unknown {
 
 function stripSuffix(value: string, suffix: string): string {
   return value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
+}
+
+/**
+ * Which boundary an old connection was describing, from what it stated.
+ *
+ * The kind and the location are one answer rather than two: `kind` is the
+ * discriminant of `VesselLocation`, so whichever address the connection carried
+ * settles both. `null` means the connection said nothing about where the
+ * boundary is, which is not the same as it being a boundary of some default
+ * kind.
+ */
+function boundaryOf(
+  apiServer: unknown,
+  project: unknown,
+): { kind: VesselKind; location: Document } | null {
+  if (typeof apiServer === 'string') {
+    return { kind: 'cluster', location: { apiServer } };
+  }
+  if (typeof project === 'string') {
+    return { kind: 'gcp-project', location: { project } };
+  }
+  return null;
 }
 
 /** A claim about a boundary, or `undefined` for anything that is not one. */

@@ -198,6 +198,16 @@ export function deployAdapterSuite(
       }
     });
 
+    test('inspect says whether the boundary carries this surface', async () => {
+      // The question `connectTarget` acts on: a surface the probe establishes
+      // is not there gets no Target at all. Every adapter answers it, because
+      // core holds a `DeployAdapter` without knowing which backend is behind
+      // it — and it answers `carried` here, since the far side these suites
+      // stand up is one that answers.
+      const { surface } = await make().inspect(target);
+      expect(surface).toEqual({ kind: 'carried' });
+    });
+
     test('inspect reports observations, not judgements', async () => {
       const { discovery } = await make().inspect(target);
       // `verifiedDeploy` and `offlineDeploy` are core's conclusions (§32, §33).

@@ -44,7 +44,9 @@ import {
   hasVesselLocation,
   type TargetHealth,
   targetLabel,
+  unstatedAddress,
 } from '../domain/target.ts';
+import type { SurfaceProbe } from '../domain/vessel.ts';
 import { reconcilerLoopDuration } from '../telemetry/index.ts';
 
 /**
@@ -62,6 +64,17 @@ export interface TargetInspectionResult {
   readonly prerequisites: readonly PrerequisiteResult[];
   /** `null` when nothing could be discovered — unreachable, or no adapter. */
   readonly discovery: TargetDiscovery | null;
+  /**
+   * What the pass established about the surface itself being there.
+   *
+   * Only `connectTarget` acts on it, and only to withhold a row it was about
+   * to create. **The standing loop never creates or removes a Target from
+   * this**: a row that exists has been placed on, and a probe that failed a
+   * different way on one tick is not a mandate to delete what an operator
+   * connected. A surface a vessel gained since is registered by re-running the
+   * connect, which is an act somebody performed.
+   */
+  readonly surface: SurfaceProbe;
 }
 
 /**
@@ -80,12 +93,29 @@ export async function inspectTarget(
     // Not a fault: an installation is allowed to have a Target whose adapter it
     // does not ship. It is simply a Target nothing can be placed on, and saying
     // so is more useful than refusing to record it.
+    const detail = `this installation has no ${target.adapter} adapter`;
     return {
-      prerequisites: unreachablePrerequisites(
-        `this installation has no ${target.adapter} adapter`,
-        target.adapter,
-      ),
+      prerequisites: unreachablePrerequisites(detail, target.adapter),
       discovery: null,
+      // Undetermined rather than absent, and the distinction is the whole
+      // point: nobody asked the boundary anything, so nothing is known about
+      // what it carries. Reading it as an absence would let an installation
+      // that ships one adapter conclude that no vessel anywhere has the others.
+      surface: { kind: 'undetermined', detail },
+    };
+  }
+  const unstated = unstatedAddress(target);
+  if (unstated !== null) {
+    // The vessel's location is of the other kind's shape, so the flat view
+    // this was handed has a hole where the surface's address goes. Asking the
+    // adapter anyway is a request against `projects/undefined` and a sentence
+    // naming `undefined` back to the operator; the checklist says which
+    // address is missing instead. Undetermined for the same reason as above —
+    // nobody asked the boundary anything.
+    return {
+      prerequisites: unreachablePrerequisites(unstated, target.adapter),
+      discovery: null,
+      surface: { kind: 'undetermined', detail: unstated },
     };
   }
   try {
@@ -93,14 +123,14 @@ export async function inspectTarget(
     return {
       prerequisites: inspection.prerequisites,
       discovery: inspection.discovery,
+      surface: inspection.surface,
     };
   } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
     return {
-      prerequisites: unreachablePrerequisites(
-        cause instanceof Error ? cause.message : String(cause),
-        target.adapter,
-      ),
+      prerequisites: unreachablePrerequisites(detail, target.adapter),
       discovery: null,
+      surface: { kind: 'undetermined', detail },
     };
   }
 }
@@ -227,6 +257,11 @@ export interface TargetRefresh {
  * else. In particular it does not touch `status`: connected and disconnected are
  * the operator's statement about a Target, and a loop that could flip them would
  * make a disconnect undo itself the moment the cluster came back.
+ *
+ * It ignores the pass's {@link TargetInspectionResult.surface} for the same
+ * reason. Which surfaces a vessel carries is settled by an act — connect — and
+ * a loop that added or removed rows on a probe would make the set of Targets a
+ * thing that changes while nobody is looking.
  */
 export async function refreshTarget(
   context: TargetLoopContext,

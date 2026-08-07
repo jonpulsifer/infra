@@ -29,7 +29,7 @@ import type {
   TargetConnectionProposal,
 } from '../web/model.ts';
 import { type TargetConnection, targetLabel } from './target.ts';
-import { surfacesOf, type VesselKind } from './vessel.ts';
+import { surfacesToProbe, type VesselKind } from './vessel.ts';
 
 /** The donor, spelled the way every other surface names a Target. */
 function labelOf(row: OnboardingTargetRow | undefined): string | null {
@@ -166,12 +166,13 @@ export function pendingConnections(
     return {
       kind: vessel.kind,
       vessel: vessel.name,
-      // Every surface the act will write, whether or not all of them are
-      // unconfigured today: connecting re-registers the whole vessel, and
-      // saying so is what stops the confirmation from under-reporting what it
-      // is about to touch. Read off the vessel's kind rather than recovered
-      // from a name.
-      surfaces: surfacesOf(vessel.kind),
+      // Every surface the act will ask this boundary about, whether or not all
+      // of them are unconfigured today: connecting re-probes the whole vessel,
+      // and saying so is what stops the confirmation from under-reporting what
+      // it is about to touch. What it registers is what the probe finds, which
+      // can be fewer — a project with the runtime API switched off gets a
+      // sentence rather than a Target.
+      surfaces: surfacesToProbe(vessel.kind),
       proposal: connectionProposal(rows, vessel.kind),
     };
   });

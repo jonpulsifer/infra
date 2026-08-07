@@ -1833,6 +1833,14 @@ function TargetsScreen({
   >({ type: 'loading' });
   const [connecting, setConnecting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  /**
+   * Surfaces the last connect established are not on the boundary it probed.
+   *
+   * Not an error — the connect succeeded — and not readable from the reloaded
+   * list either, because what it says is about a Target that deliberately does
+   * not exist. So it is the one part of the act's answer this screen keeps.
+   */
+  const [absent, setAbsent] = useState<readonly string[]>([]);
   /** Bumped after a connect, because the checklist it produced is the answer. */
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -1866,12 +1874,19 @@ function TargetsScreen({
   const connect = async (input: InputOf<'connectTarget'>) => {
     setConnecting(true);
     setActionError(null);
+    setAbsent([]);
     try {
       const result = await command('connectTarget', input);
       if (!result.ok) {
         setActionError(result.failure.message);
         return;
       }
+      setAbsent(
+        result.value.absent.map(
+          (surface) =>
+            `${surface.vessel}/${surface.adapter} was not registered: ${surface.detail}`,
+        ),
+      );
       // §13: connect always succeeds, and what it produced is a checklist. The
       // list is re-read rather than patched because that checklist is the whole
       // outcome of the act and it came from a pass of the inspection loop.
@@ -1912,6 +1927,7 @@ function TargetsScreen({
       pending={state.pending}
       connecting={connecting}
       error={actionError}
+      absent={absent}
       onConnect={connect}
       onChanged={() => setReloadToken((token) => token + 1)}
       onNavigate={onNavigate}

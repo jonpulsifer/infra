@@ -648,7 +648,12 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       this.checklist(api, connection),
       this.discover(api, connection),
     ]);
-    return { prerequisites, discovery };
+    // A cluster *is* its `kubernetes` surface — there is no second service to
+    // have switched off — so getting this far is the whole probe. The reads
+    // above throw rather than degrade when the API server does not answer, and
+    // core reads that as `undetermined`, which is the honest arm: nothing was
+    // established about a cluster nobody could reach.
+    return { prerequisites, discovery, surface: { kind: 'carried' } };
   }
 
   /**

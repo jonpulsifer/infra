@@ -44,7 +44,7 @@ import {
   targetLabel,
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
-import { cloudChecklist } from '../cloud/checklist.ts';
+import { cloudChecklist, cloudSurfaceProbe } from '../cloud/checklist.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
 import {
   type CloudFailure,
@@ -342,17 +342,19 @@ export class StaticDeployAdapter implements DeployAdapter {
       path: `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites`,
       query: { pageSize: '1' },
     });
+    const subject = {
+      project: connection.project,
+      service: SERVICE_NAME,
+      scope: connection.project,
+    };
 
     return {
       prerequisites: orderedChecklist(
-        cloudChecklist(probe, {
-          project: connection.project,
-          service: SERVICE_NAME,
-          scope: connection.project,
-        }),
+        cloudChecklist(probe, subject),
         this.adapter,
       ),
       discovery: this.discover(connection),
+      surface: cloudSurfaceProbe(probe, subject),
     };
   }
 

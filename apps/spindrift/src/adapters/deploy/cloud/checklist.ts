@@ -24,11 +24,17 @@
  * non-candidate with a stated reason, and "not assessed" is a stated reason —
  * whereas reporting it met would be core deciding that what it failed to check
  * was fine.
+ *
+ * That same probe answers a second question — {@link cloudSurfaceProbe} — which
+ * is whether this project carries the runtime at all. It is separate from the
+ * checklist because it decides something the checklist never did: whether there
+ * is a Target here to keep a checklist about.
  */
 import type {
   Prerequisite,
   PrerequisiteResult,
 } from '../../../domain/capabilities.ts';
+import type { SurfaceProbe } from '../../../domain/vessel.ts';
 import type { CloudResponse } from './http.ts';
 
 /** The three items a cloud Target is assessed against, in display order. */
@@ -114,6 +120,48 @@ export function cloudChecklist(
   return allUnmet(
     `${subject.service} answered ${probe.status}: ${probe.message}`,
   );
+}
+
+/**
+ * Whether that same probe established the project carries this runtime.
+ *
+ * One question off the call the checklist already made, because the answer is
+ * in the same refusal. A cloud runtime is a service that is switched on per
+ * project, so **the service being off is the surface not being there** — the
+ * `cloudrun` Target an operator would otherwise get is a row nothing can ever
+ * be placed on, and §14 forbids Spindrift turning the service on to make it
+ * true.
+ *
+ * Every other refusal is `undetermined`, and the `404` is the one worth stating
+ * a reason for: a cloud API answers `404` for a project this identity may not
+ * see as readily as for one that is not there, so reading it as an absence
+ * would delete a Target over a missing IAM grant. It stays a `VESSEL` row on a
+ * Target that exists, where the loop re-checks it.
+ */
+export function cloudSurfaceProbe(
+  probe: CloudResponse<unknown>,
+  subject: CloudChecklistSubject,
+): SurfaceProbe {
+  if (probe.ok) return { kind: 'carried' };
+  if (probe.kind === 'transport') {
+    return {
+      kind: 'undetermined',
+      detail: `${subject.service} could not be reached: ${probe.message}`,
+    };
+  }
+  if (
+    probe.reason === SERVICE_DISABLED ||
+    probe.body.includes(SERVICE_DISABLED)
+  ) {
+    return {
+      kind: 'absent',
+      detail: `the ${subject.service} API is not enabled on ${subject.project}, so it carries no ${subject.service} surface`,
+    };
+  }
+  return {
+    kind: 'undetermined',
+    detail: `${subject.service} answered ${probe.status}: ${probe.message}`,
+  };
 }
 
 /** Every item unmet, with one sentence — the Target nothing is known about. */

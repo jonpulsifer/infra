@@ -152,20 +152,6 @@ describe('boot fails loudly', () => {
     );
   });
 
-  test('when a Target names a vessel whose kind cannot carry its surface', () => {
-    // `SURFACES_BY_VESSEL_KIND` is the one statement of which runtimes a
-    // boundary carries, and this is where the document is held to it — a
-    // `cloudrun` surface on a cluster is refused here rather than reaching an
-    // adapter that has no way to place it.
-    const document = fixtureText.replace(
-      '  - vessel: cloud\n    adapter: cloudrun',
-      '  - vessel: cluster\n    adapter: cloudrun',
-    );
-    expect(() => parseManifest(document, 'test')).toThrow(
-      /a cluster vessel does not carry a cloudrun surface/,
-    );
-  });
-
   test('on duplicate vessel names', () => {
     const document = fixtureText.replace(
       '  - name: cloud\n',
@@ -178,6 +164,38 @@ describe('boot fails loudly', () => {
     const document = fixtureText.split('targets:')[0] ?? '';
     expect(() => parseManifest(`${document}targets: []\n`, 'test')).toThrow(
       /targets/,
+    );
+  });
+});
+
+/**
+ * The refusal this schema deliberately stopped making.
+ *
+ * A `targets[]` entry **is** how a document declares a surface on a vessel, and
+ * which runtimes a boundary really has is established by probing it at connect.
+ * A vessel's `kind` says only what shape its location has, so holding the
+ * document to a table of surfaces per kind would refuse a project that runs a
+ * cluster on the authority of a value that knows nothing about it.
+ */
+describe('a vessel’s kind is not a list of the runtimes on it', () => {
+  test('a document may declare a surface no table pairs with that kind', () => {
+    const document = fixtureText.replace(
+      '  - vessel: cloud\n    adapter: cloudrun',
+      '  - vessel: cluster\n    adapter: cloudrun',
+    );
+    expect(() => parseManifest(document, 'test')).not.toThrow();
+  });
+
+  test('and the reference itself is still checked', () => {
+    // What survives is the rule that has teeth: `reconcileManifestTargets`
+    // looks a vessel up by name, so a Target naming one the document does not
+    // declare is a seed with nothing to attach to.
+    const document = fixtureText.replace(
+      '  - vessel: cloud\n    adapter: cloudrun',
+      '  - vessel: nowhere\n    adapter: cloudrun',
+    );
+    expect(() => parseManifest(document, 'test')).toThrow(
+      /no vessel named nowhere is declared/,
     );
   });
 });
