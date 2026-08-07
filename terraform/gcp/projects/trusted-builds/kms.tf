@@ -60,13 +60,14 @@ resource "google_kms_crypto_key_iam_binding" "signer_metadata" {
 }
 # The home vessel's SIGNER_KEY probe asks a different question from signing:
 # not "may I use this key" but "does a key with the signing purpose exist
-# here" — `cryptoKeys.list` on the ring, then the purpose off each key's
-# metadata. The bindings above are key-scoped, so a lister that can read the
-# signer's metadata still cannot enumerate the ring to find it. Ring-scoped
-# `roles/cloudkms.viewer` is metadata only — list and get, no use — and the
-# member form leaves the attester bindings authoritative over their own roles.
-resource "google_kms_key_ring_iam_member" "spindrift_probe_viewer" {
-  key_ring_id = google_kms_key_ring.keys.id
-  role        = "roles/cloudkms.viewer"
-  member      = local.spindrift_controller_member
+# here" — and it starts by enumerating the rings (`GET /v1/projects/…/
+# keyRings`, `cloud-discovery.ts`), which is `cloudkms.keyRings.list` at
+# project scope. A ring-scoped grant answers the second call and not the
+# first, so the viewer sits on the project: metadata only — list and get on
+# rings, keys and versions, use of nothing. The attester bindings above stay
+# authoritative over the roles that can sign.
+resource "google_project_iam_member" "spindrift_probe_viewer" {
+  project = local.project
+  role    = "roles/cloudkms.viewer"
+  member  = local.spindrift_controller_member
 }
