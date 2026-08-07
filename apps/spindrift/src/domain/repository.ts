@@ -203,3 +203,15 @@ export function repositoryRefOf(row: {
 }): RepositoryRef {
   return { installationId: row.installationId };
 }
+
+/**
+ * Where a repository is cloned from.
+ *
+ * `webBaseUrl` is the repository host's web origin, which §20 keeps in the
+ * installation manifest because an enterprise deployment serves its own. A
+ * template with the public host written into it is a clone URL that is right
+ * here by accident and wrong for every other installation.
+ */
+export function cloneUrlFor(webBaseUrl: string, fullName: string): string {
+  return `${webBaseUrl}/${fullName}.git`;
+}

@@ -66,8 +66,6 @@ import {
   completeCreationDraftInput,
   getCreationDraft,
   getCreationDraftInput,
-  reviewCreationDraft,
-  reviewCreationDraftInput,
   saveCreationDraft,
   saveCreationDraftInput,
   startCreationDraft,
@@ -208,10 +206,6 @@ export const commandRegistry = {
   saveCreationDraft: {
     input: saveCreationDraftInput,
     handler: saveCreationDraft,
-  },
-  reviewCreationDraft: {
-    input: reviewCreationDraftInput,
-    handler: reviewCreationDraft,
   },
   completeCreationDraft: {
     input: completeCreationDraftInput,

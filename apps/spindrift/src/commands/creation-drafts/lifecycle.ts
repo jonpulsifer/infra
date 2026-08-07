@@ -16,6 +16,7 @@ import {
   type CreationDraftView,
   creationDraftSchema,
   initialCreationDraft,
+  storedDraft,
 } from '../../domain/creation-draft.ts';
 import type { ArtifactType } from '../../domain/desired-state.ts';
 import {
@@ -24,7 +25,7 @@ import {
   placementTargetOf,
   resolvePlacement,
 } from '../../domain/placement.ts';
-import { repositoryRefOf } from '../../domain/repository.ts';
+import { cloneUrlFor, repositoryRefOf } from '../../domain/repository.ts';
 import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
 import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
 import { targetRowLabel } from '../../domain/target.ts';
@@ -56,18 +57,15 @@ export const saveCreationDraftInput = z
     draft: creationDraftSchema,
   })
   .strict();
-export const reviewCreationDraftInput = versionedIdentity;
 export const completeCreationDraftInput = versionedIdentity;
 
 export type StartCreationDraftInput = z.infer<typeof startCreationDraftInput>;
 export type GetCreationDraftInput = z.infer<typeof getCreationDraftInput>;
 export type SaveCreationDraftInput = z.infer<typeof saveCreationDraftInput>;
-export type ReviewCreationDraftInput = z.infer<typeof reviewCreationDraftInput>;
 export type CompleteCreationDraftInput = z.infer<
   typeof completeCreationDraftInput
 >;
 
-export interface ReviewCreationDraftResult extends CreationDraftView {}
 export interface CompleteCreationDraftResult {
   readonly draft: CreationDraftView;
   readonly app: CompletedCreation | null;
@@ -111,7 +109,16 @@ export const startCreationDraft: Command<
       id,
       userId: context.principal.id,
       draft: initialCreationDraft({
-        repository: repository?.fullName ?? null,
+        repository:
+          repository === undefined
+            ? null
+            : {
+                fullName: repository.fullName,
+                cloneUrl: cloneUrlFor(
+                  context.manifest.github.oauthBaseUrl,
+                  repository.fullName,
+                ),
+              },
         targetId: target?.id ?? null,
         // The vessel by name rather than by project id: the draft states which
         // boundary this installation's home is, and a project is one shape a
@@ -166,24 +173,6 @@ export const saveCreationDraft: Command<
     .returning();
 
   if (!row) return conflictOrMissing(input.id, input.revision, context);
-  return ok(await viewOf(row, context));
-};
-
-export const reviewCreationDraft: Command<
-  ReviewCreationDraftInput,
-  ReviewCreationDraftResult
-> = async (input, context) => {
-  const row = await owned(input.id, context);
-  if (!row) {
-    return failed(
-      'NOT_FOUND',
-      `there is no creation draft with id ${input.id}`,
-    );
-  }
-  if (row.revision !== input.revision) return stale();
-
-  // Review is intentionally read-only. Issue 05 consumes a ready review and
-  // atomically creates the Component, Build, and first dispatch.
   return ok(await viewOf(row, context));
 };
 
@@ -591,7 +580,7 @@ async function completedCreation(
     draft: {
       id: row.id,
       revision: row.revision,
-      draft: row.draft,
+      draft: storedDraft(row.draft),
       blockers: [],
       ready: true,
     },
@@ -647,11 +636,15 @@ async function viewOf(
   row: typeof creationDrafts.$inferSelect,
   context: CommandContext,
 ): Promise<CreationDraftView> {
-  const blockers = await revalidate(row.draft, context);
+  // Read through `storedDraft`, so a row written before a key was retired
+  // hands the browser only keys the save schema still names — the browser
+  // returns whatever it was given, and a strict schema would refuse it.
+  const draft = storedDraft(row.draft);
+  const blockers = await revalidate(draft, context);
   return {
     id: row.id,
     revision: row.revision,
-    draft: row.draft,
+    draft,
     blockers,
     ready: blockers.length === 0,
   };

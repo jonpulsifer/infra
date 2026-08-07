@@ -25,10 +25,15 @@
  */
 import { AlertTriangle, Loader2, Rocket } from 'lucide-react';
 import { type Dispatch, useEffect, useRef, useState } from 'react';
+import type { ZodType } from 'zod';
 import type {
   Blocker,
   CreationDraftView,
   DraftAction,
+} from '../../../../domain/creation-draft.ts';
+import {
+  appNameSchema,
+  componentNameSchema,
 } from '../../../../domain/creation-draft.ts';
 import {
   type ClientResult,
@@ -40,12 +45,17 @@ import {
   type RepositoryChoice,
   repositoryChoices,
 } from '../../../components/repo-picker.tsx';
-import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
+import type {
+  GrantedRepositoryView,
+  RepositoryOptionView,
+  TargetOptionView,
+} from '../../../model.ts';
 import { reportSessionExpired } from '../../../session-events.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { Field } from '../../../ui/field.tsx';
+import { deployDraft } from './deploy.ts';
 import {
   type InspectedScope,
   inspection,
@@ -66,6 +76,7 @@ import {
   TargetHealth,
   VesselRow,
 } from './summary.tsx';
+import { type DraftWrites, draftWrites } from './writes.ts';
 
 /**
  * What stands between a repository with several Apps in it and a Deploy.
@@ -96,6 +107,163 @@ function unchosenScope(
   ];
 }
 
+/**
+ * What went wrong with the read, split on whether there was one.
+ *
+ * The two are different answers and only one of them is a prerequisite. A
+ * repository that could not be read leaves every row below Source standing on
+ * the draft's opening claim — a kind nothing checked, a directory nothing
+ * looked in — so Deploy would build a guess. A repository that *was* read and
+ * holds nothing buildable is the assertion path §5 keeps open: name the
+ * directory, pick the kind, and Spindrift builds what you said.
+ */
+export interface DetectionTrouble {
+  readonly kind: 'unread' | 'unsupported';
+  readonly message: string;
+  /** The repository the read was about. */
+  readonly repo: string;
+  /**
+   * The directory it asked about, absent when it asked about the tree.
+   *
+   * What makes the sentence checkable against the draft rather than cleared on
+   * a guess: a complaint about `docs` stops being on screen when the root
+   * directory stops saying `docs`, and one about the repository as a whole does
+   * not, because naming a directory in it did not read it.
+   */
+  readonly scope?: string;
+}
+
+/**
+ * The last read's complaint, while the draft still names what it is about.
+ *
+ * Derived rather than cleared per action, which is the whole of the fix: an
+ * enumeration of the actions that "move the input" cannot tell a sentence about
+ * a directory from a sentence about a repository, and clearing an unreadable
+ * repository on a keystroke in the root directory field re-enables Deploy on
+ * the draft's opening claim — a kind nothing checked, in a tree nothing read.
+ */
+export function standingTrouble(
+  draft: Draft,
+  trouble: DetectionTrouble | null,
+): DetectionTrouble | null {
+  if (trouble === null || draft.source.kind !== 'repo') return null;
+  if (draft.source.repo !== trouble.repo) return null;
+  return trouble.scope === undefined || trouble.scope === draft.source.subpath
+    ? trouble
+    : null;
+}
+
+function unreadRepository(
+  draft: Draft,
+  trouble: DetectionTrouble | null,
+): readonly Blocker[] {
+  if (draft.source.kind !== 'repo' || trouble?.kind !== 'unread') return [];
+  return [
+    {
+      code: 'REPOSITORY_UNAVAILABLE',
+      title: `Spindrift could not read ${draft.source.repo}.`,
+      remediation: `${trouble.message} Until it can be read, everything below Source is the draft's opening claim rather than anything found in the repository.`,
+    },
+  ];
+}
+
+/** Whether anything has answered which directory this draft deploys. */
+function answeredScope(draft: Draft): boolean {
+  return draft.scopeByOperator === true || draft.detection.scope !== undefined;
+}
+
+/** The schema's own complaint about one value, or `null`. */
+function issueWith(schema: ZodType<string>, value: string): string | null {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? null : (parsed.error.issues[0]?.message ?? null);
+}
+
+/** A refusal, and what the operator was doing when it arrived. */
+interface Refused {
+  readonly failure: TransportFailure;
+  readonly title?: string;
+}
+
+/** The two reads this screen opens with, in the order they are made. */
+export type CreationLoad = 'draft' | 'options';
+
+const LOADING_NOTE = {
+  draft: 'Recovering the draft…',
+  options: 'Reading the Targets and repositories it can use…',
+} as const satisfies Record<CreationLoad, string>;
+
+/**
+ * The screen's own shape, while the two reads it opens with are in flight.
+ *
+ * A screen that is a card of decided rows loads as a card of rows: one pulsing
+ * sentence says a page is coming and nothing about what will be on it, and the
+ * layout shift when the real rows arrive is the reader losing their place. The
+ * caption names the read actually outstanding, because the second one cannot
+ * start until the first has answered — the draft says what to resolve placement
+ * for (§3) — so "still loading" has two different meanings here.
+ */
+export function CreationSkeleton({ phase }: { phase: CreationLoad }) {
+  return (
+    <div
+      aria-busy="true"
+      className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-5 py-6"
+    >
+      <header>
+        <Eyebrow>New App</Eyebrow>
+        <div className="mt-2 h-7 w-64 animate-pulse rounded-md bg-secondary" />
+        <p className="mt-2 text-sm text-muted-foreground">
+          {LOADING_NOTE[phase]}
+        </p>
+      </header>
+      <Card>
+        {['Source', 'Component', 'Target', 'URL', 'Reach', 'Vessel'].map(
+          (label) => (
+            <div
+              key={label}
+              className="flex items-center gap-3 border-b border-border-soft px-4 py-3 last:border-b-0"
+            >
+              <span className="w-[84px] shrink-0 text-xs text-muted-foreground">
+                {label}
+              </span>
+              <span className="h-4 flex-1 animate-pulse rounded bg-secondary" />
+            </div>
+          ),
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Neither read answered, so there is no draft to show.
+ *
+ * Every one of the three reads behind this screen is idempotent — a start
+ * replays onto the draft id it was handed, and the other two are queries — so
+ * the retry is free, and without it a transient failure left the operator on a
+ * screen with a sentence and nothing to press.
+ */
+export function CreationLoadFailure({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-5 py-6">
+      <div className="rounded-sm border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+        <p className="text-sm font-medium">Failed to load creation options</p>
+        <p className="mt-1 text-sm">{message}</p>
+      </div>
+      <div>
+        <Button variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function NewApp({
   initial,
   targets: initialTargets,
@@ -108,7 +276,7 @@ export function NewApp({
   /** Repositories Spindrift holds a row for. */
   repos: readonly RepositoryOptionView[];
   /** Repositories GitHub currently grants this installation. */
-  available: readonly RepositoryOptionView[];
+  available: readonly GrantedRepositoryView[];
   onCreated?: (app: { readonly id: string; readonly name: string }) => void;
 }) {
   const [draft, setDraft] = useState(initial.draft);
@@ -118,11 +286,11 @@ export function NewApp({
   // offered the candidates for a `service`.
   const [targets, setTargets] = useState(initialTargets);
   const [serverBlockers, setServerBlockers] = useState(initial.blockers);
-  const [refusal, setRefusal] = useState<TransportFailure | null>(null);
+  const [refusal, setRefusal] = useState<Refused | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [detectionError, setDetectionError] = useState<string | null>(null);
+  const [trouble, setTrouble] = useState<DetectionTrouble | null>(null);
   // Everything the last read said about this repository, unsummarized. The
   // wizard's job is to offer it, so it is kept as it arrived: dropping the
   // scopes detection could not make sense of would leave "why not here"
@@ -131,9 +299,8 @@ export function NewApp({
   const scopesRef = useRef<readonly InspectedScope[]>([]);
   const draftRef = useRef(initial.draft);
   const revisionRef = useRef(initial.revision);
-  const saves = useRef(Promise.resolve());
-  const pendingSaves = useRef(0);
-  const saveFailed = useRef(false);
+  /** What the last write was refused with, or `null` once one has landed. */
+  const unsaved = useRef<TransportFailure | null>(null);
 
   const candidateIds = targets
     .filter((target) => target.candidate)
@@ -154,7 +321,12 @@ export function NewApp({
     draft.source.kind === 'repo' &&
     draft.detection.scope !== undefined &&
     draft.detection.scope !== draft.source.subpath;
-  const localBlockers = [...blockersFor(draft, candidateIds), ...unchosen];
+  const standing = standingTrouble(draft, trouble);
+  const localBlockers = [
+    ...blockersFor(draft, candidateIds),
+    ...unchosen,
+    ...unreadRepository(draft, standing),
+  ];
   const blockers = [
     ...localBlockers,
     ...serverBlockers.filter(
@@ -163,6 +335,96 @@ export function NewApp({
   ];
   const target = targets.find((option) => option.targetId === draft.targetId);
   const choices = repositoryChoices(repos, available);
+  const appNameIssue = issueWith(appNameSchema, draft.appName);
+  const componentNameIssue = issueWith(
+    componentNameSchema,
+    draft.componentName,
+  );
+
+  /**
+   * Put the server's copy of the draft back on screen.
+   *
+   * The revision guard means one refused save refuses every save after it: the
+   * revision the tab holds is a version that no longer exists, so the next
+   * keystroke is refused for the same reason, forever. Re-reading is the whole
+   * recovery — the server's draft is the truth by definition here — and what it
+   * costs is whatever was typed since the other tab wrote, which is why it is
+   * said out loud rather than done quietly.
+   */
+  const resync = async (): Promise<void> => {
+    try {
+      const recovered = await command('getCreationDraft', { id: initial.id });
+      if (!recovered.ok) {
+        unsaved.current = recovered.failure;
+        setRefusal({ failure: recovered.failure });
+        return;
+      }
+      revisionRef.current = recovered.value.revision;
+      draftRef.current = recovered.value.draft;
+      setDraft(recovered.value.draft);
+      setServerBlockers(recovered.value.blockers);
+      // Whatever the debounce is still holding was written against the version
+      // that just lost, and sending it would put a document nobody is looking
+      // at on the server at the revision just recovered — where it lands,
+      // because the revision is all the guard checks. Dropped after the read
+      // rather than before it, so an edit made while it was in flight goes too.
+      writes.current?.discard();
+      unsaved.current = null;
+      setRefusal({
+        failure: {
+          code: 'STALE_EDIT',
+          message:
+            'Another tab saved this draft first, and its version is what is on screen now. Anything you had typed here since is gone — check the rows above before deploying.',
+        },
+        title: 'This draft was edited somewhere else',
+      });
+    } catch (cause) {
+      const failure: TransportFailure = {
+        code: 'INTERNAL',
+        message:
+          cause instanceof Error ? cause.message : 'the draft was not re-read',
+      };
+      unsaved.current = failure;
+      setRefusal({ failure });
+    }
+  };
+
+  const persist = async (next: Draft): Promise<void> => {
+    try {
+      const result = await command('saveCreationDraft', {
+        id: initial.id,
+        revision: revisionRef.current,
+        draft: next,
+      });
+      if (result.ok) {
+        revisionRef.current = result.value.revision;
+        unsaved.current = null;
+        setServerBlockers(result.value.blockers);
+        setRefusal(null);
+        return;
+      }
+      if (result.failure.code === 'STALE_EDIT') {
+        await resync();
+        return;
+      }
+      unsaved.current = result.failure;
+      setRefusal({ failure: result.failure });
+    } catch (cause) {
+      const failure: TransportFailure = {
+        code: 'MALFORMED_REQUEST',
+        message:
+          cause instanceof Error ? cause.message : 'the draft could not save',
+      };
+      unsaved.current = failure;
+      setRefusal({ failure });
+    }
+  };
+
+  const writes = useRef<DraftWrites<Draft> | null>(null);
+  writes.current ??= draftWrites<Draft>({
+    save: persist,
+    onWriting: setSaving,
+  });
 
   const dispatch: Dispatch<DraftAction> = (action) => {
     const previous = draftRef.current;
@@ -188,37 +450,7 @@ export function NewApp({
           setTargets(result.value.options);
       });
     }
-    pendingSaves.current += 1;
-    setSaving(true);
-    saves.current = saves.current
-      .then(async () => {
-        const result = await command('saveCreationDraft', {
-          id: initial.id,
-          revision: revisionRef.current,
-          draft: next,
-        });
-        if (!result.ok) {
-          saveFailed.current = true;
-          setRefusal(result.failure);
-          return;
-        }
-        revisionRef.current = result.value.revision;
-        saveFailed.current = false;
-        setServerBlockers(result.value.blockers);
-        setRefusal(null);
-      })
-      .catch((cause: unknown) => {
-        saveFailed.current = true;
-        setRefusal({
-          code: 'MALFORMED_REQUEST',
-          message:
-            cause instanceof Error ? cause.message : 'the draft could not save',
-        });
-      })
-      .finally(() => {
-        pendingSaves.current -= 1;
-        setSaving(pendingSaves.current > 0);
-      });
+    writes.current?.edit(next);
   };
 
   /**
@@ -238,14 +470,21 @@ export function NewApp({
    */
   const inspect = async (fullName: string, scope?: string) => {
     setDetecting(true);
-    setDetectionError(null);
+    setTrouble(null);
     try {
       const result = await command(
         'inspectRepository',
         inspection(fullName, scope),
       );
       if (!result.ok) {
-        setDetectionError(result.failure.message);
+        // Recorded against the repository and no directory, whichever the
+        // request named: what failed is the reading of the tree, and only
+        // another repository — or another read — is a different answer.
+        setTrouble({
+          kind: 'unread',
+          message: result.failure.message,
+          repo: fullName,
+        });
         return;
       }
       const found = result.value.scopes;
@@ -261,22 +500,33 @@ export function NewApp({
         merged,
       });
       if (outcome.act === 'detect') dispatch(outcome.action);
-      if (outcome.act === 'refuse') setDetectionError(outcome.message);
+      if (outcome.act === 'refuse')
+        setTrouble({
+          kind: 'unsupported',
+          message: outcome.message,
+          repo: fullName,
+          scope,
+        });
     } catch (cause) {
-      setDetectionError(
-        cause instanceof Error ? cause.message : 'the repository was not read',
-      );
+      setTrouble({
+        kind: 'unread',
+        repo: fullName,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'the repository was not read',
+      });
     } finally {
       setDetecting(false);
     }
   };
 
   /** Selecting a repository reads it. Nothing is written until Deploy. */
-  const selectRepo = (repo: RepositoryChoice, url: string) => {
+  const selectRepo = (repo: RepositoryChoice) => {
     dispatch({
       type: 'repo',
       fullName: repo.fullName,
-      url,
+      url: repo.cloneUrl,
       connect: repo.state === 'grant-only',
     });
     scopesRef.current = [];
@@ -317,34 +567,59 @@ export function NewApp({
     void inspect(source.repo);
   }, []);
 
+  // A debounce that drops the last edit when the screen goes away is a
+  // debounce that loses work: navigating off within the window would leave the
+  // draft one keystroke behind what was on screen. Leaving sends it.
+  useEffect(
+    () => () => {
+      void writes.current?.flush();
+    },
+    [],
+  );
+
   /** The terminal act: revalidate and create under one database lock. */
   async function start() {
     setSubmitting(true);
-    setRefusal(null);
-    await saves.current;
-    if (saveFailed.current) {
+    try {
+      const outcome = await deployDraft({
+        flush: async () => {
+          await writes.current?.flush();
+        },
+        unsaved: () => unsaved.current,
+        complete: () =>
+          command('completeCreationDraft', {
+            id: initial.id,
+            revision: revisionRef.current,
+          }),
+      });
+      if (outcome.act === 'unsaved' || outcome.act === 'lost') {
+        setRefusal({ failure: outcome.failure, title: outcome.title });
+        return;
+      }
+      // The press is as capable of finding the stale revision as a keystroke
+      // is, and it lands there whenever the last edit was already saved: the
+      // flush sends nothing, so the completion is the first thing carrying the
+      // revision another tab has superseded. Reported rather than recovered, it
+      // is a refusal telling the operator to reload with no control that does.
+      if (outcome.act === 'stale') {
+        await resync();
+        return;
+      }
+      if (outcome.act === 'refused') {
+        setRefusal({ failure: outcome.failure });
+        return;
+      }
+      setRefusal(null);
+      setServerBlockers(outcome.result.draft.blockers);
+      if (outcome.result.app === null) return;
+      onCreated?.({
+        id: outcome.result.app.appId,
+        name: outcome.result.app.name,
+      });
+    } finally {
+      // Whatever happened, the button stops saying it is creating something.
       setSubmitting(false);
-      return;
     }
-    const result = await command('completeCreationDraft', {
-      id: initial.id,
-      revision: revisionRef.current,
-    });
-    if (!result.ok) {
-      setRefusal(result.failure);
-      setSubmitting(false);
-      return;
-    }
-    setServerBlockers(result.value.draft.blockers);
-    if (result.value.app === null) {
-      setSubmitting(false);
-      return;
-    }
-    onCreated?.({
-      id: result.value.app.appId,
-      name: result.value.app.name,
-    });
-    setSubmitting(false);
   }
 
   return (
@@ -371,7 +646,7 @@ export function NewApp({
           repos={choices}
           scopes={scopes}
           detecting={detecting}
-          detectionError={detectionError}
+          trouble={standing}
           unchosen={unchosen.length > 0}
           onSelectRepo={selectRepo}
           onChooseScope={chooseScope}
@@ -380,8 +655,15 @@ export function NewApp({
 
         <Row
           label="Component"
+          // A name the schema will refuse is an answer nobody has given yet,
+          // so the row that holds it opens rather than hiding the field the
+          // message is attached to behind a pencil.
           unsettled={
-            detectionError !== null || unchosen.length > 0 || readElsewhere
+            standing !== null ||
+            unchosen.length > 0 ||
+            readElsewhere ||
+            appNameIssue !== null ||
+            componentNameIssue !== null
           }
           value={`${draft.componentName} · ${draft.kind}`}
           why={
@@ -408,6 +690,7 @@ export function NewApp({
                     value: event.target.value,
                   })
                 }
+                issue={appNameIssue}
                 hint="Lowercase DNS label — it appears in the canonical hostname."
               />
               <Field
@@ -421,6 +704,7 @@ export function NewApp({
                     value: event.target.value,
                   })
                 }
+                issue={componentNameIssue}
               />
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
@@ -625,7 +909,9 @@ export function NewApp({
         </div>
       ) : null}
 
-      {refusal ? <Refusal failure={refusal} /> : null}
+      {refusal ? (
+        <Refusal failure={refusal.failure} title={refusal.title} />
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -701,7 +987,7 @@ function SourceRow({
   repos,
   scopes,
   detecting,
-  detectionError,
+  trouble,
   unchosen,
   onSelectRepo,
   onChooseScope,
@@ -713,10 +999,10 @@ function SourceRow({
   /** What the last read said, or `null` before anything has been read. */
   scopes: readonly InspectedScope[] | null;
   detecting: boolean;
-  detectionError: string | null;
+  trouble: DetectionTrouble | null;
   /** Detection is offering candidates and the draft names none of them. */
   unchosen: boolean;
-  onSelectRepo: (repo: RepositoryChoice, url: string) => void;
+  onSelectRepo: (repo: RepositoryChoice) => void;
   onChooseScope: (scope: InspectedScope) => void;
   onSettleSubpath: () => void;
 }) {
@@ -763,13 +1049,18 @@ function SourceRow({
   return (
     <Row
       label="Source"
-      // Opens itself on anything unresolved, because §3's grammar only works
-      // when the alternatives are visible: a sentence about a directory
-      // Spindrift could not build is unreadable while the list of directories
-      // it did read is behind a disclosure.
+      // Open whenever the source is still the question — which includes a
+      // repository whose directory nothing has answered for yet, not only one
+      // that went wrong. §3's grammar only works when the alternatives are
+      // visible: a sentence about a directory Spindrift could not build is
+      // unreadable while the list of directories it did read is behind a
+      // pencil. A settled source collapses, because then the list is noise.
       unsettled={
         draft.source.kind === 'repo'
-          ? draft.source.repo === '' || unchosen || detectionError !== null
+          ? draft.source.repo === '' ||
+            unchosen ||
+            trouble !== null ||
+            !answeredScope(draft)
           : !draft.source.location
       }
       value={
@@ -788,7 +1079,7 @@ function SourceRow({
         ) : null
       }
       why={
-        detectionError ??
+        trouble?.message ??
         (draft.source.kind === 'archive' && !draft.source.location
           ? 'Not staged yet.'
           : undefined)
@@ -937,10 +1228,23 @@ function ScopeChooser({
  * The code is shown alongside the sentence because it is a closed vocabulary
  * and therefore searchable — the same reason §6 keeps its eight failure reasons
  * rather than writing friendlier prose.
+ *
+ * `title` is what the operator was doing when it arrived. A refusal from a save
+ * nobody watched, still on screen when Deploy is pressed, otherwise reads as
+ * the answer to the press — and the two want different sentences.
  */
-function Refusal({ failure }: { failure: TransportFailure }) {
+function Refusal({
+  failure,
+  title,
+}: {
+  failure: TransportFailure;
+  title?: string;
+}) {
   return (
     <div className="rounded-md border border-destructive bg-destructive-soft px-3 py-2.5">
+      {title ? (
+        <p className="text-sm font-semibold text-destructive">{title}</p>
+      ) : null}
       <p className="font-mono text-xs font-semibold text-destructive">
         {failure.code}
       </p>

@@ -19,7 +19,11 @@ import {
   type Draft,
   draftReducer,
 } from '../../src/web/views/apps/new/draft.ts';
-import { NewApp } from '../../src/web/views/apps/new/index.tsx';
+import {
+  CreationLoadFailure,
+  CreationSkeleton,
+  NewApp,
+} from '../../src/web/views/apps/new/index.tsx';
 import {
   INITIAL_DRAFT,
   REPOSITORY_GRANT,
@@ -150,6 +154,78 @@ describe('the whole plan is on one screen', () => {
 
   test('the vessel is marked immutable while it is still a choice', () => {
     expect(markup).toContain('immutable once created');
+  });
+});
+
+describe('while the screen is still loading', () => {
+  test('the placeholder is the rows that are coming, not one pulsing line', () => {
+    // A card of six rows arrives as a card of six rows. The alternative is a
+    // sentence that says nothing about what will be on the screen, followed by
+    // a layout shift that costs the reader their place.
+    const markup = renderToStaticMarkup(<CreationSkeleton phase="draft" />);
+    for (const label of [
+      'Source',
+      'Component',
+      'Target',
+      'URL',
+      'Reach',
+      'Vessel',
+    ]) {
+      expect(markup).toContain(label);
+    }
+    expect(markup).toContain('aria-busy="true"');
+  });
+
+  test('it names which of the two reads is outstanding', () => {
+    // The second read cannot start until the first has answered — placement is
+    // resolved for the draft (§3) — so "loading" means two different waits.
+    expect(renderToStaticMarkup(<CreationSkeleton phase="draft" />)).toContain(
+      'Recovering the draft',
+    );
+    expect(
+      renderToStaticMarkup(<CreationSkeleton phase="options" />),
+    ).toContain('Targets and repositories');
+  });
+});
+
+describe('a field the schema will refuse', () => {
+  // The rule is one statement, in `creationDraftSchema`, read from both ends.
+  // Before this the only surface for it was the transport refusal the save
+  // came back with, rendered under the Deploy button as `appName: must be
+  // lowercase…` — the right fact, as far from the input as the page allows.
+  const markup = render({ ...clean, appName: 'Almanac Staging' });
+
+  test('is marked where the value is', () => {
+    expect(markup).toContain('aria-invalid="true"');
+    expect(markup).toContain('must be lowercase letters, digits and hyphens');
+  });
+
+  test('and a good one is not', () => {
+    expect(render(clean)).not.toContain('aria-invalid');
+  });
+
+  test('the Component name carries the schema’s rule too', () => {
+    // Whatever rule the schema states, and no rule it does not: an empty name
+    // is the only thing `componentName` refuses.
+    expect(render({ ...clean, componentName: '' })).toContain(
+      'the Component needs a name',
+    );
+  });
+});
+
+describe('when neither read answered', () => {
+  const markup = renderToStaticMarkup(
+    <CreationLoadFailure
+      message="the database was unreachable"
+      onRetry={() => {}}
+    />,
+  );
+
+  test('the failure is named and retryable', () => {
+    // Every read behind this screen is idempotent, so a dead end here is a
+    // choice rather than a consequence.
+    expect(markup).toContain('the database was unreachable');
+    expect(markup).toContain('Try again');
   });
 });
 
@@ -372,6 +448,30 @@ describe('the draft reducer', () => {
     // With the claim on it: the root is nobody's word, so the next read of the
     // new tree is free to propose one.
     expect(next.scopeByOperator).toBeUndefined();
+  });
+
+  test('another repository is another read, so the detection resets', () => {
+    // The scope is what `outcomeOf` reads to decide a draft has been answered.
+    // Carried across a repository change, the read of the repository just
+    // chosen applies nothing and the rows below keep describing the previous
+    // one — a kind, a sentence, and ruled-out kinds from somewhere else.
+    const read = draftReducer(INITIAL_DRAFT, {
+      type: 'detect',
+      scope: 'apps/api',
+      kind: 'job',
+      reason: 'a job is declared in spindrift.yaml',
+      unavailable: { website: 'no static output is emitted here' },
+    });
+    const next = draftReducer(read, {
+      type: 'repo',
+      fullName: 'example/ledger',
+      url: 'https://github.com/example/ledger.git',
+    });
+
+    expect(next.detection.scope).toBeUndefined();
+    expect(next.detection.unavailable).toEqual({});
+    expect(next.detection.available).toEqual(['service', 'website', 'job']);
+    expect(next.detection.reason).not.toContain('spindrift.yaml');
   });
 
   test('a directory the operator typed is recorded as theirs', () => {

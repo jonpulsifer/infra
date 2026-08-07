@@ -28,27 +28,6 @@ export const ENTRIES = [
   },
 ] as const;
 
-/**
- * The five decisions, as the flow used to walk them.
- *
- * Kept as vocabulary and no longer as a rail. §18 named the sequence Source →
- * Component → Place → Configure → Review, and stories 31 and 32 say what that
- * sequence is *for*: "defaults carrying every step" and "corrections and
- * configuration hidden behind progressive disclosure". Five screens with a
- * Continue button under each is one way to render that, and it turned out to
- * be the way that made every default look like a question.
- *
- * So the decisions still exist, in this order, as the order of the summary
- * rows on one screen. What went away is the walking.
- */
-export const DECISIONS = [
-  'Source',
-  'Component',
-  'Place',
-  'Configure',
-  'Review',
-] as const;
-
 // Exported because §3's requirements are derived from exactly these three, so
 // any command that resolves placement validates them against the same words the
 // draft does.
@@ -56,15 +35,30 @@ export const componentKind = z.enum(['service', 'website', 'job']);
 export const reach = z.enum(['none', 'private', 'public']);
 export const auth = z.enum(['none', 'proxy']);
 const entry = z.enum(['service', 'website', 'upload', 'repo', 'discover']);
-const appName = z
+
+/**
+ * The App name's rule, exported because the screen checks it too.
+ *
+ * One statement of the rule, read from both ends: the browser marks the field
+ * as the operator types and the command refuses the document, and a second copy
+ * of the regex is how those two come to disagree. The messages are written for
+ * a reader because this is the one schema whose complaints are rendered beside
+ * an input rather than logged.
+ */
+export const appNameSchema = z
   .string()
   .trim()
-  .min(1)
-  .max(63)
+  .min(1, 'the App needs a name')
+  .max(63, 'at most 63 characters — it is one DNS label')
   .regex(
     /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
     'must be lowercase letters, digits and hyphens',
   );
+
+/** The Component name's rule. Read beside the field for the same reason. */
+export const componentNameSchema = z
+  .string()
+  .min(1, 'the Component needs a name');
 
 const source = z.discriminatedUnion('kind', [
   z
@@ -147,8 +141,8 @@ export const creationDraftSchema = z
   .object({
     entry,
     source,
-    appName,
-    componentName: z.string().min(1),
+    appName: appNameSchema,
+    componentName: componentNameSchema,
     detection,
     kind: componentKind,
     vessel,
@@ -186,17 +180,25 @@ export const creationDraftSchema = z
      * statement about one tree.
      */
     scopeByOperator: z.boolean().optional(),
-    /**
-     * Which step of the old rail this draft was left on.
-     *
-     * Optional, unread, and still here: drafts are durable rows, and a strict
-     * schema that dropped the key would refuse every draft saved before the
-     * flow became one screen. It costs a line to keep and a migration to
-     * remove.
-     */
-    step: z.number().int().min(0).optional(),
   })
   .strict();
+
+/**
+ * The same document, read from a stored row.
+ *
+ * Drafts are durable jsonb, so a row written before a key was retired still
+ * carries it — and the strict schema above, which is what a save is validated
+ * against, would refuse the operator's own draft the moment they touched it.
+ * Reading through this drops what is no longer named, so the browser never
+ * receives a key it would hand straight back. That is the whole migration: the
+ * column is jsonb and every retired key was optional.
+ */
+const storedDraftSchema = z.object(creationDraftSchema.shape);
+
+export function storedDraft(draft: Draft): Draft {
+  const parsed = storedDraftSchema.safeParse(draft);
+  return parsed.success ? (parsed.data as Draft) : draft;
+}
 
 export type Draft = z.infer<typeof creationDraftSchema>;
 export type EntryId = Draft['entry'];
@@ -262,14 +264,36 @@ export interface CreationDraftView {
   readonly ready: boolean;
 }
 
+/**
+ * What a draft claims about a repository nothing has read.
+ *
+ * One statement of it, because two states mean it: a draft that has just been
+ * created, and a draft that has just been pointed at another repository. Both
+ * have read nothing about the tree they name, and `scope: undefined` is what
+ * says so — it is the flag the browser's read consults before proposing.
+ */
+function openingDetection(): Detection {
+  return {
+    kind: 'service',
+    reason:
+      'the default is a long-running service until detection says otherwise',
+    available: ['service', 'website', 'job'],
+    unavailable: {},
+  };
+}
+
 /** Defaults are selected from current persisted installation capabilities. */
 export function initialCreationDraft(input: {
-  readonly repository: string | null;
+  /** The repository to open on, with the clone URL its host serves it at. */
+  readonly repository: {
+    readonly fullName: string;
+    readonly cloneUrl: string;
+  } | null;
   readonly targetId: string | null;
   readonly vessel: string;
 }): Draft {
   const name =
-    (input.repository?.split('/').pop() ?? 'app')
+    (input.repository?.fullName.split('/').pop() ?? 'app')
       .toLowerCase()
       .replaceAll(/[^a-z0-9-]/g, '-')
       .replaceAll(/^-+|-+$/g, '') || 'app';
@@ -279,8 +303,8 @@ export function initialCreationDraft(input: {
     source: repo
       ? {
           kind: 'repo',
-          repo,
-          url: `https://github.com/${repo}.git`,
+          repo: repo.fullName,
+          url: repo.cloneUrl,
           subpath: '.',
         }
       : {
@@ -293,13 +317,7 @@ export function initialCreationDraft(input: {
         },
     appName: name,
     componentName: 'web',
-    detection: {
-      kind: 'service',
-      reason:
-        'the default is a long-running service until detection says otherwise',
-      available: ['service', 'website', 'job'],
-      unavailable: {},
-    },
+    detection: openingDetection(),
     kind: 'service',
     vessel: {
       name: input.vessel,
@@ -438,6 +456,12 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
         // The directory went back to the root with the tree it named, so
         // whoever typed the old one has not typed this one.
         scopeByOperator: undefined,
+        // And so did the read. The sentence, the ruled-out kinds and the scope
+        // are all statements about the previous repository, and the scope is
+        // what makes a draft count as answered — carried over, the read of the
+        // repository just chosen finds the question already settled and applies
+        // nothing, leaving the rows below describing somewhere else.
+        detection: openingDetection(),
       };
     }
     // Typing a directory is the operator answering where the App is, so it

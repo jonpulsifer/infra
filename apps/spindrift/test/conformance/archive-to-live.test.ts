@@ -42,7 +42,7 @@ import { describe, expect, test } from 'bun:test';
 import { asc, eq } from 'drizzle-orm';
 import {
   completeCreationDraft,
-  reviewCreationDraft,
+  getCreationDraft,
   saveCreationDraft,
   startCreationDraft,
 } from '../../src/commands/creation-drafts/lifecycle.ts';
@@ -304,10 +304,7 @@ async function createThroughDraft(
   );
   if (!saved.ok) throw new Error(saved.failure.message);
 
-  const reviewed = await reviewCreationDraft(
-    { id: saved.value.id, revision: saved.value.revision },
-    context,
-  );
+  const reviewed = await getCreationDraft({ id: saved.value.id }, context);
   if (!reviewed.ok) throw new Error(reviewed.failure.message);
   // Read back rather than assumed: a blocker here is the product refusing the
   // draft, and it names which of §3's conditions this installation failed.

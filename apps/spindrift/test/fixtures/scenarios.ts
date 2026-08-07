@@ -23,6 +23,7 @@ import type {
   AppListItem,
   ChecklistItem,
   DeployView,
+  GrantedRepositoryView,
   LinkedRepoView,
   LogLine,
   RepositoryOptionView,
@@ -825,80 +826,89 @@ export const INITIAL_DRAFT: Draft = {
     { name: 'LOG_LEVEL', supplied: true },
     { name: 'DATABASE_URL', supplied: false },
   ],
-  step: 0,
 };
 
 /**
- * Repositories Spindrift holds a row for. `connected` here means an App
- * already deploys from it — `listRepositories`'s own reading of the word on
- * this list.
+ * The repository host this fixture installation runs against.
+ *
+ * Deliberately not the public one: a clone URL composed from the manifest is
+ * indistinguishable from a hardcoded template while the fixture agrees with it.
  */
+const VCS = 'https://vcs.example';
+
+/** Repositories Spindrift holds a row for, two of which have an App on them. */
 export const REPOSITORY_OPTIONS: readonly RepositoryOptionView[] = [
   {
     repositoryId: 100001,
     fullName: 'example-org/infra',
     defaultBranch: 'main',
-    connected: true,
+    cloneUrl: `${VCS}/example-org/infra.git`,
+    alreadyDeploys: true,
   },
   {
     repositoryId: 100002,
     fullName: 'example-org/hub',
     defaultBranch: 'main',
-    connected: true,
+    cloneUrl: `${VCS}/example-org/hub.git`,
+    alreadyDeploys: true,
   },
   {
     repositoryId: 100003,
     fullName: 'example-org/site',
     defaultBranch: 'main',
-    connected: false,
+    cloneUrl: `${VCS}/example-org/site.git`,
+    alreadyDeploys: false,
   },
   {
     repositoryId: 100004,
     fullName: 'example-org/api',
     defaultBranch: 'main',
-    connected: true,
+    cloneUrl: `${VCS}/example-org/api.git`,
+    alreadyDeploys: true,
   },
   {
     repositoryId: 100005,
     fullName: 'example-org/weather-card',
     defaultBranch: 'main',
-    connected: false,
+    cloneUrl: `${VCS}/example-org/weather-card.git`,
+    alreadyDeploys: false,
   },
 ];
 
 /**
- * Repositories the GitHub App installation currently grants. `connected` here
- * means Spindrift holds a row for it — the other reading of the same word, on
- * the other list of the same response, which is why the picker derives a state
- * instead of rendering either boolean.
+ * Repositories the GitHub App installation currently grants.
  *
  * Two of them are on no other list: a grant Spindrift has never connected is
  * the ordinary state of a fresh installation.
  */
-export const REPOSITORY_GRANT: readonly RepositoryOptionView[] = [
+export const REPOSITORY_GRANT: readonly GrantedRepositoryView[] = [
   {
     repositoryId: 100001,
     fullName: 'example-org/infra',
     defaultBranch: 'main',
-    connected: true,
+    cloneUrl: `${VCS}/example-org/infra.git`,
+    rowExists: true,
   },
   {
     repositoryId: 100003,
     fullName: 'example-org/site',
     defaultBranch: 'main',
-    connected: true,
+    cloneUrl: `${VCS}/example-org/site.git`,
+    rowExists: true,
   },
   {
     repositoryId: 200001,
     fullName: 'example-org/almanac',
     defaultBranch: 'main',
-    connected: false,
+    cloneUrl: `${VCS}/example-org/almanac.git`,
+    rowExists: false,
   },
   {
     repositoryId: 200002,
     fullName: 'example-org/ledger',
     defaultBranch: 'trunk',
-    connected: false,
+    cloneUrl: `${VCS}/example-org/ledger.git`,
+    rowExists: false,
   },
 ];
 
@@ -911,6 +921,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     health: 'connected',
     error: null,
     lastReconciledSha: 'a1b2c3d',
+    staleReason: null,
     appSubpaths: ['apps/hub', 'apps/api', 'apps/wiki'],
   },
   {
@@ -920,6 +931,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     health: 'connected',
     error: null,
     lastReconciledSha: 'e4f5g6h',
+    staleReason: null,
     appSubpaths: ['.'],
   },
   {
@@ -930,6 +942,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     error:
       'Installation suspended — the GitHub App installation was suspended by the account owner.',
     lastReconciledSha: 'i7j8k9l',
+    staleReason: null,
     appSubpaths: ['.'],
   },
 ];

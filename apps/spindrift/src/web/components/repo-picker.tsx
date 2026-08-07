@@ -23,7 +23,7 @@
  */
 import { GitBranch, Search } from 'lucide-react';
 import { useState } from 'react';
-import type { RepositoryOptionView } from '../model.ts';
+import type { GrantedRepositoryView, RepositoryOptionView } from '../model.ts';
 import { Badge } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 
@@ -40,6 +40,9 @@ export type RepositoryChoiceState =
 export interface RepositoryChoice {
   readonly fullName: string;
   readonly defaultBranch: string;
+  /** Carried from the response rather than templated: the host is the
+   * installation's, and this component has no way to know it. */
+  readonly cloneUrl: string;
   readonly state: RepositoryChoiceState;
 }
 
@@ -55,22 +58,23 @@ const STATE_BADGE = {
 /**
  * The grant and the connections, as one list.
  *
- * The two `connected` booleans on the response mean different things — on a
- * connection it means an App deploys from it, on a grant entry it means a row
- * exists — so neither is read as a state here. The state is derived from which
- * list a repository is in and what its own list says about it, which is the
- * only reading that cannot be wrong about the other list.
+ * A connection knows whether an App deploys from it and a grant entry knows
+ * whether a row exists, which are two different facts about two different
+ * lists — so a row's state is derived from which list it came from and the
+ * fact that list actually holds, and neither boolean is ever read off the
+ * other's row.
  */
 export function repositoryChoices(
   connections: readonly RepositoryOptionView[],
-  grant: readonly RepositoryOptionView[],
+  grant: readonly GrantedRepositoryView[],
 ): readonly RepositoryChoice[] {
   const rows = new Map<string, RepositoryChoice>();
   for (const repo of connections) {
     rows.set(repo.fullName, {
       fullName: repo.fullName,
       defaultBranch: repo.defaultBranch,
-      state: repo.connected ? 'deploys' : 'connected',
+      cloneUrl: repo.cloneUrl,
+      state: repo.alreadyDeploys ? 'deploys' : 'connected',
     });
   }
   for (const repo of grant) {
@@ -78,6 +82,7 @@ export function repositoryChoices(
     rows.set(repo.fullName, {
       fullName: repo.fullName,
       defaultBranch: repo.defaultBranch,
+      cloneUrl: repo.cloneUrl,
       state: 'grant-only',
     });
   }
@@ -94,7 +99,7 @@ export function RepoPicker({
   repos: readonly RepositoryChoice[];
   /** The fullName of the currently selected repo, or `null`. */
   selected: string | null;
-  onSelect: (repo: RepositoryChoice, url: string) => void;
+  onSelect: (repo: RepositoryChoice) => void;
 }) {
   const [filter, setFilter] = useState('');
   const normalised = filter.toLowerCase();
@@ -138,9 +143,7 @@ export function RepoPicker({
               <button
                 key={repo.fullName}
                 type="button"
-                onClick={() =>
-                  onSelect(repo, `https://github.com/${repo.fullName}.git`)
-                }
+                onClick={() => onSelect(repo)}
                 className={cn(
                   'flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors',
                   isSelected

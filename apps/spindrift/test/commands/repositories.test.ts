@@ -678,6 +678,25 @@ describe('listRepositories', () => {
     }
   });
 
+  test('a repository the host would not answer about is listed, and says so', async () => {
+    // Listing refreshes every connected repository from the host. One that
+    // fails must not empty the screen — and must not pass for current either,
+    // because the commit beside it is then older than it looks.
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'unconnected' });
+    await connectRepository(input(fake), await context(fake));
+
+    const offline = await context(fake, (() => {
+      throw new Error('the repository host is unreachable');
+    }) as unknown as typeof fetch);
+    const result = await listRepositories({}, offline);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.repos).toHaveLength(1);
+    expect(result.value.repos[0]?.staleReason).toContain('unreachable');
+  });
+
   test('keeps GitHub-granted repositories separate from durable connections', async () => {
     const base = await context(null);
     const result = await listRepositories(
@@ -720,7 +739,10 @@ describe('listRepositories', () => {
         repositoryId: '99',
         fullName: 'example/available',
         defaultBranch: 'trunk',
-        connected: false,
+        // The manifest's repository host, not the public one: an enterprise
+        // installation clones from its own, and the browser reads no manifest.
+        cloneUrl: 'https://git.example.test/example/available.git',
+        rowExists: false,
       },
     ]);
   });

@@ -10,7 +10,6 @@ export {
   CREATION_BLOCKER_CODES,
   type CreationDraftView,
   creationDraftSchema,
-  DECISIONS,
   type Detection,
   type Draft,
   type DraftAction,

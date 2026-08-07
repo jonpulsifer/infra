@@ -3,7 +3,6 @@ import { count, eq } from 'drizzle-orm';
 import {
   completeCreationDraft,
   getCreationDraft,
-  reviewCreationDraft,
   saveCreationDraft,
   startCreationDraft,
 } from '../../src/commands/creation-drafts/lifecycle.ts';
@@ -159,6 +158,21 @@ describe('creation drafts', () => {
     expect(row?.count).toBe(1);
   });
 
+  test('the draft it opens on clones from the host the manifest names', async () => {
+    // The public host is a value this installation could have and not a
+    // template to write into the source: an enterprise deployment serves its
+    // own, and a draft carrying the wrong one stages nothing.
+    await seedCapabilities();
+    const started = await startCreationDraft({}, await context());
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(started.value.draft.source).toMatchObject({
+      kind: 'repo',
+      repo: 'example/app',
+      url: 'https://git.example.test/example/app.git',
+    });
+  });
+
   test('refresh recovers the same server-owned draft for its operator', async () => {
     await seedCapabilities();
     const ctx = await context();
@@ -178,6 +192,36 @@ describe('creation drafts', () => {
     expect(stored?.revision).toBe(0);
   });
 
+  test('a draft written before a key was retired is still editable', async () => {
+    // Drafts are durable jsonb rows somebody comes back to. The save schema is
+    // strict, and the browser sends back what it was given — so a retired key
+    // handed out on read is a draft that refuses its own next keystroke. The
+    // read drops it, which is the whole migration a jsonb column needs.
+    await seedCapabilities();
+    const ctx = await context();
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+    await database()
+      .db.update(creationDrafts)
+      .set({ draft: { ...started.value.draft, step: 4 } as never })
+      .where(eq(creationDrafts.id, started.value.id));
+
+    const recovered = await getCreationDraft({ id: started.value.id }, ctx);
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) return;
+    expect(recovered.value.draft).not.toHaveProperty('step');
+
+    const saved = await saveCreationDraft(
+      {
+        id: started.value.id,
+        revision: recovered.value.revision,
+        draft: { ...recovered.value.draft, appName: 'still-editable' },
+      },
+      ctx,
+    );
+    expect(saved.ok && saved.value.draft.appName).toBe('still-editable');
+  });
+
   test('serializes edits with an optimistic revision and rejects a stale tab', async () => {
     await seedCapabilities();
     const ctx = await context();
@@ -187,7 +231,6 @@ describe('creation drafts', () => {
     const changed = {
       ...started.value.draft,
       appName: 'renamed',
-      step: 2,
     };
     const saved = await saveCreationDraft(
       { id: started.value.id, revision: 0, draft: changed },
@@ -237,10 +280,7 @@ describe('creation drafts', () => {
       .set({ health: 'unhealthy' })
       .where(eq(targets.id, target.id));
 
-    const reviewed = await reviewCreationDraft(
-      { id: started.value.id, revision: started.value.revision },
-      ctx,
-    );
+    const reviewed = await getCreationDraft({ id: started.value.id }, ctx);
     expect(reviewed.ok).toBe(true);
     if (!reviewed.ok) return;
     expect(reviewed.value.ready).toBe(false);
@@ -268,21 +308,18 @@ describe('creation drafts', () => {
       {
         id: started.value.id,
         revision: started.value.revision,
-        draft: { ...started.value.draft, step: 4 },
+        draft: { ...started.value.draft },
       },
       ctx,
     );
     if (!saved.ok) throw new Error(saved.failure.message);
 
-    const reviewed = await reviewCreationDraft(
-      { id: saved.value.id, revision: saved.value.revision },
-      ctx,
-    );
+    const reviewed = await getCreationDraft({ id: saved.value.id }, ctx);
     expect(reviewed.ok).toBe(true);
     if (!reviewed.ok) return;
     expect(reviewed.value.ready).toBe(true);
     expect(reviewed.value.blockers).toEqual([]);
-    expect(reviewed.value.draft.step).toBe(4);
+    expect(reviewed.value.draft.componentName).toBe('web');
     const completed = await completeCreationDraft(
       { id: saved.value.id, revision: saved.value.revision },
       ctx,
@@ -420,7 +457,7 @@ describe('creation drafts', () => {
       {
         id: started.value.id,
         revision: started.value.revision,
-        draft: { ...started.value.draft, step: 4 },
+        draft: { ...started.value.draft },
       },
       ctx,
     );
@@ -473,7 +510,6 @@ describe('creation drafts', () => {
             contents: 'source',
             subpath: 'service',
           },
-          step: 4,
         },
       },
       ctx,
@@ -531,7 +567,6 @@ describe('creation drafts', () => {
           reach: 'public',
           auth: 'none',
           targetId: target.id,
-          step: 4,
         },
       },
       ctx,
@@ -582,7 +617,6 @@ describe('creation drafts', () => {
           reach: 'public',
           auth: 'none',
           targetId: target.id,
-          step: 4,
         },
       },
       ctx,
@@ -622,7 +656,6 @@ describe('creation drafts', () => {
             contents: 'source',
             subpath: '.',
           },
-          step: 4,
         },
       },
       ctx,

@@ -631,22 +631,51 @@ export interface TargetOptionView {
   readonly detail: readonly string[];
 }
 
-/**
- * A connected repository as the repository picker lists it.
- *
- * §20: `Link repo` lists repositories currently granted to the installation.
- * Spindrift stores installation and stable repository IDs; the display fields
- * (fullName, defaultBranch) are refreshable.
- */
-export interface RepositoryOptionView {
+/** Everything both repository lists say about one repository. */
+interface RepositoryIdentityView {
   /** GitHub's stable numeric or UUID repository ID, used as the selection key. */
   readonly repositoryId: string | number;
   /** The owner/name a human reads — e.g. `example-org/hub`. */
   readonly fullName: string;
   /** The branch Spindrift watches. */
   readonly defaultBranch: string;
-  /** Whether this repository already has an App connected to it. */
-  readonly connected: boolean;
+  /**
+   * Where this repository is cloned from.
+   *
+   * Composed here rather than in the browser because the repository host is an
+   * installation fact (§20) and the browser reads no manifest: a client-side
+   * template would name the public host on an installation that has its own.
+   */
+  readonly cloneUrl: string;
+}
+
+/**
+ * A repository Spindrift holds a connection row for.
+ *
+ * §20: Spindrift stores installation and stable repository IDs; the display
+ * fields (fullName, defaultBranch) are refreshable.
+ */
+export interface RepositoryOptionView extends RepositoryIdentityView {
+  /**
+   * Whether an App already deploys from this repository.
+   *
+   * Named for what it is because the grant list carries a boolean about the
+   * same repository meaning something else entirely: two fields called
+   * `connected` on one response, rendered with one green badge, is a badge that
+   * claims whichever of the two the reader happens to assume.
+   */
+  readonly alreadyDeploys: boolean;
+}
+
+/**
+ * A repository the GitHub App installation currently grants.
+ *
+ * The grant is a fact about GitHub, so the only thing this list knows about
+ * Spindrift is whether a row for it exists here yet.
+ */
+export interface GrantedRepositoryView extends RepositoryIdentityView {
+  /** Whether Spindrift already holds a connection row for it. */
+  readonly rowExists: boolean;
 }
 
 /** Whether the repository connector can currently call GitHub for this user. */
@@ -677,6 +706,15 @@ export interface LinkedRepoView {
   readonly error: string | null;
   /** The last commit SHA Spindrift reconciled. */
   readonly lastReconciledSha: string | null;
+  /**
+   * Why the last refresh of this row from the host failed, if it did.
+   *
+   * Separate from `error`, which is about access being lost. This one is a row
+   * that is still connected and whose commit is older than it looks: listing
+   * every repository refreshes them all, and one the host would not answer
+   * about is a stale row rather than a missing one.
+   */
+  readonly staleReason: string | null;
   /** App subpaths connected to this repository. */
   readonly appSubpaths: readonly string[];
 }

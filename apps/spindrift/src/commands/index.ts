@@ -39,7 +39,6 @@ export { setConfig } from './config/set.ts';
 export {
   completeCreationDraft,
   getCreationDraft,
-  reviewCreationDraft,
   saveCreationDraft,
   startCreationDraft,
 } from './creation-drafts/lifecycle.ts';
