@@ -192,6 +192,10 @@ spec:
         apiBaseUrl: https://api.github.com
         oauthBaseUrl: https://github.com
         buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
+        # Where every boundary below is declared. An unmet prerequisite
+        # renders the Terraform that clears it, and this is the repository the
+        # pull request adding that stanza is opened against.
+        infrastructureRepository: jonpulsifer/infra
       sources:
         # Which of these staging picks is `shared.sourceBucket` on the home
         # vessel: the bucket lives in that project, so stating it anywhere else
@@ -239,6 +243,11 @@ spec:
           kind: gcp-project
           location:
             project: bluenose
+          # The root that declares this project. It is what gives a generated
+          # remediation somewhere to land: the stanza names
+          # `<root>/services.tf` or `<root>/iam.tf` rather than a directory
+          # nothing here has agreed to.
+          terraformRoot: terraform/gcp/projects/bluenose
           # The shared services, on the boundary that holds them.
           # `installation.homeVessel` names this vessel, so this block is
           # required here and refused on every other.
