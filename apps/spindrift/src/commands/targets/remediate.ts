@@ -24,6 +24,7 @@ import { remediationFor } from '../../domain/remediation.ts';
 import { VESSEL_PREREQUISITES } from '../../domain/vessel.ts';
 import { GitHubAccessError } from '../../integrations/github/http.ts';
 import {
+  AlreadyDeclaredError,
   openRemediationPullRequest,
   remediationTransaction,
 } from '../../integrations/github/remediation-pr.ts';
@@ -108,7 +109,10 @@ export const openPrerequisiteRemediation: Command<
   }
 
   const remediation = remediationFor(
-    input.prerequisite,
+    // The stored row, not the name off the request: whether the probe reached a
+    // verdict is what decides there is anything to generate at all, and a
+    // browser has no business asserting it.
+    row,
     remediationSubject(
       context.manifest,
       {
@@ -156,6 +160,7 @@ export const openPrerequisiteRemediation: Command<
       defaultBranch,
       transaction: remediationTransaction({
         vessel: input.vessel,
+        adapter: input.adapter ?? null,
         prerequisite: input.prerequisite,
         remediation,
       }),
@@ -168,6 +173,12 @@ export const openPrerequisiteRemediation: Command<
       prerequisiteMet: false,
     });
   } catch (cause) {
+    // The destination owning this already is a fact about the repository rather
+    // than a failure to reach it, so it says so in its own words instead of
+    // arriving as "could not open a pull request".
+    if (cause instanceof AlreadyDeclaredError) {
+      return failed('NOT_DEPLOYABLE', cause.message);
+    }
     // A repository this installation cannot reach is a fact about the world,
     // reported as a refusal the operator can act on — never an exception the
     // dispatch surface turns into a 500. The same rule §15 keeps for the

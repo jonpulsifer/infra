@@ -139,6 +139,28 @@ export interface PrerequisiteResult {
   /** Why it is unmet. §3's grammar: non-candidates are annotated with a reason. */
   readonly detail?: string;
   /**
+   * Whether a probe reached a verdict on this row, as against never getting to
+   * ask it.
+   *
+   * `false` is the arm `cloud/checklist.ts` spends its table keeping apart from
+   * an observed fault — "not assessed", an unreachable service, a status
+   * nothing here reads — and `unreachablePrerequisites` is the same arm one
+   * layer out. Both report unmet, because §13 will not have core deciding that
+   * what it failed to check was fine, and they mean opposite things about the
+   * boundary: one says a fact was observed wrong, the other says no fact was
+   * observed at all.
+   *
+   * Carried on the row because everything downstream of the checklist needs the
+   * distinction the checklist already drew, and a reader that recovered it by
+   * matching on `detail` would be parsing a sentence written for an operator.
+   * `remediation.ts` is the consumer that makes it load-bearing: a change
+   * generated for a row nobody assessed is a guess with a pull request button
+   * beside it.
+   *
+   * Absent means assessed, which is every row a probe answered.
+   */
+  readonly assessed?: boolean;
+  /**
    * What would clear it, as Terraform, and where that belongs.
    *
    * Absent on a stored row and present on a read one: the loops store what was
@@ -499,6 +521,9 @@ export function resolveCapabilities(
  * §13: connect always succeeds. A Target that cannot be inspected is therefore
  * created — or kept — with every item unmet and the fault stated, rather than
  * the act failing and leaving nothing to look at.
+ *
+ * Every row `assessed: false`: nothing was asked, so nothing was observed, and
+ * a reader must not be able to mistake this for a boundary that answered.
  */
 export function unreachablePrerequisites(
   detail: string,
@@ -507,6 +532,7 @@ export function unreachablePrerequisites(
   return prerequisitesFor(adapter).map((name) => ({
     name,
     met: false,
+    assessed: false,
     detail,
   }));
 }

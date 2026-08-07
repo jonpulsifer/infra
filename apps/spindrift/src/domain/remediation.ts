@@ -16,12 +16,24 @@
  * green because the standing loop probed again, not because anything here
  * claimed it.
  *
- * Three rules decide what this module will and will not emit:
+ * Four rules decide what this module will and will not emit:
  *
  * 1. **Only what was observed.** A stanza names the project the probe named and
  *    the service it found switched off. There is no placeholder, no `TODO`, and
  *    no full set of services where one failed — a generated change an operator
  *    has to edit before reading is worse than none, because it looks finished.
+ *
+ *    The rule reaches further than the fields, and this is the half that is
+ *    easy to lose: an unmet row is not on its own an observation. Both
+ *    checklists report a row unmet when they could not assess it — a service
+ *    switched off stops the one probe that would have answered the other two,
+ *    a refused listing establishes nothing about what is in the project — and
+ *    they mark those rows {@link AnyPrerequisiteRow.assessed} `false` for this
+ *    reader. Generating from one would propose a grant for a call nobody made,
+ *    or a bucket nobody established was missing, under a pull request button.
+ *    So {@link remediationFor} takes the row rather than its name, and an
+ *    unassessed row is answered exactly as a Kubernetes one is: with the
+ *    reason there is no change rather than with a change.
  * 2. **Only where it belongs.** A stanza with no path is a snippet. The
  *    destination is the vessel's own declared Terraform root, and a boundary
  *    that declares none gets {@link RemediationDestination}'s `absent` arm —
@@ -33,6 +45,14 @@
  *    Those get {@link NoRemediation} with the reason, which the UI renders
  *    distinctly from a stanza that happens to be empty — the same
  *    found-versus-unavailable split `cloud-discovery.ts` keeps one noun down.
+ * 4. **Never a second writer of one fact.** A root that already declares the
+ *    bucket, the enabled service or the binding owns it, and a stanza appended
+ *    beside it is drift — which `AGENTS.md` prohibits by name — or, where the
+ *    resource address repeats, a root that no longer parses. This module
+ *    cannot read that root, so every stanza carries
+ *    {@link GeneratedRemediation.declares}: the strings a file that already
+ *    owns this fact would contain, which `integrations/github/remediation-pr.ts`
+ *    checks the destination for before it writes anything.
  *
  * **Composed at read time, never stored.** The loops store what was observed and
  * derive what it means, and a stanza is the second kind of thing: it moves when
@@ -40,6 +60,15 @@
  * new resource. A copy written into a checklist row would be a derivation that
  * goes stale with nothing to notice, which is the defect `target-loop.ts`
  * already names.
+ *
+ * **Literals, not a root's own locals.** A stanza names the project rather than
+ * `local.project`, and takes no `depends_on` on a service resource, because a
+ * root this generator has never read is a root whose locals and resource
+ * addresses it would be guessing at — and a stanza referring to one that is not
+ * there does not parse either. Rule 4 is what makes that safe rather than
+ * sloppy: where a root does own these facts, no stanza is offered at all, so
+ * the only file one is ever appended to is one that has nothing to match its
+ * spelling against.
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
 import type { Prerequisite } from './capabilities.ts';
@@ -47,6 +76,20 @@ import type { VesselPrerequisite } from './vessel.ts';
 
 /** Any row either checklist can put on a screen. */
 export type AnyPrerequisite = Prerequisite | VesselPrerequisite;
+
+/**
+ * An unmet row, as this module reads one.
+ *
+ * The name says which change would clear it; `assessed` says whether anything
+ * established it needs clearing. Both checklists carry the second — see
+ * `PrerequisiteResult.assessed` — and a caller that passed only the name would
+ * be handing this generator a row nobody looked at.
+ */
+export interface AnyPrerequisiteRow {
+  readonly name: AnyPrerequisite;
+  /** `false` where the probe never got far enough to reach a verdict. */
+  readonly assessed?: boolean;
+}
 
 /**
  * Where a stanza belongs.
@@ -72,6 +115,23 @@ export interface GeneratedRemediation {
   readonly destination: RemediationDestination;
   /** The stanza, exactly as it would be committed. */
   readonly terraform: string;
+  /**
+   * The strings a destination that already owns this fact would contain: the
+   * resource address this stanza takes, and the value it manages.
+   *
+   * Written here because this is where the stanza is written and nowhere else
+   * knows what it asserts. What it is *for* is one step away: a root that
+   * already declares the bucket, enables the service or binds the role does not
+   * need this change and must not be given it twice. A repeated resource
+   * address does not parse at all, and a second resource managing one fact is
+   * drift — the failure `services.tf` in the real root would take, where
+   * `google_project_service.service` already holds every API in a `for_each`.
+   *
+   * Substrings rather than a parse, because this module emits HCL and does not
+   * read it, and the one thing a formatted `.tf` file spells predictably is a
+   * quoted string.
+   */
+  readonly declares: readonly string[];
 }
 
 /** Why this row has no generated change — never rendered as an empty box. */
@@ -180,11 +240,24 @@ const NOT_TERRAFORM: Partial<Record<AnyPrerequisite, string>> = {
  *
  * Total over both checklists: every unmet row an operator can see gets an
  * answer here, so the UI never has to decide what an absent remediation meant.
+ *
+ * The row rather than its name, and the unassessed arm ahead of everything
+ * else, because that arm is the one a caller cannot be trusted to remember: a
+ * row is unmet either because something was observed wrong or because nothing
+ * was observed at all, and only the first is a fault a stanza addresses.
  */
 export function remediationFor(
-  name: AnyPrerequisite,
+  row: AnyPrerequisiteRow,
   subject: RemediationSubject,
 ): Remediation {
+  const name = row.name;
+  if (row.assessed === false) {
+    return {
+      kind: 'none',
+      reason: `nothing here observed ${name} failing — the probe stopped before it could assess this row, and a change generated from an observation nobody made is a guess with a pull request beside it`,
+    };
+  }
+
   const stated = NOT_TERRAFORM[name];
   if (stated !== undefined) return { kind: 'none', reason: stated };
 
@@ -213,11 +286,17 @@ function enablePlatformApi(subject: RemediationSubject): Remediation {
         'nothing observed which project this row is about, or which service was switched off in it',
     };
   }
+  const label = identifier(`spindrift_${service.split('.')[0]}`);
   return {
     kind: 'generated',
     summary: `Enable ${service} on ${subject.project}. Only the service this probe found switched off; the rest of the project’s services are untouched.`,
     destination: destinationOf(subject, DESTINATION_FILE.PLATFORM_API),
-    terraform: `resource "google_project_service" "${identifier(`spindrift_${service.split('.')[0]}`)}" {
+    // The service string and not only the address: a root that enables its
+    // APIs through one `for_each` resource owns this service under a label
+    // nothing here can predict, and appending beside it is two resources
+    // managing one enablement.
+    declares: [address('google_project_service', label), quote(service)],
+    terraform: `resource "google_project_service" "${label}" {
   project            = ${quote(subject.project)}
   service            = ${quote(service)}
   disable_on_destroy = false
@@ -243,11 +322,17 @@ function grantFederatedAccess(subject: RemediationSubject): Remediation {
         'this installation federates without impersonating a service account, so the principal a grant must name is decided by the pool provider’s attribute mapping rather than by anything Spindrift holds',
     };
   }
+  const label = identifier(`spindrift_${role.slice(role.indexOf('/') + 1)}`);
   return {
     kind: 'generated',
     summary: `Grant ${subject.principal} ${role} on ${subject.project}, which is the role that admits the call this probe was refused.`,
     destination: destinationOf(subject, DESTINATION_FILE.OIDC_FEDERATION),
-    terraform: `resource "google_project_iam_member" "${identifier(`spindrift_${role.slice(role.indexOf('/') + 1)}`)}" {
+    // The role string as well, for the reason the service is checked: a root
+    // that grants its roles through one `for_each` over a local set already
+    // binds this one, and a second `google_project_iam_member` beside it is a
+    // second manager of one binding rather than a change that clears anything.
+    declares: [address('google_project_iam_member', label), quote(role)],
+    terraform: `resource "google_project_iam_member" "${label}" {
   project = ${quote(subject.project)}
   role    = ${quote(role)}
   member  = ${quote(subject.principal)}
@@ -276,6 +361,10 @@ function declareSourceBucket(subject: RemediationSubject): Remediation {
     kind: 'generated',
     summary: `Declare ${subject.sourceBucket} in ${subject.project}, at the location this boundary’s connected surface names.`,
     destination: destinationOf(subject, DESTINATION_FILE.SOURCE_BUCKET),
+    declares: [
+      address('google_storage_bucket', 'spindrift_source'),
+      quote(subject.sourceBucket),
+    ],
     terraform: `resource "google_storage_bucket" "spindrift_source" {
   project                     = ${quote(subject.project)}
   name                        = ${quote(subject.sourceBucket)}
@@ -318,6 +407,16 @@ function destinationOf(
 /** A Terraform resource name: the label characters HCL admits, and no others. */
 function identifier(value: string): string {
   return value.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+/**
+ * A resource address as a formatted `.tf` file spells it — the two quoted
+ * labels with the single space `terraform fmt` normalizes to, and without the
+ * `resource` keyword, so it matches a `moved` or `import` block naming the same
+ * address just as well as the declaration itself.
+ */
+function address(type: string, label: string): string {
+  return `${quote(type)} ${quote(label)}`;
 }
 
 /** A quoted HCL string. Closed input, so JSON's escaping is exactly right. */

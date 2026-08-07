@@ -185,6 +185,16 @@ export interface VesselPrerequisiteResult {
   /** Why it is unmet. §3's grammar: an exclusion carries its reason. */
   readonly detail?: string;
   /**
+   * Whether a read reached a verdict on this row — a Target's `assessed` one
+   * noun up, and load-bearing for the same reason.
+   *
+   * `false` is `Discovered`'s `unavailable` arm arriving here intact: a refused
+   * or unreachable listing establishes nothing, and `holds` keeps it apart from
+   * an established absence precisely so that nothing downstream can treat a
+   * boundary that would not answer as a boundary that answered no.
+   */
+  readonly assessed?: boolean;
+  /**
    * What would clear it, as Terraform — a Target's `remediation` one noun up,
    * and composed at read time for the same reason.
    */
@@ -206,6 +216,7 @@ export function unreachableVesselPrerequisites(
   return vesselPrerequisitesFor(kind, roles).map((name) => ({
     name,
     met: false,
+    assessed: false,
     detail,
   }));
 }

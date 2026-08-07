@@ -111,14 +111,23 @@ export function remediationSubject(
   };
 }
 
-/** A checklist row, as this module reads either checklist's. */
+/**
+ * A checklist row, as this module reads either checklist's.
+ *
+ * `assessed` travels with the name because `met: false` on its own does not say
+ * why, and the two reasons want opposite answers: a fault that was observed has
+ * a change that clears it, and a row a probe never reached has nothing to
+ * generate from. Passing the row through rather than its name is what keeps
+ * that decision inside `remediationFor`, where both callers get it.
+ */
 interface ChecklistRow {
   readonly name: AnyPrerequisite;
   readonly met: boolean;
+  readonly assessed?: boolean;
 }
 
 /**
- * Give every unmet row the change that clears it.
+ * Give every unmet row the change that clears it, or the reason there is none.
  *
  * Met rows are left exactly as stored: there is nothing to clear, and a
  * remediation beside a green row would be a change somebody might apply.
@@ -128,8 +137,6 @@ export function withRemediations<T extends ChecklistRow>(
   subject: RemediationSubject,
 ): readonly (T & { readonly remediation?: Remediation })[] {
   return items.map((item) =>
-    item.met
-      ? item
-      : { ...item, remediation: remediationFor(item.name, subject) },
+    item.met ? item : { ...item, remediation: remediationFor(item, subject) },
   );
 }

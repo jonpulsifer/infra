@@ -25,6 +25,12 @@
  * whereas reporting it met would be core deciding that what it failed to check
  * was fine.
  *
+ * That row also carries `assessed: false`, which is the same distinction in a
+ * field rather than in a sentence. The detail is written for an operator and a
+ * reader downstream must not have to parse it: `remediation.ts` generates the
+ * Terraform that clears an observed fault, and a row from either arm below
+ * would otherwise be handed a change for something nothing here checked.
+ *
  * That same probe answers a second question — {@link cloudSurfaceProbe} — which
  * is whether this project carries the runtime at all. It is separate from the
  * checklist because it decides something the checklist never did: whether there
@@ -84,6 +90,7 @@ export function cloudChecklist(
     return checklist({
       PLATFORM_API: {
         met: false,
+        assessed: true,
         detail: `the ${subject.service} API is not enabled on ${subject.project}`,
       },
       OIDC_FEDERATION: notAssessed(subject.service),
@@ -96,6 +103,7 @@ export function cloudChecklist(
       PLATFORM_API: { met: true },
       OIDC_FEDERATION: {
         met: false,
+        assessed: true,
         detail: `the federated identity may not act on ${subject.scope}: ${probe.message}`,
       },
       // Not assessed rather than met: a project that refuses to answer has not
@@ -112,6 +120,7 @@ export function cloudChecklist(
       OIDC_FEDERATION: notAssessed(subject.service),
       VESSEL: {
         met: false,
+        assessed: true,
         detail: `${subject.scope} does not exist, and Spindrift never creates a vessel (§14)`,
       },
     });
@@ -166,22 +175,38 @@ export function cloudSurfaceProbe(
 
 /** Every item unmet, with one sentence — the Target nothing is known about. */
 function allUnmet(detail: string): readonly PrerequisiteResult[] {
-  return CLOUD_PREREQUISITES.map((name) => ({ name, met: false, detail }));
+  return CLOUD_PREREQUISITES.map((name) => ({
+    name,
+    met: false,
+    assessed: false,
+    detail,
+  }));
 }
 
-function notAssessed(service: string): { met: false; detail: string } {
+function notAssessed(service: string): Unmet {
   return {
     met: false,
+    assessed: false,
     detail: `not assessed: the ${service} probe did not get far enough to check this`,
   };
 }
 
+/**
+ * One unmet answer, and whether the probe got far enough to reach it.
+ *
+ * `assessed` is required rather than optional here so that adding an arm to the
+ * table above is a decision about which kind of unmet it is, made where the
+ * refusal is read, rather than a default taken by omission.
+ */
+type Unmet = {
+  readonly met: false;
+  readonly assessed: boolean;
+  readonly detail: string;
+};
+
 /** Assemble the three in their declared order, so the UI never reorders them. */
 function checklist(
-  answers: Record<
-    (typeof CLOUD_PREREQUISITES)[number],
-    { met: true } | { met: false; detail: string }
-  >,
+  answers: Record<(typeof CLOUD_PREREQUISITES)[number], { met: true } | Unmet>,
 ): readonly PrerequisiteResult[] {
   return CLOUD_PREREQUISITES.map((name) => ({ name, ...answers[name] }));
 }

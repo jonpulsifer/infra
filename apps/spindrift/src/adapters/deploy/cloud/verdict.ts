@@ -78,6 +78,12 @@ export function orderedChecklist(
     results.map((result) => [result.name, result]),
   );
   return prerequisitesFor(adapter).map(
-    (name) => found.get(name) ?? { name, met: false, detail: 'not assessed' },
+    (name) =>
+      found.get(name) ?? {
+        name,
+        met: false,
+        assessed: false,
+        detail: 'not assessed',
+      },
   );
 }
