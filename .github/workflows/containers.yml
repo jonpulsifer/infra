@@ -156,9 +156,22 @@ jobs:
             # The name must be followed by `:` or `@` so that a repository whose
             # path merely starts with this one — `spindrift` and
             # `spindrift-demo` are both published here — is not rewritten by it.
-            # The registry is deliberately unanchored: these manifests pin from
-            # both ghcr.io and docker.io.
-            ref="[^[:space:]\"']*/${IMAGE_NAME}(:[^@[:space:]]+)?"
+            #
+            # The registry is anchored to ghcr.io because that is the only place
+            # this job pushes (see the `images:` input above). A digest is
+            # content-addressed per registry, so stamping this one onto a ref
+            # that resolves anywhere else yields a pin that cannot be pulled —
+            # and the failure lands on the cluster, long after CI goes green.
+            ref="ghcr\.io/[^[:space:]\"']*/${IMAGE_NAME}(:[^@[:space:]]+)?"
+
+            # Refuse rather than rewrite when the manifest pins this image from
+            # somewhere other than ghcr.io, so the mismatch is a red build
+            # instead of an ImagePullBackOff nobody is watching for.
+            if grep -qE "[^[:space:]\"']*/${IMAGE_NAME}(:[^@[:space:]]+)?@sha256:[0-9a-f]{64}" "$manifest" \
+              && ! grep -qE "${ref}@sha256:[0-9a-f]{64}" "$manifest"; then
+              echo "::error::$manifest pins $IMAGE_NAME from a registry this job does not publish to; only ghcr.io digests are valid here"
+              exit 1
+            fi
             if grep -qE "${ref}@sha256:[0-9a-f]{64}" "$manifest"; then
               echo "Updating digest for $IMAGE_NAME in $manifest..."
               # DIGEST already carries the sha256: prefix, so the capture group
