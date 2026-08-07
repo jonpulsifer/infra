@@ -1,15 +1,27 @@
 name: TypeScript Benchmark
 
+# Compares runner labels on one identical real workload. `skiff-ubuntu` belongs
+# here on the strongest possible footing: its rootfs is the very same pinned
+# actions-runner image digest ARC boots (nix/images/hull-ubuntu.nix,
+# clusters/base/apps/arc/infra.yaml), so a difference in these numbers is the
+# runner and not the toolchain.
+#
+# `skiff-nixos` is deliberately absent. It shares the host's /nix/store and has
+# no FHS, so setup-bun's dynamically-linked download cannot run there — the same
+# wall the ARC runners hit. It is a hull for jobs that build with Nix, not for
+# this suite.
+
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Runner target to test (all runs offsite, folly, and ubuntu-latest in parallel matrix)'
+        description: 'Runner target to test (all runs every label below in a parallel matrix)'
         type: choice
         options:
           - all
           - infra-offsite
           - infra-folly
+          - skiff-ubuntu
           - ubuntu-latest
         default: all
 
@@ -26,10 +38,38 @@ jobs:
       - id: set-runners
         run: |
           if [ "${{ inputs.target }}" = "all" ]; then
-            echo 'runners=["infra-offsite", "infra-folly", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'runners=["infra-offsite", "infra-folly", "skiff-ubuntu", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           else
             echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
           fi
+
+  # The cheapest job that can exist, on every label, so the Actions timings
+  # separate what a runner costs to acquire from what the workload costs to
+  # run. That split is the whole argument for a warm microVM pool: a skiff is
+  # already booted and JIT-registered when the job arrives, an ARC runner is a
+  # pod that must be scheduled, and a GitHub-hosted runner is a queue.
+  #
+  # It also records what hardware each label actually lands on, which is the
+  # context every number below is meaningless without.
+  overhead:
+    needs: configure
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJson(needs.configure.outputs.runners) }}
+    name: overhead (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: What am I
+        run: |
+          printf 'label      %s\n' '${{ matrix.runner }}'
+          printf 'kernel     %s\n' "$(uname -r)"
+          printf 'cores      %s\n' "$(nproc)"
+          printf 'memory     %s\n' "$(awk '/MemTotal/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo)"
+          printf 'uptime     %ss (how long this machine existed before the job)\n' "$(cut -d' ' -f1 /proc/uptime)"
 
   benchmark:
     needs: configure
