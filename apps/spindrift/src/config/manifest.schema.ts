@@ -137,10 +137,52 @@ const reachSchema = z.enum(['none', 'private', 'public']);
  * gets the first of `supplyChain.registry`, which is not the same answer as one
  * that reaches none.
  */
+/**
+ * The installation-wide services one vessel holds for every other.
+ *
+ * These were four unrelated top-level keys — `sources.defaultBucket`,
+ * `cloud.artifactsProject`, `secretStore.container` and
+ * `cloud.homeVesselProject` — that happened to describe one boundary. Nothing
+ * said they had to, so nothing noticed when they stopped: a bucket in one
+ * project, a store in another and a `homeVesselProject` naming a third is a
+ * document that validates and then fails at the first signed URL.
+ *
+ * Stated on the vessel they are one boundary's properties, and the fourth
+ * collapses entirely — where the home vessel *is* is its `location`, which every
+ * vessel already carries and which two keys can no longer disagree about.
+ *
+ * Only the vessel `installation.homeVessel` names may carry this block, and it
+ * must: the document-level refinement below enforces both halves, so a reader
+ * asking for the source bucket resolves exactly one answer.
+ */
+export const sharedServicesSchema = z
+  .object({
+    /** Where archive sources and artifacts are staged before a build (§4). */
+    sourceBucket: nonEmptyString,
+    /**
+     * Project holding immutable build artifacts and signing material, shared
+     * across every vessel (§14). Its own project rather than this vessel's: an
+     * installation may publish artifacts from a project it runs nothing in, and
+     * this one does.
+     */
+    artifactsProject: nonEmptyString,
+    /**
+     * What holds the items inside the secret store: the vessel's project for
+     * Secret Manager, the vault for 1Password.
+     *
+     * One key rather than one per adapter, because the two are the same thing
+     * under different names, and a per-adapter block would let an installation
+     * configure a store it does not use.
+     */
+    secretStoreContainer: nonEmptyString,
+  })
+  .strict();
+
 const vesselFacts = {
   name: targetNameSchema,
   servedHosts: z.array(nonEmptyString).optional(),
   reachableRegistries: z.array(nonEmptyString).optional(),
+  shared: sharedServicesSchema.optional(),
 };
 
 /**
@@ -268,10 +310,45 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
 export const installationManifestSchema = z
   .object({
     /**
-     * Opaque label for this installation. Appears in the UI and in logs; it
-     * carries no behaviour.
+     * What this installation is, and which two vessels it is built on.
+     *
+     * The two pointers are scalars naming a declared vessel, and cardinality
+     * comes free with that: a field that names one vessel has nothing to
+     * constrain, no partial unique index, and no guard that can drift from the
+     * column it guards. An `is_home boolean` could express neither — it would be
+     * true of two rows and say nothing about which.
+     *
+     * "This vessel is undeletable" then stops being a column and becomes
+     * *something points at it*, which is the check `targets`' `restrict` already
+     * performs one noun down. Neither pointer is a foreign key, so the guard is
+     * explicit in the command paths rather than in the schema — see
+     * `disconnectTarget`.
      */
-    installation: nonEmptyString,
+    installation: z
+      .object({
+        /**
+         * Opaque label for this installation. Appears in the UI and in logs; it
+         * carries no behaviour.
+         */
+        name: nonEmptyString,
+        /**
+         * The vessel this control plane runs on (§19).
+         *
+         * Being *also* an ordinary deploy Target is fine and needs no marking:
+         * it is the in-cluster destination, first in `targets` and rank 0, and
+         * an ordinary destination besides.
+         */
+        controlPlaneVessel: targetNameSchema,
+        /**
+         * The vessel holding this installation's shared services — the source
+         * bucket, the secret store, the artifacts project and the signer.
+         *
+         * Where the installer put them, so it is an install-time fact rather
+         * than an operator choice; there is no act that moves it.
+         */
+        homeVessel: targetNameSchema,
+      })
+      .strict(),
 
     controlPlane: z
       .object({
@@ -350,46 +427,33 @@ export const installationManifestSchema = z
       .object({
         /**
          * First-party GCS buckets for staging archive sources and artifacts (§4, §13).
+         *
+         * **No `defaultBucket` beside it.** Which of them staging picks is a
+         * property of the home vessel — `shared.sourceBucket` — because a
+         * default stated here could name a bucket in a project nothing else in
+         * this document mentions.
          */
         buckets: z.array(nonEmptyString).min(1),
-        /**
-         * Default GCS bucket for staging archive sources and artifacts.
-         */
-        defaultBucket: nonEmptyString.optional(),
       })
       .strict(),
 
-    cloud: z
-      .object({
-        /**
-         * Project holding immutable build artifacts and signing material. Shared
-         * across every vessel (§14).
-         */
-        artifactsProject: nonEmptyString,
-        /**
-         * Spindrift's own project, and the default shared vessel for Apps that
-         * do not choose one (§14).
-         */
-        homeVesselProject: nonEmptyString,
-        /**
-         * **No `federation` key, and that is the point.**
-         *
-         * §13's one auth mode — "native OIDC federation, nothing stored" — is
-         * an `external_account` credential document, and the installer chart
-         * already writes one from the workload-identity audience and mount path
-         * a release names. Asking for the same four facts here made a second
-         * copy, by hand, in a document the chart does not render; the two could
-         * disagree, they did, and the failure arrived as a `signBlob` refusal
-         * that read as a code defect.
-         *
-         * It is now resolved from the mounted credential —
-         * `federation-credential.ts` — and appears on {@link
-         * InstallationManifest} without ever being authored. Nullable exactly
-         * as before, and for the same reason: an installation with no cloud
-         * Targets mounts no credential and has no honest value here.
-         */
-      })
-      .strict(),
+    /**
+     * **No `cloud` block at all, and that is now the whole of it.**
+     *
+     * §13's one auth mode — "native OIDC federation, nothing stored" — is an
+     * `external_account` credential document, and the installer chart already
+     * writes one from the workload-identity audience and mount path a release
+     * names. Asking for the same four facts here made a second copy, by hand,
+     * in a document the chart does not render; the two could disagree, they
+     * did, and the failure arrived as a `signBlob` refusal that read as a code
+     * defect. The two keys that stayed — `artifactsProject` and
+     * `homeVesselProject` — are properties of the vessel `installation.homeVessel`
+     * names, so the block has nothing authored left in it.
+     *
+     * `cloud.federation` is resolved from the mounted credential —
+     * `federation-credential.ts` — and appears on {@link InstallationManifest}
+     * without ever being authored.
+     */
 
     charts: z
       .object({
@@ -570,14 +634,11 @@ export const installationManifestSchema = z
          */
         endpoint: z.string().url(),
         /**
-         * What holds the items inside that store: the vessel's project for Secret
-         * Manager, the vault for 1Password.
-         *
-         * One key rather than one per adapter, because the two are the same
-         * thing under different names, and a per-adapter block would let an
-         * installation configure a store it does not use.
+         * **No `container` here.** What holds the items is a property of the
+         * boundary they live in, so it is `shared.secretStoreContainer` on the
+         * home vessel — the same place the source bucket and the artifacts
+         * project moved to, and for the same reason.
          */
-        container: nonEmptyString,
       })
       .strict(),
 
@@ -653,6 +714,43 @@ export const installationManifestSchema = z
         message: `no vessel named ${target.vessel} is declared`,
       });
     });
+
+    // The two the installation itself is built on, resolved the same way a
+    // Target's `vessel` is. A pointer that does not resolve is the one shape of
+    // this document that cannot boot: the home vessel is where the source
+    // bucket, the store and the signer are read from, and nothing below can
+    // pick a fallback that would not be a guess about somebody's cloud.
+    for (const key of ['controlPlaneVessel', 'homeVessel'] as const) {
+      if (declared.has(manifest.installation[key])) continue;
+      context.addIssue({
+        code: 'custom',
+        path: ['installation', key],
+        message: `no vessel named ${manifest.installation[key]} is declared`,
+      });
+    }
+
+    // Exactly one vessel carries the shared services, and it is the one the
+    // pointer names. Both halves, because either alone leaves a reader with a
+    // question: none declared is a source bucket nobody stated, and a second
+    // one declared is two answers to `sourceBucket` with nothing to choose
+    // between them.
+    manifest.vessels.forEach((vessel, index) => {
+      const isHome = vessel.name === manifest.installation.homeVessel;
+      if (isHome && vessel.shared === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['vessels', index, 'shared'],
+          message: `${vessel.name} is this installation's home vessel and must declare its shared services`,
+        });
+      }
+      if (!isHome && vessel.shared !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['vessels', index, 'shared'],
+          message: `only ${manifest.installation.homeVessel}, this installation's home vessel, may declare shared services`,
+        });
+      }
+    });
   });
 
 export type TargetAdapter = z.infer<typeof targetAdapterSchema>;
@@ -661,6 +759,7 @@ export type BuildRouteAdapter = z.infer<typeof buildRouteAdapterSchema>;
 export type BuildRouteConfig = z.infer<typeof buildRouteSchema>;
 export type TargetSeed = z.infer<typeof targetSeedSchema>;
 export type VesselSeed = z.infer<typeof vesselSeedSchema>;
+export type SharedServices = z.infer<typeof sharedServicesSchema>;
 export type GatewayAuthConfig = z.infer<typeof gatewayAuthSchema>;
 
 /**
@@ -680,12 +779,132 @@ export type AuthoredManifest = z.infer<typeof installationManifestSchema>;
  * derived value is present for readers and unreachable from any write path,
  * which is what makes disagreement impossible rather than merely discouraged.
  */
-export type InstallationManifest = Omit<AuthoredManifest, 'cloud'> & {
-  readonly cloud: AuthoredManifest['cloud'] & {
+export type InstallationManifest = AuthoredManifest & {
+  readonly cloud: {
     /** Resolved from the credential the deployment mounts, never authored. */
     readonly federation: FederationConfig | null;
   };
 };
+
+/** The document both halves of a pointer are resolved against. */
+type PointedAt = Pick<AuthoredManifest, 'installation' | 'vessels'>;
+
+/**
+ * The vessel one of the installation's two pointers names.
+ *
+ * Total, because the document-level refinement above already refused a pointer
+ * that resolves to nothing — so a validated manifest cannot reach here without
+ * an answer, and the throw is the assertion of that rather than a case a caller
+ * has to handle.
+ */
+function pointedVessel(manifest: PointedAt, name: string): VesselSeed {
+  const vessel = manifest.vessels.find((declared) => declared.name === name);
+  if (vessel === undefined) {
+    throw new Error(`no vessel named ${name} is declared`);
+  }
+  return vessel;
+}
+
+/** The vessel holding this installation's shared services. */
+export function homeVesselOf(manifest: PointedAt): VesselSeed {
+  return pointedVessel(manifest, manifest.installation.homeVessel);
+}
+
+/** The vessel this control plane runs on (§19). */
+export function controlPlaneVesselOf(manifest: PointedAt): VesselSeed {
+  return pointedVessel(manifest, manifest.installation.controlPlaneVessel);
+}
+
+/**
+ * The source bucket, the artifacts project and the store container, read off
+ * the one vessel that holds them.
+ *
+ * Total for the same reason {@link pointedVessel} is: the refinement requires
+ * the home vessel to declare this block and forbids every other vessel from
+ * carrying one, so there is exactly one answer and it is present.
+ */
+export function sharedServicesOf(manifest: PointedAt): SharedServices {
+  const home = homeVesselOf(manifest);
+  if (home.shared === undefined) {
+    throw new Error(`${home.name} declares no shared services`);
+  }
+  return home.shared;
+}
+
+/**
+ * The project the home vessel is, or `null` where the declaration seeds its
+ * identity without saying where it is.
+ *
+ * `null` rather than a throw because that half-ready state is one §13 intends to
+ * be visible: `location` is optional on a vessel seed for the same reason the
+ * column is nullable, and a bucket check against `undefined` is worse than a
+ * stated absence.
+ */
+export function homeVesselProjectOf(manifest: PointedAt): string | null {
+  const location = homeVesselOf(manifest).location;
+  return location !== undefined && 'project' in location
+    ? location.project
+    : null;
+}
+
+/**
+ * Whether this vessel is one the installation itself is built on.
+ *
+ * The predicate every guard and every read-only screen asks. Neither pointer is
+ * a foreign key, so this is what stands in for one.
+ */
+export function isDeclaredInstallationVessel(
+  manifest: Pick<AuthoredManifest, 'installation'>,
+  vessel: string,
+): boolean {
+  return (
+    vessel === manifest.installation.homeVessel ||
+    vessel === manifest.installation.controlPlaneVessel
+  );
+}
+
+/**
+ * Every path in a document a mounted declaration governs, as
+ * `web/forms/document.ts` addresses one — the two pointers, and whichever
+ * entries of `vessels` they name. `[]` when nothing is mounted, which is when
+ * nothing is governed.
+ *
+ * **By name resolved against the document, never by a position carried from
+ * anywhere else.** `vessels` is an array an editing surface adds to and removes
+ * from, so a position computed before an edit addresses a different entry after
+ * it.
+ *
+ * Both arguments are `unknown` because both callers hold one: the declaration
+ * arrives over the wire and the document is mid-edit, and a predicate that only
+ * answered for a document that already validates would stop locking exactly
+ * while a mistake was being typed.
+ */
+export function governedManifestPaths(
+  declaration: unknown,
+  document: unknown,
+): readonly (readonly (string | number)[])[] {
+  const pointers = (declaration as { installation?: Record<string, unknown> })
+    ?.installation;
+  const governed = new Set(
+    (['controlPlaneVessel', 'homeVessel'] as const)
+      .map((key) => pointers?.[key])
+      .filter((name): name is string => typeof name === 'string'),
+  );
+  if (governed.size === 0) return [];
+
+  const declared = (document as { vessels?: unknown })?.vessels;
+  const entries = Array.isArray(declared) ? declared : [];
+  return [
+    ['installation', 'controlPlaneVessel'],
+    ['installation', 'homeVessel'],
+    ...entries.flatMap((vessel, index) => {
+      const name = (vessel as { name?: unknown })?.name;
+      return typeof name === 'string' && governed.has(name)
+        ? [['vessels', index] as readonly (string | number)[]]
+        : [];
+    }),
+  ];
+}
 
 /**
  * Project a resolved manifest back down to the document an operator may write.
@@ -704,6 +923,6 @@ export type InstallationManifest = Omit<AuthoredManifest, 'cloud'> & {
 export function toAuthoredManifest(
   manifest: InstallationManifest,
 ): AuthoredManifest {
-  const { federation: _derived, ...cloud } = manifest.cloud;
-  return { ...manifest, cloud };
+  const { cloud: _derived, ...authored } = manifest;
+  return authored;
 }

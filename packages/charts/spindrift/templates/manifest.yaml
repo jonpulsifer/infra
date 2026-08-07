@@ -18,8 +18,8 @@ document is this chart's own copy of the placeholder, built to already agree
 with `.Values.hostname`, so there is nothing for it to disagree with.
 */}}
 {{- if .Values.manifest }}
-{{- if dig "cloud" "federation" nil .Values.manifest }}
-{{- fail "manifest.cloud.federation is not a manifest key: federation is read from the external_account credential this chart renders. Set serviceAccount.token.gcpAudience and serviceAccount.token.gcpImpersonationUrl instead." }}
+{{- if hasKey .Values.manifest "cloud" }}
+{{- fail "manifest.cloud is not a manifest key. Federation is read from the external_account credential this chart renders — set serviceAccount.token.gcpAudience and serviceAccount.token.gcpImpersonationUrl instead — and the artifacts project and the home vessel's own project are properties of the vessel installation.homeVessel names." }}
 {{- end }}
 {{- if dig "charts" "installer" nil .Values.manifest }}
 {{- fail "manifest.charts.installer is not a manifest key: nothing reads it. Remove it." }}

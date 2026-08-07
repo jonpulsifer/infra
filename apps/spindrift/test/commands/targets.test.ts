@@ -31,6 +31,7 @@ import type {
 } from '../../src/commands/types.ts';
 import {
   type InstallationManifest,
+  sharedServicesOf,
   type TargetAdapter,
   toAuthoredManifest,
 } from '../../src/config/manifest.schema.ts';
@@ -45,7 +46,10 @@ import {
   vessels,
 } from '../../src/db/schema.ts';
 import { deployState } from '../../src/domain/target.ts';
-import { surfacesToProbe } from '../../src/domain/vessel.ts';
+import {
+  surfacesToProbe,
+  vesselPrerequisitesFor,
+} from '../../src/domain/vessel.ts';
 import { restoreDeclaredTargetConnections } from '../../src/reconciler/target-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
@@ -581,11 +585,20 @@ describe('an operator’s Target correction outlives the next boot', () => {
     const platform = input.chartValues?.platform as Record<string, unknown>;
     return {
       ...toAuthoredManifest(manifest),
+      // One declared boundary, so it is both of the two the installation is
+      // built on. `shared` follows the pointer rather than the kind: only the
+      // vessel `homeVessel` names may carry it, and it must.
+      installation: {
+        ...manifest.installation,
+        controlPlaneVessel: 'cluster',
+        homeVessel: 'cluster',
+      },
       vessels: [
         {
           name: 'cluster',
           kind: 'cluster' as const,
           location: { apiServer: input.apiServer },
+          shared: sharedServicesOf(manifest),
         },
       ],
       targets: [
@@ -691,12 +704,15 @@ describe('an operator’s Target correction outlives the next boot', () => {
 describe('disconnect strands rather than stops', () => {
   test('an impact review names Deploys without changing state', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
-    const target = (await targetRow('cluster'))!;
+    await connectTarget(
+      clusterInput({ vessel: 'app-cluster' }),
+      context(registry),
+    );
+    const target = (await targetRow('app-cluster'))!;
     const { app, component } = await seedLiveDeploy(target.id, 'preview-ref');
 
     const result = await disconnectTarget(
-      { vessel: 'cluster', adapter: 'kubernetes', confirm: false },
+      { vessel: 'app-cluster', adapter: 'kubernetes', confirm: false },
       context(registry),
     );
     if (!result.ok) throw new Error('disconnect review refused');
@@ -710,17 +726,20 @@ describe('disconnect strands rather than stops', () => {
       .from(deploys)
       .where(eq(deploys.targetId, target.id));
     expect(row?.orphanedAt).toBeNull();
-    expect((await targetRow('cluster'))?.status).toBe('connected');
+    expect((await targetRow('app-cluster'))?.status).toBe('connected');
   });
 
   test('live Deploys go orphaned and are named, and nothing is destroyed', async () => {
     const { registry, of } = fakes();
-    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
-    const target = (await targetRow('cluster'))!;
+    await connectTarget(
+      clusterInput({ vessel: 'app-cluster' }),
+      context(registry),
+    );
+    const target = (await targetRow('app-cluster'))!;
     const { app, component } = await seedLiveDeploy(target.id, 'ref-1');
 
     const result = await disconnectTarget(
-      { vessel: 'cluster', adapter: 'kubernetes' },
+      { vessel: 'app-cluster', adapter: 'kubernetes' },
       context(registry),
     );
 
@@ -746,7 +765,7 @@ describe('disconnect strands rather than stops', () => {
     expect(
       deployState({ phase: row!.phase, orphanedAt: row!.orphanedAt }),
     ).toBe('orphaned');
-    expect((await targetRow('cluster'))?.status).toBe('disconnected');
+    expect((await targetRow('app-cluster'))?.status).toBe('disconnected');
 
     // A cluster being removed from the platform is exactly when tearing down
     // what runs on it would be the most destructive reading of the request.
@@ -755,13 +774,49 @@ describe('disconnect strands rather than stops', () => {
 
   test('disconnecting a Target with nothing on it strands nothing', async () => {
     const { registry } = fakes();
-    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
+    await connectTarget(
+      clusterInput({ vessel: 'app-cluster' }),
+      context(registry),
+    );
     const result = await disconnectTarget(
-      { vessel: 'cluster', adapter: 'kubernetes' },
+      { vessel: 'app-cluster', adapter: 'kubernetes' },
       context(registry),
     );
     if (!result.ok) throw new Error('disconnect refused');
     expect(result.value.stranded).toEqual([]);
+  });
+
+  test('a vessel the installation is built on cannot be disconnected', async () => {
+    // Neither pointer is a foreign key, so nothing else would stop this the way
+    // `targets_vessel_id_vessels_id_fk`'s `restrict` stops a vessel with
+    // surfaces from being dropped. The bootstrap paradox is what makes it worth
+    // an explicit guard: disconnecting the boundary this control plane runs on
+    // leaves a process that keeps serving until the next thing it tries to do.
+    const { registry } = fakes();
+    await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
+
+    for (const vessel of [
+      manifest.installation.controlPlaneVessel,
+      manifest.installation.homeVessel,
+    ]) {
+      const result = await disconnectTarget(
+        { vessel, adapter: 'kubernetes' },
+        context(registry),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+      expect(result.failure.message).toContain('built on');
+    }
+
+    // And refused before the review, so the impact screen never offers a
+    // button that cannot be pressed.
+    const review = await disconnectTarget(
+      { vessel: 'cluster', adapter: 'kubernetes', confirm: false },
+      context(registry),
+    );
+    expect(review.ok).toBe(false);
+    expect((await targetRow('cluster'))?.status).toBe('connected');
   });
 
   test('an unknown Target is a refusal with an identity', async () => {
@@ -779,13 +834,13 @@ describe('disconnect strands rather than stops', () => {
 describe('reconnect re-adopts via observe', () => {
   test('a workload the adapter still sees is adopted back', async () => {
     const { registry, of } = fakes();
-    const input = clusterInput({ vessel: 'cluster' });
+    const input = clusterInput({ vessel: 'app-cluster' });
 
     await connectTarget(input, context(registry));
-    const target = (await targetRow('cluster'))!;
+    const target = (await targetRow('app-cluster'))!;
     await seedLiveDeploy(target.id, 'ref-1');
     await disconnectTarget(
-      { vessel: 'cluster', adapter: 'kubernetes' },
+      { vessel: 'app-cluster', adapter: 'kubernetes' },
       context(registry),
     );
 
@@ -814,13 +869,13 @@ describe('reconnect re-adopts via observe', () => {
 
   test('a workload that is gone stays orphaned rather than resurrected', async () => {
     const { registry } = fakes();
-    const input = clusterInput({ vessel: 'cluster' });
+    const input = clusterInput({ vessel: 'app-cluster' });
 
     await connectTarget(input, context(registry));
-    const target = (await targetRow('cluster'))!;
+    const target = (await targetRow('app-cluster'))!;
     await seedLiveDeploy(target.id, 'ref-1');
     await disconnectTarget(
-      { vessel: 'cluster', adapter: 'kubernetes' },
+      { vessel: 'app-cluster', adapter: 'kubernetes' },
       context(registry),
     );
 
@@ -839,12 +894,12 @@ describe('reconnect re-adopts via observe', () => {
 
   test('a declarative reconnect waits for adapters, then re-adopts', async () => {
     const { registry, of } = fakes();
-    const input = clusterInput({ vessel: 'cluster' });
+    const input = clusterInput({ vessel: 'app-cluster' });
     await connectTarget(input, context(registry));
-    const target = (await targetRow('cluster'))!;
+    const target = (await targetRow('app-cluster'))!;
     await seedLiveDeploy(target.id, 'ref-1');
     await disconnectTarget(
-      { vessel: 'cluster', adapter: 'kubernetes' },
+      { vessel: 'app-cluster', adapter: 'kubernetes' },
       context(registry),
     );
     of('kubernetes').place('ref-1', {
@@ -854,11 +909,17 @@ describe('reconnect re-adopts via observe', () => {
     });
     const declared = {
       ...manifest,
+      installation: {
+        ...manifest.installation,
+        controlPlaneVessel: input.vessel,
+        homeVessel: input.vessel,
+      },
       vessels: [
         {
           name: input.vessel,
           kind: 'cluster',
           location: { apiServer: input.apiServer },
+          shared: sharedServicesOf(manifest),
         },
       ],
       targets: [
@@ -878,14 +939,14 @@ describe('reconnect re-adopts via observe', () => {
       // is the deployment's, and the schema refuses a document restating it.
       [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(declared)),
     });
-    expect((await targetRow('cluster'))?.status).toBe('disconnected');
+    expect((await targetRow('app-cluster'))?.status).toBe('disconnected');
 
     const readopted = await restoreDeclaredTargetConnections(
       context(registry),
       declared,
     );
     expect(readopted).toHaveLength(1);
-    expect((await targetRow('cluster'))?.status).toBe('connected');
+    expect((await targetRow('app-cluster'))?.status).toBe('connected');
     const [row] = await database()
       .db.select()
       .from(deploys)
@@ -1050,5 +1111,59 @@ describe('listTargets', () => {
     if (!result.ok) return;
     const k8s = result.value.targets.find((t) => t.adapter === 'kubernetes');
     expect(k8s?.canonical).toBe('*.apps.example.test');
+  });
+
+  test('answers the boundaries themselves, with the role each carries', async () => {
+    // The seam between the vessel catalogue and the screen. Both ends are well
+    // covered on their own; without this the payload the Targets surface reads
+    // its checklist section out of is asserted by nothing.
+    const { registry } = fakes();
+    await connectTarget(cloudInput({ vessel: 'cloud' }), context(registry));
+
+    const result = await listTargets({}, context(registry));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const home = result.value.vessels.find((vessel) => vessel.name === 'cloud');
+    expect(home?.roles).toEqual(['home']);
+    expect(home?.inspectedAt).toBeNull();
+  });
+
+  test('a vessel’s health is derived from its rows, not read off one', async () => {
+    // Health is not a column, for the reason `target-loop.ts` gives about a
+    // stored derivation going stale. Asserted through the catalogue rather than
+    // by mirroring it: an unmet row is unhealthy, and every row met is healthy.
+    const { registry } = fakes();
+    await connectTarget(cloudInput({ vessel: 'cloud' }), context(registry));
+
+    const catalogue = vesselPrerequisitesFor('gcp-project', ['home']);
+    expect(catalogue).toContain('SOURCE_BUCKET');
+
+    await database()
+      .db.update(vessels)
+      .set({
+        prerequisites: catalogue.map((name) => ({
+          name,
+          met: name !== 'SIGNER_KEY',
+        })),
+      })
+      .where(eq(vessels.name, 'cloud'));
+    const unhealthy = await listTargets({}, context(registry));
+    expect(unhealthy.ok).toBe(true);
+    if (!unhealthy.ok) return;
+    expect(
+      unhealthy.value.vessels.find((vessel) => vessel.name === 'cloud')?.health,
+    ).toBe('unhealthy');
+
+    await database()
+      .db.update(vessels)
+      .set({ prerequisites: catalogue.map((name) => ({ name, met: true })) })
+      .where(eq(vessels.name, 'cloud'));
+    const healthy = await listTargets({}, context(registry));
+    expect(healthy.ok).toBe(true);
+    if (!healthy.ok) return;
+    expect(
+      healthy.value.vessels.find((vessel) => vessel.name === 'cloud')?.health,
+    ).toBe('healthy');
   });
 });

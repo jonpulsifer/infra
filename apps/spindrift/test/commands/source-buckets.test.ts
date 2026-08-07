@@ -14,6 +14,7 @@ import type {
   AdapterRegistry,
   CommandContext,
 } from '../../src/commands/types.ts';
+import { sharedServicesOf } from '../../src/config/manifest.schema.ts';
 import {
   readStoredManifest,
   writeStoredManifest,
@@ -99,9 +100,21 @@ async function context(bucketStatus = 200): Promise<CommandContext> {
   };
 }
 
+/**
+ * The declared list and the one staging picks, read back from the row.
+ *
+ * Two keys from two places now, and deliberately asserted together: the list is
+ * `sources.buckets` and the choice is the home vessel's `shared.sourceBucket`,
+ * so a write that moved one without the other is a manifest whose staging
+ * bucket is not among its buckets.
+ */
 async function storedBuckets() {
   const stored = await readStoredManifest(database().db);
-  return stored?.sources;
+  if (stored === null) return null;
+  return {
+    buckets: stored.sources.buckets,
+    defaultBucket: sharedServicesOf(stored).sourceBucket,
+  };
 }
 
 describe('declaring a source bucket', () => {
@@ -202,5 +215,50 @@ describe('declaring a source bucket', () => {
       },
     );
     expect(without.ok && without.value.canVerify).toBe(false);
+  });
+});
+
+/**
+ * Which bucket a staging picks is a property of the home vessel, and an
+ * installation that mounts a declaration takes that vessel from it on every
+ * boot. So the choice is the declaration's there, and this command has to say
+ * so rather than write it.
+ */
+describe('an installation whose home vessel is declared', () => {
+  async function declared(): Promise<CommandContext> {
+    return { ...(await context()), declaration: await authoredFixture() };
+  }
+
+  test('adding a bucket is still this screen’s to do', async () => {
+    // `sources.buckets` is not the home vessel's, so nothing about it moves
+    // with the declaration and the ordinary act stays open.
+    const result = await useSourceBucket(
+      { bucketName: 'a-second-bucket', makeDefault: false },
+      await declared(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(await storedBuckets()).toMatchObject({
+      buckets: ['example-source-bucket', 'a-second-bucket'],
+    });
+  });
+
+  test('moving the default is refused rather than half-applied', async () => {
+    // Accepted, it would leave the bucket added and the choice reverted at the
+    // next restart — one act, half of it standing, and nothing on screen
+    // saying which half.
+    const result = await useSourceBucket(
+      { bucketName: 'a-second-bucket', makeDefault: true },
+      await declared(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain('shared.sourceBucket');
+    expect(await storedBuckets()).toMatchObject({
+      buckets: ['example-source-bucket'],
+      defaultBucket: 'example-source-bucket',
+    });
   });
 });

@@ -20,6 +20,8 @@ import { createAdapterRegistry } from '../../src/adapters/registry.ts';
 import {
   type DiscoveredFact,
   discoverInstallationFacts,
+  HOME_VESSEL,
+  placementOf,
 } from '../../src/commands/installation/discover.ts';
 import type { CommandContext } from '../../src/commands/types.ts';
 import type { InstallationManifest } from '../../src/config/manifest.ts';
@@ -97,10 +99,19 @@ function installation(options: FakeGcpDiscoveryOptions = {}) {
   return { fake, context: contextFor(fake) };
 }
 
+/**
+ * How the home vessel is addressed in a discovered path.
+ *
+ * Three of the five facts are that vessel's own properties, and they name it
+ * rather than the position it holds — the position is the document's to give,
+ * at the moment a value is applied to it.
+ */
+const HOME = ['vessels', HOME_VESSEL] as const;
+
 /** One fact by the manifest path it proposes a value for. */
 function factAt(
   facts: readonly DiscoveredFact[],
-  ...path: string[]
+  ...path: (string | number)[]
 ): DiscoveredFact {
   const found = facts.find((fact) => fact.path.join('.') === path.join('.'));
   if (found === undefined) {
@@ -212,7 +223,9 @@ describe('a refusal is never an empty answer', () => {
 
     const facts = await discover(context, { project: PROJECT });
 
-    expect(factAt(facts, 'cloud', 'artifactsProject').kind).toBe('found');
+    expect(factAt(facts, ...HOME, 'shared', 'artifactsProject').kind).toBe(
+      'found',
+    );
     expect(factAt(facts, 'sources', 'buckets').kind).toBe('found');
     expect(factAt(facts, 'supplyChain', 'signer').kind).toBe('unavailable');
   });
@@ -227,7 +240,7 @@ describe('what the reads answer', () => {
 
     const facts = await discover(context, { project: PROJECT });
     const buckets = factAt(facts, 'sources', 'buckets');
-    const fallback = factAt(facts, 'sources', 'defaultBucket');
+    const fallback = factAt(facts, ...HOME, 'shared', 'sourceBucket');
 
     expect(buckets.kind).toBe('found');
     expect(fallback.kind).toBe('found');
@@ -309,7 +322,9 @@ describe('what the reads answer', () => {
 
     const facts = await discover(context);
 
-    expect(factAt(facts, 'cloud', 'artifactsProject').kind).toBe('found');
+    expect(factAt(facts, ...HOME, 'shared', 'artifactsProject').kind).toBe(
+      'found',
+    );
     for (const path of [
       ['sources', 'buckets'],
       ['supplyChain', 'signer'],
@@ -331,7 +346,12 @@ describe('what the reads answer', () => {
       deletedProjects: ['example-retired'],
     });
 
-    const fact = factAt(await discover(context), 'cloud', 'artifactsProject');
+    const fact = factAt(
+      await discover(context),
+      ...HOME,
+      'shared',
+      'artifactsProject',
+    );
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
@@ -348,7 +368,12 @@ describe('truncation is not silence', () => {
       pageSize: 1,
     });
 
-    const fact = factAt(await discover(context), 'cloud', 'artifactsProject');
+    const fact = factAt(
+      await discover(context),
+      ...HOME,
+      'shared',
+      'artifactsProject',
+    );
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
@@ -370,7 +395,12 @@ describe('truncation is not silence', () => {
       pageSize: 1,
     });
 
-    const fact = factAt(await discover(context), 'cloud', 'artifactsProject');
+    const fact = factAt(
+      await discover(context),
+      ...HOME,
+      'shared',
+      'artifactsProject',
+    );
 
     expect(fact.kind).toBe('unavailable');
     if (fact.kind !== 'unavailable') return;
@@ -417,7 +447,12 @@ describe('the credential answers what it can without a call', () => {
       }),
     );
 
-    const fact = factAt(await discover(context), 'cloud', 'homeVesselProject');
+    const fact = factAt(
+      await discover(context),
+      ...HOME,
+      'location',
+      'project',
+    );
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
@@ -441,7 +476,12 @@ describe('the credential answers what it can without a call', () => {
       }),
     );
 
-    const fact = factAt(await discover(context), 'cloud', 'homeVesselProject');
+    const fact = factAt(
+      await discover(context),
+      ...HOME,
+      'location',
+      'project',
+    );
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
@@ -454,7 +494,12 @@ describe('the credential answers what it can without a call', () => {
     // fragment of a project name presented as an answer.
     const { context } = installation({ projects: [] });
 
-    const fact = factAt(await discover(context), 'cloud', 'homeVesselProject');
+    const fact = factAt(
+      await discover(context),
+      ...HOME,
+      'location',
+      'project',
+    );
 
     expect(fact.kind).toBe('found');
     if (fact.kind !== 'found') return;
@@ -479,7 +524,7 @@ describe('the credential answers what it can without a call', () => {
     );
 
     const facts = await discover(context);
-    const home = factAt(facts, 'cloud', 'homeVesselProject');
+    const home = factAt(facts, ...HOME, 'location', 'project');
 
     expect(home.kind).toBe('found');
     if (home.kind !== 'found') return;
@@ -492,7 +537,9 @@ describe('the credential answers what it can without a call', () => {
     expect(home.candidates[0]?.value).toBe(PROJECT);
     // And the key it cannot suggest anything for stays honest about the same
     // refusal, rather than borrowing the answer.
-    expect(factAt(facts, 'cloud', 'artifactsProject').kind).toBe('unavailable');
+    expect(factAt(facts, ...HOME, 'shared', 'artifactsProject').kind).toBe(
+      'unavailable',
+    );
   });
 });
 
@@ -539,8 +586,17 @@ describe('every path discovery proposes is a path the manifest has', () => {
    * names through `manifestFieldAt`, and a copy here would be a second answer
    * about one schema that only has to agree by luck.
    */
-  function resolves(path: readonly string[]): boolean {
+  function resolves(path: readonly (string | number)[]): boolean {
     return manifestFieldAt(path) !== null;
+  }
+
+  /** The same walk, over a fact placed on a document the way the panel places it. */
+  function placed(fact: DiscoveredFact): readonly (string | number)[] {
+    const at = placementOf(fact, fixture);
+    if (at === null) {
+      throw new Error(`nothing in the fixture holds ${fact.path.join('.')}`);
+    }
+    return at;
   }
 
   test('the walk rejects a key the schema no longer has', () => {
@@ -572,10 +628,54 @@ describe('every path discovery proposes is a path the manifest has', () => {
 
     expect(facts.length).toBeGreaterThan(0);
     for (const fact of facts) {
-      expect([fact.path.join('.'), resolves(fact.path)]).toEqual([
+      expect([fact.path.join('.'), resolves(placed(fact))]).toEqual([
         fact.path.join('.'),
         true,
       ]);
     }
+  });
+
+  test('a vessel path is placed by name, so an edited array cannot misplace it', async () => {
+    // The whole reason a discovered path names the home vessel rather than
+    // carrying its position: the settings form removes entries from `vessels`
+    // between the ask and the press, and `location.project` carries no
+    // refinement that would refuse a value written onto the wrong boundary.
+    const { context } = installation({ projects: [PROJECT] });
+    const fact = factAt(
+      await discover(context, { project: PROJECT }),
+      ...HOME,
+      'location',
+      'project',
+    );
+
+    const shifted = {
+      ...fixture,
+      vessels: [
+        { name: 'a-boundary-added-since', kind: 'cluster' as const },
+        ...fixture.vessels,
+      ],
+    };
+    expect(placementOf(fact, shifted)).toEqual([
+      'vessels',
+      fixture.vessels.findIndex(
+        (vessel) => vessel.name === fixture.installation.homeVessel,
+      ) + 1,
+      'location',
+      'project',
+    ]);
+  });
+
+  test('a document that declares no home vessel is placed nowhere', async () => {
+    // Rather than at the position the answer was produced for, which after a
+    // removal is whichever boundary slid into it.
+    const { context } = installation({ projects: [PROJECT] });
+    const fact = factAt(
+      await discover(context, { project: PROJECT }),
+      ...HOME,
+      'location',
+      'project',
+    );
+
+    expect(placementOf(fact, { ...fixture, vessels: [] })).toBeNull();
   });
 });

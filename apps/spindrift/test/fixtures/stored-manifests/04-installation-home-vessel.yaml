@@ -1,0 +1,121 @@
+# A stored manifest as this build writes one: the two vessels this installation
+# is built on are named by the installation itself, and the four keys that
+# described the second one without saying so are its properties.
+#
+# `03` stated `cloud.homeVesselProject`, `cloud.artifactsProject`,
+# `sources.defaultBucket` and `secretStore.container` as four unrelated
+# top-level values. Nothing said they described one boundary, so nothing noticed
+# when they stopped describing the same one. `manifest-upgrade.ts` recovers the
+# home vessel by matching `cloud.homeVesselProject` against a declared vessel's
+# project — and, where the old document named a project no vessel declared,
+# takes the first cloud vessel rather than minting a boundary out of a string.
+# The control plane is the vessel of the rank-0 Target, which is where every
+# document written so far put it.
+#
+# **The newest file in this corpus, and the test asserts this build needs no
+# upgrade to read it.** That is the forcing function: change the manifest schema
+# in any way that stops accepting this document, and the assertion fails. The
+# fix is never to edit this file — it is to copy it to the next number, edit
+# *that* to the new shape, and teach `manifest-upgrade.ts` how to get from here
+# to there. Doing it the other way round is exactly how a schema change reaches
+# production able to discard a configured installation.
+#
+# `installation.name` differs from every declaration this suite mounts, for the
+# reason `01` gives.
+installation:
+  name: stored-with-installation-vessels
+  controlPlaneVessel: cluster
+  homeVessel: cloud
+
+controlPlane:
+  hostname: spindrift.example.test
+
+auth:
+  gateway: null
+
+dns:
+  zones:
+    private: apps.example.test
+    public: example.test
+
+sources:
+  buckets:
+    - example-source-bucket
+
+charts:
+  app: example/spindrift-app
+
+supplyChain:
+  registry: registry.example.test/artifacts
+  verifier: verifier.example.test
+  signer: gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer
+
+github:
+  clientId: Iv1.example
+  oauthBaseUrl: https://git.example.test
+  apiBaseUrl: https://api.git.example.test
+  buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
+
+build:
+  routes:
+    - name: hosted
+      adapter: github-actions
+  zeroConfigFrontend: registry.example.test/zero-config:pinned
+
+secretStore:
+  adapter: gcp-secret-manager
+  endpoint: https://secrets.example.test
+
+vessels:
+  - name: cluster
+    kind: cluster
+    location:
+      apiServer: https://cluster.example.test
+    reachableRegistries:
+      - registry.example.test
+    servedHosts:
+      - apps.example.test
+  - name: cloud
+    kind: gcp-project
+    location:
+      project: example-vessel
+    reachableRegistries:
+      - mirror.example.test
+    servedHosts:
+      - hosting.example.test
+      - run.example.test
+    # The shared services, on the one vessel that holds them. Only the vessel
+    # `installation.homeVessel` names may carry this block, and it must.
+    shared:
+      sourceBucket: example-source-bucket
+      artifactsProject: example-artifacts
+      secretStoreContainer: example-secrets
+
+targets:
+  - vessel: cluster
+    adapter: kubernetes
+    reaches: [none, private]
+    authReaches: [private]
+    connection:
+      namespace: apps
+      delivery:
+        flavour: flux-helmrelease
+        namespace: apps
+        sourceRef:
+          name: infra
+          namespace: flux-system
+      chartValues:
+        platform:
+          gateway:
+            name: cluster-gateway
+            namespace: gateway
+  - vessel: cloud
+    adapter: cloudrun
+    connection:
+      region: example-region
+      endpoint: https://run.example.test
+      serviceAccount: runtime@example-vessel.iam.gserviceaccount.com
+  - vessel: cloud
+    adapter: static
+    connection:
+      endpoint: https://hosting.example.test

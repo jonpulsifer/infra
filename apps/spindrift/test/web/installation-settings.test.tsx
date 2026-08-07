@@ -164,6 +164,64 @@ describe('a refusal reads as what it is', () => {
   });
 });
 
+/**
+ * Ticket 81's second clause: the two vessels the installation is built on
+ * reconcile from the mounted declaration on boot **and render read-only**.
+ *
+ * The lock is the point rather than the refusal behind it. `loadStoredManifest`
+ * re-applies the declaration to those two entries at every restart, so a field
+ * an operator can type into here is a field that accepts a value and loses it —
+ * which is the failure `views/targets/list.tsx` renders its own sentence for.
+ */
+describe('the vessels this installation is built on are read-only', () => {
+  /** The fixture plus a boundary neither pointer names. */
+  const withAppVessel = {
+    ...manifest,
+    vessels: [...manifest.vessels, { name: 'elsewhere', kind: 'cluster' }],
+  };
+
+  /** Whether the control with this `name` is rendered disabled. */
+  function locked(markup: string, name: string): boolean {
+    const control = new RegExp(`<[^>]*name="${name}"[^>]*>`).exec(markup)?.[0];
+    if (control === undefined) throw new Error(`no control named ${name}`);
+    return control.includes('disabled=""');
+  }
+
+  test('a declaration locks the pointers and the entries they name', () => {
+    const markup = screen({ document: withAppVessel, declaration: manifest });
+
+    expect(locked(markup, 'installation.controlPlaneVessel')).toBe(true);
+    expect(locked(markup, 'installation.homeVessel')).toBe(true);
+    // Everything under a governed entry, not only its name: the shared services
+    // are the half a boot most often takes back, and the half three commands
+    // used to write.
+    expect(locked(markup, 'vessels.1.name')).toBe(true);
+    expect(locked(markup, 'vessels.1.shared.sourceBucket')).toBe(true);
+    // By name, resolved against the document. The third boundary is nobody's
+    // but this screen's, and so is every ordinary key.
+    expect(locked(markup, 'vessels.2.name')).toBe(false);
+    expect(locked(markup, 'build.zeroConfigFrontend')).toBe(false);
+  });
+
+  test('the lock carries the sentence saying why', () => {
+    // A disabled input with nothing beside it reads as a bug in the form.
+    expect(
+      screen({ document: withAppVessel, declaration: manifest }),
+    ).toContain('are declared, not configured here');
+  });
+
+  test('with no declaration mounted the whole document is this screen’s', () => {
+    // Governance is what a declaration does on a boot. An installation running
+    // without one owns its document outright — which is how the shared services
+    // are configured at all on an install that mounts nothing.
+    const markup = screen({ document: withAppVessel });
+
+    expect(locked(markup, 'installation.homeVessel')).toBe(false);
+    expect(locked(markup, 'vessels.1.shared.sourceBucket')).toBe(false);
+    expect(markup).not.toContain('are declared, not configured here');
+  });
+});
+
 describe('adopting a divergent declaration', () => {
   test('no divergence, no notice and no adopt act', () => {
     const markup = screen();

@@ -1,0 +1,22 @@
+-- A vessel gets a standing checklist of its own.
+--
+-- §13's checklist was written about a Target, and four of this installation's
+-- prerequisites are not a Target's: the source bucket a build stages into
+-- before any placement is known, the artifacts project shared across every
+-- vessel (§14), the store of record every Target reads one copy of, and the
+-- signer core calls rather than a Target does. They belong to the boundary that
+-- holds them, which is the vessel `installation.homeVessel` names.
+--
+-- Which rows a vessel is asked is `VESSEL_PREREQUISITES_BY_KIND_AND_ROLE` in
+-- `src/domain/vessel.ts` — kind times role, the way `PREREQUISITES_BY_ADAPTER`
+-- keys off adapter. An app vessel is asked nothing and stores nothing here, so
+-- it is never shown a green row for something nobody checked.
+--
+-- **Additive and nullable, so it is safe on a running installation.** Null is
+-- "never assessed", which is what every existing row honestly is until the
+-- standing loop has been round once; health is derived from these rows at read
+-- time rather than stored, for the reason `target-loop.ts` gives about stored
+-- derivations.
+ALTER TABLE "vessels" ADD COLUMN "prerequisites" jsonb;
+--> statement-breakpoint
+ALTER TABLE "vessels" ADD COLUMN "inspected_at" timestamp with time zone;

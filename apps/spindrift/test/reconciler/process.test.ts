@@ -146,7 +146,7 @@ describe('reconciler loop composition', () => {
         .filter((event) => event.type === 'pass')
         .map((event) => event.loop)
         .sort(),
-    ).toEqual(['build', 'config', 'deploy', 'target']);
+    ).toEqual(['build', 'config', 'deploy', 'target', 'vessel']);
     expect(events.find((event) => event.type === 'disabled')).toEqual({
       type: 'disabled',
       loop: 'repository',
@@ -188,6 +188,7 @@ describe('reconciler loop composition', () => {
       'deploy',
       'repository',
       'target',
+      'vessel',
     ]);
   });
 });

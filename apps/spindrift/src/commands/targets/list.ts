@@ -16,12 +16,18 @@ import {
   type OnboardingTargetRow,
   pendingConnections,
 } from '../../domain/target-onboarding.ts';
-import { surfacesToProbe, type VesselLocation } from '../../domain/vessel.ts';
+import {
+  deriveVesselHealth,
+  surfacesToProbe,
+  type VesselLocation,
+  vesselRolesOf,
+} from '../../domain/vessel.ts';
 import type {
   CloudBoundaryFacts,
   PendingTargetConnection,
   TargetListItem,
   TargetOptionView,
+  VesselListItem,
 } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
 
@@ -182,6 +188,12 @@ export interface ListTargetsResult {
   readonly options: readonly TargetOptionView[];
   /** Connect acts this installation is waiting on — the onboarding surface. */
   readonly pending: readonly PendingTargetConnection[];
+  /**
+   * The boundaries themselves, with the checklist that is theirs rather than a
+   * surface's. In declaration order, so the two the installation is built on
+   * read where the manifest put them.
+   */
+  readonly vessels: readonly VesselListItem[];
 }
 
 export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
@@ -246,6 +258,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         target.connection,
       ),
       edit: editStart(target, allTargets),
+      vesselRoles: vesselRolesOf(context.manifest, target.vessel.name),
     });
 
     const isConnected = target.status === 'connected';
@@ -333,9 +346,32 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
     }
   }
 
+  const vesselRows = await context.db.query.vessels.findMany({
+    orderBy: (vessels, { asc }) => [asc(vessels.createdAt), asc(vessels.name)],
+  });
+
   return ok({
     targets: targetsList,
     options: optionsList,
     pending: pendingConnections(allTargets),
+    vessels: vesselRows.map((vessel) => {
+      const roles = vesselRolesOf(context.manifest, vessel.name);
+      const prerequisites = vessel.prerequisites ?? [];
+      return {
+        name: vessel.name,
+        kind: vessel.kind,
+        roles,
+        // Derived here rather than stored, exactly as a Target's is: the
+        // catalogue can gain a row in a release, and a stored verdict would
+        // keep reading healthy against a question nobody had asked yet.
+        health: deriveVesselHealth(prerequisites, vessel.kind, roles),
+        prerequisites: prerequisites.map((item) => ({
+          name: item.name,
+          met: item.met,
+          ...(item.detail === undefined ? {} : { detail: item.detail }),
+        })),
+        inspectedAt: vessel.inspectedAt?.toISOString() ?? null,
+      };
+    }),
   });
 };

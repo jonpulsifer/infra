@@ -29,9 +29,13 @@
  * rather than a document this act half-rewrote.
  */
 import { z } from 'zod';
-import type { AuthoredManifest } from '../../config/manifest.schema.ts';
+import {
+  type AuthoredManifest,
+  sharedServicesOf,
+} from '../../config/manifest.schema.ts';
 import { ManifestError, validateManifest } from '../../config/manifest.ts';
 import {
+  governedSliceRefusal,
   readStoredManifest,
   writeStoredManifest,
 } from '../../config/manifest-store.ts';
@@ -117,24 +121,32 @@ export const useSourceBucket: Command<
   const buckets = stored.sources.buckets.includes(input.bucketName)
     ? stored.sources.buckets
     : [...stored.sources.buckets, input.bucketName];
-  const defaultBucket = input.makeDefault
+  // Which bucket a staging picks is a property of the home vessel, so making
+  // one the default is a write to that vessel rather than to `sources`. The
+  // list and the choice therefore move in one document, which is what keeps a
+  // default that is not among the buckets unrepresentable.
+  const shared = sharedServicesOf(stored);
+  const sourceBucket = input.makeDefault
     ? input.bucketName
-    : (stored.sources.defaultBucket ?? buckets[0]);
+    : shared.sourceBucket;
 
   const next: AuthoredManifest = {
     ...stored,
-    sources: { ...stored.sources, buckets, defaultBucket },
+    sources: { ...stored.sources, buckets },
+    vessels: stored.vessels.map((vessel) =>
+      vessel.name === stored.installation.homeVessel
+        ? { ...vessel, shared: { ...shared, sourceBucket } }
+        : vessel,
+    ),
   };
 
+  let updated: AuthoredManifest;
   try {
     // Validated on the way out even though only two keys moved: the document
     // that gets written is the one that has to be valid, and a stored manifest
     // that was already drifting from the schema must not be made durable again
     // by an act that never looked at the rest of it.
-    await writeStoredManifest(
-      context.db,
-      validateManifest(next, 'the updated manifest'),
-    );
+    updated = validateManifest(next, 'the updated manifest');
   } catch (cause) {
     if (cause instanceof ManifestError) {
       return failed('NOT_DEPLOYABLE', cause.message);
@@ -142,11 +154,22 @@ export const useSourceBucket: Command<
     throw cause;
   }
 
+  // Which bucket a staging picks is the home vessel's, and an installation that
+  // mounts a declaration takes that vessel from it on every boot. Making a
+  // default here would then leave the added bucket standing and the choice
+  // reverted — an act half-applied, with nothing on screen saying which half.
+  // Refused whole rather than half-applied: adding without choosing is the
+  // other arm of this same command, and it is still open.
+  const governed = governedSliceRefusal(updated, context.declaration);
+  if (governed !== null) {
+    return failed('NOT_DEPLOYABLE', governed);
+  }
+
+  await writeStoredManifest(context.db, updated);
+
   return ok({
     buckets,
-    // Non-null by construction: `sources.buckets` has a minimum of one, and the
-    // bucket just verified is in it.
-    defaultBucket: defaultBucket ?? input.bucketName,
+    defaultBucket: sourceBucket,
     location: verified.location,
     permissions: verified.permissions,
   });

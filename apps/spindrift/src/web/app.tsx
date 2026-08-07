@@ -23,6 +23,7 @@ import type {
   RepositoryOptionView,
   TargetListItem,
   TargetOptionView,
+  VesselListItem,
   WorkspaceView,
 } from './model.ts';
 import { isInFlight } from './model.ts';
@@ -1829,6 +1830,7 @@ function TargetsScreen({
         type: 'success';
         targets: readonly TargetListItem[];
         pending: readonly PendingTargetConnection[];
+        vessels: readonly VesselListItem[];
       }
   >({ type: 'loading' });
   const [connecting, setConnecting] = useState(false);
@@ -1854,6 +1856,7 @@ function TargetsScreen({
             type: 'success',
             targets: result.value.targets,
             pending: result.value.pending,
+            vessels: result.value.vessels,
           });
         } else {
           setState({ type: 'error', message: result.failure.message });
@@ -1925,6 +1928,7 @@ function TargetsScreen({
     <TargetList
       targets={state.targets}
       pending={state.pending}
+      vessels={state.vessels}
       connecting={connecting}
       error={actionError}
       absent={absent}

@@ -102,11 +102,9 @@ describe('the credential the deployment mounts', () => {
 
 describe('the manifest cannot restate it', () => {
   test('there is no key to write it into', () => {
-    const cloud = installationManifestSchema.shape.cloud;
-    expect(Object.keys(cloud.shape).sort()).toEqual([
-      'artifactsProject',
-      'homeVesselProject',
-    ]);
+    // Not even a block to hang it off any more: the two keys that used to sit
+    // beside it are properties of the home vessel, so `cloud` is derived whole.
+    expect(installationManifestSchema.shape).not.toHaveProperty('cloud');
     expect(Object.keys(installationManifestSchema.shape.charts.shape)).toEqual([
       'app',
     ]);
@@ -123,7 +121,6 @@ describe('the manifest cannot restate it', () => {
     const restated = {
       ...document,
       cloud: {
-        ...(document.cloud as Record<string, unknown>),
         federation: {
           audience: '//iam.stale.test/pools/stale',
           tokenUrl: 'https://sts.stale.test/v1/token',
@@ -139,7 +136,7 @@ describe('the manifest cannot restate it', () => {
 
     expect(() =>
       parseManifest(JSON.stringify(restated), 'a stale document'),
-    ).toThrow(/federation/);
+    ).toThrow(/cloud/);
   });
 
   test('what readers get is the deployment’s copy, joined on at resolve', async () => {
@@ -153,6 +150,6 @@ describe('the manifest cannot restate it', () => {
     );
     // And the authored document is untouched by the join, so a write path
     // holding one cannot round-trip a derived value back into the row.
-    expect(authored.cloud).not.toHaveProperty('federation');
+    expect(authored).not.toHaveProperty('cloud');
   });
 });

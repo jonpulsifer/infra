@@ -65,18 +65,77 @@ export interface DiscoveredCandidate {
    * What is written at the fact's path when this candidate is chosen, verbatim.
    *
    * Carried rather than derived because the two are not always the same shape:
-   * `sources.buckets` is a list and takes `[name]`, while `sources.defaultBucket`
-   * takes the same name bare. A screen deriving that would be a screen with an
-   * opinion about the schema, which is exactly what it must not have.
+   * `sources.buckets` is a list and takes `[name]`, while the home vessel's
+   * `shared.sourceBucket` takes the same name bare. A screen deriving that
+   * would be a screen with an opinion about the schema, which is exactly what
+   * it must not have.
    */
   readonly value: unknown;
 }
 
+/**
+ * The step a path takes to reach the vessel `installation.homeVessel` names.
+ *
+ * A stand-in for that entry's position rather than the position itself. Three of
+ * these facts are properties of one *vessel* — the home vessel is an entry in
+ * `vessels` — and an index computed where the answer was produced is an index
+ * the document may have moved since: the settings form removes array entries,
+ * and adopting a declaration replaces the array whole. A value written at a
+ * stale index lands on whichever boundary slid into it, and `location.project`
+ * carries no refinement that would refuse it.
+ *
+ * {@link placementOf} resolves it against the document being edited, at the
+ * moment a candidate is confirmed. Unambiguous as a string because the segment
+ * before it names an array, and an array is never keyed by a name.
+ */
+export const HOME_VESSEL = 'homeVessel';
+
 /** One manifest path, and what discovery could say about it. */
 export type DiscoveredFact = {
-  /** Where the chosen value belongs, as `forms/document.ts` addresses it. */
-  readonly path: readonly string[];
+  /**
+   * Where the chosen value belongs, as `forms/document.ts` addresses it, with
+   * {@link HOME_VESSEL} standing in for a position only the document can give.
+   *
+   * Numbers as well as keys, because `withValueAt` already distinguishes the
+   * two — a numeric step indexes an array and a string step keys an object — so
+   * this is the path type that layer has, not a second one beside it.
+   */
+  readonly path: readonly (string | number)[];
 } & Discovered<DiscoveredCandidate>;
+
+/**
+ * Where a discovered value goes in this document — `null` for one that declares
+ * no home vessel to put it on.
+ *
+ * The whole of what {@link HOME_VESSEL} costs, and it is here rather than on the
+ * screen for the reason the panel states about itself: resolving a pointer to a
+ * position is knowledge about this schema, and a panel that held any would be
+ * the panel that stops working when a key moves.
+ */
+export function placementOf(
+  fact: DiscoveredFact,
+  document: unknown,
+): readonly (string | number)[] | null {
+  const [head, next, ...rest] = fact.path;
+  if (head !== 'vessels' || next !== HOME_VESSEL) return fact.path;
+  const home = homeVesselIndex(document);
+  return home === null ? null : ['vessels', home, ...rest];
+}
+
+/** Where the vessel this document's `homeVessel` names sits in its `vessels`. */
+function homeVesselIndex(document: unknown): number | null {
+  const doc = document as {
+    installation?: { homeVessel?: unknown };
+    vessels?: unknown;
+  } | null;
+  const name = doc?.installation?.homeVessel;
+  const vessels = doc?.vessels;
+  if (typeof name !== 'string' || !Array.isArray(vessels)) return null;
+  const index = vessels.findIndex(
+    (vessel) => (vessel as { name?: unknown })?.name === name,
+  );
+  return index === -1 ? null : index;
+}
 
 export interface DiscoverInstallationFactsResult {
   /** In display order. Empty is not a state this command can produce. */
@@ -138,23 +197,37 @@ export const discoverInstallationFacts: Command<
       : signingKeysIn(discovery, project, kmsLocation),
   ]);
 
-  const suggestedVessel = homeVesselOf(context.manifest.cloud.federation);
-
+  const suggestedVessel = credentialProject(context.manifest.cloud.federation);
+  // Three of the five facts are the home vessel's own properties, so they are
+  // addressed through {@link HOME_VESSEL} rather than through the position that
+  // vessel holds in the document this process happens to be holding.
   return ok({
     facts: [
       withSuggestion(
-        mapped(['cloud', 'homeVesselProject'], projects, plain),
+        mapped(
+          ['vessels', HOME_VESSEL, 'location', 'project'],
+          projects,
+          plain,
+        ),
         suggestedVessel,
       ),
-      mapped(['cloud', 'artifactsProject'], projects, plain),
+      mapped(
+        ['vessels', HOME_VESSEL, 'shared', 'artifactsProject'],
+        projects,
+        plain,
+      ),
       // The same one read, answered against both keys: a bucket chosen for one
-      // and not the other leaves a manifest whose default is not among its
-      // buckets, which validates and then stages nowhere.
+      // and not the other leaves a manifest whose staging bucket is not among
+      // its buckets, which validates and then stages nowhere.
       mapped(['sources', 'buckets'], buckets, (name) => ({
         label: name,
         value: [name],
       })),
-      mapped(['sources', 'defaultBucket'], buckets, plain),
+      mapped(
+        ['vessels', HOME_VESSEL, 'shared', 'sourceBucket'],
+        buckets,
+        plain,
+      ),
       mapped(['supplyChain', 'signer'], signers, plain),
     ],
   });
@@ -207,7 +280,7 @@ async function signingKeysIn(
 
 /** One read, against one manifest path, in whichever arm it came back in. */
 function mapped(
-  path: readonly string[],
+  path: readonly (string | number)[],
   discovered: Discovered<string>,
   to: (value: string) => DiscoveredCandidate,
 ): DiscoveredFact {
@@ -254,13 +327,13 @@ function withSuggestion(
 }
 
 /**
- * The home vessel this installation's own identity lives in, if it says.
+ * The project this installation's own identity lives in, if the credential says.
  *
  * Labelled with its provenance, not with the bare id: what is written is the
  * project, but what is read is where the answer came from — this deployment's
  * own credential rather than anything the cloud was asked.
  */
-function homeVesselOf(
+function credentialProject(
   federation: FederationConfig,
 ): DiscoveredCandidate | null {
   const url = federation.impersonationUrl;

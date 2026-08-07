@@ -28,7 +28,7 @@ import type {
   Reach,
 } from '../domain/desired-state.ts';
 import type { Exclusion } from '../domain/placement.ts';
-import type { VesselKind } from '../domain/vessel.ts';
+import type { VesselKind, VesselRole } from '../domain/vessel.ts';
 
 /**
  * §6's phases, verbatim: `PENDING → APPLYING → WAITING → LIVE | FAILED`.
@@ -825,6 +825,46 @@ export interface TargetListItem {
         readonly proposal: TargetConnectionProposal;
       }
     | null;
+  /**
+   * What this Target's boundary is to the installation, from
+   * `vesselRolesOf` — `['app']` for an ordinary one.
+   *
+   * The screen reads it to decide whether this Target is the operator's to
+   * change. A boundary the installation itself is built on reconciles from the
+   * declaration on every boot, so an edit here would be reverted by the next
+   * restart with nothing on screen saying why; the honest surface is one that
+   * does not offer the control, and says where the values come from instead.
+   */
+  readonly vesselRoles: readonly VesselRole[];
+}
+
+/**
+ * One tenancy boundary, as the Targets screen shows it.
+ *
+ * A peer of {@link TargetListItem} rather than a field on it, because a
+ * boundary's checklist is one fact and a vessel may carry two surfaces — folded
+ * into the Target rows it would be the same four answers rendered twice, which
+ * is the duplication the vessel noun exists to remove.
+ */
+export interface VesselListItem {
+  readonly name: string;
+  /** The shape of its address, and nothing else — see `domain/vessel.ts`. */
+  readonly kind: VesselKind;
+  /** What the installation asks of it. `['app']` is an ordinary boundary. */
+  readonly roles: readonly VesselRole[];
+  readonly health: 'healthy' | 'unhealthy';
+  /**
+   * The whole standing checklist for the boundary, met rows included — and
+   * empty for a vessel the catalogue asks nothing of, which is not the same as
+   * a vessel that passed.
+   */
+  readonly prerequisites: readonly {
+    readonly name: string;
+    readonly met: boolean;
+    readonly detail?: string;
+  }[];
+  /** When the standing pass last ran against it, ISO-8601, or null if never. */
+  readonly inspectedAt: string | null;
 }
 
 /**

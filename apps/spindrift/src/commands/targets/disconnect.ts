@@ -19,6 +19,7 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  isDeclaredInstallationVessel,
   type TargetAdapter,
   targetAdapterSchema,
 } from '../../config/manifest.schema.ts';
@@ -73,6 +74,24 @@ export const disconnectTarget: Command<
 > = async (input, context) => {
   const now = context.clock.now();
   const confirmed = input.confirm ?? true;
+
+  // The two vessels this installation is built on are not an operator's to
+  // remove. Neither pointer is a foreign key, so nothing below would stop this
+  // the way `targets_vessel_id_vessels_id_fk`'s `restrict` stops a vessel with
+  // surfaces from being dropped — the guard is the substitute for that, and it
+  // is checked before the review as well as before the write, so the impact
+  // screen never offers a button that cannot be pressed.
+  //
+  // Refused rather than warned about, because the bootstrap paradox makes the
+  // failure quiet: disconnecting the boundary the control plane runs on, or the
+  // one holding the source bucket and the store, leaves a process that keeps
+  // serving right up until the next thing it tries to stage or deliver.
+  if (isDeclaredInstallationVessel(context.manifest, input.vessel)) {
+    return failed(
+      'NOT_DEPLOYABLE',
+      `${input.vessel} is a vessel this installation is built on, so its surfaces cannot be disconnected — change the declaration and re-seed instead`,
+    );
+  }
 
   // The pair, not a name: `(vessel, adapter)` is what a Target is, and it is the
   // unique index too, so this resolves at most one row.

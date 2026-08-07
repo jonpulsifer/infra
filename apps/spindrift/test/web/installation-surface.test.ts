@@ -209,7 +209,7 @@ describe('whether anybody has configured this installation', () => {
     const { manifest } = await readInstallation();
     const named = withValueAt(
       manifest,
-      ['installation'],
+      ['installation', 'name'],
       'named-by-onboarding',
     );
 

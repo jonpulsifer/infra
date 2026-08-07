@@ -35,7 +35,30 @@ export interface FormProps {
   readonly document: unknown;
   readonly errors: FieldErrors;
   readonly disabled: boolean;
+  /**
+   * Whether one path is somebody else's to write — read-only rather than
+   * saving-right-now, which is what `disabled` says.
+   *
+   * A predicate over paths rather than a flag on a field, because the answer is
+   * a fact about the *document* and this file has none: which value a screen
+   * may not drive depends on what the document says elsewhere, and a field
+   * carrying it would be the schema describing a screen. The caller answers for
+   * a path and everything under it; omitted means nothing is locked.
+   */
+  locked?(at: Path): boolean;
   onChange(document: unknown): void;
+}
+
+/**
+ * Whether a control at this path may not be written — either reason.
+ *
+ * The two are one word to a control and two words to a reader: `disabled` is
+ * "not right now, a save is in flight" and `locked` is "not here, ever". The
+ * sentence explaining the second belongs on the screen that knows it, not on
+ * every input.
+ */
+function isFrozen(form: FormProps, at: Path): boolean {
+  return form.disabled || form.locked?.(at) === true;
 }
 
 /** Every key of an object schema, in the order the schema declares them. */
@@ -82,6 +105,7 @@ function SchemaFieldControl({
   const present = value !== undefined && value !== null;
   const togglable = field.optional || field.nullable;
   const id = pathKey(at);
+  const frozen = isFrozen(form, at);
 
   const toggle = (on: boolean) => {
     if (on) {
@@ -109,7 +133,7 @@ function SchemaFieldControl({
             id={`${id}--present`}
             name={`${id}--present`}
             checked={present}
-            disabled={form.disabled}
+            disabled={frozen}
             onChange={(event) => toggle(event.currentTarget.checked)}
             className="size-3.5 accent-accent"
             aria-label={`Configure ${field.label}`}
@@ -144,6 +168,7 @@ export function SchemaControl({
 }) {
   const value = valueAt(form.document, at);
   const id = pathKey(at);
+  const frozen = isFrozen(form, at);
   const set = (next: unknown) =>
     form.onChange(withValueAt(form.document, at, next));
 
@@ -155,7 +180,7 @@ export function SchemaControl({
           name={id}
           type={node.format === 'url' ? 'url' : 'text'}
           value={typeof value === 'string' ? value : ''}
-          disabled={form.disabled}
+          disabled={frozen}
           onChange={(event) => set(event.currentTarget.value)}
         />
       );
@@ -167,7 +192,7 @@ export function SchemaControl({
           type="number"
           step={node.integer ? 1 : 'any'}
           value={typeof value === 'number' ? String(value) : ''}
-          disabled={form.disabled}
+          disabled={frozen}
           onChange={(event) => {
             const parsed = Number(event.currentTarget.value);
             set(event.currentTarget.value === '' ? undefined : parsed);
@@ -181,7 +206,7 @@ export function SchemaControl({
           id={id}
           name={id}
           checked={value === true}
-          disabled={form.disabled}
+          disabled={frozen}
           onChange={(event) => set(event.currentTarget.checked)}
           className="size-4 accent-accent"
         />
@@ -191,7 +216,7 @@ export function SchemaControl({
         <Select
           id={id}
           value={typeof value === 'string' ? value : ''}
-          disabled={form.disabled}
+          disabled={frozen}
           onChange={set}
           options={node.values.map((each) => ({ value: each, label: each }))}
         />
@@ -251,7 +276,10 @@ function ArrayControl({
             type="button"
             size="sm"
             variant="ghost"
-            disabled={form.disabled}
+            // Per item, not per array: an array may hold one entry somebody else
+            // declares and others a screen owns outright, and locking the whole
+            // control for the first would take the second away too.
+            disabled={isFrozen(form, [...at, index])}
             aria-label={`Remove item ${index + 1}`}
             onClick={() =>
               form.onChange(withoutValueAt(form.document, [...at, index]))
@@ -307,7 +335,7 @@ function UnionControl({
           <Select
             id={`${id}--variant`}
             value={active?.tag ?? ''}
-            disabled={form.disabled}
+            disabled={isFrozen(form, at)}
             onChange={(next) => {
               const chosen = node.variants.find((each) => each.tag === next);
               if (chosen === undefined) return;

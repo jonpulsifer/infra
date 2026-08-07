@@ -100,7 +100,11 @@ export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
 
 /** High-trust default placeholder manifest used when initializing an unseeded installation. */
 export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
-  installation: 'default',
+  installation: {
+    name: 'default',
+    controlPlaneVessel: 'primary',
+    homeVessel: 'spindrift',
+  },
   controlPlane: {
     hostname: 'spindrift.example.com',
   },
@@ -115,11 +119,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
   },
   sources: {
     buckets: ['bluenose-spindrift-source'],
-    defaultBucket: 'bluenose-spindrift-source',
-  },
-  cloud: {
-    artifactsProject: 'spindrift-artifacts',
-    homeVesselProject: 'spindrift-vessel',
   },
   charts: {
     app: 'packages/charts/spindrift-app',
@@ -158,7 +157,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     adapter: 'onepassword',
     endpoint:
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
-    container: 'spindrift-vault',
   },
   vessels: [
     {
@@ -170,6 +168,11 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       name: 'spindrift',
       kind: 'gcp-project',
       location: { project: 'spindrift-vessel' },
+      shared: {
+        sourceBucket: 'bluenose-spindrift-source',
+        artifactsProject: 'spindrift-artifacts',
+        secretStoreContainer: 'spindrift-vault',
+      },
     },
   ],
   targets: [
@@ -271,7 +274,7 @@ export function isUnconfiguredInstallation(
 ): boolean {
   const stand = DEFAULT_PLACEHOLDER_MANIFEST;
   return (
-    manifest.installation === stand.installation &&
+    manifest.installation.name === stand.installation.name &&
     manifest.github.clientId === stand.github.clientId &&
     manifest.secretStore.adapter === stand.secretStore.adapter &&
     // The one that is a list. A bare string is the same document as a
@@ -348,10 +351,7 @@ export async function resolveManifest(
 ): Promise<InstallationManifest> {
   return {
     ...manifest,
-    cloud: {
-      ...manifest.cloud,
-      federation: await loadDeploymentFederation(env),
-    },
+    cloud: { federation: await loadDeploymentFederation(env) },
   };
 }
 

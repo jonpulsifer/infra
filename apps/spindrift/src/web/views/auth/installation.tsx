@@ -38,10 +38,19 @@
  * next edit starts from the row rather than from a stale copy. Reload discards
  * local edits for the same reason.
  */
-import { CircleAlert, CircleCheck, RotateCcw, Sliders } from 'lucide-react';
+import {
+  CircleAlert,
+  CircleCheck,
+  RotateCcw,
+  Server,
+  Sliders,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { governedManifestPaths } from '../../../config/manifest.schema.ts';
 import type { TransportFailure } from '../../client.ts';
 import { command } from '../../client.ts';
+import type { Path } from '../../forms/document.ts';
+import { pathKey } from '../../forms/document.ts';
 import { manifestFields, manifestIssues } from '../../forms/manifest.ts';
 import type { FieldErrors } from '../../forms/render.tsx';
 import { SchemaFields } from '../../forms/render.tsx';
@@ -279,7 +288,18 @@ export function InstallationSettingsView({
    */
   onAdopted?(): void;
 }) {
-  const form = { document, errors, disabled: saving, onChange };
+  // The slice the mounted declaration takes back on every boot. Read-only here
+  // rather than accepted and reverted: `configureInstallation` refuses a
+  // document that edits it, and a field an operator can type into but not save
+  // is a field that teaches them the wrong thing about who owns it. Still no
+  // key named in this file — the paths come from the schema module that owns
+  // them, resolved against the document being edited.
+  const governed = governedManifestPaths(declaration, document).map(pathKey);
+  const locked = (at: Path) => {
+    const here = pathKey(at);
+    return governed.some((key) => here === key || here.startsWith(`${key}.`));
+  };
+  const form = { document, errors, disabled: saving, locked, onChange };
   // Sections are whichever keys have structure. Derived rather than listed, so
   // a key that changes shape moves itself between the two halves.
   const nested = fields.filter(
@@ -301,6 +321,8 @@ export function InstallationSettingsView({
         onAdopted={onAdopted}
       />
 
+      <GovernedSliceNotice locked={governed.length > 0} />
+
       {/* Above the form, because it is the step that comes before editing: a
           value confirmed from the cloud is a value nobody has to type, and one
           typed here is a value nothing checked. It edits the same document
@@ -309,6 +331,7 @@ export function InstallationSettingsView({
       <DiscoveryPanel
         document={document}
         disabled={saving}
+        locked={locked}
         onChange={onChange}
       />
 
@@ -379,6 +402,40 @@ export function InstallationSettingsView({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Why some of the fields below cannot be typed into.
+ *
+ * The sentence rather than a tooltip on each control, and the same sentence
+ * `views/targets/list.tsx` renders on a governed Target's card: these two
+ * boundaries reconcile from the mounted declaration on every boot, so an edit
+ * accepted here would survive exactly until the next restart — with the screen
+ * that accepted it then showing the old values and no reason. A lock with no
+ * sentence beside it reads as a bug in the form.
+ *
+ * Not a refusal: nothing failed and nothing here is wrong to fix, so it takes
+ * the neutral voice `Outcome`'s `refused` arm uses rather than the destructive
+ * one.
+ */
+function GovernedSliceNotice({ locked }: { readonly locked: boolean }) {
+  if (!locked) return null;
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-border bg-secondary p-3 text-sm text-foreground">
+      <Server aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
+      <div>
+        <p className="font-medium">
+          The vessels this installation is built on are declared, not configured
+          here.
+        </p>
+        <p className="mt-0.5 text-muted-foreground">
+          This installation reconciles them from the mounted declaration on
+          every boot, so they are read-only below and a save that changed one
+          would be refused. Change the declaration instead.
+        </p>
+      </div>
+    </div>
   );
 }
 

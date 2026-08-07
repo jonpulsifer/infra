@@ -4,7 +4,13 @@
 # Spindrift installation appears here and nowhere in src/. If a new
 # installation-specific value is added to the schema, this file is where it
 # gets a value, and the extraction test is what notices when it does not.
-installation: example
+installation:
+  name: example
+  # The two vessels this installation is itself built on. Scalars naming a
+  # declared vessel, so cardinality is free: there is one control plane and one
+  # home, and neither can be a list of two.
+  controlPlaneVessel: cluster
+  homeVessel: cloud
 
 # Where this control plane serves its own UI. A passkey is scoped to it, and it
 # is how one process tells a request for itself from a request for an App.
@@ -24,15 +30,12 @@ dns:
 sources:
   buckets:
     - example-source-bucket
-  defaultBucket: example-source-bucket
 
-cloud:
-  artifactsProject: example-artifacts
-  homeVesselProject: example-home
-  # No `federation` block. §13's one auth mode is an external_account credential
-  # the installer chart renders, and the process reads it from there — see
-  # gcp-credentials.json beside this file, which is the fixture deployment's
-  # copy. A second one here could disagree with the pod it runs in.
+# No `cloud` block. §13's one auth mode is an external_account credential the
+# installer chart renders, and the process reads it from there — see
+# gcp-credentials.json beside this file, which is the fixture deployment's copy.
+# A second one here could disagree with the pod it runs in. The two keys that
+# used to sit beside it are properties of the home vessel below.
 
 charts:
   app: example/spindrift-app
@@ -74,7 +77,6 @@ build:
 secretStore:
   adapter: gcp-secret-manager
   endpoint: https://secrets.example.test
-  container: example-secrets
 
 # The tenancy boundaries. Named, so nothing has to recover one from a Target's
 # vessel and adapter — the cloud vessel below carries two surfaces and says so
@@ -86,6 +88,13 @@ vessels:
     kind: cluster
   - name: cloud
     kind: gcp-project
+    # This installation's shared services, stated once on the boundary that
+    # holds them. `installation.homeVessel` names this vessel, so this block is
+    # required here and refused on every other.
+    shared:
+      sourceBucket: example-source-bucket
+      artifactsProject: example-artifacts
+      secretStoreContainer: example-secrets
 
 # Rank order: placement considers these top to bottom. A Target has no name of
 # its own — `vessel` and `adapter` are what identify it.

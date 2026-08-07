@@ -51,7 +51,11 @@ import type {
 import type { Draft } from '../domain/creation-draft.ts';
 import type { DesiredDocument } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
-import { VESSEL_KINDS, type VesselLocation } from '../domain/vessel.ts';
+import {
+  VESSEL_KINDS,
+  type VesselLocation,
+  type VesselPrerequisiteResult,
+} from '../domain/vessel.ts';
 import type { CoreSignature } from '../supply-chain/sign.ts';
 import type { BackendProvenanceAssessment } from '../supply-chain/verify.ts';
 
@@ -902,6 +906,27 @@ export const vessels = pgTable(
     servedHosts: text('served_hosts').array(),
     /** §3, and boundary-shaped for the same reason. */
     reachableRegistries: text('reachable_registries').array(),
+    /**
+     * The standing checklist for the boundary itself, as
+     * `VESSEL_PREREQUISITES_BY_KIND_AND_ROLE` decides its rows.
+     *
+     * Not a second copy of a Target's: these are the four facts that are true of
+     * one boundary and of no runtime on it — the source bucket, the store
+     * container, the artifacts project and the signer. Null means never
+     * assessed, which is a different state from assessed-and-empty: an app
+     * vessel is asked nothing and so stores an empty list once the loop has been
+     * past it.
+     *
+     * Health is not a column. It is every catalogued row met, derived at read
+     * time for the reason `target-loop.ts` gives — a stored derivation can be
+     * stale in a way nothing notices.
+     */
+    prerequisites:
+      jsonbDocument('prerequisites').$type<
+        readonly VesselPrerequisiteResult[]
+      >(),
+    /** When the standing pass last ran against this boundary. */
+    inspectedAt: timestamp('inspected_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

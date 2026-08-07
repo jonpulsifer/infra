@@ -48,7 +48,128 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return dropTargetNames(addDeclaredVessels(document));
+  return nameInstallationVessels(dropTargetNames(addDeclaredVessels(document)));
+}
+
+/**
+ * Turn the four loose strings that described this installation's own two
+ * boundaries into two pointers and one vessel's properties.
+ *
+ * `installation` was an opaque label; it is now the block that names the vessel
+ * the control plane runs on and the vessel holding the shared services.
+ * `cloud.homeVesselProject`, `cloud.artifactsProject`, `sources.defaultBucket`
+ * and `secretStore.container` were four keys that all described the second one
+ * without anything saying so, and they move onto it.
+ *
+ * **Both pointers are recovered rather than guessed, and each from the one
+ * thing the old document actually stated.**
+ *
+ * The home vessel is the boundary whose `location.project` is the project
+ * `cloud.homeVesselProject` named — the two were the same value on every
+ * installation that has one, which is the whole reason the collapse is
+ * expressible. Where they were not, the first `gcp-project` vessel takes the
+ * role: the old key could name a project that was never a declared boundary,
+ * and minting a vessel for it here would recover a boundary from a string,
+ * which is precisely what the `vessels` key exists to stop.
+ *
+ * The control plane is the vessel of the **first** Target. Rank is array
+ * position (`reconcileManifestTargets`), the control plane's own cluster is its
+ * in-cluster destination, and rank 0 is where every document written so far put
+ * it. It is a recovery of one fact from one document shape, run once — after
+ * this the declaration states it and nothing derives it again.
+ *
+ * Runs last, because it reads `vessels` and `targets[].vessel`, which the two
+ * steps above are what put there.
+ */
+function nameInstallationVessels(document: unknown): unknown {
+  const manifest = asDocument(document);
+  if (manifest === null) return document;
+  // Already current: `installation` is the block rather than the label.
+  if (asDocument(manifest.installation) !== null) return document;
+  if (typeof manifest.installation !== 'string') return document;
+
+  const vessels = Array.isArray(manifest.vessels) ? manifest.vessels : null;
+  const targets = Array.isArray(manifest.targets) ? manifest.targets : null;
+  const cloud = asDocument(manifest.cloud);
+  const sources = asDocument(manifest.sources);
+  const secretStore = asDocument(manifest.secretStore);
+  if (vessels === null || targets === null) return document;
+
+  const declared = vessels.flatMap((seed) => {
+    const vessel = asDocument(seed);
+    return vessel === null || typeof vessel.name !== 'string' ? [] : [vessel];
+  });
+  if (declared.length !== vessels.length) return document;
+
+  const home = homeVesselIn(declared, cloud?.homeVesselProject);
+  const controlPlane = asDocument(targets[0])?.vessel;
+  if (home === null || typeof controlPlane !== 'string') return document;
+
+  const buckets = sources?.buckets;
+  const sourceBucket =
+    firstString(sources?.defaultBucket) ??
+    (Array.isArray(buckets) ? firstString(buckets[0]) : null);
+  const artifactsProject = firstString(cloud?.artifactsProject);
+  const secretStoreContainer = firstString(secretStore?.container);
+  if (
+    sourceBucket === null ||
+    artifactsProject === null ||
+    secretStoreContainer === null
+  ) {
+    return document;
+  }
+
+  const { defaultBucket: _moved, ...remainingSources } = sources ?? {};
+  const { container: _held, ...remainingStore } = secretStore ?? {};
+  const { cloud: _derivedNow, ...rest } = manifest;
+  return {
+    ...rest,
+    installation: {
+      name: manifest.installation,
+      controlPlaneVessel: controlPlane,
+      homeVessel: home.name,
+    },
+    sources: remainingSources,
+    secretStore: remainingStore,
+    // Rebuilt in place, in order: nothing reads a vessel's position, but two
+    // documents that differ only by order would diff as changed.
+    vessels: declared.map((vessel) =>
+      vessel === home
+        ? {
+            ...vessel,
+            shared: { sourceBucket, artifactsProject, secretStoreContainer },
+          }
+        : vessel,
+    ),
+  };
+}
+
+/**
+ * Which declared boundary `cloud.homeVesselProject` was describing.
+ *
+ * The project match first, because that is the document stating it. The first
+ * cloud vessel behind it, because the old key was free to name a project no
+ * vessel declared and this upgrade may not invent one.
+ */
+function homeVesselIn(
+  declared: readonly Document[],
+  homeVesselProject: unknown,
+): (Document & { name: string }) | null {
+  const named =
+    typeof homeVesselProject === 'string'
+      ? declared.find(
+          (vessel) =>
+            asDocument(vessel.location)?.project === homeVesselProject,
+        )
+      : undefined;
+  const home =
+    named ?? declared.find((vessel) => vessel.kind === 'gcp-project') ?? null;
+  return home === null ? null : (home as Document & { name: string });
+}
+
+/** A stated string, or `null` for anything that is not one. */
+function firstString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
 }
 
 /**

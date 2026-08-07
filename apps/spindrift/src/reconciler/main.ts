@@ -18,7 +18,9 @@ try {
   await startReconciler({
     signal: shutdown.signal,
     onStarted: (manifest) =>
-      console.log(`spindrift reconciler → running (${manifest.installation})`),
+      console.log(
+        `spindrift reconciler → running (${manifest.installation.name})`,
+      ),
     onEvent: report,
   });
 } finally {

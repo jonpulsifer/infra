@@ -204,6 +204,13 @@
       "when": 1785374380772,
       "tag": "0028_target_vessel_surface_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785374380773,
+      "tag": "0029_vessel_checklist",
+      "breakpoints": true
     }
   ]
 }

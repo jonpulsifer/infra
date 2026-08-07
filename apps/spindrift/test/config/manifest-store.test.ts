@@ -11,6 +11,7 @@ import {
 } from '../../src/config/manifest.ts';
 import {
   diffManifestPaths,
+  governedSliceRefusal,
   loadStoredManifest,
   targetConnectionDivergence,
   writeStoredManifest,
@@ -55,6 +56,12 @@ const connectedManifest = {
       name: 'cloud',
       kind: 'gcp-project',
       location: { project: 'example-vessel' },
+      // Carried from the fixture rather than restated: the home vessel is the
+      // one that must declare these, and which vessel that is comes from the
+      // fixture's own `installation.homeVessel`.
+      shared: fixtureManifest.vessels.find(
+        (vessel) => vessel.name === fixtureManifest.installation.homeVessel,
+      )?.shared,
     },
   ],
   targets: [
@@ -93,7 +100,7 @@ describe('the stored installation manifest', () => {
     const first = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
-    expect(first.installation).toBe('example');
+    expect(first.installation.name).toBe('example');
 
     const later = await loadStoredManifest(database().db, {});
     expect(later).toEqual(first);
@@ -371,11 +378,8 @@ describe('the stored installation manifest', () => {
     const first = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
-    expect(first.installation).toBe('example');
-    const changed = fixtureText.replace(
-      'installation: example',
-      'installation: replacement',
-    );
+    expect(first.installation.name).toBe('example');
+    const changed = fixtureText.replace('name: example', 'name: replacement');
 
     // A rollout must not revert what an operator just configured, so the row
     // wins over the declaration that seeded it.
@@ -383,17 +387,14 @@ describe('the stored installation manifest', () => {
       [MANIFEST_INLINE_VAR]: changed,
     });
     expect(later).toEqual(first);
-    expect(later.installation).toBe('example');
+    expect(later.installation.name).toBe('example');
   });
 
   test('discarding the row re-seeds from the declaration', async () => {
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
-    const changed = fixtureText.replace(
-      'installation: example',
-      'installation: replacement',
-    );
+    const changed = fixtureText.replace('name: example', 'name: replacement');
 
     // The deliberate act that makes a declaration apply again. It is also the
     // whole of the tear-down-and-redeploy loop: an installation that lost its
@@ -403,7 +404,7 @@ describe('the stored installation manifest', () => {
     const reseeded = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: changed,
     });
-    expect(reseeded.installation).toBe('replacement');
+    expect(reseeded.installation.name).toBe('replacement');
     expect(await loadStoredManifest(database().db, {})).toEqual(reseeded);
   });
 
@@ -436,10 +437,7 @@ describe('the stored installation manifest', () => {
       })
       .where(eq(targets.id, await targetIdOf('cluster')));
 
-    const changed = fixtureText.replace(
-      'installation: example',
-      'installation: replacement',
-    );
+    const changed = fixtureText.replace('name: example', 'name: replacement');
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: changed,
     });
@@ -515,10 +513,7 @@ describe('the stored installation manifest', () => {
     // though the operator had declared nothing at all.
     await expect(
       loadStoredManifest(database().db, {
-        [MANIFEST_INLINE_VAR]: fixtureText.replace(
-          'installation: example',
-          'installation: ""',
-        ),
+        [MANIFEST_INLINE_VAR]: fixtureText.replace('name: example', 'name: ""'),
       }),
     ).rejects.toThrow(ManifestError);
   });
@@ -658,7 +653,7 @@ describe('the stored installation manifest', () => {
       }),
     ]);
     expect(second).toEqual(first);
-    expect(first.installation).toBe('example');
+    expect(first.installation.name).toBe('example');
     expect(await database().db.select().from(targets)).toHaveLength(3);
   });
 
@@ -695,7 +690,7 @@ describe('the stored installation manifest', () => {
     // what an installation with no cloud Targets honestly has.
     expect(loaded).toEqual({
       ...DEFAULT_PLACEHOLDER_MANIFEST,
-      cloud: { ...DEFAULT_PLACEHOLDER_MANIFEST.cloud, federation: null },
+      cloud: { federation: null },
     });
   });
 
@@ -783,15 +778,30 @@ describe('naming where a declaration disagrees with the stored row', () => {
   });
 
   test('the startup warning names the differing path, and still no value', async () => {
+    // An ordinary boundary, deliberately: the two the installation is built on
+    // are reconciled from the declaration on every boot, so a difference there
+    // is one a boot resolves rather than one to warn about.
+    const seeded = {
+      ...connectedManifest,
+      vessels: [
+        ...connectedManifest.vessels,
+        {
+          name: 'elsewhere',
+          kind: 'cluster' as const,
+          location: { apiServer: 'https://elsewhere.example.test' },
+        },
+      ],
+    } satisfies AuthoredManifest;
     await loadStoredManifest(database().db, {
-      [MANIFEST_INLINE_VAR]: JSON.stringify(connectedManifest),
+      [MANIFEST_INLINE_VAR]: JSON.stringify(seeded),
     });
     const declared = {
-      ...connectedManifest,
-      vessels: connectedManifest.vessels.map((vessel) =>
-        vessel.kind === 'cluster'
+      ...seeded,
+      vessels: seeded.vessels.map((vessel) =>
+        vessel.name === 'elsewhere'
           ? {
-              ...vessel,
+              name: 'elsewhere',
+              kind: 'cluster' as const,
               location: {
                 apiServer: 'https://declared-elsewhere.example.test',
               },
@@ -821,11 +831,244 @@ describe('naming where a declaration disagrees with the stored row', () => {
     const messages = calls.map((call) => String(call[0]));
     expect(
       messages.some((message) =>
-        message.includes('vessels.0.location.apiServer'),
+        message.includes('vessels.2.location.apiServer'),
       ),
     ).toBe(true);
     expect(
       messages.some((message) => message.includes('declared-elsewhere')),
     ).toBe(false);
+  });
+});
+
+/**
+ * The one exception to "a declaration seeds and does not govern".
+ *
+ * It is a narrowing rather than an inversion: the vessel this control plane runs
+ * on and the vessel holding its shared services reconcile from the mounted
+ * declaration on every boot, because you should not be able to click your way
+ * into an unbootable control plane or a home pointing at nothing. Every other
+ * vessel keeps the rule exactly.
+ */
+describe('the two vessels the installation is built on are governed', () => {
+  /** A declaration with a third, ordinary boundary beside the fixture's two. */
+  function withAppVessel(apiServer: string, homeProject: string) {
+    return JSON.stringify({
+      ...connectedManifest,
+      vessels: [
+        ...connectedManifest.vessels.map((vessel) =>
+          vessel.name === 'cloud'
+            ? { ...vessel, location: { project: homeProject } }
+            : vessel,
+        ),
+        { name: 'elsewhere', kind: 'cluster', location: { apiServer } },
+      ],
+      targets: [
+        ...connectedManifest.targets,
+        { vessel: 'elsewhere', adapter: 'kubernetes' },
+      ],
+    });
+  }
+
+  async function locationOf(name: string) {
+    const [row] = await database()
+      .db.select({ location: vessels.location })
+      .from(vessels)
+      .where(eq(vessels.name, name));
+    return row?.location;
+  }
+
+  test('a boot moves the home vessel and leaves an ordinary one alone', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: withAppVessel(
+        'https://elsewhere.example.test',
+        'first-home',
+      ),
+    });
+
+    // Both edited in the declaration, and only one of them is the
+    // declaration's to move on a boot.
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: withAppVessel(
+        'https://moved.example.test',
+        'second-home',
+      ),
+    });
+
+    expect(await locationOf('cloud')).toEqual({
+      kind: 'gcp-project',
+      project: 'second-home',
+    });
+    expect(await locationOf('elsewhere')).toEqual({
+      kind: 'cluster',
+      apiServer: 'https://elsewhere.example.test',
+    });
+  });
+
+  test('moving the home vessel reassesses the surfaces on it', async () => {
+    // A Target's checklist is a set of claims about a place. Move the place and
+    // every one of them is about somewhere else — the same reason a `declared`
+    // write resets them.
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: withAppVessel('https://a.example.test', 'before'),
+    });
+    const id = await targetIdOf('cloud', 'cloudrun');
+    await database()
+      .db.update(targets)
+      .set({ health: 'healthy', inspectedAt: new Date() })
+      .where(eq(targets.id, id));
+
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: withAppVessel('https://a.example.test', 'after'),
+    });
+
+    const [row] = await database()
+      .db.select()
+      .from(targets)
+      .where(eq(targets.id, id));
+    expect(row?.health).toBe('unhealthy');
+    expect(row?.inspectedAt).toBeNull();
+  });
+
+  /** The fixture, with a home vessel a declaration can move. */
+  function homeAt(project: string) {
+    return JSON.stringify({
+      ...fixtureManifest,
+      vessels: fixtureManifest.vessels.map((vessel) =>
+        vessel.name === fixtureManifest.installation.homeVessel
+          ? { ...vessel, location: { project } }
+          : vessel,
+      ),
+    });
+  }
+
+  test('a boot that moves the home vessel keeps the connection an operator made', async () => {
+    // The fixture seeds its Targets with no connection — §13's half-ready state
+    // — so on a boot the manifest's copy of one is `null`. Re-asserting it
+    // because the boundary moved would discard what the connect screen wrote
+    // while leaving the row reading `connected`, which is a Target every loop
+    // and every deploy path silently skips.
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: homeAt('before'),
+    });
+    const id = await targetIdOf('cloud', 'cloudrun');
+    const connection = connectionFor('cloudrun');
+    await database()
+      .db.update(targets)
+      .set({
+        status: 'connected',
+        connection,
+        health: 'healthy',
+        inspectedAt: new Date(),
+      })
+      .where(eq(targets.id, id));
+
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: homeAt('after'),
+    });
+
+    const [row] = await database()
+      .db.select()
+      .from(targets)
+      .where(eq(targets.id, id));
+    expect(row?.status).toBe('connected');
+    expect(row?.connection).toEqual(connection);
+    // Reassessed, though: every claim on the checklist was about the old place.
+    expect(row?.health).toBe('unhealthy');
+    expect(row?.inspectedAt).toBeNull();
+    // And it says which half moved. "Declared Target connection is awaiting
+    // inspection" would send an operator to a declaration that says nothing
+    // about this Target's connection.
+    expect(row?.prerequisites?.[0]?.detail).toContain('boundary');
+  });
+
+  test('a boot leaves an address the declaration does not state', async () => {
+    // The fixture declares both boundaries and neither location, which is the
+    // half-ready state §13 intends to be visible: the address comes from the
+    // connect act. Nulling the row on the strength of a declaration that said
+    // nothing about it undid that act on every restart.
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+    const located = {
+      kind: 'gcp-project' as const,
+      project: 'typed-at-connect',
+    };
+    await database()
+      .db.update(vessels)
+      .set({ location: located })
+      .where(eq(vessels.name, 'cloud'));
+
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: fixtureText,
+    });
+
+    expect(await locationOf('cloud')).toEqual(located);
+  });
+});
+
+/**
+ * The other half of governing those two: a write into the governed slice is
+ * refused rather than accepted and reverted at the next boot.
+ */
+describe('a write the next boot would take back is refused', () => {
+  /** The home vessel's shared services, edited the way the product edits them. */
+  function withSourceBucket(bucket: string): AuthoredManifest {
+    return {
+      ...connectedManifest,
+      vessels: connectedManifest.vessels.map((vessel) =>
+        vessel.name === connectedManifest.installation.homeVessel &&
+        vessel.shared !== undefined
+          ? { ...vessel, shared: { ...vessel.shared, sourceBucket: bucket } }
+          : vessel,
+      ),
+    } as AuthoredManifest;
+  }
+
+  test('the paths a boot would revert are named', () => {
+    const refusal = governedSliceRefusal(
+      withSourceBucket('operator-chosen'),
+      connectedManifest,
+    );
+    expect(refusal).toContain('vessels.1.shared.sourceBucket');
+    expect(refusal).toContain('Change the declaration');
+    // Paths, never values, for the reason `diffManifestPaths` gives.
+    expect(refusal).not.toContain('operator-chosen');
+  });
+
+  test('a re-pointed pointer is named too', () => {
+    const refusal = governedSliceRefusal(
+      {
+        ...connectedManifest,
+        installation: {
+          ...connectedManifest.installation,
+          controlPlaneVessel: 'cloud',
+        },
+      },
+      connectedManifest,
+    );
+    expect(refusal).toContain('installation.controlPlaneVessel');
+  });
+
+  test('everything outside the governed slice is still this screen’s to drive', () => {
+    expect(
+      governedSliceRefusal(
+        {
+          ...connectedManifest,
+          sources: {
+            ...connectedManifest.sources,
+            buckets: [...connectedManifest.sources.buckets, 'another-bucket'],
+          },
+        },
+        connectedManifest,
+      ),
+    ).toBeNull();
+  });
+
+  test('with no declaration mounted there is nothing to govern', () => {
+    // An installation running with no declaration owns its own document
+    // outright, which is the state the shared services are configured in.
+    expect(
+      governedSliceRefusal(withSourceBucket('operator-chosen'), null),
+    ).toBeNull();
   });
 });

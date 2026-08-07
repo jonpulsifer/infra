@@ -122,7 +122,7 @@ export type OnboardingAsk = {
 export const ONBOARDING_ASKS: readonly OnboardingAsk[] = [
   {
     kind: 'field',
-    at: ['installation'],
+    at: ['installation', 'name'],
     title: 'Name this installation',
     blurb:
       'A label for this control plane. It appears in the UI and in logs and carries no behaviour, so it is yours to pick.',

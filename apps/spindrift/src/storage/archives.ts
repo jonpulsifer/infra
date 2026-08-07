@@ -21,6 +21,7 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FederationOptions } from '../adapters/deploy/cloud/federation.ts';
+import { sharedServicesOf } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
 import { uploadToGcsBucket } from './cloud.ts';
 
@@ -66,12 +67,17 @@ export const ARTIFACTS_BUCKET_VAR = 'SPINDRIFT_ARTIFACTS_BUCKET';
  * this process outside its chart rather than a caller of it.
  */
 export function sourceDepotFor(
-  manifest: Pick<InstallationManifest, 'sources' | 'cloud'> | null | undefined,
+  manifest:
+    | Pick<InstallationManifest, 'installation' | 'vessels' | 'cloud'>
+    | null
+    | undefined,
 ): SourceDepot | null {
   const bucket =
     process.env[ARTIFACTS_BUCKET_VAR]?.trim() ||
-    manifest?.sources?.defaultBucket?.trim() ||
-    manifest?.sources?.buckets?.[0]?.trim();
+    // The home vessel's, because that is where the bucket is: a default stated
+    // beside `sources.buckets` could name one in a project nothing else in the
+    // document mentions, which is invisible until a build stages an archive.
+    (manifest == null ? undefined : sharedServicesOf(manifest).sourceBucket);
   const federation = manifest?.cloud?.federation ?? null;
   if (!bucket || federation === null) return null;
   return { bucket, federation };
