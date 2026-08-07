@@ -8,10 +8,10 @@ import (
 // launcher starts a child process. execLauncher is the real adapter; tests
 // substitute a fake that records argv and simulates exit.
 //
-// stdout/stderr are *os.File, not io.Writer: passt daemonizes and holds its
-// inherited stdio open past its own exit, so a piped io.Writer would leave
-// Wait's copy goroutine blocked forever. A real file (or /dev/null) has no
-// such goroutine.
+// stdout/stderr are *os.File, not io.Writer: virtiofsd forks a worker that
+// inherits its stdio and outlives the parent's exit, so a piped io.Writer
+// would leave Wait's copy goroutine blocked on the survivor. A real file (or
+// /dev/null) has no such goroutine.
 type launcher interface {
 	Start(name string, args []string, stdout, stderr *os.File) (proc, error)
 }

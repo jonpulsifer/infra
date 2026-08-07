@@ -188,7 +188,11 @@ in
         User = "bosun";
         Group = "bosun";
         SupplementaryGroups = [ "kvm" ];
-        Restart = "on-failure";
+        # always, not on-failure: bosun exits 0 on SIGTERM, and on-failure
+        # reads that as "done" -- leaving the pool empty and every skiff label
+        # unserviced until someone notices. An explicit `systemctl stop` still
+        # stops it.
+        Restart = "always";
         RestartSec = "5s";
 
         RuntimeDirectory = "bosun";

@@ -183,36 +183,22 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 
 	virtiofsd := binPath(p.cfg.Bin.Virtiofsd, "virtiofsd")
 
-	credProc, err := p.launch.Start(virtiofsd, virtiofsdArgs(s.paths.credSock, s.paths.dir, false), helpersLog, helpersLog)
-	if err != nil {
+	if err := p.startHelper(s, virtiofsd, virtiofsdArgs(s.paths.credSock, s.paths.dir, false)); err != nil {
 		return fmt.Errorf("start credential virtiofsd: %w", err)
 	}
-	s.helpers = append(s.helpers, credProc)
 
 	for i, dev := range h.manifest.Devices {
 		if dev.Share == nil {
 			continue // a disk rides cloud-hypervisor's own --disk; no helper
 		}
-		dp, err := p.launch.Start(virtiofsd, virtiofsdArgs(s.paths.deviceSocks[i], dev.Share.Host, dev.Share.RO), helpersLog, helpersLog)
-		if err != nil {
+		if err := p.startHelper(s, virtiofsd, virtiofsdArgs(s.paths.deviceSocks[i], dev.Share.Host, dev.Share.RO)); err != nil {
 			return fmt.Errorf("start device virtiofsd %s: %w", dev.Share.Tag, err)
 		}
-		s.helpers = append(s.helpers, dp)
 	}
 
-	// passt daemonizes; the real daemon detaches from this process (see
-	// launcher.go). It stays in bosun's cgroup, so KillMode=control-group
-	// still reaps it when bosun itself stops.
-	//
-	// ponytail: an individual skiff recycled mid-run cannot kill the
-	// detached passt process by PID, only its own launch handle (a no-op
-	// past daemonization). Upgrade path: pass --pid and track/kill that PID
-	// if leaked passt processes become a problem in practice.
-	passtProc, err := p.launch.Start(binPath(p.cfg.Bin.Passt, "passt"), passtArgs(s.paths.netSock), helpersLog, helpersLog)
-	if err != nil {
+	if err := p.startHelper(s, binPath(p.cfg.Bin.Passt, "passt"), passtArgs(s.paths.netSock)); err != nil {
 		return fmt.Errorf("start passt: %w", err)
 	}
-	s.helpers = append(s.helpers, passtProc)
 
 	chProc, err := p.launch.Start(binPath(p.cfg.Bin.CloudHypervisor, "cloud-hypervisor"), chArgs(h, class, s.id, s.paths), helpersLog, helpersLog)
 	if err != nil {
@@ -220,6 +206,20 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 	}
 	s.ch = chProc
 
+	return nil
+}
+
+// startHelper launches one side-car on s and reaps it in the background.
+// bosun's lifecycle signal is cloud-hypervisor's exit alone, so nothing else
+// ever Wait()s a helper — and an unwaited child that exits stays a zombie in
+// bosun's process table until bosun itself restarts.
+func (p *pool) startHelper(s *skiff, name string, args []string) error {
+	pr, err := p.launch.Start(name, args, s.helpersLog, s.helpersLog)
+	if err != nil {
+		return err
+	}
+	s.helpers = append(s.helpers, pr)
+	go func() { _ = pr.Wait() }()
 	return nil
 }
 
