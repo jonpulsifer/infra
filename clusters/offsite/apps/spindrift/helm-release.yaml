@@ -195,6 +195,13 @@ spec:
         # Where every boundary below is declared. An unmet prerequisite
         # renders the Terraform that clears it, and this is the repository the
         # pull request adding that stanza is opened against.
+        #
+        # Governed rather than seeded, which is the exception in this block:
+        # everywhere else the stored row wins over a declaration, and this
+        # installation has had one since long before this key existed. It
+        # travels with the vessel entries because `terraformRoot` below is a
+        # path *inside* this repository — governing the path and not the
+        # repository would be two halves of one address that can disagree.
         infrastructureRepository: jonpulsifer/infra
       sources:
         # Which of these staging picks is `shared.sourceBucket` on the home

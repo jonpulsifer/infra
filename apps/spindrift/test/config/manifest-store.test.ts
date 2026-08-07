@@ -1007,6 +1007,91 @@ describe('the two vessels the installation is built on are governed', () => {
 });
 
 /**
+ * The repository the governed vessels' roots are paths inside.
+ *
+ * Governed with them and for their sake: a vessel entry carries `terraformRoot`
+ * as a path relative to this repository, so governing the path while the row
+ * keeps the repository is two halves of one address that can disagree with
+ * nothing to notice. The failure it produces is silent — a declaration that
+ * names the repository lands on an installation that has never booted and on no
+ * other, so the feature it feeds reads as broken on exactly the installations
+ * that have been running longest.
+ */
+describe('the repository the boundaries are declared in', () => {
+  /** The fixture, naming a different infrastructure repository. */
+  function declaredAt(repository: string): string {
+    return JSON.stringify({
+      ...fixtureManifest,
+      github: {
+        ...fixtureManifest.github,
+        infrastructureRepository: repository,
+      },
+    });
+  }
+
+  test('a declaration reaches an installation that is already seeded', async () => {
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: declaredAt('example/first'),
+    });
+
+    const manifest = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: declaredAt('example/second'),
+    });
+
+    expect(manifest.github.infrastructureRepository).toBe('example/second');
+  });
+
+  test('a declaration that names none leaves what an operator set', async () => {
+    // The chart's own placeholder omits the key, so reading its absence as an
+    // assertion would clear this on every boot of every default installation.
+    const withoutKey = JSON.stringify({
+      ...fixtureManifest,
+      github: {
+        ...fixtureManifest.github,
+        infrastructureRepository: undefined,
+      },
+    });
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: withoutKey,
+    });
+    const [row] = await database().db.select().from(installation);
+    await writeStoredManifest(database().db, {
+      ...(row!.manifest as AuthoredManifest),
+      github: {
+        ...(row!.manifest as AuthoredManifest).github,
+        infrastructureRepository: 'operator/chosen',
+      },
+    });
+
+    const manifest = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: withoutKey,
+    });
+    expect(manifest.github.infrastructureRepository).toBe('operator/chosen');
+  });
+
+  test('the rest of the block stays the row’s', async () => {
+    // The App id, its endpoints and the pinned workflow are configured through
+    // the settings screen; only the repository the roots live in is governed.
+    await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: declaredAt('example/first'),
+    });
+    const [row] = await database().db.select().from(installation);
+    await writeStoredManifest(database().db, {
+      ...(row!.manifest as AuthoredManifest),
+      github: {
+        ...(row!.manifest as AuthoredManifest).github,
+        clientId: 'Iv1.configured-here',
+      },
+    });
+
+    const manifest = await loadStoredManifest(database().db, {
+      [MANIFEST_INLINE_VAR]: declaredAt('example/first'),
+    });
+    expect(manifest.github.clientId).toBe('Iv1.configured-here');
+  });
+});
+
+/**
  * The other half of governing those two: a write into the governed slice is
  * refused rather than accepted and reverted at the next boot.
  */
@@ -1033,6 +1118,21 @@ describe('a write the next boot would take back is refused', () => {
     expect(refusal).toContain('Change the declaration');
     // Paths, never values, for the reason `diffManifestPaths` gives.
     expect(refusal).not.toContain('operator-chosen');
+  });
+
+  test('the infrastructure repository is refused where a declaration names one', () => {
+    const refusal = governedSliceRefusal(
+      {
+        ...connectedManifest,
+        github: {
+          ...connectedManifest.github,
+          infrastructureRepository: 'operator/chosen',
+        },
+      } as AuthoredManifest,
+      connectedManifest,
+    );
+    expect(refusal).toContain('github.infrastructureRepository');
+    expect(refusal).not.toContain('operator/chosen');
   });
 
   test('a re-pointed pointer is named too', () => {
