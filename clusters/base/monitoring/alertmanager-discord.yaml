@@ -1,0 +1,26 @@
+---
+# One Discord webhook serves both clusters; the `cluster` external label on
+# every alert is what tells the messages apart, so there is nothing per-site
+# here and this lives in base rather than beside each HelmRelease.
+#
+# Alertmanager reads the URL through `webhook_url_file` from the secret this
+# creates, mounted by `alertmanagerSpec.secrets` in each cluster's
+# kube-prometheus HelmRelease.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-discord
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: alertmanager-discord
+    creationPolicy: Owner
+  data:
+    - secretKey: webhook-url
+      remoteRef:
+        key: discord alertmanager webhook
+        property: password
