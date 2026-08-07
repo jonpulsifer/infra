@@ -12,6 +12,11 @@ resource "google_artifact_registry_repository" "images" {
     id     = "delete-untagged"
     action = "DELETE"
     condition {
+      # Without this the provider sends `ANY`, and the policy this id promises
+      # is one that deletes every artifact a day after it is built — including
+      # the tagged one a live Service is running, which then cannot redeploy
+      # or roll back because its digest no longer resolves.
+      tag_state  = "UNTAGGED"
       older_than = "24h"
     }
   }
