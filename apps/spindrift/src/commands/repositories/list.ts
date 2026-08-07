@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { RepositoryAuthorizationRequiredError } from '../../domain/repository.ts';
 import { reconcileRepository } from '../../reconciler/repo-loop.ts';
 import type {
+  GrantedRepositoryView,
   LinkedRepoView,
   RepositoryConnectorView,
   RepositoryOptionView,
@@ -16,7 +17,7 @@ export interface ListRepositoriesResult {
   /** Durable connections consumed by the App creation flow. */
   readonly options: readonly RepositoryOptionView[];
   /** Repositories GitHub currently grants, consumed by the connector form. */
-  readonly available: readonly RepositoryOptionView[];
+  readonly available: readonly GrantedRepositoryView[];
   readonly connector: RepositoryConnectorView;
 }
 
@@ -126,17 +127,17 @@ export const listRepositories: Command<
   const connectedByName = new Map(
     reposList.map((repo) => [repo.fullName, repo] as const),
   );
-  const availableList: RepositoryOptionView[] = available.map((repo) => ({
+  const availableList: GrantedRepositoryView[] = available.map((repo) => ({
     repositoryId: repo.repositoryId,
     fullName: repo.fullName,
     defaultBranch: repo.defaultBranch,
-    connected: connectedByName.has(repo.fullName),
+    rowExists: connectedByName.has(repo.fullName),
   }));
   const optionsList: RepositoryOptionView[] = allRepos.map((repo) => ({
     repositoryId: repo.id,
     fullName: repo.fullName,
     defaultBranch: repo.defaultBranch,
-    connected: subpathsByRepoId.has(repo.id),
+    alreadyDeploys: subpathsByRepoId.has(repo.id),
   }));
 
   return ok({

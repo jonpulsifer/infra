@@ -200,7 +200,7 @@ describe('the GitHub repository connector', () => {
             repositoryId: '99',
             fullName: 'example/app',
             defaultBranch: 'main',
-            connected: false,
+            rowExists: false,
           },
         ]}
         connector={{

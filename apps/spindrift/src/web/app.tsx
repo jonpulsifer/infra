@@ -16,6 +16,7 @@ import type {
   BuildListItem,
   DeployLedgerItem,
   DeployView,
+  GrantedRepositoryView,
   LinkedRepoView,
   LogLine,
   PendingTargetConnection,
@@ -2050,7 +2051,7 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
         type: 'success';
         repos: readonly LinkedRepoView[];
         options: readonly RepositoryOptionView[];
-        available: readonly RepositoryOptionView[];
+        available: readonly GrantedRepositoryView[];
         connector: RepositoryConnectorView;
       }
   >({ type: 'loading' });
@@ -2253,7 +2254,7 @@ function NewAppScreen({
         type: 'success';
         targetOptions: readonly TargetOptionView[];
         repoOptions: readonly RepositoryOptionView[];
-        repoGrant: readonly RepositoryOptionView[];
+        repoGrant: readonly GrantedRepositoryView[];
         draft: import('../domain/creation-draft.ts').CreationDraftView;
       }
   >({ type: 'loading' });

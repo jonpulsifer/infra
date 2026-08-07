@@ -42,9 +42,9 @@ import { useState } from 'react';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type {
+  GrantedRepositoryView,
   LinkedRepoView,
   RepositoryConnectorView,
-  RepositoryOptionView,
 } from '../../model.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
@@ -94,7 +94,7 @@ export function RepositoryList({
   embedded = false,
 }: {
   repos: readonly LinkedRepoView[];
-  options: readonly RepositoryOptionView[];
+  options: readonly GrantedRepositoryView[];
   connector: RepositoryConnectorView;
   authorization: RepositoryAuthorizationView | null;
   connecting: boolean;
@@ -373,7 +373,7 @@ function AvailableRepositories({
   connecting,
   onConnect,
 }: {
-  options: readonly RepositoryOptionView[];
+  options: readonly GrantedRepositoryView[];
   connecting: boolean;
   onConnect: (input: ConnectRepositoryInput) => void;
 }) {
@@ -430,7 +430,7 @@ function RepositoryRow({
   onToggle,
   onConnect,
 }: {
-  option: RepositoryOptionView;
+  option: GrantedRepositoryView;
   open: boolean;
   connecting: boolean;
   onToggle: () => void;
@@ -470,14 +470,14 @@ function RepositoryRow({
         <span className="font-mono text-xs text-muted-foreground">
           {option.defaultBranch}
         </span>
-        {option.connected ? <Badge tone="success">connected</Badge> : null}
+        {option.rowExists ? <Badge tone="success">connected</Badge> : null}
         <Button
           size="sm"
           variant={open ? 'ghost' : 'outline'}
           className="ml-auto"
           onClick={toggle}
         >
-          {open ? 'Cancel' : option.connected ? 'Reconnect' : 'Connect'}
+          {open ? 'Cancel' : option.rowExists ? 'Reconnect' : 'Connect'}
         </Button>
       </div>
 

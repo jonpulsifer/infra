@@ -720,7 +720,7 @@ describe('listRepositories', () => {
         repositoryId: '99',
         fullName: 'example/available',
         defaultBranch: 'trunk',
-        connected: false,
+        rowExists: false,
       },
     ]);
   });

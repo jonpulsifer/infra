@@ -7,9 +7,9 @@
  * the operator has granted repositories and connected none, that reads "no
  * repositories" beside a GitHub App that is working.
  *
- * The two lists each carry a `connected` boolean and they do not mean the same
- * thing, which is why the state on each row is derived here rather than read
- * off either one.
+ * Each list carries its own boolean about Spindrift — `alreadyDeploys` on a
+ * connection, `rowExists` on a grant entry — which is why the state on each row
+ * is derived here rather than read off either one.
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -53,10 +53,11 @@ describe('what the picker offers', () => {
     expect(stateOf('example-org/ledger')).toBe('grant-only');
   });
 
-  test("the grant's own `connected` flag never decides a row", () => {
-    // `available[].connected` means "a row exists" while `options[].connected`
-    // means "an App deploys from it". Reading the first as a state is how a
-    // connected repository with no App reads as one that has one.
+  test("the grant's own row-exists flag never decides a row", () => {
+    // A grant entry knows only that Spindrift holds a row; whether an App
+    // deploys from it is the connection's own fact. Reading the first as the
+    // second is how a connected repository with no App reads as one that has
+    // one.
     const grantOnly = repositoryChoices(
       [],
       [
@@ -64,11 +65,22 @@ describe('what the picker offers', () => {
           repositoryId: '1',
           fullName: 'example-org/site',
           defaultBranch: 'main',
-          connected: true,
+          rowExists: true,
         },
       ],
     );
     expect(grantOnly[0]?.state).toBe('grant-only');
+  });
+
+  test('a repository on both lists is read off the connection', () => {
+    // `example-org/site` has a row and no App: the grant says a row exists and
+    // the connection says nothing deploys from it. Only the second is an answer
+    // to the question the row is asking.
+    expect(
+      REPOSITORY_GRANT.find((repo) => repo.fullName === 'example-org/site')
+        ?.rowExists,
+    ).toBe(true);
+    expect(stateOf('example-org/site')).toBe('connected');
   });
 });
 

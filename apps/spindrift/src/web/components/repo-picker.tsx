@@ -23,7 +23,7 @@
  */
 import { GitBranch, Search } from 'lucide-react';
 import { useState } from 'react';
-import type { RepositoryOptionView } from '../model.ts';
+import type { GrantedRepositoryView, RepositoryOptionView } from '../model.ts';
 import { Badge } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 
@@ -55,22 +55,22 @@ const STATE_BADGE = {
 /**
  * The grant and the connections, as one list.
  *
- * The two `connected` booleans on the response mean different things — on a
- * connection it means an App deploys from it, on a grant entry it means a row
- * exists — so neither is read as a state here. The state is derived from which
- * list a repository is in and what its own list says about it, which is the
- * only reading that cannot be wrong about the other list.
+ * A connection knows whether an App deploys from it and a grant entry knows
+ * whether a row exists, which are two different facts about two different
+ * lists — so a row's state is derived from which list it came from and the
+ * fact that list actually holds, and neither boolean is ever read off the
+ * other's row.
  */
 export function repositoryChoices(
   connections: readonly RepositoryOptionView[],
-  grant: readonly RepositoryOptionView[],
+  grant: readonly GrantedRepositoryView[],
 ): readonly RepositoryChoice[] {
   const rows = new Map<string, RepositoryChoice>();
   for (const repo of connections) {
     rows.set(repo.fullName, {
       fullName: repo.fullName,
       defaultBranch: repo.defaultBranch,
-      state: repo.connected ? 'deploys' : 'connected',
+      state: repo.alreadyDeploys ? 'deploys' : 'connected',
     });
   }
   for (const repo of grant) {

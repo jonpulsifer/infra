@@ -40,7 +40,11 @@ import {
   type RepositoryChoice,
   repositoryChoices,
 } from '../../../components/repo-picker.tsx';
-import type { RepositoryOptionView, TargetOptionView } from '../../../model.ts';
+import type {
+  GrantedRepositoryView,
+  RepositoryOptionView,
+  TargetOptionView,
+} from '../../../model.ts';
 import { reportSessionExpired } from '../../../session-events.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
@@ -108,7 +112,7 @@ export function NewApp({
   /** Repositories Spindrift holds a row for. */
   repos: readonly RepositoryOptionView[];
   /** Repositories GitHub currently grants this installation. */
-  available: readonly RepositoryOptionView[];
+  available: readonly GrantedRepositoryView[];
   onCreated?: (app: { readonly id: string; readonly name: string }) => void;
 }) {
   const [draft, setDraft] = useState(initial.draft);
