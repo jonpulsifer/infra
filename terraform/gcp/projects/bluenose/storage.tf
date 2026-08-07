@@ -19,7 +19,7 @@ resource "google_storage_bucket" "spindrift_source" {
     }
   }
 
-  depends_on = [google_project_service.service["storage.googleapis.com"]]
+  depends_on = [module.vessel]
 }
 
 resource "google_storage_bucket_iam_member" "spindrift_source" {
