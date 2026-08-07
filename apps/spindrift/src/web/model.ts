@@ -706,6 +706,15 @@ export interface LinkedRepoView {
   readonly error: string | null;
   /** The last commit SHA Spindrift reconciled. */
   readonly lastReconciledSha: string | null;
+  /**
+   * Why the last refresh of this row from the host failed, if it did.
+   *
+   * Separate from `error`, which is about access being lost. This one is a row
+   * that is still connected and whose commit is older than it looks: listing
+   * every repository refreshes them all, and one the host would not answer
+   * about is a stale row rather than a missing one.
+   */
+  readonly staleReason: string | null;
   /** App subpaths connected to this repository. */
   readonly appSubpaths: readonly string[];
 }

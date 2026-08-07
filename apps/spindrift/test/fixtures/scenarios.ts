@@ -921,6 +921,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     health: 'connected',
     error: null,
     lastReconciledSha: 'a1b2c3d',
+    staleReason: null,
     appSubpaths: ['apps/hub', 'apps/api', 'apps/wiki'],
   },
   {
@@ -930,6 +931,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     health: 'connected',
     error: null,
     lastReconciledSha: 'e4f5g6h',
+    staleReason: null,
     appSubpaths: ['.'],
   },
   {
@@ -940,6 +942,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     error:
       'Installation suspended — the GitHub App installation was suspended by the account owner.',
     lastReconciledSha: 'i7j8k9l',
+    staleReason: null,
     appSubpaths: ['.'],
   },
 ];

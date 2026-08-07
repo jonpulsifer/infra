@@ -29,20 +29,38 @@ export const listRepositories: Command<
   ListRepositoriesResult
 > = async (_input, context) => {
   const host = context.adapters.repository?.() ?? null;
+  // Refreshed together rather than one after another. This read is on the
+  // creation screen's critical path and every active repository was a serial
+  // round trip to the host, so the screen waited for the sum of them — and a
+  // slow one made the wizard look broken rather than busy.
+  const staleReasons = new Map<string, string>();
   if (host !== null) {
     const existing = await context.db.query.repositories.findMany();
-    for (const repo of existing) {
-      if (repo.access === 'active') {
-        try {
-          await reconcileRepository(
-            { db: context.db, clock: context.clock, host },
-            repo,
-          );
-        } catch {
-          // ignore individual repo reconciliation error during list
-        }
-      }
-    }
+    await Promise.all(
+      existing
+        .filter((repo) => repo.access === 'active')
+        .map(async (repo) => {
+          // One repository the host would not answer about does not empty the
+          // list — but the row it happened to says so, because the alternative
+          // is a commit from an hour ago rendered as current. `unavailable` is
+          // the loop's own word for that, and a throw is the same fact
+          // arriving as an exception.
+          try {
+            const pass = await reconcileRepository(
+              { db: context.db, clock: context.clock, host },
+              repo,
+            );
+            if (pass.outcome === 'unavailable') {
+              staleReasons.set(repo.id, pass.detail);
+            }
+          } catch (cause) {
+            staleReasons.set(
+              repo.id,
+              cause instanceof Error ? cause.message : String(cause),
+            );
+          }
+        }),
+    );
   }
 
   const allRepos = await context.db.query.repositories.findMany({
@@ -92,6 +110,7 @@ export const listRepositories: Command<
       health: isConnected ? 'connected' : 'connection_lost',
       error: repo.frozenReason ?? null,
       lastReconciledSha: repo.authoritativeCommit ?? null,
+      staleReason: staleReasons.get(repo.id) ?? null,
       appSubpaths,
     });
   }

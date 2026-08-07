@@ -701,6 +701,20 @@ function ConnectedRepositories({
                   <p className="text-sm">{repo.error}</p>
                 </div>
               ) : null}
+              {/* Still connected, and the commit beside it is older than it
+                  looks: listing refreshes every row, and one the host would
+                  not answer about says so rather than passing for current. */}
+              {repo.staleReason ? (
+                <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-warning">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 text-warning"
+                  />
+                  <p className="text-sm">
+                    This row was not refreshed: {repo.staleReason}
+                  </p>
+                </div>
+              ) : null}
               {repo.appSubpaths.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {repo.appSubpaths.map((subpath) => (
