@@ -46,6 +46,7 @@ import type {
   Reach,
   Resources,
 } from './desired-state.ts';
+import type { Remediation } from './remediation.ts';
 import type { SurfaceProbe } from './vessel.ts';
 
 /**
@@ -137,6 +138,16 @@ export interface PrerequisiteResult {
   readonly met: boolean;
   /** Why it is unmet. §3's grammar: non-candidates are annotated with a reason. */
   readonly detail?: string;
+  /**
+   * What would clear it, as Terraform, and where that belongs.
+   *
+   * Absent on a stored row and present on a read one: the loops store what was
+   * observed and nothing they concluded, and a stanza is a conclusion that
+   * moves when a root is declared or a surface is connected. `remediation.ts`
+   * composes it, `commands/targets/remediation.ts` supplies the facts, and
+   * nothing writes it back.
+   */
+  readonly remediation?: Remediation;
 }
 
 /**

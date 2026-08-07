@@ -34,6 +34,7 @@ import type {
   AuthoredManifest,
   TargetAdapter,
 } from '../config/manifest.schema.ts';
+import type { Remediation } from './remediation.ts';
 
 /**
  * What kind of boundary this is.
@@ -183,6 +184,11 @@ export interface VesselPrerequisiteResult {
   readonly met: boolean;
   /** Why it is unmet. §3's grammar: an exclusion carries its reason. */
   readonly detail?: string;
+  /**
+   * What would clear it, as Terraform — a Target's `remediation` one noun up,
+   * and composed at read time for the same reason.
+   */
+  readonly remediation?: Remediation;
 }
 
 /**

@@ -28,7 +28,35 @@ import type {
   Reach,
 } from '../domain/desired-state.ts';
 import type { Exclusion } from '../domain/placement.ts';
+import type { AnyPrerequisite, Remediation } from '../domain/remediation.ts';
 import type { VesselKind, VesselRole } from '../domain/vessel.ts';
+
+/**
+ * One checklist row, as either screen renders it.
+ *
+ * Shared between a Target's checklist and its boundary's because the two are
+ * the same row with a different subject — and because the remediation half is
+ * the part that must not be rendered two different ways.
+ */
+export interface PrerequisiteRowView {
+  /**
+   * The catalogued name, not a free string: the screen posts it back to
+   * `openPrerequisiteRemediation`, and a name that command's schema does not
+   * carry is a button that cannot work.
+   */
+  readonly name: AnyPrerequisite;
+  readonly met: boolean;
+  readonly detail?: string;
+  /**
+   * What would clear it, present on every unmet row and absent on every met
+   * one.
+   *
+   * The union carries its own `none` arm, so "no change could be generated for
+   * this" is a value with a reason rather than a missing field — which is what
+   * keeps it renderable as something other than an empty box.
+   */
+  readonly remediation?: Remediation;
+}
 
 /**
  * §6's phases, verbatim: `PENDING → APPLYING → WAITING → LIVE | FAILED`.
@@ -743,11 +771,7 @@ export interface TargetListItem {
    * was checked* — which is the question an operator staring at a healthy
    * Target that will not take their app is actually asking.
    */
-  readonly prerequisites: readonly {
-    readonly name: string;
-    readonly met: boolean;
-    readonly detail?: string;
-  }[];
+  readonly prerequisites: readonly PrerequisiteRowView[];
   /** Supported component kinds on this target. */
   readonly kinds: readonly ComponentKind[];
   /**
@@ -858,11 +882,7 @@ export interface VesselListItem {
    * empty for a vessel the catalogue asks nothing of, which is not the same as
    * a vessel that passed.
    */
-  readonly prerequisites: readonly {
-    readonly name: string;
-    readonly met: boolean;
-    readonly detail?: string;
-  }[];
+  readonly prerequisites: readonly PrerequisiteRowView[];
   /** When the standing pass last ran against it, ISO-8601, or null if never. */
   readonly inspectedAt: string | null;
 }

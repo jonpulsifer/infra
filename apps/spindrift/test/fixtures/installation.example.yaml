@@ -52,6 +52,9 @@ github:
   # Pinned to a commit, never a branch: the caller this ref lands in runs with
   # the connected repository's own permissions.
   buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
+  # Where the boundaries below are declared. A generated remediation for an
+  # unmet prerequisite is opened here as a pull request; nothing else is.
+  infrastructureRepository: example/infrastructure
 
 # Rank order: a build takes the first route that clears the Target's minimum
 # SLSA Build Level, so the order of this list is the admin rank §16 names.
@@ -88,6 +91,9 @@ vessels:
     kind: cluster
   - name: cloud
     kind: gcp-project
+    # Where this boundary is declared, so a generated remediation has somewhere
+    # to go. A vessel with no root gets the honest answer instead of a path.
+    terraformRoot: terraform/projects/cloud
     # This installation's shared services, stated once on the boundary that
     # holds them. `installation.homeVessel` names this vessel, so this block is
     # required here and refused on every other.

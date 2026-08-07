@@ -25,11 +25,17 @@ import {
 import type {
   CloudBoundaryFacts,
   PendingTargetConnection,
+  PrerequisiteRowView,
   TargetListItem,
   TargetOptionView,
   VesselListItem,
 } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
+import {
+  type BoundaryFacts,
+  remediationSubject,
+  withRemediations,
+} from './remediation.ts';
 
 /**
  * The three requirements placement is derived from (§3).
@@ -183,6 +189,43 @@ function editStart(
       };
 }
 
+/**
+ * One boundary and every surface registered on it, as a remediation reads it.
+ *
+ * By vessel id rather than by name for the same reason the Target rows join on
+ * it: the name is what a screen shows and the id is what the row is keyed on.
+ */
+function boundaryOf(
+  vessel: { readonly id: string; readonly name: string },
+  location: VesselLocation | null,
+  allTargets: readonly SurfaceOnVessel[],
+): BoundaryFacts {
+  return {
+    name: vessel.name,
+    location,
+    surfaces: allTargets.filter((row) => row.vessel.id === vessel.id),
+  };
+}
+
+/** A checklist row on its way to a screen, with the change that clears it. */
+function checklistView(
+  items: readonly {
+    readonly name: PrerequisiteRowView['name'];
+    readonly met: boolean;
+    readonly detail?: string;
+    readonly remediation?: PrerequisiteRowView['remediation'];
+  }[],
+): readonly PrerequisiteRowView[] {
+  return items.map((item) => ({
+    name: item.name,
+    met: item.met,
+    ...(item.detail === undefined ? {} : { detail: item.detail }),
+    ...(item.remediation === undefined
+      ? {}
+      : { remediation: item.remediation }),
+  }));
+}
+
 export interface ListTargetsResult {
   readonly targets: readonly TargetListItem[];
   readonly options: readonly TargetOptionView[];
@@ -239,11 +282,16 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         prereqFailures && prereqFailures.length > 0
           ? prereqFailures
           : undefined,
-      prerequisites: (target.prerequisites ?? []).map((item) => ({
-        name: item.name,
-        met: item.met,
-        ...(item.detail === undefined ? {} : { detail: item.detail }),
-      })),
+      prerequisites: checklistView(
+        withRemediations(
+          target.prerequisites ?? [],
+          remediationSubject(
+            context.manifest,
+            boundaryOf(target.vessel, target.vessel.location, allTargets),
+            target.adapter,
+          ),
+        ),
+      ),
       kinds,
       canonical,
       status: target.status,
@@ -365,11 +413,19 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         // catalogue can gain a row in a release, and a stored verdict would
         // keep reading healthy against a question nobody had asked yet.
         health: deriveVesselHealth(prerequisites, vessel.kind, roles),
-        prerequisites: prerequisites.map((item) => ({
-          name: item.name,
-          met: item.met,
-          ...(item.detail === undefined ? {} : { detail: item.detail }),
-        })),
+        prerequisites: checklistView(
+          withRemediations(
+            prerequisites,
+            // No adapter: these rows belong to the boundary rather than to any
+            // surface on it, and answering one with a runtime's service name
+            // would be the duplication the vessel noun exists to remove.
+            remediationSubject(
+              context.manifest,
+              boundaryOf(vessel, vessel.location, allTargets),
+              null,
+            ),
+          ),
+        ),
         inspectedAt: vessel.inspectedAt?.toISOString() ?? null,
       };
     }),
