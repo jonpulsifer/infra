@@ -193,6 +193,12 @@ in
 
         RuntimeDirectory = "bosun";
         RuntimeDirectoryMode = "0700";
+        # systemd removes a RuntimeDirectory when the service stops, which
+        # would delete the per-skiff state on the way down -- exactly what
+        # sweep-on-start reads to deregister runners whose VMM was killed with
+        # the cgroup and never got to tear itself down. Without this, every
+        # restart leaks a ghost registration.
+        RuntimeDirectoryPreserve = "yes";
         LogsDirectory = "bosun";
 
         # Every skiff is a child of this unit, so one filter covers the whole
