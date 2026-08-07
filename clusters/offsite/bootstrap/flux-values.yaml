@@ -13,4 +13,4 @@ instance:
     ref: "refs/heads/main"
     path: "clusters/offsite/flux-system"
     pullSecret: "flux-github-app-credentials"
-    interval: "1h"
+    interval: "5m"
