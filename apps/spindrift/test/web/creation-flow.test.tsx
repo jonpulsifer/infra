@@ -188,6 +188,31 @@ describe('while the screen is still loading', () => {
   });
 });
 
+describe('a field the schema will refuse', () => {
+  // The rule is one statement, in `creationDraftSchema`, read from both ends.
+  // Before this the only surface for it was the transport refusal the save
+  // came back with, rendered under the Deploy button as `appName: must be
+  // lowercase…` — the right fact, as far from the input as the page allows.
+  const markup = render({ ...clean, appName: 'Almanac Staging' });
+
+  test('is marked where the value is', () => {
+    expect(markup).toContain('aria-invalid="true"');
+    expect(markup).toContain('must be lowercase letters, digits and hyphens');
+  });
+
+  test('and a good one is not', () => {
+    expect(render(clean)).not.toContain('aria-invalid');
+  });
+
+  test('the Component name carries the schema’s rule too', () => {
+    // Whatever rule the schema states, and no rule it does not: an empty name
+    // is the only thing `componentName` refuses.
+    expect(render({ ...clean, componentName: '' })).toContain(
+      'the Component needs a name',
+    );
+  });
+});
+
 describe('when neither read answered', () => {
   const markup = renderToStaticMarkup(
     <CreationLoadFailure

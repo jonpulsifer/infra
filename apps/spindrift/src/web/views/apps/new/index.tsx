@@ -25,10 +25,15 @@
  */
 import { AlertTriangle, Loader2, Rocket } from 'lucide-react';
 import { type Dispatch, useEffect, useRef, useState } from 'react';
+import type { ZodType } from 'zod';
 import type {
   Blocker,
   CreationDraftView,
   DraftAction,
+} from '../../../../domain/creation-draft.ts';
+import {
+  appNameSchema,
+  componentNameSchema,
 } from '../../../../domain/creation-draft.ts';
 import {
   type ClientResult,
@@ -50,6 +55,7 @@ import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { Field } from '../../../ui/field.tsx';
+import { deployDraft } from './deploy.ts';
 import {
   type InspectedScope,
   inspection,
@@ -70,6 +76,7 @@ import {
   TargetHealth,
   VesselRow,
 } from './summary.tsx';
+import { type DraftWrites, draftWrites } from './writes.ts';
 
 /**
  * What stands between a repository with several Apps in it and a Deploy.
@@ -98,6 +105,65 @@ function unchosenScope(
       remediation: `Detection found ${detected.length} directories it knows how to build. Pick one under Source, or name another yourself.`,
     },
   ];
+}
+
+/**
+ * What went wrong with the read, split on whether there was one.
+ *
+ * The two are different answers and only one of them is a prerequisite. A
+ * repository that could not be read leaves every row below Source standing on
+ * the draft's opening claim — a kind nothing checked, a directory nothing
+ * looked in — so Deploy would build a guess. A repository that *was* read and
+ * holds nothing buildable is the assertion path §5 keeps open: name the
+ * directory, pick the kind, and Spindrift builds what you said.
+ */
+export type DetectionTrouble =
+  | { readonly kind: 'unread'; readonly message: string }
+  | { readonly kind: 'unsupported'; readonly message: string };
+
+function unreadRepository(
+  draft: Draft,
+  trouble: DetectionTrouble | null,
+): readonly Blocker[] {
+  if (draft.source.kind !== 'repo' || trouble?.kind !== 'unread') return [];
+  return [
+    {
+      code: 'REPOSITORY_UNAVAILABLE',
+      title: `Spindrift could not read ${draft.source.repo}.`,
+      remediation: `${trouble.message} Until it can be read, everything below Source is the draft's opening claim rather than anything found in the repository.`,
+    },
+  ];
+}
+
+/**
+ * The actions that make a sentence about the last read stop being true.
+ *
+ * Naming the actions rather than clearing everywhere: `kind`, `reach` and the
+ * Target do not move the thing that was read, so a refusal that survives them
+ * is the refusal still being about the repository on screen.
+ */
+const CLEARS_DETECTION = new Set<DraftAction['type']>([
+  'repo',
+  'subpath',
+  'entry',
+  'detect',
+]);
+
+/** Whether anything has answered which directory this draft deploys. */
+function answeredScope(draft: Draft): boolean {
+  return draft.scopeByOperator === true || draft.detection.scope !== undefined;
+}
+
+/** The schema's own complaint about one value, or `null`. */
+function issueWith(schema: ZodType<string>, value: string): string | null {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? null : (parsed.error.issues[0]?.message ?? null);
+}
+
+/** A refusal, and what the operator was doing when it arrived. */
+interface Refused {
+  readonly failure: TransportFailure;
+  readonly title?: string;
 }
 
 /** The two reads this screen opens with, in the order they are made. */
@@ -202,11 +268,11 @@ export function NewApp({
   // offered the candidates for a `service`.
   const [targets, setTargets] = useState(initialTargets);
   const [serverBlockers, setServerBlockers] = useState(initial.blockers);
-  const [refusal, setRefusal] = useState<TransportFailure | null>(null);
+  const [refusal, setRefusal] = useState<Refused | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [detectionError, setDetectionError] = useState<string | null>(null);
+  const [trouble, setTrouble] = useState<DetectionTrouble | null>(null);
   // Everything the last read said about this repository, unsummarized. The
   // wizard's job is to offer it, so it is kept as it arrived: dropping the
   // scopes detection could not make sense of would leave "why not here"
@@ -215,9 +281,8 @@ export function NewApp({
   const scopesRef = useRef<readonly InspectedScope[]>([]);
   const draftRef = useRef(initial.draft);
   const revisionRef = useRef(initial.revision);
-  const saves = useRef(Promise.resolve());
-  const pendingSaves = useRef(0);
-  const saveFailed = useRef(false);
+  /** What the last write was refused with, or `null` once one has landed. */
+  const unsaved = useRef<TransportFailure | null>(null);
 
   const candidateIds = targets
     .filter((target) => target.candidate)
@@ -238,7 +303,11 @@ export function NewApp({
     draft.source.kind === 'repo' &&
     draft.detection.scope !== undefined &&
     draft.detection.scope !== draft.source.subpath;
-  const localBlockers = [...blockersFor(draft, candidateIds), ...unchosen];
+  const localBlockers = [
+    ...blockersFor(draft, candidateIds),
+    ...unchosen,
+    ...unreadRepository(draft, trouble),
+  ];
   const blockers = [
     ...localBlockers,
     ...serverBlockers.filter(
@@ -247,12 +316,90 @@ export function NewApp({
   ];
   const target = targets.find((option) => option.targetId === draft.targetId);
   const choices = repositoryChoices(repos, available);
+  const appNameIssue = issueWith(appNameSchema, draft.appName);
+  const componentNameIssue = issueWith(
+    componentNameSchema,
+    draft.componentName,
+  );
+
+  /**
+   * Put the server's copy of the draft back on screen.
+   *
+   * The revision guard means one refused save refuses every save after it: the
+   * revision the tab holds is a version that no longer exists, so the next
+   * keystroke is refused for the same reason, forever. Re-reading is the whole
+   * recovery — the server's draft is the truth by definition here — and what it
+   * costs is whatever was typed into the field the other tab also changed,
+   * which is why it is said out loud rather than done quietly.
+   */
+  const resync = async (): Promise<void> => {
+    const recovered = await command('getCreationDraft', { id: initial.id });
+    if (!recovered.ok) {
+      unsaved.current = recovered.failure;
+      setRefusal({ failure: recovered.failure });
+      return;
+    }
+    revisionRef.current = recovered.value.revision;
+    draftRef.current = recovered.value.draft;
+    setDraft(recovered.value.draft);
+    setServerBlockers(recovered.value.blockers);
+    unsaved.current = null;
+    setRefusal({
+      failure: {
+        code: 'STALE_EDIT',
+        message:
+          'Another tab saved this draft first, and its version is what is on screen now. Anything you had changed on the same field is gone — check the rows above before deploying.',
+      },
+      title: 'This draft was edited somewhere else',
+    });
+  };
+
+  const persist = async (next: Draft): Promise<void> => {
+    try {
+      const result = await command('saveCreationDraft', {
+        id: initial.id,
+        revision: revisionRef.current,
+        draft: next,
+      });
+      if (result.ok) {
+        revisionRef.current = result.value.revision;
+        unsaved.current = null;
+        setServerBlockers(result.value.blockers);
+        setRefusal(null);
+        return;
+      }
+      if (result.failure.code === 'STALE_EDIT') {
+        await resync();
+        return;
+      }
+      unsaved.current = result.failure;
+      setRefusal({ failure: result.failure });
+    } catch (cause) {
+      const failure: TransportFailure = {
+        code: 'MALFORMED_REQUEST',
+        message:
+          cause instanceof Error ? cause.message : 'the draft could not save',
+      };
+      unsaved.current = failure;
+      setRefusal({ failure });
+    }
+  };
+
+  const writes = useRef<DraftWrites<Draft> | null>(null);
+  writes.current ??= draftWrites<Draft>({
+    save: persist,
+    onWriting: setSaving,
+  });
 
   const dispatch: Dispatch<DraftAction> = (action) => {
     const previous = draftRef.current;
     const next = draftReducer(previous, action);
     draftRef.current = next;
     setDraft(next);
+    // A sentence about what was read stops being true the moment the input it
+    // was read from moves. Leaving it up is how a repository that cannot be
+    // read keeps blocking a repository that can.
+    if (CLEARS_DETECTION.has(action.type)) setTrouble(null);
     // Compared rather than keyed off the action type: `entry` and `detect`
     // change the kind too, and an enumeration here would drift the first time a
     // new action moves one of the three.
@@ -272,37 +419,7 @@ export function NewApp({
           setTargets(result.value.options);
       });
     }
-    pendingSaves.current += 1;
-    setSaving(true);
-    saves.current = saves.current
-      .then(async () => {
-        const result = await command('saveCreationDraft', {
-          id: initial.id,
-          revision: revisionRef.current,
-          draft: next,
-        });
-        if (!result.ok) {
-          saveFailed.current = true;
-          setRefusal(result.failure);
-          return;
-        }
-        revisionRef.current = result.value.revision;
-        saveFailed.current = false;
-        setServerBlockers(result.value.blockers);
-        setRefusal(null);
-      })
-      .catch((cause: unknown) => {
-        saveFailed.current = true;
-        setRefusal({
-          code: 'MALFORMED_REQUEST',
-          message:
-            cause instanceof Error ? cause.message : 'the draft could not save',
-        });
-      })
-      .finally(() => {
-        pendingSaves.current -= 1;
-        setSaving(pendingSaves.current > 0);
-      });
+    writes.current?.edit(next);
   };
 
   /**
@@ -322,14 +439,14 @@ export function NewApp({
    */
   const inspect = async (fullName: string, scope?: string) => {
     setDetecting(true);
-    setDetectionError(null);
+    setTrouble(null);
     try {
       const result = await command(
         'inspectRepository',
         inspection(fullName, scope),
       );
       if (!result.ok) {
-        setDetectionError(result.failure.message);
+        setTrouble({ kind: 'unread', message: result.failure.message });
         return;
       }
       const found = result.value.scopes;
@@ -345,11 +462,16 @@ export function NewApp({
         merged,
       });
       if (outcome.act === 'detect') dispatch(outcome.action);
-      if (outcome.act === 'refuse') setDetectionError(outcome.message);
+      if (outcome.act === 'refuse')
+        setTrouble({ kind: 'unsupported', message: outcome.message });
     } catch (cause) {
-      setDetectionError(
-        cause instanceof Error ? cause.message : 'the repository was not read',
-      );
+      setTrouble({
+        kind: 'unread',
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'the repository was not read',
+      });
     } finally {
       setDetecting(false);
     }
@@ -401,34 +523,46 @@ export function NewApp({
     void inspect(source.repo);
   }, []);
 
+  // A debounce that drops the last edit when the screen goes away is a
+  // debounce that loses work: navigating off within the window would leave the
+  // draft one keystroke behind what was on screen. Leaving sends it.
+  useEffect(
+    () => () => {
+      void writes.current?.flush();
+    },
+    [],
+  );
+
   /** The terminal act: revalidate and create under one database lock. */
   async function start() {
     setSubmitting(true);
-    setRefusal(null);
-    await saves.current;
-    if (saveFailed.current) {
-      setSubmitting(false);
-      return;
-    }
-    const result = await command('completeCreationDraft', {
-      id: initial.id,
-      revision: revisionRef.current,
-    });
-    if (!result.ok) {
-      setRefusal(result.failure);
-      setSubmitting(false);
-      return;
-    }
-    setServerBlockers(result.value.draft.blockers);
-    if (result.value.app === null) {
-      setSubmitting(false);
-      return;
-    }
-    onCreated?.({
-      id: result.value.app.appId,
-      name: result.value.app.name,
+    const outcome = await deployDraft({
+      flush: async () => {
+        await writes.current?.flush();
+      },
+      unsaved: () => unsaved.current,
+      complete: () =>
+        command('completeCreationDraft', {
+          id: initial.id,
+          revision: revisionRef.current,
+        }),
     });
     setSubmitting(false);
+    if (outcome.act === 'unsaved') {
+      setRefusal({ failure: outcome.failure, title: outcome.title });
+      return;
+    }
+    if (outcome.act === 'refused') {
+      setRefusal({ failure: outcome.failure });
+      return;
+    }
+    setRefusal(null);
+    setServerBlockers(outcome.result.draft.blockers);
+    if (outcome.result.app === null) return;
+    onCreated?.({
+      id: outcome.result.app.appId,
+      name: outcome.result.app.name,
+    });
   }
 
   return (
@@ -455,7 +589,7 @@ export function NewApp({
           repos={choices}
           scopes={scopes}
           detecting={detecting}
-          detectionError={detectionError}
+          trouble={trouble}
           unchosen={unchosen.length > 0}
           onSelectRepo={selectRepo}
           onChooseScope={chooseScope}
@@ -464,8 +598,15 @@ export function NewApp({
 
         <Row
           label="Component"
+          // A name the schema will refuse is an answer nobody has given yet,
+          // so the row that holds it opens rather than hiding the field the
+          // message is attached to behind a pencil.
           unsettled={
-            detectionError !== null || unchosen.length > 0 || readElsewhere
+            trouble !== null ||
+            unchosen.length > 0 ||
+            readElsewhere ||
+            appNameIssue !== null ||
+            componentNameIssue !== null
           }
           value={`${draft.componentName} · ${draft.kind}`}
           why={
@@ -492,6 +633,7 @@ export function NewApp({
                     value: event.target.value,
                   })
                 }
+                issue={appNameIssue}
                 hint="Lowercase DNS label — it appears in the canonical hostname."
               />
               <Field
@@ -505,6 +647,7 @@ export function NewApp({
                     value: event.target.value,
                   })
                 }
+                issue={componentNameIssue}
               />
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
@@ -709,7 +852,9 @@ export function NewApp({
         </div>
       ) : null}
 
-      {refusal ? <Refusal failure={refusal} /> : null}
+      {refusal ? (
+        <Refusal failure={refusal.failure} title={refusal.title} />
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -785,7 +930,7 @@ function SourceRow({
   repos,
   scopes,
   detecting,
-  detectionError,
+  trouble,
   unchosen,
   onSelectRepo,
   onChooseScope,
@@ -797,7 +942,7 @@ function SourceRow({
   /** What the last read said, or `null` before anything has been read. */
   scopes: readonly InspectedScope[] | null;
   detecting: boolean;
-  detectionError: string | null;
+  trouble: DetectionTrouble | null;
   /** Detection is offering candidates and the draft names none of them. */
   unchosen: boolean;
   onSelectRepo: (repo: RepositoryChoice) => void;
@@ -847,13 +992,18 @@ function SourceRow({
   return (
     <Row
       label="Source"
-      // Opens itself on anything unresolved, because §3's grammar only works
-      // when the alternatives are visible: a sentence about a directory
-      // Spindrift could not build is unreadable while the list of directories
-      // it did read is behind a disclosure.
+      // Open whenever the source is still the question — which includes a
+      // repository whose directory nothing has answered for yet, not only one
+      // that went wrong. §3's grammar only works when the alternatives are
+      // visible: a sentence about a directory Spindrift could not build is
+      // unreadable while the list of directories it did read is behind a
+      // pencil. A settled source collapses, because then the list is noise.
       unsettled={
         draft.source.kind === 'repo'
-          ? draft.source.repo === '' || unchosen || detectionError !== null
+          ? draft.source.repo === '' ||
+            unchosen ||
+            trouble !== null ||
+            !answeredScope(draft)
           : !draft.source.location
       }
       value={
@@ -872,7 +1022,7 @@ function SourceRow({
         ) : null
       }
       why={
-        detectionError ??
+        trouble?.message ??
         (draft.source.kind === 'archive' && !draft.source.location
           ? 'Not staged yet.'
           : undefined)
@@ -1021,10 +1171,23 @@ function ScopeChooser({
  * The code is shown alongside the sentence because it is a closed vocabulary
  * and therefore searchable — the same reason §6 keeps its eight failure reasons
  * rather than writing friendlier prose.
+ *
+ * `title` is what the operator was doing when it arrived. A refusal from a save
+ * nobody watched, still on screen when Deploy is pressed, otherwise reads as
+ * the answer to the press — and the two want different sentences.
  */
-function Refusal({ failure }: { failure: TransportFailure }) {
+function Refusal({
+  failure,
+  title,
+}: {
+  failure: TransportFailure;
+  title?: string;
+}) {
   return (
     <div className="rounded-md border border-destructive bg-destructive-soft px-3 py-2.5">
+      {title ? (
+        <p className="text-sm font-semibold text-destructive">{title}</p>
+      ) : null}
       <p className="font-mono text-xs font-semibold text-destructive">
         {failure.code}
       </p>

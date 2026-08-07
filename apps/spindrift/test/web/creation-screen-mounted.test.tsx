@@ -153,7 +153,7 @@ describe('a draft becoming addressable', () => {
     expect(count('inspectRepository')).toBe(1);
 
     // Still the screen, rather than the placeholder a reload puts back.
-    expect(screen.text()).toContain(INITIAL_DRAFT.appName);
+    expect(screen.text()).toContain(INITIAL_DRAFT.detection.reason);
     expect(screen.text()).not.toContain('Recovering the draft');
 
     screen.unmount();
@@ -168,7 +168,7 @@ describe('a draft becoming addressable', () => {
 
     expect(count('getCreationDraft')).toBe(1);
     expect(count('startCreationDraft')).toBe(0);
-    expect(screen.text()).toContain(INITIAL_DRAFT.appName);
+    expect(screen.text()).toContain(INITIAL_DRAFT.detection.reason);
 
     screen.unmount();
   });

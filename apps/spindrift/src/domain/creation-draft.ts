@@ -56,15 +56,30 @@ export const componentKind = z.enum(['service', 'website', 'job']);
 export const reach = z.enum(['none', 'private', 'public']);
 export const auth = z.enum(['none', 'proxy']);
 const entry = z.enum(['service', 'website', 'upload', 'repo', 'discover']);
-const appName = z
+
+/**
+ * The App name's rule, exported because the screen checks it too.
+ *
+ * One statement of the rule, read from both ends: the browser marks the field
+ * as the operator types and the command refuses the document, and a second copy
+ * of the regex is how those two come to disagree. The messages are written for
+ * a reader because this is the one schema whose complaints are rendered beside
+ * an input rather than logged.
+ */
+export const appNameSchema = z
   .string()
   .trim()
-  .min(1)
-  .max(63)
+  .min(1, 'the App needs a name')
+  .max(63, 'at most 63 characters — it is one DNS label')
   .regex(
     /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
     'must be lowercase letters, digits and hyphens',
   );
+
+/** The Component name's rule. Read beside the field for the same reason. */
+export const componentNameSchema = z
+  .string()
+  .min(1, 'the Component needs a name');
 
 const source = z.discriminatedUnion('kind', [
   z
@@ -147,8 +162,8 @@ export const creationDraftSchema = z
   .object({
     entry,
     source,
-    appName,
-    componentName: z.string().min(1),
+    appName: appNameSchema,
+    componentName: componentNameSchema,
     detection,
     kind: componentKind,
     vessel,
