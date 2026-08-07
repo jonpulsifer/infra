@@ -648,6 +648,24 @@ export class FakeCloudRun {
       if (this.options.refuseIam !== undefined) {
         return json(this.options.refuseIam.status, this.options.refuseIam.body);
       }
+      // The org's domain-restricted sharing, verbatim from the live refusal:
+      // `allUsers` belongs to no permitted customer, so a policy naming it is
+      // rejected wherever this installation runs. Modeled unconditionally
+      // because public reach must travel as the Service's own
+      // `invokerIamDisabled` — an adapter that reaches for the binding again
+      // has to fail here the way it fails in a vessel.
+      const bindings =
+        (body as { policy?: { bindings?: { members?: string[] }[] } })?.policy
+          ?.bindings ?? [];
+      if (bindings.some((binding) => binding.members?.includes('allUsers'))) {
+        return json(403, {
+          error: {
+            status: 'PERMISSION_DENIED',
+            message:
+              'One or more users named in the policy do not belong to a permitted customer, perhaps due to an organization policy.',
+          },
+        });
+      }
       if (!this.resources.has(key)) return json(404, notFound());
       this.policies.set(key, body);
       return json(200, (body as { policy?: unknown })?.policy ?? {});

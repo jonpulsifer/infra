@@ -81,9 +81,9 @@ import { cloudRunJob } from './job.ts';
 import { cloudSchedulerJob, jobInvokerPolicy, TIME_ZONE } from './scheduler.ts';
 import {
   allowsUnauthenticated,
+  CLOSED_INVOKER_POLICY,
   cloudRunService,
   type InvokerPolicy,
-  invokerPolicy,
   workloadId,
 } from './service.ts';
 import {
@@ -326,6 +326,11 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // written again after the rollout below: the closed state is **asserted**
     // on every deploy rather than inherited from the platform's default.
     //
+    // The *open* half does not travel through IAM at all: `{public, none}` is
+    // the Service document's own `invokerIamDisabled`, so it tightens in the
+    // same PATCH that rolls the template — the field and the revision flip
+    // together, and no principal an org policy could refuse is ever named.
+    //
     // A job's invoker policy is not on this path. Nothing routes to a Job, so
     // its policy answers only *who may run it* — which is the scheduler and
     // nobody else — and the tightening direction there is the scheduler job
@@ -338,7 +343,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         connection,
         SERVICES,
         id,
-        invokerPolicy(desired.reach, desired.auth),
+        CLOSED_INVOKER_POLICY,
         `{reach: ${desired.reach}, auth: ${desired.auth}}`,
       );
       if (tightened !== null) {
@@ -437,18 +442,19 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       return verdict;
     }
 
-    // Now that the Service exists, the policy this exposure means is written
-    // whichever direction it moved. Opening can only happen here — granting
-    // invoke on something that is not there is not a call the API takes — and
-    // tightening repeats a write it may already have made, which is idempotent
-    // and is what makes "no non-public mode has a bypassable origin" this
-    // adapter's guarantee rather than the platform default's.
+    // Now that the Service exists, the closed policy is asserted on every
+    // exposure. Tightening repeats a write it may already have made, which is
+    // idempotent and is what makes "no non-public mode has a bypassable
+    // origin" this adapter's guarantee rather than the platform default's. On
+    // the public cell the write earns its place differently: openness is the
+    // document field above, and the empty policy strips the `allUsers`
+    // binding earlier versions of this adapter minted.
     const written = await this.setInvoker(
       http,
       connection,
       SERVICES,
       id,
-      invokerPolicy(desired.reach, desired.auth),
+      CLOSED_INVOKER_POLICY,
       `{reach: ${desired.reach}, auth: ${desired.auth}}`,
     );
     if (written !== null) {
