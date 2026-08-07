@@ -1082,6 +1082,11 @@ export const TARGET_LIST: readonly TargetListItem[] = [
         name: 'DELIVERY_OPERATOR',
         met: false,
         detail: 'no Flux controller answers in this cluster',
+        remediation: {
+          kind: 'none',
+          reason:
+            'a delivery operator is installed into the cluster itself, which is the GitOps tree rather than Terraform',
+        },
       },
       { name: 'CHART_SOURCE', met: true },
       { name: 'WRITABLE_STORE', met: true },
@@ -1124,13 +1129,38 @@ export const VESSEL_LIST: readonly VesselListItem[] = [
     roles: ['home'],
     health: 'unhealthy',
     prerequisites: [
-      { name: 'SOURCE_BUCKET', met: true },
+      // Unmet with the change that clears it: the two halves §13's checklist
+      // owes an operator, on one row.
+      {
+        name: 'SOURCE_BUCKET',
+        met: false,
+        detail: 'example-source-bucket is not a bucket in example-vessel',
+        remediation: {
+          kind: 'generated',
+          summary:
+            'Declare example-source-bucket in example-vessel, at the location this boundary’s connected surface names.',
+          destination: {
+            kind: 'root',
+            path: 'terraform/projects/cloud/storage.tf',
+          },
+          terraform:
+            'resource "google_storage_bucket" "spindrift_source" {\n  name = "example-source-bucket"\n}\n',
+        },
+      },
       { name: 'SECRET_STORE', met: true },
+      // Unmet with no change to generate: a key's algorithm was never observed
+      // here, and this row is what makes "no generated remediation" a state the
+      // screen renders as a sentence rather than as an empty box.
       {
         name: 'SIGNER_KEY',
         met: false,
         detail:
           'no signing key with that reference is in this location, or its purpose is not signing',
+        remediation: {
+          kind: 'none',
+          reason:
+            'a signing key’s algorithm was never observed here, and a key created under the wrong one cannot be changed afterwards',
+        },
       },
       { name: 'ARTIFACTS_PROJECT', met: true },
     ],

@@ -28,6 +28,8 @@ import {
   AlertTriangle,
   Check,
   ChevronRight,
+  Copy,
+  GitPullRequest,
   Globe,
   Plus,
   Server,
@@ -35,12 +37,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { useState } from 'react';
+import type { TargetAdapter } from '../../../config/manifest.schema.ts';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
 import { surfacesToProbe, type VesselRole } from '../../../domain/vessel.ts';
 import type { LogoName } from '../../client/logos/index.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type {
   PendingTargetConnection,
+  PrerequisiteRowView,
   TargetListItem,
   VesselListItem,
 } from '../../model.ts';
@@ -100,6 +104,208 @@ function AbsentSurfaces({ absent }: { absent: readonly string[] }) {
         <p key={sentence}>{sentence}</p>
       ))}
     </div>
+  );
+}
+
+/**
+ * One checklist row, and — where it is unmet — the change that clears it.
+ *
+ * §13 makes an unmet item "a non-candidate with a stated reason", and a reason
+ * is the diagnosis rather than the fix. What is rendered underneath one here is
+ * the Terraform that clears it and the path it belongs at, so the operator's
+ * next move is copy-and-commit or press the button, rather than work out from a
+ * sentence what a cloud wants.
+ *
+ * **"No generated remediation" is a state with a sentence, never an empty
+ * box.** Most rows are cleared by something other than Terraform, and rendering
+ * that as a blank disclosure would say a change exists and is empty — the same
+ * laundering `cloud-discovery.ts` keeps `found: []` and `unavailable` apart to
+ * prevent.
+ */
+function ChecklistRow({
+  vessel,
+  adapter,
+  item,
+}: {
+  readonly vessel: string;
+  /** Omitted for a boundary's own row, which is not on any surface. */
+  readonly adapter?: TargetAdapter;
+  readonly item: PrerequisiteRowView;
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-md px-2 py-1.5 text-xs">
+      <div className="flex items-start gap-2">
+        {item.met ? (
+          <Check
+            aria-hidden="true"
+            className="mt-0.5 size-3.5 shrink-0 text-success"
+          />
+        ) : (
+          <X
+            aria-hidden="true"
+            className="mt-0.5 size-3.5 shrink-0 text-destructive"
+          />
+        )}
+        <span className="font-mono">{item.name}</span>
+        {item.detail ? (
+          <span className="text-muted-foreground">— {item.detail}</span>
+        ) : null}
+      </div>
+      {item.remediation === undefined ? null : item.remediation.kind ===
+        'none' ? (
+        <p className="pl-5 text-[11px] text-subtle">
+          No generated remediation — {item.remediation.reason}
+        </p>
+      ) : (
+        <RemediationDisclosure
+          vessel={vessel}
+          {...(adapter === undefined ? {} : { adapter })}
+          prerequisite={item.name}
+          remediation={item.remediation}
+        />
+      )}
+    </div>
+  );
+}
+
+type OpenState =
+  | { readonly type: 'idle' }
+  | { readonly type: 'opening' }
+  | { readonly type: 'opened'; readonly number: number; readonly path: string }
+  | { readonly type: 'error'; readonly message: string };
+
+/** The stanza, where it belongs, and the two ways to take it from here. */
+function RemediationDisclosure({
+  vessel,
+  adapter,
+  prerequisite,
+  remediation,
+}: {
+  readonly vessel: string;
+  readonly adapter?: TargetAdapter;
+  readonly prerequisite: PrerequisiteRowView['name'];
+  readonly remediation: Extract<
+    NonNullable<PrerequisiteRowView['remediation']>,
+    { kind: 'generated' }
+  >;
+}) {
+  /*
+    Open, and collapsible afterwards — the rule the checklist above it already
+    follows: "the one time it says something other than fine is the time it
+    should not need a click." Only an unmet row has a remediation at all, so
+    every one of these is that time; the disclosure is what lets an operator
+    who has read one put it away, not a gate in front of it.
+  */
+  const [open, setOpen] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<OpenState>({ type: 'idle' });
+  const destination = remediation.destination;
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(remediation.terraform);
+    setCopied(true);
+  };
+
+  const openPullRequest = async () => {
+    setState({ type: 'opening' });
+    try {
+      const result = await command('openPrerequisiteRemediation', {
+        vessel,
+        ...(adapter === undefined ? {} : { adapter }),
+        prerequisite,
+      });
+      setState(
+        result.ok
+          ? {
+              type: 'opened',
+              number: result.value.pullRequest,
+              path: result.value.path,
+            }
+          : { type: 'error', message: result.failure.message },
+      );
+    } catch (cause) {
+      setState({
+        type: 'error',
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Opening the pull request failed',
+      });
+    }
+  };
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="pl-5">
+      <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+        <ChevronRight
+          aria-hidden="true"
+          className="size-3 transition-transform group-data-[state=open]:rotate-90"
+        />
+        Remediation
+        <span className="ml-auto font-mono">
+          {destination.kind === 'root' ? destination.path : 'no Terraform root'}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-1.5 flex flex-col gap-2">
+        <p className="text-[11px] text-muted-foreground">
+          {remediation.summary}
+        </p>
+        {destination.kind === 'absent' ? (
+          /*
+            The honest arm. There is no file to append to and no pull request
+            to open, so the screen says which boundary has no root rather than
+            naming a directory nothing in that repository agreed to.
+          */
+          <p className="text-[11px] text-subtle">
+            {vessel} has no Terraform root. This is what one would contain, in a{' '}
+            <span className="font-mono">{destination.file}</span> inside it.
+          </p>
+        ) : null}
+        <pre className="overflow-x-auto rounded-md border border-border bg-background px-3 py-2 font-mono text-[11px]">
+          {remediation.terraform}
+        </pre>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => void copy()}>
+            <Copy aria-hidden="true" className="size-3.5" />
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+          {destination.kind === 'root' ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={state.type === 'opening' || state.type === 'opened'}
+              onClick={() => void openPullRequest()}
+            >
+              <GitPullRequest aria-hidden="true" className="size-3.5" />
+              {state.type === 'opening'
+                ? 'Opening…'
+                : state.type === 'opened'
+                  ? `Opened #${state.number}`
+                  : 'Open a pull request'}
+            </Button>
+          ) : null}
+          {/*
+            The whole of what a merged pull request does, and what it does not.
+            Applying is what clears the row, and the standing loop is what
+            notices — so there is nothing here to press afterwards.
+          */}
+          <span className="text-[11px] text-subtle">
+            Spindrift changes nothing here. Applying this is what clears the
+            row, and the standing check is what notices.
+          </span>
+        </div>
+        {state.type === 'opened' ? (
+          <p className="text-[11px] text-muted-foreground">
+            Pull request #{state.number} adds this to{' '}
+            <span className="font-mono">{state.path}</span>. Nothing else was
+            written, and this row stays unmet until the boundary says otherwise.
+          </p>
+        ) : null}
+        {state.type === 'error' ? (
+          <p className="text-[11px] text-destructive">{state.message}</p>
+        ) : null}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -450,26 +656,7 @@ function VesselChecklists({
               </span>
             </div>
             {vessel.prerequisites.map((item) => (
-              <div
-                key={item.name}
-                className="flex items-start gap-2 px-1 text-xs"
-              >
-                {item.met ? (
-                  <Check
-                    aria-hidden="true"
-                    className="mt-0.5 size-3.5 shrink-0 text-success"
-                  />
-                ) : (
-                  <X
-                    aria-hidden="true"
-                    className="mt-0.5 size-3.5 shrink-0 text-destructive"
-                  />
-                )}
-                <span className="font-mono">{item.name}</span>
-                {item.detail ? (
-                  <span className="text-muted-foreground">— {item.detail}</span>
-                ) : null}
-              </div>
+              <ChecklistRow key={item.name} vessel={vessel.name} item={item} />
             ))}
             {/*
               Labelled as of-a-moment, for the reason a Target's checklist is:
@@ -765,28 +952,12 @@ function TargetCard({
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-2 flex flex-col gap-1">
               {target.prerequisites.map((item) => (
-                <div
+                <ChecklistRow
                   key={item.name}
-                  className="flex items-start gap-2 rounded-md px-2 py-1.5 text-xs"
-                >
-                  {item.met ? (
-                    <Check
-                      aria-hidden="true"
-                      className="mt-0.5 size-3.5 shrink-0 text-success"
-                    />
-                  ) : (
-                    <X
-                      aria-hidden="true"
-                      className="mt-0.5 size-3.5 shrink-0 text-destructive"
-                    />
-                  )}
-                  <span className="font-mono">{item.name}</span>
-                  {item.detail ? (
-                    <span className="text-muted-foreground">
-                      — {item.detail}
-                    </span>
-                  ) : null}
-                </div>
+                  vessel={target.vessel}
+                  adapter={target.adapter}
+                  item={item}
+                />
               ))}
               {/*
                 Labelled as of-a-moment on purpose. §18 makes "the live
