@@ -72,6 +72,10 @@ in
       "virtiofs"
       "overlay"
     ];
+
+    # The NIC otherwise appears only once stage-2 udev gets to it, and
+    # everything that wants the network queues behind that.
+    initrd.availableKernelModules = [ "virtio_net" ];
   };
 
   fileSystems = {
@@ -197,6 +201,18 @@ in
   programs.nix-ld.enable = true;
 
   virtualisation.docker.enable = true;
+
+  # A skiff exists to run one job and halt, so nothing here should cost boot
+  # time it will never earn back.
+  documentation.enable = false;
+  # The KVM clock is already correct and the LAN is unreachable anyway.
+  services.timesyncd.enable = false;
+  # Nothing lives long enough to rotate, and its config check fails at boot.
+  services.logrotate.enable = false;
+  # docker.socket still starts dockerd on first use; a job that never touches
+  # Docker never pays for it, and one that does pays while it is already
+  # running rather than before the runner can register.
+  systemd.services.docker.wantedBy = lib.mkForce [ ];
 
   # A hull is content-addressed by the launcher over this directory, so it
   # carries no identity of its own.
