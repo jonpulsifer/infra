@@ -53,6 +53,15 @@ export type CloudResponse<Result> =
       readonly body: string;
       /** The API's own machine-readable reason, where it gave one. */
       readonly reason: string | null;
+      /**
+       * The project the refusal's `ErrorInfo` names as the call's consumer,
+       * where it gave one — the federated token's own project, which is
+       * routinely not the project in the request URL. A `SERVICE_DISABLED`
+       * is about this project's switch, whatever project the call was aimed
+       * at, and a sentence that echoes the URL's project sends an operator
+       * to verify an API that was never the problem.
+       */
+      readonly consumer: string | null;
       readonly message: string;
     }
   | {
@@ -82,7 +91,7 @@ interface CloudError {
   error?: {
     message?: string;
     status?: string;
-    details?: { reason?: string }[];
+    details?: { reason?: string; metadata?: { consumer?: string } }[];
   };
 }
 
@@ -215,12 +224,19 @@ function failureOf<Result>(
       ?.reason ??
     parsed?.error?.status ??
     null;
+  // ErrorInfo writes it as `projects/<id>`; the sentences here name projects
+  // bare, as the manifest and every subject already do.
+  const consumer =
+    parsed?.error?.details
+      ?.find((detail) => detail.metadata?.consumer !== undefined)
+      ?.metadata?.consumer?.replace(/^projects\//, '') ?? null;
   return {
     ok: false,
     kind: 'status',
     status: response.status,
     body,
     reason,
+    consumer,
     message: parsed?.error?.message ?? body ?? response.statusText,
   };
 }

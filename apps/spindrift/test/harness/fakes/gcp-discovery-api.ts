@@ -40,6 +40,12 @@ export interface FakeRefusal {
   readonly status: number;
   /** Placed in `error.details[].reason`, as the real APIs place it. */
   readonly reason?: string;
+  /**
+   * Placed in `error.details[].metadata.consumer` as `projects/<id>`, as
+   * ErrorInfo carries it — the project the refused call bills, which is not
+   * necessarily the one the request URL names.
+   */
+  readonly consumer?: string;
   readonly message?: string;
 }
 
@@ -244,21 +250,26 @@ function refusalOf(refusal: FakeRefusal | undefined): Response | null {
   return error(refusal.status, {
     message: refusal.message ?? 'the caller may not act here',
     ...(refusal.reason === undefined ? {} : { reason: refusal.reason }),
+    ...(refusal.consumer === undefined ? {} : { consumer: refusal.consumer }),
   });
 }
 
 function error(
   status: number,
-  detail: { message: string; reason?: string },
+  detail: { message: string; reason?: string; consumer?: string },
 ): Response {
+  const info = {
+    ...(detail.reason === undefined ? {} : { reason: detail.reason }),
+    ...(detail.consumer === undefined
+      ? {}
+      : { metadata: { consumer: `projects/${detail.consumer}` } }),
+  };
   return Response.json(
     {
       error: {
         code: status,
         message: detail.message,
-        ...(detail.reason === undefined
-          ? {}
-          : { details: [{ reason: detail.reason }] }),
+        ...(Object.keys(info).length === 0 ? {} : { details: [info] }),
       },
     },
     { status },

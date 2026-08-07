@@ -530,6 +530,30 @@ describe('§13: one probe, three answers', () => {
     );
   });
 
+  test('a switch off in the billing project is named, and settles nothing here', async () => {
+    // GCP refuses a call whose *consumer* — the project the federated token
+    // bills — has the service off, whatever project the URL names, and its
+    // ErrorInfo names that consumer. The checklist row has to send the
+    // operator there, and the surface stays undetermined: the refusal said
+    // nothing about what example-vessel carries.
+    const { adapter } = adapterFor({
+      refuseList: serviceDisabled('example-billing'),
+    });
+    const inspected = await adapter.inspect(target());
+
+    const platform = inspected.prerequisites.find(
+      (item) => item.name === 'PLATFORM_API',
+    );
+    expect(platform?.met).toBe(false);
+    expect(platform?.detail).toContain('example-billing');
+    expect(platform?.detail).toContain('not example-vessel');
+
+    expect(inspected.surface.kind).toBe('undetermined');
+    expect(
+      inspected.surface.kind === 'undetermined' && inspected.surface.detail,
+    ).toContain('example-billing');
+  });
+
   test('but a refusal establishes nothing about what is here', async () => {
     // The distinction `cloud-discovery.ts` draws between found-empty and
     // unavailable, applied to a surface: neither of these says the runtime is
