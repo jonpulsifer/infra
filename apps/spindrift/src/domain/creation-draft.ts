@@ -24,7 +24,7 @@ export const ENTRIES = [
   {
     id: 'discover',
     label: 'Discover',
-    note: 'Propose Apps from a connected repo',
+    note: 'List every directory a repo can deploy',
   },
 ] as const;
 
@@ -70,9 +70,27 @@ const source = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('repo'),
-      repo: z.string().min(1),
-      url: z.url(),
+      /**
+       * Empty until one is picked.
+       *
+       * "Deploy from a repository, and I have not said which" is a state the
+       * flow genuinely has — the `Link repo` and `Discover` tiles open on it
+       * from an upload draft — and a schema that could not hold it would make
+       * those tiles unable to switch the source at all. `blockersFor` refuses
+       * to create anything while it is empty.
+       */
+      repo: z.string(),
+      url: z.union([z.url(), z.literal('')]),
       subpath: z.string().min(1),
+      /**
+       * Whether creating the App also connects the repository (§15).
+       *
+       * Set when the operator picks a repository GitHub grants and Spindrift
+       * holds no row for. Browsing one writes nothing; Deploy is the committing
+       * act, and it is there that the row and the configuration PR appear. An
+       * abandoned draft leaves neither.
+       */
+      connect: z.boolean().optional(),
     })
     .strict(),
   z
@@ -128,6 +146,26 @@ export const creationDraftSchema = z
     auth,
     config: z.array(configKey),
     /**
+     * The source the last tile switch put down.
+     *
+     * Pressing `Upload` on a repository draft and then `Link repo` again is
+     * somebody looking rather than changing their mind, and a tile that costs
+     * them a staged archive or a chosen repository for the look is a tile
+     * nobody presses twice. Optional, and unset on a draft that has never
+     * switched.
+     */
+    stashed: source.optional(),
+    /**
+     * Whether the App name is the operator's word rather than a derivation.
+     *
+     * Optional because drafts are durable rows and an older one predates the
+     * flag; absent reads as "nothing has been typed", which is what every one
+     * of those drafts means. Once set, choosing another repository or another
+     * scope leaves the name alone: a name somebody typed is an answer, and
+     * re-deriving over it is the flow overwriting a decision it asked for.
+     */
+    appNameByOperator: z.boolean().optional(),
+    /**
      * Which step of the old rail this draft was left on.
      *
      * Optional, unread, and still here: drafts are durable rows, and a strict
@@ -153,7 +191,7 @@ export type DraftAction =
   | { type: 'target'; targetId: string }
   | { type: 'reach'; reach: Reach }
   | { type: 'auth'; auth: Auth }
-  | { type: 'repo'; fullName: string; url: string }
+  | { type: 'repo'; fullName: string; url: string; connect?: boolean }
   | { type: 'subpath'; subpath: string }
   /**
    * What the detector found, applied.
@@ -254,17 +292,68 @@ export function initialCreationDraft(input: {
   };
 }
 
+/** An archive nobody has staged yet — what the `Upload` tile opens on. */
+function emptyArchive(): DraftSource {
+  return {
+    kind: 'archive',
+    filename: 'upload.zip',
+    digest: `sha256:${'0'.repeat(64)}`,
+    location: null,
+    contents: 'source',
+    subpath: '.',
+  };
+}
+
+/**
+ * The kind of source a tile is about, or `null` when it is about the kind of
+ * Component instead — `Service` and `Website` name what is being deployed and
+ * never where it comes from.
+ */
+function sourceKindFor(entry: EntryId): DraftSource['kind'] | null {
+  if (entry === 'upload') return 'archive';
+  return entry === 'repo' || entry === 'discover' ? 'repo' : null;
+}
+
+/** Neither an archive nor a repository yet — what a switched tile opens on. */
+function blankSource(kind: DraftSource['kind']): DraftSource {
+  return kind === 'archive'
+    ? emptyArchive()
+    : { kind: 'repo', repo: '', url: '', subpath: '.' };
+}
+
 export function draftReducer(draft: Draft, action: DraftAction): Draft {
   switch (action.type) {
+    // A tile that names a source switches to it, whatever the draft was on
+    // before: a tile that changes a label and leaves the surface underneath it
+    // belonging to the other kind of source is a tile that lies. The source it
+    // switches away from is kept, so that pressing the other tile and coming
+    // back is a look rather than a loss.
     case 'entry': {
       const kind =
         action.entry === 'service' || action.entry === 'website'
           ? action.entry
           : draft.detection.kind;
-      return { ...draft, entry: action.entry, kind };
+      const wanted = sourceKindFor(action.entry);
+      if (wanted === null || wanted === draft.source.kind) {
+        return { ...draft, entry: action.entry, kind };
+      }
+      return {
+        ...draft,
+        entry: action.entry,
+        kind,
+        source:
+          draft.stashed?.kind === wanted ? draft.stashed : blankSource(wanted),
+        stashed: draft.source,
+      };
     }
     case 'field':
-      return { ...draft, [action.field]: action.value };
+      return {
+        ...draft,
+        [action.field]: action.value,
+        // Typing the App name is the operator answering the question, so
+        // nothing derives it again afterwards.
+        ...(action.field === 'appName' ? { appNameByOperator: true } : {}),
+      };
     case 'kind':
       return { ...draft, kind: action.kind };
     case 'target':
@@ -317,9 +406,13 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
           kind: 'repo',
           repo: action.fullName,
           url: action.url,
-          subpath: draft.source.kind === 'repo' ? draft.source.subpath : '.',
+          // Back to the root: the directory the draft named is a statement
+          // about the repository that was selected before this one, and
+          // carrying it over would name a path in a tree nobody has read.
+          subpath: '.',
+          ...(action.connect === true ? { connect: true as const } : {}),
         },
-        appName: name,
+        appName: draft.appNameByOperator ? draft.appName : name,
       };
     }
     case 'subpath':
@@ -373,6 +466,15 @@ export function blockersFor(
       title: 'The chosen Target is not a candidate for this Component.',
       remediation:
         'Pick a Target listed as a candidate, or clear the reason this one was excluded. Targets state their own reasons.',
+    });
+  }
+
+  if (draft.source.kind === 'repo' && draft.source.repo === '') {
+    blockers.push({
+      code: 'SOURCE_UNAVAILABLE',
+      title: 'No repository is chosen.',
+      remediation:
+        'Pick one under Source. Every repository the GitHub App installation grants is listed there, whether Spindrift has connected it or not.',
     });
   }
 
