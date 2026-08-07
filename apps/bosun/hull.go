@@ -205,9 +205,15 @@ func virtiofsdArgs(sock, sharedDir string, ro bool) []string {
 	return args
 }
 
+// passtArgs builds one skiff's network backend. --foreground keeps passt as
+// bosun's own child so Kill() reaches it, and --one-off makes it quit when
+// its VMM disconnects instead of waiting — and spinning — for a second
+// client that a one-job skiff will never send.
 func passtArgs(sock string) []string {
 	return []string{
 		"--vhost-user",
+		"--foreground",
+		"--one-off",
 		"-s", sock,
 		"--map-host-loopback", "none",
 		"--map-guest-addr", "none",

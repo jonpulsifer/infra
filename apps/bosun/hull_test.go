@@ -155,7 +155,7 @@ func TestVirtiofsdArgs(t *testing.T) {
 
 func TestPasstArgs(t *testing.T) {
 	got := passtArgs("/run/bosun/sk01.net")
-	want := []string{"--vhost-user", "-s", "/run/bosun/sk01.net", "--map-host-loopback", "none", "--map-guest-addr", "none", "-4", "-D", "1.1.1.1"}
+	want := []string{"--vhost-user", "--foreground", "--one-off", "-s", "/run/bosun/sk01.net", "--map-host-loopback", "none", "--map-guest-addr", "none", "-4", "-D", "1.1.1.1"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -16,13 +17,17 @@ var errFakeKilled = errors.New("fake: killed")
 type fakeProc struct {
 	exitCh chan error
 	once   sync.Once
+	waited atomic.Bool // someone is Wait()ing, so this process gets reaped
 }
 
 func newFakeProc() *fakeProc {
 	return &fakeProc{exitCh: make(chan error, 1)}
 }
 
-func (p *fakeProc) Wait() error { return <-p.exitCh }
+func (p *fakeProc) Wait() error {
+	p.waited.Store(true)
+	return <-p.exitCh
+}
 
 func (p *fakeProc) Kill() error {
 	p.once.Do(func() { p.exitCh <- errFakeKilled })
@@ -66,6 +71,13 @@ func (f *fakeLaunch) last(name string) (fakeCall, bool) {
 		}
 	}
 	return fakeCall{}, false
+}
+
+// all returns every recorded call, oldest first.
+func (f *fakeLaunch) all() []fakeCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]fakeCall(nil), f.calls...)
 }
 
 func (f *fakeLaunch) count() int {

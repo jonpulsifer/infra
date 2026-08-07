@@ -93,6 +93,21 @@ func TestFillBootsWarmCountAndCredentialShareAlwaysPresent(t *testing.T) {
 	}
 }
 
+// Every side-car must be Wait()ed by someone, or it becomes a zombie in
+// bosun's process table the moment it exits — one per helper per recycled
+// skiff, for as long as bosun runs.
+func TestEveryHelperIsReaped(t *testing.T) {
+	p, _, fl := testPool(t)
+	p.fill(context.Background())
+
+	for _, call := range fl.all() {
+		if call.name == "cloud-hypervisor" {
+			continue // awaitExit owns this one
+		}
+		waitFor(t, "helper "+call.name+" is Wait()ed", call.proc.waited.Load)
+	}
+}
+
 func TestPoolReplacesSkiffAfterExit(t *testing.T) {
 	p, _, fl := testPool(t)
 	ctx, cancel := context.WithCancel(context.Background())
