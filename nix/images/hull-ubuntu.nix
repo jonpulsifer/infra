@@ -153,8 +153,8 @@ let
   '';
 
   # Stage 2, line 2: the one job this skiff was booted for. The runner
-  # deregisters itself after one job and exits; inittab's next line then
-  # powers off, which exits the VMM with 0 — the launcher's completion signal.
+  # deregisters itself after one job and exits; this script then powers off,
+  # which exits the VMM with 0 — the launcher's completion signal.
   run = pkgs.writeScript "skiff-run" ''
     #!/opt/bosun/busybox sh
     export HOME=/home/runner
@@ -185,7 +185,6 @@ let
       {
         nativeBuildInputs = with pkgs; [
           jq
-          squashfs-tools-ng
           squashfsTools
         ];
       }
