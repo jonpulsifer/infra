@@ -46,7 +46,10 @@ import {
   vessels,
 } from '../../src/db/schema.ts';
 import { deployState } from '../../src/domain/target.ts';
-import { surfacesToProbe } from '../../src/domain/vessel.ts';
+import {
+  surfacesToProbe,
+  vesselPrerequisitesFor,
+} from '../../src/domain/vessel.ts';
 import { restoreDeclaredTargetConnections } from '../../src/reconciler/target-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
@@ -1108,5 +1111,59 @@ describe('listTargets', () => {
     if (!result.ok) return;
     const k8s = result.value.targets.find((t) => t.adapter === 'kubernetes');
     expect(k8s?.canonical).toBe('*.apps.example.test');
+  });
+
+  test('answers the boundaries themselves, with the role each carries', async () => {
+    // The seam between the vessel catalogue and the screen. Both ends are well
+    // covered on their own; without this the payload the Targets surface reads
+    // its checklist section out of is asserted by nothing.
+    const { registry } = fakes();
+    await connectTarget(cloudInput({ vessel: 'cloud' }), context(registry));
+
+    const result = await listTargets({}, context(registry));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const home = result.value.vessels.find((vessel) => vessel.name === 'cloud');
+    expect(home?.roles).toEqual(['home']);
+    expect(home?.inspectedAt).toBeNull();
+  });
+
+  test('a vessel’s health is derived from its rows, not read off one', async () => {
+    // Health is not a column, for the reason `target-loop.ts` gives about a
+    // stored derivation going stale. Asserted through the catalogue rather than
+    // by mirroring it: an unmet row is unhealthy, and every row met is healthy.
+    const { registry } = fakes();
+    await connectTarget(cloudInput({ vessel: 'cloud' }), context(registry));
+
+    const catalogue = vesselPrerequisitesFor('gcp-project', ['home']);
+    expect(catalogue).toContain('SOURCE_BUCKET');
+
+    await database()
+      .db.update(vessels)
+      .set({
+        prerequisites: catalogue.map((name) => ({
+          name,
+          met: name !== 'SIGNER_KEY',
+        })),
+      })
+      .where(eq(vessels.name, 'cloud'));
+    const unhealthy = await listTargets({}, context(registry));
+    expect(unhealthy.ok).toBe(true);
+    if (!unhealthy.ok) return;
+    expect(
+      unhealthy.value.vessels.find((vessel) => vessel.name === 'cloud')?.health,
+    ).toBe('unhealthy');
+
+    await database()
+      .db.update(vessels)
+      .set({ prerequisites: catalogue.map((name) => ({ name, met: true })) })
+      .where(eq(vessels.name, 'cloud'));
+    const healthy = await listTargets({}, context(registry));
+    expect(healthy.ok).toBe(true);
+    if (!healthy.ok) return;
+    expect(
+      healthy.value.vessels.find((vessel) => vessel.name === 'cloud')?.health,
+    ).toBe('healthy');
   });
 });

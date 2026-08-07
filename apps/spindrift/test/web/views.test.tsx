@@ -997,6 +997,80 @@ describe('the Targets surface', () => {
     // all the way onto the screen.
     expect(markup).not.toContain('spindrift-apps');
   });
+
+  /** One card at a time, because the two claims below are about one card each. */
+  const card = (id: string) =>
+    renderToStaticMarkup(
+      <TargetList
+        targets={TARGET_LIST.filter((target) => target.id === id)}
+        pending={[]}
+        vessels={VESSEL_LIST}
+        connecting={false}
+        error={null}
+        onConnect={() => undefined}
+      />,
+    );
+
+  test('a surface on a vessel the installation is built on offers neither act', () => {
+    // That boundary reconciles from the mounted declaration on every boot, so
+    // an edit made here would survive exactly until the next restart — and a
+    // disconnect is refused one layer down, because neither pointer is a
+    // foreign key and nothing else would stop it.
+    const markup = words(card('target-primary'));
+    expect(markup).not.toContain('Edit connection');
+    expect(markup).not.toContain('Disconnect');
+    // And the sentence saying why, rather than a disabled button saying nothing.
+    expect(markup).toContain('where this control plane runs');
+    expect(markup).toContain('cannot be disconnected');
+  });
+
+  test('an ordinary Target keeps both acts', () => {
+    // The other side of the same claim: the lock is by role, not by screen.
+    const markup = words(card('target-secondary'));
+    expect(markup).toContain('Edit connection');
+    expect(markup).toContain('Disconnect');
+    expect(markup).not.toContain('cannot be disconnected');
+  });
+
+  test('the boundaries carry a checklist of their own, and say which they are', () => {
+    const markup = words(targets());
+    expect(markup).toContain('Boundaries this installation is built on');
+    // The four the home vessel exists to hold. None of them belongs to a
+    // Target, and none is asked of an app vessel.
+    for (const item of [
+      'SOURCE_BUCKET',
+      'SECRET_STORE',
+      'SIGNER_KEY',
+      'ARTIFACTS_PROJECT',
+    ]) {
+      expect(markup).toContain(item);
+    }
+    expect(markup).toContain('home vessel');
+    expect(markup).toContain('where this control plane runs');
+    // Red where a row failed — a boundary's health is every catalogued row met.
+    expect(markup).toContain('unhealthy');
+  });
+
+  test('a boundary nobody has been past says so rather than reading as passed', () => {
+    // §18's rule in reverse: a snapshot has to say when, and never-assessed is
+    // a different state from assessed-and-everything-met.
+    const markup = words(
+      renderToStaticMarkup(
+        <TargetList
+          targets={TARGET_LIST}
+          pending={[]}
+          vessels={VESSEL_LIST.map((vessel) => ({
+            ...vessel,
+            inspectedAt: null,
+          }))}
+          connecting={false}
+          error={null}
+          onConnect={() => undefined}
+        />,
+      ),
+    );
+    expect(markup).toContain('never inspected');
+  });
 });
 
 describe('changing how a Component is reached (§9)', () => {
