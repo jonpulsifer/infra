@@ -334,11 +334,15 @@ describe('connecting a repository without being told what is in it', () => {
     // `apps/lib` is a library. It is passed over rather than connected, and
     // passing over seven of nine directories is the ordinary monorepo case —
     // refusing the whole connect over them would make discovery useless.
+    //
+    // `apps/api` is a Go service and the workspace declaration says nothing
+    // about it, which is exactly why discovery does not stop at that
+    // declaration: a repository is not one ecosystem's package list.
     expect(
       Object.keys(written)
         .filter((path) => path.endsWith(SPINDRIFT_FILE))
         .sort(),
-    ).toEqual([`apps/web/${SPINDRIFT_FILE}`]);
+    ).toEqual([`apps/api/${SPINDRIFT_FILE}`, `apps/web/${SPINDRIFT_FILE}`]);
   });
 
   test('an in-repo spindrift.yaml is what gets written back, unchanged', async () => {
@@ -536,6 +540,52 @@ describe('inspecting a repository before connecting it', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_FOUND');
+    // GitHub answers a repository that does not exist and one the installation
+    // does not select identically, so the sentence names both rather than
+    // asserting an existence nothing established.
+    expect(result.failure.message).toContain('does not exist');
+    expect(result.failure.message).toContain('repository selection');
+  });
+
+  test('a quota refusal is not a missing repository', async () => {
+    // §15 splits `RATE_LIMITED` from `ACCESS_LOST` precisely so that an hour's
+    // quota is never read as a repository that is gone. Collapsing them here
+    // sends an operator to check an installation that is fine.
+    const fake = new FakeGitHub();
+    fake.rateLimited = true;
+
+    const result = await inspectRepository(
+      { fullName: fake.fullName },
+      await context(fake),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).not.toBe('NOT_FOUND');
+    expect(result.failure.message).toContain('rate-limiting');
+    // And no response body: the far side answers a refusal with JSON or with
+    // somebody's error page, and neither is a sentence.
+    expect(result.failure.message).not.toContain('rate limit exceeded');
+    expect(result.failure.message).not.toContain('failed with');
+  });
+
+  test('a far side having a bad time says so, without its body', async () => {
+    const fake = new FakeGitHub();
+    const failing = (async () =>
+      new Response('<html>upstream connect error</html>', {
+        status: 502,
+      })) as unknown as typeof fetch;
+
+    const result = await inspectRepository(
+      { fullName: fake.fullName },
+      await context(fake, failing),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).not.toBe('NOT_FOUND');
+    expect(result.failure.message).toContain('502');
+    expect(result.failure.message).not.toContain('upstream connect error');
   });
 
   test('reads the tree once however many scopes it inspects', async () => {

@@ -198,6 +198,40 @@ describe('discovering what is in a repository', () => {
     ]);
   });
 
+  test('a declared workspace does not hide what is beside it', async () => {
+    // The defect: a repository that declares JS workspaces answered with its
+    // JS packages and nothing else, so a Go service in the same `apps/`
+    // directory was not a candidate — not even an unsupported one. A
+    // declaration says where one ecosystem's packages are; it says nothing
+    // about the repository.
+    const found = await discoverScopes(
+      memoryTree({
+        'package.json': PACKAGE({ workspaces: ['apps/*'] }),
+        'apps/web/package.json': PACKAGE({
+          name: 'web',
+          dependencies: { next: '15.0.0' },
+        }),
+        'apps/ddnsd/go.mod': 'module ddnsd\n',
+        'apps/rackstat/Dockerfile': 'FROM scratch\n',
+      }),
+    );
+
+    // Declared packages keep their priority, and what the walk found beyond
+    // them follows.
+    expect(found).toEqual(['apps/web', 'apps/ddnsd', 'apps/rackstat']);
+  });
+
+  test('a declared package is offered once, not twice', async () => {
+    const found = await discoverScopes(
+      memoryTree({
+        'package.json': PACKAGE({ workspaces: ['apps/*'] }),
+        'apps/web/package.json': PACKAGE({ name: 'web' }),
+      }),
+    );
+
+    expect(found).toEqual(['apps/web']);
+  });
+
   test('a repository with no workspace declaration is walked, but not deeply', async () => {
     const found = await discoverScopes(
       memoryTree({
