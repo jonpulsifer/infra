@@ -908,6 +908,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
       'connection.chartValues.platform.gateway.namespace',
     ],
     edit: {
+      kind: 'cluster',
       apiServer: 'https://primary.example:6443',
       proposal: { carriedFrom: 'primary/kubernetes', namespace: 'apps' },
     },
@@ -972,6 +973,7 @@ export const TARGET_LIST: readonly TargetListItem[] = [
     inspectedAt: '2026-08-02T12:00:00.000Z',
     connectionDivergence: [],
     edit: {
+      kind: 'cluster',
       apiServer: 'https://secondary.example:6443',
       proposal: { carriedFrom: 'secondary/kubernetes', namespace: 'apps' },
     },

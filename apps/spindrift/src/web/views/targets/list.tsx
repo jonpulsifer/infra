@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
+import { surfacesToProbe } from '../../../domain/vessel.ts';
 import type { LogoName } from '../../client/logos/index.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type { PendingTargetConnection, TargetListItem } from '../../model.ts';
@@ -547,6 +548,10 @@ function TargetCard({
               form was reachable only from an unconfigured seed. It is the same
               form and the same act — §13 makes connect idempotent by name — so
               the edit is a re-connect rather than a second way to write these.
+
+              And a re-connect is a re-probe: it asks the boundary about every
+              surface again, which is how a project whose Cloud Run API was off
+              at connect time gets that Target once it is switched on.
             */}
             {target.edit ? (
               <Button
@@ -593,10 +598,16 @@ function TargetCard({
         {editing && target.edit ? (
           <div className="rounded-md border border-border-soft bg-secondary/40 px-4 py-4">
             <ConnectTargetForm
-              kind="cluster"
+              kind={target.edit.kind}
               vessel={target.vessel}
-              apiServer={target.edit.apiServer}
-              surfaces={[target.adapter]}
+              {...(target.edit.kind === 'cluster'
+                ? { apiServer: target.edit.apiServer }
+                : { project: target.edit.project })}
+              // The whole act, not this card: one connect asks the boundary
+              // about every surface its kind is probed for, and saying so is
+              // what stops the confirmation from under-reporting what it
+              // touches.
+              surfaces={surfacesToProbe(target.edit.kind)}
               proposal={target.edit.proposal}
               connecting={connecting}
               onConnect={onConnect}

@@ -54,7 +54,10 @@ import {
 } from '../../../domain/target-onboarding.ts';
 import type { VesselKind } from '../../../domain/vessel.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
-import type { TargetConnectionProposal } from '../../model.ts';
+import type {
+  CloudBoundaryFacts,
+  TargetConnectionProposal,
+} from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import {
@@ -92,6 +95,10 @@ export function ConnectTargetForm(props: {
    * operator to restate the one fact the row is certain of.
    */
   apiServer?: string;
+  /** The same fact for a cloud boundary, on the same one path — an edit. */
+  project?: string;
+  /** What an edit of a cloud boundary restates so the act does not delete it. */
+  carried?: CloudBoundaryFacts;
   /** The surfaces this one act probes that boundary for. */
   surfaces: readonly string[];
   proposal: TargetConnectionProposal;
@@ -641,27 +648,34 @@ function Declaration({
 // --- The cloud flow, unchanged ---------------------------------------------
 
 /**
- * A cloud project's two Targets, in one act (§13).
+ * A cloud project's Targets, in one act (§13).
  *
  * Still a flat form, and not because nobody got to it: a project has no
  * discovery API to enumerate itself through before it is named, so there is
  * nothing here for a probe to read. The two endpoints and the region are
- * carried from a working cloud Target; the project id never is.
+ * carried from a working cloud Target; the project id never is — except on an
+ * edit, where the id is this boundary's own rather than somebody else's, and
+ * pressing the button again is how a surface the last probe did not find gets
+ * asked about a second time.
  */
 function ConnectCloud({
   vessel,
+  project: knownProject = '',
+  carried = {},
   proposal,
   connecting,
   onConnect,
   onCancel,
 }: {
   vessel: string;
+  project?: string;
+  carried?: CloudBoundaryFacts;
   proposal: TargetConnectionProposal;
   connecting: boolean;
   onConnect: (input: ConnectTargetInput) => void;
   onCancel: () => void;
 }) {
-  const [project, setProject] = useState('');
+  const [project, setProject] = useState(knownProject);
   const [region, setRegion] = useState(proposal.region ?? '');
   const [runEndpoint, setRunEndpoint] = useState(proposal.runEndpoint ?? '');
   const [hostingEndpoint, setHostingEndpoint] = useState(
@@ -682,7 +696,11 @@ function ConnectCloud({
           label="Project"
           value={project}
           onChange={(event) => setProject(event.target.value)}
-          hint="Not carried — a second project prefilled with the first one's id would read as correct."
+          hint={
+            knownProject === ''
+              ? "Not carried — a second project prefilled with the first one's id would read as correct."
+              : 'This boundary’s own id. Connecting again re-asks it about every surface.'
+          }
         />
         <Field
           name="region"
@@ -717,6 +735,12 @@ function ConnectCloud({
               ...(proposal.policyEndpoint === undefined
                 ? {}
                 : { policyEndpoint: proposal.policyEndpoint }),
+              // One act writes the whole connection and the whole vessel row,
+              // so what this boundary already states has to go back with it or
+              // the edit deletes it. There is no field for these because they
+              // are not decisions being made again — the fresh-connect path
+              // sends none, having nothing to preserve.
+              ...carried,
             })
           }
         >

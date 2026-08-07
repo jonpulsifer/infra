@@ -453,6 +453,74 @@ describe('the act is credential-shaped though the noun is flat', () => {
     expect(row?.prerequisites?.[0]?.detail).toContain('not enabled');
   });
 
+  test('and the screen keeps the act that asks again once it is switched on', async () => {
+    // The absence is deliberately not stored: what a boundary carries is a fact
+    // about the boundary, and a copy of it here would be a copy that goes stale
+    // the moment somebody enables the API. What stands in for remembering the
+    // answer is being able to ask again — which needs a control on a vessel
+    // whose remaining surfaces are already connected, or the only route left is
+    // declaring the surface in Git.
+    await connectTarget(
+      cloudInput({ vessel: 'elsewhere', project: 'other' }),
+      context(fakes().registry),
+    );
+    const off = fakes({
+      cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
+    });
+    await connectTarget(
+      cloudInput({
+        vessel: 'vessel',
+        project: 'p',
+        servedHosts: ['hosting.example.test'],
+      }),
+      context(off.registry),
+    );
+
+    const listed = await listTargets({}, context(off.registry));
+    if (!listed.ok) throw new Error('listTargets refused');
+    const edit = listed.value.targets.find(
+      (target) => target.vessel === 'vessel' && target.adapter === 'static',
+    )?.edit;
+    if (edit?.kind !== 'gcp-project') {
+      throw new Error('the surface that answered offers no edit');
+    }
+    // This boundary's own id, which a fresh connect refuses to propose and an
+    // edit must not make the operator retype. The endpoints and the region are
+    // installation-wide, so the project that does run Cloud Run supplies them.
+    expect(edit.project).toBe('p');
+    expect(edit.proposal.runEndpoint).toBe(CLOUD_ENDPOINTS.run);
+    expect(edit.proposal.region).toBe(cloudInput().region);
+    // And what one act writes that the form has no field to ask for again:
+    // sending the form back without these is the edit deleting them.
+    expect(edit.carried.servedHosts).toEqual(['hosting.example.test']);
+
+    // The same act, from exactly what the screen is holding.
+    const on = fakes();
+    const again = await connectTarget(
+      {
+        kind: 'gcp-project',
+        vessel: 'vessel',
+        project: edit.project,
+        region: edit.proposal.region!,
+        runEndpoint: edit.proposal.runEndpoint!,
+        hostingEndpoint: edit.proposal.hostingEndpoint!,
+        ...edit.carried,
+      },
+      context(on.registry),
+    );
+
+    if (!again.ok) throw new Error('connect refused');
+    expect(again.value.targets.map((target) => target.adapter)).toEqual([
+      'cloudrun',
+      'static',
+    ]);
+    const [boundary] = await database()
+      .db.select({ servedHosts: vessels.servedHosts })
+      .from(vessels)
+      .where(eq(vessels.name, 'vessel'));
+    expect(boundary?.servedHosts).toEqual(['hosting.example.test']);
+  });
+
   test('one cloud connect fills its matched manifest-seeded pair', async () => {
     const { registry } = fakes();
     const vessel = await insertVessel(database().db, 'cloudrun', {
@@ -589,7 +657,10 @@ describe('an operator’s Target correction outlives the next boot', () => {
     // The screen that made the correction possible: the edit opens on this
     // Target's own address, which is the one field a fresh connect refuses to
     // propose and the one field an edit must not make the operator retype.
-    expect(cluster?.edit?.apiServer).toBe(clusterInput().apiServer);
+    expect(cluster?.edit).toMatchObject({
+      kind: 'cluster',
+      apiServer: clusterInput().apiServer,
+    });
     expect(cluster?.edit?.proposal.carriedFrom).toBe('cluster/kubernetes');
   });
 

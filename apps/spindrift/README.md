@@ -220,6 +220,13 @@ than an unhealthy row. Nothing ever removes a Target that already exists — a
 surface that stops answering keeps its row and fails the checklist, and the
 standing loop refreshes rows without ever creating or deleting one.
 
+**A surface found later joins the vessel when somebody asks again.** The absence
+is deliberately not stored: what a boundary carries is a fact about the
+boundary, and a copy of it here would go stale the moment the API is switched
+on. So the answer to "it exists now" is the connect act run again, which the
+Targets screen offers on a boundary that is already connected, and which changes
+no Target that was already there.
+
 The split decides where every fact lives. What is true of the boundary, and
 therefore of every surface on it — where it is, which hosts it serves, which
 registries it reaches — belongs to the vessel, stated once, where two surfaces

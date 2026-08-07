@@ -13,9 +13,12 @@ import {
 } from '../../domain/placement.ts';
 import {
   connectionProposal,
+  type OnboardingTargetRow,
   pendingConnections,
 } from '../../domain/target-onboarding.ts';
+import { surfacesToProbe, type VesselLocation } from '../../domain/vessel.ts';
 import type {
+  CloudBoundaryFacts,
   PendingTargetConnection,
   TargetListItem,
   TargetOptionView,
@@ -70,6 +73,108 @@ function canonicalBoundary(
   return zones.private === zones.public
     ? `*.${zones.private}`
     : `*.${zones.private} (private) · *.${zones.public} (public)`;
+}
+
+/** A Target row with the boundary it sits on, as {@link editStart} reads it. */
+type SurfaceOnVessel = OnboardingTargetRow & {
+  readonly vessel: OnboardingTargetRow['vessel'] & {
+    readonly location: VesselLocation | null;
+    readonly servedHosts: readonly string[] | null;
+    readonly reachableRegistries: readonly string[] | null;
+  };
+};
+
+/**
+ * The facts a cloud edit has to restate — see `TargetListItem.edit`.
+ *
+ * Read off the boundary and off its runtime surface, because that is where
+ * `connectTarget` put them: one act supplied them once and fanned them out, so
+ * an edit that re-runs the act has to hand them all back or the act deletes
+ * them.
+ */
+function carriedFacts(
+  vessel: SurfaceOnVessel['vessel'],
+  onVessel: readonly SurfaceOnVessel[],
+): CloudBoundaryFacts {
+  const run = onVessel.find(
+    (row) => row.connection?.adapter === 'cloudrun',
+  )?.connection;
+  const runtime = run?.adapter === 'cloudrun' ? run : null;
+  return {
+    ...(runtime?.serviceAccount === undefined
+      ? {}
+      : { serviceAccount: runtime.serviceAccount }),
+    ...(runtime?.logHistorySeconds === undefined
+      ? {}
+      : { logHistorySeconds: runtime.logHistorySeconds }),
+    ...(vessel.servedHosts === null
+      ? {}
+      : { servedHosts: [...vessel.servedHosts] }),
+    ...(vessel.reachableRegistries === null
+      ? {}
+      : { reachableRegistries: [...vessel.reachableRegistries] }),
+  };
+}
+
+/**
+ * Where an edit of this Target's connection starts — `TargetListItem.edit`.
+ *
+ * A cluster's values come from this Target alone, which is the whole difference
+ * between an edit and a connect: `connectionProposal` prefers a healthy donor
+ * of the same adapter, and given a list of one there is only this row to read.
+ * A donor's values on an edit screen would be the second cluster's address
+ * problem with the Targets the other way round.
+ *
+ * A cloud edit reads this boundary's surfaces **together**, because one connect
+ * writes them together: the region and the runtime endpoint are on `cloudrun`
+ * and the hosting endpoint on `static`, so an edit opened from either that read
+ * only itself would drop the other one's fact. Behind them come the
+ * installation's other cloud Targets, because those three values are
+ * installation-wide rather than this project's — and that is what makes the
+ * edit usable as the re-probe: a vessel whose runtime surface the last probe
+ * did not find has no `cloudrun` row of its own to read an endpoint off.
+ *
+ * Offered only for a surface the boundary's connect act probes for. Editing is
+ * that act run again, so a surface outside its list is one this form would not
+ * write — and a control that does not touch the row it hangs off is worse than
+ * none.
+ */
+function editStart(
+  target: SurfaceOnVessel,
+  allTargets: readonly SurfaceOnVessel[],
+): TargetListItem['edit'] {
+  const location = target.vessel.location;
+  if (target.connection === null || location === null) return null;
+  if (!surfacesToProbe(location.kind).includes(target.adapter)) return null;
+
+  const onVessel = allTargets.filter(
+    (row) => row.vessel.id === target.vessel.id,
+  );
+  // The address is the vessel's, not the surface's — which is exactly why an
+  // edit may state it where a proposal may not.
+  return location.kind === 'cluster'
+    ? {
+        kind: 'cluster',
+        apiServer: location.apiServer,
+        proposal: connectionProposal([target], 'cluster'),
+      }
+    : {
+        kind: 'gcp-project',
+        project: location.project,
+        carried: carriedFacts(target.vessel, onVessel),
+        // This boundary's own surfaces first, the installation's others behind
+        // them: a region and two API endpoints are installation-wide facts a
+        // fresh connect already carries from any working cloud Target, so the
+        // vessel whose runtime surface is not registered *yet* is exactly the
+        // case where another project's are the right thing to offer.
+        proposal: connectionProposal(
+          [
+            ...onVessel,
+            ...allTargets.filter((row) => row.vessel.id !== target.vessel.id),
+          ],
+          'gcp-project',
+        ),
+      };
 }
 
 export interface ListTargetsResult {
@@ -140,21 +245,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
         ),
         target.connection,
       ),
-      // Carried from this Target alone, which is the whole difference between
-      // an edit and a connect: `connectionProposal` prefers a healthy donor of
-      // the same adapter, and given a list of one there is only this row to
-      // read. A donor's values on an edit screen would be the second cluster's
-      // address problem with the Targets the other way round.
-      edit:
-        target.adapter === 'kubernetes' &&
-        target.connection?.adapter === 'kubernetes' &&
-        target.vessel.location?.kind === 'cluster'
-          ? {
-              // The cluster's address is the vessel's, not the surface's.
-              apiServer: target.vessel.location.apiServer,
-              proposal: connectionProposal([target], 'cluster'),
-            }
-          : null,
+      edit: editStart(target, allTargets),
     });
 
     const isConnected = target.status === 'connected';
