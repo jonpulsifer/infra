@@ -166,8 +166,51 @@ describe('connecting a repository', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_FOUND');
-    expect(result.failure.message).toContain('installation selects it');
+    // GitHub answers a repository that does not exist and one the installation
+    // does not select identically, so the sentence names both rather than
+    // asserting an existence nothing established.
+    expect(result.failure.message).toContain('does not exist');
+    expect(result.failure.message).toContain('repository selection');
     // Nothing was written on the way to refusing.
+    expect(await database().db.select().from(repositories)).toEqual([]);
+  });
+
+  // The creation wizard connects on Deploy, against a repository it has
+  // already read successfully on this screen. A quota window answering
+  // `NOT_FOUND` there contradicts the list the operator picked from, and a raw
+  // HTTP body is not a sentence anybody can act on.
+  test('a quota refusal is not a missing repository', async () => {
+    const fake = new FakeGitHub();
+    fake.rateLimited = true;
+
+    const result = await connectRepository(input(fake), await context(fake));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).not.toBe('NOT_FOUND');
+    expect(result.failure.message).toContain('rate-limiting');
+    expect(result.failure.message).not.toContain('rate limit exceeded');
+    expect(result.failure.message).not.toContain('failed with');
+    expect(await database().db.select().from(repositories)).toEqual([]);
+  });
+
+  test('a far side having a bad time says so, without its body', async () => {
+    const fake = new FakeGitHub();
+    const failing = (async () =>
+      new Response('<html>upstream connect error</html>', {
+        status: 502,
+      })) as unknown as typeof fetch;
+
+    const result = await connectRepository(
+      input(fake),
+      await context(fake, failing),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).not.toBe('NOT_FOUND');
+    expect(result.failure.message).toContain('502');
+    expect(result.failure.message).not.toContain('upstream connect error');
     expect(await database().db.select().from(repositories)).toEqual([]);
   });
 
