@@ -3,9 +3,12 @@
 # every alert is what tells the messages apart, so there is nothing per-site
 # here and this lives in base rather than beside each HelmRelease.
 #
-# Alertmanager reads the URL through `webhook_url_file` from the secret this
-# creates, mounted by `alertmanagerSpec.secrets` in each cluster's
-# kube-prometheus HelmRelease.
+# The receiver lives in an AlertmanagerConfig rather than the HelmRelease's
+# inline `alertmanager.config`, because the operator parses that inline config
+# with its own Go types before generating the running one, and its discordConfig
+# has no `webhook_url_file` — it rejects the whole document and silently keeps
+# serving the last config it accepted. `apiURL` below is the operator's own
+# secret reference, so the URL still never appears in git.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -22,5 +25,34 @@ spec:
   data:
     - secretKey: webhook-url
       remoteRef:
-        key: discord alertmanager webhook
+        # Item id rather than title, so renaming the item in 1Password cannot
+        # quietly stop alert delivery.
+        key: aujvxijpz3oi25ccfdynev5sb4
         property: password
+---
+# Appended by the operator as a sub-route of the HelmRelease's top-level route,
+# after that route's own Watchdog entry — so Watchdog is still swallowed first
+# and everything surviving it lands here. Carries no matchers of its own, which
+# only catches everything because alertmanagerConfigMatcherStrategy is None; the
+# default would pin it to alerts labelled namespace=monitoring.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: discord
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: discord
+spec:
+  route:
+    receiver: discord
+    groupBy: [cluster, namespace, alertname]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 12h
+  receivers:
+    - name: discord
+      discordConfigs:
+        - apiURL:
+            name: alertmanager-discord
+            key: webhook-url
+          sendResolved: true
