@@ -29,15 +29,38 @@ const AUTH: readonly RegistryAuth[] = [
 ];
 
 describe('the Docker config a builder is handed', () => {
-  test('is the format every registry client reads', () => {
+  /**
+   * Docker Hub under the legacy index URL and nothing else, because that is
+   * the only key BuildKit reads for it: it resolves the host to
+   * `registry-1.docker.io` and substitutes `DockerHubConfigfileKey` before
+   * looking anything up. Filed under either hostname the entry is invisible,
+   * and the push fails as `push access denied` — observed live on the managed
+   * route, where this config is the only credential the builder gets.
+   */
+  test('files Docker Hub under the key BuildKit reads it from', () => {
     const config = dockerConfigFor(AUTH);
     expect(config).not.toBeNull();
     expect(JSON.parse(config ?? '{}')).toEqual({
       auths: {
-        'registry-1.docker.io': {
+        'https://index.docker.io/v1/': {
           auth: btoa(`an-owner:${TOKEN}`),
         },
       },
+    });
+    // The spelling an operator actually stores reaches the same entry.
+    expect(
+      JSON.parse(
+        dockerConfigFor([{ ...AUTH[0]!, host: 'docker.io' }]) ?? '{}',
+      ),
+    ).toEqual(JSON.parse(config ?? '{}'));
+  });
+
+  test('leaves every other registry under its own hostname', () => {
+    const config = dockerConfigFor([
+      { host: 'ghcr.io', username: 'an-owner', secret: TOKEN },
+    ]);
+    expect(JSON.parse(config ?? '{}')).toEqual({
+      auths: { 'ghcr.io': { auth: btoa(`an-owner:${TOKEN}`) } },
     });
   });
 
