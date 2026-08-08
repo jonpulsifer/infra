@@ -28,10 +28,25 @@ type skiff struct {
 	everOnline    bool      // true once the runner has reported online at least once
 	offlineStreak int       // consecutive offline observations; reset by any other status
 	busySince     time.Time // zero until the runner first reports busy; maxLifetime is measured from here
+	exitReason    string    // why bosun killed this skiff; empty means the guest halted itself
 
 	helpersLog *os.File
 	helpers    []proc // virtiofsd(s) + passt
 	ch         proc   // cloud-hypervisor; Wait() on this is "did the job finish"
+}
+
+// setExitReason records why bosun is about to kill this skiff. The poll loop
+// sets it; awaitExit's retire reads it on another goroutine.
+func (s *skiff) setExitReason(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.exitReason = reason
+}
+
+func (s *skiff) reason() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exitReason
 }
 
 // pool keeps every class's warm count full. On start it sweeps stale state
@@ -46,13 +61,46 @@ type pool struct {
 	gh     githubClient
 	launch launcher
 	logger *slog.Logger
+	stats  *metrics
 
 	mu     sync.Mutex
 	skiffs map[string]*skiff
 }
 
 func newPool(cfg *Config, gh githubClient, launch launcher, logger *slog.Logger) *pool {
-	return &pool{cfg: cfg, gh: gh, launch: launch, logger: logger, skiffs: map[string]*skiff{}}
+	return &pool{cfg: cfg, gh: gh, launch: launch, logger: logger, stats: newMetrics(), skiffs: map[string]*skiff{}}
+}
+
+// publish writes the metrics textfile, if one is configured. Called after
+// every pool change and on every poll tick, so its mtime doubles as bosun's
+// heartbeat.
+func (p *pool) publish() {
+	if p.cfg.MetricsFile == "" {
+		return
+	}
+	live := map[string]poolState{}
+	desired := map[string]int{}
+	for name, class := range p.cfg.Classes {
+		desired[name] = class.Warm
+	}
+	p.mu.Lock()
+	for _, s := range p.skiffs {
+		state := live[s.class]
+		s.mu.Lock()
+		busy := !s.busySince.IsZero()
+		s.mu.Unlock()
+		if busy {
+			state.busy++
+		} else {
+			state.idle++
+		}
+		live[s.class] = state
+	}
+	p.mu.Unlock()
+
+	if err := writeTextfile(p.cfg.MetricsFile, p.stats.render(live, desired)); err != nil {
+		p.logger.Warn("write metrics", "path", p.cfg.MetricsFile, "error", err)
+	}
 }
 
 // sweep clears every entry under runtimeDir and deletes the GitHub
@@ -136,12 +184,14 @@ func (p *pool) spawn(ctx context.Context, className string) {
 
 	if err := p.writeState(paths.dir, runnerID, jitConfig, h.digest); err != nil {
 		logger.Error("write state", "error", err)
+		s.setExitReason(exitBootFailed)
 		p.retire(ctx, s, logger)
 		return
 	}
 
 	if err := p.boot(s, h, class, logger); err != nil {
 		logger.Error("boot", "error", err)
+		s.setExitReason(exitBootFailed)
 		p.retire(ctx, s, logger)
 		return
 	}
@@ -150,7 +200,9 @@ func (p *pool) spawn(ctx context.Context, className string) {
 	p.skiffs[id] = s
 	p.mu.Unlock()
 
+	p.stats.boot(className)
 	logger.Info("skiff booted", "runner_id", runnerID)
+	p.publish()
 	go p.awaitExit(ctx, s, logger)
 }
 
@@ -249,6 +301,12 @@ func (p *pool) awaitExit(ctx context.Context, s *skiff, logger *slog.Logger) {
 // and socket files. Best effort throughout — /run is tmpfs, so anything left
 // behind here does not survive a reboot either way.
 func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
+	reason := s.reason()
+	if reason == "" {
+		reason = exitCompleted // the guest powered itself off at the end of its job
+	}
+	p.stats.exit(s.class, reason)
+
 	for _, h := range s.helpers {
 		killBestEffort(h, logger, "helper")
 	}
@@ -310,6 +368,9 @@ func (p *pool) pollOnce(ctx context.Context) {
 	for _, s := range snapshot {
 		p.pollSkiff(ctx, s)
 	}
+	// Every tick, whether anything changed or not: the file's mtime is the
+	// only signal that says bosun is still alive.
+	p.publish()
 }
 
 // pollSkiff reconciles one skiff against GitHub's view of its runner.
@@ -332,6 +393,7 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	logger := p.logger.With("skiff", s.id, "class", s.class)
 	status, busy, err := p.gh.GetRunner(ctx, p.cfg.Repo, s.runnerID)
 	if err != nil {
+		p.stats.githubError()
 		logger.Warn("poll runner status", "error", err)
 		return
 	}
@@ -365,12 +427,15 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	switch {
 	case status == "offline" && everOnline && offlineStreak >= wedgeThreshold:
 		logger.Warn("wedged guest: went offline with the VMM still alive", "consecutive_polls", offlineStreak)
+		s.setExitReason(exitWedged)
 		killBestEffort(s.ch, logger, "wedged cloud-hypervisor")
 	case !busySince.IsZero() && p.exceededLifetime(s.class, busySince):
 		logger.Info("max lifetime exceeded, recycling", "busy_for", time.Since(busySince))
+		s.setExitReason(exitLifetime)
 		killBestEffort(s.ch, logger, "expired cloud-hypervisor")
 	case busySince.IsZero() && time.Since(s.mintedAt) > jitExpiry:
 		logger.Info("idle past JIT expiry, recycling")
+		s.setExitReason(exitJITExpired)
 		killBestEffort(s.ch, logger, "idle-expired cloud-hypervisor")
 	}
 }

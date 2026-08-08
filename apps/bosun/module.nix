@@ -26,6 +26,7 @@ let
       tokenFile
       runtimeDir
       logDir
+      metricsFile
       ;
     pollInterval = cfg.pollInterval;
     classes = lib.mapAttrs (_: c: {
@@ -92,6 +93,22 @@ in
       type = types.str;
       default = "/var/log/bosun";
       description = "Where each skiff's serial console is written.";
+    };
+
+    metricsFile = mkOption {
+      type = types.str;
+      default = "/var/lib/node-exporter-textfiles/bosun.prom";
+      description = ''
+        Prometheus textfile for node-exporter's textfile collector to serve.
+        Empty disables it.
+
+        A file rather than an HTTP listener on purpose: the IPAddressDeny
+        below is inherited by every skiff, so a socket in-cluster Prometheus
+        could reach would mean opening the pod CIDR to untrusted job code
+        too. The file's mtime is bosun's heartbeat -- node-exporter exports it
+        as `node_textfile_mtime_seconds`, so a stale file is what a dead or
+        wedged bosun looks like.
+      '';
     };
 
     pollInterval = mkOption {
@@ -204,6 +221,10 @@ in
         # restart leaks a ghost registration.
         RuntimeDirectoryPreserve = "yes";
         LogsDirectory = "bosun";
+        # Holds metricsFile. 0755 so node-exporter -- which reads it from
+        # outside this unit, as a DaemonSet mounting the host path -- can.
+        StateDirectory = "node-exporter-textfiles";
+        StateDirectoryMode = "0755";
 
         # Every skiff is a child of this unit, so one filter covers the whole
         # pool: job code reaches the public internet and nothing on the LAN.

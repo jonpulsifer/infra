@@ -253,6 +253,19 @@ spec:
               - *am
         pathType: Prefix
     prometheus-node-exporter:
+      # A host service that wants metrics scraped drops a .prom file in
+      # /var/lib/node-exporter-textfiles and this picks it up, labelled with the
+      # node it came from. That is how bosun on riptide is scraped: its unit
+      # carries an IPAddressDeny every skiff inherits, so a listener in-cluster
+      # Prometheus could reach would open the pod CIDR to job code as well.
+      #
+      # Reached through the host-root mount the chart already makes, so this
+      # needs no extra volume. extraArgs REPLACES the chart's defaults, so the
+      # two filesystem excludes below are the chart's own and must stay.
+      extraArgs:
+        - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+        - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$
+        - --collector.textfile.directory=/host/root/var/lib/node-exporter-textfiles
       prometheus:
         monitor:
           relabelings:

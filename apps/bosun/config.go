@@ -14,6 +14,7 @@ type Config struct {
 	TokenFile    string           `json:"tokenFile"`
 	RuntimeDir   string           `json:"runtimeDir"`
 	LogDir       string           `json:"logDir"`
+	MetricsFile  string           `json:"metricsFile"` // empty disables; a node-exporter textfile, not a listener
 	PollInterval Duration         `json:"pollInterval"`
 	Classes      map[string]Class `json:"classes"`
 	Bin          BinPaths         `json:"bin"`
