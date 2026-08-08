@@ -65,6 +65,14 @@ resource "google_compute_image" "tender" {
   guest_os_features {
     type = "UEFI_COMPATIBLE"
   }
+  # C4 is gVNIC-only -- Granite Rapids does not offer virtio-net -- so GCE sets
+  # the interface's NicType to GVNIC on its own and then rejects the instance
+  # if the image has not declared it can drive one. The kernel can: CONFIG_GVE
+  # is a module, udev autoloads it by PCI id, and google-compute-config.nix
+  # turns off predictable interface names, so it still arrives as eth0.
+  guest_os_features {
+    type = "GVNIC"
+  }
 }
 
 # C4 is Hyperdisk-only; Persistent Disk is not offered on the newest families.
@@ -75,6 +83,13 @@ resource "google_compute_image" "tender" {
 # every time. The host carries itself forward with nixos-upgrade from main the
 # same way every other fleet host does; the image is a birth certificate, not a
 # deploy channel.
+#
+# The cost of that: a disk copies the image's guest_os_features when it is
+# created and never revisits them, and the image's self_link does not change
+# when the image is replaced under the same name -- so a change to the features
+# above produces no diff here at all. Replacing an existing disk to pick them up
+# is a deliberate `-replace`, and only ever safe before first boot, while there
+# is no host key on it yet.
 resource "google_compute_disk" "tender" {
   name  = "tender"
   image = google_compute_image.tender.self_link
