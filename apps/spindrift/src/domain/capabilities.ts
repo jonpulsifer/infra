@@ -161,6 +161,21 @@ export interface PrerequisiteResult {
    */
   readonly assessed?: boolean;
   /**
+   * The project whose switch a `SERVICE_DISABLED` refusal was actually about,
+   * where that is not the project the call was aimed at.
+   *
+   * GCP refuses a call whose *consumer* — the project the federated token bills
+   * — has the service off, whatever project the URL names. Ticket 90 made the
+   * sentence say so; this is the same fact in a field, because the sentence is
+   * written for an operator and `remediation.ts` must not parse it: a stanza
+   * generated off `subject.project` enables the API on a project that was never
+   * the problem, and files it in that project's root.
+   *
+   * Absent means the refusal named no consumer or named the probed project,
+   * which is every other row.
+   */
+  readonly consumer?: string;
+  /**
    * What would clear it, as Terraform, and where that belongs.
    *
    * Absent on a stored row and present on a read one: the loops store what was

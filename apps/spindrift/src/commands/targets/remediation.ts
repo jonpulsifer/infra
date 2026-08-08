@@ -24,6 +24,7 @@ import {
 } from '../../config/manifest.schema.ts';
 import type {
   AnyPrerequisite,
+  DeclaredVessel,
   Remediation,
   RemediationSubject,
 } from '../../domain/remediation.ts';
@@ -108,7 +109,36 @@ export function remediationSubject(
     // about a source bucket, so naming one here would be a stanza declaring
     // this installation's bucket in somebody else's project.
     sourceBucket: isHome ? sharedServicesOf(manifest).sourceBucket : null,
+    declared: declaredProjects(manifest),
   };
+}
+
+/**
+ * Every declared boundary that says which project it is.
+ *
+ * From the document rather than from the vessel rows, for the reason
+ * `terraformRootOf` reads the document: a root is a fact about where the
+ * declaration lives, and the row it would otherwise be joined to is one this
+ * caller does not hold — the refusal names a project, not a boundary.
+ *
+ * A vessel that declares no location is left out rather than listed with a
+ * null: it cannot match a project, and a reader that had to skip it would be
+ * the second place this rule is written.
+ */
+function declaredProjects(
+  manifest: InstallationManifest,
+): readonly DeclaredVessel[] {
+  return manifest.vessels.flatMap((vessel) =>
+    vessel.kind === 'gcp-project' && vessel.location !== undefined
+      ? [
+          {
+            name: vessel.name,
+            project: vessel.location.project,
+            terraformRoot: vessel.terraformRoot ?? null,
+          },
+        ]
+      : [],
+  );
 }
 
 /**
@@ -124,6 +154,8 @@ interface ChecklistRow {
   readonly name: AnyPrerequisite;
   readonly met: boolean;
   readonly assessed?: boolean;
+  /** Travels for the same reason `assessed` does — see `AnyPrerequisiteRow`. */
+  readonly consumer?: string;
 }
 
 /**

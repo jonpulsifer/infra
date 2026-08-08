@@ -20,12 +20,29 @@
  * rather than an empty box.
  */
 import { describe, expect, test } from 'bun:test';
+import { cloudChecklist } from '../../src/adapters/deploy/cloud/checklist.ts';
+import type { CloudResponse } from '../../src/adapters/deploy/cloud/http.ts';
+import {
+  remediationSubject,
+  withRemediations,
+} from '../../src/commands/targets/remediation.ts';
+import type { InstallationManifest } from '../../src/config/manifest.ts';
 import { PREREQUISITES } from '../../src/domain/capabilities.ts';
 import {
   type RemediationSubject,
   remediationFor,
 } from '../../src/domain/remediation.ts';
 import { VESSEL_PREREQUISITES } from '../../src/domain/vessel.ts';
+import { fixtureManifest } from '../harness/installation.ts';
+
+/** The boundaries the declaration names, as the destination lookup reads them. */
+const DECLARED = [
+  {
+    name: 'cloud',
+    project: 'example-vessel',
+    terraformRoot: 'terraform/projects/cloud',
+  },
+] as const;
 
 const HOME: RemediationSubject = {
   vessel: 'cloud',
@@ -35,7 +52,40 @@ const HOME: RemediationSubject = {
   principal: 'serviceAccount:spindrift@example.test',
   region: 'example-region',
   sourceBucket: 'example-source-bucket',
+  declared: DECLARED,
 };
+
+/**
+ * A boundary that is not this installation's own, connected through the UI.
+ *
+ * The shape the consumer distinction is about: the probe is aimed here, and the
+ * switch that is off is the home vessel's, because that is the project the
+ * federated token bills.
+ */
+const ELSEWHERE: RemediationSubject = {
+  ...HOME,
+  vessel: 'elsewhere',
+  project: 'other-vessel',
+  terraformRoot: null,
+  sourceBucket: null,
+};
+
+/**
+ * The fixture, with its home boundary saying which project it is.
+ *
+ * The fixture leaves `location` off on purpose — it seeds identity and leaves
+ * reach to the connect act — and the consumer distinction only exists for an
+ * installation whose home vessel declares a project, as the live one does.
+ */
+const declaring: InstallationManifest = ((manifest: InstallationManifest) => ({
+  ...manifest,
+  vessels: manifest.vessels.map((vessel) =>
+    vessel.name === manifest.installation.homeVessel &&
+    vessel.kind === 'gcp-project'
+      ? { ...vessel, location: { project: 'example-vessel' } }
+      : vessel,
+  ),
+}))(await fixtureManifest());
 
 /** The `kind: 'generated'` arm, or a failure naming what came back instead. */
 function generated(remediation: ReturnType<typeof remediationFor>) {
@@ -88,6 +138,64 @@ describe('a service the probe found switched off', () => {
     // The stanza still stands: "here is what a root would contain" is an answer
     // an operator can act on. What is withheld is the location.
     expect(change.terraform).toContain('google_project_service');
+  });
+
+  test('the switch that is off is the consumer’s, so the stanza is too', () => {
+    // GCP refuses the call whose *consumer* has the service off, whatever
+    // project the URL named. Enabling the API on `other-vessel` would clear
+    // nothing and would be reviewed by whoever owns a boundary that was never
+    // at fault.
+    const change = generated(
+      remediationFor(
+        { name: 'PLATFORM_API', consumer: 'example-vessel' },
+        ELSEWHERE,
+      ),
+    );
+    expect(change.terraform).toContain('"example-vessel"');
+    expect(change.terraform).not.toContain('other-vessel');
+    expect(change.summary).toContain('not other-vessel');
+  });
+
+  test('and it goes to the root the consumer’s boundary declares', () => {
+    // Not the probed boundary's — which here has no root at all, so a
+    // destination taken from the subject would have withheld the location of a
+    // change that has a perfectly good place to go.
+    const change = generated(
+      remediationFor(
+        { name: 'PLATFORM_API', consumer: 'example-vessel' },
+        ELSEWHERE,
+      ),
+    );
+    expect(change.destination).toEqual({
+      kind: 'root',
+      path: 'terraform/projects/cloud/services.tf',
+    });
+  });
+
+  test('a consumer no declaration names gets the reason, never a guess', () => {
+    const change = remediationFor(
+      { name: 'PLATFORM_API', consumer: 'somebody-elses-project' },
+      ELSEWHERE,
+    );
+    expect(change.kind).toBe('none');
+    if (change.kind !== 'none') return;
+    expect(change.reason).toContain('somebody-elses-project');
+    expect(change.reason).toContain('no root');
+  });
+
+  test('a consumer that is the probed project changes nothing', () => {
+    const change = generated(
+      remediationFor(
+        { name: 'PLATFORM_API', consumer: 'example-vessel' },
+        HOME,
+      ),
+    );
+    expect(change.terraform).toContain('"example-vessel"');
+    expect(change.destination).toEqual({
+      kind: 'root',
+      path: 'terraform/projects/cloud/services.tf',
+    });
+    expect(change.summary).not.toContain('bill');
   });
 
   test('a surface with no service of its own generates nothing', () => {
@@ -271,5 +379,80 @@ describe('the rows Terraform does not clear', () => {
       expect(change.reason).toContain('Terraform');
       expect(change.reason).toContain('cluster');
     }
+  });
+});
+
+/**
+ * The consumer, from the refusal that named it to the stanza that acts on it.
+ *
+ * Deliberately across the seam rather than at either side of it: the fact is
+ * observed in `cloud/checklist.ts`, stored on a jsonb row, and read by a
+ * generator two modules away, and every previous defect of this shape was a
+ * fact that survived one of those hops and not the next. Ticket 90 fixed the
+ * sentence; a test that only asserted the sentence would have passed while the
+ * generated change still enabled the API on the wrong project.
+ */
+describe('a refusal about the project the calls bill to', () => {
+  /** What Cloud Run answers when the *caller's* project has it switched off. */
+  const REFUSED: CloudResponse<unknown> = {
+    ok: false,
+    kind: 'status',
+    status: 403,
+    body: JSON.stringify({ error: { status: 'PERMISSION_DENIED' } }),
+    reason: 'SERVICE_DISABLED',
+    consumer: 'example-vessel',
+    message:
+      'Cloud Run Admin API has not been used in project example-vessel before or it is disabled',
+  };
+
+  test('the stanza names that project, and lands in its root', () => {
+    const rows = cloudChecklist(REFUSED, {
+      project: 'other-vessel',
+      service: 'Cloud Run',
+      scope: 'services in other-vessel',
+    });
+    const answered = withRemediations(
+      rows,
+      remediationSubject(
+        declaring,
+        {
+          name: 'elsewhere',
+          location: { kind: 'gcp-project', project: 'other-vessel' },
+          surfaces: [
+            { connection: { adapter: 'cloudrun', region: 'example-region' } },
+          ],
+        },
+        'cloudrun',
+      ),
+    );
+
+    const change = generated(
+      answered.find((row) => row.name === 'PLATFORM_API')?.remediation ?? {
+        kind: 'none',
+        reason: 'PLATFORM_API is not on the checklist this refusal produced',
+      },
+    );
+    expect(change.terraform).toContain('"example-vessel"');
+    expect(change.terraform).toContain('"run.googleapis.com"');
+    expect(change.terraform).not.toContain('other-vessel');
+    expect(change.destination).toEqual({
+      kind: 'root',
+      path: 'terraform/projects/cloud/services.tf',
+    });
+  });
+
+  test('a refusal naming no consumer still answers about the probed project', () => {
+    const rows = cloudChecklist(
+      { ...REFUSED, consumer: null },
+      {
+        project: 'example-vessel',
+        service: 'Cloud Run',
+        scope: 'services in example-vessel',
+      },
+    );
+    const platform = rows.find((row) => row.name === 'PLATFORM_API');
+    expect(platform?.consumer).toBeUndefined();
+    expect(platform?.detail).toContain('example-vessel');
+    expect(platform?.detail).not.toContain('bill');
   });
 });

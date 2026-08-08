@@ -87,11 +87,19 @@ export function cloudChecklist(
   const disabled =
     probe.reason === SERVICE_DISABLED || probe.body.includes(SERVICE_DISABLED);
   if (disabled) {
+    const consumer =
+      probe.consumer !== null && probe.consumer !== subject.project
+        ? probe.consumer
+        : undefined;
     return checklist({
       PLATFORM_API: {
         met: false,
         assessed: true,
         detail: `the ${subject.service} API is not enabled on ${disabledProject(probe.consumer, subject)}`,
+        // The same fact the sentence carries, in a field: `remediation.ts`
+        // decides which project a stanza enables the service on, and reading it
+        // back out of the sentence would be parsing prose written for a person.
+        ...(consumer === undefined ? {} : { consumer }),
       },
       OIDC_FEDERATION: notAssessed(subject.service),
       VESSEL: notAssessed(subject.service),
@@ -231,6 +239,8 @@ type Unmet = {
   readonly met: false;
   readonly assessed: boolean;
   readonly detail: string;
+  /** See {@link PrerequisiteResult.consumer}. Only the disabled-service arm. */
+  readonly consumer?: string;
 };
 
 /** Assemble the three in their declared order, so the UI never reorders them. */

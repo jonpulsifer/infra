@@ -130,9 +130,12 @@ export const openPrerequisiteRemediation: Command<
     );
   }
   if (remediation.destination.kind !== 'root') {
+    // The destination's own vessel, not the one asked about: a refusal names
+    // the project it billed, so the boundary with no root can be a different
+    // one from the surface this row is on.
     return failed(
       'NOT_DEPLOYABLE',
-      `${input.vessel} declares no Terraform root, so there is nowhere to open this change — the stanza names what a root would contain, and creating one is not something Spindrift does`,
+      `${remediation.destination.vessel} declares no Terraform root, so there is nowhere to open this change — the stanza names what a root would contain, and creating one is not something Spindrift does`,
     );
   }
 

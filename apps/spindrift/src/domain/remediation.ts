@@ -89,6 +89,17 @@ export interface AnyPrerequisiteRow {
   readonly name: AnyPrerequisite;
   /** `false` where the probe never got far enough to reach a verdict. */
   readonly assessed?: boolean;
+  /**
+   * The project the refusal named as the consumer, where that is not the one
+   * probed — see `PrerequisiteResult.consumer`.
+   *
+   * On the row rather than on the subject because it is an observation about
+   * one refusal, and the subject is the boundary the probe was aimed at. The
+   * two differ exactly when this field is present, which is the whole reason it
+   * exists: a stanza generated off the subject would enable a service on a
+   * project whose switch was never off.
+   */
+  readonly consumer?: string;
 }
 
 /**
@@ -175,6 +186,27 @@ export interface RemediationSubject {
   readonly region: string | null;
   /** The bucket this installation stages sources into, when it holds one. */
   readonly sourceBucket: string | null;
+  /**
+   * Every boundary this installation's declaration puts at a project, so a
+   * refusal about a *different* project than the one probed still lands where
+   * that project is declared.
+   *
+   * Needed because {@link RemediationSubject} is one boundary and a
+   * `SERVICE_DISABLED` is routinely about another: the consumer the federated
+   * token bills, which for this installation's own calls is the home vessel.
+   * Resolving it here rather than by convention keeps rule 2 — a project no
+   * declaration names has no honest root to put a change in, and inventing one
+   * is what this module will not do.
+   */
+  readonly declared: readonly DeclaredVessel[];
+}
+
+/** A boundary the declaration names, as a destination lookup reads one. */
+export interface DeclaredVessel {
+  readonly name: string;
+  /** The project it is; only boundaries that declare one are listed. */
+  readonly project: string;
+  readonly terraformRoot: string | null;
 }
 
 /**
@@ -263,7 +295,7 @@ export function remediationFor(
 
   switch (name) {
     case 'PLATFORM_API':
-      return enablePlatformApi(subject);
+      return enablePlatformApi(row, subject);
     case 'OIDC_FEDERATION':
       return grantFederatedAccess(subject);
     case 'SOURCE_BUCKET':
@@ -276,8 +308,21 @@ export function remediationFor(
   }
 }
 
-/** The one service the probe found switched off — never the full set. */
-function enablePlatformApi(subject: RemediationSubject): Remediation {
+/**
+ * The one service the probe found switched off — never the full set, and never
+ * on a project whose switch was not the one refused.
+ *
+ * A `SERVICE_DISABLED` names its *consumer*: the project the federated token
+ * bills, which for this installation's own calls is the home vessel and not the
+ * vessel being probed. Where the two differ, both halves of the change follow
+ * the consumer — the stanza's `project` and the root it is filed in — because a
+ * change enabling an API on the probed project would clear nothing and would be
+ * reviewed by whoever owns a boundary that was never at fault.
+ */
+function enablePlatformApi(
+  row: AnyPrerequisiteRow,
+  subject: RemediationSubject,
+): Remediation {
   const service = serviceOf(subject.adapter);
   if (service === null || subject.project === null) {
     return {
@@ -286,18 +331,44 @@ function enablePlatformApi(subject: RemediationSubject): Remediation {
         'nothing observed which project this row is about, or which service was switched off in it',
     };
   }
+  const consumer =
+    row.consumer === undefined || row.consumer === subject.project
+      ? null
+      : row.consumer;
+  const owner =
+    consumer === null
+      ? null
+      : (subject.declared.find((vessel) => vessel.project === consumer) ??
+        null);
+  if (consumer !== null && owner === null) {
+    // Rule 2, in the one place the destination is not this subject's: a project
+    // that appears only in somebody else's refusal is a boundary this
+    // declaration has never named, so there is no root to file a change in and
+    // no vessel to say one is missing from.
+    return {
+      kind: 'none',
+      reason: `the ${service} switch this refusal is about is ${consumer}’s — the project this installation’s calls bill to, not ${subject.project} — and nothing in this declaration names ${consumer} as a vessel, so there is no root to put the change in`,
+    };
+  }
+  const project = consumer ?? subject.project;
   const label = identifier(`spindrift_${service.split('.')[0]}`);
   return {
     kind: 'generated',
-    summary: `Enable ${service} on ${subject.project}. Only the service this probe found switched off; the rest of the project’s services are untouched.`,
-    destination: destinationOf(subject, DESTINATION_FILE.PLATFORM_API),
+    summary:
+      owner === null
+        ? `Enable ${service} on ${project}. Only the service this probe found switched off; the rest of the project’s services are untouched.`
+        : `Enable ${service} on ${project} — the project this installation’s calls bill to, not ${subject.project}, which the refusal establishes nothing about. Only the service this probe found switched off; the rest of the project’s services are untouched.`,
+    destination:
+      owner === null
+        ? destinationOf(subject, DESTINATION_FILE.PLATFORM_API)
+        : rootOf(owner, DESTINATION_FILE.PLATFORM_API),
     // The service string and not only the address: a root that enables its
     // APIs through one `for_each` resource owns this service under a label
     // nothing here can predict, and appending beside it is two resources
     // managing one enablement.
     declares: [address('google_project_service', label), quote(service)],
     terraform: `resource "google_project_service" "${label}" {
-  project            = ${quote(subject.project)}
+  project            = ${quote(project)}
   service            = ${quote(service)}
   disable_on_destroy = false
 }
@@ -399,9 +470,20 @@ function destinationOf(
   subject: RemediationSubject,
   file: string,
 ): RemediationDestination {
-  return subject.terraformRoot === null
-    ? { kind: 'absent', vessel: subject.vessel, file }
-    : { kind: 'root', path: `${subject.terraformRoot}/${file}` };
+  return rootOf(
+    { name: subject.vessel, terraformRoot: subject.terraformRoot },
+    file,
+  );
+}
+
+/** The same answer for a boundary that is not the one the row is on. */
+function rootOf(
+  vessel: Pick<DeclaredVessel, 'name' | 'terraformRoot'>,
+  file: string,
+): RemediationDestination {
+  return vessel.terraformRoot === null
+    ? { kind: 'absent', vessel: vessel.name, file }
+    : { kind: 'root', path: `${vessel.terraformRoot}/${file}` };
 }
 
 /** A Terraform resource name: the label characters HCL admits, and no others. */
