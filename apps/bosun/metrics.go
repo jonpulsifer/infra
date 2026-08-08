@@ -26,6 +26,13 @@ const (
 	exitLifetime   = "lifetime"
 	exitJITExpired = "jit_expired"
 	exitBootFailed = "boot_failed"
+	// exitKilled is a VMM that died without bosun asking. The cgroup OOM
+	// killer is the one that happens: every skiff is a child of bosun's unit,
+	// so a MemoryMax there reaps the biggest guest rather than letting the
+	// host pick a victim. Distinct from "completed" because counting an
+	// OOM-killed job as a finished one hides exactly the thing worth alerting
+	// on.
+	exitKilled = "killed"
 )
 
 func newMetrics() *metrics {
@@ -84,7 +91,7 @@ func (m *metrics) render(live map[string]poolState, desired map[string]int) stri
 	b.WriteString("# HELP bosun_skiff_exits_total Skiffs gone since bosun started, by why.\n")
 	b.WriteString("# TYPE bosun_skiff_exits_total counter\n")
 	for _, class := range sortedKeys(desired) {
-		for _, reason := range []string{exitCompleted, exitWedged, exitLifetime, exitJITExpired, exitBootFailed} {
+		for _, reason := range []string{exitCompleted, exitWedged, exitLifetime, exitJITExpired, exitBootFailed, exitKilled} {
 			b.WriteString(fmt.Sprintf("bosun_skiff_exits_total{class=%q,reason=%q} %d\n", class, reason, m.exits[class][reason]))
 		}
 	}

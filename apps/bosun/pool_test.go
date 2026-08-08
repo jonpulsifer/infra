@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -153,6 +154,76 @@ func TestPoolReplacesSkiffAfterExit(t *testing.T) {
 	// under logDir rather than in the state dir retire wipes.
 	if _, err := os.Stat(first.paths.diagDir); err != nil {
 		t.Fatalf("retired skiff's diag dir should survive, err=%v", err)
+	}
+}
+
+// Helpers drop sidecar files beside their sockets and do not clean them up:
+// virtiofsd a "<sock>.pid", passt a "<sock>.repair". Removing only the socket
+// leaked both for as long as bosun ran.
+func TestRetireRemovesHelperSidecarFiles(t *testing.T) {
+	p, _, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+
+	var litter []string
+	for _, sock := range first.paths.sockets() {
+		for _, path := range []string{sock, sock + ".pid", sock + ".repair"} {
+			writeFile(t, path, "")
+			litter = append(litter, path)
+		}
+	}
+	if len(litter) == 0 {
+		t.Fatal("no sockets to litter: skiffPaths.sockets() returned nothing")
+	}
+
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	chCall.proc.exit(nil)
+
+	waitFor(t, "retire clears every socket and its sidecars", func() bool {
+		for _, path := range litter {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// A VMM that exits non-zero without bosun having asked was killed by
+// something outside -- the cgroup OOM killer is the one that happens. Calling
+// that "completed" would hide an OOM-killed job in the metric that says
+// whether jobs are finishing.
+func TestExternallyKilledSkiffIsNotCountedAsCompleted(t *testing.T) {
+	p, _, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	chCall.proc.exit(errors.New("signal: killed"))
+
+	waitFor(t, "exit is recorded as killed", func() bool {
+		p.stats.mu.Lock()
+		defer p.stats.mu.Unlock()
+		return p.stats.exits[first.class][exitKilled] == 1
+	})
+
+	p.stats.mu.Lock()
+	completed := p.stats.exits[first.class][exitCompleted]
+	p.stats.mu.Unlock()
+	if completed != 0 {
+		t.Fatalf("an externally killed skiff was counted as completed (%d)", completed)
 	}
 }
 
