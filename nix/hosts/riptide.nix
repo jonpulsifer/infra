@@ -73,11 +73,21 @@
     # warm = 2 is the point of the disk: the bench measured a second
     # skiff-ubuntu job waiting three minutes for the first to finish, which is
     # what blocks migrating anything real onto skiffs.
+    #
+    # persist is what closes the remaining gap to a hosted runner. That gap was
+    # measured at 99 s on this repo's real suite and 70 s of it was
+    # `actions/cache` pulling the dependency store over the internet -- so the
+    # answer is not a faster transfer, it is no transfer. A slot the next skiff
+    # finds already carrying the checkout, the bun store and the tool cache
+    # removes it. `jonpulsifer/infra` runs no code from forks, which is the
+    # condition that makes the trade sound; the option's own documentation is
+    # where the reasoning lives.
     classes.skiff-ubuntu = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
       memory = "3072M";
       workspace = "6G";
+      persist = true;
       warm = 2;
     };
   };

@@ -145,23 +145,63 @@ let
     #
     # Formatting is this hull's business: bosun hands over a raw device and
     # never learns what goes on it, the same seam that lets the rootfs above
-    # be a squashfs. Lazy init because the filesystem lives exactly as long as
-    # the skiff does -- nobody is left to benefit from an eager inode table.
+    # be a squashfs. That seam is also what makes a warm disk work without
+    # bosun growing an opinion: a class that persists hands the same image to
+    # successive skiffs, and the *guest* decides whether what it finds on it is
+    # a filesystem worth keeping.
     #
-    # Both the runner's workspace and docker's data root land here, which is
-    # what takes them off the class's memory: without a disk they are tmpfs,
-    # and `memory` is the disk budget.
+    # The runner's workspace, docker's data root and a cache directory land
+    # here, which is what takes them off the class's memory: without a disk
+    # they are tmpfs, and `memory` is the disk budget.
     work=$($bb sed -n 's/.*bosun\.workspace=\([^ ]*\).*/\1/p' /proc/cmdline)
     $bb mkdir -p /var/lib/docker /home/runner/_work
     if [ -n "$work" ]; then
       $bb modprobe ext4
-      /usr/sbin/mkfs.ext4 -Fq -m0 -E lazy_itable_init=1,lazy_journal_init=1 "$work"
       $bb mkdir -p /mnt/skiff
-      $bb mount -t ext4 "$work" /mnt/skiff
-      $bb mkdir -p /mnt/skiff/work /mnt/skiff/docker
+      # Format only when the disk will not mount, which is the one test that
+      # answers both cases bosun can hand over: a freshly reserved image is
+      # zeroes and cannot mount, and a persisted slot image arrives with the
+      # last skiff's filesystem on it. Lazy init because a filesystem this
+      # guest creates is one nobody is left to benefit from an eager inode
+      # table on.
+      $bb mount -t ext4 "$work" /mnt/skiff 2>/dev/null || {
+        /usr/sbin/mkfs.ext4 -Fq -m0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "$work"
+        $bb mount -t ext4 "$work" /mnt/skiff
+      }
+      # A cache is worth keeping right up to the point where it stops fitting.
+      # Past that every skiff after this one fails on ENOSPC, so the guest that
+      # finds the disk nearly full is the one that resets it -- there is nobody
+      # else who could, since bosun never mounts it. df's columns: 2 is 1K
+      # blocks, 4 is available.
+      set -- $($bb df -k /mnt/skiff | $bb tail -1)
+      if [ -n "$4" ] && [ "$4" -lt $(( $2 / 5 )) ]; then
+        echo "skiff-mark workspace-reset $4 of $2 KiB free"
+        $bb umount /mnt/skiff
+        /usr/sbin/mkfs.ext4 -Fq -m0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "$work"
+        $bb mount -t ext4 "$work" /mnt/skiff
+      fi
+      # docker's data root is wiped every boot, persisted disk or not: a skiff
+      # killed mid-job leaves container metadata dockerd would try to restore
+      # into a machine that is not the one that wrote it, and what keeping the
+      # layer store would save is one image pull. The runner's workspace is
+      # where the value is.
+      $bb rm -rf /mnt/skiff/docker
+      $bb mkdir -p /mnt/skiff/work /mnt/skiff/docker /mnt/skiff/cache
       $bb chmod 0710 /mnt/skiff/docker
       $bb mount -o bind /mnt/skiff/work /home/runner/_work
       $bb mount -o bind /mnt/skiff/docker /var/lib/docker
+      # What a job may keep between skiffs. Announced as one environment
+      # variable rather than as a path a workflow has to know, because the
+      # honest reading of "is there a warm cache here" is "did the hull set
+      # this" -- a class with no disk, or one that does not persist, sets
+      # nothing and a workflow falls back to whatever it does on a hosted
+      # runner. `run` below is what puts it in the runner's environment.
+      #
+      # The runner's own tool cache needs no line here: with
+      # AGENT_TOOLSDIRECTORY unset it defaults to _work/_tool, which is already
+      # on this disk, so setup-bun and mise stop re-downloading a toolchain
+      # every job for free.
+      echo 'export SKIFF_CACHE=/mnt/skiff/cache' > /etc/skiff-env
     else
       # A plain tmpfs: docker's overlayfs snapshotter cannot put upper/work
       # dirs on the root overlay itself (EINVAL on mount).
@@ -194,6 +234,10 @@ let
     export HOME=/home/runner
     export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     export RUNNER_ALLOW_RUNASROOT=1
+    # Whatever setup decided this skiff may keep between jobs, or nothing. The
+    # runner hands its own environment down to every step, so a variable
+    # exported here is a variable a workflow can read.
+    [ -f /etc/skiff-env ] && . /etc/skiff-env
     # Read rather than passed as an argument: --jitconfig would put the
     # credential in every process listing inside the guest.
     export ACTIONS_RUNNER_INPUT_JITCONFIG="$(/opt/bosun/busybox cat /run/bosun/jitconfig)"

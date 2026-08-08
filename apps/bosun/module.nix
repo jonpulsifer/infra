@@ -36,6 +36,7 @@ let
         vcpus
         memory
         workspace
+        persist
         warm
         maxLifetime
         ;
@@ -109,9 +110,13 @@ in
         Where per-skiff scratch disks are reserved, for classes that size one
         with {option}`classes.<name>.workspace`. Must be real storage, not
         tmpfs: the whole point is to stop charging a build's bytes against the
-        class's memory. Each image is fully allocated at boot and deleted when
-        its skiff is scuttled, so `warm × workspace` per class is the space
-        this host must keep free.
+        class's memory. Each image is fully allocated at boot, so
+        `warm × workspace` per class is the space this host must keep free.
+
+        An image is deleted when its skiff is scuttled unless the class sets
+        {option}`classes.<name>.persist`, which hands it to the replacement
+        instead. Either way the space is reserved up front, so the figure above
+        does not change.
       '';
     };
 
@@ -187,6 +192,40 @@ in
 
                 The disk is raw: what filesystem it carries is the hull's
                 business, and bosun never learns what was written to it.
+              '';
+            };
+            persist = mkOption {
+              type = types.bool;
+              default = false;
+              description = ''
+                Hand the same workspace disks back to successive skiffs of this
+                class instead of a freshly reserved one each boot. Needs
+                {option}`workspace`.
+
+                This is the one place a skiff is allowed to leave something
+                behind, and it is a deliberate trade rather than an oversight.
+                What it buys is the entire measured deficit to a GitHub-hosted
+                runner: on this repo's real suite that gap was 99 s, of which
+                70 s was `actions/cache` pulling a dependency store over the
+                internet — not compute, and not boot. A disk the next skiff
+                finds already warm removes the transfer instead of speeding it
+                up.
+
+                What it costs is that one job can affect the next one on the
+                same slot. The VM boundary still holds — a skiff cannot reach
+                the host, another skiff, or the LAN — so what is shared is a
+                filesystem, not a machine. That is the trade every
+                non-ephemeral self-hosted runner makes, and it is only sound
+                for a repository whose contributors are trusted. Leave it off
+                for anything that runs code from a fork.
+
+                Slot images are named `<class>-<slot>.img` under
+                {option}`workspaceDir` and survive a bosun restart, which
+                happens on every token rotation and every rebuild of this host.
+                Lowering {option}`warm` reclaims the images above the new count
+                on the next start. A guest that finds its disk nearly full
+                reformats it, so a cache that grows without bound costs one
+                cold job rather than an ENOSPC on every job after it.
               '';
             };
             warm = mkOption {

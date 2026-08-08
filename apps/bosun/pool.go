@@ -22,6 +22,7 @@ type skiff struct {
 	class    string
 	runnerID int64
 	paths    skiffPaths
+	slot     int       // workspace slot held from a persisting class, or -1
 	mintedAt time.Time // when the JIT config was minted; its ~1h expiry is measured from here
 
 	mu            sync.Mutex
@@ -65,10 +66,56 @@ type pool struct {
 
 	mu     sync.Mutex
 	skiffs map[string]*skiff
+	// slots is which workspace slot of a persisting class is currently held,
+	// per class. Tracked rather than derived from skiffs because a slot is
+	// claimed before there is a skiff to derive it from -- see claimSlot.
+	slots map[string]map[int]struct{}
 }
 
 func newPool(cfg *Config, gh githubClient, launch launcher, logger *slog.Logger) *pool {
-	return &pool{cfg: cfg, gh: gh, launch: launch, logger: logger, stats: newMetrics(), skiffs: map[string]*skiff{}}
+	return &pool{
+		cfg:    cfg,
+		gh:     gh,
+		launch: launch,
+		logger: logger,
+		stats:  newMetrics(),
+		skiffs: map[string]*skiff{},
+		slots:  map[string]map[int]struct{}{},
+	}
+}
+
+// workspaceSlotName is the image a persisting class's slot always reuses. Named
+// after the class and the slot rather than after a skiff, because the whole
+// point is that it outlives every skiff that mounts it.
+func workspaceSlotName(className string, slot int) string {
+	return fmt.Sprintf("%s-%d.img", className, slot)
+}
+
+// claimSlot reserves the lowest free workspace slot for a persisting class.
+//
+// Reserved rather than computed from the live skiff map, because two skiffs
+// finishing at once each spawn a replacement on their own goroutine: both would
+// read the same lowest-free index and hand two running guests the same disk.
+func (p *pool) claimSlot(className string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	claimed, ok := p.slots[className]
+	if !ok {
+		claimed = map[int]struct{}{}
+		p.slots[className] = claimed
+	}
+	for slot := 0; ; slot++ {
+		if _, taken := claimed[slot]; !taken {
+			claimed[slot] = struct{}{}
+			return slot
+		}
+	}
+}
+
+func (p *pool) releaseSlot(className string, slot int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.slots[className], slot)
 }
 
 // publish writes the metrics textfile, if one is configured. Called after
@@ -131,13 +178,50 @@ func (p *pool) sweep(ctx context.Context) error {
 			p.logger.Warn("sweep: remove stale state", "path", path, "error", err)
 		}
 	}
-	// Workspace images sit on real storage rather than tmpfs, so unlike
-	// everything above they survive a reboot as well as a restart, and nothing
-	// else ever deletes one whose skiff was killed with the cgroup.
-	if err := os.RemoveAll(p.cfg.WorkspaceDir); err != nil {
-		p.logger.Warn("sweep: remove stale workspaces", "path", p.cfg.WorkspaceDir, "error", err)
-	}
+	p.sweepWorkspaces()
 	return nil
+}
+
+// sweepWorkspaces clears the workspace directory of everything a prior run left
+// behind — except the slot images of a class that persists.
+//
+// Workspace images sit on real storage rather than tmpfs, so unlike per-skiff
+// runtime state they survive a reboot as well as a restart, and nothing else
+// ever deletes one whose skiff was killed with the cgroup. A persisting class's
+// slot images are the exception and the point: they hold the caches the next
+// skiff is meant to find, and bosun restarts on every token rotation and every
+// rebuild of this host. Throwing them away there would make the warm cache a
+// thing that only ever works between two consecutive jobs.
+//
+// Slots at or above a class's current warm count are *not* kept, so lowering
+// warm reclaims the space on the next start rather than leaving images nothing
+// will ever mount again.
+func (p *pool) sweepWorkspaces() {
+	entries, err := os.ReadDir(p.cfg.WorkspaceDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			p.logger.Warn("sweep: reading workspaces", "path", p.cfg.WorkspaceDir, "error", err)
+		}
+		return
+	}
+	keep := map[string]struct{}{}
+	for name, class := range p.cfg.Classes {
+		if !class.Persist {
+			continue
+		}
+		for slot := 0; slot < class.Warm; slot++ {
+			keep[workspaceSlotName(name, slot)] = struct{}{}
+		}
+	}
+	for _, e := range entries {
+		if _, ok := keep[e.Name()]; ok {
+			continue
+		}
+		path := filepath.Join(p.cfg.WorkspaceDir, e.Name())
+		if err := os.RemoveAll(path); err != nil {
+			p.logger.Warn("sweep: remove stale workspace", "path", path, "error", err)
+		}
+	}
 }
 
 // fill boots every class up to its configured warm count.
@@ -178,10 +262,6 @@ func (p *pool) spawn(ctx context.Context, className string) {
 		logger.Error("resolve paths", "error", err)
 		return
 	}
-	if class.Workspace != "" {
-		paths.workspace = filepath.Join(p.cfg.WorkspaceDir, id+".img")
-	}
-
 	// Mint immediately before boot, never stockpiled: the config expires
 	// ~1h from this call, not from when a guest first connects.
 	runnerID, jitConfig, err := p.gh.GenerateJITConfig(ctx, p.cfg.Repo, "skiff-"+id, []string{className})
@@ -189,7 +269,21 @@ func (p *pool) spawn(ctx context.Context, className string) {
 		logger.Error("generate jitconfig", "error", err)
 		return
 	}
-	s := &skiff{id: id, class: className, runnerID: runnerID, paths: paths, mintedAt: time.Now()}
+
+	// Claimed after the mint, because every exit path past this point hands the
+	// skiff to retire, which is what releases it. A slot claimed before a
+	// failing mint would leak.
+	slot := -1
+	if class.Workspace != "" {
+		if class.Persist {
+			slot = p.claimSlot(className)
+			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, workspaceSlotName(className, slot))
+			logger = logger.With("workspace_slot", slot)
+		} else {
+			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, id+".img")
+		}
+	}
+	s := &skiff{id: id, class: className, runnerID: runnerID, paths: paths, slot: slot, mintedAt: time.Now()}
 
 	if err := p.writeState(paths.dir, runnerID, jitConfig, h.digest); err != nil {
 		logger.Error("write state", "error", err)
@@ -245,7 +339,7 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 	// Before any helper, so a host that cannot spare the space costs one
 	// failed spawn rather than four processes to unwind.
 	if s.paths.workspace != "" {
-		if err := createWorkspace(s.paths.workspace, class.Workspace); err != nil {
+		if err := ensureWorkspace(s.paths.workspace, class.Workspace, class.Persist); err != nil {
 			return fmt.Errorf("create workspace disk: %w", err)
 		}
 	}
@@ -359,12 +453,19 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 	}
 
 	// diagDir is deliberately not removed: it is the evidence, and this is
-	// the path a wedged skiff's own death takes. The workspace is, and must
-	// be — it is the one thing bosun reserves that a reboot would not free,
-	// and it is where untrusted job code wrote.
+	// the path a wedged skiff's own death takes.
 	os.RemoveAll(s.paths.dir)
+	// An ephemeral workspace is removed, and must be — it is the one thing
+	// bosun reserves that a reboot would not free, and it is where untrusted
+	// job code wrote. A slot from a persisting class is instead handed back for
+	// the replacement to mount: what the last job left on it is the cache the
+	// next one is here for.
 	if s.paths.workspace != "" {
-		os.Remove(s.paths.workspace)
+		if s.slot >= 0 {
+			p.releaseSlot(s.class, s.slot)
+		} else {
+			os.Remove(s.paths.workspace)
+		}
 	}
 	// Each helper drops a sidecar file beside its socket -- virtiofsd a
 	// "<sock>.pid", passt a "<sock>.repair" -- and neither is cleaned up by

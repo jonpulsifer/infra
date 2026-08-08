@@ -131,7 +131,7 @@ func TestChArgsWithDisk(t *testing.T) {
 		"--memory", "size=2048M,shared=on",
 		"--fs", "tag=bosun,socket=/run/bosun/sk03.fs",
 		"--fs", "tag=bosun-diag,socket=/run/bosun/sk03.diag.fs",
-		"--disk", "path=/hulls/ubuntu/rootfs.img,readonly=on",
+		"--disk", "path=/hulls/ubuntu/rootfs.img,readonly=on,image_type=raw",
 		"--net", "vhost_user=on,socket=/run/bosun/sk03.net",
 		"--api-socket", "/run/bosun/sk03.api",
 		"--console", "off",
@@ -325,8 +325,8 @@ func TestChArgsWorkspaceDiskComesLastAndIsNamedOnTheCmdline(t *testing.T) {
 		"--memory", "size=3072M,shared=on",
 		"--fs", "tag=bosun,socket=/run/bosun/sk09.fs",
 		"--fs", "tag=bosun-diag,socket=/run/bosun/sk09.diag.fs",
-		"--disk", "path=/hulls/ubuntu/rootfs.img,readonly=on",
-		"--disk", "path=/var/lib/bosun/workspace/sk09.img,readonly=off",
+		"--disk", "path=/hulls/ubuntu/rootfs.img,readonly=on,image_type=raw",
+		"--disk", "path=/var/lib/bosun/workspace/sk09.img,readonly=off,image_type=raw",
 		"--net", "vhost_user=on,socket=/run/bosun/sk09.net",
 		"--api-socket", "/run/bosun/sk09.api",
 		"--console", "off",
@@ -362,10 +362,10 @@ func TestChArgsNoWorkspaceLeavesCmdlineAlone(t *testing.T) {
 
 // The reservation is the whole reason the disk exists: a sparse file would
 // move the overcommit onto the host filesystem rather than remove it.
-func TestCreateWorkspaceReservesTheWholeSize(t *testing.T) {
+func TestEnsureWorkspaceReservesTheWholeSize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "sk11.img")
-	if err := createWorkspace(path, "2M"); err != nil {
-		t.Fatalf("createWorkspace: %v", err)
+	if err := ensureWorkspace(path, "2M", false); err != nil {
+		t.Fatalf("ensureWorkspace: %v", err)
 	}
 	var st syscall.Stat_t
 	if err := syscall.Stat(path, &st); err != nil {
@@ -379,8 +379,65 @@ func TestCreateWorkspaceReservesTheWholeSize(t *testing.T) {
 		t.Errorf("allocated %d blocks, want at least %d -- the file is sparse", st.Blocks, want)
 	}
 
-	if err := createWorkspace(path, "nonsense"); err == nil {
+	if err := ensureWorkspace(path, "nonsense", false); err == nil {
 		t.Fatal("expected an error for an unparseable size")
+	}
+}
+
+// The whole value of a persisting class is that the next skiff finds what the
+// last one left, so an image the right size must survive being ensured again --
+// and the ephemeral path must still truncate, or a class that stopped
+// persisting would quietly keep handing out the old disk.
+func TestEnsureWorkspaceKeepsAPersistedImageAndTruncatesAnEphemeralOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skiff-ubuntu-0.img")
+	if err := ensureWorkspace(path, "2M", true); err != nil {
+		t.Fatalf("ensureWorkspace: %v", err)
+	}
+	// Stands in for a filesystem and its caches: bosun never learns what is on
+	// the disk, only whether it left it alone.
+	if err := os.WriteFile(path, append([]byte("warm-cache"), make([]byte, 2<<20-10)...), 0o600); err != nil {
+		t.Fatalf("seed image: %v", err)
+	}
+
+	if err := ensureWorkspace(path, "2M", true); err != nil {
+		t.Fatalf("ensureWorkspace (keep): %v", err)
+	}
+	kept, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(kept[:10]) != "warm-cache" {
+		t.Errorf("persisted image was rewritten: got %q", kept[:10])
+	}
+
+	// A class whose workspace size changed cannot keep a filesystem sized for
+	// the old figure.
+	if err := ensureWorkspace(path, "3M", true); err != nil {
+		t.Fatalf("ensureWorkspace (resize): %v", err)
+	}
+	resized, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(resized) != 3<<20 {
+		t.Errorf("size = %d, want %d", len(resized), 3<<20)
+	}
+	if string(resized[:10]) == "warm-cache" {
+		t.Error("a resized image kept the old filesystem")
+	}
+
+	if err := ensureWorkspace(path, "3M", false); err != nil {
+		t.Fatalf("ensureWorkspace (ephemeral): %v", err)
+	}
+	fresh, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for i, b := range fresh {
+		if b != 0 {
+			t.Fatalf("ephemeral image not truncated: byte %d = %#x", i, b)
+		}
 	}
 }
 

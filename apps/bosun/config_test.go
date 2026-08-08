@@ -112,3 +112,51 @@ func TestLoadConfigRejectsUnparseableWorkspaceSize(t *testing.T) {
 		t.Fatal("expected an error for an unparseable workspace size")
 	}
 }
+
+// persist is what a class trades the "leaves nothing behind" stance for, and
+// what it buys is a warm cache on a disk. A class that persists nothing is a
+// declaration whose only possible effect is to mislead whoever reads it.
+func TestLoadConfigRejectsPersistWithoutAWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff-ubuntu": {"hull": "/hulls/ubuntu", "vcpus": 4, "memory": "3072M", "warm": 2, "persist": true}}
+	}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for a persisting class with no workspace")
+	}
+}
+
+// Slot images live in one flat directory named <class>-<slot>.img, and sweep
+// tells a slot image from an orphan by that shape alone.
+func TestLoadConfigRejectsAPersistingClassNameThatWouldEscapeItsImageName(t *testing.T) {
+	for _, name := range []string{"skiff/ubuntu", "skiff.ubuntu"} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.json")
+		writeFile(t, path, `{
+			"repo": "acme/widgets",
+			"tokenFile": "/run/secrets/token",
+			"classes": {"`+name+`": {"hull": "/h", "vcpus": 1, "memory": "512M", "warm": 1, "workspace": "1G", "persist": true}}
+		}`)
+		if _, err := LoadConfig(path); err == nil {
+			t.Errorf("expected error for persisting class named %q", name)
+		}
+	}
+}
+
+// The same names are fine when nothing persists: only the slot image naming
+// constrains them.
+func TestLoadConfigAllowsADottedClassNameThatDoesNotPersist(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff.ubuntu": {"hull": "/h", "vcpus": 1, "memory": "512M", "warm": 1}}
+	}`)
+	if _, err := LoadConfig(path); err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+}
