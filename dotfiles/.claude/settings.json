@@ -2,7 +2,7 @@
   "permissions": {
     "defaultMode": "acceptEdits"
   },
-  "model": "opus",
+  "model": "opus[1m]",
   "worktree": {
     "baseRef": "fresh"
   },
@@ -26,9 +26,9 @@
   "effortLevel": "high",
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "editorMode": "normal",
   "remoteControlAtStartup": false,
-  "agentPushNotifEnabled": true,
-  "skipWorkflowUsageWarning": true
+  "agentPushNotifEnabled": true
 }
