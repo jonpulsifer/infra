@@ -15,18 +15,38 @@ spec:
   groups:
     - name: bosun
       rules:
+        # node-exporter labels a textfile series with its full path, not its
+        # basename — verified against the one that already exists on spore. A
+        # file="bosun.prom" selector matches nothing, which is how the first
+        # version of these two alerts stayed silent through 22 hours of bosun
+        # being down.
+        #
         # bosun rewrites its textfile every poll interval, so the mtime is a
         # heartbeat. A stale file means bosun is dead, wedged, or unable to
         # write — the case that went unnoticed for nine hours on 2026-08-07,
         # when a SIGTERM plus Restart=on-failure left the pool empty.
         - alert: BosunNotReporting
-          expr: time() - node_textfile_mtime_seconds{file="bosun.prom"} > 300
+          expr: time() - node_textfile_mtime_seconds{file=~".*/bosun\\.prom"} > 300
           for: 5m
           labels:
             severity: warning
           annotations:
             message: bosun on {{ $labels.instance }} has not written metrics in {{ $value | humanizeDuration }}
             description: "The warm pool is unmanaged: no skiff is being replaced and no runner label it serves is being fed."
+
+        # A staleness alert cannot fire on a series that never appears, so it
+        # covers "bosun stopped" and not "bosun never came up" — a host
+        # rebuilt without it, a unit that failed to start, a metricsFile the
+        # collector is not looking at. That is the same silence, and this is
+        # the rule that breaks it.
+        - alert: BosunAbsent
+          expr: absent(node_textfile_mtime_seconds{file=~".*/bosun\\.prom"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: no bosun is reporting metrics anywhere on this cluster
+            description: "Either no bosun host is running, or its metricsFile is not in the directory node-exporter's textfile collector reads."
 
         # A class below its warm count for this long is not refill latency —
         # a skiff boots in about a second. It is minting failing, a hull
