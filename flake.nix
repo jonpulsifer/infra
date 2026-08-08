@@ -74,7 +74,6 @@
         import nixpkgs {
           inherit system;
           config.allowUnfree = true;
-          overlays = [ (import ./nix/overlays/mise.nix) ];
         }
       );
 
