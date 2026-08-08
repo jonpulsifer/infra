@@ -24,6 +24,13 @@ on:
           - skiff-ubuntu
           - ubuntu-latest
         default: all
+      caches:
+        description: 'best = each label uses the fastest cache it has; none = no dependency or build cache anywhere (isolates the runner from the network)'
+        type: choice
+        options:
+          - best
+          - none
+        default: best
 
 permissions:
   contents: read
@@ -70,6 +77,11 @@ jobs:
           printf 'cores      %s\n' "$(nproc)"
           printf 'memory     %s\n' "$(awk '/MemTotal/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo)"
           printf 'uptime     %ss (how long this machine existed before the job)\n' "$(cut -d' ' -f1 /proc/uptime)"
+          printf 'warm disk  %s\n' "${SKIFF_CACHE:-none (this runner brings no cache of its own)}"
+          if [ -n "${SKIFF_CACHE:-}" ]; then
+            df -h "$SKIFF_CACHE" | tail -1
+            du -sh "$SKIFF_CACHE"/* "$RUNNER_TOOL_CACHE" 2>/dev/null || true
+          fi
 
   benchmark:
     needs: configure
@@ -110,6 +122,50 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
+      # Whether this runner brought a cache of its own, and where.
+      #
+      # A skiff whose class persists its workspace mounts the same disk the last
+      # job on that slot left behind, and its hull announces the one directory a
+      # job may keep things in as $SKIFF_CACHE. Nothing else sets it: a hosted
+      # runner, an ARC pod, and a skiff of a class that does not persist all
+      # arrive with nothing and fall through to the GitHub Actions cache below.
+      #
+      # This is what the bench compares under `caches: best`. The first clean run
+      # put a skiff at hosted-runner speed on compute (build 22 s against 25 s)
+      # and lost 70 s of a 99 s deficit inside one `actions/cache` step — the
+      # dependency store, over the internet. Both runners still do the same work
+      # here; each does it with the fastest cache it has, which is how either
+      # would be configured for real.
+      #
+      # `caches: none` is the other honest question, and the one that says what a
+      # runner *is*: no dependency cache and no build cache on any label, so what
+      # remains is cores, memory and disk. One caveat to state rather than hide —
+      # a skiff's git objects and runner tool cache live on the same disk and
+      # this wipes them too, but `actions/checkout` still fetches into the repo
+      # it finds, so a skiff's checkout is incremental where a hosted runner's is
+      # a clone. That difference is the runner, not a cache we configured.
+      - name: Where this runner's cache lives
+        run: |
+          if [ "${{ inputs.caches }}" = "none" ]; then
+            echo "caches: none — nothing is restored on any label."
+            if [ -n "${SKIFF_CACHE:-}" ]; then
+              rm -rf "$SKIFF_CACHE"/* "${RUNNER_TOOL_CACHE:?}"/* 2>/dev/null || true
+              echo "Warm disk emptied so this skiff measures cold too."
+            fi
+            exit 0
+          fi
+          if [ -z "${SKIFF_CACHE:-}" ]; then
+            echo "No warm disk. Restoring the dependency store over the network."
+            exit 0
+          fi
+          mkdir -p "$SKIFF_CACHE/bun" "$SKIFF_CACHE/turbo"
+          {
+            echo "SKIFF_CACHE_ROOT=$SKIFF_CACHE"
+            echo "BUN_INSTALL_CACHE_DIR=$SKIFF_CACHE/bun"
+            echo "TURBO_CACHE_DIR=$SKIFF_CACHE/turbo"
+          } >> "$GITHUB_ENV"
+          echo "Warm disk at $SKIFF_CACHE:"
+          du -sh "$SKIFF_CACHE"/* 2>/dev/null || echo "  (empty — this slot is cold)"
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Authenticate to Google Cloud
@@ -122,7 +178,11 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
+      # Skipped on a runner that mounted a warm disk: BUN_INSTALL_CACHE_DIR and
+      # TURBO_CACHE_DIR already point at one, and downloading a copy of what is
+      # on the local filesystem is the 70 s this whole exercise is about.
       - name: Cache Bun store
+        if: env.SKIFF_CACHE_ROOT == '' && inputs.caches != 'none'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
@@ -130,6 +190,7 @@ jobs:
           restore-keys: |
             bun-store-${{ runner.os }}-
       - name: Cache Turborepo
+        if: env.SKIFF_CACHE_ROOT == '' && inputs.caches != 'none'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |

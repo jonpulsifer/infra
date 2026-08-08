@@ -210,6 +210,17 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 // so the hull's own disks keep the indices it built around. It carries no
 // filesystem: what a workspace holds is the hull's business, the same way its
 // rootfs is, and bosun never learns what was put there.
+//
+// image_type=raw is not optional and not cosmetic. cloud-hypervisor 52 refuses
+// sector-0 writes on a disk whose type it had to auto-detect -- it logs
+// "Autodetected raw image type. Disabling sector 0 writes", then answers the
+// guest's first write with ReadOnly. The guest sees an I/O error at sector 0,
+// mkfs dies, and the mount that follows fails on a device that looks broken
+// rather than protected. Measured on riptide 2026-08-08: every workspace disk
+// since it was introduced had been silently unusable for exactly this reason,
+// so a hull's disks are declared raw because the hull contract says a disk is a
+// raw file the hull ships. A hull wanting qcow2 wants a manifest field, and a
+// failing test to go with it.
 func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 	args := []string{
 		"--kernel", filepath.Join(h.dir, h.manifest.Kernel),
@@ -229,13 +240,13 @@ func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 			if dev.Disk.RO {
 				ro = "on"
 			}
-			args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=%s", filepath.Join(h.dir, dev.Disk.Path), ro))
+			args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=%s,image_type=raw", filepath.Join(h.dir, dev.Disk.Path), ro))
 			disks++
 		}
 	}
 	cmdline := h.manifest.Cmdline
 	if p.workspace != "" {
-		args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=off", p.workspace))
+		args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=off,image_type=raw", p.workspace))
 		cmdline += " bosun.workspace=" + guestDiskName(disks)
 	}
 	args = append(args,
@@ -248,18 +259,31 @@ func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 	return args
 }
 
-// createWorkspace reserves and creates one skiff's scratch disk. Reserved
-// rather than sparse on purpose: taking the workspace off the class's memory
-// is the whole point, and a sparse file would move the overcommit onto the
-// host filesystem instead of removing it. A pool that cannot fit fails a
-// spawn, which is visible, rather than a build mid-run, which is not.
-func createWorkspace(path, size string) error {
+// ensureWorkspace reserves one skiff's scratch disk. Reserved rather than
+// sparse on purpose: taking the workspace off the class's memory is the whole
+// point, and a sparse file would move the overcommit onto the host filesystem
+// instead of removing it. A pool that cannot fit fails a spawn, which is
+// visible, rather than a build mid-run, which is not.
+//
+// keep leaves an image the right size exactly as it is, which is how a
+// persisting class hands the last skiff's caches to the next one. bosun still
+// learns nothing about what is on it — the guest decides whether what it finds
+// is usable, the same seam that lets the rootfs be a squashfs. An image of the
+// wrong size is recreated regardless: a class whose `workspace` changed cannot
+// keep a filesystem sized for the old figure, and growing one in place would
+// hand the guest a disk its superblock disagrees with.
+func ensureWorkspace(path, size string, keep bool) error {
 	n, err := parseSize(size)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
+	}
+	if keep {
+		if info, err := os.Stat(path); err == nil && info.Size() == n {
+			return nil
+		}
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
 	if err != nil {

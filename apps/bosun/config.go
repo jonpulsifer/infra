@@ -32,7 +32,18 @@ type Class struct {
 	// Workspace sizes a scratch disk for this class; empty means none, and
 	// then the class's memory is its disk budget, since both hull families
 	// put the guest root on a tmpfs overlay.
-	Workspace   string   `json:"workspace,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	// Persist hands the same workspace disks back to successive skiffs of this
+	// class instead of a freshly reserved one each boot. The disk is the only
+	// thing a skiff has that *could* outlive it, so this is the one place the
+	// "a skiff leaves nothing behind" stance is traded away, deliberately and
+	// per class: what survives is a warm cache, and what it buys is the entire
+	// measured gap to a hosted runner, which is network transfer and nothing
+	// else.
+	//
+	// Off by default. A class that sets it must also size a workspace, since
+	// there is otherwise no disk to persist.
+	Persist     bool     `json:"persist,omitempty"`
 	Warm        int      `json:"warm"`
 	MaxLifetime Duration `json:"maxLifetime"`
 }
@@ -129,6 +140,16 @@ func LoadConfig(path string) (*Config, error) {
 			if _, err := parseSize(c.Workspace); err != nil {
 				return nil, fmt.Errorf("config: class %s: workspace: %w", name, err)
 			}
+		} else if c.Persist {
+			return nil, fmt.Errorf("config: class %s: persist needs a workspace to persist", name)
+		}
+		if c.Persist && strings.ContainsAny(name, "/.") {
+			// Slot images are named <class>-<slot>.img under one flat
+			// directory, and sweep tells a slot image from an orphan by that
+			// shape. A class name carrying a separator or a dot would either
+			// escape the directory or produce a name sweep reads as somebody
+			// else's.
+			return nil, fmt.Errorf("config: class %s: a persisting class name may not contain '/' or '.'", name)
 		}
 		if c.Warm <= 0 {
 			return nil, fmt.Errorf("config: class %s: warm must be positive", name)

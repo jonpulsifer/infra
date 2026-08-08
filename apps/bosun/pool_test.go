@@ -10,12 +10,34 @@ import (
 	"time"
 )
 
+// poolTempDir is t.TempDir() without the cleanup assertion, and the difference
+// matters here for one reason: a skiff's lifetime goroutine outlives the test
+// that started it. Every test drives the pool with an uncancelled context, so
+// awaitExit boots a replacement each time a fake VMM's Wait() resolves — and a
+// replacement mid-boot writes into these directories while TempDir is deleting
+// them. t.TempDir() reports that as a failed cleanup on a test whose own
+// assertions all passed, which is a fault in the harness rather than in bosun.
+//
+// The goroutines are bounded by the test binary either way. What is deliberately
+// not built to close this is a graceful pool shutdown: bosun's real teardown is
+// systemd killing the cgroup and sweep-on-start deregistering what is left, so
+// a stop path existing only for tests would be machinery the daemon never runs.
+func poolTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "bosun-pool-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // testPool wires a pool against a fake GitHub client and a fake launcher —
 // no KVM, no network, no real binaries — with one class, "skiff-test",
 // warm=1, pointed at a minimal on-disk hull.
 func testPool(t *testing.T) (*pool, *fakeGitHub, *fakeLaunch) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := poolTempDir(t)
 	hullDir := writeTestHull(t, dir, "hull", nil)
 	cfg := &Config{
 		Repo:         "acme/widgets",
@@ -486,7 +508,7 @@ func TestWorkspaceDiskIsCreatedOnBootAndDeletedOnRetire(t *testing.T) {
 	if !ok {
 		t.Fatal("cloud-hypervisor was never launched")
 	}
-	if !slices.Contains(chCall.args, "path="+s.paths.workspace+",readonly=off") {
+	if !slices.Contains(chCall.args, "path="+s.paths.workspace+",readonly=off,image_type=raw") {
 		t.Fatalf("workspace disk missing from argv: %v", chCall.args)
 	}
 
@@ -499,13 +521,104 @@ func TestWorkspaceDiskIsCreatedOnBootAndDeletedOnRetire(t *testing.T) {
 func TestSweepClearsOrphanedWorkspaceImages(t *testing.T) {
 	p, _, _ := testPool(t)
 	orphan := filepath.Join(p.cfg.WorkspaceDir, "deadbeef.img")
-	if err := createWorkspace(orphan, "1M"); err != nil {
-		t.Fatalf("createWorkspace: %v", err)
+	if err := ensureWorkspace(orphan, "1M", false); err != nil {
+		t.Fatalf("ensureWorkspace: %v", err)
 	}
 	if err := p.sweep(context.Background()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Fatalf("orphaned workspace survived sweep: %v", err)
+	}
+}
+
+// bosun restarts on every token rotation and every rebuild of its host. A sweep
+// that took the slot images with it would make a warm cache something that only
+// ever survives between two consecutive jobs.
+func TestSweepKeepsPersistedSlotImagesAndDropsSlotsAboveWarm(t *testing.T) {
+	p, _, _ := testPool(t)
+	class := p.cfg.Classes["skiff-test"]
+	class.Workspace = "1M"
+	class.Persist = true
+	class.Warm = 2
+	p.cfg.Classes["skiff-test"] = class
+
+	live := []string{
+		filepath.Join(p.cfg.WorkspaceDir, "skiff-test-0.img"),
+		filepath.Join(p.cfg.WorkspaceDir, "skiff-test-1.img"),
+	}
+	// Slot 2 belongs to a warm count this class no longer declares, so nothing
+	// will ever mount it again.
+	retired := filepath.Join(p.cfg.WorkspaceDir, "skiff-test-2.img")
+	// A skiff whose VMM was killed with the cgroup, from before the class
+	// persisted.
+	orphan := filepath.Join(p.cfg.WorkspaceDir, "deadbeef.img")
+	for _, path := range append(append([]string{}, live...), retired, orphan) {
+		if err := ensureWorkspace(path, "1M", false); err != nil {
+			t.Fatalf("ensureWorkspace %s: %v", path, err)
+		}
+	}
+
+	if err := p.sweep(context.Background()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	for _, path := range live {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("persisted slot image did not survive sweep: %v", err)
+		}
+	}
+	for _, path := range []string{retired, orphan} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("%s survived sweep: %v", filepath.Base(path), err)
+		}
+	}
+}
+
+// Two skiffs finishing at once spawn two replacements on two goroutines. Both
+// reading "the lowest free slot" off the live skiff map would hand two running
+// guests the same disk, so the claim has to be the reservation.
+func TestPersistingClassGivesEachLiveSkiffItsOwnSlotAndHandsItBack(t *testing.T) {
+	p, _, fl := testPool(t)
+	class := p.cfg.Classes["skiff-test"]
+	class.Workspace = "1M"
+	class.Persist = true
+	class.Warm = 2
+	p.cfg.Classes["skiff-test"] = class
+	ctx := context.Background()
+
+	p.fill(ctx)
+
+	p.mu.Lock()
+	held := map[string]int{}
+	for _, s := range p.skiffs {
+		held[filepath.Base(s.paths.workspace)] = s.slot
+	}
+	skiffs := make([]*skiff, 0, len(p.skiffs))
+	for _, s := range p.skiffs {
+		skiffs = append(skiffs, s)
+	}
+	p.mu.Unlock()
+
+	if len(held) != 2 {
+		t.Fatalf("two warm skiffs share a workspace image: %v", held)
+	}
+	for _, want := range []string{"skiff-test-0.img", "skiff-test-1.img"} {
+		if _, ok := held[want]; !ok {
+			t.Errorf("no skiff mounted %s: %v", want, want)
+		}
+	}
+	if _, ok := fl.last("cloud-hypervisor"); !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+
+	// Retire releases the slot rather than deleting the image: what the last
+	// job left on it is the cache the next one is here for.
+	victim := skiffs[0]
+	p.retire(ctx, victim, testLogger())
+	if _, err := os.Stat(victim.paths.workspace); err != nil {
+		t.Fatalf("persisted workspace was deleted on retire: %v", err)
+	}
+	if got := p.claimSlot("skiff-test"); got != victim.slot {
+		t.Errorf("released slot not reused: claimed %d, want %d", got, victim.slot)
 	}
 }
