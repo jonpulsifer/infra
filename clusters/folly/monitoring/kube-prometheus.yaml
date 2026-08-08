@@ -206,7 +206,8 @@ spec:
           group_wait: 30s
           group_interval: 5m
           repeat_interval: 12h
-          receiver: discord
+          # Anything the AlertmanagerConfig sub-route does not take lands here.
+          receiver: "null"
           routes:
             # Watchdog fires forever by design — it means the pipeline is alive.
             # Delivering it twice a day trains the channel to ignore itself, and
@@ -216,12 +217,6 @@ spec:
                 - alertname = "Watchdog"
         receivers:
           - name: "null"
-          - name: discord
-            discord_configs:
-              # Read from the mounted file so the URL never lands in this
-              # HelmRelease, the rendered manifest, or the wiki.
-              - webhook_url_file: /etc/alertmanager/secrets/alertmanager-discord/webhook-url
-                send_resolved: true
         inhibit_rules:
           - source_matchers: [severity = "critical"]
             target_matchers: [severity =~ "warning|info"]
@@ -234,10 +229,16 @@ spec:
             equal: [namespace]
           - target_matchers: [alertname = "InfoInhibitor"]
       alertmanagerSpec:
-        # Mounts at /etc/alertmanager/secrets/<name>/, which is what
-        # webhook_url_file above reads.
-        secrets:
-          - alertmanager-discord
+        # The Discord receiver is an AlertmanagerConfig in base/monitoring. The
+        # operator merges only the ones it can select, and the chart's default
+        # selector is empty, which selects nothing.
+        alertmanagerConfigSelector:
+          matchLabels:
+            alertmanagerConfig: discord
+        # Otherwise the operator pins that config's route to alerts labelled
+        # namespace=monitoring, and nothing else ever reaches Discord.
+        alertmanagerConfigMatcherStrategy:
+          type: None
       ingress:
         enabled: true
         annotations:
