@@ -38,9 +38,10 @@ import {
   Server,
   Timer,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
+import { formatDuration } from '../../components/running-time.tsx';
 import type {
   GrantedRepositoryView,
   LinkedRepoView,
@@ -54,6 +55,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
+import { CopyButton } from '../../ui/copy.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { cn } from '../../ui/utils.ts';
 
@@ -62,6 +64,16 @@ export interface RepositoryAuthorizationView {
   readonly verificationUri: string;
   readonly state: 'waiting' | 'expired' | 'denied' | 'error';
   readonly message?: string;
+  /**
+   * When GitHub stops accepting this code.
+   *
+   * Optional because the caller holding this state is free to omit it and every
+   * test builds the view by hand — but the server has always sent it, on the
+   * first call and on every poll, and the screen spent that whole time telling
+   * an operator to type a code with no hint that it dies in fifteen minutes.
+   * Absent, the panel simply says nothing about time rather than guessing.
+   */
+  readonly expiresAt?: string;
 }
 
 export interface OpenedRepositoryPullRequest {
@@ -165,7 +177,7 @@ export function RepositoryList({
   );
 
   if (embedded) {
-    const connected = connector.state === 'authorized';
+    const standing = connectorStanding(connector);
     return (
       <section className="grid gap-5 py-6 xl:grid-cols-[240px_minmax(0,1fr)] xl:gap-8">
         <div>
@@ -173,8 +185,8 @@ export function RepositoryList({
             <Logo name="github" />
             <h3 className="font-semibold">GitHub</h3>
           </div>
-          <Badge className="mt-3" tone={connected ? 'success' : 'warning'}>
-            <Dot /> {connected ? 'connected' : connector.state}
+          <Badge className="mt-3" tone={standing.tone}>
+            <Dot /> {standing.label}
           </Badge>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             Repository discovery, source events, and build dispatch.
@@ -234,6 +246,33 @@ export function RepositoryList({
 }
 
 /**
+ * The connector's state as a sentence and a colour, rather than as its tag.
+ *
+ * The badge used to print the union member — an operator read the literal word
+ * `unauthorized`, which is a name for a case in a type and not something anyone
+ * says — and it wore the same amber as `unavailable`. Those two are the furthest
+ * apart of the three: `unauthorized` is one button press from done and nothing
+ * is wrong, while `unavailable` means this installation holds no keyring and the
+ * fix is not on this screen or any other. Same colour for both told the reader
+ * that the fixable one was as stuck as the unfixable one.
+ */
+function connectorStanding(connector: RepositoryConnectorView): {
+  readonly label: string;
+  readonly tone: 'success' | 'destructive' | 'idle';
+} {
+  switch (connector.state) {
+    case 'authorized':
+      return { label: `connected as @${connector.login}`, tone: 'success' };
+    case 'unauthorized':
+      // Idle, not warning: nothing has gone wrong, this is simply the step
+      // before the first one.
+      return { label: 'not authorized yet', tone: 'idle' };
+    default:
+      return { label: 'no keyring', tone: 'destructive' };
+  }
+}
+
+/**
  * Authorization, which is a different act from connecting anything.
  *
  * Once authorized this collapses to one line. It is a prerequisite, not a
@@ -285,14 +324,10 @@ function ConnectorCard({
               <Logo name="github" className="size-4" /> Authorize GitHub
             </Button>
           ) : (
-            <>
-              <DeviceAuthorization authorization={authorization} />
-              {authorization.state === 'waiting' ? null : (
-                <Button className="self-start" onClick={onAuthorize}>
-                  Start again
-                </Button>
-              )}
-            </>
+            <DeviceAuthorization
+              authorization={authorization}
+              onAuthorize={onAuthorize}
+            />
           )}
           {error ? <ErrorMessage message={error} /> : null}
         </CardContent>
@@ -318,7 +353,10 @@ function ConnectorCard({
           </Button>
         </div>
         {authorization !== null ? (
-          <DeviceAuthorization authorization={authorization} />
+          <DeviceAuthorization
+            authorization={authorization}
+            onAuthorize={onAuthorize}
+          />
         ) : null}
         {error ? <ErrorMessage message={error} /> : null}
       </CardContent>
@@ -326,31 +364,116 @@ function ConnectorCard({
   );
 }
 
+/**
+ * How much of the code's life is left, ticking.
+ *
+ * Counting down rather than up, so `RunningTime` is the wrong component and
+ * only its formatter is borrowed. The clock is the browser's and the deadline is
+ * the server's, which is normally a reason not to compute a duration here — but
+ * a device code is a fifteen-minute window and a second of skew inside it is
+ * invisible, while showing nothing at all is what leaves an operator typing a
+ * code GitHub stopped accepting four minutes ago.
+ *
+ * `null` when there is no deadline to count, which is the honest answer and not
+ * a zero: a panel with no `expiresAt` says nothing about time.
+ */
+function useRemaining(expiresAt: string | undefined): number | null {
+  const ends = expiresAt === undefined ? Number.NaN : Date.parse(expiresAt);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (Number.isNaN(ends)) return;
+    // Re-read from the wall clock each tick rather than decrementing, so a
+    // throttled background tab comes back with the truth instead of with
+    // however many ticks it was allowed.
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [ends]);
+
+  return Number.isNaN(ends) ? null : Math.max(0, ends - now);
+}
+
+/**
+ * The device ceremony, in the four different things it can be doing.
+ *
+ * All four used to be one red box with a swapped sentence, which made a denial
+ * (someone said no, and will have to say yes) look identical to a transport
+ * failure (nobody said anything, try again) and to an expiry (nothing is wrong,
+ * the code is just old). They fail for different reasons and the reader's next
+ * move differs, so they get different words, different tone, and — the part the
+ * red box never had — the button that resolves them, in place.
+ */
 function DeviceAuthorization({
   authorization,
+  onAuthorize,
 }: {
   authorization: RepositoryAuthorizationView;
+  onAuthorize: () => void;
 }) {
-  if (authorization.state !== 'waiting') {
+  const remaining = useRemaining(authorization.expiresAt);
+
+  if (authorization.state !== 'waiting' || remaining === 0) {
+    const state = remaining === 0 ? 'expired' : authorization.state;
+    const outcome =
+      state === 'denied'
+        ? {
+            tone: 'destructive' as const,
+            title: 'GitHub declined the authorization',
+            detail:
+              'The account that opened the code refused it. A new code will ask again.',
+          }
+        : state === 'expired'
+          ? {
+              tone: 'warning' as const,
+              title: 'That code expired',
+              detail:
+                'Device codes are short-lived. Nothing is wrong — take a new one and enter it while the countdown runs.',
+            }
+          : {
+              tone: 'destructive' as const,
+              title: 'GitHub did not answer the authorization',
+              detail:
+                'The ceremony stopped before GitHub said yes or no. Nothing was stored.',
+            };
     return (
-      <ErrorMessage
-        message={
-          authorization.message ??
-          (authorization.state === 'denied'
-            ? 'GitHub authorization was denied.'
-            : authorization.state === 'expired'
-              ? 'The GitHub authorization code expired. Start again.'
-              : 'GitHub authorization failed.')
-        }
-      />
+      <div
+        className={cn(
+          'rounded-md border px-3 py-2.5',
+          outcome.tone === 'warning'
+            ? 'border-warning/40 bg-warning-soft'
+            : 'border-destructive/40 bg-destructive-soft',
+        )}
+      >
+        <p className="text-sm font-semibold">{outcome.title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {authorization.message ?? outcome.detail}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-3"
+          onClick={onAuthorize}
+        >
+          Get a new code
+        </Button>
+      </div>
     );
   }
+
   return (
     <div className="rounded-md border border-primary/40 bg-accent px-4 py-3">
       <p className="text-sm font-semibold">Enter this code in GitHub</p>
-      <p className="mt-2 font-mono text-2xl font-semibold tracking-[0.2em]">
-        {authorization.userCode}
-      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <p className="font-mono text-2xl font-semibold tracking-[0.2em]">
+          {authorization.userCode}
+        </p>
+        <CopyButton value={authorization.userCode} label="device code" />
+        {remaining === null ? null : (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            expires in {formatDuration(remaining)}
+          </span>
+        )}
+      </div>
       <Button asChild className="mt-3">
         <a
           href={authorization.verificationUri}
@@ -360,8 +483,18 @@ function DeviceAuthorization({
           Continue in GitHub <ExternalLink aria-hidden="true" />
         </a>
       </Button>
-      <p className="mt-2 text-xs text-muted-foreground">
-        This page checks automatically after GitHub approves the App.
+      {/* The poll is real and silent; a reader watching a static panel has no
+          way to tell it apart from a page that gave up. */}
+      <p
+        role="status"
+        className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"
+      >
+        <Loader2
+          aria-hidden="true"
+          className="size-3 motion-safe:animate-spin"
+        />
+        checking with GitHub… this page continues on its own once the App is
+        approved.
       </p>
     </div>
   );
@@ -653,6 +786,19 @@ function DetectedScope({ scope }: { scope: InspectedScope }) {
   );
 }
 
+/**
+ * Where a fact about a connected repository lives on the host.
+ *
+ * The same assumption the opened-pull-request link above already makes, named
+ * once so it is visible: this templates the public host. `LinkedRepoView`
+ * carries no clone URL, so an installation pointed at its own GitHub is the
+ * case this gets wrong — and a commit that is one click away is worth more than
+ * a hash that is zero clicks away and useless.
+ */
+function githubUrl(fullName: string, ...path: readonly string[]): string {
+  return `https://github.com/${fullName}/${path.join('/')}`;
+}
+
 function ConnectedRepositories({
   repos,
 }: {
@@ -662,7 +808,10 @@ function ConnectedRepositories({
 
   return (
     <section className="flex flex-col gap-2">
-      <Eyebrow>Connected</Eyebrow>
+      <Eyebrow>
+        Connected · {repos.length}{' '}
+        {repos.length === 1 ? 'repository' : 'repositories'}
+      </Eyebrow>
       <div className="flex flex-col gap-3">
         {repos.map((repo) => (
           <Card
@@ -687,12 +836,26 @@ function ConnectedRepositories({
                     : 'connection lost'}
                 </Badge>
                 {repo.lastReconciledSha ? (
-                  <span className="ml-auto font-mono text-xs text-muted-foreground">
-                    {repo.lastReconciledSha.slice(0, 7)}
+                  <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>reconciled at</span>
+                    <a
+                      className="font-mono underline underline-offset-2 hover:text-foreground"
+                      href={githubUrl(
+                        repo.fullName,
+                        'commit',
+                        repo.lastReconciledSha,
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={repo.lastReconciledSha}
+                    >
+                      {repo.lastReconciledSha.slice(0, 7)}
+                    </a>
+                    <CopyButton value={repo.lastReconciledSha} label="commit" />
                   </span>
                 ) : null}
               </div>
-              {repo.health === 'connection_lost' && repo.error ? (
+              {repo.error ? (
                 <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive-soft px-3 py-2">
                   <AlertTriangle
                     aria-hidden="true"
@@ -716,14 +879,30 @@ function ConnectedRepositories({
                 </div>
               ) : null}
               {repo.appSubpaths.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">
+                    Deploying from
+                  </span>
+                  {/* Each subpath is a directory an App is built out of, and the
+                      chip went nowhere. It links at the directory rather than at
+                      the App because the read model carries the path and not the
+                      App's id — see the note in the batch summary. */}
                   {repo.appSubpaths.map((subpath) => (
-                    <span
+                    <a
                       key={subpath}
-                      className="rounded-md border bg-secondary px-2 py-1 font-mono text-xs"
+                      href={githubUrl(
+                        repo.fullName,
+                        'tree',
+                        repo.defaultBranch,
+                        subpath === '.' ? '' : subpath,
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-md border bg-secondary px-2 py-1 font-mono text-xs hover:border-primary/50"
                     >
-                      {subpath}
-                    </span>
+                      {subpath === '.' ? 'repository root' : subpath}
+                      <ExternalLink aria-hidden="true" className="size-3" />
+                    </a>
                   ))}
                 </div>
               ) : (

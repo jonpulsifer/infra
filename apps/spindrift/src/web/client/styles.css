@@ -22,101 +22,102 @@
  * directions — forcing light on a dark OS is as real a request as the reverse.
  * The system choice is the absence of an attribute, so the light OS block
  * excludes `[data-theme="dark"]` and leaves an explicit dark choice alone.
+ *
+ * Those three inputs now settle exactly one property. Each raw variable is
+ * declared **once**, as `light-dark(<light>, <dark>)`, and the three blocks
+ * below carry nothing but `color-scheme` — which is the input `light-dark()`
+ * reads. The palette used to be typed out three times, and the drift that
+ * costs was not hypothetical: `--terminal-bad` and `--terminal-dim` were
+ * missing from both light copies, so an error line in a build log fell back to
+ * the inherited ink for any reader not on the default. A value that cannot be
+ * written twice cannot disagree with itself.
+ *
+ * Two of the light values are not the prototypes' — `--accent` and `--ink-3`
+ * are a shade deeper, because the originals measured below 4.5:1 against the
+ * surfaces they are read on. Contrast is not a palette preference.
  */
 
 @import "tailwindcss";
 
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
-
 :root {
   color-scheme: dark;
-  --ground: #07171b;
-  --surface: #0d2228;
-  --surface-2: #10272d;
-  --inspector: #0a1d22;
-  --topbar: #07171b;
-  --line: #29474e;
-  --line-soft: #233f46;
-  --ink: #eaf4f5;
-  --ink-2: #a8bec3;
-  --ink-3: #91aab0;
-  --accent: #59b8c6;
-  --accent-soft: #153740;
-  --good: #91ddb6;
-  --good-soft: #15392c;
-  --warn: #f0bd72;
-  --warn-soft: #3a2b16;
-  --bad: #ef9a94;
-  --bad-soft: #3b201f;
-  --terminal: #051216;
+  --ground: light-dark(#f4f7f7, #07171b);
+  --surface: light-dark(#ffffff, #0d2228);
+  --surface-2: light-dark(#edf1f2, #10272d);
+  --inspector: light-dark(#f9fbfb, #0a1d22);
+  --topbar: light-dark(#ffffff, #07171b);
+  --line: light-dark(#dce5e6, #29474e);
+  --line-soft: light-dark(#e7edef, #233f46);
+  --ink: light-dark(#102229, #eaf4f5);
+  --ink-2: light-dark(#43585f, #a8bec3);
+  --ink-3: light-dark(#566970, #91aab0);
+  --accent: light-dark(#16707f, #59b8c6);
+  --accent-soft: light-dark(#def1f4, #153740);
+  --good: light-dark(#20784f, #91ddb6);
+  --good-soft: light-dark(#dff3e9, #15392c);
+  --warn: light-dark(#96631d, #f0bd72);
+  --warn-soft: light-dark(#faefd9, #3a2b16);
+  --bad: light-dark(#a43e37, #ef9a94);
+  --bad-soft: light-dark(#f9e4e1, #3b201f);
+
+  /*
+   * Text drawn *on* the accent, which is a different job from the accent
+   * itself. A filled primary button used to set its label to `--ground`, and
+   * on a light page that is near-white type on a mid teal — the surface colour
+   * was doing a text colour's work and failing the same measurement the two
+   * values above were corrected for.
+   */
+  --on-accent: light-dark(#ffffff, #07171b);
+
+  /*
+   * The terminal does not flip. A build log is a verbatim transcript of
+   * something a machine printed, so it keeps its own dark ground in both
+   * themes — see `components/log-pane.tsx`, which is the same argument. Only
+   * the ground shifts a shade, to sit on a light page without reading as a
+   * hole punched in it.
+   */
+  --terminal: light-dark(#0e1619, #051216);
   --terminal-ink: #c3d3d8;
   --terminal-bad: #f0938a;
   --terminal-dim: #6d838b;
-  --rail: #051216;
+
+  /* The rail is dark in both themes, for the same reason the terminal is: it
+     is chrome, not page. */
+  --rail: light-dark(#092126, #051216);
   --rail-active: #17414a;
-  --rail-line: #17343b;
+  --rail-line: light-dark(#1c444c, #17343b);
   --rail-foreground: #eefcfd;
-  --rail-muted: #82a8ae;
+  --rail-muted: light-dark(#9fc1c6, #82a8ae);
+
+  /*
+   * The three tokens a floating surface needs, which were previously typed as
+   * literal `shadow-[…]` and `bg-[color:…]` at the call sites that wanted
+   * them. A shadow tuned for a near-black page is invisible on a white one, so
+   * this flips too.
+   */
+  --panel-shadow: light-dark(
+    0 18px 55px rgb(15 40 46 / 12%),
+    0 18px 55px rgb(0 0 0 / 28%)
+  );
+  --overlay: light-dark(rgb(16 34 41 / 40%), rgb(3 10 12 / 62%));
+  /*
+   * How far to invert a single-colour mark. `ui/logo.tsx` reads it as
+   * `filter: invert(var(--logo-invert))` rather than through a Tailwind `dark` variant,
+   * because the variant keys on an attribute that `theme.ts` deliberately
+   * removes for the `system` choice — so the mark was invisible for every
+   * reader who left the theme to their OS.
+   */
+  --logo-invert: light-dark(0, 1);
 }
 
 /* Explicit light, and the system choice when the OS asks for light. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --ground: #f4f7f7;
-  --surface: #ffffff;
-  --surface-2: #edf1f2;
-  --inspector: #f9fbfb;
-  --topbar: #ffffff;
-  --line: #dce5e6;
-  --line-soft: #e7edef;
-  --ink: #102229;
-  --ink-2: #43585f;
-  --ink-3: #697b82;
-  --accent: #238ca0;
-  --accent-soft: #def1f4;
-  --good: #20784f;
-  --good-soft: #dff3e9;
-  --warn: #96631d;
-  --warn-soft: #faefd9;
-  --bad: #a43e37;
-  --bad-soft: #f9e4e1;
-  --terminal: #0e1619;
-  --terminal-ink: #c3d3d8;
-  --rail: #092126;
-  --rail-active: #17414a;
-  --rail-line: #1c444c;
-  --rail-foreground: #eefcfd;
-  --rail-muted: #9fc1c6;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
-    --ground: #f4f7f7;
-    --surface: #ffffff;
-    --surface-2: #edf1f2;
-    --inspector: #f9fbfb;
-    --topbar: #ffffff;
-    --line: #dce5e6;
-    --line-soft: #e7edef;
-    --ink: #102229;
-    --ink-2: #43585f;
-    --ink-3: #697b82;
-    --accent: #238ca0;
-    --accent-soft: #def1f4;
-    --good: #20784f;
-    --good-soft: #dff3e9;
-    --warn: #96631d;
-    --warn-soft: #faefd9;
-    --bad: #a43e37;
-    --bad-soft: #f9e4e1;
-    --terminal: #0e1619;
-    --terminal-ink: #c3d3d8;
-    --rail: #092126;
-    --rail-active: #17414a;
-    --rail-line: #1c444c;
-    --rail-foreground: #eefcfd;
-    --rail-muted: #9fc1c6;
   }
 }
 
@@ -128,7 +129,7 @@
   --color-popover: var(--surface);
   --color-popover-foreground: var(--ink);
   --color-primary: var(--accent);
-  --color-primary-foreground: var(--ground);
+  --color-primary-foreground: var(--on-accent);
   --color-secondary: var(--surface-2);
   --color-secondary-foreground: var(--ink);
   --color-muted: var(--surface-2);
@@ -140,6 +141,7 @@
   --color-border-soft: var(--line-soft);
   --color-input: var(--line);
   --color-ring: var(--accent);
+  --color-overlay: var(--overlay);
 
   --color-success: var(--good);
   --color-success-soft: var(--good-soft);
@@ -161,9 +163,47 @@
   --color-rail-foreground: var(--rail-foreground);
   --color-rail-muted: var(--rail-muted);
 
-  --radius-sm: 4px;
+  --shadow-panel: var(--panel-shadow);
+
+  /*
+   * Six sizes, and the screens are allowed exactly these. The count is not a
+   * preference: `text-[11px]`, `text-[11.5px]`, `text-[12.5px]` and
+   * `text-[10.5px]` were all in the tree at once, which is four names for one
+   * caption and no way to change captions. Each step names the job rather than
+   * the pixels — `caption` is the label above a value, `body` is a row of
+   * machine facts, `ui` is prose a person reads, and `display` is the one
+   * number or title a screen exists to say.
+   */
+  --text-micro: 10px;
+  --text-micro--line-height: 1.4;
+  --text-caption: 11.5px;
+  --text-caption--line-height: 1.45;
+  --text-body: 13px;
+  --text-body--line-height: 1.55;
+  --text-ui: 15px;
+  --text-ui--line-height: 1.5;
+  --text-title: 20px;
+  --text-title--line-height: 1.3;
+  --text-display: 28px;
+  --text-display--line-height: 1.15;
+
+  /* The two letter-spacings the type has: wide for an uppercase eyebrow, tight
+     for anything set at display size. Both were retyped as arbitrary values at
+     every site that wanted them. */
+  --tracking-eyebrow: 0.1em;
+  --tracking-display: -0.02em;
+
+  /* The step every `p-*`/`gap-*`/`size-*` utility multiplies. Declared rather
+     than inherited from Tailwind's default so the rhythm is a fact in this
+     file, where a reader looking for it would look. */
+  --spacing: 4px;
+
+  --radius-sm: 5px;
+  /* An alias, not a step. 56 call sites say `rounded-md`; pointing it at the
+     small radius makes every one of them correct today, and sweeping the class
+     name later is cosmetic. */
   --radius-md: 5px;
-  --radius-lg: 7px;
+  --radius-lg: 10px;
 
   --font-sans:
     Inter, "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui,
@@ -192,7 +232,7 @@
     background-attachment: fixed;
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    font-size: 15px;
+    font-size: var(--text-ui);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
@@ -213,5 +253,33 @@
   :focus-visible {
     outline: 2px solid var(--color-ring);
     outline-offset: 2px;
+  }
+}
+
+/*
+ * One reduced-motion reset, here rather than per component.
+ *
+ * `ui/badge.tsx` declares `motion-safe:` on its dot and explains that it is the
+ * only animation in the app; that stopped being true around the fourteenth
+ * `animate-pulse`, and a reader who asked for less motion should not have to
+ * hope every new site remembered the variant. Nothing here is load-bearing as
+ * motion — every pulsing thing also carries a word and a tone — so cutting the
+ * duration removes the animation without removing the meaning.
+ *
+ * **Unlayered on purpose**, and this is the only rule in the file that is. It
+ * has to beat `animate-pulse`, which lives in Tailwind's `utilities` layer, and
+ * cascade layers outrank specificity: the same rule inside `@layer base` loses
+ * to every utility no matter how it is written, and would need `!important` on
+ * each declaration to win. An unlayered rule wins by position in the cascade
+ * instead, which is the mechanism rather than a fight with it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }

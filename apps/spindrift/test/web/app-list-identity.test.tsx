@@ -34,6 +34,12 @@ import type {
   CommandContext,
 } from '../../src/commands/types.ts';
 import {
+  builds,
+  componentTargetDesired,
+  deploys,
+  targets,
+} from '../../src/db/schema.ts';
+import {
   type AppDeletion,
   type AppDeletionControls,
   DeleteAppButton,
@@ -42,10 +48,15 @@ import {
   type ExplorerItem,
   ObjectExplorer,
 } from '../../src/web/components/object-explorer.tsx';
-import type { AppListItem } from '../../src/web/model.ts';
+import type { AppListItem, DeployPhase } from '../../src/web/model.ts';
 import { AppList, appHref } from '../../src/web/views/apps/list.tsx';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
+import { aDesiredDocument } from '../harness/release.ts';
 
 const manifest = await fixtureManifest();
 const database = withIsolatedDatabase();
@@ -118,6 +129,126 @@ async function seedTwins(ctx: CommandContext, name: string) {
   }
   return made;
 }
+
+/**
+ * One App with two Components, released to two different verdicts.
+ *
+ * The `web` Component is serving and the `worker` behind it is red — the shape
+ * the list used to report as `live`, because it read the phase off
+ * `components[0]` and stopped. Each Component gets its own Target so the two
+ * releases are genuinely independent rather than two rows on one placement.
+ */
+async function seedSplitApp(ctx: CommandContext) {
+  const name = `split-${crypto.randomUUID().slice(0, 8)}`;
+  const app = await createApp(
+    { name, sourceKind: 'repo', repoUrl: 'https://vcs.example/acme/split.git' },
+    ctx,
+  );
+  if (!app.ok) throw new Error(app.failure.message);
+
+  const released: { name: string; phase: DeployPhase; commit: string }[] = [];
+  let redDeployId = 0;
+
+  for (const [componentName, phase] of [
+    ['web', 'LIVE'],
+    ['worker', 'FAILED'],
+  ] as const) {
+    const component = await createComponent(
+      {
+        appId: app.value.appId,
+        name: componentName,
+        kind: 'service',
+        expose: componentName === 'web',
+        reach: componentName === 'web' ? 'private' : 'none',
+        auth: componentName === 'web' ? 'proxy' : 'none',
+      },
+      ctx,
+    );
+    if (!component.ok) throw new Error(component.failure.message);
+
+    const vessel = await insertVessel(ctx.db, 'kubernetes', {
+      name: `cluster-${crypto.randomUUID()}`,
+    });
+    const [target] = await ctx.db
+      .insert(targets)
+      .values(targetValues({ adapter: 'kubernetes', vesselId: vessel.id }))
+      .returning();
+    await ctx.db.insert(componentTargetDesired).values({
+      componentId: component.value.componentId,
+      targetId: target!.id,
+    });
+
+    const commit = crypto.randomUUID().slice(0, 7);
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId: component.value.componentId,
+        commit,
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'c'.repeat(64)}`,
+        status: 'SUCCEEDED',
+        runner: 'hosted runner',
+      })
+      .returning();
+
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId: component.value.componentId,
+        desired: aDesiredDocument(),
+        targetId: target!.id,
+        buildId: build!.id,
+        phase,
+      })
+      .returning();
+
+    if (phase === 'FAILED') redDeployId = deploy!.id;
+    released.push({ name: componentName, phase, commit });
+  }
+
+  return { appId: app.value.appId, name, released, redDeployId };
+}
+
+describe('an App is as healthy as its worst Component', () => {
+  test('a green service in front of a red worker does not read as live', async () => {
+    const ctx = context();
+    const seeded = await seedSplitApp(ctx);
+
+    const listed = await listApps({}, ctx);
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+
+    const row = listed.value.apps.find((app) => app.id === seeded.appId);
+    expect(row).toBeDefined();
+    if (!row) return;
+
+    // The whole defect: `components[0]` is the `web` that is serving.
+    expect(row.phase).toBe('FAILED');
+    expect(row.componentCount).toBe(2);
+    expect(row.failing).toBe(1);
+  });
+
+  test('and every other fact on the row belongs to that same Component', async () => {
+    // A row that named one Component's commit beside another's placement is
+    // two answers wearing one line, and no reader can tell which is which.
+    const ctx = context();
+    const seeded = await seedSplitApp(ctx);
+    const red = seeded.released.find((entry) => entry.phase === 'FAILED');
+
+    const listed = await listApps({}, ctx);
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+
+    const row = listed.value.apps.find((app) => app.id === seeded.appId);
+    expect(row?.commit).toBe(red?.commit ?? '');
+    expect(row?.deployId).toBe(seeded.redDeployId);
+    // The instant the release was written, so the scan can be ordered by how
+    // long each App has been in the state it is in.
+    expect(row?.at).toBeDefined();
+    expect(row?.when).toBeDefined();
+  });
+});
 
 describe('two Apps answer to one name', () => {
   test('the list carries an id for each, and the ids differ', async () => {

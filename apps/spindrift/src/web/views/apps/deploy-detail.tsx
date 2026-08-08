@@ -83,7 +83,9 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
+import { CopyButton } from '../../ui/copy.tsx';
 import { Logo } from '../../ui/logo.tsx';
+import { Page } from '../../ui/page.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
 
 const BUILD_ADAPTER: Record<string, { logo: LogoName; label: string }> = {
@@ -120,7 +122,7 @@ export function DeployDetail({
   onNavigate?: (path: string) => void;
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-4 px-5 py-6">
+    <Page width="reading">
       <Chrome view={view} onNavigate={onNavigate} />
       <Hero view={view} actions={actions} />
 
@@ -173,7 +175,7 @@ export function DeployDetail({
         one is an absence, not a hidden pane.
       */}
       {view.id !== null ? <DeployDrawer view={view} /> : null}
-    </div>
+    </Page>
   );
 }
 
@@ -542,7 +544,7 @@ function Provenance({
           {source.kind === 'repo' ? (
             <>
               <Fact label="Repository" value={source.repo} />
-              <Fact label="Commit" value={source.commit} />
+              <Fact label="Commit" value={source.commit} copy />
             </>
           ) : (
             <>
@@ -559,8 +561,8 @@ function Provenance({
             </>
           )}
           <Fact label="Scope" value={source.subpath} />
-          <Fact label="Artifact" value={view.artifactDigest} />
-          <Fact label="Config version" value={view.configVersion} />
+          <Fact label="Artifact" value={view.artifactDigest} copy />
+          <Fact label="Config version" value={view.configVersion} copy />
           <Fact label="Created" value={view.at} />
         </CardContent>
       </Card>
@@ -590,22 +592,38 @@ function Fact({
   label,
   value,
   note,
+  copy = false,
 }: {
   label: string;
   value: string | null;
   note?: string;
+  /**
+   * Offer the value to the clipboard.
+   *
+   * On for the three facts whose entire purpose is to be pasted somewhere else
+   * — the commit into `git`, the artifact digest into `crane`, the config
+   * version into a support thread. Off for the rest, because a copy button on
+   * every line is a column of buttons and none of them reads as the one that
+   * matters.
+   */
+  copy?: boolean;
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <Eyebrow>{label}</Eyebrow>
-      <span
-        className={cn(
-          'truncate font-mono text-xs',
-          value === null ? 'text-muted-foreground' : 'text-subtle',
-        )}
-        title={value ?? undefined}
-      >
-        {value ?? '—'}
+      <span className="flex min-w-0 items-center gap-1">
+        <span
+          className={cn(
+            'truncate font-mono text-xs',
+            value === null ? 'text-muted-foreground' : 'text-subtle',
+          )}
+          title={value ?? undefined}
+        >
+          {value ?? '—'}
+        </span>
+        {copy && value !== null ? (
+          <CopyButton value={value} label={label.toLowerCase()} />
+        ) : null}
       </span>
       {note ? (
         <span className="text-[11px] text-muted-foreground">{note}</span>

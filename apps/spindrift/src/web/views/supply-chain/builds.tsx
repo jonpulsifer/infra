@@ -1,24 +1,149 @@
+/**
+ * Builds — the act between the two nouns, as a table of comparable attempts.
+ *
+ * The row used to carry three of the eight facts `BuildListItem` ships:
+ * `#id · app`, `component · commit`, a status word and a time. `runner`,
+ * `targetShape` and `artifactType` were stuffed into the Explorer's invisible
+ * `search` string, so an operator could *filter* by runner and never *see* one
+ * — and `artifactDigest`, the thing the whole act exists to produce, reached
+ * only the inspector.
+ *
+ * `dispatchWaitingOn` is the one that mattered. `model.ts` calls it "what a
+ * PENDING Build is stuck on, in the operator's own words", the Overview
+ * rendered it, and the screen named after Builds did not — so a Build
+ * permanently refused because no configured route meets its Target's threshold
+ * looked exactly like one that started two seconds ago. It is a column here,
+ * in the artifact slot, because a Build that is waiting has no artifact and the
+ * reason it has none is the honest thing to put where one would go.
+ *
+ * The evidence panel is still a per-selection fetch and still does not follow a
+ * running attempt: `getBuildDetail` is called once per selected Build, so the
+ * step list beside a RUNNING row stays at whatever it was when the row was
+ * clicked while the status badge updates from the list poll. That is a real gap
+ * and it wants the attempt stream, not an interval.
+ */
 import { useEffect, useState } from 'react';
 import { command, type OutputOf } from '../../client.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import {
   DefinitionGrid,
-  type ExplorerItem,
-  ExplorerPageHeader,
   type ExplorerTone,
-  ObjectExplorer,
+  LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { BuildListItem, BuildStatus } from '../../model.ts';
+import type { BuildListItem } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
-import { SupplyChainTabs } from './tabs.tsx';
+import { Ref } from '../../ui/copy.tsx';
+import type { Column } from '../../ui/data-table.tsx';
+import { EmptyState } from '../../ui/empty-state.tsx';
+import { Page, PageHeader } from '../../ui/page.tsx';
+import { SkeletonRows } from '../../ui/skeleton.tsx';
+import { Timestamp } from '../../ui/timestamp.tsx';
+import { SupplyChainFlow, SupplyChainTabs } from './tabs.tsx';
 
-function tone(status: BuildStatus): ExplorerTone {
-  if (status === 'SUCCEEDED') return 'success';
-  if (status === 'FAILED') return 'destructive';
+/**
+ * The tone a Build's state deserves, including the state that is not one.
+ *
+ * A PENDING Build refusing every tick is not "in progress" the way a RUNNING
+ * one is — it needs an operator to configure the thing it is waiting on, which
+ * is what `warning` already means everywhere else. Shared with the Overview so
+ * the same Build is never two colours on two screens.
+ */
+export function buildTone(
+  build: Pick<BuildListItem, 'status' | 'dispatchWaitingOn'>,
+): ExplorerTone {
+  if (build.status === 'FAILED') return 'destructive';
+  if (build.status === 'SUCCEEDED') return 'success';
+  if (build.dispatchWaitingOn !== null) return 'warning';
   return 'accent';
 }
+
+const COLUMNS: readonly Column<BuildListItem>[] = [
+  {
+    id: 'id',
+    header: '#',
+    mono: true,
+    width: '5.5rem',
+    sortable: true,
+    sortValue: (build) => build.id,
+    cell: (build) => `#${build.id}`,
+  },
+  {
+    id: 'app',
+    header: 'App / component',
+    sortable: true,
+    sortValue: (build) => `${build.app}/${build.component}`,
+    cell: (build) => (
+      <span className="truncate">
+        {build.app} <span className="text-muted-foreground">/</span>{' '}
+        {build.component}
+      </span>
+    ),
+  },
+  {
+    id: 'commit',
+    header: 'Commit',
+    sortable: true,
+    sortValue: (build) => build.commit,
+    cell: (build) => <Ref value={build.commit} kind="commit" />,
+  },
+  {
+    id: 'runner',
+    header: 'Runner',
+    sortable: true,
+    sortValue: (build) => build.runner ?? '',
+    cell: (build) =>
+      build.runner ?? (
+        <span className="text-muted-foreground">supplied artifact</span>
+      ),
+  },
+  {
+    id: 'shape',
+    header: 'Shape',
+    mono: true,
+    cell: (build) => build.targetShape,
+  },
+  {
+    id: 'artifact',
+    header: 'Artifact',
+    cell: (build) =>
+      build.dispatchWaitingOn !== null ? (
+        <span className="text-warning">{build.dispatchWaitingOn}</span>
+      ) : build.artifactDigest ? (
+        <Ref value={build.artifactDigest} kind="digest" />
+      ) : (
+        <span className="text-muted-foreground">not produced</span>
+      ),
+  },
+  {
+    id: 'status',
+    header: 'State',
+    sortable: true,
+    sortValue: (build) => build.status,
+    cell: (build) => (
+      <Badge tone={buildTone(build)}>
+        {build.dispatchWaitingOn !== null
+          ? 'waiting'
+          : build.status.toLowerCase()}
+      </Badge>
+    ),
+  },
+  {
+    id: 'age',
+    header: 'Created',
+    align: 'end',
+    sortable: true,
+    sortValue: (build) => build.at,
+    cell: (build) => (
+      <Timestamp
+        at={build.at}
+        when={build.when}
+        className="font-mono text-muted-foreground"
+      />
+    ),
+  },
+];
 
 export function BuildLedger({
   builds,
@@ -35,100 +160,106 @@ export function BuildLedger({
   readonly loadError?: string | null;
   readonly onLoadMore?: () => void;
 }) {
-  const byId = new Map(builds.map((build) => [`build:${build.id}`, build]));
-  const items: ExplorerItem[] = builds.map((build) => ({
-    id: `build:${build.id}`,
-    title: `#${build.id} · ${build.app}`,
-    detail: `${build.component} · ${build.commit.slice(0, 12)}`,
-    status: build.status.toLowerCase(),
-    tone: tone(build.status),
-    when: build.when,
-    at: build.at,
-    search: `${build.runner ?? ''} ${build.targetShape} ${build.artifactType}`,
-    active: build.status === 'PENDING' || build.status === 'RUNNING',
-  }));
-
   return (
-    <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <Page>
       <SupplyChainTabs current="builds" onNavigate={onNavigate} />
-      <ExplorerPageHeader
+      <PageHeader
         eyebrow="Build ledger"
         title="Builds"
         description="The act between the two nouns: a Source becomes an Artifact here. Placement remains a separate Deploy, with its own state and evidence."
       />
-      <ObjectExplorer
-        items={items}
-        filterPlaceholder={`Filter ${builds.length} Builds…`}
-        empty={
-          <div className="rounded-sm border border-border bg-card p-10 text-center text-sm text-muted-foreground">
-            No Builds exist yet. Creating and deploying an App starts the first
-            one.
-          </div>
+      <LedgerExplorer
+        columns={COLUMNS}
+        rows={builds}
+        rowKey={(build) => `build:${build.id}`}
+        rowSearch={(build) =>
+          `${build.id} ${build.app} ${build.component} ${build.commit} ${build.status} ${build.runner ?? ''} ${build.targetShape} ${build.artifactType} ${build.artifactDigest ?? ''} ${build.dispatchWaitingOn ?? ''}`
         }
-        renderInspector={(item) => {
-          const build = byId.get(item.id)!;
-          return (
-            <>
-              <Eyebrow>Build / {build.id}</Eyebrow>
-              <div className="mt-1 flex flex-wrap items-center gap-3">
-                <h2 className="text-2xl font-semibold tracking-tight">
-                  {build.app} / {build.component}
-                </h2>
-                <Badge tone={tone(build.status)}>
-                  {build.status.toLowerCase()}
-                </Badge>
-              </div>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                Turning commit <span className="font-mono">{build.commit}</span>{' '}
-                into a {build.artifactType} artifact for {build.targetShape}.
+        filterPlaceholder={`Filter ${builds.length} Builds…`}
+        caption="Builds, newest first"
+        inspectorLabel={(build) => `Build ${build.id}`}
+        empty={
+          <EmptyState title="No Builds exist yet.">
+            Creating and deploying an App starts the first one.
+          </EmptyState>
+        }
+        renderInspector={(build) => (
+          <>
+            <Eyebrow>Build / {build.id}</Eyebrow>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <h2 className="text-title font-semibold tracking-tight">
+                {build.app} / {build.component}
+              </h2>
+              <Badge tone={buildTone(build)}>
+                {build.status.toLowerCase()}
+              </Badge>
+            </div>
+            {build.dispatchWaitingOn !== null ? (
+              <p className="mt-3 rounded-sm border border-warning/50 px-3 py-2 text-body text-warning">
+                Waiting: {build.dispatchWaitingOn}
               </p>
-              <DefinitionGrid
-                entries={[
-                  { label: 'State', value: build.status.toLowerCase() },
-                  { label: 'Created', value: build.when, mono: true },
-                  {
-                    label: 'Runner',
-                    value: build.runner ?? 'supplied artifact',
-                  },
-                  {
-                    label: 'Artifact',
-                    value: build.artifactDigest?.slice(0, 20) ?? 'not produced',
-                    mono: true,
-                  },
-                  { label: 'Shape', value: build.targetShape, mono: true },
-                  {
-                    label: 'Commit',
-                    value: build.commit.slice(0, 12),
-                    mono: true,
-                  },
-                ]}
-              />
-              <BuildEvidence buildId={build.id} />
-              <div className="mt-6 flex flex-wrap gap-2">
-                <Button onClick={() => onNavigate(`/builds/${build.id}`)}>
-                  Open Build
-                </Button>
-                {build.deployId !== null ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => onNavigate(`/deploys/${build.deployId}`)}
-                  >
-                    Related Deploy
-                  </Button>
-                ) : null}
+            ) : null}
+            <p className="mt-2 max-w-2xl text-body leading-6 text-muted-foreground">
+              Turning commit <span className="font-mono">{build.commit}</span>{' '}
+              into a {build.artifactType} artifact for {build.targetShape}.
+            </p>
+            <DefinitionGrid
+              entries={[
+                { label: 'State', value: build.status.toLowerCase() },
+                {
+                  label: 'Created',
+                  value: <Timestamp at={build.at} when={build.when} />,
+                  title: build.at,
+                  mono: true,
+                },
+                {
+                  label: 'Runner',
+                  value: build.runner ?? 'supplied artifact',
+                },
+                {
+                  label: 'Artifact',
+                  value: build.artifactDigest ? (
+                    <Ref value={build.artifactDigest} kind="digest" />
+                  ) : (
+                    'not produced'
+                  ),
+                  title: build.artifactDigest ?? undefined,
+                  mono: true,
+                },
+                { label: 'Shape', value: build.targetShape, mono: true },
+                {
+                  label: 'Commit',
+                  value: <Ref value={build.commit} kind="commit" />,
+                  title: build.commit,
+                  mono: true,
+                },
+              ]}
+            />
+            <BuildEvidence buildId={build.id} />
+            <div className="mt-6 flex flex-wrap gap-2">
+              <Button onClick={() => onNavigate(`/builds/${build.id}`)}>
+                Open Build
+              </Button>
+              {build.deployId !== null ? (
                 <Button
                   variant="outline"
-                  onClick={() => onNavigate(`/apps/${build.appId}`)}
+                  onClick={() => onNavigate(`/deploys/${build.deployId}`)}
                 >
-                  Open App
+                  Related Deploy
                 </Button>
-              </div>
-            </>
-          );
-        }}
+              ) : null}
+              <Button
+                variant="outline"
+                onClick={() => onNavigate(`/apps/${build.appId}`)}
+              >
+                Open App
+              </Button>
+            </div>
+          </>
+        )}
       />
       {loadError ? (
-        <p className="text-sm text-destructive">{loadError}</p>
+        <p className="text-body text-destructive">{loadError}</p>
       ) : null}
       {hasMore ? (
         <div className="flex justify-center">
@@ -137,11 +268,12 @@ export function BuildLedger({
           </Button>
         </div>
       ) : builds.length > 0 ? (
-        <p className="text-center text-xs text-muted-foreground">
+        <p className="text-center text-caption text-muted-foreground">
           Entire Build ledger loaded.
         </p>
       ) : null}
-    </div>
+      <SupplyChainFlow />
+    </Page>
   );
 }
 
@@ -155,6 +287,7 @@ function BuildEvidence({ buildId }: { readonly buildId: number }) {
 
   useEffect(() => {
     let live = true;
+    setState({ type: 'loading' });
     command('getBuildDetail', { id: buildId })
       .then((result) => {
         if (!live) return;
@@ -181,13 +314,14 @@ function BuildEvidence({ buildId }: { readonly buildId: number }) {
     <section className="mt-6 border-t border-border pt-5">
       <Eyebrow>Observed steps</Eyebrow>
       {state.type === 'loading' ? (
-        <p className="mt-2 animate-pulse text-sm text-muted-foreground">
-          Loading Build evidence…
-        </p>
+        <div className="mt-2">
+          <p className="sr-only">Loading Build evidence…</p>
+          <SkeletonRows rows={3} />
+        </div>
       ) : state.type === 'error' ? (
-        <p className="mt-2 text-sm text-destructive">{state.message}</p>
+        <p className="mt-2 text-body text-destructive">{state.message}</p>
       ) : state.detail.attempt.build === null ? (
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="mt-2 text-body text-muted-foreground">
           This was a supplied artifact; no builder ran.
         </p>
       ) : (

@@ -125,23 +125,13 @@ export function Notice({
 }
 
 /**
- * The honest empty state (§17).
+ * The honest empty state (§17) now lives in `ui/empty-state.tsx`, where the
+ * ledgers and the workspace can reach it without importing a log pane.
  *
- * A `website` on a static Target has no process, so there is no output to
- * stream — and §17 is explicit that this gets a stated reason rather than a
- * disabled tab. Disabling hides the fact; this names it.
+ * Re-exported from here rather than moved, because "there is no output to
+ * stream, and here is why" is the pane's own alternative — the argument at the
+ * top of this file is what made the component exist — and every call site that
+ * reads `EmptyState` out of the log module is reading it from the right place
+ * for the reason it is used there.
  */
-export function EmptyState({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center">
-      <p className="text-sm font-semibold text-foreground">{title}</p>
-      <p className="mt-1 text-[12.5px] text-muted-foreground">{children}</p>
-    </div>
-  );
-}
+export { EmptyState } from '../ui/empty-state.tsx';

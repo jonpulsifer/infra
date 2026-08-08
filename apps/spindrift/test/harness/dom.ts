@@ -125,6 +125,14 @@ export class FakeNode {
   addEventListener(): void {}
   removeEventListener(): void {}
 
+  /**
+   * `commitMount` calls this directly on a mounted `input`/`select`/`button`
+   * carrying `autoFocus`, so a tree with an autofocused control does not mount
+   * without it. There is no focus in this shim — `activeElement` stays `null` —
+   * and that is the honest state: nothing here has a viewport to focus into.
+   */
+  focus(): void {}
+
   getBoundingClientRect() {
     return {
       x: 0,

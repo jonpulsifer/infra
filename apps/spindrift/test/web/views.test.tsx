@@ -743,6 +743,16 @@ describe('the App workspace', () => {
       // And says whose runs they are. An App with a service and two jobs has
       // three runtimes, and a card headed only "Recent runs" names none of them.
       expect(markup).toContain('Output of nightly');
+    });
+
+    test('and the config of that Component, on the view that holds config', () => {
+      // Config is scoped to one (Component, Target) pair and this App has
+      // several, so the heading names whose keys these are — a heading that
+      // said only "Config" was the same list claiming to be the App's.
+      const markup = renderToStaticMarkup(
+        <Workspace view={view} tab="config" />,
+      );
+
       expect(markup).toContain('Configuration for nightly');
       expect(markup).toContain('RETENTION_DAYS');
     });
@@ -893,6 +903,154 @@ describe('the App workspace', () => {
         expect(text).toContain(entry.title);
       }
     });
+  });
+});
+
+/**
+ * What the App surface says now that the read model carries it.
+ *
+ * Every claim below is about a fact `getAppWorkspace` had in hand and dropped
+ * on the floor — the commit, the instant, the failure reason, the drift, which
+ * prerequisite is unmet. The screen rendered a phase pill over all of them, so
+ * a drifted App read "is live" and a failed one read "has no release serving
+ * yet" with no reason and no evidence.
+ */
+describe('the App workspace states what the release did', () => {
+  const service = WORKSPACE_SCENARIOS.service;
+
+  test('the hero dates the release and names the commit it shipped', () => {
+    const markup = workspace({
+      ...service,
+      commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      when: '8m ago',
+      at: '2026-07-28T13:00:00.000Z',
+    });
+
+    // Shortened to git's own seven, with the whole value on the title so a
+    // hover answers what the ellipsis ate.
+    expect(markup).toContain('a1b2c3d');
+    expect(markup).toContain('2026-07-28T13:00:00.000Z');
+  });
+
+  test('a red release names its reason on the App, not only on the attempt', () => {
+    const markup = workspace({
+      ...service,
+      phase: 'FAILED',
+      urlLive: false,
+      diagnosis: {
+        reason: 'STARTUP_FAILED',
+        blame: 'developer',
+        detail: 'The container exits immediately on start.',
+        evidence: null,
+      },
+    });
+
+    expect(markup).toContain('STARTUP_FAILED');
+    expect(markup).toContain('The container exits immediately on start.');
+  });
+
+  test('a drifted release says so instead of reading as live', () => {
+    // §6 calls drift "information, not an alarm" — and until now the App it is
+    // about was the one screen that could not report it.
+    const markup = workspace({
+      ...service,
+      drift: {
+        since: '2h ago',
+        at: '2026-07-28T13:00:00.000Z',
+        observedDigest: 'sha256:0badc0ffee',
+        detail: null,
+      },
+    });
+
+    expect(markup).toContain('DRIFTED');
+    expect(markup).toContain('since 2h ago');
+  });
+
+  test('an unmet prerequisite is named rather than counted', () => {
+    const markup = workspace({
+      ...service,
+      prerequisitesMet: false,
+      unmetPrerequisites: [
+        {
+          name: 'DELIVERY_OPERATOR',
+          met: false,
+          detail: 'No delivery operator is installed in this cluster.',
+        },
+      ],
+    });
+
+    expect(markup).toContain('1 prerequisite unmet');
+    expect(markup).toContain(
+      'No delivery operator is installed in this cluster.',
+    );
+  });
+
+  test('a Component row carries its own placement, not the selection’s', () => {
+    const markup = workspace({
+      ...service,
+      components: [
+        {
+          ...service.components[0]!,
+          target: 'driftwood/kubernetes',
+          url: 'beacon.apps.example',
+          urlLive: true,
+          when: '8m ago',
+        },
+      ],
+    });
+
+    expect(markup).toContain('driftwood/kubernetes');
+  });
+});
+
+describe('the App workspace has views rather than one column', () => {
+  const service = WORKSPACE_SCENARIOS.service;
+
+  test('the strip names them, and Overview is where an arrival lands', () => {
+    const markup = workspace(service);
+
+    expect(markup).toContain('Releases');
+    expect(markup).toContain('role="tablist"');
+    // The hero is above the strip: whether the App is up is not a tab you can
+    // be on the wrong one of.
+    expect(markup.indexOf('is live')).toBeLessThan(
+      markup.indexOf('role="tablist"'),
+    );
+  });
+
+  test('config is behind its own view, and off the Overview', () => {
+    expect(workspace(service)).not.toContain('value is write-only');
+  });
+
+  test('the live tail follows, and says what it dropped', () => {
+    // `app.tsx` appends every socket page forever. Without a cap the pane grew
+    // the page without bound while the newest line sat off-screen.
+    const chatty = workspace({
+      ...service,
+      runtime: {
+        kind: 'stream',
+        componentId: 'component-beacon-web',
+        targetId: 'target-metal',
+        reach: '7 days',
+        lines: Array.from({ length: 2_050 }, (_, index) => ({
+          text: `line ${index}`,
+        })),
+      },
+    });
+
+    expect(chatty).toContain('Showing the last 2000 lines');
+    expect(chatty).not.toContain('line 0\n');
+    // Following is what gives the pane a bottom to scroll to.
+    expect(chatty).toContain('max-h-[420px]');
+  });
+
+  test('no button on this screen does nothing when it is pressed', () => {
+    // `SectionHeader` renders its verb whether or not a handler was passed, so
+    // these two read as broken features rather than absent ones.
+    const markup = workspace(service);
+
+    expect(markup).not.toContain('Add Component');
+    expect(markup).not.toContain('Attach Datastore');
   });
 });
 
@@ -1185,9 +1343,12 @@ describe('changing how a Component is reached (§9)', () => {
 
 describe('editing config from the workspace (§10)', () => {
   const view = WORKSPACE_SCENARIOS.service;
+  /** Config is its own view of the App now, so the assertions open it. */
+  const config = (v: WorkspaceView) =>
+    renderToStaticMarkup(<Workspace view={v} tab="config" />);
 
   test('every configured key is shown, and nothing about its value is', () => {
-    const markup = workspace(view);
+    const markup = config(view);
     for (const key of view.configKeys) {
       expect(markup).toContain(key);
     }
@@ -1202,11 +1363,12 @@ describe('editing config from the workspace (§10)', () => {
   test('the affordance is on the section only where an act is wired', () => {
     // No form whose Save cannot be called — the same rule §9's Reach card
     // states above.
-    expect(workspace(view)).not.toContain('Set variable');
+    expect(config(view)).not.toContain('Set variable');
 
     const markup = renderToStaticMarkup(
       <Workspace
         view={view}
+        tab="config"
         onSetConfig={async () => ({
           ok: true,
           written: [],

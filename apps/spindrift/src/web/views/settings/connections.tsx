@@ -61,6 +61,7 @@ import { Button } from '../../ui/button.tsx';
 import { Card, CardContent } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
 import { Logo } from '../../ui/logo.tsx';
+import { Skeleton, SkeletonRows, SkeletonText } from '../../ui/skeleton.tsx';
 import { cn } from '../../ui/utils.ts';
 
 type Verification = OutputOf<'testBucketPermissions'>;
@@ -133,15 +134,7 @@ export function SourceBuckets() {
   );
   const onChanged = () => setReloadToken((token) => token + 1);
 
-  if (loaded.state === 'loading') {
-    return (
-      <SectionShell>
-        <p className="animate-pulse text-sm text-muted-foreground">
-          Loading source storage…
-        </p>
-      </SectionShell>
-    );
-  }
+  if (loaded.state === 'loading') return <LoadingSection rows={3} />;
   if (loaded.state === 'error' || loaded.value === undefined) {
     return (
       <SectionShell>
@@ -265,33 +258,46 @@ function SourceBucketList({
 
       {adding ? (
         <Card>
-          <CardContent className="flex flex-col gap-3">
-            <Field
-              name="bucket"
-              label="Bucket name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="spindrift-sources"
-              hint="Checked before it is added — a bucket the controller cannot write to is a build that dies at staging."
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={busy || name.trim() === ''}
-                onClick={() => use(name.trim(), false)}
-              >
-                {busy ? 'Checking…' : 'Verify and add'}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={busy || name.trim() === ''}
-                onClick={() => use(name.trim(), true)}
-              >
-                Add as default
-              </Button>
-              <Button variant="ghost" onClick={() => setAdding(false)}>
-                Cancel
-              </Button>
-            </div>
+          <CardContent>
+            {/* A real form, so Enter in the one field does what the reader
+                expects. The second verb stays a button: adding as the default
+                is a different act, not the same act confirmed harder. */}
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void use(name.trim(), false);
+              }}
+            >
+              <Field
+                name="bucket"
+                label="Bucket name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="spindrift-sources"
+                hint="Checked before it is added — a bucket the controller cannot write to is a build that dies at staging."
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={busy || name.trim() === ''}>
+                  {busy ? 'Checking…' : 'Verify and add'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || name.trim() === ''}
+                  onClick={() => use(name.trim(), true)}
+                >
+                  Add as default
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setAdding(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
       ) : null}
@@ -370,13 +376,23 @@ function BucketRow({
         </div>
       </div>
 
+      {/* Both halves were unlabelled monospace, so a region name and the two
+          IAM permissions the check actually exercised read as one undifferentiated
+          string — and the second one is the entire evidence behind the `writable`
+          badge above it, which is the fact worth naming. */}
       {check.state === 'reachable' ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 pl-6 text-[11px] text-subtle">
-          <span className="font-mono">{check.result.location}</span>
-          <span className="font-mono">
-            {check.result.permissions.join(' · ')}
-          </span>
-        </div>
+        <dl className="flex flex-wrap gap-x-4 gap-y-0.5 pl-6 text-[11px] text-subtle">
+          <div className="flex gap-1.5">
+            <dt>Region</dt>
+            <dd className="font-mono">{check.result.location}</dd>
+          </div>
+          <div className="flex gap-1.5">
+            <dt>Granted</dt>
+            <dd className="font-mono">
+              {check.result.permissions.join(' · ')}
+            </dd>
+          </div>
+        </dl>
       ) : null}
       {check.state === 'unreachable' ? (
         <p className="pl-6 text-xs text-destructive">{check.message}</p>
@@ -409,15 +425,7 @@ export function ArtifactRegistries() {
   );
   const onChanged = () => setReloadToken((token) => token + 1);
 
-  if (loaded.state === 'loading') {
-    return (
-      <SectionShell>
-        <p className="animate-pulse text-sm text-muted-foreground">
-          Loading artifact registries…
-        </p>
-      </SectionShell>
-    );
-  }
+  if (loaded.state === 'loading') return <LoadingSection rows={2} />;
   if (loaded.state === 'error' || loaded.value === undefined) {
     return (
       <SectionShell>
@@ -526,33 +534,46 @@ function ArtifactRegistryList({
 
       {adding ? (
         <Card>
-          <CardContent className="flex flex-col gap-3">
-            <Field
-              name="registry"
-              label="Registry namespace"
-              value={namespace}
-              onChange={(event) => setNamespace(event.target.value)}
-              placeholder="ghcr.io/an-owner"
-              hint="A host and a namespace — the repository path is appended per Component. Checked before it is declared; the check proves the registry answers, never that a push will be authorized."
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={busy || namespace.trim() === ''}
-                onClick={() => use(namespace.trim(), false)}
-              >
-                {busy ? 'Checking…' : 'Verify and connect'}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={busy || namespace.trim() === ''}
-                onClick={() => use(namespace.trim(), true)}
-              >
-                Connect as first
-              </Button>
-              <Button variant="ghost" onClick={() => setAdding(false)}>
-                Cancel
-              </Button>
-            </div>
+          <CardContent>
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void use(namespace.trim(), false);
+              }}
+            >
+              <Field
+                name="registry"
+                label="Registry namespace"
+                value={namespace}
+                onChange={(event) => setNamespace(event.target.value)}
+                placeholder="ghcr.io/an-owner"
+                hint="A host and a namespace — the repository path is appended per Component. Checked before it is declared; the check proves the registry answers, never that a push will be authorized."
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="submit"
+                  disabled={busy || namespace.trim() === ''}
+                >
+                  {busy ? 'Checking…' : 'Verify and connect'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || namespace.trim() === ''}
+                  onClick={() => use(namespace.trim(), true)}
+                >
+                  Connect as first
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setAdding(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
       ) : null}
@@ -723,7 +744,22 @@ function RegistryCredentialForm({
   };
 
   return (
-    <div className="ml-6 mt-1 flex flex-col gap-3 rounded-md border border-border bg-secondary/40 px-3 py-3">
+    <form
+      className="ml-6 mt-1 flex flex-col gap-3 rounded-md border border-border bg-secondary/40 px-3 py-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void act(async () => {
+          const result = await command('setRegistryCredential', {
+            registry: registry.namespace,
+            username: username.trim(),
+            secret,
+          });
+          return result.ok
+            ? { ok: true }
+            : { ok: false, message: result.failure.message };
+        });
+      }}
+    >
       <Field
         name={`registry-username-${registry.host}`}
         label="Username"
@@ -743,24 +779,14 @@ function RegistryCredentialForm({
       />
       <div className="flex flex-wrap gap-2">
         <Button
+          type="submit"
           disabled={busy || username.trim() === '' || secret === ''}
-          onClick={() =>
-            void act(async () => {
-              const result = await command('setRegistryCredential', {
-                registry: registry.namespace,
-                username: username.trim(),
-                secret,
-              });
-              return result.ok
-                ? { ok: true }
-                : { ok: false, message: result.failure.message };
-            })
-          }
         >
           {busy ? 'Checking…' : 'Verify and save'}
         </Button>
         {registry.credentialUsername !== null ? (
           <Button
+            type="button"
             variant="outline"
             disabled={busy}
             onClick={() =>
@@ -777,7 +803,7 @@ function RegistryCredentialForm({
             Forget it
           </Button>
         ) : null}
-        <Button variant="ghost" onClick={onCancel}>
+        <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
       </div>
@@ -787,7 +813,7 @@ function RegistryCredentialForm({
           Forgetting it here does not revoke it at the registry.
         </p>
       ) : null}
-    </div>
+    </form>
   );
 }
 
@@ -796,6 +822,35 @@ function RegistryCredentialForm({
 /** The frame a section keeps while it is loading or refusing. */
 function SectionShell({ children }: { children: ReactNode }) {
   return <section className="flex flex-col gap-4 py-6">{children}</section>;
+}
+
+/**
+ * A section that has not answered yet, in the shape of the section that will.
+ *
+ * Each section reads its own far side, which is the right call and had one
+ * visible cost: three grey sentences of one line each, resolving at three
+ * different times, each replaced by a two-column block several hundred pixels
+ * tall. The screen jumped three times and the reader lost their place twice.
+ *
+ * So this is not a spinner in a box — it is `ConnectionSection`'s own grid, with
+ * the provider column and the ruled card the real section will put there. It
+ * deliberately does not guess the row count: the caller knows how many rows this
+ * particular connection usually has, and a skeleton that promised six where two
+ * arrive is a jump in the other direction.
+ */
+function LoadingSection({ rows }: { rows: number }) {
+  return (
+    <section className="grid gap-5 py-6 xl:grid-cols-[240px_minmax(0,1fr)] xl:gap-8">
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-5 w-24 rounded-full" />
+        <SkeletonText lines={3} />
+      </div>
+      <div className="min-w-0 rounded-md border border-border">
+        <SkeletonRows rows={rows} />
+      </div>
+    </section>
+  );
 }
 
 /**

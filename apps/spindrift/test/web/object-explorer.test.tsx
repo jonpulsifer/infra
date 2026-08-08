@@ -4,6 +4,7 @@ import { ObjectExplorer } from '../../src/web/components/object-explorer.tsx';
 import { AppShell } from '../../src/web/components/shell.tsx';
 import type { BuildListItem, DeployLedgerItem } from '../../src/web/model.ts';
 import { DeployLedger } from '../../src/web/views/operations/deploys.tsx';
+import { Overview } from '../../src/web/views/operations/overview.tsx';
 import { SettingsLayout } from '../../src/web/views/settings/layout.tsx';
 import { ArtifactLedger } from '../../src/web/views/supply-chain/artifacts.tsx';
 import { BuildLedger } from '../../src/web/views/supply-chain/builds.tsx';
@@ -210,6 +211,60 @@ describe('the global operation ledgers', () => {
     expect(markup).toContain('never placed');
     expect(markup).toContain('SLSA L3');
     expect(markup).toContain('ghcr.io/an-owner/morrow');
+  });
+
+  /**
+   * The ledgers are tables now, and the point of a table is the columns: the
+   * facts these rows carried and did not show were flattened into one `·`
+   * sentence nobody could sort, align or compare down.
+   */
+  test('a ledger row is a table row with the facts it used to hide', () => {
+    const markup = renderToStaticMarkup(
+      <BuildLedger builds={[build]} onNavigate={() => undefined} />,
+    );
+    expect(markup).toContain('<table');
+    expect(markup).toContain('scope="col"');
+    for (const header of ['Runner', 'Shape', 'Artifact', 'Commit']) {
+      expect(markup).toContain(header);
+    }
+  });
+
+  /**
+   * A count off an array the caller fetched with `limit: 12` is not a fleet
+   * total. The tile may only claim what it can back up.
+   */
+  test('the landing screen scopes a page count instead of presenting it as a total', () => {
+    const markup = renderToStaticMarkup(
+      <Overview
+        apps={[]}
+        builds={[build]}
+        deploys={[deploy]}
+        targets={[]}
+        buildsHasMore
+        deploysHasMore
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).not.toContain('Object explorer');
+    expect(markup).toContain('aria-label="Serving"');
+    expect(markup).toContain('aria-label="Standing state"');
+    expect(markup).toContain('aria-label="Activity"');
+    expect(markup).toContain('1+');
+    expect(markup).toContain('not a fleet total');
+  });
+
+  test('a landing screen with a whole ledger loaded claims the whole ledger', () => {
+    const markup = renderToStaticMarkup(
+      <Overview
+        apps={[]}
+        builds={[build]}
+        deploys={[deploy]}
+        targets={[]}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).not.toContain('1+');
+    expect(markup).not.toContain('not a fleet total');
   });
 
   test('offers the next cursor page instead of truncating history', () => {

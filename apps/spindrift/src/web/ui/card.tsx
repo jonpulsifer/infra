@@ -53,7 +53,7 @@ export function Eyebrow({ className, ...props }: ComponentProps<'span'>) {
   return (
     <span
       className={cn(
-        'text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground',
+        'text-micro font-semibold uppercase tracking-eyebrow text-muted-foreground',
         className,
       )}
       {...props}

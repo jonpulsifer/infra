@@ -13,6 +13,22 @@
  * afterwards; and story 4's recovery — rotate the token, replace every passkey
  * — is the sentence under a sign-in that has stopped working, because that is
  * the moment somebody needs it.
+ *
+ * **It says which installation this is, and it says it with the origin.** This
+ * is the first thing a human ever sees of the product and it identified
+ * nothing, so staging and production were the same screen. The manifest holds
+ * an `installation.name`, and nothing here can read it: this side of the door
+ * has no session, and a control plane that told an anonymous caller what it is
+ * called would be answering a question nobody authenticated to ask. The origin
+ * is the honest identity available here — a ceremony is scoped to
+ * `controlPlane.hostname` and a browser refuses one whose relying party is not
+ * a suffix of the host in the address bar, so the host **is** what the passkey
+ * is about to be bound to.
+ *
+ * **What it does, in one sentence, instead of what it is made of.** "Passkey
+ * Authentication & UI-Driven Manifest Operations" is the vocabulary of the
+ * implementation, and "manifest operations" is the noun this product exists to
+ * hide from the person reading it.
  */
 import { KeyRound, ShieldCheck } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -40,19 +56,14 @@ export function Gate({
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col justify-center gap-6 px-5 py-12">
       <div className="flex flex-col items-center gap-2 text-center">
-        <div className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent shadow-sm">
-          <span className="relative flex size-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-            <span className="relative inline-flex size-2 rounded-full bg-accent" />
-          </span>
-          Passkey-First Platform
-        </div>
         <span className="font-mono text-xl font-bold tracking-[0.25em] text-foreground">
           SPINDRIFT
         </span>
-        <p className="text-xs text-muted-foreground">
-          Passkey Authentication &amp; UI-Driven Manifest Operations
+        <p className="text-sm text-muted-foreground">
+          Deploy to your own clusters and cloud projects. One button, one
+          release.
         </p>
+        <Installation />
       </div>
       {claimed ? (
         <SignIn gatewayUnlinked={gatewayUnlinked} onSignedIn={onSignedIn} />
@@ -60,6 +71,23 @@ export function Gate({
         <Enrol onSignedIn={onSignedIn} />
       )}
     </main>
+  );
+}
+
+/**
+ * Which installation the passkey is about to be bound to.
+ *
+ * Rendered as nothing when there is no origin to read — this file is also
+ * rendered to static markup in a test, and a screen that invented a hostname
+ * for that would be the one thing worse than a screen that names none.
+ */
+function Installation() {
+  const host = typeof location === 'undefined' ? '' : location.host;
+  if (host === '') return null;
+  return (
+    <p className="mt-1 font-mono text-caption text-subtle">
+      signing in to {host}
+    </p>
   );
 }
 
@@ -116,24 +144,34 @@ function Enrol({ onSignedIn }: { onSignedIn: (p: Principal) => void }) {
           </p>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <Field
-          name="enrolment-token"
-          label="Enrolment token"
-          type="password"
-          autoComplete="off"
-          value={token}
-          placeholder="from SPINDRIFT_ENROLMENT_TOKEN"
-          onChange={(event) => setToken(event.currentTarget.value)}
-        />
-        <Problem>{error}</Problem>
-        <Button
-          disabled={running || token.trim() === ''}
-          onClick={() => run(() => enrol(token.trim()))}
+      <CardContent>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(() => enrol(token.trim()));
+          }}
         >
-          <KeyRound aria-hidden="true" />
-          {running ? 'Waiting for your passkey…' : 'Enrol a passkey'}
-        </Button>
+          <Field
+            name="enrolment-token"
+            label="Enrolment token"
+            type="password"
+            autoComplete="off"
+            // The first control a human ever meets in this product. It was not
+            // focused, so the first act was a mouse hunt for the only box on
+            // the screen — and this screen has exactly one.
+            autoFocus
+            value={token}
+            placeholder="from SPINDRIFT_ENROLMENT_TOKEN"
+            onChange={(event) => setToken(event.currentTarget.value)}
+          />
+          <Problem>{error}</Problem>
+          <Button type="submit" disabled={running || token.trim() === ''}>
+            <KeyRound aria-hidden="true" />
+            {running ? 'Waiting for your passkey…' : 'Enrol a passkey'}
+          </Button>
+          <Ceremony running={running} />
+        </form>
       </CardContent>
     </Card>
   );
@@ -168,14 +206,21 @@ function SignIn({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <Problem>{error}</Problem>
-        <Button disabled={running} onClick={() => run(signIn)}>
+        <Button disabled={running} onClick={() => void run(signIn)}>
           {running ? 'Waiting for your passkey…' : 'Continue with a passkey'}
         </Button>
+        <Ceremony running={running} />
         <details className="rounded-md border border-border px-3 py-2">
           <summary className="cursor-pointer text-xs font-medium text-foreground">
             Recover with a rotated token
           </summary>
-          <div className="mt-3 flex flex-col gap-3">
+          <form
+            className="mt-3 flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void run(() => enrol(token.trim()));
+            }}
+          >
             <p className="text-xs text-muted-foreground">
               Rotate{' '}
               <code className="font-mono">SPINDRIFT_ENROLMENT_TOKEN</code> in
@@ -192,17 +237,38 @@ function SignIn({
               onChange={(event) => setToken(event.currentTarget.value)}
             />
             <Button
+              type="submit"
               variant="outline"
               disabled={running || token.trim() === ''}
-              onClick={() => run(() => enrol(token.trim()))}
             >
               <ShieldCheck aria-hidden="true" />
               {running ? 'Waiting for your passkey…' : 'Replace the passkey'}
             </Button>
-          </div>
+          </form>
         </details>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * That the browser is waiting on a passkey, out loud.
+ *
+ * The only sign a ceremony was in flight was a button label, which is announced
+ * to nobody — and this ceremony can sit for thirty seconds while an operator
+ * looks for a security key. Empty rather than unmounted while idle, so the
+ * region exists before it has anything to say and the change is what is
+ * announced.
+ */
+function Ceremony({ running }: { running: boolean }) {
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="text-xs text-muted-foreground"
+    >
+      {running ? 'Waiting for your passkey. Your browser will ask.' : ''}
+    </p>
   );
 }
 

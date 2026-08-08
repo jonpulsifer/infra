@@ -34,6 +34,10 @@ import { subscribeAttempt, subscribeRuntime } from './stream-client.ts';
 import { type Theme, useTheme } from './theme.ts';
 import { Button } from './ui/button.tsx';
 import { Eyebrow } from './ui/card.tsx';
+import { ErrorState } from './ui/error-state.tsx';
+import { Page } from './ui/page.tsx';
+import { Skeleton, SkeletonRows } from './ui/skeleton.tsx';
+import { notify } from './ui/toast.tsx';
 import { cn } from './ui/utils.ts';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { AppList } from './views/apps/list.tsx';
@@ -529,8 +533,21 @@ function OverviewScreen({
         builds: readonly BuildListItem[];
         deploys: readonly DeployLedgerItem[];
         targets: readonly TargetListItem[];
+        /**
+         * Whether the two paged reads had more to give.
+         *
+         * Both were asked for twelve and both answer with the cursor for the
+         * thirteenth, which this screen used to drop on the floor — and then
+         * counted the twelve it kept as if they were the fleet. Keeping the
+         * cursor is the whole fix: nothing here pages, it only needs to know
+         * that "3 running" is three of the newest twelve and not three in the
+         * installation.
+         */
+        buildsHasMore: boolean;
+        deploysHasMore: boolean;
       }
   >({ type: 'loading' });
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -564,6 +581,8 @@ function OverviewScreen({
           builds: builds.value.builds,
           deploys: deploys.value.deploys,
           targets: targets.value.targets,
+          buildsHasMore: builds.value.nextBefore !== null,
+          deploysHasMore: deploys.value.nextBefore !== null,
         });
       });
     const fail = (cause: unknown) => {
@@ -579,18 +598,21 @@ function OverviewScreen({
       live = false;
       clearInterval(refresh);
     };
-  }, []);
+  }, [reloadToken]);
 
-  if (state.type === 'loading') {
-    return <ScreenLoading>Loading Overview…</ScreenLoading>;
-  }
+  if (state.type === 'loading') return <OverviewSkeleton />;
   if (state.type === 'error') {
     return (
-      <ScreenFailure title="Failed to load Overview">
-        {state.message}
-      </ScreenFailure>
+      <ScreenFailure
+        title="Failed to load Overview"
+        message={state.message}
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
+  // Spread whole, which is how `buildsHasMore`/`deploysHasMore` reach
+  // `Overview` without this file having to know whether it reads them yet: a
+  // JSX spread carries what the receiver declares and drops the rest.
   return <Overview {...state} onNavigate={onNavigate} />;
 }
 
@@ -606,6 +628,7 @@ function BuildsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   >({ type: 'loading' });
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -644,7 +667,7 @@ function BuildsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
       live = false;
       clearInterval(refresh);
     };
-  }, []);
+  }, [reloadToken]);
 
   const loadOlder = async () => {
     if (state.type !== 'success' || state.nextBefore === null) return;
@@ -676,14 +699,14 @@ function BuildsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     }
   };
 
-  if (state.type === 'loading') {
-    return <ScreenLoading>Loading Builds…</ScreenLoading>;
-  }
+  if (state.type === 'loading') return <LedgerSkeleton />;
   if (state.type === 'error') {
     return (
-      <ScreenFailure title="Failed to load Builds">
-        {state.message}
-      </ScreenFailure>
+      <ScreenFailure
+        title="Failed to load Builds"
+        message={state.message}
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
   return (
@@ -710,6 +733,7 @@ function DeploysScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   >({ type: 'loading' });
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -748,7 +772,7 @@ function DeploysScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
       live = false;
       clearInterval(refresh);
     };
-  }, []);
+  }, [reloadToken]);
 
   const loadOlder = async () => {
     if (state.type !== 'success' || state.nextBefore === null) return;
@@ -780,14 +804,14 @@ function DeploysScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     }
   };
 
-  if (state.type === 'loading') {
-    return <ScreenLoading>Loading Deploys…</ScreenLoading>;
-  }
+  if (state.type === 'loading') return <LedgerSkeleton />;
   if (state.type === 'error') {
     return (
-      <ScreenFailure title="Failed to load Deploys">
-        {state.message}
-      </ScreenFailure>
+      <ScreenFailure
+        title="Failed to load Deploys"
+        message={state.message}
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
   return (
@@ -811,28 +835,162 @@ function mergeLedger<T extends { readonly id: number }>(
   return [...byId.values()].sort((left, right) => right.id - left.id);
 }
 
-function ScreenLoading({ children }: { children: string }) {
+/**
+ * The three states every screen in this file is in before it has its data, and
+ * the one container all three of them share.
+ *
+ * They share a container because they did not, and that was the visible bug:
+ * six screens rendered `Loading Overview…` inside `max-w-[1040px]` and then
+ * mounted their content inside `max-w-[1320px]`, so arriving anywhere shifted
+ * the whole page sideways the instant the read returned. `Page` names the two
+ * widths, and a loading state that passes the same one its screen passes cannot
+ * disagree with it.
+ *
+ * `LedgerSkeleton` is a header and rows, `DetailSkeleton` is a hero and cards —
+ * the two shapes this file actually loads. Neither tries to be a picture of the
+ * real screen; a skeleton is a promise about *where* things land, and one that
+ * chases the layout is one more thing to keep in sync.
+ */
+function LedgerSkeleton({
+  width = 'wide',
+  rows = 6,
+}: {
+  width?: 'wide' | 'reading';
+  rows?: number;
+}) {
   return (
-    <div className="mx-auto w-full max-w-[1320px] px-6 py-8">
-      <p className="animate-pulse text-sm text-muted-foreground">{children}</p>
+    <Page width={width}>
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-7 w-64" />
+      </div>
+      <SkeletonRows rows={rows} />
+    </Page>
+  );
+}
+
+/**
+ * The landing screen, which is tiles over a feed and not a ledger.
+ *
+ * Its own shape rather than `LedgerSkeleton` with more rows, because the tile
+ * strip is the tallest thing above the fold: standing in for it with rows moves
+ * the feed up by a hundred pixels and then drops it back down, which is the
+ * jump a skeleton exists to prevent.
+ */
+function OverviewSkeleton() {
+  return (
+    <Page>
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-7 w-56" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+      </div>
+      <SkeletonRows rows={8} />
+    </Page>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <Page width="reading">
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-8 w-72" />
+      </div>
+      <Skeleton className="h-28" />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Skeleton className="h-44" />
+        <Skeleton className="h-44" />
+      </div>
+    </Page>
+  );
+}
+
+/**
+ * One ruled row of the Connections screen, loading.
+ *
+ * No `Page` around it, unlike every other skeleton here: the Targets and
+ * Repositories screens only ever render inside `ConnectionsSettings`'
+ * `divide-y` stack, so a centred max-width column would indent them out of
+ * alignment with the two sections that resolved first — which is precisely the
+ * jump this screen was worst at, three grey lines settling at three different
+ * moments and shifting the ones below each time.
+ */
+function SectionSkeleton({ rows }: { rows: number }) {
+  return (
+    <div className="flex flex-col gap-4 py-6">
+      <Skeleton className="h-4 w-40" />
+      <SkeletonRows rows={rows} />
     </div>
   );
 }
 
+/**
+ * A load that failed, with the button that re-runs it.
+ *
+ * Every caller passes `onRetry`, and every one of them had to grow a token to
+ * do it. That is the change: a screen whose read failed has nothing on it, so
+ * the reader's only previous way forward was reloading a hash-routed
+ * application to re-run one query.
+ */
 function ScreenFailure({
   title,
-  children,
+  message,
+  onRetry,
+  width = 'wide',
 }: {
   title: string;
-  children: string;
+  message: string;
+  onRetry: () => void;
+  width?: 'wide' | 'reading';
 }) {
   return (
-    <div className="mx-auto w-full max-w-[1320px] px-6 py-8">
-      <div className="rounded-sm border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="mt-1 text-sm">{children}</p>
-      </div>
-    </div>
+    <Page width={width}>
+      <ErrorState title={title} message={message} onRetry={onRetry} />
+    </Page>
+  );
+}
+
+/**
+ * An id in the path that names nothing.
+ *
+ * Three screens rendered this as a centred card with an eyebrow, a heading, the
+ * server's sentence and a `Back to Apps` button — the same card three times,
+ * differing in two words. It is the same failure `ScreenFailure` renders, plus
+ * the one thing a not-found has that a transport failure does not: somewhere
+ * definite to go.
+ */
+function ScreenNotFound({
+  title,
+  message,
+  onNavigate,
+}: {
+  title: string;
+  message: string;
+  onNavigate: (path: string) => void;
+}) {
+  return (
+    <Page width="reading">
+      <ErrorState
+        title={title}
+        code="NOT_FOUND"
+        message={message}
+        secondary={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onNavigate('/apps')}
+          >
+            Back to Apps
+          </Button>
+        }
+      />
+    </Page>
   );
 }
 
@@ -842,6 +1000,7 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     | { type: 'error'; message: string }
     | { type: 'success'; apps: readonly AppListItem[] }
   >({ type: 'loading' });
+  const [reloadToken, setReloadToken] = useState(0);
 
   // The row goes when the App does. Re-reading the list instead would be a
   // second round trip to learn something this screen was just told.
@@ -850,7 +1009,7 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   // name drops every row sharing it, so deleting one of two same-named Apps
   // would hide the other until a reload — and reaching the other one is the
   // whole point of giving this list an identity.
-  const deletion = useAppDeletion(({ id }) => {
+  const deletion = useAppDeletion(({ id, name }) => {
     setState((current) =>
       current.type === 'success'
         ? {
@@ -859,6 +1018,10 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
           }
         : current,
     );
+    // The dialog that confirmed this closes with the press, so without this the
+    // only evidence the act happened is a row that is no longer there — which
+    // is indistinguishable from having deleted the wrong one.
+    notify({ tone: 'success', title: `Deleted ${name}` });
   });
 
   useEffect(() => {
@@ -882,26 +1045,51 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     return () => {
       live = false;
     };
-  }, []);
+  }, [reloadToken]);
 
-  if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading apps...
-        </p>
-      </div>
+  /**
+   * Keep the list current, at the two cadences the workspace already uses.
+   *
+   * This screen read once at mount and never again, so a row whose App was
+   * mid-release sat on the phase it happened to have at that instant — under a
+   * dot the explorer pulses forever, which reads as "still moving" about a
+   * release that finished minutes ago. The workspace worked this out already;
+   * this is the same argument for the screen an operator watches a fleet from.
+   *
+   * A failed refresh is dropped rather than replacing a readable list with an
+   * error page. The next tick tries again.
+   */
+  const inFlight =
+    state.type === 'success' && state.apps.some((app) => isInFlight(app.phase));
+  useEffect(() => {
+    let live = true;
+    const timer = setInterval(
+      () => {
+        void command('listApps', {})
+          .then((result) => {
+            if (!live || !result.ok) return;
+            setState({ type: 'success', apps: result.value.apps });
+          })
+          .catch(() => {});
+      },
+      inFlight ? 3_000 : 20_000,
     );
-  }
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [inFlight]);
+
+  if (state.type === 'loading') return <LedgerSkeleton width="reading" />;
 
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load apps</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
-      </div>
+      <ScreenFailure
+        title="Failed to load Apps"
+        message={state.message}
+        width="reading"
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
 
@@ -962,7 +1150,6 @@ function WorkspaceScreen({
     | { type: 'success'; workspace: WorkspaceView }
   >({ type: 'loading' });
   const [deploying, setDeploying] = useState(false);
-  const [deployError, setDeployError] = useState<string | null>(null);
   /** Bumped when an act changed state the workspace has already read. */
   const [reloadToken, setReloadToken] = useState(0);
   /**
@@ -1168,43 +1355,26 @@ function WorkspaceScreen({
     );
   }, [runs?.componentId, runs?.targetId, following]);
 
-  if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading workspace...
-        </p>
-      </div>
-    );
-  }
+  if (state.type === 'loading') return <DetailSkeleton />;
 
   if (state.type === 'not-found') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-border bg-card p-6 text-center">
-          <Eyebrow>App Not Found</Eyebrow>
-          <h1 className="mt-2 text-xl font-semibold">
-            No App named "{appName}"
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{state.message}</p>
-          <div className="mt-4 flex justify-center">
-            <Button variant="outline" onClick={() => onNavigate('/apps')}>
-              Back to Apps
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ScreenNotFound
+        title={`No App named "${appName}"`}
+        message={state.message}
+        onNavigate={onNavigate}
+      />
     );
   }
 
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load workspace</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
-      </div>
+      <ScreenFailure
+        title="Failed to load workspace"
+        message={state.message}
+        width="reading"
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
 
@@ -1214,7 +1384,6 @@ function WorkspaceScreen({
   const handleDeploy = async (rebuild: boolean) => {
     if (state.type !== 'success') return;
     setDeploying(true);
-    setDeployError(null);
     try {
       // By id where the workspace knows one: `apps` does not constrain `name`,
       // and the command refuses a name two Apps answer to rather than guessing.
@@ -1242,10 +1411,18 @@ function WorkspaceScreen({
       } else {
         // The sentence the command refused with, unedited — a disconnected
         // Target, a signature that did not verify. Nothing is retried behind it.
-        setDeployError(result.failure.message);
+        notify({
+          tone: 'destructive',
+          title: 'Deploy refused',
+          detail: result.failure.message,
+        });
       }
     } catch (e: unknown) {
-      setDeployError(e instanceof Error ? e.message : 'Deploy failed');
+      notify({
+        tone: 'destructive',
+        title: 'Deploy failed',
+        detail: e instanceof Error ? e.message : 'Server failure',
+      });
     } finally {
       setDeploying(false);
     }
@@ -1380,23 +1557,6 @@ function WorkspaceScreen({
 
   return (
     <>
-      {deployError ? (
-        <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Deploy failed</p>
-              <p className="text-sm mt-0.5">{deployError}</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setDeployError(null)}
-            >
-              Dismiss
-            </Button>
-          </div>
-        </div>
-      ) : null}
       <Workspace
         view={state.workspace}
         onDeploy={() => handleDeploy(false)}
@@ -1460,7 +1620,7 @@ function DeployScreen({
   >({ type: 'loading' });
 
   const [busy, setBusy] = useState<'redeploy' | 'rollback' | null>(null);
-  const [redeployError, setRedeployError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -1521,12 +1681,11 @@ function DeployScreen({
       live = false;
       stopStream?.();
     };
-  }, [deployId]);
+  }, [deployId, reloadToken]);
 
   const handleRedeploy = async () => {
     if (state.type !== 'success') return;
     setBusy('redeploy');
-    setRedeployError(null);
     try {
       // The App's id, not its name: `apps` has no unique constraint on `name`,
       // so redeploying by name would act on whichever row shares it.
@@ -1540,10 +1699,18 @@ function DeployScreen({
       } else {
         // Surfaced verbatim and acted on no further: a refused redeploy is a
         // fact about this artifact and this Target, not a cue to build another.
-        setRedeployError(result.failure.message);
+        notify({
+          tone: 'destructive',
+          title: 'Redeploy refused',
+          detail: result.failure.message,
+        });
       }
     } catch (e: unknown) {
-      setRedeployError(e instanceof Error ? e.message : 'Redeploy failed');
+      notify({
+        tone: 'destructive',
+        title: 'Redeploy failed',
+        detail: e instanceof Error ? e.message : 'Server failure',
+      });
     } finally {
       setBusy(null);
     }
@@ -1553,7 +1720,6 @@ function DeployScreen({
     if (state.type !== 'success') return;
     const view = state.deploy;
     setBusy('rollback');
-    setRedeployError(null);
     try {
       const result = await rollback({
         componentId: view.componentId,
@@ -1561,74 +1727,52 @@ function DeployScreen({
         buildId: view.buildId,
       });
       if (result.ok) {
+        // The scariest button in the product, and until now the only thing it
+        // said on success was a different id in the URL. The build number is
+        // what makes the sentence checkable against what the operator meant.
+        notify({
+          tone: 'success',
+          title: `Rolled back to build ${view.buildId}`,
+          detail: `Deploy #${result.deployId} is the release now serving.`,
+        });
         onNavigate(`/deploys/${result.deployId}`);
       } else {
-        setRedeployError(result.message);
+        notify({
+          tone: 'destructive',
+          title: 'Rollback refused',
+          detail: result.message,
+        });
       }
     } finally {
       setBusy(null);
     }
   };
 
-  if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading deploy details...
-        </p>
-      </div>
-    );
-  }
+  if (state.type === 'loading') return <DetailSkeleton />;
 
   if (state.type === 'not-found') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-border bg-card p-6 text-center">
-          <Eyebrow>Deploy Not Found</Eyebrow>
-          <h1 className="mt-2 text-xl font-semibold">
-            Deploy #{deployId} not found
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{state.message}</p>
-          <div className="mt-4 flex justify-center">
-            <Button variant="outline" onClick={() => onNavigate('/apps')}>
-              Back to Apps
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ScreenNotFound
+        title={`Deploy #${deployId} not found`}
+        message={state.message}
+        onNavigate={onNavigate}
+      />
     );
   }
 
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load deploy detail</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
-      </div>
+      <ScreenFailure
+        title="Failed to load deploy detail"
+        message={state.message}
+        width="reading"
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
 
   return (
     <>
-      {redeployError ? (
-        <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">That act was refused</p>
-              <p className="text-sm mt-0.5">{redeployError}</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRedeployError(null)}
-            >
-              Dismiss
-            </Button>
-          </div>
-        </div>
-      ) : null}
       <DeployDetail
         view={state.deploy}
         actions={{
@@ -1662,7 +1806,7 @@ function BuildScreen({
     | { type: 'success'; attempt: DeployView; deployId: number | null }
   >({ type: 'loading' });
   const [busy, setBusy] = useState<'redeploy' | 'deploy' | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -1711,12 +1855,11 @@ function BuildScreen({
       live = false;
       stopStream?.();
     };
-  }, [buildId]);
+  }, [buildId, reloadToken]);
 
   const act = async (kind: 'redeploy' | 'deploy') => {
     if (state.type !== 'success') return;
     setBusy(kind);
-    setActionError(null);
     try {
       // One command for both, because §4 gives the workspace button one
       // meaning: deploy the newest artifact, or start the Build that would
@@ -1730,52 +1873,43 @@ function BuildScreen({
             : `/deploys/${result.value.deployId}`,
         );
       } else {
-        setActionError(result.failure.message);
+        notify({
+          tone: 'destructive',
+          title: 'That act was refused',
+          detail: result.failure.message,
+        });
       }
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : 'Deploy failed');
+      notify({
+        tone: 'destructive',
+        title: 'Deploy failed',
+        detail: cause instanceof Error ? cause.message : 'Server failure',
+      });
     } finally {
       setBusy(null);
     }
   };
 
-  if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading build...
-        </p>
-      </div>
-    );
-  }
+  if (state.type === 'loading') return <DetailSkeleton />;
 
   if (state.type === 'not-found') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-border bg-card p-6 text-center">
-          <Eyebrow>Build Not Found</Eyebrow>
-          <h1 className="mt-2 text-xl font-semibold">
-            Build #{buildId} not found
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{state.message}</p>
-          <div className="mt-4 flex justify-center">
-            <Button variant="outline" onClick={() => onNavigate('/apps')}>
-              Back to Apps
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ScreenNotFound
+        title={`Build #${buildId} not found`}
+        message={state.message}
+        onNavigate={onNavigate}
+      />
     );
   }
 
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load build</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
-      </div>
+      <ScreenFailure
+        title="Failed to load build"
+        message={state.message}
+        width="reading"
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
 
@@ -1792,23 +1926,6 @@ function BuildScreen({
           >
             Open related Deploy
           </Button>
-        </div>
-      ) : null}
-      {actionError ? (
-        <div className="mx-auto mt-4 w-full max-w-[1040px] px-5">
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">That act was refused</p>
-              <p className="text-sm mt-0.5">{actionError}</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setActionError(null)}
-            >
-              Dismiss
-            </Button>
-          </div>
         </div>
       ) : null}
       <DeployDetail
@@ -1911,23 +2028,16 @@ function TargetsScreen({
     }
   };
 
-  if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading targets...
-        </p>
-      </div>
-    );
-  }
+  if (state.type === 'loading') return <SectionSkeleton rows={3} />;
 
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load targets</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
+      <div className="py-6">
+        <ErrorState
+          title="Failed to load Targets"
+          message={state.message}
+          onRetry={() => setReloadToken((token) => token + 1)}
+        />
       </div>
     );
   }
@@ -1954,6 +2064,7 @@ function SourcesScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     | { type: 'error'; message: string }
     | { type: 'success'; result: OutputOf<'listSources'> }
   >({ type: 'loading' });
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -1976,16 +2087,16 @@ function SourcesScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     return () => {
       live = false;
     };
-  }, []);
+  }, [reloadToken]);
 
-  if (state.type === 'loading') {
-    return <ScreenLoading>Loading Sources…</ScreenLoading>;
-  }
+  if (state.type === 'loading') return <LedgerSkeleton />;
   if (state.type === 'error') {
     return (
-      <ScreenFailure title="Failed to load Sources">
-        {state.message}
-      </ScreenFailure>
+      <ScreenFailure
+        title="Failed to load Sources"
+        message={state.message}
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
   return (
@@ -2007,6 +2118,7 @@ function ArtifactsScreen({
     | { type: 'error'; message: string }
     | { type: 'success'; result: OutputOf<'listArtifacts'> }
   >({ type: 'loading' });
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -2029,16 +2141,16 @@ function ArtifactsScreen({
     return () => {
       live = false;
     };
-  }, []);
+  }, [reloadToken]);
 
-  if (state.type === 'loading') {
-    return <ScreenLoading>Loading Artifacts…</ScreenLoading>;
-  }
+  if (state.type === 'loading') return <LedgerSkeleton />;
   if (state.type === 'error') {
     return (
-      <ScreenFailure title="Failed to load Artifacts">
-        {state.message}
-      </ScreenFailure>
+      <ScreenFailure
+        title="Failed to load Artifacts"
+        message={state.message}
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
     );
   }
   return (
@@ -2163,23 +2275,16 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
     authorization?.state,
   ]);
 
-  if (state.type === 'loading') {
-    return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <p className="text-sm text-muted-foreground animate-pulse">
-          Loading repositories...
-        </p>
-      </div>
-    );
-  }
+  if (state.type === 'loading') return <SectionSkeleton rows={2} />;
 
   if (state.type === 'error') {
     return (
-      <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-5 px-5 py-6">
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="text-sm font-medium">Failed to load repositories</p>
-          <p className="text-sm mt-1">{state.message}</p>
-        </div>
+      <div className="py-6">
+        <ErrorState
+          title="Failed to load repositories"
+          message={state.message}
+          onRetry={handleRefresh}
+        />
       </div>
     );
   }

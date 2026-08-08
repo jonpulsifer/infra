@@ -71,12 +71,14 @@
  * them first.
  */
 import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { command } from '../../client.ts';
 import type { Path } from '../../forms/document.ts';
+import { valueAt } from '../../forms/document.ts';
 import { manifestFieldAt, manifestIssues } from '../../forms/manifest.ts';
 import type { FieldErrors } from '../../forms/render.tsx';
 import { SchemaFields } from '../../forms/render.tsx';
+import type { StepStatus } from '../../model.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { DiscoveryPanel } from './discovery.tsx';
@@ -86,6 +88,7 @@ import {
   refusalOf,
   type SaveOutcome,
 } from './installation.tsx';
+import { type RailStep, StepRail } from './step-rail.tsx';
 
 /** One screen: a manifest key to confirm, or the cloud to ask. */
 export type OnboardingAsk = {
@@ -173,6 +176,164 @@ export function stepAsking(path: string): number {
 }
 
 /**
+ * What is wrong with the answer the step in front of the operator asks for.
+ *
+ * The machinery for this has existed since the screen did and was consulted
+ * exactly once, after the final write — so an empty installation name walked
+ * through all four questions, and the commit press threw the operator back to
+ * step one reading a sentence of dotted schema paths. The same map, filtered by
+ * {@link stepAsking}, is a gate on `Continue`: an answer is checked where it is
+ * given, by the schema that will refuse it, and the reason is on screen beside
+ * the button that will not move.
+ *
+ * Exported because it is the whole of the gate and the one part of it worth
+ * asserting without a browser.
+ */
+export function stepIssues(document: unknown, step: number): FieldErrors {
+  const issues = new Map<string, readonly string[]>();
+  for (const [path, messages] of manifestIssues(document)) {
+    if (stepAsking(path) === step) issues.set(path, messages);
+  }
+  return issues;
+}
+
+/** The document's answer to one ask, as a line for the rail. */
+function answerTo(document: unknown, ask: OnboardingAsk): string | undefined {
+  if (ask.kind !== 'field') return undefined;
+  const value = valueAt(document, ask.at);
+  if (value === undefined || value === null) return undefined;
+  return Array.isArray(value) ? value.join(', ') : String(value);
+}
+
+/**
+ * The four asks as the rail draws them, against where the operator is.
+ *
+ * Behind is `done` rather than "answered": this screen confirms values that
+ * arrive already filled in, so "has a value" is true of every step from the
+ * first render and would make the rail a row of four ticks that never move.
+ * What it can honestly say is which questions have been walked past — and
+ * `failed` overrides that, because a step the write came back refusing is not
+ * a step behind you.
+ */
+function railSteps(
+  document: unknown,
+  errors: FieldErrors,
+  step: number,
+): readonly RailStep[] {
+  const refused = new Set([...errors.keys()].map(stepAsking));
+  return ONBOARDING_ASKS.map((ask, index) => ({
+    title: ask.title,
+    value: answerTo(document, ask),
+    status: (refused.has(index)
+      ? 'failed'
+      : index === step
+        ? 'running'
+        : index < step
+          ? 'done'
+          : 'waiting') satisfies StepStatus,
+  }));
+}
+
+/**
+ * The two maps of what is wrong, as one map for the controls.
+ *
+ * The server's issues and the schema's are the same kind of fact keyed the same
+ * way, and a control that rendered only the first would stay silent about the
+ * value that is stopping the button beside it. The server's win a collision:
+ * it is the authority, and it has seen the whole document.
+ */
+function merged(errors: FieldErrors, blocking: FieldErrors): FieldErrors {
+  if (blocking.size === 0) return errors;
+  return new Map([...blocking, ...errors]);
+}
+
+/**
+ * The step the URL is on, clamped, and `0` for a URL that names none.
+ *
+ * The hash is already this app's router, so browser Back was moving the URL
+ * under a wizard that neither followed it nor noticed. Clamped rather than
+ * validated because the only input is something a human typed into an address
+ * bar, and the honest answer to `#/setup/9` is the last question.
+ */
+function stepInHash(): number {
+  if (typeof location === 'undefined') return 0;
+  const asked = /^#\/setup\/(\d+)/.exec(location.hash)?.[1];
+  const at = asked === undefined ? 1 : Number(asked);
+  return Math.min(Math.max(at - 1, 0), ONBOARDING_ASKS.length - 1);
+}
+
+/** Where the in-progress document is kept between two loads of one tab. */
+const HELD = 'spindrift.setup';
+
+/**
+ * The document a reload interrupted, or `undefined` for a fresh start.
+ *
+ * `sessionStorage` rather than `localStorage`, and it is the one-write design
+ * that decides which: nothing is stored server-side until the last press, so
+ * four answers live only here — but they are answers about *this* tab's visit
+ * to *this* installation, and a document surviving until next week would be a
+ * document proposed against an installation somebody else has since configured.
+ *
+ * Every failure answers "start fresh". Storage a browser refuses, a body
+ * another version of this screen wrote, a private window that throws on read —
+ * none of them are worth a screen of their own, and all of them are survivable
+ * by asking the four questions again.
+ */
+function restored(): unknown {
+  try {
+    const held = sessionStorage.getItem(HELD);
+    const document: unknown = held === null ? null : JSON.parse(held);
+    return typeof document === 'object' && document !== null
+      ? document
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function remember(document: unknown): void {
+  try {
+    sessionStorage.setItem(HELD, JSON.stringify(document));
+  } catch {
+    // A browser that will not store this is a browser where F5 costs four
+    // answers, which is where this screen started. It is not a refusal.
+  }
+}
+
+/** A refused path, named as the question that asks about it. */
+function refusedAs(path: string): string {
+  const at = stepAsking(path);
+  return ONBOARDING_ASKS[at]?.title ?? path;
+}
+
+/**
+ * The sentence a document the schema refuses is reported with.
+ *
+ * The paths are what the schema keys its issues by and they are the wrong
+ * vocabulary for the one screen whose whole premise is naming keys in human
+ * terms — `installation.name, supplyChain.registry are not valid` was the last
+ * thing an operator read before being thrown back to step one. Every path a
+ * step asks about is named as that step; the rest are named as themselves,
+ * because discovery writes values this screen never offers a control for and
+ * pointing at a question that does not ask them would be worse than the path.
+ */
+export function refusalSentence(paths: readonly string[]): string {
+  const asked = [
+    ...new Set(paths.filter((path) => stepAsking(path) >= 0).map(refusedAs)),
+  ];
+  const unasked = paths.filter((path) => stepAsking(path) < 0);
+  return [
+    'This installation was not written.',
+    asked.length === 0 ? '' : `Answer again: ${asked.join('; ')}.`,
+    unasked.length === 0
+      ? ''
+      : `These values were refused and no question here asks about them: ${unasked.join(', ')}.`,
+  ]
+    .filter((part) => part !== '')
+    .join(' ');
+}
+
+/**
  * Ask the four, then write the document once.
  *
  * `initial` rather than a read of its own: whoever decided this installation is
@@ -191,11 +352,35 @@ export function Onboarding({
    */
   onDone(next: string | null): void;
 }) {
-  const [document, setDocument] = useState<unknown>(initial);
-  const [step, setStep] = useState(0);
+  const [document, setDocument] = useState<unknown>(
+    () => restored() ?? initial,
+  );
+  const [step, setStepState] = useState(stepInHash);
   const [errors, setErrors] = useState<FieldErrors>(new Map());
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // The step lives in the hash and the document in `sessionStorage`, which
+  // together make F5 and browser Back survivable. Both are consequences of the
+  // one-write-at-the-end design rather than complaints about it: nothing is
+  // stored server-side until the last press, so an in-memory document is four
+  // answers that a reload silently discards — and the hash is already this
+  // app's router, so Back was moving the URL under a wizard that neither
+  // followed it nor noticed.
+  const setStep = (next: number) => {
+    const clamped = Math.min(Math.max(next, 0), ONBOARDING_ASKS.length - 1);
+    setStepState(clamped);
+    if (typeof location !== 'undefined')
+      location.hash = `/setup/${clamped + 1}`;
+  };
+
+  useEffect(() => {
+    const follow = () => setStepState(stepInHash());
+    addEventListener('hashchange', follow);
+    return () => removeEventListener('hashchange', follow);
+  }, []);
+
+  useEffect(() => remember(document), [document]);
 
   const finish = async () => {
     // The same earlier-of-two-identical-checks the settings form runs, for the
@@ -221,10 +406,7 @@ export function Onboarding({
         .filter((at) => at >= 0)
         .sort((first, second) => first - second);
       if (asked[0] !== undefined) setStep(asked[0]);
-      setOutcome({
-        kind: 'invalid',
-        message: `This installation was not written, because ${paths.join(', ')} ${paths.length === 1 ? 'is' : 'are'} not valid.`,
-      });
+      setOutcome({ kind: 'invalid', message: refusalSentence(paths) });
       return;
     }
 
@@ -314,15 +496,39 @@ export function OnboardingView({
   const ask = ONBOARDING_ASKS[step];
   if (ask === undefined) return null;
   const last = step === ONBOARDING_ASKS.length - 1;
-  const form = { document, errors, disabled: saving, onChange };
+  // What the schema says about the answer in front of the operator, now, rather
+  // than what it will say after the write. The map exists either way; consulting
+  // it here is the difference between a refusal beside the control that caused
+  // it and a refusal three steps later naming a dotted path.
+  const blocking = stepIssues(document, step);
+  const held = [...blocking.values()][0]?.[0];
+  // The discovery step is the one with no form around it, so its primary button
+  // has nothing to submit — a `type="submit"` outside a form is a button that
+  // does nothing when pressed, which is how this step would have shipped.
+  const submits = ask.kind !== 'discovery';
+  const advance = () => {
+    if (blocking.size > 0) return;
+    if (last) onFinish();
+    else onStep(step + 1);
+  };
+  const form = {
+    document,
+    errors: merged(errors, blocking),
+    disabled: saving,
+    // One question on screen, so the control that asks it is where the cursor
+    // belongs. The first interaction with this product was a mouse hunt for the
+    // only box on the page.
+    autoFocus: true,
+    onChange,
+  };
 
-  return (
-    <OnboardingShell>
+  const body = (
+    <>
       <Card>
         <CardHeader>
           <Rocket aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
           <div>
-            <p className="text-[11.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
+            <p className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
               Step {step + 1} of {ONBOARDING_ASKS.length}
             </p>
             <CardTitle>{ask.title}</CardTitle>
@@ -347,7 +553,7 @@ export function OnboardingView({
 
       <Outcome outcome={outcome} />
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Button
           type="button"
           variant="outline"
@@ -356,18 +562,63 @@ export function OnboardingView({
         >
           Back
         </Button>
-        {last ? (
-          <Button type="button" disabled={saving} onClick={onFinish}>
-            {saving ? 'Configuring…' : 'Configure this installation'}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            disabled={saving}
-            onClick={() => onStep(step + 1)}
+        <div className="flex items-center gap-3">
+          {/* Whatever the button is currently mumbling, said out loud. A
+              ceremony that takes as long as a cloud write takes was announced
+              to a screen reader by nothing at all. */}
+          <p
+            role="status"
+            aria-live="polite"
+            className="text-xs text-muted-foreground"
           >
-            Continue
+            {saving
+              ? 'Writing this installation…'
+              : held === undefined
+                ? ''
+                : held}
+          </p>
+          <Button
+            type={submits ? 'submit' : 'button'}
+            disabled={saving || blocking.size > 0}
+            onClick={submits ? undefined : advance}
+          >
+            {last
+              ? saving
+                ? 'Configuring…'
+                : 'Configure this installation'
+              : 'Continue'}
           </Button>
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <OnboardingShell
+      rail={
+        <StepRail
+          steps={railSteps(document, errors, step)}
+          current={step}
+          onJump={saving ? undefined : onStep}
+        />
+      }
+    >
+      <div>
+        {ask.kind === 'discovery' ? (
+          // The one step with no form of its own, because it already has one:
+          // the discovery panel submits its narrowing, and a form nested in a
+          // form is markup a browser repairs into something neither meant.
+          <div className="flex flex-col gap-6">{body}</div>
+        ) : (
+          <form
+            className="flex flex-col gap-6"
+            onSubmit={(event) => {
+              event.preventDefault();
+              advance();
+            }}
+          >
+            {body}
+          </form>
         )}
       </div>
     </OnboardingShell>
@@ -459,10 +710,23 @@ function OnboardingDone({
  * An unconfigured installation has no Apps, no Builds and no Targets, so the
  * navigation that reaches them would be five links to five empty screens and a
  * sixth to the settings form this screen exists to stand in front of.
+ *
+ * What it does have is a fixed position. The column was vertically centred, and
+ * step three mounts a discovery panel that grows by five rows when the cloud
+ * answers — so every Continue, and every successful ask, slid the whole screen
+ * under the reader. A wizard reads as built mostly because its chrome does not
+ * move, so the header and the rail are pinned and only the step changes height.
  */
-function OnboardingShell({ children }: { readonly children: ReactNode }) {
+function OnboardingShell({
+  rail,
+  children,
+}: {
+  /** The four questions, when there are four questions to show. */
+  readonly rail?: ReactNode;
+  readonly children: ReactNode;
+}) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-[640px] flex-col justify-center gap-6 px-5 py-12">
+    <main className="mx-auto flex min-h-dvh w-full max-w-[880px] flex-col gap-8 px-5 pb-16 pt-[12vh]">
       <div className="flex flex-col items-center gap-2 text-center">
         <span className="font-mono text-xl font-bold tracking-[0.25em] text-foreground">
           SPINDRIFT
@@ -471,7 +735,14 @@ function OnboardingShell({ children }: { readonly children: ReactNode }) {
           Nothing here is configured yet. Four answers and it is.
         </p>
       </div>
-      {children}
+      {rail === undefined ? (
+        <div className="mx-auto w-full max-w-[640px]">{children}</div>
+      ) : (
+        <div className="grid gap-8 md:grid-cols-[210px_minmax(0,1fr)]">
+          <div className="md:sticky md:top-8 md:self-start">{rail}</div>
+          <div className="min-w-0">{children}</div>
+        </div>
+      )}
     </main>
   );
 }
