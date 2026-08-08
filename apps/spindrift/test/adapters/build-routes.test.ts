@@ -348,9 +348,47 @@ describe('the hosted build route', () => {
     expect(result.status).toBe('FAILED');
     if (result.status === 'FAILED') {
       expect(result.reason).toBe('TARGET_UNREACHABLE');
-      expect(result.detail).toContain('no run appeared');
+      expect(result.detail).toContain('no run named');
     }
     expect(text(events)).toContain('no run named');
+  });
+
+  test('a lookup that flakes after a successful dispatch is retried, not failed', async () => {
+    // Observed live: the dispatch worked, the call that goes looking for the
+    // run it created answered `500`, and the build was recorded `FAILED` while
+    // the run it dispatched ran to green. A `5xx` is the far side's fault by
+    // definition — it says nothing about the dispatch, which already succeeded
+    // and is already on the log.
+    const { route } = hostedRoute({ actions: { listFailures: 2 } });
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(text(events)).toContain('the dispatch succeeded');
+    expect(text(events)).toContain('retrying');
+  });
+
+  test('a lookup that never recovers blames the lookup, not the dispatch', async () => {
+    const { route } = hostedRoute(
+      { actions: { listFailures: 1000 } },
+      { discoveryMs: 5_000 },
+    );
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') {
+      expect(result.reason).toBe('TARGET_UNREACHABLE');
+      expect(result.detail).toContain('the workflow was dispatched but');
+      expect(result.detail).toContain('kept failing');
+    }
+    expect(text(events)).not.toContain('dispatch failed');
+  });
+
+  test('a status read that flakes mid-run is retried within the budget', async () => {
+    const { route } = hostedRoute({ actions: { statusFailures: 2 } });
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(text(events)).toContain('could not be read; retrying');
   });
 
   test('a red run is a build failure carrying the runner’s own log', async () => {
