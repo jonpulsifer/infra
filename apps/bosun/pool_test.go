@@ -471,7 +471,8 @@ func TestWorkspaceDiskIsCreatedOnBootAndDeletedOnRetire(t *testing.T) {
 	class := p.cfg.Classes["skiff-test"]
 	class.Workspace = "1M"
 	p.cfg.Classes["skiff-test"] = class
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	p.fill(ctx)
 	s := onlySkiff(t, p)
@@ -490,10 +491,15 @@ func TestWorkspaceDiskIsCreatedOnBootAndDeletedOnRetire(t *testing.T) {
 		t.Fatalf("workspace disk missing from argv: %v", chCall.args)
 	}
 
-	p.retire(ctx, s, testLogger())
-	if _, err := os.Stat(s.paths.workspace); !os.IsNotExist(err) {
-		t.Fatalf("workspace image survived retire: %v", err)
-	}
+	// Retire through the guest's own exit rather than by calling retire
+	// directly: awaitExit owns that path, and cancelling first stops it
+	// spawning a replacement whose files would outlive the test.
+	cancel()
+	chCall.proc.exit(nil)
+	waitFor(t, "the workspace image is deleted with its skiff", func() bool {
+		_, err := os.Stat(s.paths.workspace)
+		return os.IsNotExist(err)
+	})
 }
 
 func TestSweepClearsOrphanedWorkspaceImages(t *testing.T) {
