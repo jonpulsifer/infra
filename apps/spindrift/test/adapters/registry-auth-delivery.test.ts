@@ -49,9 +49,7 @@ describe('the Docker config a builder is handed', () => {
     });
     // The spelling an operator actually stores reaches the same entry.
     expect(
-      JSON.parse(
-        dockerConfigFor([{ ...AUTH[0]!, host: 'docker.io' }]) ?? '{}',
-      ),
+      JSON.parse(dockerConfigFor([{ ...AUTH[0]!, host: 'docker.io' }]) ?? '{}'),
     ).toEqual(JSON.parse(config ?? '{}'));
   });
 
