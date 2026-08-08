@@ -5,7 +5,6 @@ namespace: monitoring
 configMapGenerator:
   - name: dashboards
     files:
-      - dht22.json
       - coredns.json
       - spore.json
 generatorOptions:

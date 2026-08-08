@@ -42,8 +42,6 @@ spec:
             - name: media
               mountPath: /mnt/media
               readOnly: false
-            - name: hardware-acceleration
-              mountPath: /dev/dri
             - name: cache
               mountPath: /cache
             - name: tmp
@@ -60,8 +58,10 @@ spec:
           hostPath:
             path: /mnt/disks/media
             type: DirectoryOrCreate
-        - name: hardware-acceleration
-          hostPath:
-            path: /dev/dri
+      # No /dev/dri hostPath: the gpu.intel.com/i915 limit above already has the
+      # device plugin inject the render node. Bind-mounting the whole directory
+      # on top of that also drags in /dev/dri/by-path, where a dangling
+      # simple-framebuffer symlink survives the handover to i915 at boot and
+      # fails container creation outright.
       nodeSelector:
         intel.feature.node.kubernetes.io/gpu: "true"

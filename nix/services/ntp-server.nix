@@ -18,9 +18,15 @@ in
   services.chrony = {
     enable = true;
     enableNTS = true;
+    # Every entry must answer NTS-KE on tcp/4460, because enableNTS makes that
+    # the only way chrony will accept a source. A server that does not speak it
+    # is not a fallback — it is silently unselectable, and when the remaining
+    # source blips the host drops to orphan mode and reports the kernel clock
+    # unsynchronised.
     servers = [
       "time.nrc.ca"
-      "time.chu.nrc.ca"
+      "time.cloudflare.com"
+      "nts.netnod.se"
     ];
     extraConfig = ''
       # The two LAN servers poll one another so orphan mode can elect a leader

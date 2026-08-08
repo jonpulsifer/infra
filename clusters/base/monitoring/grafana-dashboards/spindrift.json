@@ -33,7 +33,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(kube_pod_status_ready{condition=\"true\", namespace=\"spindrift\"})",
+          "expr": "sum(kube_pod_status_ready{condition=\"true\", namespace=~\"spindrift|spindrift-apps\"})",
           "refId": "A",
           "instant": true
         }
@@ -71,7 +71,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"spindrift\"}[1h]))",
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=~\"spindrift|spindrift-apps\"}[1h]))",
           "refId": "A",
           "instant": true
         }
@@ -110,7 +110,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "kube_pod_status_phase{namespace=\"spindrift\"}",
+          "expr": "kube_pod_status_phase{namespace=~\"spindrift|spindrift-apps\"}",
           "legendFormat": "{{pod}} {{phase}} ({{cluster}})",
           "refId": "A"
         }
@@ -144,7 +144,7 @@
       "targets": [
         {
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{namespace=\"spindrift\"}",
+          "expr": "{namespace=~\"spindrift|spindrift-apps\"}",
           "refId": "A"
         }
       ],

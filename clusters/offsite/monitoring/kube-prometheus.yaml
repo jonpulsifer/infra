@@ -39,8 +39,11 @@ spec:
         kubeControllerManager: false
         kubeProxy: false
         kubeSchedulerAlerting: false
+    # Kubelet carries cAdvisor, so every container_* series and with it the
+    # whole k8s-resources dashboard set depends on this being scraped. It also
+    # backs the KubeletDown rule, which defaultRules leaves on.
     kubelet:
-      enabled: false
+      enabled: true
     kubeControllerManager:
       enabled: false
     kubeEtcd:
@@ -55,6 +58,11 @@ spec:
         serviceDiscoveryRole: EndpointSlice
         retention: 15d
         retentionSize: 20GB
+        # `cluster` is what tells the two sites apart once alerts land in one
+        # Discord channel, and it is the variable every multi-cluster dashboard
+        # in the chart groups on.
+        externalLabels:
+          cluster: ${CLUSTER_NAME}
         storageSpec:
           volumeClaimTemplate:
             spec:
@@ -67,6 +75,48 @@ spec:
         # and any ServiceMonitors this chart ships, via the release label.
         serviceMonitorSelectorNilUsesShards: false
     alertmanager:
+      # The chart's stock route sends everything to a receiver named "null",
+      # which accepts alerts and discards them. Without this block the whole
+      # pipeline runs and notifies nobody. Offsite has no Alertmanager ingress,
+      # so Discord is the only way an alert from here reaches anyone.
+      config:
+        route:
+          group_by: [cluster, namespace, alertname]
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 12h
+          receiver: discord
+          routes:
+            # Watchdog fires forever by design — it means the pipeline is alive.
+            # Delivering it twice a day trains the channel to ignore itself, and
+            # its absence is the signal, which Discord cannot show anyway.
+            - receiver: "null"
+              matchers:
+                - alertname = "Watchdog"
+        receivers:
+          - name: "null"
+          - name: discord
+            discord_configs:
+              # Read from the mounted file so the URL never lands in this
+              # HelmRelease, the rendered manifest, or the wiki.
+              - webhook_url_file: /etc/alertmanager/secrets/alertmanager-discord/webhook-url
+                send_resolved: true
+        inhibit_rules:
+          - source_matchers: [severity = "critical"]
+            target_matchers: [severity =~ "warning|info"]
+            equal: [namespace, alertname]
+          - source_matchers: [severity = "warning"]
+            target_matchers: [severity = "info"]
+            equal: [namespace, alertname]
+          - source_matchers: [alertname = "InfoInhibitor"]
+            target_matchers: [severity = "info"]
+            equal: [namespace]
+          - target_matchers: [alertname = "InfoInhibitor"]
+      alertmanagerSpec:
+        # Mounts at /etc/alertmanager/secrets/<name>/, which is what
+        # webhook_url_file above reads.
+        secrets:
+          - alertmanager-discord
       ingress:
         enabled: false
     grafana:

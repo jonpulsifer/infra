@@ -15,6 +15,7 @@ gcloud = "latest"
 "github:tronbyt/pixlet" = "v0.53.1"
 go = "latest"
 helm = "latest"
+jq = "latest"
 k9s = "latest"
 kubectl = "latest"
 kustomize = "latest"
@@ -52,6 +53,10 @@ run = "tofu fmt -recursive"
 [tasks."validation-impact:test"]
 description = "Test validation-impact routing"
 run = "bash .github/scripts/validation-impact_test.sh"
+
+[tasks.alerts]
+description = "Firing Alertmanager alerts on every cluster (optional substring filter)"
+run = "bash scripts/alerts.sh"
 
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
