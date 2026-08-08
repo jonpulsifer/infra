@@ -16,10 +16,15 @@
 # policy, and it buys back only the ~10% nested-virt tax.
 
 locals {
-  # The one knob worth turning while measuring. C4 in us-east1-b; changing
-  # family means re-checking the nested-virt column, not just the price.
+  # The one knob worth turning while measuring. Changing family means
+  # re-checking the nested-virt column, not just the price.
   tender_machine_type = "c4-standard-8" # 8 vCPU / 30 GB
   tender_disk_size    = 100             # closure + hull + warm x workspace
+
+  # Everything below is on the default provider -- northamerica-northeast1-a --
+  # rather than the us-east1 `free-tier` alias the rest of this root uses.
+  # Montreal carries C4, and there is nothing free-tier about a C4.
+  tender_subnet_cidr = "10.13.38.0/28"
 }
 
 # No IAM role bindings anywhere: this host needs nothing from GCP beyond
@@ -39,11 +44,21 @@ data "google_storage_bucket_objects" "tender" {
   prefix = "tender/nixos-image-google-compute"
 }
 
+# A VPC is global but a subnetwork is regional, and the module's only subnet is
+# in us-east1. This is a second subnet on the same network rather than a second
+# network: the module's IAP-range SSH firewall rule is network-scoped, so it
+# already covers anything landing here.
+resource "google_compute_subnetwork" "tender" {
+  name                     = "tender"
+  ip_cidr_range            = local.tender_subnet_cidr
+  network                  = module.network.network.self_link
+  private_ip_google_access = true
+}
+
 resource "google_compute_image" "tender" {
-  provider          = google.free-tier
   name              = "tender"
   family            = "tender"
-  storage_locations = ["us-east1"]
+  storage_locations = ["northamerica-northeast1"]
   raw_disk {
     source = "https://storage.googleapis.com/homelab-ng-free/${data.google_storage_bucket_objects.tender.bucket_objects[0].name}"
   }
@@ -61,11 +76,10 @@ resource "google_compute_image" "tender" {
 # same way every other fleet host does; the image is a birth certificate, not a
 # deploy channel.
 resource "google_compute_disk" "tender" {
-  provider = google.free-tier
-  name     = "tender"
-  image    = google_compute_image.tender.self_link
-  size     = local.tender_disk_size
-  type     = "hyperdisk-balanced"
+  name  = "tender"
+  image = google_compute_image.tender.self_link
+  size  = local.tender_disk_size
+  type  = "hyperdisk-balanced"
 
   lifecycle {
     ignore_changes = [image]
@@ -73,7 +87,6 @@ resource "google_compute_disk" "tender" {
 }
 
 resource "google_compute_instance" "tender" {
-  provider                  = google.free-tier
   name                      = "tender"
   description               = "Cloud bosun host: a warm pool of microVM Actions runners"
   machine_type              = local.tender_machine_type
@@ -112,7 +125,7 @@ resource "google_compute_instance" "tender" {
   # module's IAP-range SSH allow.
   network_interface {
     network    = module.network.network.self_link
-    subnetwork = module.network.subnet.self_link
+    subnetwork = google_compute_subnetwork.tender.self_link
     access_config {}
   }
 
