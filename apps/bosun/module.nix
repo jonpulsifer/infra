@@ -97,7 +97,7 @@ in
 
     metricsFile = mkOption {
       type = types.str;
-      default = "/var/lib/node-exporter-textfiles/bosun.prom";
+      default = "/var/lib/prometheus-node-exporter-text-files/bosun.prom";
       description = ''
         Prometheus textfile for node-exporter's textfile collector to serve.
         Empty disables it.
@@ -223,7 +223,13 @@ in
         LogsDirectory = "bosun";
         # Holds metricsFile. 0755 so node-exporter -- which reads it from
         # outside this unit, as a DaemonSet mounting the host path -- can.
-        StateDirectory = "node-exporter-textfiles";
+        #
+        # The directory name is the fleet's, not bosun's:
+        # nix/services/spore-native-boot.nix already drops a .prom file here.
+        # ponytail: StateDirectory chowns it to bosun, so one writer per host.
+        # A second host service wanting the same directory wants tmpfiles and
+        # an explicit ReadWritePaths instead.
+        StateDirectory = "prometheus-node-exporter-text-files";
         StateDirectoryMode = "0755";
 
         # Every skiff is a child of this unit, so one filter covers the whole
