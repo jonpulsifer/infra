@@ -90,6 +90,13 @@ export interface FakeActionsOptions {
    * its text — the one failure a green run can still die of.
    */
   logStatus?: number;
+  /**
+   * List calls that answer `500` before the endpoint serves. Models the far
+   * side flaking on the lookup for a run whose dispatch already worked.
+   */
+  listFailures?: number;
+  /** Status reads that answer `500` before the endpoint serves. */
+  statusFailures?: number;
 }
 
 interface FakeRun {
@@ -169,6 +176,7 @@ export class FakeGitHub {
   private pullNumber = 0;
   private runNumber = 0;
   private listCalls = 0;
+  private statusCalls = 0;
   private readonly runs: FakeRun[] = [];
   private readonly actions: Required<FakeActionsOptions>;
 
@@ -182,6 +190,8 @@ export class FakeGitHub {
       conclusion: options.actions?.conclusion ?? 'success',
       log: options.actions?.log ?? defaultBuildLog,
       logStatus: options.actions?.logStatus ?? 200,
+      listFailures: options.actions?.listFailures ?? 0,
+      statusFailures: options.actions?.statusFailures ?? 0,
     };
   }
 
@@ -362,6 +372,9 @@ export class FakeGitHub {
     const list = rest.match(/^\/actions\/workflows\/([^/]+)\/runs$/);
     if (list && method === 'GET') {
       this.listCalls += 1;
+      if (this.listCalls <= this.actions.listFailures) {
+        return this.json({ message: 'Server Error' }, 500);
+      }
       const visible =
         this.listCalls > this.actions.discoveryDelay ? this.runs : [];
       return this.json({
@@ -378,6 +391,10 @@ export class FakeGitHub {
     if (read && method === 'GET') {
       const run = this.runs.find((each) => each.id === Number(read[1]));
       if (run === undefined) return this.notFound();
+      this.statusCalls += 1;
+      if (this.statusCalls <= this.actions.statusFailures) {
+        return this.json({ message: 'Server Error' }, 500);
+      }
       run.reads += 1;
       const done = run.reads > this.actions.duration;
       return this.json({

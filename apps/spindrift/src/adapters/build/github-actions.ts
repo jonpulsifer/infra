@@ -454,26 +454,42 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       timeoutMs: this.options.discoveryMs ?? DEFAULT_RUN_DISCOVERY_MS,
     });
     let run: ActionsRun | null = null;
+    // A lookup the far side would not answer is retried until the discovery
+    // deadline, not treated as the dispatch failing: the dispatch already
+    // succeeded and is already on the log, and a `5xx` is the one status class
+    // that says nothing about the request. The last refusal is kept so that a
+    // deadline that expires this way blames the lookup, not the dispatch.
+    let lookupFailure: string | null = null;
     while (run === null) {
       if (discovery.expired()) {
-        yield {
-          type: 'log',
-          at: now(),
-          line: `no run named “${runName}” appeared in ${repository}`,
-        };
+        const complaint =
+          lookupFailure === null
+            ? `no run named “${runName}” appeared in ${repository}`
+            : `the lookup for run “${runName}” in ${repository} kept failing: ${lookupFailure}`;
+        yield { type: 'log', at: now(), line: complaint };
         return buildFailed(
           logs,
           'TARGET_UNREACHABLE',
-          `the workflow was dispatched but no run appeared in ${repository}`,
+          `the workflow was dispatched but ${complaint}`,
           { repository, workflow, runName },
         );
       }
       await discovery.tick();
-      const runs = await host.workflowRuns(ref, repository, {
-        workflow,
-        branch,
-      });
-      run = runs.find((candidate) => candidate.name === runName) ?? null;
+      try {
+        const runs = await host.workflowRuns(ref, repository, {
+          workflow,
+          branch,
+        });
+        run = runs.find((candidate) => candidate.name === runName) ?? null;
+        lookupFailure = null;
+      } catch (error) {
+        lookupFailure = error instanceof Error ? error.message : String(error);
+        yield {
+          type: 'log',
+          at: now(),
+          line: `the dispatch succeeded and the lookup for its run did not; retrying: ${lookupFailure}`,
+        };
+      }
     }
 
     yield { type: 'log', at: now(), line: `run ${run.id} started` };
@@ -496,13 +512,25 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     let jobs: readonly ActionsJob[] = [];
 
     for (;;) {
-      jobs = await host.runJobs(ref, repository, run.id);
-      for (const event of stepEvents(jobs, seen, now())) yield event;
+      try {
+        jobs = await host.runJobs(ref, repository, run.id);
+        for (const event of stepEvents(jobs, seen, now())) yield event;
 
-      const current = await host.workflowRun(ref, repository, run.id);
-      if (current !== null && current.status === 'completed') {
-        conclusion = current.conclusion;
-        break;
+        const current = await host.workflowRun(ref, repository, run.id);
+        if (current !== null && current.status === 'completed') {
+          conclusion = current.conclusion;
+          break;
+        }
+      } catch (error) {
+        // Same posture as the discovery lookup: the run demonstrably exists,
+        // so a status read the far side would not answer is retried within
+        // the budget rather than ending a build that is still going.
+        const detail = error instanceof Error ? error.message : String(error);
+        yield {
+          type: 'log',
+          at: now(),
+          line: `the status of run ${run.id} could not be read; retrying: ${detail}`,
+        };
       }
       if (budget.expired()) {
         return buildFailed(
