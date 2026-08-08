@@ -77,4 +77,17 @@
       warm = 1;
     };
   };
+
+  # The pool's declared ceiling is 2048M + 8192M = 10 GiB, which riptide does
+  # not have to spare: 15.2 GiB total, ~5 GiB held by kubelet and the system,
+  # and no swap. Only a skiff-nixos job peaking at the same time as a
+  # skiff-ubuntu one gets there -- warm=1 serialises within a label but not
+  # across them -- and without a bound the *host* OOM killer picks the victim,
+  # which on a worker node may be a pod or kubelet rather than a skiff.
+  #
+  # 9G clears the realistic worst case (one 8192M guest plus the other class
+  # idling, ~8.8 GiB) and stops the pathological one inside bosun's own
+  # cgroup. Every skiff is a child of this unit, so the limit covers the whole
+  # pool the same way IPAddressDeny does.
+  systemd.services.bosun.serviceConfig.MemoryMax = "9G";
 }
