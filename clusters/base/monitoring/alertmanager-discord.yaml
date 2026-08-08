@@ -30,11 +30,14 @@ spec:
         key: aujvxijpz3oi25ccfdynev5sb4
         property: password
 ---
-# Appended by the operator as a sub-route of the HelmRelease's top-level route,
-# after that route's own Watchdog entry — so Watchdog is still swallowed first
-# and everything surviving it lands here. Carries no matchers of its own, which
-# only catches everything because alertmanagerConfigMatcherStrategy is None; the
-# default would pin it to alerts labelled namespace=monitoring.
+# The operator merges this as the FIRST sub-route of the HelmRelease's
+# top-level route and forces `continue: true` on it, so it is evaluated before
+# that route's own entries and does not stop them matching. Watchdog therefore
+# has to be excluded here: relying on a later `alertname = "Watchdog"` route to
+# swallow it first does not work, it just lands in both receivers.
+#
+# Matching everything else only works because alertmanagerConfigMatcherStrategy
+# is None; the default would pin this to alerts labelled namespace=monitoring.
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -45,6 +48,10 @@ metadata:
 spec:
   route:
     receiver: discord
+    matchers:
+      - name: alertname
+        value: Watchdog
+        matchType: "!="
     groupBy: [cluster, namespace, alertname]
     groupWait: 30s
     groupInterval: 5m
