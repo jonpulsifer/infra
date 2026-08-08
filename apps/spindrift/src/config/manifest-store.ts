@@ -19,6 +19,7 @@ import {
 } from './manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
+  governingDeclaration,
   loadManifestIfPresent,
   ManifestError,
   resolveManifest,
@@ -75,12 +76,17 @@ export async function loadStoredManifest(
       `installation manifest: the stored manifest is not valid for this build, so this installation is being re-seeded from the mounted declaration — anything configured through the UI that the declaration does not carry is lost: ${unreadable.message}`,
     );
   }
+  // Seeding takes the declaration whatever it is — a stand-in carrying this
+  // release's own hostname is the whole of what makes a chart-only install
+  // reachable (ticket 77). Governing is the other half of the same document and
+  // does not follow: see {@link governingDeclaration}.
+  const governing = governingDeclaration(declaration);
   const declared =
     stored === null
       ? (declaration ?? DEFAULT_PLACEHOLDER_MANIFEST)
-      : declaration === null
+      : governing === null
         ? stored
-        : governedByDeclaration(stored, declaration);
+        : governedByDeclaration(stored, governing);
   if (unreadable === null && stored !== null && declaration !== null) {
     // The generic half of this warning has existed since the rule did — "a
     // declaration is mounted and ignored" — and it is not enough. Proven live:
@@ -232,7 +238,8 @@ export function governedSliceRefusal(
   manifest: AuthoredManifest,
   declaration: AuthoredManifest | null | undefined,
 ): string | null {
-  if (declaration == null) return null;
+  const governing = governingDeclaration(declaration);
+  if (governing === null) return null;
   // Both sides through the same parse. The schema normalizes as it validates —
   // `supplyChain.registry` is authored as a string or a list and comes out a
   // list — and {@link governedByDeclaration} validates what it merges, so
@@ -240,7 +247,7 @@ export function governedSliceRefusal(
   // normalization as a path a boot reverts and refuse a document nobody edited.
   const normalized = validateManifest(manifest, 'the submitted manifest');
   const reverted = diffManifestPaths(
-    governedByDeclaration(normalized, declaration),
+    governedByDeclaration(normalized, governing),
     normalized,
   );
   if (reverted.length === 0) return null;

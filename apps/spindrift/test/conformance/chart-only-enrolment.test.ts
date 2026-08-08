@@ -25,11 +25,14 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
+  governingDeclaration,
   isUnconfiguredInstallation,
   validateManifest,
 } from '../../src/config/manifest.ts';
+import { governedSliceRefusal } from '../../src/config/manifest-store.ts';
 
 /** The repository root, for reading the chart's copy of the placeholder. */
 const REPO_ROOT = join(import.meta.dir, '../../../..');
@@ -101,5 +104,90 @@ describe('the chart-only default manifest matches the code copy', () => {
     );
     expect(seeded.controlPlane.hostname).toBe('spindrift.lolwtf.ca');
     expect(isUnconfiguredInstallation(seeded)).toBe(true);
+  });
+});
+
+/**
+ * The wizard the chart-only install exists to reach must be able to finish.
+ *
+ * 77 got the first operator to the door and 81 governs the two vessels an
+ * installation is built on, so a rollout cannot point a control plane at a
+ * boundary that is not there. On a chart-only install those two meet: the
+ * declaration the chart mounts to bind the relying party is the *stand-in*, and
+ * governing it locks `spindrift-vessel` and `spindrift-artifacts` — names of
+ * nothing — over the real values, forever, because the only surface that could
+ * set them is refused for editing a governed path.
+ *
+ * Observed live 2026-08-08 on the acceptance installation, at the wizard's
+ * artifacts-project step:
+ *
+ *   the vessels this installation is built on … would be taken back at:
+ *   vessels.1.shared.artifactsProject, vessels.1.location.project.
+ *   Change the declaration instead.
+ *
+ * There is no declaration to change: the operator installed a chart.
+ */
+describe('a stand-in declaration governs nothing', () => {
+  /** The document the chart mounts on a real release. */
+  async function seeded(): Promise<AuthoredManifest> {
+    const raw = await Bun.file(DEFAULT_MANIFEST_FILE).text();
+    return validateManifest(
+      Bun.YAML.parse(
+        raw.replace(
+          '{{ .Values.hostname | quote }}',
+          JSON.stringify('spindrift-acceptance.lolwtf.ca'),
+        ),
+      ),
+      'chart default manifest',
+    );
+  }
+
+  /** The same document with the two values the wizard exists to collect. */
+  function configured(base: AuthoredManifest): AuthoredManifest {
+    return validateManifest(
+      {
+        ...base,
+        vessels: base.vessels.map((vessel) =>
+          vessel.name === base.installation.homeVessel
+            ? {
+                ...vessel,
+                location: { project: 'bluenose' },
+                shared: {
+                  ...(vessel as { shared?: Record<string, unknown> }).shared,
+                  artifactsProject: 'trusted-builds',
+                },
+              }
+            : vessel,
+        ),
+      },
+      'the operator’s document',
+    );
+  }
+
+  test('the wizard’s own two fields are accepted, not refused', async () => {
+    const stand = await seeded();
+    expect(governedSliceRefusal(configured(stand), stand)).toBeNull();
+  });
+
+  test('and an operator’s declaration still governs them', async () => {
+    // The other direction, so this does not become "nothing governs anything".
+    // One key away from the stand-in is a document somebody wrote, and 81's
+    // rule applies to it in full.
+    const stand = await seeded();
+    const authored = validateManifest(
+      { ...stand, installation: { ...stand.installation, name: 'offsite' } },
+      'an operator’s declaration',
+    );
+    const refusal = governedSliceRefusal(configured(authored), authored);
+    expect(refusal).toContain('vessels.1.location.project');
+    expect(refusal).toContain('Change the declaration instead');
+  });
+
+  test('a boot leaves the configured values standing', async () => {
+    // The refusal is the symptom; this is the thing it was protecting against.
+    // `governedByDeclaration` runs on every boot, so a stand-in that governed
+    // would put the placeholder projects back under a running installation.
+    const stand = await seeded();
+    expect(governingDeclaration(stand)).toBeNull();
   });
 });

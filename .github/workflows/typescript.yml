@@ -68,14 +68,35 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           has_changes="$ANY_CHANGED"
-          release=clusters/offsite/apps/spindrift/helm-release.yaml
 
-          # Continuous delivery only rewrites this image digest. The rest of
-          # the release is a conformance-test input and remains significant.
-          if [[ "$ALL_CHANGED_FILES" == "$release" ]] &&
-            git diff --quiet \
+          # Every release continuous delivery stamps this image's digest into,
+          # from `.github/containers.json`. Plural since the clean-installation
+          # acceptance environment consumes the same image: one bump rewrites
+          # both files, so a check that only knew the first would run the whole
+          # suite on every digest bump forever.
+          releases=(
+            clusters/offsite/apps/spindrift/helm-release.yaml
+            clusters/offsite/apps/spindrift-acceptance/helm-release.yaml
+          )
+
+          # Continuous delivery only rewrites the image digest. The rest of each
+          # release is a conformance-test input and remains significant, so this
+          # skips only when every changed file is one of those releases and
+          # every one of them differs at nothing but that line.
+          only_digests=true
+          for changed in $ALL_CHANGED_FILES; do
+            known=false
+            for release in "${releases[@]}"; do
+              [[ "$changed" == "$release" ]] && known=true && break
+            done
+            if ! "$known" || ! git diff --quiet \
               --ignore-matching-lines='^[[:space:]]*image: ghcr\.io/jonpulsifer/spindrift:latest@sha256:[[:xdigit:]]{64}$' \
-              "$BASE_SHA" "$HEAD_SHA" -- "$release"; then
+              "$BASE_SHA" "$HEAD_SHA" -- "$changed"; then
+              only_digests=false
+              break
+            fi
+          done
+          if [[ -n "$ALL_CHANGED_FILES" ]] && "$only_digests"; then
             has_changes=false
           fi
 

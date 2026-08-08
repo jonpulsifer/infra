@@ -37,6 +37,7 @@ function screen({
   saving = false,
   divergence = [] as readonly string[],
   declaration = null as unknown,
+  declarationGoverns = false,
 } = {}): string {
   return renderToStaticMarkup(
     <InstallationSettingsView
@@ -47,6 +48,7 @@ function screen({
       saving={saving}
       divergence={divergence}
       declaration={declaration}
+      declarationGoverns={declarationGoverns}
       onChange={() => undefined}
       onSave={() => undefined}
       onReload={() => undefined}
@@ -188,7 +190,11 @@ describe('the vessels this installation is built on are read-only', () => {
   }
 
   test('a declaration locks the pointers and the entries they name', () => {
-    const markup = screen({ document: withAppVessel, declaration: manifest });
+    const markup = screen({
+      document: withAppVessel,
+      declaration: manifest,
+      declarationGoverns: true,
+    });
 
     expect(locked(markup, 'installation.controlPlaneVessel')).toBe(true);
     expect(locked(markup, 'installation.homeVessel')).toBe(true);
@@ -206,7 +212,11 @@ describe('the vessels this installation is built on are read-only', () => {
   test('the lock carries the sentence saying why', () => {
     // A disabled input with nothing beside it reads as a bug in the form.
     expect(
-      screen({ document: withAppVessel, declaration: manifest }),
+      screen({
+        document: withAppVessel,
+        declaration: manifest,
+        declarationGoverns: true,
+      }),
     ).toContain('are declared, not configured here');
   });
 
@@ -218,6 +228,26 @@ describe('the vessels this installation is built on are read-only', () => {
 
     expect(locked(markup, 'installation.homeVessel')).toBe(false);
     expect(locked(markup, 'vessels.1.shared.sourceBucket')).toBe(false);
+    expect(markup).not.toContain('are declared, not configured here');
+  });
+
+  test('a mounted declaration that governs nothing locks nothing', () => {
+    // The chart-only install. The chart mounts its stand-in so the passkey
+    // relying party is the hostname the release actually serves, and a stand-in
+    // asserts nothing about anybody's boundaries — so this screen has to be the
+    // one place those two values can be set, not the one place they cannot.
+    //
+    // The server answers whether the declaration governs; this screen must not
+    // lock on `declaration` being present, which is the shape that shipped the
+    // wizard nobody could finish.
+    const markup = screen({
+      document: withAppVessel,
+      declaration: manifest,
+      declarationGoverns: false,
+    });
+
+    expect(locked(markup, 'installation.homeVessel')).toBe(false);
+    expect(locked(markup, 'vessels.1.shared.artifactsProject')).toBe(false);
     expect(markup).not.toContain('are declared, not configured here');
   });
 });

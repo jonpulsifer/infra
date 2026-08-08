@@ -269,6 +269,37 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * honest — they chose nothing — but it does mean "configured" is a record of a
  * document, not of a ceremony.
  */
+/**
+ * The mounted declaration where it governs, and `null` where it does not.
+ *
+ * **A stand-in governs nothing.** The governed slice
+ * (`manifest-store.ts:governedByDeclaration`) exists so a rollout cannot revert
+ * the two vessels an installation is built on: a control plane pointed at a
+ * boundary that is not there, or a home vessel whose bucket and signer nobody
+ * can reach, is an installation that cannot come back, and that is worth taking
+ * out of the operator's hands. **None of that reasoning survives the document
+ * being the placeholder.** There is no operator assertion to protect, and what
+ * the rule protects instead is `spindrift-vessel` and `spindrift-artifacts` —
+ * names of nothing — against the real ones, forever, because the wizard that
+ * would set them is refused for editing a governed path.
+ *
+ * That is not a hypothetical: the chart mounts exactly this document on a
+ * release with no `manifest:` value, which is the chart-only install path, and
+ * the two collided the first time anybody ran one. The relying party is why the
+ * chart mounts it at all — see `files/default-manifest.yaml` — so the document
+ * has to stay mounted and stop governing, rather than not be mounted.
+ *
+ * The same four keys as {@link isUnconfiguredInstallation}, and deliberately
+ * the same function: "this document is the stand-in" is one fact, and a second
+ * spelling of it is a second thing to keep in step with the chart's copy.
+ */
+export function governingDeclaration(
+  declaration: AuthoredManifest | null | undefined,
+): AuthoredManifest | null {
+  if (declaration == null) return null;
+  return isUnconfiguredInstallation(declaration) ? null : declaration;
+}
+
 export function isUnconfiguredInstallation(
   manifest: AuthoredManifest,
 ): boolean {
