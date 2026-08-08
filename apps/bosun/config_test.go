@@ -29,6 +29,11 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if time.Duration(cfg.PollInterval) != defaultPollInterval {
 		t.Errorf("pollInterval default: got %s", cfg.PollInterval)
 	}
+	// Not optional: the busy-time budget is the only thing that reaps a skiff
+	// whose guest wedged mid-job, so a class that declares none still gets one.
+	if time.Duration(cfg.Classes["skiff-nixos"].MaxLifetime) != defaultMaxLifetime {
+		t.Errorf("maxLifetime default: got %s", cfg.Classes["skiff-nixos"].MaxLifetime)
+	}
 }
 
 func TestLoadConfigRejectsSelfHostedClassName(t *testing.T) {

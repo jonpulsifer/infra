@@ -16,7 +16,7 @@ tags:: architecture
 	- Named cost: idle skiffs hold RAM, and there is no scale-to-zero.
 - ## The hull contract is the seam
 	- A hull is a directory holding a `hull.json` beside its artifacts, declaring `kernel`, `initrd`, `cmdline`, and an optional `devices[]` list. bosun reads the manifest and translates it to cloud-hypervisor arguments; it carries **no per-hull-family branching** and never learns what any device means.
-	- bosun promises every skiff the same three things regardless of hull — a credential at a contract-fixed location, a writable workspace, and outbound network — plus its own identity appended to the cmdline as `bosun.skiff` and `bosun.hull`. Those are correlation facts, never claims: a guest reporting its own hull digest proves nothing to anyone.
+	- bosun promises every skiff the same four things regardless of hull — a credential at a contract-fixed location, a writable workspace, outbound network, and a writable diagnostic share on the host — plus its own identity appended to the cmdline as `bosun.skiff` and `bosun.hull`. Those are correlation facts, never claims: a guest reporting its own hull digest proves nothing to anyone.
 	- A hull promises to boot from what it declared, find its credential, run one job, and halt. The last clause is enforced by GitHub rather than by anyone here.
 	- Hull identity is a **content digest** over the manifest and the files it names — not a Nix store path, so a hull built without Nix can have one too.
 - ## The NixOS hull
@@ -28,6 +28,7 @@ tags:: architecture
 	- bosun mints a JIT config **immediately before boot** and never stockpiles: an unused one expires about an hour after it is minted.
 	- It arrives on a per-skiff virtiofs share rather than the kernel cmdline, which is world-readable inside the guest. bosun **deletes it host-side** the moment GitHub reports the runner online — virtiofs passes through to the host filesystem, so it vanishes in-guest with no cooperation from the guest, and untrusted job code never sees a live credential.
 	- bosun polls **one runner id at a time and never the runner list**. A registration that no skiff ever consumes leaves a ghost behind, so the list is never the source of truth for pool size; local bookkeeping is. That one call also distinguishes a booted-*idle* skiff from a booted-*busy* one, which is invisible from the host, and catches a wedged guest — which `ch-remote ping` cannot, because a hung guest with a live VMM answers ping.
+	- The wedge rule applies to **idle skiffs only**. Offline-with-a-live-VMM does not distinguish a hung guest from a running job whose runner went quiet, so on a busy skiff it would destroy the job and the evidence of why. A busy skiff is bounded by its class's `maxLifetime` instead, which is why that budget may not be zero.
 - ## Egress
 	- The policy is inverted from the obvious one: **deny the LAN, allow the internet.** Every job in this repo already fetches many public hosts, and none needs a LAN destination.
 	- It is a single `IPAddressDeny` on bosun's own systemd unit. systemd's IP filtering inherits down the whole cgroup subtree, so one directive covers every skiff with no per-skiff rule anywhere.
@@ -42,4 +43,5 @@ tags:: architecture
 	- ARC keeps serving `folly`, `offsite` and `self-hosted` throughout. A skiff never claims those labels — its class name is its only label.
 - ## Trying it
 	- `.github/workflows/skiff-smoke.yml` is a `workflow_dispatch` job on `runs-on: skiff-nixos`. It asserts what a skiff does differently: the warm shared store, the writable overlay, `nix-ld` resolving the FHS interpreter downloaded release binaries ask for, and socket-activated Docker.
-	- Inspect a host with `systemctl status bosun` and `journalctl -u bosun`; each skiff's serial console is written under the module's `logDir`.
+	- Inspect a host with `systemctl status bosun` and `journalctl -u bosun`. Under the module's `logDir`, each skiff leaves its serial console as `<id>.log`, and an Ubuntu-hull skiff also leaves the runner's own trace in `<id>.diag/` — a writable virtiofs share, so it lands on the host *while* the job runs and survives a skiff killed mid-job. bosun offers that share to every skiff; the NixOS hull does not mount it yet, so a `skiff-nixos` `<id>.diag/` is empty. Both outlive the skiff and are aged out by `logRetention`.
+	- A class's `memory` is also its **disk budget**: the whole guest root is a tmpfs overlay, so a checkout plus build that outgrows it is an OOM rather than an `ENOSPC`. A real virtio-blk workspace is the answer past that, not a bigger number.

@@ -92,7 +92,23 @@ in
     logDir = mkOption {
       type = types.str;
       default = "/var/log/bosun";
-      description = "Where each skiff's serial console is written.";
+      description = ''
+        Where each skiff's serial console is written, and where its
+        `<id>.diag/` — the guest's own runner trace, shared in writable — is
+        left behind after the skiff is gone. Both survive retire on purpose;
+        {option}`logRetention` is what bounds them.
+      '';
+    };
+
+    logRetention = mkOption {
+      type = types.str;
+      default = "7d";
+      description = ''
+        How long a scuttled skiff's serial console and diagnostic directory
+        stay readable. Nothing else deletes them: retire keeps them so a
+        skiff that died mid-job can still be read afterwards, and the
+        diagnostic share is writable by untrusted job code.
+      '';
     };
 
     metricsFile = mkOption {
@@ -188,6 +204,11 @@ in
       extraGroups = [ "kvm" ];
     };
     users.groups.bosun = { };
+
+    # Nothing in bosun deletes a retired skiff's logs, so this is the only
+    # bound on logDir: one directory per skiff ever booted, plus whatever job
+    # code chose to write into the diagnostic share.
+    systemd.tmpfiles.rules = [ "e ${cfg.logDir} - - - ${cfg.logRetention}" ];
 
     systemd.services.bosun = {
       description = "warm pool of ephemeral microVM Actions runners";

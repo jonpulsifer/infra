@@ -62,15 +62,22 @@ const (
 	defaultLogDir       = "/var/log/bosun"
 	defaultPollInterval = 30 * time.Second
 
+	// defaultMaxLifetime backstops a class that declares no budget. It is a
+	// default rather than "unlimited" because the busy-time budget is the
+	// only thing that reaps a skiff whose guest wedged mid-job -- the wedge
+	// detector deliberately will not touch one.
+	defaultMaxLifetime = time.Hour
+
 	// selfHosted is the label the existing ARC runners hold. A skiff class
 	// must never claim it.
 	selfHosted = "self-hosted"
 
 	// wedgeThreshold is how many consecutive offline observations it takes to
-	// call a guest wedged. A runner drops its connection whenever the network
-	// hiccups -- observed live, one minute after a transient
-	// "connection reset by peer" on the poll itself -- and killing on the
-	// first observation kills whatever job the skiff was running.
+	// call an idle guest wedged. A runner drops its connection whenever the
+	// network hiccups -- observed live, one minute after a transient
+	// "connection reset by peer" on the poll itself. Debouncing it is why the
+	// rule is safe to apply at all; not applying it to a busy skiff is why a
+	// job is never the thing it kills.
 	wedgeThreshold = 3
 
 	// jitExpiry is how long a generated JIT config is valid if never
@@ -113,6 +120,10 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		if c.Warm <= 0 {
 			return nil, fmt.Errorf("config: class %s: warm must be positive", name)
+		}
+		if c.MaxLifetime <= 0 {
+			c.MaxLifetime = Duration(defaultMaxLifetime)
+			cfg.Classes[name] = c
 		}
 	}
 

@@ -60,6 +60,7 @@ func TestChArgsNoDevices(t *testing.T) {
 		"--cpus", "boot=4",
 		"--memory", "size=4096M,shared=on",
 		"--fs", "tag=bosun,socket=/run/bosun/sk01.fs",
+		"--fs", "tag=bosun-diag,socket=/run/bosun/sk01.diag.fs",
 		"--net", "vhost_user=on,socket=/run/bosun/sk01.net",
 		"--api-socket", "/run/bosun/sk01.api",
 		"--console", "off",
@@ -93,6 +94,7 @@ func TestChArgsWithDevices(t *testing.T) {
 		"--cpus", "boot=2",
 		"--memory", "size=2048M,shared=on",
 		"--fs", "tag=bosun,socket=/run/bosun/sk02.fs",
+		"--fs", "tag=bosun-diag,socket=/run/bosun/sk02.diag.fs",
 		"--fs", "tag=ro-store,socket=/run/bosun/sk02.ro-store.fs",
 		"--net", "vhost_user=on,socket=/run/bosun/sk02.net",
 		"--api-socket", "/run/bosun/sk02.api",
@@ -127,6 +129,7 @@ func TestChArgsWithDisk(t *testing.T) {
 		"--cpus", "boot=2",
 		"--memory", "size=2048M,shared=on",
 		"--fs", "tag=bosun,socket=/run/bosun/sk03.fs",
+		"--fs", "tag=bosun-diag,socket=/run/bosun/sk03.diag.fs",
 		"--disk", "path=/hulls/ubuntu/rootfs.img,readonly=on",
 		"--net", "vhost_user=on,socket=/run/bosun/sk03.net",
 		"--api-socket", "/run/bosun/sk03.api",
@@ -168,6 +171,19 @@ func TestSockPathTooLong(t *testing.T) {
 	}
 	if _, err := sockPath("/run/bosun", "sk01.fs"); err != nil {
 		t.Fatalf("unexpected error for short path: %v", err)
+	}
+}
+
+func TestResolvePathsPutsDiagUnderLogDir(t *testing.T) {
+	p, err := resolvePaths("/run/bosun", "/var/log/bosun", "sk01", nil)
+	if err != nil {
+		t.Fatalf("resolvePaths: %v", err)
+	}
+	if p.diagDir != "/var/log/bosun/sk01.diag" {
+		t.Errorf("diagDir: got %s", p.diagDir)
+	}
+	if p.diagSock != "/run/bosun/sk01.diag.fs" {
+		t.Errorf("diagSock: got %s", p.diagSock)
 	}
 }
 

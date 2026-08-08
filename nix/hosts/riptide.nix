@@ -38,11 +38,16 @@
     };
     # The FHS family: apt, dockerd, and the ARC image's toolchain, no Nix.
     # More memory than skiff-nixos because jobs here apt-get and docker build
-    # inside the guest rather than leaning on a warm host store.
+    # inside the guest rather than leaning on a warm host store -- and because
+    # the whole guest root is a tmpfs overlay, so this number is the class's
+    # disk budget as much as its RAM. A checkout plus a docker build that
+    # exceeds it is an OOM, not an ENOSPC. 8192M against riptide's ~10 GiB
+    # free is the ceiling while kubelet shares the host; past that the answer
+    # is a real workspace disk, not a bigger number.
     classes.skiff-ubuntu = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
-      memory = "4096M";
+      memory = "8192M";
       warm = 1;
     };
   };

@@ -126,6 +126,13 @@ let
     $bb hostname skiff
     echo "127.0.0.1 localhost skiff" > /etc/hosts
 
+    # The runner writes its trace to <runner root>/_diag. Everything else in
+    # this guest is a tmpfs overlay that dies with the VM, so this one
+    # directory is bound through to the host: a skiff killed mid-job leaves
+    # the _diag behind on riptide instead of nothing at all.
+    $bb mkdir -p /home/runner/_diag
+    $bb mount -t virtiofs bosun-diag /home/runner/_diag
+
     $bb ip link set lo up
     $bb ip link set eth0 up
     $bb udhcpc -i eth0 -q -n -s /opt/bosun/udhcpc-script
