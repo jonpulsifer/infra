@@ -8,7 +8,7 @@ tags:: architecture
 	  | **skiff** | one microVM serving exactly one job, then halting |
 	  | **bosun** | the daemon that keeps skiffs alive, and the project |
 	  | **hull** | the immutable kernel + initrd + manifest a skiff boots from |
-	  | **class** | what a `runs-on:` label resolves to — which hull, how many vCPUs, how much memory |
+	  | **class** | what a `runs-on:` label resolves to — which hull, how many vCPUs, how much memory and scratch disk |
 	- GitHub owns `runner`, `job`, `workflow` and `label`; those words appear in YAML this project does not control, so they are never reused for anything here.
 - ## Warm pool, not dispatch
 	- A JIT-registered runner is ephemeral by construction: it runs one job, deregisters itself, and exits. So bosun keeps N skiffs booted and registered, and **GitHub hands one a matching job unprompted**.
@@ -44,4 +44,6 @@ tags:: architecture
 - ## Trying it
 	- `.github/workflows/skiff-smoke.yml` is a `workflow_dispatch` job on `runs-on: skiff-nixos`. It asserts what a skiff does differently: the warm shared store, the writable overlay, `nix-ld` resolving the FHS interpreter downloaded release binaries ask for, and socket-activated Docker.
 	- Inspect a host with `systemctl status bosun` and `journalctl -u bosun`. Under the module's `logDir`, each skiff leaves its serial console as `<id>.log`, and an Ubuntu-hull skiff also leaves the runner's own trace in `<id>.diag/` — a writable virtiofs share, so it lands on the host *while* the job runs and survives a skiff killed mid-job. bosun offers that share to every skiff; the NixOS hull does not mount it yet, so a `skiff-nixos` `<id>.diag/` is empty. Both outlive the skiff and are aged out by `logRetention`.
-	- A class's `memory` is also its **disk budget**: the whole guest root is a tmpfs overlay, so a checkout plus build that outgrows it is an OOM rather than an `ENOSPC`. A real virtio-blk workspace is the answer past that, not a bigger number.
+	- A class's `memory` is also its **disk budget** unless the class sizes a `workspace`: the whole guest root is a tmpfs overlay, so a checkout plus build that outgrows it is an OOM rather than an `ENOSPC`.
+	- A `workspace` is a virtio-blk scratch disk, reserved under the module's `workspaceDir` at boot and deleted with the skiff. bosun appends it after every hull-declared device and names it on the cmdline as `bosun.workspace=`, because a device index shifts with what the hull declared and a name does not. It is handed over raw — the Ubuntu hull formats it and puts the runner's workspace and docker's data root there, which is what lets a class hold more warm skiffs than its memory alone would allow. What the disk carries is the hull's business; bosun never learns what was written to it.
+	- The space is reserved up front, not as a build uses it, so `warm × workspace` per class is what the host must keep free — an overcommitted pool fails a spawn, which is visible, rather than a build mid-run, which is not.

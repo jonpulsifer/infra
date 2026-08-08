@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // hullManifest is hull.json: the declared shape of a microVM image. bosun
@@ -66,6 +67,7 @@ func loadHull(dir string) (*hull, error) {
 	}
 
 	shipped := []string{m.Kernel, m.Initrd}
+	disks := 0
 	for i, dev := range m.Devices {
 		switch {
 		case dev.Share != nil && dev.Disk == nil:
@@ -74,9 +76,16 @@ func loadHull(dir string) (*hull, error) {
 				return nil, fmt.Errorf("hull manifest %s: devices[%d].disk.path is required", dir, i)
 			}
 			shipped = append(shipped, dev.Disk.Path)
+			disks++
 		default:
 			return nil, fmt.Errorf("hull manifest %s: devices[%d] must declare exactly one of share or disk", dir, i)
 		}
+	}
+	// Guest disk names run /dev/vda..vdz, and bosun may append a workspace
+	// disk after whatever the hull declared. Past this the name it puts on the
+	// cmdline would be wrong rather than missing, so the manifest is rejected.
+	if disks > maxHullDisks {
+		return nil, fmt.Errorf("hull manifest %s: %d disks exceeds the %d guest device names available", dir, disks, maxHullDisks)
 	}
 
 	// ponytail: hashes every shipped file (a rootfs disk is GBs) on each
@@ -102,6 +111,18 @@ func hashFile(w io.Writer, path string) error {
 	return err
 }
 
+// maxHullDisks leaves one of the 26 /dev/vd? names for bosun's workspace
+// disk, which is always appended last.
+const maxHullDisks = 25
+
+// guestDiskName is the device cloud-hypervisor presents for the nth --disk,
+// in declaration order. bosun tells the guest this name rather than letting
+// it count, because an index shifts with whatever the hull declared while a
+// name handed over on the cmdline does not.
+func guestDiskName(n int) string {
+	return "/dev/vd" + string(rune('a'+n))
+}
+
 // maxSockPathLen is Linux's sockaddr_un.sun_path capacity minus its NUL
 // terminator (108 bytes total). A longer path truncates silently and the
 // VMM that tries to connect never starts.
@@ -121,6 +142,7 @@ func sockPath(dir, name string) (string, error) {
 // exactly one place.
 type skiffPaths struct {
 	dir         string   // runtimeDir/<id> — the credential share and bosun's entire state for this skiff
+	workspace   string   // workspaceDir/<id>.img — empty unless the class sizes a scratch disk
 	credSock    string   // runtimeDir/<id>.fs
 	diagDir     string   // logDir/<id>.diag — the guest's runner _diag, written through to the host
 	diagSock    string   // runtimeDir/<id>.diag.fs
@@ -183,6 +205,11 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 // (tag "bosun-diag", the only writable path a guest has). Both tags are fixed
 // by contract with the guest, and both are present even when the hull
 // declares no devices at all.
+//
+// A workspace disk, when the class sizes one, goes *after* every hull device,
+// so the hull's own disks keep the indices it built around. It carries no
+// filesystem: what a workspace holds is the hull's business, the same way its
+// rootfs is, and bosun never learns what was put there.
 func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 	args := []string{
 		"--kernel", filepath.Join(h.dir, h.manifest.Kernel),
@@ -192,6 +219,7 @@ func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 		"--fs", fmt.Sprintf("tag=bosun,socket=%s", p.credSock),
 		"--fs", fmt.Sprintf("tag=bosun-diag,socket=%s", p.diagSock),
 	}
+	disks := 0
 	for i, dev := range h.manifest.Devices {
 		switch {
 		case dev.Share != nil:
@@ -202,16 +230,43 @@ func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 				ro = "on"
 			}
 			args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=%s", filepath.Join(h.dir, dev.Disk.Path), ro))
+			disks++
 		}
+	}
+	cmdline := h.manifest.Cmdline
+	if p.workspace != "" {
+		args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=off", p.workspace))
+		cmdline += " bosun.workspace=" + guestDiskName(disks)
 	}
 	args = append(args,
 		"--net", fmt.Sprintf("vhost_user=on,socket=%s", p.netSock),
 		"--api-socket", p.apiSock,
 		"--console", "off",
 		"--serial", fmt.Sprintf("file=%s", p.logFile),
-		"--cmdline", fmt.Sprintf("%s bosun.skiff=%s bosun.hull=sha256:%s", h.manifest.Cmdline, id, h.digest),
+		"--cmdline", fmt.Sprintf("%s bosun.skiff=%s bosun.hull=sha256:%s", cmdline, id, h.digest),
 	)
 	return args
+}
+
+// createWorkspace reserves and creates one skiff's scratch disk. Reserved
+// rather than sparse on purpose: taking the workspace off the class's memory
+// is the whole point, and a sparse file would move the overcommit onto the
+// host filesystem instead of removing it. A pool that cannot fit fails a
+// spawn, which is visible, rather than a build mid-run, which is not.
+func createWorkspace(path, size string) error {
+	n, err := parseSize(size)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return syscall.Fallocate(int(f.Fd()), 0, 0, n)
 }
 
 // virtiofsdArgs builds one virtiofsd instance's argv, shared by the
