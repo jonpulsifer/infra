@@ -29,17 +29,6 @@
     'prEditedNotification',
     'prIgnoreNotification',
   ],
-  // No postUpgradeTasks: the only task we would want (refreshing the mise
-  // fetchurl hashes) is gated by `allowedCommands`, a globalOnly option the
-  // Mend-hosted `renovate[bot]` app does not expose for this repo. Setting it
-  // in repo config is rejected (`Configuration Error: ... cannot be
-  // configured within a repository's config file`), and with no global entry
-  // the task is skipped with a `has not been added to the allowed list in
-  // allowedCommands` log on every bump. So Renovate bumps the mise version
-  // string only; refresh the fetchurl hashes by hand — run
-  // .github/scripts/update-mise-hashes.sh locally (see nix/overlays/mise.nix)
-  // before merge. nix-ci on optiplex (x86_64) + forge (aarch64) exercises both
-  // hashes and blocks a stale PR, quoting the correct replacement.
   // 'auto' rebases automerging PRs (most of this repo) whenever they fall
   // behind main — Atlantis plans stay fresh and GitHub native auto-merge can
   // satisfy require-up-to-date rules — while manual-review PRs only rebase on
@@ -72,22 +61,6 @@
     enabled: true,
   },
   customManagers: [
-    {
-      // mise prebuilt binary version in nix/overlays/mise.nix. The
-      // jdx/mise GitHub release tags are `v<ver>`; extractVersionTemplate
-      // strips the leading `v` so currentValue (`2026.7.5`) matches.
-      // Renovate bumps the version string only; the two fetchurl hashes are
-      // not covered and must be refreshed manually (see overlay comment).
-      customType: 'regex',
-      description: 'mise prebuilt binary (nix overlay)',
-      managerFilePatterns: ['/nix/overlays/mise\\.nix$/'],
-      matchStrings: [
-        '# renovate: datasource=github-releases depName=jdx/mise\\n\\s*version = "(?<currentValue>[^"]+)";',
-      ],
-      datasourceTemplate: 'github-releases',
-      depNameTemplate: 'jdx/mise',
-      extractVersionTemplate: '^v(?<version>.*)$',
-    },
     {
       customType: 'regex',
       description: 'Process annotated dependencies',
@@ -446,19 +419,6 @@
       matchManagers: ['nix'],
       matchPackageNames: ['dotfiles'],
       automerge: true,
-    },
-    {
-      // Renovate bumps the version string in nix/overlays/mise.nix only; the
-      // two fetchurl hashes are refreshed by hand — run
-      // .github/scripts/update-mise-hashes.sh before merge (postUpgradeTasks
-      // can't do it: `allowedCommands` is global-only and unset on this bot).
-      // nix-ci builds optiplex (x86_64) + forge (aarch64), which exercise
-      // both hashes and block a stale PR quoting the correct replacement.
-      description: 'mise prebuilt binary — manual hash refresh, automerge (CI-guarded)',
-      matchDepNames: ['jdx/mise'],
-      matchDatasources: ['github-releases'],
-      automerge: true,
-      addLabels: ['renovate/nix-mise'],
     },
     // ============================================================
     // Blocked

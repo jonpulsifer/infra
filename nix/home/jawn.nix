@@ -120,12 +120,14 @@ in
     ];
 
     initContent = ''
-      # Path: user scripts first, then mise shims, then bun
-      export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
-      if command -v mise >/dev/null 2>&1; then
-        eval "$(mise activate zsh)"
-        export MISE_NODE_COMPILE=false
-      fi
+      # Path: user scripts first, then mise shims, then bun. Shims rather than
+      # `mise activate`: nix installs the mise binary and stops there, so the
+      # shell carries no nix-generated hook and mise resolves tool versions
+      # itself, per invocation, out of ~/.local/share/mise. Safe here because
+      # no mise config in this repo declares an [env] block -- exporting one
+      # back into the shell is the only thing a shim cannot do.
+      export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$HOME/.bun/bin:$PATH"
+      export MISE_NODE_COMPILE=false
 
       # Profile detection
       if [[ "''${MISE_ENV:-personal}" == "work" ]]; then

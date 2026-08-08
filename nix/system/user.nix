@@ -6,10 +6,6 @@
   ...
 }:
 let
-  # Use the prebuilt upstream mise binary instead of building the jdx/mise
-  # flake input from source on every host. See nix/overlays/mise.nix.
-  miseOverlay = import ../overlays/mise.nix;
-
   sshKeys = lib.splitString "\n" (builtins.readFile inputs.keys);
   rowbuttKeys = lib.splitString "\n" (builtins.readFile inputs.rowbuttkeys);
   consolePasswordHash = "$6$MyfHzd0UhaiNWR2.$e3CjotacfdkRzNBs/AyIGLkneJCeIZcIVd2zLm5cEoJbSCpKB2ilEAIBtqZQl6xiNgngoFH6dyqyabhwjYVQU/";
@@ -17,10 +13,22 @@ in
 {
   programs.zsh.enable = true;
 
-  # Applied at the host level so every host's pkgs.mise resolves to the
-  # prebuilt binary. (radiopi0/blinkypi0 don't pull mise into their user
-  # package sets at all, so the overlay is inert there.)
-  nixpkgs.overlays = [ miseOverlay ];
+  # Nix installs the binary and nothing else: no activation hook, no
+  # home-manager `programs.mise`. Everything past that -- runtimes, k8s
+  # tooling, the shims that put them on PATH -- mise manages itself out of
+  # ~/.local/share/mise, which is the point of having it.
+  #
+  # nixpkgs' own package rather than a pinned upstream tarball, so it
+  # substitutes from cache.nixos.org and no host builds it. It also carries no
+  # hash to go stale: the overlay this replaces had to be refreshed by hand on
+  # every bump, and a bump that skipped it broke every Nix build in the repo.
+  #
+  # Gated on the same flag the dotfiles bootstrap uses, which the pi-zero
+  # profile already sets false. armv6l has no cache and no upstream asset, so
+  # an unconditional entry here would put a from-source Rust build on the two
+  # hosts least able to do one -- the case the deleted overlay handled with a
+  # `throw` that only worked because nothing referenced pkgs.mise there.
+  environment.systemPackages = lib.optional config.homelab.fleet.miseDotfiles pkgs.mise;
 
   users.mutableUsers = false;
   users.users.root.hashedPassword = consolePasswordHash;
@@ -40,7 +48,6 @@ in
       git
       unzip
       gnupg
-      mise
     ];
   };
 
@@ -58,7 +65,6 @@ in
       git
       unzip
       gnupg
-      mise
     ];
   };
 }
