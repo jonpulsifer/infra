@@ -31,6 +31,34 @@ resource "google_service_account_iam_member" "spindrift_controller_token_creator
   member             = local.spindrift_principal
 }
 
+# The clean-installation acceptance environment federates as this same account.
+#
+# The pool's subject is the cluster, the namespace and the service account, so a
+# second installation is a second subject however identical its deployment is —
+# it gets no access at all without these two, which is the shape working
+# correctly rather than an obstacle.
+#
+# Bound to the existing account rather than given its own. §14 puts identity
+# provisioning in this repository's Terraform and not in the product, so a
+# second account would exercise these files rather than anything Spindrift
+# does, at the price of duplicating every project role, both bucket grants and
+# the signer for an environment whose purpose is to be deleted. What it costs
+# is stated where the installation is declared: the acceptance installation can
+# reach everything the running one can.
+#
+# Deleting `clusters/offsite/apps/spindrift-acceptance` is what retires these.
+resource "google_service_account_iam_member" "spindrift_acceptance_workload_identity" {
+  service_account_id = google_service_account.spindrift_controller.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = local.spindrift_acceptance_principal
+}
+
+resource "google_service_account_iam_member" "spindrift_acceptance_token_creator" {
+  service_account_id = google_service_account.spindrift_controller.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = local.spindrift_acceptance_principal
+}
+
 # The roles the controller holds on this vessel. Declared in this file rather
 # than beside the module call for the reason services.tf gives: Spindrift's
 # generated remediation stanzas append `google_project_iam_member` resources

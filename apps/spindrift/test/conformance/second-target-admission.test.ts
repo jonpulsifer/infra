@@ -464,6 +464,15 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     // annotation) that this test does not touch and does not subsume.
     const consumers: [string, string][] = [
       ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
+      // The clean-installation acceptance environment consumes the same
+      // artifact independently, and is listed for the reason the pair above is:
+      // a consumer nothing checks is a tag that stops resolving the first time
+      // the chart version moves, and this one exists precisely to prove the
+      // published chart installs.
+      [
+        'spindrift',
+        'clusters/offsite/apps/spindrift-acceptance/oci-repository.yaml',
+      ],
       [
         'spindrift-app',
         'clusters/base/platform/spindrift-target/oci-repository.yaml',
