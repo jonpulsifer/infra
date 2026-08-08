@@ -122,6 +122,8 @@ func sockPath(dir, name string) (string, error) {
 type skiffPaths struct {
 	dir         string   // runtimeDir/<id> — the credential share and bosun's entire state for this skiff
 	credSock    string   // runtimeDir/<id>.fs
+	diagDir     string   // logDir/<id>.diag — the guest's runner _diag, written through to the host
+	diagSock    string   // runtimeDir/<id>.diag.fs
 	netSock     string   // runtimeDir/<id>.net
 	apiSock     string   // runtimeDir/<id>.api
 	logFile     string   // logDir/<id>.log — the guest's serial console, via cloud-hypervisor's --serial
@@ -133,7 +135,13 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 	var err error
 	p.dir = filepath.Join(runtimeDir, id)
 	p.logFile = filepath.Join(logDir, id+".log")
+	// Under logDir, not runtimeDir: this is the one thing about a skiff that
+	// must outlive it, and runtimeDir is tmpfs that retire empties anyway.
+	p.diagDir = filepath.Join(logDir, id+".diag")
 	if p.credSock, err = sockPath(runtimeDir, id+".fs"); err != nil {
+		return skiffPaths{}, err
+	}
+	if p.diagSock, err = sockPath(runtimeDir, id+".diag.fs"); err != nil {
 		return skiffPaths{}, err
 	}
 	if p.netSock, err = sockPath(runtimeDir, id+".net"); err != nil {
@@ -156,10 +164,12 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 	return p, nil
 }
 
-// chArgs builds cloud-hypervisor's argv for one skiff. The credential share
-// (tag "bosun") is injected unconditionally ahead of any hull-declared
-// devices; its tag is fixed by contract with the guest-side agent, and it is
-// present even when the hull declares no devices at all.
+// chArgs builds cloud-hypervisor's argv for one skiff. Two shares are
+// injected unconditionally ahead of any hull-declared devices — the
+// credential (tag "bosun", read-only in-guest) and the diagnostic drop box
+// (tag "bosun-diag", the only writable path a guest has). Both tags are fixed
+// by contract with the guest, and both are present even when the hull
+// declares no devices at all.
 func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 	args := []string{
 		"--kernel", filepath.Join(h.dir, h.manifest.Kernel),
@@ -167,6 +177,7 @@ func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 		"--cpus", fmt.Sprintf("boot=%d", class.VCPUs),
 		"--memory", fmt.Sprintf("size=%s,shared=on", class.Memory),
 		"--fs", fmt.Sprintf("tag=bosun,socket=%s", p.credSock),
+		"--fs", fmt.Sprintf("tag=bosun-diag,socket=%s", p.diagSock),
 	}
 	for i, dev := range h.manifest.Devices {
 		switch {

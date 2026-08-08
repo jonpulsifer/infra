@@ -239,6 +239,21 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 		return fmt.Errorf("start credential virtiofsd: %w", err)
 	}
 
+	// The guest's only writable path onto the host, and the whole reason it
+	// exists: a skiff's root is a tmpfs overlay, so a guest that dies mid-job
+	// takes the runner's own diagnostic log with it and leaves the serial
+	// console — which carries no _diag — as the only evidence.
+	//
+	// ponytail: no quota. Untrusted job code can fill logDir; the tmpfiles
+	// rule in module.nix only ages files out. A loopback filesystem or an
+	// XFS project quota is the answer if a job ever does it.
+	if err := os.MkdirAll(s.paths.diagDir, 0o755); err != nil {
+		return fmt.Errorf("create diag dir: %w", err)
+	}
+	if err := p.startHelper(s, virtiofsd, virtiofsdArgs(s.paths.diagSock, s.paths.diagDir, false)); err != nil {
+		return fmt.Errorf("start diag virtiofsd: %w", err)
+	}
+
 	for i, dev := range h.manifest.Devices {
 		if dev.Share == nil {
 			continue // a disk rides cloud-hypervisor's own --disk; no helper
@@ -319,8 +334,11 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 		logger.Warn("delete runner on retire", "runner_id", s.runnerID, "error", err)
 	}
 
+	// diagDir is deliberately not removed: it is the evidence, and this is
+	// the path a wedged skiff's own death takes.
 	os.RemoveAll(s.paths.dir)
 	os.Remove(s.paths.credSock)
+	os.Remove(s.paths.diagSock)
 	os.Remove(s.paths.netSock)
 	os.Remove(s.paths.apiSock)
 	for _, sock := range s.paths.deviceSocks {
@@ -378,15 +396,24 @@ func (p *pool) pollOnce(ctx context.Context) {
 //   - First online observation: revoke the JIT credential host-side. virtiofs
 //     passes the delete through, so it vanishes in-guest with no guest
 //     cooperation, and untrusted job code never sees a live credential again.
-//   - Offline after having been online: the guest may be wedged. ch-remote ping
-//     cannot tell a hung guest from a healthy one — both answer with a live
-//     VMM — so GitHub's own view of the runner is the only signal. It takes
+//
+//   - Offline after having been online, and never busy: the guest is wedged
+//     holding a credential it will never spend. ch-remote ping cannot tell a
+//     hung guest from a healthy one — both answer with a live VMM — so
+//     GitHub's own view of the runner is the only signal. It takes
 //     wedgeThreshold consecutive offline observations, because a runner
-//     briefly loses its connection whenever the network hiccups and one
-//     observation is not worth killing a job over.
+//     briefly loses its connection whenever the network hiccups.
+//
+//     A skiff that has gone busy is exempt. The same signal on a running job
+//     is indistinguishable from a job whose runner is merely quiet, and
+//     killing on it destroys the job *and* the evidence of why. maxLifetime
+//     is the reaper there: it bounds a wedged busy skiff to the budget its
+//     class already declares, which is why that budget may not be zero.
+//
 //   - Busy transition: recorded once, so maxLifetime is measured from when
 //     the job started, not from boot (which would let warm idle time eat a
 //     job's budget).
+//
 //   - Idle past jitExpiry: the credential this skiff registered with is now
 //     dead and it never connected; recycle it for a fresh one.
 func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
@@ -425,7 +452,7 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	}
 
 	switch {
-	case status == "offline" && everOnline && offlineStreak >= wedgeThreshold:
+	case status == "offline" && everOnline && busySince.IsZero() && offlineStreak >= wedgeThreshold:
 		logger.Warn("wedged guest: went offline with the VMM still alive", "consecutive_polls", offlineStreak)
 		s.setExitReason(exitWedged)
 		killBestEffort(s.ch, logger, "wedged cloud-hypervisor")
@@ -440,12 +467,11 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	}
 }
 
+// exceededLifetime is the only thing that reaps a busy skiff, wedged or
+// working, so LoadConfig guarantees every class carries a non-zero budget.
 func (p *pool) exceededLifetime(className string, busySince time.Time) bool {
 	class, ok := p.cfg.Classes[className]
-	if !ok || class.MaxLifetime == 0 {
-		return false
-	}
-	return time.Since(busySince) > time.Duration(class.MaxLifetime)
+	return ok && time.Since(busySince) > time.Duration(class.MaxLifetime)
 }
 
 func newSkiffID() (string, error) {

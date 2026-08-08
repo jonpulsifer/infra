@@ -74,22 +74,34 @@ func TestFillBootsWarmCountAndCredentialShareAlwaysPresent(t *testing.T) {
 		t.Fatalf("unexpected jitconfig generation: %v", gh.generated)
 	}
 
-	// virtiofsd (credential) + passt + cloud-hypervisor, no hull devices.
-	if fl.count() != 3 {
-		t.Fatalf("want 3 launches for a device-less hull, got %d", fl.count())
+	// virtiofsd (credential) + virtiofsd (diag) + passt + cloud-hypervisor,
+	// no hull devices.
+	if fl.count() != 4 {
+		t.Fatalf("want 4 launches for a device-less hull, got %d", fl.count())
 	}
 	chCall, ok := fl.last("cloud-hypervisor")
 	if !ok {
 		t.Fatal("cloud-hypervisor was never launched")
 	}
-	found := false
-	for i, a := range chCall.args {
-		if a == "--fs" && i+1 < len(chCall.args) && chCall.args[i+1] == "tag=bosun,socket="+s.paths.credSock {
-			found = true
+	for _, want := range []string{
+		"tag=bosun,socket=" + s.paths.credSock,
+		"tag=bosun-diag,socket=" + s.paths.diagSock,
+	} {
+		found := false
+		for i, a := range chCall.args {
+			if a == "--fs" && i+1 < len(chCall.args) && chCall.args[i+1] == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("share %q missing from cloud-hypervisor argv: %v", want, chCall.args)
 		}
 	}
-	if !found {
-		t.Fatalf("credential share missing from cloud-hypervisor argv: %v", chCall.args)
+
+	// The diag share is a real host directory, made before the VMM starts:
+	// virtiofsd has nothing to serve otherwise.
+	if fi, err := os.Stat(s.paths.diagDir); err != nil || !fi.IsDir() {
+		t.Fatalf("diag dir not created: err=%v", err)
 	}
 }
 
@@ -136,6 +148,11 @@ func TestPoolReplacesSkiffAfterExit(t *testing.T) {
 
 	if _, err := os.Stat(first.paths.dir); !os.IsNotExist(err) {
 		t.Fatalf("retired skiff's state dir should be gone, err=%v", err)
+	}
+	// The evidence outlives the skiff; that is the entire point of putting it
+	// under logDir rather than in the state dir retire wipes.
+	if _, err := os.Stat(first.paths.diagDir); err != nil {
+		t.Fatalf("retired skiff's diag dir should survive, err=%v", err)
 	}
 }
 
@@ -191,27 +208,94 @@ func TestJITConfigDeletedOnFirstOnline(t *testing.T) {
 	}
 }
 
-// TestWedgedGuestIsKilled drives the wedge path (online, then offline while
-// the VMM is still alive) and observes its effect the same way
-// TestPoolReplacesSkiffAfterExit does: the skiff gets replaced. It
-// deliberately does not read chCall.proc.exitCh directly — awaitExit's own
-// goroutine is already receiving from that channel via Wait(), and a second
-// receiver would race it for the single buffered value.
-func TestWedgedGuestIsKilled(t *testing.T) {
+// TestWedgedIdleGuestIsKilled drives the wedge path (online, then offline
+// while the VMM is still alive, having never gone busy) and observes its
+// effect the same way TestPoolReplacesSkiffAfterExit does: the skiff gets
+// replaced. It deliberately does not read chCall.proc.exitCh directly —
+// awaitExit's own goroutine is already receiving from that channel via
+// Wait(), and a second receiver would race it for the single buffered value.
+func TestWedgedIdleGuestIsKilled(t *testing.T) {
+	p, gh, _ := testPool(t)
+	ctx := context.Background()
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+
+	gh.setStatus(first.runnerID, "online", false)
+	p.pollOnce(ctx) // connects, idle
+
+	gh.setStatus(first.runnerID, "offline", false)
+	for i := 0; i < wedgeThreshold; i++ {
+		p.pollOnce(ctx) // wedge: offline after having been online, repeatedly
+	}
+
+	waitFor(t, "wedged idle skiff is killed and replaced", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if len(p.skiffs) != 1 {
+			return false
+		}
+		for id := range p.skiffs {
+			return id != first.id
+		}
+		return false
+	})
+}
+
+// TestWedgeRuleSpareABusySkiff is the reason the rule is scoped to idle
+// skiffs at all: the offline-with-a-live-VMM signal cannot distinguish a hung
+// guest from a running job whose runner went quiet, and killing on it takes
+// the job and the evidence of why. A busy skiff is maxLifetime's problem.
+func TestWedgeRuleSparesABusySkiff(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
 	p.fill(ctx)
 	first := onlySkiff(t, p)
 
 	gh.setStatus(first.runnerID, "online", true)
-	p.pollOnce(ctx) // connects, goes busy
+	p.pollOnce(ctx) // connects and goes busy: a job is running
 
 	gh.setStatus(first.runnerID, "offline", true)
-	for i := 0; i < wedgeThreshold; i++ {
-		p.pollOnce(ctx) // wedge: offline after having been online, repeatedly
+	for i := 0; i < wedgeThreshold*3; i++ {
+		p.pollOnce(ctx)
 	}
 
-	waitFor(t, "wedged skiff is killed and replaced", func() bool {
+	// The decision, not its effect: pollSkiff sets the exit reason on this
+	// goroutine before killing, while retire runs on awaitExit's and would
+	// race an assertion about the pool's contents.
+	if r := first.reason(); r != "" {
+		t.Fatalf("a busy skiff was condemned after %d offline polls, reason=%q", wedgeThreshold*3, r)
+	}
+	time.Sleep(20 * time.Millisecond) // give a wrongly-scheduled retire a chance to land
+	p.mu.Lock()
+	_, stillThere := p.skiffs[first.id]
+	p.mu.Unlock()
+	if !stillThere {
+		t.Fatal("a busy skiff was killed by the wedge rule")
+	}
+}
+
+// The other half of that trade: with the wedge rule declining to act, the
+// class's busy-time budget must still reap it, or a wedged job holds its
+// label forever.
+func TestBusySkiffIsReapedByMaxLifetime(t *testing.T) {
+	p, gh, _ := testPool(t)
+	ctx := context.Background()
+	p.cfg.Classes["skiff-test"] = Class{
+		Hull:  p.cfg.Classes["skiff-test"].Hull,
+		VCPUs: 1, Memory: "512M", Warm: 1,
+		MaxLifetime: Duration(time.Millisecond),
+	}
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+
+	gh.setStatus(first.runnerID, "online", true)
+	p.pollOnce(ctx) // goes busy; the budget starts here
+	time.Sleep(5 * time.Millisecond)
+
+	gh.setStatus(first.runnerID, "offline", true) // wedged, and over budget
+	p.pollOnce(ctx)
+
+	waitFor(t, "over-budget busy skiff is killed and replaced", func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if len(p.skiffs) != 1 {
@@ -269,29 +353,31 @@ func TestSweepOnEmptyRuntimeDirIsANoop(t *testing.T) {
 	}
 }
 
-// TestTransientOfflineDoesNotKill covers the incident this debounce exists for:
-// a runner briefly lost its connection to GitHub, and killing on the first
-// offline observation destroyed a healthy skiff a minute later. Anything short
-// of wedgeThreshold consecutive observations, or a streak broken by a single
-// online, must leave the skiff alone -- it may be running a job.
+// TestTransientOfflineDoesNotKill covers the incident this debounce exists
+// for: a runner briefly lost its connection to GitHub, and killing on the
+// first offline observation destroyed a healthy skiff a minute later. Driven
+// idle, where the wedge rule does apply, so the debounce is what is under
+// test rather than the busy exemption. Anything short of wedgeThreshold
+// consecutive observations, or a streak broken by a single online, must leave
+// the skiff alone.
 func TestTransientOfflineDoesNotKill(t *testing.T) {
 	p, gh, _ := testPool(t)
 	ctx := context.Background()
 	p.fill(ctx)
 	first := onlySkiff(t, p)
 
-	gh.setStatus(first.runnerID, "online", true)
+	gh.setStatus(first.runnerID, "online", false)
 	p.pollOnce(ctx)
 
 	for i := 0; i < wedgeThreshold-1; i++ {
-		gh.setStatus(first.runnerID, "offline", true)
+		gh.setStatus(first.runnerID, "offline", false)
 		p.pollOnce(ctx)
 	}
 	// one good observation resets the streak, exactly as a reconnect would
-	gh.setStatus(first.runnerID, "online", true)
+	gh.setStatus(first.runnerID, "online", false)
 	p.pollOnce(ctx)
 	for i := 0; i < wedgeThreshold-1; i++ {
-		gh.setStatus(first.runnerID, "offline", true)
+		gh.setStatus(first.runnerID, "offline", false)
 		p.pollOnce(ctx)
 	}
 
