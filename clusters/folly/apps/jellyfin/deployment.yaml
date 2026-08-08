@@ -8,6 +8,12 @@ metadata:
     app.kubernetes.io/part-of: jellyfin
 spec:
   replicas: 1
+  # riptide advertises exactly one gpu.intel.com/i915, and the container below
+  # claims it. A rolling update surges the replacement before releasing the
+  # old pod's claim, so the new one can never be scheduled and the rollout
+  # deadlocks — the old pod keeps the device it is no longer able to use.
+  strategy:
+    type: Recreate
   selector:
     matchLabels: *labels
   template:
