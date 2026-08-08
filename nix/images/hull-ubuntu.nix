@@ -180,12 +180,23 @@ let
         /usr/sbin/mkfs.ext4 -Fq -m0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "$work"
         $bb mount -t ext4 "$work" /mnt/skiff
       fi
-      # docker's data root is wiped every boot, persisted disk or not: a skiff
-      # killed mid-job leaves container metadata dockerd would try to restore
-      # into a machine that is not the one that wrote it, and what keeping the
-      # layer store would save is one image pull. The runner's workspace is
-      # where the value is.
-      $bb rm -rf /mnt/skiff/docker
+      # docker keeps its layer store across skiffs and loses everything mutable.
+      #
+      # The split matters in both directions. A skiff killed mid-job leaves
+      # container and network metadata that dockerd would try to restore into a
+      # machine that is not the one that wrote it, and a job's service container
+      # carries a name GitHub generated for a job that is over -- so `containers`
+      # and `network` go. `image` and `overlay2` are pulled bytes and nothing
+      # else: keeping them is what stopped this hull paying 25 s to pull
+      # `postgres:18-alpine` on every single job, measured against 20 s on a
+      # GitHub-hosted runner that has it seeded.
+      #
+      # ponytail: deleting `containers` orphans its entries under
+      # image/overlay2/layerdb/mounts, which docker tolerates and its own gc
+      # collects. The reset-when-nearly-full rule above is the backstop; a real
+      # `docker system prune` needs a dockerd that is already up, which races
+      # the job this guest booted to run.
+      $bb rm -rf /mnt/skiff/docker/containers /mnt/skiff/docker/network /mnt/skiff/docker/tmp
       $bb mkdir -p /mnt/skiff/work /mnt/skiff/docker /mnt/skiff/cache
       $bb chmod 0710 /mnt/skiff/docker
       $bb mount -o bind /mnt/skiff/work /home/runner/_work
@@ -197,11 +208,19 @@ let
       # nothing and a workflow falls back to whatever it does on a hosted
       # runner. `run` below is what puts it in the runner's environment.
       #
-      # The runner's own tool cache needs no line here: with
-      # AGENT_TOOLSDIRECTORY unset it defaults to _work/_tool, which is already
-      # on this disk, so setup-bun and mise stop re-downloading a toolchain
-      # every job for free.
-      echo 'export SKIFF_CACHE=/mnt/skiff/cache' > /etc/skiff-env
+      # The runner's tool cache is named explicitly rather than left to default.
+      # Measured: `_work/_tool` stayed at 4 KiB across warm jobs while setup-bun
+      # kept paying to download, because with AGENT_TOOLSDIRECTORY unset the
+      # runner puts its tool cache somewhere on the root overlay -- which is
+      # tmpfs, so it costs the class's memory *and* is gone next boot. Naming it
+      # here rather than in a workflow makes it a property of the machine, which
+      # is what it is: the runner reads it before any job exists.
+      $bb mkdir -p /mnt/skiff/tools
+      {
+        echo 'export SKIFF_CACHE=/mnt/skiff/cache'
+        echo 'export RUNNER_TOOL_CACHE=/mnt/skiff/tools'
+        echo 'export AGENT_TOOLSDIRECTORY=/mnt/skiff/tools'
+      } > /etc/skiff-env
     else
       # A plain tmpfs: docker's overlayfs snapshotter cannot put upper/work
       # dirs on the root overlay itself (EINVAL on mount).

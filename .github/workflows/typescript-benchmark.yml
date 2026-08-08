@@ -149,7 +149,15 @@ jobs:
           if [ "${{ inputs.caches }}" = "none" ]; then
             echo "caches: none — nothing is restored on any label."
             if [ -n "${SKIFF_CACHE:-}" ]; then
-              rm -rf "$SKIFF_CACHE"/* "${RUNNER_TOOL_CACHE:?}"/* 2>/dev/null || true
+              rm -rf "$SKIFF_CACHE"/* "${RUNNER_TOOL_CACHE:-/nonexistent}"/* 2>/dev/null || true
+              mkdir -p "$SKIFF_CACHE/bun"
+              # Emptied, but still on the disk. Left to its default, bun's store
+              # lands in $HOME on the guest's tmpfs root and a cold install of
+              # this repo is ~1.5 GiB against a 2.9 GiB class — which is an
+              # ENOSPC mid-install, measured. "No cache" has to mean an empty
+              # cache, not a cache in RAM, or this input measures the wrong
+              # machine.
+              echo "BUN_INSTALL_CACHE_DIR=$SKIFF_CACHE/bun" >> "$GITHUB_ENV"
               echo "Warm disk emptied so this skiff measures cold too."
             fi
             exit 0
@@ -158,11 +166,16 @@ jobs:
             echo "No warm disk. Restoring the dependency store over the network."
             exit 0
           fi
-          mkdir -p "$SKIFF_CACHE/bun" "$SKIFF_CACHE/turbo"
+          mkdir -p "$SKIFF_CACHE/bun" "$SKIFF_CACHE/turbo" "$SKIFF_CACHE/mise"
+          # mise is the odd one out: setup-bun and the runner's own tool cache
+          # land in _work/_tool, which is already on this disk, but mise keeps
+          # its toolchains under its own data directory in $HOME and re-downloads
+          # helm every job without this line.
           {
             echo "SKIFF_CACHE_ROOT=$SKIFF_CACHE"
             echo "BUN_INSTALL_CACHE_DIR=$SKIFF_CACHE/bun"
             echo "TURBO_CACHE_DIR=$SKIFF_CACHE/turbo"
+            echo "MISE_DATA_DIR=$SKIFF_CACHE/mise"
           } >> "$GITHUB_ENV"
           echo "Warm disk at $SKIFF_CACHE:"
           du -sh "$SKIFF_CACHE"/* 2>/dev/null || echo "  (empty — this slot is cold)"
