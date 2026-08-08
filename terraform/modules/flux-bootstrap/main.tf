@@ -171,7 +171,13 @@ resource "kubernetes_deployment_v1" "coredns" {
     }
   }
   spec {
-    replicas = 1
+    # Two, spread across nodes where there are two to spread across: a CoreDNS
+    # that loses its API-server watches keeps serving its last snapshot and
+    # still answers /ready, so a single replica is a single copy of a cache
+    # nothing refreshes. A second replica does not prevent the wedge — a CA
+    # rotation breaks both — but it is the floor for cluster DNS surviving one
+    # pod or one node.
+    replicas = 2
     strategy {
       type = "RollingUpdate"
       rolling_update {
@@ -190,7 +196,24 @@ resource "kubernetes_deployment_v1" "coredns" {
         }
       }
       spec {
-        priority_class_name             = "system-cluster-critical"
+        priority_class_name = "system-cluster-critical"
+        affinity {
+          pod_anti_affinity {
+            # Preferred, not required: a site down to one schedulable node
+            # still gets both replicas rather than one Pending forever.
+            preferred_during_scheduling_ignored_during_execution {
+              weight = 100
+              pod_affinity_term {
+                topology_key = "kubernetes.io/hostname"
+                label_selector {
+                  match_labels = {
+                    "k8s-app" = "kube-dns"
+                  }
+                }
+              }
+            }
+          }
+        }
         service_account_name            = kubernetes_service_account_v1.coredns.metadata[0].name
         dns_policy                      = "Default"
         automount_service_account_token = true

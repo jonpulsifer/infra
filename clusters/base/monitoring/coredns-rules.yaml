@@ -1,0 +1,30 @@
+# Cluster CoreDNS losing its API-server watches is invisible from the outside:
+# it keeps serving whatever snapshot it holds, stays Ready (the kubernetes
+# plugin reports ready once and never again), and Postgres-shaped symptoms show
+# up in workloads days later. Observed live: offsite's CoreDNS lost its watches
+# on a CA rotation and answered from a six-day-old snapshot until restarted.
+#
+# The signal is client-go's own request metric, which the kubernetes plugin
+# exports: a transport-level failure — TLS refusal included — is recorded with
+# `code="<error>"`. A healthy CoreDNS logs a handful of these over weeks; a
+# wedged one fails its watch reconnects continuously for as long as it is
+# wedged, which is what the `for:` filters on.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: coredns
+  namespace: monitoring
+  labels:
+    release: prom-stack
+spec:
+  groups:
+    - name: coredns
+      rules:
+        - alert: CoreDNSWatchesFailing
+          expr: sum by (cluster, instance) (rate(coredns_kubernetes_rest_client_requests_total{job="coredns", code="<error>"}[10m])) > 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            message: CoreDNS on {{ $labels.cluster }} cannot reach the API server
+            description: "CoreDNS ({{ $labels.instance }}) has been failing its API-server requests for 30 minutes. It is still serving DNS — from a snapshot that is no longer being refreshed, so records created or moved since the wedge do not resolve. Restart the coredns Deployment in kube-system and find what broke the connection (certificate rotation is the known cause)."

@@ -11,5 +11,6 @@ resources:
   - opentelemetry-collector-servicemonitor.yaml
   - grafana-dashboards
   - alertmanager-discord.yaml
+  - coredns-rules.yaml
   - helm-repository-grafana.yaml
   - helm-repository-prometheus.yaml
