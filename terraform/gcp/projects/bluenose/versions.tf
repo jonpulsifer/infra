@@ -9,6 +9,11 @@ locals {
   fml_pool = "iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool"
 
   spindrift_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift:spindrift"
+
+  # The clean-installation acceptance environment, declared in
+  # clusters/offsite/apps/spindrift-acceptance. Same cluster, same service
+  # account name, different namespace — which is a different subject entirely.
+  spindrift_acceptance_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift-acceptance:spindrift"
 }
 
 data "google_project" "current" {

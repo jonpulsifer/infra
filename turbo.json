@@ -61,7 +61,8 @@
         "$TURBO_ROOT$/packages/charts/spindrift/Chart.yaml",
         "$TURBO_ROOT$/packages/charts/spindrift-app/Chart.yaml",
         "$TURBO_ROOT$/clusters/base/platform/spindrift-target/oci-repository.yaml",
-        "$TURBO_ROOT$/clusters/offsite/apps/spindrift/oci-repository.yaml"
+        "$TURBO_ROOT$/clusters/offsite/apps/spindrift/oci-repository.yaml",
+        "$TURBO_ROOT$/clusters/offsite/apps/spindrift-acceptance/oci-repository.yaml"
       ],
       "env": ["DATABASE_URL"],
       "outputs": []

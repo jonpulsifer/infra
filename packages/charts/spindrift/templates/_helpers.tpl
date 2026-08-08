@@ -1,13 +1,29 @@
 {{/*
-The release's base name. Every object is derived from it, and the namespace is
-assumed to match — Flux creates the Namespace alongside this release.
+The release's base name. Every object is derived from it.
 */}}
 {{- define "spindrift.fullname" -}}
 {{- default .Release.Name .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/*
+Where this release installs.
+
+`.Release.Namespace` — the namespace Helm was told to install into — rather
+than the release's own name, which is what this used to assume. The two agree
+for the installation this chart was written beside and disagree for every
+other: `helm install spindrift oci://… -n anything-else` wrote its Deployments,
+its database and its Gateway into a namespace called `spindrift`, which is
+either a namespace that does not exist or, worse, somebody else's installation.
+
+That is a property of an extractable artifact rather than a detail: a chart
+that only installs where its author put it has not been extracted, whatever
+registry it is published to.
+
+`namespaceOverride` stays for a release that genuinely wants to write outside
+the namespace it was installed into.
+*/}}
 {{- define "spindrift.namespace" -}}
-{{- default (include "spindrift.fullname" .) .Values.namespaceOverride }}
+{{- default .Release.Namespace .Values.namespaceOverride }}
 {{- end }}
 
 {{- define "spindrift.serviceAccountName" -}}

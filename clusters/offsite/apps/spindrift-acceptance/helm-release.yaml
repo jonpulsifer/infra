@@ -1,0 +1,75 @@
+---
+# The bare install: the chart, an image, a hostname, and nothing else.
+#
+# **There is deliberately no `manifest:` here, and that is the whole point.**
+# The installation next door seeds a fully authored declaration, so everything
+# it proves is about a document somebody already wrote. This one comes up with
+# no declaration at all — the state a first-time operator installs into — which
+# means the placeholder is what seeds the row, the relying party has to be the
+# hostname this is actually served at, and every genuine choice is made in the
+# product by the wizard.
+#
+# What that leaves untested here is intentional: a re-seedable declaration is
+# the other installation's job, and it holds it.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: spindrift
+  namespace: spindrift-acceptance
+  labels:
+    # See the comment on the running installation's release: this patch target
+    # only applies to charts sourced through `chart.spec`, and a `chartRef`
+    # release has none.
+    source.toolkit.fluxcd.io/kind: OCIRepository
+spec:
+  interval: 5m
+  chartRef:
+    kind: OCIRepository
+    name: spindrift
+  values:
+    # The same digest the running installation is on. A fresh install of a
+    # different image would answer a question about that image instead.
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:eeab79ec9c3be369949c8645d800c6eb2ca9a55680a9038386d52cb5ccbf0484
+    # A real origin, because a passkey ceremony is scoped to one and a
+    # relying party that is not a suffix of the origin is refused by the
+    # browser rather than by anything here. cert-manager issues the
+    # certificate from the chart's Gateway and external-dns publishes the
+    # record from its HTTPRoute, so this line is the whole of it.
+    hostname: spindrift-acceptance.${SECRET_DOMAIN}
+    envFromSecret: spindrift-acceptance-env
+    # **The one thing this shares with the running installation.** The pool
+    # provider mints a token whose subject is this namespace's service account,
+    # and `terraform/gcp/projects/bluenose/iam.tf` binds that subject to the
+    # same `spindrift-controller` account the other installation impersonates.
+    #
+    # A second identity would be the more faithful shape and is not worth it:
+    # §14 puts identity provisioning in the operator's Terraform rather than in
+    # the product, so what a second account would exercise is this repository's
+    # own IAM, not anything Spindrift does. What it would cost is every project
+    # role, the bucket grants and the signer duplicated for an environment
+    # meant to be deleted.
+    #
+    # The consequence, stated rather than discovered: this installation can
+    # reach everything the other one can, in the same projects. Give its Apps
+    # names nothing else uses.
+    serviceAccount:
+      token:
+        gcpAudience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+        gcpImpersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
+        # The cluster's own root and nothing else. The running installation
+        # extends its bundle because it holds a Target on folly; this one
+        # places on cloud surfaces, which are reached over public TLS the
+        # image's own trust store already covers.
+        caConfigMap: kube-root-ca.crt
+    ingress:
+      enabled: true
+    # Its own database, and `keepOnDelete` off — an acceptance installation
+    # that leaves a volume behind is one whose next run is not clean.
+    database:
+      enabled: true
+      size: 2Gi
+      keepOnDelete: false
+      migration:
+        enabled: true
+    reconciler:
+      enabled: true
