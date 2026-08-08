@@ -29,7 +29,7 @@ spec:
   values:
     # The same digest the running installation is on. A fresh install of a
     # different image would answer a question about that image instead.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:ff81945e9f5a17a63b53a34f5bb37b9e3e7ffa9c594ff522d07ab5e42579a346
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:c99fc4ebf860ffaeb9f956ff4409d3d7ca898d5fd13b978388ed813e2525987d
     # A real origin, because a passkey ceremony is scoped to one and a
     # relying party that is not a suffix of the origin is refused by the
     # browser rather than by anything here. cert-manager issues the
