@@ -158,11 +158,16 @@ jobs:
             echo "No warm disk. Restoring the dependency store over the network."
             exit 0
           fi
-          mkdir -p "$SKIFF_CACHE/bun" "$SKIFF_CACHE/turbo"
+          mkdir -p "$SKIFF_CACHE/bun" "$SKIFF_CACHE/turbo" "$SKIFF_CACHE/mise"
+          # mise is the odd one out: setup-bun and the runner's own tool cache
+          # land in _work/_tool, which is already on this disk, but mise keeps
+          # its toolchains under its own data directory in $HOME and re-downloads
+          # helm every job without this line.
           {
             echo "SKIFF_CACHE_ROOT=$SKIFF_CACHE"
             echo "BUN_INSTALL_CACHE_DIR=$SKIFF_CACHE/bun"
             echo "TURBO_CACHE_DIR=$SKIFF_CACHE/turbo"
+            echo "MISE_DATA_DIR=$SKIFF_CACHE/mise"
           } >> "$GITHUB_ENV"
           echo "Warm disk at $SKIFF_CACHE:"
           du -sh "$SKIFF_CACHE"/* 2>/dev/null || echo "  (empty — this slot is cold)"

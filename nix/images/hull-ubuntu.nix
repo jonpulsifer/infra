@@ -180,12 +180,23 @@ let
         /usr/sbin/mkfs.ext4 -Fq -m0 -E lazy_itable_init=1,lazy_journal_init=1,nodiscard "$work"
         $bb mount -t ext4 "$work" /mnt/skiff
       fi
-      # docker's data root is wiped every boot, persisted disk or not: a skiff
-      # killed mid-job leaves container metadata dockerd would try to restore
-      # into a machine that is not the one that wrote it, and what keeping the
-      # layer store would save is one image pull. The runner's workspace is
-      # where the value is.
-      $bb rm -rf /mnt/skiff/docker
+      # docker keeps its layer store across skiffs and loses everything mutable.
+      #
+      # The split matters in both directions. A skiff killed mid-job leaves
+      # container and network metadata that dockerd would try to restore into a
+      # machine that is not the one that wrote it, and a job's service container
+      # carries a name GitHub generated for a job that is over -- so `containers`
+      # and `network` go. `image` and `overlay2` are pulled bytes and nothing
+      # else: keeping them is what stopped this hull paying 25 s to pull
+      # `postgres:18-alpine` on every single job, measured against 20 s on a
+      # GitHub-hosted runner that has it seeded.
+      #
+      # ponytail: deleting `containers` orphans its entries under
+      # image/overlay2/layerdb/mounts, which docker tolerates and its own gc
+      # collects. The reset-when-nearly-full rule above is the backstop; a real
+      # `docker system prune` needs a dockerd that is already up, which races
+      # the job this guest booted to run.
+      $bb rm -rf /mnt/skiff/docker/containers /mnt/skiff/docker/network /mnt/skiff/docker/tmp
       $bb mkdir -p /mnt/skiff/work /mnt/skiff/docker /mnt/skiff/cache
       $bb chmod 0710 /mnt/skiff/docker
       $bb mount -o bind /mnt/skiff/work /home/runner/_work
