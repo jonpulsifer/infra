@@ -130,6 +130,19 @@ type skiffPaths struct {
 	deviceSocks []string // parallel to the hull manifest's Devices
 }
 
+// sockets is every vhost-user/virtiofs socket bosun creates for one skiff.
+// Cleanup iterates this rather than naming each field, so a socket added to
+// skiffPaths cannot be forgotten on the teardown path.
+func (p skiffPaths) sockets() []string {
+	socks := []string{p.credSock, p.diagSock, p.netSock, p.apiSock}
+	for _, sock := range p.deviceSocks {
+		if sock != "" {
+			socks = append(socks, sock)
+		}
+	}
+	return socks
+}
+
 func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPaths, error) {
 	var p skiffPaths
 	var err error

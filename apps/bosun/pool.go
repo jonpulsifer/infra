@@ -303,6 +303,13 @@ func binPath(override, fallback string) string {
 // finished on its own or bosun killed it for being wedged or over budget.
 func (p *pool) awaitExit(ctx context.Context, s *skiff, logger *slog.Logger) {
 	err := s.ch.Wait()
+	// A clean guest poweroff exits 0. A non-zero exit with no reason already
+	// set means the VMM died without bosun asking -- the cgroup OOM killer is
+	// the one that happens -- and calling that "completed" would hide it in
+	// the one metric that says whether jobs are finishing.
+	if err != nil && s.reason() == "" {
+		s.setExitReason(exitKilled)
+	}
 	logger.Info("skiff halted", "error", err)
 	p.retire(ctx, s, logger)
 	if ctx.Err() != nil {
@@ -337,12 +344,15 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 	// diagDir is deliberately not removed: it is the evidence, and this is
 	// the path a wedged skiff's own death takes.
 	os.RemoveAll(s.paths.dir)
-	os.Remove(s.paths.credSock)
-	os.Remove(s.paths.diagSock)
-	os.Remove(s.paths.netSock)
-	os.Remove(s.paths.apiSock)
-	for _, sock := range s.paths.deviceSocks {
+	// Each helper drops a sidecar file beside its socket -- virtiofsd a
+	// "<sock>.pid", passt a "<sock>.repair" -- and neither is cleaned up by
+	// the helper on the way out. Removing only the sockets leaked both for as
+	// long as bosun ran, since sweep-on-start is what eventually collected
+	// them. os.Remove on a name that was never created is a no-op here.
+	for _, sock := range s.paths.sockets() {
 		os.Remove(sock)
+		os.Remove(sock + ".pid")
+		os.Remove(sock + ".repair")
 	}
 
 	p.mu.Lock()
