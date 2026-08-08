@@ -29,5 +29,6 @@
   "theme": "dark",
   "editorMode": "normal",
   "remoteControlAtStartup": false,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "skipWorkflowUsageWarning": true
 }
