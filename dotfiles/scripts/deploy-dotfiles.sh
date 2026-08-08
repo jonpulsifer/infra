@@ -28,17 +28,22 @@ link_file "${DOTFILES_DIR}" "${HOME}/.dotfiles"
 # 2. Individual config files and directories
 link_file "${DOTFILES_DIR}/.tmux.conf" "${HOME}/.tmux.conf"
 link_file "${DOTFILES_DIR}/.vimrc" "${HOME}/.vimrc"
-link_file "${DOTFILES_DIR}/.zshenv" "${HOME}/.zshenv"
 link_file "${DOTFILES_DIR}/.config/.bunfig.toml" "${HOME}/.config/.bunfig.toml"
 link_file "${DOTFILES_DIR}/.config/git" "${HOME}/.config/git"
 link_file "${DOTFILES_DIR}/.config/ghostty/config" "${HOME}/.config/ghostty/config"
-link_file "${DOTFILES_DIR}/.config/nvim" "${HOME}/.config/nvim"
-# On NixOS hosts where home-manager owns zsh (HM_ACTIVATED=1), skip deploying
-# the .config/zsh dir: home-manager writes ~/.config/zsh/.zshrc itself, and a
-# symlink here would shadow its generated file. Everything else (.zshenv,
-# git, ssh, ...) still deploys.
+# Everything home-manager's programs.zsh and programs.neovim generate. On a
+# NixOS host home-manager owns these outright (HM_ACTIVATED=1) and refuses to
+# overwrite a file it did not create, so deploying them here does not merely
+# shadow the generated versions -- it fails the whole home-manager activation,
+# taking every other programs.<x> with it.
+#
+# Everywhere else -- macOS, where Homebrew and these dotfiles are the whole
+# story and there is no home-manager -- the guard is false and all three
+# deploy exactly as before.
 if [[ "${HM_ACTIVATED:-0}" != "1" ]]; then
+  link_file "${DOTFILES_DIR}/.zshenv" "${HOME}/.zshenv"
   link_file "${DOTFILES_DIR}/.config/zsh" "${HOME}/.config/zsh"
+  link_file "${DOTFILES_DIR}/.config/nvim" "${HOME}/.config/nvim"
 fi
 link_file "${DOTFILES_DIR}/.local/bin" "${HOME}/.local/bin"
 link_file "${DOTFILES_DIR}/.ssh/config" "${HOME}/.ssh/config"

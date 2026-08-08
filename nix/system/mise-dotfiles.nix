@@ -33,13 +33,17 @@ lib.mkIf (config.homelab.fleet.miseDotfiles && (user.isNormalUser or false)) {
       "users"
       "groups"
     ];
+    # `|| true` on purpose: a dotfiles problem must not fail an activation and
+    # strand the host. stderr is deliberately *not* discarded, though -- it was,
+    # and a bootstrap that failed every run left no trace anywhere, which is
+    # how the home-manager collision above went unnoticed.
     text = ''
       HOME="${user.home}" MISE_YES=1 ${wslEnv}\
       ${pkgs.sudo}/bin/sudo --preserve-env=${preserveEnv} -u ${user.name} \
-        ${mise}/bin/mise trust -y ${dotfilesSource} 2>/dev/null || true
+        ${mise}/bin/mise trust -y ${dotfilesSource} || true
       HOME="${user.home}" MISE_YES=1 ${wslEnv}HM_ACTIVATED=1 \
       ${pkgs.sudo}/bin/sudo --preserve-env=${preserveEnv},HM_ACTIVATED -u ${user.name} \
-        ${mise}/bin/mise run bootstrap -y --cd ${dotfilesSource} 2>/dev/null || true
+        ${mise}/bin/mise run bootstrap -y --cd ${dotfilesSource} || true
     '';
   };
 }
