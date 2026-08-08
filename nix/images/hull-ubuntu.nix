@@ -208,11 +208,19 @@ let
       # nothing and a workflow falls back to whatever it does on a hosted
       # runner. `run` below is what puts it in the runner's environment.
       #
-      # The runner's own tool cache needs no line here: with
-      # AGENT_TOOLSDIRECTORY unset it defaults to _work/_tool, which is already
-      # on this disk, so setup-bun and mise stop re-downloading a toolchain
-      # every job for free.
-      echo 'export SKIFF_CACHE=/mnt/skiff/cache' > /etc/skiff-env
+      # The runner's tool cache is named explicitly rather than left to default.
+      # Measured: `_work/_tool` stayed at 4 KiB across warm jobs while setup-bun
+      # kept paying to download, because with AGENT_TOOLSDIRECTORY unset the
+      # runner puts its tool cache somewhere on the root overlay -- which is
+      # tmpfs, so it costs the class's memory *and* is gone next boot. Naming it
+      # here rather than in a workflow makes it a property of the machine, which
+      # is what it is: the runner reads it before any job exists.
+      $bb mkdir -p /mnt/skiff/tools
+      {
+        echo 'export SKIFF_CACHE=/mnt/skiff/cache'
+        echo 'export RUNNER_TOOL_CACHE=/mnt/skiff/tools'
+        echo 'export AGENT_TOOLSDIRECTORY=/mnt/skiff/tools'
+      } > /etc/skiff-env
     else
       # A plain tmpfs: docker's overlayfs snapshotter cannot put upper/work
       # dirs on the root overlay itself (EINVAL on mount).
