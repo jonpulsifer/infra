@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -295,5 +296,103 @@ func TestLoadHullRequiresFields(t *testing.T) {
 func TestLoadHullMissingFile(t *testing.T) {
 	if _, err := loadHull(t.TempDir()); err == nil {
 		t.Fatal("expected error for missing hull.json")
+	}
+}
+
+// The workspace disk goes after the hull's own disks so their indices are
+// untouched, and the guest is told the name rather than left to count.
+func TestChArgsWorkspaceDiskComesLastAndIsNamedOnTheCmdline(t *testing.T) {
+	h := &hull{
+		dir: "/hulls/ubuntu",
+		manifest: hullManifest{
+			Kernel: "vmlinux", Initrd: "initrd", Cmdline: "console=ttyS0",
+			Devices: []hullDevice{{Disk: &hullDisk{Path: "rootfs.img", RO: true}}},
+		},
+		digest: "deadbeef",
+	}
+	class := Class{VCPUs: 4, Memory: "3072M", Workspace: "6G"}
+	paths, err := resolvePaths("/run/bosun", "/var/log/bosun", "sk09", h.manifest.Devices)
+	if err != nil {
+		t.Fatalf("resolvePaths: %v", err)
+	}
+	paths.workspace = "/var/lib/bosun/workspace/sk09.img"
+
+	got := chArgs(h, class, "sk09", paths)
+	want := []string{
+		"--kernel", "/hulls/ubuntu/vmlinux",
+		"--initramfs", "/hulls/ubuntu/initrd",
+		"--cpus", "boot=4",
+		"--memory", "size=3072M,shared=on",
+		"--fs", "tag=bosun,socket=/run/bosun/sk09.fs",
+		"--fs", "tag=bosun-diag,socket=/run/bosun/sk09.diag.fs",
+		"--disk", "path=/hulls/ubuntu/rootfs.img,readonly=on",
+		"--disk", "path=/var/lib/bosun/workspace/sk09.img,readonly=off",
+		"--net", "vhost_user=on,socket=/run/bosun/sk09.net",
+		"--api-socket", "/run/bosun/sk09.api",
+		"--console", "off",
+		"--serial", "file=/var/log/bosun/sk09.log",
+		// vdb, not vda: the hull's rootfs holds vda.
+		"--cmdline", "console=ttyS0 bosun.workspace=/dev/vdb bosun.skiff=sk09 bosun.hull=sha256:deadbeef",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("argv mismatch:\n got:  %v\n want: %v", got, want)
+	}
+}
+
+// A class with no workspace must produce exactly the argv it produced before
+// the option existed: no disk, and nothing extra on the cmdline.
+func TestChArgsNoWorkspaceLeavesCmdlineAlone(t *testing.T) {
+	h := &hull{
+		dir:      "/hulls/nixos",
+		manifest: hullManifest{Kernel: "vmlinux", Initrd: "initrd", Cmdline: "console=ttyS0"},
+		digest:   "deadbeef",
+	}
+	paths, err := resolvePaths("/run/bosun", "/var/log/bosun", "sk10", nil)
+	if err != nil {
+		t.Fatalf("resolvePaths: %v", err)
+	}
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk10", paths)
+	if slices.Contains(got, "--disk") {
+		t.Fatalf("workspace-less class got a disk: %v", got)
+	}
+	if !slices.Contains(got, "console=ttyS0 bosun.skiff=sk10 bosun.hull=sha256:deadbeef") {
+		t.Fatalf("cmdline changed: %v", got)
+	}
+}
+
+// The reservation is the whole reason the disk exists: a sparse file would
+// move the overcommit onto the host filesystem rather than remove it.
+func TestCreateWorkspaceReservesTheWholeSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "sk11.img")
+	if err := createWorkspace(path, "2M"); err != nil {
+		t.Fatalf("createWorkspace: %v", err)
+	}
+	var st syscall.Stat_t
+	if err := syscall.Stat(path, &st); err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if st.Size != 2<<20 {
+		t.Errorf("size = %d, want %d", st.Size, 2<<20)
+	}
+	// 512-byte blocks: a sparse file of this size reports far fewer.
+	if want := int64(2 << 20 / 512); st.Blocks < want {
+		t.Errorf("allocated %d blocks, want at least %d -- the file is sparse", st.Blocks, want)
+	}
+
+	if err := createWorkspace(path, "nonsense"); err == nil {
+		t.Fatal("expected an error for an unparseable size")
+	}
+}
+
+func TestLoadHullRejectsMoreDisksThanGuestDeviceNames(t *testing.T) {
+	dir := t.TempDir()
+	devices := make([]hullDevice, maxHullDisks+1)
+	for i := range devices {
+		devices[i] = hullDevice{Disk: &hullDisk{Path: "rootfs.img"}}
+	}
+	hullDir := writeTestHull(t, dir, "toomany", devices)
+	writeFile(t, filepath.Join(hullDir, "rootfs.img"), "rootfs-bytes")
+	if _, err := loadHull(hullDir); err == nil {
+		t.Fatal("expected an error for a hull declaring more disks than there are device names")
 	}
 }

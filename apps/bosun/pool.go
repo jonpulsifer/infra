@@ -131,6 +131,12 @@ func (p *pool) sweep(ctx context.Context) error {
 			p.logger.Warn("sweep: remove stale state", "path", path, "error", err)
 		}
 	}
+	// Workspace images sit on real storage rather than tmpfs, so unlike
+	// everything above they survive a reboot as well as a restart, and nothing
+	// else ever deletes one whose skiff was killed with the cgroup.
+	if err := os.RemoveAll(p.cfg.WorkspaceDir); err != nil {
+		p.logger.Warn("sweep: remove stale workspaces", "path", p.cfg.WorkspaceDir, "error", err)
+	}
 	return nil
 }
 
@@ -171,6 +177,9 @@ func (p *pool) spawn(ctx context.Context, className string) {
 	if err != nil {
 		logger.Error("resolve paths", "error", err)
 		return
+	}
+	if class.Workspace != "" {
+		paths.workspace = filepath.Join(p.cfg.WorkspaceDir, id+".img")
 	}
 
 	// Mint immediately before boot, never stockpiled: the config expires
@@ -232,6 +241,14 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 		return fmt.Errorf("open helpers log: %w", err)
 	}
 	s.helpersLog = helpersLog
+
+	// Before any helper, so a host that cannot spare the space costs one
+	// failed spawn rather than four processes to unwind.
+	if s.paths.workspace != "" {
+		if err := createWorkspace(s.paths.workspace, class.Workspace); err != nil {
+			return fmt.Errorf("create workspace disk: %w", err)
+		}
+	}
 
 	virtiofsd := binPath(p.cfg.Bin.Virtiofsd, "virtiofsd")
 
@@ -342,8 +359,13 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 	}
 
 	// diagDir is deliberately not removed: it is the evidence, and this is
-	// the path a wedged skiff's own death takes.
+	// the path a wedged skiff's own death takes. The workspace is, and must
+	// be — it is the one thing bosun reserves that a reboot would not free,
+	// and it is where untrusted job code wrote.
 	os.RemoveAll(s.paths.dir)
+	if s.paths.workspace != "" {
+		os.Remove(s.paths.workspace)
+	}
 	// Each helper drops a sidecar file beside its socket -- virtiofsd a
 	// "<sock>.pid", passt a "<sock>.repair" -- and neither is cleaned up by
 	// the helper on the way out. Removing only the sockets leaked both for as
