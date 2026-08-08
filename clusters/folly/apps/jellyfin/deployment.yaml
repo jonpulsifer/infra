@@ -9,11 +9,22 @@ metadata:
 spec:
   replicas: 1
   # riptide advertises exactly one gpu.intel.com/i915, and the container below
-  # claims it. A rolling update surges the replacement before releasing the
-  # old pod's claim, so the new one can never be scheduled and the rollout
-  # deadlocks — the old pod keeps the device it is no longer able to use.
+  # claims it. A surging replacement is scheduled before the old pod releases
+  # its claim, so the new one can never be placed and the rollout deadlocks —
+  # the old pod keeps the device it is no longer able to use.
+  #
+  # `maxSurge: 0` rather than `type: Recreate`, which says the same thing about
+  # one replica and cannot be applied here: the live object carries the
+  # `rollingUpdate` block the API server defaulted, owned by a field manager
+  # this apply is not, so a `Recreate` patch merges into an object holding both
+  # and the API refuses it — `rollingUpdate: Forbidden ... when strategy type is
+  # 'Recreate'`. That is a dry-run failure, so Flux stops applying the whole
+  # Kustomization rather than only this file.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels: *labels
   template:
