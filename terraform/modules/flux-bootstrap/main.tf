@@ -12,6 +12,12 @@ resource "github_repository_deploy_key" "this" {
 
 # CoreDNS is part of the bootstrap boundary: Flux requires cluster DNS before it
 # can fetch and reconcile its own desired state.
+#
+# The boundary has a shipping quirk: both clusters' bootstrap roots consume
+# this module and never automerge, so a change here is applied only when
+# someone comments `atlantis apply` on the PR *before* merging it. A change
+# merged without that sits in git unapplied — invisibly, because every other
+# root in this repository applies on merge.
 
 resource "kubernetes_service_account_v1" "coredns" {
   metadata {
