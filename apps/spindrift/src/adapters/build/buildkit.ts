@@ -60,11 +60,39 @@ export function dockerConfigFor(auth: readonly RegistryAuth[]): string | null {
   return JSON.stringify({
     auths: Object.fromEntries(
       auth.map((one) => [
-        one.host,
+        configKeyFor(one.host),
         { auth: btoa(`${one.username}:${one.secret}`) },
       ]),
     ),
   });
+}
+
+/** The Docker Hub entry every registry client has agreed to disagree about. */
+const DOCKER_HUB_CONFIG_KEY = 'https://index.docker.io/v1/';
+
+/**
+ * The key BuildKit looks a host up under, which is the host for all but one.
+ *
+ * Docker Hub is the exception, and it is not cosmetic: BuildKit resolves
+ * `docker.io` to the registry host `registry-1.docker.io` and then substitutes
+ * the legacy index URL before reading the config —
+ *
+ * ```go
+ * hostKey := host
+ * if host == DockerHubRegistryHost { hostKey = DockerHubConfigfileKey }
+ * ac, err := ap.config.GetAuthConfig(hostKey)
+ * ```
+ *
+ * — so an entry filed under either spelling of the hostname is an entry it
+ * never reads, and the push fails as `push access denied, repository does not
+ * exist or may require authorization`, which names authorization last and a
+ * missing repository first. The hosted route never met this: its workflow runs
+ * `docker login`, which writes this key itself.
+ */
+function configKeyFor(host: string): string {
+  return host === 'docker.io' || host === 'registry-1.docker.io'
+    ? DOCKER_HUB_CONFIG_KEY
+    : host;
 }
 
 /** Everything the program needs to know, all of it already decided by core. */
