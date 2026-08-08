@@ -16,11 +16,20 @@
  *
  * The tabs are plain links into the existing routes, so `/builds` and
  * `/builds/<id>` keep meaning exactly what they meant.
+ *
+ * Two things moved out of this component and the reason is the same for both:
+ * everything above the first row of data is a toll the operator pays on every
+ * visit. The `Supply chain` eyebrow is gone because the strip beneath it said
+ * the same word twice — it is now the strip's own accessible name, which is
+ * where a label belongs when the thing it labels is already legible. And
+ * {@link SupplyChainFlow} is exported separately so each screen can render the
+ * diagram *below* its ledger; `components/flow.tsx` already concedes that "the
+ * operator came for the rows", and documentation stacked on top of the rows is
+ * the one place it helps nobody.
  */
 import supplyChainFlow from '../../client/diagrams/supply-chain.svg';
 import { Flow } from '../../components/flow.tsx';
-import { Eyebrow } from '../../ui/card.tsx';
-import { cn } from '../../ui/utils.ts';
+import { Tabs } from '../../ui/tabs.tsx';
 
 export type SupplyChainTab = 'sources' | 'builds' | 'artifacts';
 
@@ -42,36 +51,25 @@ export function SupplyChainTabs({
   readonly onNavigate: (path: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <Eyebrow>Supply chain</Eyebrow>
-        <nav
-          aria-label="Supply chain"
-          className="flex gap-1 rounded-sm border border-border bg-card p-1"
-        >
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              aria-current={current === tab.id ? 'page' : undefined}
-              onClick={() => onNavigate(tab.path)}
-              className={cn(
-                'rounded-sm px-3 py-1.5 text-sm transition-colors',
-                current === tab.id
-                  ? 'bg-secondary font-semibold text-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-      <Flow
-        src={supplyChainFlow}
-        label="How a Source becomes something that is serving"
-        alt="Source and Build produce an Artifact through one BuildKit program on any of three routes; the gate verifies, caps the level and signs; the Artifact plus pinned config references becomes a Deploy, admitted by a signature check."
-      />
-    </div>
+    <Tabs
+      label="Supply chain"
+      items={TABS}
+      current={current}
+      onSelect={(id) => {
+        const tab = TABS.find((candidate) => candidate.id === id);
+        if (tab) onNavigate(tab.path);
+      }}
+    />
+  );
+}
+
+/** The chain as a picture, for the reader who has not built the model yet. */
+export function SupplyChainFlow() {
+  return (
+    <Flow
+      src={supplyChainFlow}
+      label="How a Source becomes something that is serving"
+      alt="Source and Build produce an Artifact through one BuildKit program on any of three routes; the gate verifies, caps the level and signs; the Artifact plus pinned config references becomes a Deploy, admitted by a signature check."
+    />
   );
 }

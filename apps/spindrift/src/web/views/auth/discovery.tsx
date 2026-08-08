@@ -21,18 +21,41 @@
  * this form. It renders in the neutral voice, beside the field it could not
  * answer, with the sentence the command produced — never as a blank, because a
  * blank on a confirmation screen reads as a confirmed answer.
+ *
+ * **Every row is a reconciliation, not a row of buttons.** The panel shipped
+ * deriving each candidate's selected style from `fact.suggested` — a property
+ * of the *server's* answer, identical before and after a press — so confirming
+ * a value changed the document and changed nothing on screen. What a row says
+ * now is a comparison: the value the document holds at
+ * {@link placementOf}, and which candidate, if any, is that value. A press is
+ * visible because the document is what is being read.
+ *
+ * **It seeds the two narrowing inputs from the document, and that is the one
+ * place it names keys.** Discovery is staged on purpose — with no project the
+ * command answers "name a project and run discovery again" for buckets and
+ * signing keys — and the candidate that unblocks it reads
+ * `"<project> — this deployment's own credential"`, so an operator who types
+ * what they read types a project that does not exist. Two paths are named to
+ * close that: the home vessel's project, and the location inside the signer
+ * this installation already holds. Both are paths the command itself answers
+ * for, so a key that leaves the schema leaves the seed empty rather than
+ * leaving a control writing somewhere nothing reads.
  */
-import { CircleAlert, Search } from 'lucide-react';
+import { Check, CircleAlert, Search } from 'lucide-react';
 import { useState } from 'react';
 import type {
   DiscoveredCandidate,
   DiscoveredFact,
 } from '../../../commands/installation/discover.ts';
-import { placementOf } from '../../../commands/installation/discover.ts';
+import {
+  HOME_VESSEL,
+  placementOf,
+} from '../../../commands/installation/discover.ts';
 import { command } from '../../client.ts';
 import type { Path } from '../../forms/document.ts';
-import { withValueAt } from '../../forms/document.ts';
+import { valueAt, withValueAt } from '../../forms/document.ts';
 import { humanize } from '../../forms/schema.ts';
+import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
@@ -112,18 +135,42 @@ export function DiscoveryPanel({
   locked?(at: Path): boolean;
   onChange(document: unknown): void;
 }) {
-  const [project, setProject] = useState('');
-  const [kmsLocation, setKmsLocation] = useState('');
+  // Seeded once, from the document this panel opened on. Later edits do not
+  // move these: they are what the operator is *narrowing* by, and a text box
+  // that rewrote itself under a cursor because a candidate landed elsewhere
+  // would be a worse bug than the empty one this replaces.
+  const seed = narrowingFrom(document);
+  const [project, setProject] = useState(seed.project);
+  const [kmsLocation, setKmsLocation] = useState(seed.kmsLocation);
   const [facts, setFacts] = useState<readonly DiscoveredFact[] | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const discover = async () => {
+  const discover = async (narrowing: {
+    project: string;
+    kmsLocation: string;
+  }) => {
     setBusy(true);
-    const answer = await askInstallationCloud({ project, kmsLocation });
+    const answer = await askInstallationCloud(narrowing);
     setFacts('facts' in answer ? answer.facts : null);
     setRefusal('refusal' in answer ? answer.refusal : null);
     setBusy(false);
+  };
+
+  /**
+   * Confirming a value, and — for the project — asking again with it.
+   *
+   * The second half is what makes the staging finishable in the place it was
+   * staged. Buckets and signing keys are not read until a project is named, so
+   * the press that names one is the press that should produce them; leaving the
+   * operator to copy a label into a box was leaving them to copy the words
+   * "this deployment's own credential" along with it.
+   */
+  const apply = (fact: DiscoveredFact, candidate: DiscoveredCandidate) => {
+    onChange(applyDiscovered(document, fact, candidate));
+    if (!isProjectFact(fact) || typeof candidate.value !== 'string') return;
+    setProject(candidate.value);
+    void discover({ project: candidate.value, kmsLocation });
   };
 
   return (
@@ -139,50 +186,110 @@ export function DiscoveryPanel({
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <Field
-            name="discovery.project"
-            label="Project"
-            hint="Leave empty to list the projects this identity can see."
-            value={project}
-            disabled={disabled || busy}
-            onChange={(event) => setProject(event.target.value)}
-          />
-          <Field
-            name="discovery.kmsLocation"
-            label="Key location"
-            hint="Signing keys are listed one location at a time."
-            value={kmsLocation}
-            disabled={disabled || busy}
-            onChange={(event) => setKmsLocation(event.target.value)}
-          />
-        </div>
-        <div>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={disabled || busy}
-            onClick={() => void discover()}
-          >
-            <Search aria-hidden="true" />
-            {busy ? 'Asking…' : 'Ask this installation’s cloud'}
-          </Button>
-        </div>
+        {/* A real form, so Enter in either narrowing box asks — and its own
+            form rather than the manifest's, which is why `installation.tsx`
+            mounts this panel outside the form it saves with: Enter here used
+            to submit the whole manifest. */}
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void discover({ project, kmsLocation });
+          }}
+        >
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <Field
+              name="discovery.project"
+              label="Project"
+              hint="Leave empty to list the projects this identity can see."
+              value={project}
+              disabled={disabled || busy}
+              onChange={(event) => setProject(event.target.value)}
+            />
+            <Field
+              name="discovery.kmsLocation"
+              label="Key location"
+              hint="Signing keys are listed one location at a time."
+              value={kmsLocation}
+              disabled={disabled || busy}
+              onChange={(event) => setKmsLocation(event.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" variant="outline" disabled={disabled || busy}>
+              <Search aria-hidden="true" />
+              {busy ? 'Asking…' : 'Ask this installation’s cloud'}
+            </Button>
+            {/* The ask can take as long as three cloud APIs take, and a button
+                label is not announced. This is. */}
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-xs text-muted-foreground"
+            >
+              {busy
+                ? 'Asking this installation’s cloud…'
+                : facts === null
+                  ? ''
+                  : `${facts.length} ${facts.length === 1 ? 'value' : 'values'} came back.`}
+            </p>
+          </div>
+        </form>
         {refusal === null ? null : <DiscoveryRefusal reason={refusal} />}
         {facts === null ? null : (
           <DiscoveredFactList
             facts={facts}
+            document={document}
             disabled={disabled || busy}
             unwritable={(fact) => unwritable(fact, document, locked)}
-            onApply={(fact, candidate) =>
-              onChange(applyDiscovered(document, fact, candidate))
-            }
+            onApply={apply}
           />
         )}
       </CardContent>
     </Card>
   );
 }
+
+/** Whether this fact answers for the project the other two reads need first. */
+function isProjectFact(fact: DiscoveredFact): boolean {
+  return fact.path.slice(-2).join('.') === 'location.project';
+}
+
+/**
+ * What this document already says about the two things discovery narrows by.
+ *
+ * Exported and pure because it is the whole of what the panel knows about the
+ * schema, and the one claim worth pinning without a browser: a document that
+ * already names its project must arrive with that project in the box, or the
+ * second stage of a two-stage ask is unreachable from the screen that staged
+ * it. A path that resolves to nothing yields an empty string, which is exactly
+ * the first-pass ask.
+ */
+export function narrowingFrom(document: unknown): {
+  readonly project: string;
+  readonly kmsLocation: string;
+} {
+  const at = placementOf(
+    { path: ['vessels', HOME_VESSEL, 'location', 'project'], ...NO_ANSWER },
+    document,
+  );
+  const project = at === null ? undefined : valueAt(document, at);
+  // The location is not a manifest key of its own: it is a segment inside the
+  // signer this installation already holds, and reading it back is cheaper for
+  // an operator than finding the console page that lists it.
+  const signer = valueAt(document, ['supplyChain', 'signer']);
+  const location =
+    typeof signer === 'string'
+      ? /\/locations\/([^/]+)/.exec(signer)?.[1]
+      : null;
+  return {
+    project: typeof project === 'string' ? project : '',
+    kmsLocation: location ?? '',
+  };
+}
+
+/** The `Discovered` half of a fact used only to address a path. */
+const NO_ANSWER = { kind: 'found', candidates: [], suggested: null } as const;
 
 /**
  * The whole ask having failed, in the neutral voice.
@@ -256,19 +363,27 @@ export function unwritable(
 }
 
 /**
- * What came back, one row per manifest path.
+ * What came back, one row per manifest path, against what the document holds.
  *
- * Pure, and exported, because this is the half with a claim in it: the two arms
- * have to read as two different things, and that is a statement about markup
- * rather than about a request.
+ * Pure, and exported, because this is the half with the claims in it: the arms
+ * have to read as different things, and a press has to change something — both
+ * statements about markup rather than about a request.
+ *
+ * `document` is optional and its absence is honest rather than defaulted: a
+ * caller with no document has nothing to compare against, so the row shows the
+ * candidates and says nothing about which one is in force. Passing a document
+ * is what turns the row into a reconciliation.
  */
 export function DiscoveredFactList({
   facts,
+  document,
   disabled = false,
   unwritable,
   onApply,
 }: {
   readonly facts: readonly DiscoveredFact[];
+  /** The document being edited, for the value each row is reconciled against. */
+  readonly document?: unknown;
   readonly disabled?: boolean;
   /** {@link unwritable}, threaded by the panel. Omitted answers everything writable. */
   unwritable?(fact: DiscoveredFact): string | null;
@@ -276,49 +391,98 @@ export function DiscoveredFactList({
 }) {
   return (
     <dl className="flex flex-col gap-3">
-      {facts.map((fact) => (
-        <div
-          key={fact.path.join('.')}
-          className="flex flex-col gap-1 border-t border-border pt-3 first:border-t-0 first:pt-0"
-        >
-          <dt className="text-[11.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">
-            {/* The last segment, humanized. Never a key written here — the
-                path came from the command, and the schema owns which keys
-                exist. */}
-            {humanize(String(fact.path[fact.path.length - 1] ?? ''))}
-          </dt>
-          <dd className="text-sm">
-            {fact.kind === 'unavailable' ? (
-              <span className="text-muted-foreground">{fact.reason}</span>
-            ) : unwritable?.(fact) ? (
-              <span className="text-muted-foreground">{unwritable(fact)}</span>
-            ) : fact.candidates.length === 0 ? (
-              <span className="text-muted-foreground">
-                Nothing of this kind exists here.
+      {facts.map((fact) => {
+        const at = document === undefined ? null : placementOf(fact, document);
+        const current = at === null ? undefined : valueAt(document, at);
+        const applied =
+          fact.kind === 'found'
+            ? fact.candidates.find((candidate) => holds(current, candidate))
+            : undefined;
+        return (
+          <div
+            key={fact.path.join('.')}
+            className="flex flex-col gap-1.5 border-t border-border pt-3 first:border-t-0 first:pt-0"
+          >
+            <dt className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">
+                {/* The last segment, humanized. Never a key written here — the
+                    path came from the command, and the schema owns which keys
+                    exist. */}
+                {humanize(String(fact.path[fact.path.length - 1] ?? ''))}
               </span>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {fact.candidates.map((candidate) => (
-                  <Button
-                    key={candidate.label}
-                    type="button"
-                    size="sm"
-                    variant={
-                      candidate.label === fact.suggested?.label
-                        ? 'default'
-                        : 'outline'
-                    }
-                    disabled={disabled}
-                    onClick={() => onApply(fact, candidate)}
-                  >
-                    {candidate.label}
-                  </Button>
-                ))}
-              </div>
+              {/* And the whole path beside it, because the tail alone is
+                  ambiguous by construction: two of the five answers humanize
+                  to the same word for two different keys. */}
+              <code className="font-mono text-micro text-subtle">
+                {fact.path.join('.')}
+              </code>
+              {current === undefined ? null : applied === undefined ? (
+                <Badge tone="warning">stand-in</Badge>
+              ) : (
+                <Badge tone="success">confirmed</Badge>
+              )}
+            </dt>
+            {current === undefined ? null : (
+              <p className="font-mono text-xs text-muted-foreground">
+                now: {readable(current)}
+              </p>
             )}
-          </dd>
-        </div>
-      ))}
+            <dd className="text-sm">
+              {fact.kind === 'unavailable' ? (
+                <span className="text-muted-foreground">{fact.reason}</span>
+              ) : unwritable?.(fact) ? (
+                <span className="text-muted-foreground">
+                  {unwritable(fact)}
+                </span>
+              ) : fact.candidates.length === 0 ? (
+                <span className="text-muted-foreground">
+                  Nothing of this kind exists here.
+                </span>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {fact.candidates.map((candidate) => (
+                    <Button
+                      key={candidate.label}
+                      type="button"
+                      size="sm"
+                      // Applied, not suggested. The suggestion is the server's
+                      // opinion and never changes; what an operator needs to
+                      // see is which candidate the document is currently
+                      // holding, which is the thing a press moves.
+                      variant={candidate === applied ? 'default' : 'outline'}
+                      aria-pressed={candidate === applied}
+                      disabled={disabled}
+                      onClick={() => onApply(fact, candidate)}
+                    >
+                      {candidate === applied ? (
+                        <Check aria-hidden="true" />
+                      ) : null}
+                      {candidate.label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </dd>
+          </div>
+        );
+      })}
     </dl>
   );
+}
+
+/**
+ * Whether the document is already holding what this candidate would write.
+ *
+ * By value rather than by label: a candidate's `value` is what lands, and for
+ * a list-valued key it is a list, so `===` would answer "no" to a value it
+ * just wrote. Serialized because these are manifest scalars and short lists,
+ * where a deep compare is the same three lines with more edge cases.
+ */
+function holds(current: unknown, candidate: DiscoveredCandidate): boolean {
+  return JSON.stringify(current) === JSON.stringify(candidate.value);
+}
+
+/** A manifest value as one line of text. */
+function readable(value: unknown): string {
+  return Array.isArray(value) ? value.join(', ') : String(value);
 }

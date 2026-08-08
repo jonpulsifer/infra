@@ -45,7 +45,9 @@ import type { SaveOutcome } from '../../src/web/views/auth/installation.tsx';
 import {
   ONBOARDING_ASKS,
   OnboardingView,
+  refusalSentence,
   stepAsking,
+  stepIssues,
 } from '../../src/web/views/auth/onboarding.tsx';
 
 /** The document an unconfigured installation actually holds. */
@@ -211,6 +213,98 @@ describe('a refusal is the same three things it is on the settings screen', () =
     // And a value no step asks about is not forced onto one. Discovery writes
     // cloud facts this screen never offers a control for.
     expect(stepAsking('secretStore.endpoint')).toBe(-1);
+  });
+});
+
+describe('the four questions are all visible while one is being answered', () => {
+  test('the rail names every step from the first step', () => {
+    // The titles have existed since the day `ONBOARDING_ASKS` did and an
+    // operator met each one only on arrival — so the step that reads the cloud,
+    // and can therefore refuse, was always a surprise three screens in.
+    const markup = screen({ step: 0 });
+    for (const ask of ONBOARDING_ASKS) expect(markup).toContain(ask.title);
+    expect(markup).toContain('aria-label="Setup steps"');
+  });
+
+  test('the progress sentence is still there, and there is no fifth screen', () => {
+    // `Step 1 of 4` is what the shell asserts against. The rail is beside it,
+    // not instead of it, and it adds no question: four asks, one write, and the
+    // write is still on the last of them.
+    expect(screen({ step: 0 })).toContain('Step 1 of 4');
+    expect(ONBOARDING_ASKS).toHaveLength(4);
+  });
+});
+
+describe('an answer is refused where it is given', () => {
+  const nameless = {
+    ...DEFAULT_PLACEHOLDER_MANIFEST,
+    installation: { ...DEFAULT_PLACEHOLDER_MANIFEST.installation, name: '' },
+  } as unknown;
+
+  /** The `<button>` whose whole content is this label. */
+  function control(markup: string, label: string): string {
+    const end = markup.indexOf(`>${label}</button>`);
+    if (end < 0) throw new Error(`no button labelled ${label}`);
+    return markup.slice(markup.lastIndexOf('<button', end), end + 1);
+  }
+
+  test('only the issues the step in front of you can fix', () => {
+    // The map is the whole of the gate, and it is worth pinning without a
+    // browser: an issue is actionable on the step that mounts the control it
+    // belongs to and nowhere else.
+    expect([...stepIssues(nameless, 0).keys()]).toEqual(['installation.name']);
+    expect(stepIssues(nameless, 1).size).toBe(0);
+    expect(stepIssues(DEFAULT_PLACEHOLDER_MANIFEST as unknown, 0).size).toBe(0);
+  });
+
+  test('the step that asks refuses to advance, and says why', () => {
+    // Before this, an empty name walked through all four questions and the
+    // commit press threw the operator back here reading a sentence of dotted
+    // schema paths.
+    const markup = screen({ step: 0, document: nameless });
+    expect(control(markup, 'Continue')).toContain('disabled=""');
+    expect(markup).toContain('Too small: expected string');
+  });
+
+  test('a valid answer advances', () => {
+    expect(control(screen({ step: 0 }), 'Continue')).not.toContain(
+      'disabled=""',
+    );
+  });
+
+  test('the step with no form of its own still advances when pressed', () => {
+    // The discovery step is the one the wizard does not wrap in a form, because
+    // the panel it mounts already is one. A `type="submit"` there is a button
+    // outside any form, which is a button that does nothing.
+    const markup = screen({ step: 2 });
+    expect(control(markup, 'Continue')).toContain('type="button"');
+    expect(control(screen({ step: 0 }), 'Continue')).toContain('type="submit"');
+  });
+
+  test('Enter is a way to answer a question', () => {
+    // The wizard had no `<form>` anywhere, so typing an answer and pressing
+    // Enter did nothing at all. The discovery step is the exception and has its
+    // own reason: its panel already submits, and a form inside a form is not a
+    // thing a browser keeps.
+    expect(screen({ step: 0 })).toContain('<form');
+    expect(screen({ step: 3 })).toContain('<form');
+  });
+
+  test('the backstop names the questions, not the schema paths', () => {
+    // The end-of-flow check stays — the command is the authority and reports
+    // every offending key at once — but this is the one screen whose premise is
+    // that keys are named in human terms, and it was reporting them in Zod's.
+    const said = refusalSentence(['installation.name', 'supplyChain.registry']);
+    expect(said).toContain('Name this installation');
+    expect(said).toContain('Where artifacts are published');
+    expect(said).not.toContain('supplyChain.registry');
+
+    // A value no step asks about has no question to be named as. Discovery
+    // applies cloud facts this screen never offers a control for, so the key
+    // itself is the most honest thing left to say.
+    expect(refusalSentence(['secretStore.endpoint'])).toContain(
+      'secretStore.endpoint',
+    );
   });
 });
 

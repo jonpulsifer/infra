@@ -20,6 +20,14 @@
  *   the section below Components and Datastores is a list of names and a form
  *   that writes — there is nothing here that could show a secret it was handed
  *   by accident, because nothing here is ever handed one.
+ *
+ * **The hero is the running App, and the tabs are everything else.** §18 is
+ * explicit that "the running App is the product, the pipeline is only how it got
+ * there", and the screen used to contradict it by stacking six equal cards down
+ * one column: config editing sat above the timeline, the live log was a
+ * half-width card at the bottom, and the App's releases had no surface at all.
+ * The hero and its diagnosis stay above the strip on every tab, because the
+ * answer to "is my App up" is not a tab you can be on the wrong one of.
  */
 import { ChevronRight, ExternalLink } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -28,6 +36,7 @@ import {
   type AppDeletionControls,
   DeleteAppButton,
 } from '../../components/delete-app.tsx';
+import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { EmptyState, LogPane } from '../../components/log-pane.tsx';
 import { PhasePill } from '../../components/status.tsx';
 import type {
@@ -35,12 +44,17 @@ import type {
   ComponentView,
   DatastoreView,
   LogLine,
+  PrerequisiteRowView,
   WorkspaceView,
 } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
+import { Ref } from '../../ui/copy.tsx';
 import { Field } from '../../ui/field.tsx';
+import { Page, PageHeader } from '../../ui/page.tsx';
+import { Tabs } from '../../ui/tabs.tsx';
+import { Timestamp } from '../../ui/timestamp.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
 import {
   AUTH_NOTE,
@@ -49,6 +63,7 @@ import {
   REACH_NOTE,
   REACHES,
 } from './new/summary.tsx';
+import { Releases } from './releases.tsx';
 
 /**
  * Saving a Component's reach, as the screen above needs it answered.
@@ -131,6 +146,7 @@ export function Workspace({
   onSetAutoDeploy,
   onFollowExecution,
   executionLines,
+  tab = 'overview',
 }: {
   view: WorkspaceView;
   onDeploy?: () => void;
@@ -190,6 +206,18 @@ export function Workspace({
   onFollowExecution?: (execution: string | null) => void;
   /** The lines of whichever run is being followed. */
   executionLines?: readonly LogLine[];
+  /**
+   * Which tab the screen opens on.
+   *
+   * ponytail: the selection lives in this component rather than in the hash,
+   * because `app.tsx` resolves an App by everything after `/apps/`, so
+   * `#/apps/42/releases` reads as an App named `42/releases` and 404s. Making
+   * each tab a real route is a two-line change *there* — strip the tab segment
+   * before the read and key the screen on the App alone — and this prop is
+   * what it would drive when it lands. Until then a tab is not linkable and
+   * survives no reload.
+   */
+  tab?: WorkspaceTab;
 }) {
   /*
     Which Component the rest of this screen is about — its runtime, its config
@@ -202,53 +230,62 @@ export function Workspace({
     view.components.find((component) => component.id === view.componentId) ??
     view.components[0];
 
+  const [current, setCurrent] = useState<WorkspaceTab>(tab);
+
   return (
-    <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-4 px-5 py-6">
-      <header className="flex flex-wrap items-end gap-4">
-        <div>
-          <Eyebrow>
-            {selected ? `${selected.kind} · ${selected.name}` : 'app'}
-          </Eyebrow>
-          <h1 className="text-2xl font-semibold tracking-tight">{view.app}</h1>
-        </div>
-        <div className="ml-auto flex gap-2">
-          {/* And the id, because a name is not one: `deleteApp` resolves on the
-              id, and a workspace that only knew what this App is called could
-              not tell it apart from another App called the same thing. */}
-          {deletion && view.appId ? (
-            <DeleteAppButton
-              appId={view.appId}
-              name={view.app}
-              deletion={deletion}
-              label
-            />
-          ) : null}
-          {/* Only where the selected Component answers somewhere: a job has no
-              address, and `Open app` on an empty one reloads this screen. */}
-          {view.url === '' ? null : (
-            <Button variant="outline" asChild>
-              <a href={normaliseUrl(view.url)}>
-                Open app <ExternalLink aria-hidden="true" />
-              </a>
+    <Page width="reading">
+      <PageHeader
+        eyebrow={selected ? `${selected.kind} · ${selected.name}` : 'app'}
+        title={view.app}
+        actions={
+          <>
+            {/* And the id, because a name is not one: `deleteApp` resolves on
+                the id, and a workspace that only knew what this App is called
+                could not tell it apart from another App called the same. */}
+            {deletion && view.appId ? (
+              <DeleteAppButton
+                appId={view.appId}
+                name={view.app}
+                deletion={deletion}
+                label
+              />
+            ) : null}
+            {/* Only where the selected Component answers somewhere: a job has
+                no address, and `Open app` on an empty one reloads this
+                screen. */}
+            {view.url === '' ? null : (
+              <Button variant="outline" asChild>
+                <a
+                  href={normaliseUrl(view.url)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Open app <ExternalLink aria-hidden="true" />
+                </a>
+              </Button>
+            )}
+            {onRebuild ? (
+              <Button
+                variant="outline"
+                onClick={onRebuild}
+                disabled={deploying}
+              >
+                Rebuild
+              </Button>
+            ) : null}
+            {/*
+              "Deploy" whatever the kind. This button writes an intent, and for
+              a job that places a CronJob triggered by nothing — it has never
+              made anything run, and calling it `Run now` beside a button that
+              does is the one label a reader cannot recover from. Running is on
+              the runtime card, where the runs are (§17).
+            */}
+            <Button onClick={onDeploy} disabled={deploying}>
+              {deploying ? 'Deploying...' : 'Deploy'}
             </Button>
-          )}
-          {onRebuild ? (
-            <Button variant="outline" onClick={onRebuild} disabled={deploying}>
-              Rebuild
-            </Button>
-          ) : null}
-          {/*
-            "Deploy" whatever the kind. This button writes an intent, and for a
-            job that places a CronJob triggered by nothing — it has never made
-            anything run, and calling it `Run now` beside a button that does is
-            the one label a reader cannot recover from. Running is on the
-            runtime card, where the runs are (§17).
-          */}
-          <Button onClick={onDeploy} disabled={deploying}>
-            {deploying ? 'Deploying...' : 'Deploy'}
-          </Button>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <Hero
         view={view}
@@ -257,42 +294,115 @@ export function Workspace({
         {...(onSetAutoDeploy === undefined ? {} : { onSetAutoDeploy })}
       />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Components
-          components={view.components}
-          {...(selected === undefined ? {} : { selectedId: selected.id })}
-          {...(onSetReach === undefined ? {} : { onSetReach })}
-          {...(onSelectComponent === undefined ? {} : { onSelectComponent })}
+      {/*
+        Above the tabs, never inside one. §6 persists a diagnosis on red and
+        records `drifted_at` when a converged release stops matching what is
+        running, and both were readable only at `/deploys/:id` — so this screen
+        said "has no release serving yet" over a failure whose reason was in
+        hand, and "is live" over a release the platform had been refusing for
+        two days. Neither is a thing an operator should have to be on the right
+        tab to find out.
+      */}
+      {view.diagnosis ? (
+        <DiagnosisPanel
+          diagnosis={view.diagnosis}
+          // The workspace does not know whether an older release is still up —
+          // that is a second query about a Deploy this screen never reads — and
+          // §6 does guarantee a failed deploy never touched exposure. The
+          // release link says it properly, one press away.
+          previousReleaseServing={false}
+          url={view.url}
         />
-        <Datastores datastores={view.datastores} />
-      </div>
+      ) : null}
+      {view.drift ? (
+        <DriftPanel
+          drift={view.drift}
+          url={view.url}
+          {...(onDeploy ? { onRedeploy: onDeploy } : {})}
+          busy={deploying}
+        />
+      ) : null}
 
-      <ConfigSection
-        configKeys={view.configKeys}
-        {...(selected === undefined ? {} : { component: selected.name })}
-        {...(onSetConfig === undefined ? {} : { onSetConfig })}
+      <Tabs
+        items={TABS}
+        current={current}
+        onSelect={(id) => setCurrent(id as WorkspaceTab)}
+        label="Views of this App"
       />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {/*
-          Every entry the view carries, un-sliced. `getAppWorkspace` bounds the
-          query that produces them, and a second bound here would be a number
-          that can silently disagree with it — a limit raised on the server and
-          not here reads as applied and is not.
-        */}
-        <Activity entries={view.activity} onNavigate={onNavigate} />
-        <Runtime
-          view={view}
+      {current === 'overview' ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Components
+              components={view.components}
+              {...(selected === undefined ? {} : { selectedId: selected.id })}
+              {...(onSetReach === undefined ? {} : { onSetReach })}
+              {...(onSelectComponent === undefined
+                ? {}
+                : { onSelectComponent })}
+            />
+            <Datastores datastores={view.datastores} />
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {/*
+              Every entry the view carries, un-sliced. `getAppWorkspace` bounds
+              the query that produces them, and a second bound here would be a
+              number that can silently disagree with it — a limit raised on the
+              server and not here reads as applied and is not.
+            */}
+            <Activity entries={view.activity} onNavigate={onNavigate} />
+            <Runtime
+              view={view}
+              {...(selected === undefined ? {} : { component: selected.name })}
+              onNavigate={onNavigate}
+              {...(onRunJob ? { onRun: onRunJob } : {})}
+              {...(onFollowExecution ? { onFollowExecution } : {})}
+              {...(executionLines ? { executionLines } : {})}
+            />
+          </div>
+        </>
+      ) : null}
+
+      {current === 'releases' ? (
+        view.appId === undefined ? (
+          <EmptyState title="This App has no id to read releases by.">
+            The screen was handed a view without one, which is the fixture shape
+            — a live workspace always carries it.
+          </EmptyState>
+        ) : (
+          <Releases app={view.appId} {...(onNavigate ? { onNavigate } : {})} />
+        )
+      ) : null}
+
+      {current === 'config' ? (
+        <ConfigSection
+          configKeys={view.configKeys}
           {...(selected === undefined ? {} : { component: selected.name })}
-          onNavigate={onNavigate}
-          {...(onRunJob ? { onRun: onRunJob } : {})}
-          {...(onFollowExecution ? { onFollowExecution } : {})}
-          {...(executionLines ? { executionLines } : {})}
+          {...(onSetConfig === undefined ? {} : { onSetConfig })}
         />
-      </div>
-    </div>
+      ) : null}
+    </Page>
   );
 }
+
+/**
+ * The three views of one App.
+ *
+ * Three rather than the six the audit sketched, because a tab is only worth its
+ * click where the thing behind it is a *different question*. Releases is one
+ * (`listDeploys`, which nothing in the browser had ever called) and Config is
+ * one (§10's write-only store, which has no business sitting above the
+ * timeline). Logs, Components and Datastores are all answers to "what is this
+ * App doing right now", which is Overview, and splitting them would make the
+ * common visit three clicks instead of none.
+ */
+export type WorkspaceTab = 'overview' | 'releases' | 'config';
+
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'releases', label: 'Releases' },
+  { id: 'config', label: 'Config' },
+] as const satisfies readonly { id: WorkspaceTab; label: string }[];
 
 /**
  * What the hero says about the Component the screen is showing.
@@ -371,19 +481,35 @@ function Hero({
         ) : (
           <Eyebrow>{view.release}</Eyebrow>
         )}
+        {/*
+          What shipped, and when. A phase pill with no date on it cannot tell
+          four minutes apart from four months, and the commit behind a running
+          App was reachable only by opening the release. Both are columns on the
+          Deploy row this screen already reads.
+        */}
+        {view.commit || view.at ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {view.commit ? <Ref value={view.commit} kind="commit" /> : null}
+            {view.at ? (
+              <Timestamp at={view.at} when={view.when} className="font-mono" />
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      <div className="ml-auto flex flex-col gap-1 text-right">
+      <div className="ml-auto flex flex-col items-end gap-1 text-right">
         <Eyebrow>Placement</Eyebrow>
         <p className="font-semibold">{view.target}</p>
         <p className="font-mono text-xs text-muted-foreground">
           on {view.vessel}
         </p>
-        <p className="text-xs text-muted-foreground">
-          {view.prerequisitesMet
-            ? 'All prerequisites passing'
-            : 'A prerequisite is unmet'}
-        </p>
+        <Prerequisites
+          met={view.prerequisitesMet}
+          unmet={view.unmetPrerequisites ?? []}
+          {...(view.targetId && onNavigate
+            ? { onOpenTarget: () => onNavigate('/targets') }
+            : {})}
+        />
         {/*
           Beside placement rather than in the header, because it is not an act:
           the header holds the two buttons that make something happen now, and
@@ -402,6 +528,88 @@ function Hero({
         ) : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Which prerequisite is unmet, rather than that one is.
+ *
+ * `prerequisitesMet` is a boolean derived from "every catalogued row met", so
+ * the screen was showing the conclusion with the evidence thrown away — "A
+ * prerequisite is unmet" on the one screen where the operator is asking *which*
+ * is a dead end, and the App will not deploy until it is answered.
+ *
+ * A native `<details>` rather than the `Collapsible` the panels above use: this
+ * is three lines of text with no initial state to derive and no animation worth
+ * the state to drive it, and the element does the whole job — including opening
+ * before hydration, which matters on the one card a reader is staring at while
+ * the rest of the page is still arriving.
+ *
+ * The remediation is deliberately not here. §13 composes the change that clears
+ * a row from the manifest and the boundary, which the Targets screen has and
+ * this one does not; a thinner generator here would be a second answer to a
+ * question that already has one. So it names the blockage and points there.
+ */
+function Prerequisites({
+  met,
+  unmet,
+  onOpenTarget,
+}: {
+  met: boolean;
+  unmet: readonly PrerequisiteRowView[];
+  onOpenTarget?: () => void;
+}) {
+  if (met) {
+    return (
+      <p className="text-xs text-muted-foreground">All prerequisites passing</p>
+    );
+  }
+
+  if (unmet.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        A prerequisite is unmet
+        {onOpenTarget ? (
+          <>
+            {' — '}
+            <button
+              type="button"
+              onClick={onOpenTarget}
+              className="underline hover:text-foreground"
+            >
+              open the Target
+            </button>
+          </>
+        ) : null}
+      </p>
+    );
+  }
+
+  return (
+    <details className="text-right text-xs text-muted-foreground">
+      <summary className="cursor-pointer text-warning hover:text-foreground">
+        {unmet.length === 1
+          ? '1 prerequisite unmet'
+          : `${unmet.length} prerequisites unmet`}
+      </summary>
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {unmet.map((row) => (
+          <li key={row.name}>
+            <span className="font-mono">{row.name}</span>
+            {row.detail ? <> — {row.detail}</> : null}
+          </li>
+        ))}
+      </ul>
+      {onOpenTarget ? (
+        <button
+          type="button"
+          onClick={onOpenTarget}
+          className="mt-1.5 underline hover:text-foreground"
+        >
+          Open the Target to clear these
+        </button>
+      ) : null}
+    </details>
   );
 }
 
@@ -493,7 +701,14 @@ function SectionHeader({
         <Eyebrow>{eyebrow}</Eyebrow>
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       </div>
-      {action ? (
+      {/*
+        Both, or neither. Rendering the verb on `action` alone is what made
+        four buttons on this screen do nothing when pressed: `Add Component`
+        and `Attach Datastore` never had a handler at all, and the runtime
+        card's own verb loses one whenever the Component has no release to open.
+        A section that cannot answer its verb does not offer it.
+      */}
+      {action && onAction ? (
         <Button
           variant="outline"
           size="sm"
@@ -560,12 +775,19 @@ function Row({
       ) : (
         body
       )}
-      {trailing ?? (
-        <ChevronRight
-          aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-      )}
+      {/*
+        The chevron is a claim that pressing the row goes somewhere, so it is
+        drawn only where the row can be pressed. It used to be the default on
+        every row with no trailing control — config keys, attached Datastores,
+        job runs — each of which advertised a navigation it did not have.
+      */}
+      {trailing ??
+        (onSelect ? (
+          <ChevronRight
+            aria-hidden="true"
+            className="size-4 shrink-0 text-muted-foreground"
+          />
+        ) : null)}
     </div>
   );
 }
@@ -580,6 +802,28 @@ function Row({
  * shown is marked, because a screen rendering a second Component's runs with
  * nothing saying whose they are is worse than one that cannot render them.
  */
+/**
+ * What one Component's row says, now that the row knows where it is.
+ *
+ * The hero states the placement of the *selected* Component, so on an App with
+ * three of them the other two's placement and address were unobtainable without
+ * pressing each row in turn — which is the one thing a list of Components exists
+ * to spare a reader. Each of the three new facts is stated only where the
+ * Component has it: one that has never been placed has no Target, a job has no
+ * address, and neither should read as a blank where a value goes.
+ */
+function componentDetail(component: ComponentView): string {
+  const parts = [
+    component.phase,
+    `${component.reach}${component.auth === 'proxy' ? ' + auth' : ''}`,
+    component.artifact,
+  ];
+  if (component.target) parts.push(component.target);
+  if (component.url) parts.push(component.url);
+  if (component.when) parts.push(component.when);
+  return parts.join(' · ');
+}
+
 function Components({
   components,
   selectedId,
@@ -596,18 +840,30 @@ function Components({
 
   return (
     <Card>
-      <SectionHeader
-        eyebrow="App structure"
-        title="Components"
-        action="Add Component"
-      />
+      {/*
+        No action. `SectionHeader` renders the button whether or not an
+        `onAction` was passed, so "Add Component" was a control that did
+        nothing on press — worse than no control, because it reads as a feature
+        that is broken rather than one that is not built. Components are
+        declared in the create flow; when adding one from here exists, the verb
+        comes back with a handler.
+      */}
+      <SectionHeader eyebrow="App structure" title="Components" />
       <CardContent className="pt-0">
+        {/* The length guard every sibling card has. A brand-new App rendered
+            an empty card under a dead button. */}
+        {components.length === 0 ? (
+          <EmptyState title="This App has no Components yet.">
+            A Component is what gets built and placed. The create flow declares
+            the first one.
+          </EmptyState>
+        ) : null}
         {components.map((component) => (
           <div key={component.name}>
             <Row
               badge={<Badge tone="accent">{component.kind}</Badge>}
               title={component.name}
-              detail={`${component.phase} · ${component.reach}${component.auth === 'proxy' ? ' + auth' : ''} · ${component.artifact}`}
+              detail={componentDetail(component)}
               selected={component.id === selectedId}
               {...(onSelectComponent === undefined
                 ? {}
@@ -772,11 +1028,10 @@ export function ReachEditor({
 function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
   return (
     <Card>
-      <SectionHeader
-        eyebrow="Attached resources"
-        title="Datastores"
-        action="Attach Datastore"
-      />
+      {/* No action, for the reason the Components header has none: attaching a
+          Datastore is an act with placement consequences (§3, §11) and no
+          command behind this button, so it pressed and did nothing. */}
+      <SectionHeader eyebrow="Attached resources" title="Datastores" />
       <CardContent className="pt-0">
         {datastores.length === 0 ? (
           <EmptyState title="No Datastores attached.">
@@ -798,13 +1053,9 @@ function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
                   ? `${datastore.provenance} · ${datastore.target} · attached to ${datastore.attachedTo}`
                   : `${datastore.provenance} · ${datastore.target} · unattached`
               }
-              trailing={
-                datastore.attachedTo ? undefined : (
-                  <Button variant="outline" size="sm">
-                    Attach
-                  </Button>
-                )
-              }
+              // The per-row `Attach` had no `onClick` either. An unattached
+              // Datastore says so in its detail line, which is the honest half
+              // of what that button was claiming.
             />
           ))
         )}
@@ -1336,7 +1587,7 @@ function Runtime({
                   />
                 </button>
                 {following === execution.name ? (
-                  <LogPane lines={executionLines ?? []} />
+                  <FollowedLog lines={executionLines ?? []} />
                 ) : null}
               </div>
             ))}
@@ -1360,7 +1611,7 @@ function Runtime({
           </>
         ) : (
           <>
-            <LogPane lines={runtime.lines} />
+            <FollowedLog lines={runtime.lines} />
             <p className="pt-2 text-xs text-muted-foreground">
               This Target keeps {runtime.reach} of history. Deploys are markers
               on this stream, never a filter.
@@ -1369,6 +1620,45 @@ function Runtime({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * How many lines of a live tail the page holds.
+ *
+ * `app.tsx` appends every socket page to `runtime.lines` and never drops one,
+ * so a chatty service grew this array — and the DOM under it — for as long as
+ * the workspace stayed open. The cap is a window on the end of the stream,
+ * which is what a tail is; the history behind it lives on the Target, and this
+ * card already says how far back that reaches.
+ */
+const TAIL_LINES = 2_000;
+
+/**
+ * The live tail: following, capped, and honest about the cap.
+ *
+ * Both `LogPane` mounts on this screen omitted `follow`, which is the flag that
+ * makes the pane auto-scroll *and* the flag that gives it a maximum height — so
+ * the one genuinely streaming surface in the product never showed its newest
+ * line and pushed the whole page down instead of scrolling inside itself. The
+ * two are one flag on purpose: a pane with no bottom has nothing to follow to.
+ *
+ * The "showing the last N" line is the same admission `Transcript` makes on the
+ * build log. A pane that silently drops the beginning of a stream is a pane
+ * that has answered "the error is not in the logs" for somebody.
+ */
+function FollowedLog({ lines }: { lines: readonly LogLine[] }) {
+  const dropped = Math.max(0, lines.length - TAIL_LINES);
+  return (
+    <>
+      <LogPane lines={dropped === 0 ? lines : lines.slice(dropped)} follow />
+      {dropped === 0 ? null : (
+        <p className="pt-1.5 text-xs text-muted-foreground">
+          Showing the last {TAIL_LINES} lines — {dropped} older{' '}
+          {dropped === 1 ? 'line has' : 'lines have'} scrolled out of this pane.
+        </p>
+      )}
+    </>
   );
 }
 

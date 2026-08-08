@@ -1,10 +1,38 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Spindrift</title>
+    <!--
+      The stored theme, stamped before the stylesheet is even fetched.
+
+      `data-theme="dark"` used to be typed on the element above, which made the
+      shipped default a fact about the document rather than about the
+      stylesheet: a reader who chose light got a dark page until `main.tsx`
+      called `restoreTheme()`, and a module script runs after the document is
+      parsed. Blocking and inline is the only position that paints once.
+
+      It agrees with `theme.ts` deliberately, including the awkward part: the
+      absence of the attribute *is* the `system` choice, so `system` removes
+      nothing and stamps nothing, while a missing or unreadable value falls back
+      to the shipped dark. `restoreTheme()` stays where it is as the path for a
+      browser that refused this script.
+    -->
+    <script>
+      try {
+        const choice = localStorage.getItem("spindrift.theme");
+        if (choice !== "system") {
+          document.documentElement.setAttribute(
+            "data-theme",
+            choice === "light" ? "light" : "dark",
+          );
+        }
+      } catch {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    </script>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>

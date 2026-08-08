@@ -57,6 +57,7 @@ import { SchemaFields } from '../../forms/render.tsx';
 import type { FormField } from '../../forms/schema.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
+import { Skeleton } from '../../ui/skeleton.tsx';
 import { DiscoveryPanel } from './discovery.tsx';
 
 /** What the last save attempt produced. */
@@ -175,14 +176,30 @@ export function InstallationSettings() {
   }
 
   if (document === undefined) {
+    // The shape that is coming, not a sentence where it will be: this screen
+    // resolves into a page header and a column of cards, and a single grey line
+    // meant the whole surface jumped into place under the reader. The sentence
+    // stays as the thing announced, because a screen reader cannot see a
+    // rectangle.
     return (
-      <Card>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Loading this installation…
-          </p>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-6">
+        <p role="status" aria-live="polite" className="sr-only">
+          Loading this installation…
+        </p>
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-64" />
+          <Skeleton className="h-3 w-96 max-w-full" />
+        </div>
+        {[0, 1, 2].map((card) => (
+          <Card key={card}>
+            <CardContent className="flex flex-col gap-3">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     );
   }
 
@@ -338,6 +355,17 @@ export function InstallationSettingsView({
         onSave();
       }}
     >
+      <div className="flex flex-col gap-1">
+        <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-foreground">
+          <Sliders aria-hidden="true" className="size-4 text-subtle" />
+          Installation manifest
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Everything that names this installation. Saving writes the whole
+          document and reconciles the Targets it declares.
+        </p>
+      </div>
+
       <ManifestDivergenceNotice
         paths={divergence}
         declaration={declaration}
@@ -358,23 +386,17 @@ export function InstallationSettingsView({
         onChange={onChange}
       />
 
-      <Card>
-        <CardHeader>
-          <Sliders aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
-          <div>
-            <CardTitle>Installation manifest</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Everything that names this installation. Saving writes the whole
-              document and reconciles the Targets it declares.
-            </p>
-          </div>
-        </CardHeader>
-        {plain.length === 0 ? null : (
-          <CardContent>
-            <SchemaFields fields={plain} at={[]} form={form} />
-          </CardContent>
-        )}
-      </Card>
+      {/* Not a card. Every one of this schema's top-level keys has structure,
+          so `plain` is empty for every manifest this build can hold — and a
+          card was drawn around it anyway, which put a titled, blurbed, and
+          permanently empty box above the twelve cards that are the actual
+          document. The copy was never a section's: it is what this whole page
+          is, so it is the page's. The keys keep a home for the day the schema
+          grows a scalar, and it is a plain fieldset rather than a card, because
+          a card with nothing in it is the thing being deleted. */}
+      {plain.length === 0 ? null : (
+        <SchemaFields fields={plain} at={[]} form={form} />
+      )}
 
       {nested.map((field) => (
         <Card key={field.key}>

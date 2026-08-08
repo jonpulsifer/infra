@@ -34,6 +34,7 @@ import {
   askInstallationCloud,
   DiscoveredFactList,
   DiscoveryRefusal,
+  narrowingFrom,
   unwritable,
 } from '../../src/web/views/auth/discovery.tsx';
 import { InstallationSettingsView } from '../../src/web/views/auth/installation.tsx';
@@ -176,6 +177,100 @@ describe('confirming a value edits the document at the path it came with', () =>
     expect(applyDiscovered(document, fact, bucket)).toMatchObject({
       sources: { buckets: ['a-bucket'] },
     });
+  });
+});
+
+describe('a row is a reconciliation, not a row of buttons', () => {
+  const fact = FACTS[0]!;
+  if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
+
+  function withProject(project: string): unknown {
+    return {
+      installation: { homeVessel: 'home' },
+      vessels: [{ name: 'home', location: { project } }],
+    };
+  }
+
+  function row(document: unknown): string {
+    return renderToStaticMarkup(
+      <DiscoveredFactList
+        facts={[fact]}
+        document={document}
+        onApply={() => undefined}
+      />,
+    );
+  }
+
+  test('confirming a value is visible, because the row reads the document', () => {
+    // The defect this replaces: the selected style came from `fact.suggested`,
+    // a property of the *server's* answer that is identical before and after a
+    // press. An operator confirmed a discovered project and every pixel on the
+    // screen stayed where it was.
+    const before = row(withProject('typed-by-hand'));
+    const after = row(withProject('example-home'));
+    expect(before).not.toEqual(after);
+    expect(before).toContain('aria-pressed="false"');
+    expect(after).toContain('aria-pressed="true"');
+  });
+
+  test('a row says what the document holds and whether it is settled', () => {
+    expect(row(withProject('typed-by-hand'))).toContain('typed-by-hand');
+    expect(row(withProject('typed-by-hand'))).toContain('stand-in');
+    expect(row(withProject('example-home'))).toContain('confirmed');
+  });
+
+  test('the whole path is on the row, because the tail is ambiguous', () => {
+    // Two of the five answers humanize to the same word: `Project` is the home
+    // vessel's own and `Artifacts project` is its shared one, and a panel
+    // showing only the last segment showed the same heading twice.
+    expect(row(withProject('example-home'))).toContain(
+      'vessels.homeVessel.location.project',
+    );
+  });
+
+  test('a caller with no document states nothing about which value is in force', () => {
+    // The honest absence: the settings screen passes a document and the row is
+    // a comparison; a caller that has none gets candidates and no verdict,
+    // rather than a verdict computed against nothing.
+    const markup = renderToStaticMarkup(
+      <DiscoveredFactList facts={[fact]} onApply={() => undefined} />,
+    );
+    expect(markup).not.toContain('confirmed');
+    expect(markup).not.toContain('stand-in');
+  });
+});
+
+describe('the narrowing inputs are seeded from the document', () => {
+  test('a project the document already names arrives in the box', () => {
+    // Discovery is staged deliberately: with no project, buckets and signing
+    // keys answer "name a project and run discovery again" — and the candidate
+    // that would unblock it is labelled `<project> — this deployment's own
+    // credential`, so an operator who typed what they read typed a project
+    // that does not exist.
+    expect(
+      narrowingFrom({
+        installation: { homeVessel: 'home' },
+        vessels: [{ name: 'home', location: { project: 'example-home' } }],
+      }),
+    ).toMatchObject({ project: 'example-home' });
+  });
+
+  test('the key location is read out of the signer this installation holds', () => {
+    // Not a manifest key of its own — it is a segment inside the signer, and
+    // reading it back is cheaper for an operator than finding the console page
+    // that lists it.
+    expect(
+      narrowingFrom({
+        supplyChain: {
+          signer:
+            'gcpkms://projects/example-home/locations/us-central1/keyRings/r/cryptoKeys/k',
+        },
+      }),
+    ).toMatchObject({ kmsLocation: 'us-central1' });
+  });
+
+  test('a document that names neither asks for everything', () => {
+    expect(narrowingFrom({})).toEqual({ project: '', kmsLocation: '' });
   });
 });
 

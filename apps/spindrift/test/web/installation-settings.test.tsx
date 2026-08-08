@@ -85,6 +85,22 @@ describe('every manifest value is reachable', () => {
     expect(markup).toContain(manifest.build.zeroConfigFrontend);
   });
 
+  test('the page states what saving does, and it is not a card', () => {
+    // Every top-level key this schema declares has structure, so the "plain"
+    // half of the split is empty for every manifest this build can hold — and
+    // a card was drawn around it regardless: a title, a blurb, and a
+    // permanently empty body sitting above the twelve cards that are the
+    // document. The claim it made was never a section's, it was the page's.
+    expect(
+      manifestFields().every(
+        (field) => field.node.kind === 'object' || field.node.kind === 'array',
+      ),
+    ).toBe(true);
+    expect(markup).toContain('<h2');
+    expect(markup).toContain('reconciles the Targets it declares');
+    expect(markup.split('Installation manifest').length - 1).toBe(1);
+  });
+
   test('a value the schema calls a url is entered as one', () => {
     expect(markup).toContain('type="url"');
   });
@@ -218,6 +234,30 @@ describe('the vessels this installation is built on are read-only', () => {
         declarationGoverns: true,
       }),
     ).toContain('are declared, not configured here');
+  });
+
+  test('a governed field is marked declared where it is, not only at the top', () => {
+    // The sentence above is one sentence at the top of a page that runs to
+    // twelve cards, and the fields it explains were rendered as `disabled`,
+    // which is the same attribute a save in flight sets. A declared value is
+    // the most authoritative thing on the screen and it read as the most
+    // broken.
+    const markup = screen({
+      document: withAppVessel,
+      declaration: manifest,
+      declarationGoverns: true,
+    });
+
+    expect(markup).toContain('declared</span>');
+    // At the boundary the answer changes, not on every descendant of it: a
+    // governed vessel would otherwise carry eight identical badges inside one
+    // card to say one thing.
+    expect(markup.split('declared</span>').length - 1).toBeLessThan(
+      manifestFields().length,
+    );
+    expect(screen({ document: withAppVessel })).not.toContain(
+      'declared</span>',
+    );
   });
 
   test('with no declaration mounted the whole document is this screen’s', () => {

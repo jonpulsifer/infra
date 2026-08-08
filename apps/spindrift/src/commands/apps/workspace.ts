@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import type { JobRuns } from '../../adapters/deploy/contract.ts';
+import type {
+  Blame,
+  FailureReason,
+  JobRuns,
+} from '../../adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { artifactSummary } from '../../domain/artifact-name.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
@@ -17,6 +21,9 @@ import type {
   ComponentView,
   DatastoreView,
   DeployPhase,
+  Diagnosis,
+  DriftView,
+  PrerequisiteRowView,
   Runtime,
   WorkspaceView,
 } from '../../web/model.ts';
@@ -125,9 +132,12 @@ export const getAppWorkspace: Command<
   const desiredTarget = selected?.desiredTargets[0]?.target;
   const workspaceTarget = latestTarget ?? desiredTarget;
 
+  const now = context.clock.now();
+
   const components: ComponentView[] = app.components.map((comp) => {
     const deploy = comp.deploys[0];
     const build = deploy?.build ?? comp.builds[0];
+    const placed = deploy?.target;
 
     return {
       id: comp.id,
@@ -137,6 +147,18 @@ export const getAppWorkspace: Command<
       artifact: artifactSummary(build),
       reach: comp.reach,
       auth: comp.auth,
+      // Placement per row, so a multi-Component App stops hiding two thirds of
+      // itself behind the selection. The hero states where the *selected*
+      // Component is; without these the others' placement was reachable only by
+      // pressing each row in turn, which is the one thing a list exists to
+      // spare a reader.
+      ...(placed === undefined ? {} : { target: targetRowLabel(placed) }),
+      ...(deploy?.url == null || deploy.url === ''
+        ? {}
+        : { url: deploy.url, urlLive: deploy.phase === 'LIVE' }),
+      ...(deploy === undefined
+        ? {}
+        : { when: elapsedSince(deploy.createdAt, now) }),
     };
   });
 
@@ -199,8 +221,6 @@ export const getAppWorkspace: Command<
     orderBy: (ev, { desc }) => [desc(ev.id)],
     limit: 10,
   });
-
-  const now = context.clock.now();
 
   // Every event belongs to exactly one attempt — the `attempt_events` check
   // constraint is what guarantees it — so every entry carries the id of the
@@ -277,6 +297,56 @@ export const getAppWorkspace: Command<
     };
   }
 
+  /*
+    Why the release went red, and what the platform has stopped agreeing with.
+
+    Both facts are columns on the Deploy row this screen already reads, and
+    until now both were rendered only at `/deploys/:id` — so the workspace said
+    "has no release serving yet" over a failure with a recorded reason, and "is
+    live" over a release the cluster had been refusing for two days. The panels
+    that render them were already written and already take exactly these shapes.
+  */
+  const diagnosis: Diagnosis | null =
+    latestDeploy?.phase === 'FAILED' && latestDeploy.reason
+      ? {
+          reason: latestDeploy.reason as FailureReason,
+          blame: (latestDeploy.blame ?? null) as Blame | null,
+          detail: latestDeploy.detail ?? 'Deploy failed',
+          evidence: evidenceOf(latestDeploy.debug),
+        }
+      : null;
+
+  const drift: DriftView | null =
+    latestDeploy?.driftedAt == null
+      ? null
+      : {
+          since: elapsedSince(latestDeploy.driftedAt, now),
+          at: latestDeploy.driftedAt.toISOString(),
+          observedDigest: latestDeploy.observedDigest,
+          detail: latestDeploy.driftDetail,
+        };
+
+  /*
+    The rows behind `prerequisitesMet: false`.
+
+    `health` is every catalogued row met, so the boolean the screen had was the
+    conclusion with the evidence thrown away — "A prerequisite is unmet" is a
+    dead end on the one screen where an operator is asking which one. These are
+    the stored results of the standing pass, unmet only, and without the
+    generated remediation: the change that clears a row is §13's to compose and
+    the Targets screen has the manifest and the boundary in hand to do it. This
+    names what is blocking and points there.
+  */
+  const unmetPrerequisites: readonly PrerequisiteRowView[] = (
+    workspaceTarget?.prerequisites ?? []
+  )
+    .filter((row) => !row.met)
+    .map((row) => ({
+      name: row.name,
+      met: false,
+      ...(row.detail === undefined ? {} : { detail: row.detail }),
+    }));
+
   const workspace: WorkspaceView = {
     app: app.name,
     appId: app.id,
@@ -306,10 +376,47 @@ export const getAppWorkspace: Command<
     activity,
     runtime,
     autoDeploy: app.sourceKind === 'repo' ? app.autoDeploy : null,
+    // What the release delivered and when, so `LIVE` stops being a word with
+    // no date on it. Absent rather than empty for an App that has never
+    // deployed: there is no commit and no instant, and a blank line where a
+    // commit goes reads as one that failed to load.
+    ...(latestDeploy === undefined
+      ? {}
+      : {
+          commit: latestDeploy.build.commit,
+          when: elapsedSince(latestDeploy.createdAt, now),
+          at: latestDeploy.createdAt.toISOString(),
+        }),
+    ...(diagnosis === null ? {} : { diagnosis }),
+    ...(drift === null ? {} : { drift }),
+    ...(unmetPrerequisites.length === 0 ? {} : { unmetPrerequisites }),
   };
 
   return ok({ workspace });
 };
+
+/**
+ * §6's raw `debug` payload as a screen can read it, or `null` where core
+ * recorded nothing.
+ *
+ * Serialising an absence yields `"{}"`, which is not evidence, is not what any
+ * runner emitted, and is truthy enough to be mistaken for both — so nothing is
+ * reported as nothing, and `DiagnosisPanel` gets to omit the disclosure rather
+ * than open one over an empty pane.
+ *
+ * ponytail: the same seven lines as `deploys/get-detail.ts`, which is the only
+ * other command that reads this column. Duplicated rather than shared because
+ * two callers is not a module; lift it into `domain/` if a third appears.
+ */
+function evidenceOf(debug: unknown): string | null {
+  if (debug === null || debug === undefined) return null;
+  if (typeof debug === 'string') return debug.trim() === '' ? null : debug;
+  const serialised = JSON.stringify(debug);
+  if (serialised === undefined || serialised === '{}' || serialised === '[]') {
+    return null;
+  }
+  return serialised;
+}
 
 /**
  * How many runs the screen asks for (§17).

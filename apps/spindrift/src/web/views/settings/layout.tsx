@@ -1,6 +1,24 @@
+/**
+ * The administrative rail, and the one tab strip left in this corner of the app.
+ *
+ * The rail was the third hand-rolled tab treatment in the tree: a column of
+ * bare `<button>` elements each claiming to be the current *page*, with no
+ * tablist around them and no way into the strip except Tab, Tab, Tab. These
+ * entries do navigate, which is more than the other two strips could say — but a
+ * tab navigating is still a tab, and `Tabs` is what the other two became, so
+ * there is no reason left for this one to be its own thing. It keeps the
+ * vertical column on wide screens purely through a class: the primitive owns
+ * roving focus and the selected state, this file owns where the strip sits.
+ *
+ * `Danger zone` stays in the list. Its content is a paragraph explaining that the
+ * category does not exist, which is a poor use of a fifth of the rail — but
+ * `object-explorer.test.tsx` asserts all five labels and that file belongs to
+ * another change in flight. Removing the entry and the assertion is one commit,
+ * and it is not this one.
+ */
 import type { ReactNode } from 'react';
 import { Eyebrow } from '../../ui/card.tsx';
-import { cn } from '../../ui/utils.ts';
+import { Tabs } from '../../ui/tabs.tsx';
 
 export type SettingsSection =
   | 'connections'
@@ -41,27 +59,14 @@ export function SettingsLayout({
       <div className="grid overflow-hidden rounded-sm border border-border bg-card lg:grid-cols-[230px_minmax(0,1fr)]">
         <aside className="border-b border-border p-3 lg:border-r lg:border-b-0 lg:p-5">
           <Eyebrow className="hidden lg:inline">Sections</Eyebrow>
-          <nav
-            aria-label="Settings sections"
-            className="flex gap-1 overflow-x-auto lg:mt-3 lg:flex-col"
-          >
-            {SECTIONS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                aria-current={section === item.id ? 'page' : undefined}
-                onClick={() => onNavigate(`/settings/${item.id}`)}
-                className={cn(
-                  'shrink-0 rounded-sm px-3 py-2 text-left text-sm transition-colors',
-                  section === item.id
-                    ? 'bg-secondary font-semibold text-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
-          </nav>
+          <Tabs
+            variant="pill"
+            label="Settings sections"
+            items={SECTIONS}
+            current={section}
+            onSelect={(id) => onNavigate(`/settings/${id}`)}
+            className="overflow-x-auto lg:mt-3 lg:flex-col lg:flex-nowrap lg:items-stretch"
+          />
         </aside>
         <article className="min-w-0 p-4 sm:p-6 lg:p-8">{children}</article>
       </div>

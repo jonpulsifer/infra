@@ -18,6 +18,15 @@ import { cn } from './utils.ts';
  * Marks drawn as a single near-black shape, which is invisible on a dark
  * surface. Inverting is right for exactly these — it would wreck a coloured
  * mark — so this is a fact about the two files, not a style choice.
+ *
+ * How much to invert is `--logo-invert`, read as a custom property rather than
+ * through a `dark` variant. That variant keyed on `[data-theme="dark"]`, and
+ * `theme.ts` *removes* that attribute for the `system` choice — deliberately,
+ * because the absence of the attribute is what lets the OS preference win. So
+ * the mark was un-inverted, on a dark page, for every reader who left the theme
+ * to their machine: the GitHub logo beside "Authorize the GitHub App" was
+ * near-black on near-black. A custom property flips with the resolved
+ * `color-scheme` instead of with an attribute that may not be there.
  */
 const MONO = new Set<LogoName>(['github', 'vercel']);
 
@@ -35,11 +44,10 @@ export function Logo({
       src={logos[name]}
       alt=""
       aria-hidden="true"
-      className={cn(
-        'size-5 shrink-0 object-contain',
-        MONO.has(name) && 'dark:invert',
-        className,
-      )}
+      style={
+        MONO.has(name) ? { filter: 'invert(var(--logo-invert))' } : undefined
+      }
+      className={cn('size-5 shrink-0 object-contain', className)}
       {...props}
     />
   );

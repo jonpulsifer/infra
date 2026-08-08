@@ -534,6 +534,24 @@ export interface ComponentView {
   readonly artifact: string;
   readonly reach: Reach;
   readonly auth: Auth;
+  /**
+   * Where this Component is placed, and what it answers on.
+   *
+   * The hero states the placement of the *selected* Component only, so for an
+   * App with three of them the other two's placement was unobtainable without
+   * pressing each row in turn — which is the one thing a list of Components
+   * exists to spare a reader. The workspace query already loads every
+   * Component's newest Deploy with its Target and vessel; these are that row.
+   *
+   * Optional for the reason every other addition to this file is: the fixtures
+   * build `ComponentView` literally, and a Component that has never been
+   * placed genuinely has no answer here.
+   */
+  readonly target?: string;
+  readonly url?: string;
+  readonly urlLive?: boolean;
+  /** When this Component's newest release was written, in words. */
+  readonly when?: string;
 }
 
 /**
@@ -600,6 +618,49 @@ export interface WorkspaceView {
    * is a choice.
    */
   readonly autoDeploy: boolean | null;
+  /**
+   * What the release named by {@link release} delivered, and when.
+   *
+   * The workspace held a phase pill and a release id and nothing that could
+   * date either: an operator looking at `LIVE` could not tell whether it went
+   * out four minutes or four months ago, and could not tell which commit is
+   * serving without opening the attempt screen. Both facts are on the Deploy
+   * row the query already reads.
+   */
+  readonly commit?: string;
+  readonly when?: string;
+  readonly at?: string;
+  /**
+   * Why the release went red (§6), and what the platform has since stopped
+   * agreeing with (§6's drift).
+   *
+   * These are the two panels the App surface was missing entirely. §6 persists
+   * a diagnosis on red because the platform will not keep it, and records
+   * `drifted_at` when a LIVE release stops matching what is running — and
+   * until now both were readable only at `/deploys/:id`, which meant a drifted
+   * App read "is live" and a failed one read "has no release serving yet" with
+   * no reason and no evidence anywhere on the screen an operator was on.
+   *
+   * Absent rather than nullable: a healthy release has no diagnosis, and a
+   * field that is present-and-null asks every reader to distinguish two
+   * spellings of nothing.
+   */
+  readonly diagnosis?: Diagnosis;
+  readonly drift?: DriftView;
+  /**
+   * The prerequisites of the placed Target that are *not* met.
+   *
+   * `prerequisitesMet` is a boolean, and "A prerequisite is unmet" over an App
+   * that will not deploy is a dead end on the one screen where the question is
+   * being asked. These are the rows behind that word.
+   *
+   * Only the unmet ones, and without `remediation`: the whole standing
+   * checklist and the change that clears each row belong to the Targets screen,
+   * which has the manifest and the boundary in hand to generate one. This says
+   * what is blocking and points there — a second, thinner generator here would
+   * be a second answer to a question §13 already answers once.
+   */
+  readonly unmetPrerequisites?: readonly PrerequisiteRowView[];
 }
 
 /**
@@ -748,7 +809,14 @@ export interface AppListItem {
   readonly vessel: string;
   readonly url: string;
   readonly urlLive: boolean;
-  /** The first Component's kind, for the list's icon. */
+  /**
+   * The kind of the Component this row is reporting on — the one whose phase
+   * became {@link phase} — for the list's icon.
+   *
+   * Not the App's first Component. Every fact on the row belongs to one
+   * Component and it has to be the same one throughout, or the icon says
+   * `website` over a job's failure.
+   */
   readonly kind: ComponentKind;
   /** The source: repo fullName or 'archive'. */
   readonly source: string;
@@ -768,6 +836,36 @@ export interface AppListItem {
    * answering nothing about which artifact was live.
    */
   readonly artifact: string;
+  /**
+   * How many Components this App has, and how many of them are red.
+   *
+   * {@link phase} is the worst of them, which is the only honest single word
+   * for an App with a green `web` and a red `worker` — but "failed" over a
+   * three-Component App says nothing about how much of it is down. These two
+   * are what turn that word back into a fact: `failed · 1 of 3`.
+   *
+   * Optional because every fixture in the tree builds this row literally, and
+   * a count that is absent reads the same as an App nobody has told the list
+   * about yet. A row without them renders the word alone, as it always did.
+   */
+  readonly componentCount?: number;
+  readonly failing?: number;
+  /**
+   * The commit the row's release was built from, and when that release was
+   * written.
+   *
+   * All three describe the same Component the rest of the row does — the one
+   * whose phase became the App's. A row that named one Component's artifact
+   * beside another's commit would be two answers wearing one line.
+   */
+  readonly commit?: string;
+  readonly when?: string;
+  readonly at?: string;
+  /**
+   * The release behind {@link phase}, so the row can reach the attempt that
+   * produced what it is reporting rather than only the App that owns it.
+   */
+  readonly deployId?: number;
 }
 
 /**

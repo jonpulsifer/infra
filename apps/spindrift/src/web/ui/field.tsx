@@ -22,7 +22,7 @@ export function Label({
   return (
     <LabelRoot
       className={cn(
-        'text-[11.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground',
+        'text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground',
         className,
       )}
       {...props}
@@ -34,8 +34,8 @@ export function Input({ className, ...props }: ComponentProps<'input'>) {
   return (
     <input
       className={cn(
-        'h-9 w-full rounded-md border border-input bg-background px-3',
-        'font-mono text-sm text-foreground',
+        'h-9 w-full rounded-sm border border-input bg-background px-3',
+        'font-mono text-body text-foreground',
         'placeholder:text-muted-foreground',
         'disabled:cursor-not-allowed disabled:opacity-60',
         className,

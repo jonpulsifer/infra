@@ -1,3 +1,15 @@
+/**
+ * The credentials an operator signs in with, and the one act that removes one.
+ *
+ * **A passkey row has to say which passkey it is.** `Remove` is irreversible
+ * and the rows were labelled `Passkey 1`, `Passkey 2` by array index — an
+ * ordinal that renumbers itself the moment an earlier one goes — over a created
+ * date that is the same week for every key somebody enrolled in one sitting.
+ * `lastUsedAt` is the fact that separates the laptop in front of you from the
+ * key in a drawer, the server has always returned it, and this screen threw it
+ * away. It is not a nickname and does not pretend to be: a nickname needs a
+ * column, and this needed a line.
+ */
 import { KeyRound, Link, Link2Off, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { CredentialSettings } from '../../../auth/credential-admin.ts';
@@ -11,6 +23,8 @@ import {
 } from '../../auth-client.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
+import { Skeleton, SkeletonRows } from '../../ui/skeleton.tsx';
+import { Timestamp } from '../../ui/timestamp.tsx';
 
 type CredentialAction =
   | { readonly kind: 'add' }
@@ -58,10 +72,20 @@ export function IdentitySettings() {
 
   if (settings === null) {
     return (
-      <div>
-        <p className="text-sm text-muted-foreground">
+      <div className="flex flex-col gap-6">
+        <p role="status" aria-live="polite" className="sr-only">
           Loading credential settings…
         </p>
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-7 w-56" />
+          <Skeleton className="h-3 w-80 max-w-full" />
+        </div>
+        <Card>
+          <CardContent className="flex flex-col gap-3">
+            <SkeletonRows rows={2} />
+            <Skeleton className="h-9 w-36" />
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -141,8 +165,22 @@ export function CredentialSettingsView({
                     Passkey {index + 1} ·{' '}
                     {shortCredential(passkey.credentialId)}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Added {new Date(passkey.createdAt).toLocaleDateString()}
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    <span>
+                      Added {new Date(passkey.createdAt).toLocaleDateString()}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    {/* The half of the row that makes `Remove` a decision
+                        rather than a guess. `never used` is a fact worth
+                        rendering loudly: it is what an abandoned enrolment
+                        looks like. */}
+                    {passkey.lastUsedAt === null ? (
+                      <span>never used</span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        Last used <Timestamp at={passkey.lastUsedAt} />
+                      </span>
+                    )}
                   </p>
                 </div>
                 <Button

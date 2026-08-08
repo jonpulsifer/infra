@@ -11,7 +11,8 @@
  * path, so the sentence a Zod issue carries is shown where the value that
  * caused it is typed rather than collected into a summary at the bottom.
  */
-import { CircleAlert, Plus, Trash2 } from 'lucide-react';
+import { CircleAlert, Lock, Plus, Trash2 } from 'lucide-react';
+import { Badge } from '../ui/badge.tsx';
 import { Button } from '../ui/button.tsx';
 import { Input, Label } from '../ui/field.tsx';
 import { cn } from '../ui/utils.ts';
@@ -46,6 +47,22 @@ export interface FormProps {
    * a path and everything under it; omitted means nothing is locked.
    */
   locked?(at: Path): boolean;
+  /**
+   * Whether the controls this form renders should take focus on mount.
+   *
+   * For the screen that mounts **one question at a time**, and it is a flag
+   * rather than a path because that screen already decided which key it is
+   * asking: onboarding renders a single field and the whole point is that
+   * typing the answer is the first thing that happens. A form rendering the
+   * whole manifest leaves it unset — a settings page that grabbed the cursor
+   * into whichever key the schema happens to declare first would be a page
+   * fighting the reader.
+   *
+   * The text and number controls honour it and the `<select>` does not, which
+   * is not a principle: no step asks for an enum, and the day one does is the
+   * day to decide whether opening a dropdown under the reader is a kindness.
+   */
+  readonly autoFocus?: boolean;
   onChange(document: unknown): void;
 }
 
@@ -60,6 +77,39 @@ export interface FormProps {
 function isFrozen(form: FormProps, at: Path): boolean {
   return form.disabled || form.locked?.(at) === true;
 }
+
+/**
+ * The second of those two words, said where the reader is.
+ *
+ * The comment above admitted the collapse and the reader still only got one
+ * word: a value the mounted declaration owns rendered exactly like a value a
+ * save was in flight over — greyed out, unexplained, and indistinguishable from
+ * a form that had broken. A governed field is the *most* authoritative value on
+ * the screen, so it is marked as declared and keeps its full contrast, and only
+ * the save-in-flight arm keeps the dimming that means "wait".
+ *
+ * Still `disabled`, not `readOnly`: the value cannot be changed here by any
+ * route, and `readOnly` would leave it in the submitted form as something this
+ * screen appeared to be sending.
+ */
+function isDeclared(form: FormProps, at: Path): boolean {
+  return form.locked?.(at) === true;
+}
+
+/**
+ * Whether this is the *outermost* declared thing, and so the one to mark.
+ *
+ * The predicate answers for a path and everything under it, so a governed
+ * vessel makes its name, its kind, its location and every shared service answer
+ * yes — and badging all of them would put eight identical markers inside one
+ * card to say one thing. The boundary is where the answer changes.
+ */
+function marksDeclared(form: FormProps, at: Path): boolean {
+  return isDeclared(form, at) && !isDeclared(form, at.slice(0, -1));
+}
+
+/** The class that undoes {@link Input}'s dimming, for the declared arm only. */
+const UNDIMMED = 'disabled:opacity-100';
 
 /** Every key of an object schema, in the order the schema declares them. */
 export function SchemaFields({
@@ -140,6 +190,12 @@ function SchemaFieldControl({
           />
         ) : null}
         <Label htmlFor={id}>{field.label}</Label>
+        {marksDeclared(form, at) ? (
+          <Badge tone="idle">
+            <Lock aria-hidden="true" className="size-3" />
+            declared
+          </Badge>
+        ) : null}
       </div>
       {field.description ? (
         <p className="text-xs text-muted-foreground">{field.description}</p>
@@ -169,6 +225,9 @@ export function SchemaControl({
   const value = valueAt(form.document, at);
   const id = pathKey(at);
   const frozen = isFrozen(form, at);
+  // Dimmed only while a save is in flight. A declared value is not pending, it
+  // is settled, and greying it said the opposite.
+  const undimmed = isDeclared(form, at) ? UNDIMMED : undefined;
   const set = (next: unknown) =>
     form.onChange(withValueAt(form.document, at, next));
 
@@ -181,6 +240,8 @@ export function SchemaControl({
           type={node.format === 'url' ? 'url' : 'text'}
           value={typeof value === 'string' ? value : ''}
           disabled={frozen}
+          className={undimmed}
+          autoFocus={form.autoFocus}
           onChange={(event) => set(event.currentTarget.value)}
         />
       );
@@ -193,6 +254,8 @@ export function SchemaControl({
           step={node.integer ? 1 : 'any'}
           value={typeof value === 'number' ? String(value) : ''}
           disabled={frozen}
+          className={undimmed}
+          autoFocus={form.autoFocus}
           onChange={(event) => {
             const parsed = Number(event.currentTarget.value);
             set(event.currentTarget.value === '' ? undefined : parsed);
@@ -208,7 +271,7 @@ export function SchemaControl({
           checked={value === true}
           disabled={frozen}
           onChange={(event) => set(event.currentTarget.checked)}
-          className="size-4 accent-accent"
+          className={cn('size-4 accent-accent', undimmed)}
         />
       );
     case 'enum':
@@ -217,6 +280,7 @@ export function SchemaControl({
           id={id}
           value={typeof value === 'string' ? value : ''}
           disabled={frozen}
+          className={undimmed}
           onChange={set}
           options={node.values.map((each) => ({ value: each, label: each }))}
         />
@@ -371,12 +435,14 @@ function Select({
   value,
   options,
   disabled,
+  className,
   onChange,
 }: {
   readonly id: string;
   readonly value: string;
   readonly options: readonly { value: string; label: string }[];
   readonly disabled: boolean;
+  readonly className?: string;
   onChange(value: string): void;
 }) {
   return (
@@ -390,6 +456,7 @@ function Select({
         'h-9 w-full rounded-md border border-input bg-background px-3',
         'font-mono text-sm text-foreground',
         'disabled:cursor-not-allowed disabled:opacity-60',
+        className,
       )}
     >
       {options.map((option) => (
