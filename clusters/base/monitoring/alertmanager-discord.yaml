@@ -22,5 +22,7 @@ spec:
   data:
     - secretKey: webhook-url
       remoteRef:
-        key: discord alertmanager webhook
+        # Item id rather than title, so renaming the item in 1Password cannot
+        # quietly stop alert delivery.
+        key: aujvxijpz3oi25ccfdynev5sb4
         property: password
