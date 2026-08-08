@@ -112,6 +112,16 @@ in
         class's memory. Each image is fully allocated at boot and deleted when
         its skiff is scuttled, so `warm × workspace` per class is the space
         this host must keep free.
+
+        **On a Kubernetes node, point this off the root filesystem.** kubelet
+        watches whichever filesystem holds its own state and the container
+        images, and evicts pods when either runs low — so a reservation there
+        is charged against the node's eviction thresholds and shows up as
+        DiskPressure rather than as a bosun problem.
+
+        Changing this does not move or delete images already reserved under
+        the previous path: sweep only knows the directory it is configured
+        with.
       '';
     };
 

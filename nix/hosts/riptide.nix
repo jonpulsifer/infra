@@ -56,6 +56,14 @@
     enable = true;
     repo = "jonpulsifer/infra";
     tokenFile = config.sops.secrets."bosun-github-token".path;
+    # NOT the default under /var/lib: `/` is both kubelet's nodefs and its
+    # imagefs on this host, and reserving a pool there took root from 78% to
+    # 93% and put the node into DiskPressure -- kubelet then garbage-collected
+    # ~16 GiB of containerd's image cache to recover. /mnt/disks is a separate
+    # partition kubelet does not watch, so a reservation here cannot evict a
+    # pod. It is shared with local-path PVCs, which is what bounds the sizes
+    # below rather than the partition being empty.
+    workspaceDir = "/mnt/disks/bosun-workspace";
     classes.skiff-nixos = {
       hull = "${inputs.self.packages.x86_64-linux.hull-nixos}";
       vcpus = 4;
@@ -66,9 +74,12 @@
     # A scratch disk carries the runner's workspace and docker's data root, so
     # `memory` here is a RAM figure and nothing else -- without one the guest
     # root is a tmpfs overlay and a checkout that outgrows the class is an OOM
-    # rather than an ENOSPC. 6G is generous for this repo's real workload
-    # (checkout, bun store, one build) and the two of them reserve 12 GiB of
-    # the ~20 GiB free on riptide's root filesystem.
+    # rather than an ENOSPC.
+    #
+    # 4G is roughly twice this repo's real workload (checkout, bun store, one
+    # build), and the pair reserve 8 GiB of the 19 GiB free on the partition
+    # named above -- which also holds a Prometheus PVC that grows. Raising this
+    # is a storage question about that partition, not a memory one.
     #
     # warm = 2 is the point of the disk: the bench measured a second
     # skiff-ubuntu job waiting three minutes for the first to finish, which is
@@ -77,7 +88,7 @@
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
       memory = "3072M";
-      workspace = "6G";
+      workspace = "4G";
       warm = 2;
     };
   };
