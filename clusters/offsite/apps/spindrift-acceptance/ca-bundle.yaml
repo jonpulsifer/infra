@@ -1,0 +1,68 @@
+---
+# The one file `NODE_EXTRA_CA_CERTS` names, for this installation.
+#
+# **Three certificates, and all three are load-bearing.** offsite's API server
+# serves a leaf issued by the FML K8s offsite CA, which is itself issued by the
+# FML intermediate — so the chain does not terminate until the self-signed root.
+# The runtime does no partial-chain verification: an issuing CA in the store is
+# not a trust anchor unless the path reaches a root, and a store holding only
+# the issuing CA answers `unable to get issuer certificate` on every call.
+#
+# That is not a prediction. This installation was first declared with the
+# chart's default `kube-root-ca.crt`, which carries the offsite CA and an
+# unrelated retired NixOS anchor and neither of the two above it, and every one
+# of the control-plane vessel's six checklist rows failed with exactly that
+# sentence.
+#
+# No folly chain here, unlike the running installation's bundle: this one holds
+# no Target on folly. Every certificate is read from `terraform/pki/certs/`.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spindrift-acceptance-ca-bundle
+  namespace: spindrift-acceptance
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIDlTCCA0egAwIBAgIRAOnaEOtL2R5JxKS455AmmR4wBQYDK2VwMDYxNDAyBgNV
+    BAMTK0ZvbGx5IE1vdW50YWluIExhYm9yYXRvcmllcyBJbnRlcm1lZGlhdGUgQ0Ew
+    HhcNMjYwNzE4MjEyMDAxWhcNMjgwNzE4MDkyMDAxWjBDMSQwIgYDVQQKExtGb2xs
+    eSBNb3VudGFpbiBMYWJvcmF0b3JpZXMxGzAZBgNVBAMTEkZNTCBLOHMgb2Zmc2l0
+    ZSBDQTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAN92dwMiLLGpTzW8
+    cysU6uK8z3yIe2plVsDZyRCRP1tMbPDQznldElE6ammP5LZVKCdeveU/giqEvLEz
+    E8nipgXka3k+FGGpELEH2Lw2bLMsOWbNRmGOmKNKGYXdh748eloiOFOihG4UzxoG
+    KWsSVUxuTr4HzQIYqxPxeI/YvYrlpld3k4eYT6D8UTKhoBhfxUtUcaUiDDAQuge5
+    l9ihvhibLjRb1Qt+ZcKtitgb859JjZXej1YW70I6CVs9u9Vsnbto5JlXy6h1Iemy
+    oqEZEVSLKg6EAT60syaqt/KYyqZrJK0XcOisNvtvlnTnGs+H2XcmcYYg6zP5OR0B
+    SXUo7D9VI2m98ReXKt3aDzDh6dwx9Y9DGP8MwP4IxKR9us99fKIMZkRR6KqlPsM6
+    NYdaBWRN4jI1qp7d2Sz9TEjS//vurO+GEFH0jGRC3TT8yWfI6WNFt9YHVTutBCul
+    0REVWiqS+fsgM/18vZYNPE17uOjV4rV5bk7/gPJdjK7wQKjDyg6ZB5QzKIZRNr6r
+    IghXdQsPehM3faFYNtUF/WJqVWuWRs+NMFZdgDPUQ3UnWbr78miOqFy3+ijjpic5
+    Nt3rXeip1+C+HsIoaFqhs4hWIe3syMdzboEUIAToYacsYZxTCIibl1Dt2cBYXI+W
+    XUxtvjArHpFRykjQEwhGIRBbxQRlAgMBAAGjYzBhMA4GA1UdDwEB/wQEAwIBhjAP
+    BgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRdgBy2YXrhX/b3AaGNtEEDav840zAf
+    BgNVHSMEGDAWgBQE4eZ0TSBnmQEKvk26Id8ATiZ+xDAFBgMrZXADQQCf5euKB1l9
+    c332iif7gRqnALxClaOwveNNbcRWIiY5GvKLM2d53A/12v6lH8pPg7KVHCdKhSW3
+    5q4gZV+fDo4K
+    -----END CERTIFICATE-----
+    -----BEGIN CERTIFICATE-----
+    MIIBiDCCATqgAwIBAgIQK5wHYh6HX8zQO7sHttvrTjAFBgMrZXAwLjEsMCoGA1UE
+    AxMjRm9sbHkgTW91bnRhaW4gTGFib3JhdG9yaWVzIFJvb3QgQ0EwHhcNMjYwNzE4
+    MTg1NTU0WhcNMjgwNzE3MTg1NTU0WjA2MTQwMgYDVQQDEytGb2xseSBNb3VudGFp
+    biBMYWJvcmF0b3JpZXMgSW50ZXJtZWRpYXRlIENBMCowBQYDK2VwAyEAclzwIx98
+    DSJ636NKmoc2KCw6t+CdMAvSd9jrRmBgZVyjZjBkMA4GA1UdDwEB/wQEAwIBBjAS
+    BgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBQE4eZ0TSBnmQEKvk26Id8ATiZ+
+    xDAfBgNVHSMEGDAWgBSbBOje8ZeYfD1aixEVw2QQ+jERQzAFBgMrZXADQQCFbA5y
+    Ibqi4DUxCcWsOmlQSTgEYnEl6t2R67c0+ECiSE67OsWT6WXTPgDyBpwd9XSkUbf7
+    UZ+9hrIYRu4FFOcO
+    -----END CERTIFICATE-----
+    -----BEGIN CERTIFICATE-----
+    MIIBYDCCARKgAwIBAgIRAK3yD7NcGXGorLa+hQf7QlYwBQYDK2VwMC4xLDAqBgNV
+    BAMTI0ZvbGx5IE1vdW50YWluIExhYm9yYXRvcmllcyBSb290IENBMB4XDTI2MDcx
+    ODE4NTU1M1oXDTQxMDcxNDE4NTU1M1owLjEsMCoGA1UEAxMjRm9sbHkgTW91bnRh
+    aW4gTGFib3JhdG9yaWVzIFJvb3QgQ0EwKjAFBgMrZXADIQAWtUf+j7uRyb2XWbZj
+    sN29BK5mRKfQCQdURx584PniOKNFMEMwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB
+    /wQIMAYBAf8CAQEwHQYDVR0OBBYEFJsE6N7xl5h8PVqLERXDZBD6MRFDMAUGAytl
+    cANBALK2I8ljioXmfP3TOxjvkGopFnxMQJlg02kA3LooJ8MRe6nizV7cS9XHy1RM
+    u/ctyGaHaBwU6tSvez0rc+IQiQ4=
+    -----END CERTIFICATE-----

@@ -56,11 +56,13 @@ spec:
       token:
         gcpAudience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
         gcpImpersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/spindrift-controller@bluenose.iam.gserviceaccount.com:generateAccessToken
-        # The cluster's own root and nothing else. The running installation
-        # extends its bundle because it holds a Target on folly; this one
-        # places on cloud surfaces, which are reached over public TLS the
-        # image's own trust store already covers.
-        caConfigMap: kube-root-ca.crt
+        # **Not `kube-root-ca.crt`**, which is the chart's default and cannot
+        # verify the cluster it runs in: it carries the FML K8s offsite CA and
+        # nothing above it, and the runtime does no partial-chain verification.
+        # Declared with the default first, and every one of the control-plane
+        # vessel's six checklist rows answered `unable to get issuer
+        # certificate`. See ca-bundle.yaml beside this file.
+        caConfigMap: spindrift-acceptance-ca-bundle
     ingress:
       enabled: true
     # Its own database, and `keepOnDelete` off — an acceptance installation
@@ -73,3 +75,113 @@ spec:
         enabled: true
     reconciler:
       enabled: true
+    # **Every value here is real.** The chart-only path — no `manifest:` at all,
+    # the placeholder seeding itself — is what this installation was declared
+    # for and it has already been spent: the first operator enrolled a passkey
+    # against this origin (ticket 77), and the wizard defect that path exposed
+    # is fixed (ticket 97). What the placeholder cannot do is be *configured
+    # into* something real, because half of it names boundaries that do not
+    # exist: `spindrift-vessel` in `spindrift-region` is not a project this or
+    # any identity can be granted anything on, so every probe against it is
+    # refused for the one reason no grant fixes.
+    #
+    # So this document states what is true. The remaining acceptance clauses —
+    # Target connection, archive-to-URL, repository-to-signed-artifact,
+    # second-Target admission — are about the deploy chain, and a clean
+    # installation with a correct declaration is still a clean installation.
+    #
+    # **It shares the running installation's boundary, not its state.** Same
+    # project, same source bucket, same store of record, same registries —
+    # because they are the same infrastructure and inventing a second of each
+    # would be testing this repository's Terraform rather than Spindrift. What
+    # is not shared is the database, the identity's *subject*, the enrolment,
+    # and every row. Its Apps take names nothing else uses.
+    manifest:
+      installation:
+        name: acceptance
+        controlPlaneVessel: offsite
+        homeVessel: bluenose
+      controlPlane:
+        hostname: spindrift-acceptance.${SECRET_DOMAIN}
+      dns:
+        zones:
+          private: ${SPINDRIFT_DOMAIN}
+          public: ${SPINDRIFT_DOMAIN}
+      auth:
+        gateway: null
+      github:
+        clientId: Iv1.918d699f36ee7afc
+        apiBaseUrl: https://api.github.com
+        oauthBaseUrl: https://github.com
+        buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
+        infrastructureRepository: jonpulsifer/infra
+      sources:
+        buckets:
+          - bluenose-spindrift-source
+      charts:
+        app: oci://ghcr.io/jonpulsifer/charts/spindrift-app
+      build:
+        routes:
+          - name: hosted
+            adapter: github-actions
+            sealPublicKey: |
+              -----BEGIN PUBLIC KEY-----
+              MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAqJhA+am3NJ4pDPNi/EDi
+              TD3UjZoP736+Nn3/RluZhdazx+UoUftS0FCXDBBI9WIG0ZzSGPYwpYXgoiZ45x+T
+              IwOrqvl+MXpU436eLPZH8vGuC9I1lRhLpepkoDkXaXixf5+CBAGHKTe/7WjlcMuS
+              +5Wkqhr20qYm8Xt2Znq9hNZHV+3x32rZGG4SEG9QdRJXt39+SI2gARpTwSdRdcpd
+              H7ScPha8cmxUiEM4S2GtVByIrwGXfxWHxb80OZrU4Kvea/GFSlWk9nKQUrmFqnj0
+              Lx4nh617h7SClmYeagkGyiQ8SL6C3hM3sGpnkaXXA4DQ/+W6QADLSAuLJKaI0xv9
+              tsDFqkNz60VQf9+SNkF446ekKqFztdsOM879nyAOIv4SfpQI3ZdvK3daFep/z4K9
+              2BUBzdb5F/f9TgTpW+PSQA2fX4vzt73WeeikVRxKx6zpnZKgFzjVMIhmu3Y47btD
+              xrPbOokNfv3N7OIhNuC7oz0tX1Lq0andlplZlcTm8pv/3bkT2QmmxtEPDRJ+Xn8h
+              fi04rbJRFt4x8GqPwCJSswH+eKOLw7c5Jtjl1vRoIKsxs5hICcFTZEIXnyycHxtA
+              Ve9Xp3LMmVgqq70mHzGCVMfJXfZgm8HBqJ5U9K5Xzjp0EHNdsE/tFjlBA/x+4KSh
+              ey2JEg4EriDjMik2MaTQqHcCAwEAAQ==
+              -----END PUBLIC KEY-----
+        zeroConfigFrontend: ghcr.io/railwayapp/railpack-frontend:v0.35.0
+      secretStore:
+        adapter: gcp-secret-manager
+        endpoint: https://secretmanager.googleapis.com
+      supplyChain:
+        signer: gcpkms://projects/trusted-builds/locations/northamerica-northeast1/keyRings/keys/cryptoKeys/signer
+        registry:
+          - ghcr.io/jonpulsifer
+          - northamerica-northeast1-docker.pkg.dev/trusted-builds/i
+        verifier: ghcr.io/jonpulsifer/spindrift-verifier
+        attestor: projects/trusted-builds/attestors/provenance
+      vessels:
+        # Where this control plane runs. It carries no Target here: a Kubernetes
+        # Target would want an Apps namespace, its own gateway with a pinned
+        # address, and a wildcard certificate — none of which the acceptance
+        # clauses need, because a Cloud Run service mints its own URL. The
+        # vessel is still declared because `controlPlaneVessel` names it.
+        - name: offsite
+          kind: cluster
+          location:
+            apiServer: https://kubernetes.default.svc
+          reachableRegistries:
+            - ghcr.io
+        - name: bluenose
+          kind: gcp-project
+          location:
+            project: bluenose
+          terraformRoot: terraform/gcp/projects/bluenose
+          shared:
+            sourceBucket: bluenose-spindrift-source
+            artifactsProject: trusted-builds
+            secretStoreContainer: bluenose
+          reachableRegistries:
+            - northamerica-northeast1-docker.pkg.dev
+      targets:
+        - vessel: bluenose
+          adapter: cloudrun
+          connection:
+            region: northamerica-northeast1
+            endpoint: https://run.googleapis.com
+            policyEndpoint: https://binaryauthorization.googleapis.com
+            serviceAccount: spindrift-runtime@bluenose.iam.gserviceaccount.com
+        - vessel: bluenose
+          adapter: static
+          connection:
+            endpoint: https://firebasehosting.googleapis.com
