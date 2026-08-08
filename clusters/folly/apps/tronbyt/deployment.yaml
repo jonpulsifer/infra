@@ -78,10 +78,18 @@ spec:
           resources:
             requests:
               memory: 64Mi
-              cpu: 50m
+              # p99 sits at 56m, so the old 50m under-declared what this
+              # actually takes and the scheduler packed the node accordingly.
+              cpu: 100m
             limits:
               memory: 256Mi
-              cpu: 500m
+              # No CPU limit on purpose. Average draw is well under half the
+              # 500m this used to carry, but the work is bursty enough to spend
+              # the quota inside a single CFS period, so it was throttled 64% of
+              # periods while looking idle. CPU is compressible — the request
+              # already guarantees a share under contention, and a limit only
+              # buys throttling. Memory keeps its limit; that one is not
+              # compressible.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
