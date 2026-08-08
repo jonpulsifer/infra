@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -14,7 +15,8 @@ type Config struct {
 	TokenFile    string           `json:"tokenFile"`
 	RuntimeDir   string           `json:"runtimeDir"`
 	LogDir       string           `json:"logDir"`
-	MetricsFile  string           `json:"metricsFile"` // empty disables; a node-exporter textfile, not a listener
+	WorkspaceDir string           `json:"workspaceDir"` // real storage, not tmpfs: it holds whole filesystem images
+	MetricsFile  string           `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
 	PollInterval Duration         `json:"pollInterval"`
 	Classes      map[string]Class `json:"classes"`
 	Bin          BinPaths         `json:"bin"`
@@ -24,9 +26,13 @@ type Config struct {
 // skiffs to keep warm, and the busy-time budget before a running skiff is
 // scuttled and replaced.
 type Class struct {
-	Hull        string   `json:"hull"`
-	VCPUs       int      `json:"vcpus"`
-	Memory      string   `json:"memory"` // passed through verbatim as cloud-hypervisor's --memory size=
+	Hull   string `json:"hull"`
+	VCPUs  int    `json:"vcpus"`
+	Memory string `json:"memory"` // passed through verbatim as cloud-hypervisor's --memory size=
+	// Workspace sizes a scratch disk for this class; empty means none, and
+	// then the class's memory is its disk budget, since both hull families
+	// put the guest root on a tmpfs overlay.
+	Workspace   string   `json:"workspace,omitempty"`
 	Warm        int      `json:"warm"`
 	MaxLifetime Duration `json:"maxLifetime"`
 }
@@ -60,6 +66,7 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 const (
 	defaultRuntimeDir   = "/run/bosun"
 	defaultLogDir       = "/var/log/bosun"
+	defaultWorkspaceDir = "/var/lib/bosun/workspace"
 	defaultPollInterval = 30 * time.Second
 
 	// defaultMaxLifetime backstops a class that declares no budget. It is a
@@ -118,6 +125,11 @@ func LoadConfig(path string) (*Config, error) {
 		if c.Memory == "" {
 			return nil, fmt.Errorf("config: class %s: memory is required", name)
 		}
+		if c.Workspace != "" {
+			if _, err := parseSize(c.Workspace); err != nil {
+				return nil, fmt.Errorf("config: class %s: workspace: %w", name, err)
+			}
+		}
 		if c.Warm <= 0 {
 			return nil, fmt.Errorf("config: class %s: warm must be positive", name)
 		}
@@ -133,8 +145,37 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.LogDir == "" {
 		cfg.LogDir = defaultLogDir
 	}
+	if cfg.WorkspaceDir == "" {
+		cfg.WorkspaceDir = defaultWorkspaceDir
+	}
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = Duration(defaultPollInterval)
 	}
 	return &cfg, nil
+}
+
+// parseSize turns "6G", "512M" or a bare byte count into bytes, taking the
+// same suffixes cloud-hypervisor's --memory size= does so a class's two size
+// fields read alike.
+func parseSize(s string) (int64, error) {
+	mult := int64(1)
+	if s != "" {
+		switch s[len(s)-1] {
+		case 'K', 'k':
+			mult = 1 << 10
+		case 'M', 'm':
+			mult = 1 << 20
+		case 'G', 'g':
+			mult = 1 << 30
+		}
+	}
+	digits := s
+	if mult > 1 {
+		digits = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid size %q", s)
+	}
+	return n * mult, nil
 }

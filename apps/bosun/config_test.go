@@ -80,3 +80,35 @@ func TestDurationUnmarshal(t *testing.T) {
 		t.Fatal("expected error for invalid duration string")
 	}
 }
+
+func TestParseSize(t *testing.T) {
+	for in, want := range map[string]int64{
+		"6G":   6 << 30,
+		"512M": 512 << 20,
+		"64k":  64 << 10,
+		"4096": 4096,
+	} {
+		got, err := parseSize(in)
+		if err != nil {
+			t.Errorf("parseSize(%q): %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("parseSize(%q) = %d, want %d", in, got, want)
+		}
+	}
+	for _, in := range []string{"", "0", "-1G", "6GB", "big", "G"} {
+		if _, err := parseSize(in); err == nil {
+			t.Errorf("parseSize(%q): expected an error", in)
+		}
+	}
+}
+
+func TestLoadConfigRejectsUnparseableWorkspaceSize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{"repo":"acme/widgets","tokenFile":"/x","classes":{"skiff-test":{"hull":"/h","vcpus":1,"memory":"512M","workspace":"lots","warm":1}}}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected an error for an unparseable workspace size")
+	}
+}

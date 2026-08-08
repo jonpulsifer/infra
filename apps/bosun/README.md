@@ -40,9 +40,11 @@ Path given via `-config`. Example:
   "tokenFile": "/run/secrets/bosun-github-token",
   "runtimeDir": "/run/bosun",
   "logDir": "/var/log/bosun",
+  "workspaceDir": "/var/lib/bosun/workspace",
   "pollInterval": "30s",
   "classes": {
-    "skiff-nixos": {"hull": "/nix/store/...-hull-nixos", "vcpus": 4, "memory": "4096M", "warm": 1, "maxLifetime": "1h"}
+    "skiff-nixos": {"hull": "/nix/store/...-hull-nixos", "vcpus": 4, "memory": "4096M", "warm": 1, "maxLifetime": "1h"},
+    "skiff-ubuntu": {"hull": "/nix/store/...-hull-ubuntu", "vcpus": 4, "memory": "3072M", "workspace": "6G", "warm": 2, "maxLifetime": "1h"}
   }
 }
 ```
@@ -52,6 +54,14 @@ Path given via `-config`. Example:
 the label a workflow's `runs-on:` matches against; it must never be
 `self-hosted`, which the existing ARC runners use, and LoadConfig rejects a
 class named that.
+
+A class's `workspace` sizes a scratch disk, reserved under `workspaceDir` at
+boot and deleted with the skiff. Without one, both hull families put the guest
+root on a tmpfs overlay and `memory` is the class's disk budget too, so a
+checkout that outgrows it is an OOM rather than an ENOSPC. The disk is handed
+over raw and appended after every hull-declared device, with its guest device
+name on the kernel cmdline as `bosun.workspace=` — what filesystem it carries
+is the hull's business, and bosun never learns what was written to it.
 
 `bin.cloudHypervisor` / `bin.virtiofsd` / `bin.passt` override the binaries
 bosun execs; unset ones resolve from `PATH`.

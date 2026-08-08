@@ -4,7 +4,9 @@
 # boots. The rootfs is the repo's own ARC runner image — the exact filesystem
 # every `runs-on: offsite` job already passes on — flattened into a read-only
 # squashfs handed to the guest as a virtio-blk disk. Writes land in a tmpfs
-# overlay upper, so a skiff still leaves nothing behind.
+# overlay upper, so a skiff still leaves nothing behind. Where the class sizes
+# a scratch disk, the workspace and docker's data root move onto it instead, so
+# a build's bytes stop being charged against the class's memory.
 #
 # Nix builds all of it, but none of it reaches the guest: no /nix/store, no
 # store share, no Nix database. "No Nix in the cloud" is about the guest, not
@@ -137,10 +139,35 @@ let
     $bb ip link set eth0 up
     $bb udhcpc -i eth0 -q -n -s /opt/bosun/udhcpc-script
 
-    # A plain tmpfs: docker's overlayfs snapshotter cannot put upper/work
-    # dirs on the root overlay itself (EINVAL on mount).
-    $bb mkdir -p /var/lib/docker
-    $bb mount -t tmpfs -o mode=0710 tmpfs /var/lib/docker
+    # The scratch disk, when the class sized one. bosun appends it after
+    # every disk this hull declared and names it on the cmdline, because an
+    # index shifts with what the hull declared and a name does not.
+    #
+    # Formatting is this hull's business: bosun hands over a raw device and
+    # never learns what goes on it, the same seam that lets the rootfs above
+    # be a squashfs. Lazy init because the filesystem lives exactly as long as
+    # the skiff does -- nobody is left to benefit from an eager inode table.
+    #
+    # Both the runner's workspace and docker's data root land here, which is
+    # what takes them off the class's memory: without a disk they are tmpfs,
+    # and `memory` is the disk budget.
+    work=$($bb sed -n 's/.*bosun\.workspace=\([^ ]*\).*/\1/p' /proc/cmdline)
+    $bb mkdir -p /var/lib/docker /home/runner/_work
+    if [ -n "$work" ]; then
+      $bb modprobe ext4
+      /usr/sbin/mkfs.ext4 -Fq -m0 -E lazy_itable_init=1,lazy_journal_init=1 "$work"
+      $bb mkdir -p /mnt/skiff
+      $bb mount -t ext4 "$work" /mnt/skiff
+      $bb mkdir -p /mnt/skiff/work /mnt/skiff/docker
+      $bb chmod 0710 /mnt/skiff/docker
+      $bb mount -o bind /mnt/skiff/work /home/runner/_work
+      $bb mount -o bind /mnt/skiff/docker /var/lib/docker
+    else
+      # A plain tmpfs: docker's overlayfs snapshotter cannot put upper/work
+      # dirs on the root overlay itself (EINVAL on mount).
+      $bb mount -t tmpfs -o mode=0710 tmpfs /var/lib/docker
+    fi
+    echo "skiff-mark workspace-ready $($bb cut -d' ' -f1 /proc/uptime)"
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       dockerd >/var/log/dockerd.log 2>&1 &
     echo "skiff-mark setup-done $($bb cut -d' ' -f1 /proc/uptime)"

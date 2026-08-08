@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -17,9 +18,10 @@ func testPool(t *testing.T) (*pool, *fakeGitHub, *fakeLaunch) {
 	dir := t.TempDir()
 	hullDir := writeTestHull(t, dir, "hull", nil)
 	cfg := &Config{
-		Repo:       "acme/widgets",
-		RuntimeDir: filepath.Join(dir, "run"),
-		LogDir:     filepath.Join(dir, "log"),
+		Repo:         "acme/widgets",
+		RuntimeDir:   filepath.Join(dir, "run"),
+		LogDir:       filepath.Join(dir, "log"),
+		WorkspaceDir: filepath.Join(dir, "workspace"),
 		Classes: map[string]Class{
 			"skiff-test": {Hull: hullDir, VCPUs: 1, Memory: "512M", Warm: 1, MaxLifetime: Duration(time.Hour)},
 		},
@@ -458,5 +460,52 @@ func TestTransientOfflineDoesNotKill(t *testing.T) {
 	p.mu.Unlock()
 	if !stillThere || n != 1 {
 		t.Fatalf("a skiff that never hit %d consecutive offline polls was killed anyway (present=%v, pool=%d)", wedgeThreshold, stillThere, n)
+	}
+}
+
+// A workspace image is reserved on real storage, so unlike everything else a
+// skiff leaves behind it does not evaporate with a tmpfs — retire has to
+// delete it, and sweep has to collect whatever a cgroup kill left.
+func TestWorkspaceDiskIsCreatedOnBootAndDeletedOnRetire(t *testing.T) {
+	p, _, fl := testPool(t)
+	class := p.cfg.Classes["skiff-test"]
+	class.Workspace = "1M"
+	p.cfg.Classes["skiff-test"] = class
+	ctx := context.Background()
+
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+
+	if s.paths.workspace == "" {
+		t.Fatal("class sizes a workspace but the skiff got no image path")
+	}
+	if _, err := os.Stat(s.paths.workspace); err != nil {
+		t.Fatalf("workspace image missing after boot: %v", err)
+	}
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	if !slices.Contains(chCall.args, "path="+s.paths.workspace+",readonly=off") {
+		t.Fatalf("workspace disk missing from argv: %v", chCall.args)
+	}
+
+	p.retire(ctx, s, testLogger())
+	if _, err := os.Stat(s.paths.workspace); !os.IsNotExist(err) {
+		t.Fatalf("workspace image survived retire: %v", err)
+	}
+}
+
+func TestSweepClearsOrphanedWorkspaceImages(t *testing.T) {
+	p, _, _ := testPool(t)
+	orphan := filepath.Join(p.cfg.WorkspaceDir, "deadbeef.img")
+	if err := createWorkspace(orphan, "1M"); err != nil {
+		t.Fatalf("createWorkspace: %v", err)
+	}
+	if err := p.sweep(context.Background()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("orphaned workspace survived sweep: %v", err)
 	}
 }

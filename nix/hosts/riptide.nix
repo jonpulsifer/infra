@@ -63,31 +63,33 @@
       warm = 1;
     };
     # The FHS family: apt, dockerd, and the ARC image's toolchain, no Nix.
-    # More memory than skiff-nixos because jobs here apt-get and docker build
-    # inside the guest rather than leaning on a warm host store -- and because
-    # the whole guest root is a tmpfs overlay, so this number is the class's
-    # disk budget as much as its RAM. A checkout plus a docker build that
-    # exceeds it is an OOM, not an ENOSPC. 8192M against riptide's ~10 GiB
-    # free is the ceiling while kubelet shares the host; past that the answer
-    # is a real workspace disk, not a bigger number.
+    # A scratch disk carries the runner's workspace and docker's data root, so
+    # `memory` here is a RAM figure and nothing else -- without one the guest
+    # root is a tmpfs overlay and a checkout that outgrows the class is an OOM
+    # rather than an ENOSPC. 6G is generous for this repo's real workload
+    # (checkout, bun store, one build) and the two of them reserve 12 GiB of
+    # the ~20 GiB free on riptide's root filesystem.
+    #
+    # warm = 2 is the point of the disk: the bench measured a second
+    # skiff-ubuntu job waiting three minutes for the first to finish, which is
+    # what blocks migrating anything real onto skiffs.
     classes.skiff-ubuntu = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
-      memory = "8192M";
-      warm = 1;
+      memory = "3072M";
+      workspace = "6G";
+      warm = 2;
     };
   };
 
-  # The pool's declared ceiling is 2048M + 8192M = 10 GiB, which riptide does
-  # not have to spare: 15.2 GiB total, ~5 GiB held by kubelet and the system,
-  # and no swap. Only a skiff-nixos job peaking at the same time as a
-  # skiff-ubuntu one gets there -- warm=1 serialises within a label but not
-  # across them -- and without a bound the *host* OOM killer picks the victim,
-  # which on a worker node may be a pod or kubelet rather than a skiff.
+  # The pool's declared ceiling is 2048M + 2x3072M = 8 GiB, inside the limit
+  # below with room to spare: riptide has 15.2 GiB total, ~5 GiB held by
+  # kubelet and the system, and no swap. Without a bound the *host* OOM killer
+  # picks the victim, which on a worker node may be a pod or kubelet rather
+  # than a skiff.
   #
-  # 9G clears the realistic worst case (one 8192M guest plus the other class
-  # idling, ~8.8 GiB) and stops the pathological one inside bosun's own
-  # cgroup. Every skiff is a child of this unit, so the limit covers the whole
-  # pool the same way IPAddressDeny does.
+  # Every skiff is a child of this unit, so the limit covers the whole pool
+  # the same way IPAddressDeny does. Raising warm further is now a disk
+  # question before it is a memory one -- see services.bosun.workspaceDir.
   systemd.services.bosun.serviceConfig.MemoryMax = "9G";
 }

@@ -26,6 +26,7 @@ let
       tokenFile
       runtimeDir
       logDir
+      workspaceDir
       metricsFile
       ;
     pollInterval = cfg.pollInterval;
@@ -34,6 +35,7 @@ let
         hull
         vcpus
         memory
+        workspace
         warm
         maxLifetime
         ;
@@ -100,6 +102,19 @@ in
       '';
     };
 
+    workspaceDir = mkOption {
+      type = types.str;
+      default = "/var/lib/bosun/workspace";
+      description = ''
+        Where per-skiff scratch disks are reserved, for classes that size one
+        with {option}`classes.<name>.workspace`. Must be real storage, not
+        tmpfs: the whole point is to stop charging a build's bytes against the
+        class's memory. Each image is fully allocated at boot and deleted when
+        its skiff is scuttled, so `warm × workspace` per class is the space
+        this host must keep free.
+      '';
+    };
+
     logRetention = mkOption {
       type = types.str;
       default = "7d";
@@ -159,13 +174,30 @@ in
               type = types.str;
               default = "4096M";
             };
+            workspace = mkOption {
+              type = types.str;
+              default = "";
+              example = "6G";
+              description = ''
+                Size of a scratch disk handed to each skiff of this class, or
+                empty for none. Both hull families put the guest root on a
+                tmpfs overlay, so without one a class's {option}`memory` is
+                also its disk budget and a checkout that outgrows it is an OOM
+                rather than an ENOSPC.
+
+                The disk is raw: what filesystem it carries is the hull's
+                business, and bosun never learns what was written to it.
+              '';
+            };
             warm = mkOption {
               type = types.ints.unsigned;
               default = 1;
               description = ''
                 How many skiffs of this class to keep booted and registered.
                 Each holds its memory for as long as it idles, so this is
-                bounded by RAM rather than by cores.
+                bounded by RAM rather than by cores — and by disk too, once
+                {option}`workspace` is set, since that space is reserved up
+                front rather than as a build uses it.
               '';
             };
             maxLifetime = mkOption {
@@ -208,7 +240,15 @@ in
     # Nothing in bosun deletes a retired skiff's logs, so this is the only
     # bound on logDir: one directory per skiff ever booted, plus whatever job
     # code chose to write into the diagnostic share.
-    systemd.tmpfiles.rules = [ "e ${cfg.logDir} - - - ${cfg.logRetention}" ];
+    #
+    # The workspace directory is tmpfiles' rather than a second
+    # StateDirectory=, because StateDirectoryMode is per-unit and the metrics
+    # directory below has to stay 0755 for node-exporter while a skiff's
+    # scratch disk should not be readable by anything else on the host.
+    systemd.tmpfiles.rules = [
+      "e ${cfg.logDir} - - - ${cfg.logRetention}"
+      "d ${cfg.workspaceDir} 0700 bosun bosun -"
+    ];
 
     systemd.services.bosun = {
       description = "warm pool of ephemeral microVM Actions runners";
@@ -252,6 +292,10 @@ in
         # an explicit ReadWritePaths instead.
         StateDirectory = "prometheus-node-exporter-text-files";
         StateDirectoryMode = "0755";
+
+        # ProtectSystem=strict makes everything outside the unit's own
+        # runtime/state/logs read-only, and the workspace directory is neither.
+        ReadWritePaths = [ cfg.workspaceDir ];
 
         # Every skiff is a child of this unit, so one filter covers the whole
         # pool: job code reaches the public internet and nothing on the LAN.
