@@ -83,6 +83,17 @@ export function InstallationSettings() {
    * not offer the act without it.
    */
   const [declaration, setDeclaration] = useState<unknown>(null);
+  /**
+   * Whether that declaration takes the governed slice back on every boot.
+   *
+   * Separate from `declaration` because a mounted document and a governing one
+   * are different facts, and the chart-only install is where they part: the
+   * chart mounts its stand-in to bind the relying party, and a stand-in governs
+   * nothing. Answered by the server (`getInstallationManifest`) rather than
+   * decided here, so this screen locks exactly what `configureInstallation`
+   * would refuse — never a field it would have accepted.
+   */
+  const [declarationGoverns, setDeclarationGoverns] = useState(false);
 
   const load = useCallback(async () => {
     const result = await command('getInstallationManifest', {});
@@ -90,6 +101,7 @@ export function InstallationSettings() {
       setDocument(result.value.manifest);
       setDivergence(result.value.declarationDivergence);
       setDeclaration(result.value.declaration);
+      setDeclarationGoverns(result.value.declarationGoverns);
       setLoadError(null);
     } else {
       setLoadError(result.failure.message);
@@ -183,6 +195,7 @@ export function InstallationSettings() {
       saving={saving}
       divergence={divergence}
       declaration={declaration}
+      declarationGoverns={declarationGoverns}
       onChange={(next) => {
         setDocument(next);
         setOutcome(null);
@@ -250,6 +263,7 @@ export function InstallationSettingsView({
   saving,
   divergence = [],
   declaration = null,
+  declarationGoverns = false,
   onChange,
   onSave,
   onReload,
@@ -277,6 +291,12 @@ export function InstallationSettingsView({
    * entitled to leave unset.
    */
   readonly declaration?: unknown;
+  /**
+   * Whether {@link declaration} governs. Defaults to `false` so a caller that
+   * passes neither locks nothing, which is the honest answer for a screen with
+   * no declaration behind it.
+   */
+  readonly declarationGoverns?: boolean;
   onChange(document: unknown): void;
   onSave(): void;
   onReload(): void;
@@ -294,7 +314,10 @@ export function InstallationSettingsView({
   // is a field that teaches them the wrong thing about who owns it. Still no
   // key named in this file — the paths come from the schema module that owns
   // them, resolved against the document being edited.
-  const governed = governedManifestPaths(declaration, document).map(pathKey);
+  const governed = governedManifestPaths(
+    declarationGoverns ? declaration : null,
+    document,
+  ).map(pathKey);
   const locked = (at: Path) => {
     const here = pathKey(at);
     return governed.some((key) => here === key || here.startsWith(`${key}.`));
