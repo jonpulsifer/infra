@@ -19,6 +19,12 @@ creation_rules:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
           # riptide (ssh-to-age of its ed25519 host key)
           - age15ylde96ar2x0q5gzqrxhkheh5puwtqf0rkuv6khgsv3xfhqu35hquw70ym
+  # tender is stage one: the operator key is the only recipient until the
+  # instance has booted once and its ed25519 host key exists to ssh-to-age.
+  - path_regex: nix/secrets/tender\.sops\.ya?ml
+    key_groups:
+      - age:
+          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
   - path_regex: nix/secrets/optiplex\.sops\.ya?ml
     key_groups:
       - age:

@@ -345,7 +345,14 @@ in
           "10.0.0.0/8"
           "172.16.0.0/12"
           "192.168.0.0/16"
+          # Link-local, which is where a cloud metadata service lives.
           "169.254.0.0/16"
+          # The tailnet. RFC1918 is not the whole LAN on a host that runs
+          # tailscale -- every enrolled fleet host also answers on a CGNAT
+          # address, and reaching one is reaching the homelab. riptide force-
+          # disables tailscale so this never bit there; a `gcp`-tagged host
+          # does not.
+          "100.64.0.0/10"
         ];
 
         NoNewPrivileges = true;
