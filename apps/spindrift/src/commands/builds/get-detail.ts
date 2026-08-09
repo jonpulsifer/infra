@@ -54,6 +54,10 @@ export const getBuildDetail: Command<
         with: {
           app: true,
           desiredTargets: {
+            // Newest first — the placement of record, exactly as `deployApp`
+            // reads it. A moved Component keeps the old pair's row until it is
+            // retired, and an unordered pick could name either.
+            orderBy: (desiredTable, { desc }) => [desc(desiredTable.updatedAt)],
             limit: 1,
             with: { target: { with: { vessel: true } } },
           },

@@ -17,7 +17,10 @@ import {
   components,
   componentTargetDesired,
   targets,
+  vessels,
 } from '../db/schema.ts';
+import { artifactTypeFor } from '../domain/placement.ts';
+import { targetLabel } from '../domain/target.ts';
 import {
   reconcilerAttemptDuration,
   reconcilerLoopDuration,
@@ -63,6 +66,15 @@ export async function runBuildPass(
       // the `where` clause, so this is the age of a Build still waiting to be
       // claimed.
       createdAt: builds.createdAt,
+      // For binding the Build to a placement that admits its shape: what this
+      // Build produces, what the Component is, and enough of the Target to
+      // derive the shape it takes — plus the row's `updatedAt`, which is what
+      // says which placement is the one of record.
+      targetShape: builds.targetShape,
+      kind: components.kind,
+      adapter: targets.adapter,
+      vessel: vessels.name,
+      desiredUpdatedAt: componentTargetDesired.updatedAt,
     })
     .from(builds)
     .innerJoin(components, eq(builds.componentId, components.id))
@@ -71,14 +83,69 @@ export async function runBuildPass(
       eq(componentTargetDesired.componentId, components.id),
     )
     .innerJoin(targets, eq(targets.id, componentTargetDesired.targetId))
+    .innerJoin(vessels, eq(vessels.id, targets.vesselId))
     .where(eq(builds.status, 'PENDING'))
     .orderBy(asc(builds.id), asc(targets.rank));
 
-  let dispatched = 0;
-  const visited = new Set<number>();
+  // A moved Component deliberately keeps the old pair's desired row until what
+  // still serves there is retired, so a PENDING Build can join two placements —
+  // and only one of them takes the shape this Build produces. Each Build is
+  // bound to the newest desired row whose Target admits its shape: the same
+  // newest-row-is-the-placement-of-record reading `deployApp` uses. Rank is
+  // only the tie-break the ordering above already applied.
+  const perBuild = new Map<number, typeof rows>();
   for (const row of rows) {
-    if (visited.has(row.buildId)) continue;
-    visited.add(row.buildId);
+    const group = perBuild.get(row.buildId);
+    if (group === undefined) perBuild.set(row.buildId, [row]);
+    else group.push(row);
+  }
+  const shapeTaken = (candidate: (typeof rows)[number]) =>
+    artifactTypeFor(candidate.kind, {
+      capabilities: {
+        artifactTypes:
+          context.adapters.deploy(candidate.adapter)?.artifactTypes ?? [],
+      },
+    });
+
+  let dispatched = 0;
+  for (const group of perBuild.values()) {
+    let row: (typeof rows)[number] | undefined;
+    for (const candidate of group) {
+      if (shapeTaken(candidate) !== candidate.targetShape) continue;
+      if (
+        row === undefined ||
+        candidate.desiredUpdatedAt > row.desiredUpdatedAt
+      ) {
+        row = candidate;
+      }
+    }
+    if (row === undefined) {
+      // No placement takes what this Build produces. Binding it anywhere would
+      // evaluate route and policy against a Target the artifact can never land
+      // on, so the Build stays PENDING and says so: placing the Component
+      // somewhere that admits the shape is an operator act that makes the next
+      // tick work.
+      const pending = group[0]!;
+      const refused = group
+        .map(
+          (candidate) =>
+            `${targetLabel(candidate)} takes ${shapeTaken(candidate)}`,
+        )
+        .join('; ');
+      await recordDispatchWait(
+        context,
+        {
+          attempt: {
+            appId: pending.appId,
+            componentId: pending.componentId,
+            buildId: pending.buildId,
+          },
+          waitingOn: pending.waitingOn,
+        },
+        `this Build produces a ${pending.targetShape} artifact and no Target this Component is placed on takes one (${refused}), so nothing can run it`,
+      );
+      continue;
+    }
     const selection = await buildRouteFor(row.targetId, context, row.appId);
     if (selection.route === null) {
       // A Target whose policy no available route satisfies. Configuring a
@@ -135,10 +202,10 @@ export async function runBuildPass(
       );
     }
   }
-  // `visited` is every distinct Build this pass looked at, all of them
+  // `perBuild` holds every distinct Build this pass looked at, all of them
   // PENDING by the `where` clause — the backlog this pass found, whether or
   // not it managed to dispatch all of it.
-  reconcilerQueueDepth.record(visited.size, { kind: 'build' });
+  reconcilerQueueDepth.record(perBuild.size, { kind: 'build' });
   return dispatched;
 }
 
