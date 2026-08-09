@@ -21,13 +21,20 @@ data "google_storage_bucket_objects" "files" {
   prefix = "nixos-image-google-compute"
 }
 
+locals {
+  # Same lexicographic trap as tender's image; see bosun.tf.
+  nixos_image_object = reverse(sort([
+    for o in data.google_storage_bucket_objects.files.bucket_objects : o.name
+  ]))[0]
+}
+
 resource "google_compute_image" "nixos" {
   provider          = google.free-tier
   name              = "nixos"
   family            = "nixos"
   storage_locations = ["us-east1"]
   raw_disk {
-    source = "https://storage.googleapis.com/homelab-ng-free/${data.google_storage_bucket_objects.files.bucket_objects[0].name}"
+    source = "https://storage.googleapis.com/homelab-ng-free/${local.nixos_image_object}"
   }
   guest_os_features {
     type = "UEFI_COMPATIBLE"
