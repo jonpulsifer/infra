@@ -303,7 +303,7 @@ in
 
       image = mkOption {
         type = types.str;
-        default = "ghcr.io/falcondev-oss/github-actions-cache-server:v9.7.0";
+        default = "ghcr.io/falcondev-oss/github-actions-cache-server:9.7.0";
         description = ''
           Pinned server image. v9+ speaks only the v2 twirp protocol, which
           is what actions/cache >= 4.2 uses against github.com.
