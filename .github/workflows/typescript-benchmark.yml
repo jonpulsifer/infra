@@ -25,11 +25,12 @@ on:
           - ubuntu-latest
         default: all
       caches:
-        description: 'best = each label uses the fastest cache it has; none = no dependency or build cache anywhere (isolates the runner from the network)'
+        description: 'best = each label uses the fastest cache it has; none = no dependency or build cache anywhere (isolates the runner from the network); gha = actions/cache on every label, exactly as a hosted runner uses it — on a skiff whose host runs the local cache service, this measures that service'
         type: choice
         options:
           - best
           - none
+          - gha
         default: best
 
 permissions:
@@ -146,6 +147,20 @@ jobs:
       # a clone. That difference is the runner, not a cache we configured.
       - name: Where this runner's cache lives
         run: |
+          if [ "${{ inputs.caches }}" = "gha" ]; then
+            echo "caches: gha — actions/cache on every label, no warm-disk shortcuts."
+            if [ -n "${SKIFF_CACHE:-}" ]; then
+              # The one honest divergence: bun's store must not land on the
+              # guest's tmpfs root (a cold install ENOSPCs a 2.9 GiB class),
+              # so it goes on the disk — emptied, so the cache step still
+              # transfers every byte. The cache steps' paths follow the env.
+              rm -rf "$SKIFF_CACHE/gha-bun"
+              mkdir -p "$SKIFF_CACHE/gha-bun"
+              echo "BUN_INSTALL_CACHE_DIR=$SKIFF_CACHE/gha-bun" >> "$GITHUB_ENV"
+              echo "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-unset (talking to GitHub)}"
+            fi
+            exit 0
+          fi
           if [ "${{ inputs.caches }}" = "none" ]; then
             echo "caches: none — nothing is restored on any label."
             if [ -n "${SKIFF_CACHE:-}" ]; then
@@ -198,7 +213,9 @@ jobs:
         if: env.SKIFF_CACHE_ROOT == '' && inputs.caches != 'none'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.bun/install/cache
+          # Follows the gha-mode redirect on a skiff; the hosted default
+          # otherwise.
+          path: ${{ env.BUN_INSTALL_CACHE_DIR || '~/.bun/install/cache' }}
           key: bun-store-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
             bun-store-${{ runner.os }}-

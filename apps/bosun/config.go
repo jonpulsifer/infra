@@ -17,6 +17,7 @@ type Config struct {
 	LogDir       string           `json:"logDir"`
 	WorkspaceDir string           `json:"workspaceDir"` // real storage, not tmpfs: it holds whole filesystem images
 	MetricsFile  string           `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
+	CacheURL     string           `json:"cacheUrl"`     // empty disables; announced to every skiff as bosun.cache on the cmdline
 	PollInterval Duration         `json:"pollInterval"`
 	Classes      map[string]Class `json:"classes"`
 	Bin          BinPaths         `json:"bin"`

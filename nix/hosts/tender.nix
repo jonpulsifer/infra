@@ -46,6 +46,13 @@
       persist = true;
       warm = 4;
     };
+
+    # 30 GB of the 100 GB boot disk for the actions/cache service; the four
+    # workspace disks reserve another 24 GB and the closure needs the rest.
+    cache = {
+      enable = true;
+      maxSizeBytes = 32212254720;
+    };
   };
 
   # 30 GiB total and nothing else on the box, so the bound is generous rather
