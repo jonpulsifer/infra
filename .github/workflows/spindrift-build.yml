@@ -73,6 +73,10 @@ jobs:
             printf 'bundleDigest=%s\n' "$(read_key '.bundleDigest')"
             printf 'location=%s\n'     "$(read_key '.origin.location')"
             printf 'subpath=%s\n'      "$(read_key '.origin.subpath')"
+            # `// "image"` because this file and the controller ship on
+            # different clocks (see `destinations` below): a spec composed
+            # before the field existed built an image, and still does.
+            printf 'artifactType=%s\n' "$(read_key '.artifactType // "image"')"
             # `.destinations` with `.destination` behind it, because this file
             # and the controller ship on different clocks — the same reason
             # `tags` carries a default. A caller pins this workflow by a local
@@ -205,9 +209,35 @@ jobs:
           ROOT: ${{ steps.bundle.outputs.root }}
           SUBPATH: ${{ steps.request.outputs.subpath }}
           FRONTEND: ${{ steps.request.outputs.frontend }}
+          ARTIFACT_TYPE: ${{ steps.request.outputs.artifactType }}
         run: |
           set -euo pipefail
           scope="${ROOT}/${SUBPATH}"
+
+          # A `files` artifact is not built at all: the scope *is* the site,
+          # and what the registry holds is one layer that is the gzipped tar
+          # `bundle.ts` reads back at deploy time. `FROM scratch` + `COPY . /`
+          # makes buildx produce exactly that — a single tar+gzip layer of the
+          # scope's contents — while the push, the provenance, the signature,
+          # the attestation and the report all ride the ordinary pipeline
+          # unchanged, so a files artifact is admitted exactly like an image.
+          # This arm is checked before the Dockerfile one on purpose: the
+          # artifact type decides what the thing *is*, and a Dockerfile in the
+          # scope only ever decided how to build one.
+          # ponytail: a site whose files need a build step first (an
+          # outputDirectory) ships its sources today; grow that arm when a
+          # built site reaches a files Target.
+          if [ "$ARTIFACT_TYPE" = "files" ]; then
+            files="${RUNNER_TEMP}/files-artifact"
+            mkdir -p "$files"
+            printf 'FROM scratch\nCOPY . /\n' > "${files}/Dockerfile"
+            {
+              printf 'context=%s\n' "$scope"
+              printf 'file=%s\n' "${files}/Dockerfile"
+              printf 'buildArgs=\n'
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # The scope names the Dockerfile; the bundle root is what it builds.
           # A monorepo App is one subpath of a tree it shares a lockfile,
