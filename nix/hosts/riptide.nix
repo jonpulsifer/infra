@@ -88,11 +88,17 @@
       memory = "3072M";
       workspace = "6G";
       persist = true;
-      warm = 2;
+      # warm = 0 while tender carries this label: the lab keeps a single warm
+      # slot (skiff-nixos above) and every skiff-ubuntu job lands on the cloud
+      # pool, which is also what makes the cloud bench numbers unambiguous.
+      # Restore warm = 2 to serve the label from this host again; the slot
+      # disks are reclaimed at 0 and rebuilt cold on the way back up.
+      warm = 0;
     };
   };
 
-  # The pool's declared ceiling is 2048M + 2x3072M = 8 GiB, inside the limit
+  # The pool's declared ceiling is 2048M + warm x 3072M -- 8 GiB at warm = 2,
+  # inside the limit
   # below with room to spare: riptide has 15.2 GiB total, ~5 GiB held by
   # kubelet and the system, and no swap. Without a bound the *host* OOM killer
   # picks the victim, which on a worker node may be a pod or kubelet rather
