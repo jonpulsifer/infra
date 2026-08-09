@@ -266,10 +266,14 @@ function routesAttachTo(target: RankedTargetRow): boolean {
  * land on either, rendered to files on a `static` Target and to a server image
  * anywhere else. That is the whole reason exposure "filters Targets and selects
  * artifact shape" rather than being a chart setting (§28).
+ *
+ * Narrowed to the one capability it reads, the way {@link sentence} is: the
+ * build loop asks it of bare `targets` rows, which have an adapter's artifact
+ * types to offer but no full placement resolution behind them.
  */
 export function artifactTypeFor(
   kind: ComponentKind,
-  target: PlacementTarget,
+  target: { readonly capabilities: Pick<TargetCapabilities, 'artifactTypes'> },
 ): ArtifactType {
   if (
     kind === 'website' &&

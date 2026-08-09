@@ -56,7 +56,13 @@ export function contextSources(dockerfile: string): readonly string[] {
       ) {
         continue;
       }
-      sources.push(token.startsWith('./') ? token.slice(2) : token);
+      const source = token.startsWith('./') ? token.slice(2) : token;
+      // `COPY ./ <dest>` names the whole context, like `.` — an empty source
+      // resolves to a directory both roots have, which the shell probes read
+      // as no evidence. Passing it on would say the scope copies ""
+      // from beside itself.
+      if (source === '') continue;
+      sources.push(source);
     }
   }
   return sources;
