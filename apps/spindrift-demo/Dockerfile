@@ -18,7 +18,7 @@ WORKDIR /app
 COPY . .
 RUN cd apps/spindrift-demo && BUILD_COMMIT="${BUILD_COMMIT}" BUILD_BRANCH="${BUILD_BRANCH}" BUILD_TIME="${BUILD_TIME:-$(date -Iseconds)}" bun run build.ts
 
-FROM cgr.dev/chainguard/node:latest@sha256:97ac65f0b4e49f62914162a85a0cccd2734f130c474b05d799a1b933cc7a70c2 AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:8e1189525a80564e0df5cec59bc4aa5d859869e6e7c05b0a4290682fbd53563e AS runner
 # Redeclare so the commit the builder baked is visible to the running image
 # as an env var the server reports on every page — the dynamic fact that
 # says "this is build X" without you opening the UI.
