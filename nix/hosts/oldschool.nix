@@ -1,6 +1,6 @@
 # oldschool: offsite worker node that also carries the site's odd jobs —
-# yarr and the offsite harmonia binary cache.
-{ ... }:
+# yarr, the offsite harmonia binary cache, and a one-slot bosun pool.
+{ config, inputs, ... }:
 {
   imports = [
     ../profiles/k8s-node.nix
@@ -8,6 +8,7 @@
     ../system/quiker.nix
     ../system/sops.nix
     ../system/tailscale-disable.nix
+    ../../apps/bosun/module.nix
   ];
 
   services.k8s.clusterCa.enable = true;
@@ -22,4 +23,33 @@
   # nix/secrets/oldschool-harmonia-cache.pub); wired into
   # services.harmonia in the deploy-harmonia ticket.
   sops.secrets."harmonia-cache-key" = { };
+
+  sops.secrets."bosun-github-token" = {
+    owner = "bosun";
+    group = "bosun";
+    mode = "0400";
+    restartUnits = [ "bosun.service" ];
+  };
+
+  # One warm FHS slot at the site with the fast internet. The class shape
+  # matches tender's so the label stays homogeneous; what differs here is the
+  # neighbourhood -- kubelet, yarr and harmonia share the same 4 cores and
+  # 16 GiB, and that contention is part of any number measured on this slot.
+  services.bosun = {
+    enable = true;
+    repo = "jonpulsifer/infra";
+    tokenFile = config.sops.secrets."bosun-github-token".path;
+    classes.skiff-ubuntu = {
+      hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
+      vcpus = 4;
+      memory = "3072M";
+      workspace = "6G";
+      persist = true;
+      warm = 1;
+    };
+  };
+
+  # Class ceiling is one 3072M skiff; the bound exists so a runaway pool can
+  # never make the host OOM killer choose between a skiff and kubelet.
+  systemd.services.bosun.serviceConfig.MemoryMax = "4G";
 }
