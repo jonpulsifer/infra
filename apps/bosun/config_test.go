@@ -67,6 +67,15 @@ func TestLoadConfigRequiresAtLeastOneClass(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAllowsParkedClass(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{"repo": "acme/widgets", "tokenFile": "/x", "classes": {"c": {"hull":"/h","vcpus":1,"memory":"1G","warm":0}}}`)
+	if _, err := LoadConfig(path); err != nil {
+		t.Fatalf("warm = 0 is a parked class, not an error: %v", err)
+	}
+}
+
 func TestDurationUnmarshal(t *testing.T) {
 	var d Duration
 	if err := json.Unmarshal([]byte(`"30s"`), &d); err != nil {
