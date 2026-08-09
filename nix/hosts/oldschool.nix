@@ -47,6 +47,13 @@
       persist = true;
       warm = 1;
     };
+
+    # 30 GB of the 200 GB root for the actions/cache service — this is the
+    # site with the fast internet, so a cold miss refills it cheapest here.
+    cache = {
+      enable = true;
+      maxSizeBytes = 32212254720;
+    };
   };
 
   # Class ceiling is one 3072M skiff; the bound exists so a runaway pool can

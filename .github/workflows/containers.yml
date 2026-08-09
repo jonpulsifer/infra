@@ -41,7 +41,11 @@ jobs:
   build:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
+    # The warm pool. dockerd runs inside every skiff, buildx brings its own
+    # buildkitd container, and `type=gha` cache traffic lands on the bosun
+    # host's local cache service via ACTIONS_RESULTS_URL — layer caches stop
+    # crossing the internet.
+    runs-on: skiff-ubuntu
     permissions:
       contents: write
       id-token: write
