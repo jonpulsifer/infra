@@ -32,10 +32,13 @@ in
 
       modules = [
         baselines.${baseline}
-        # mkDefault so an image config that takes its identity from elsewhere
-        # (nix/images/gce.nix reads it from GCE metadata, the installer images
-        # pin their own) can still override it.
-        { networking.hostName = lib.mkDefault name; }
+        # Above mkDefault (1000) so the registry name beats other modules'
+        # defaults -- nixpkgs' google-compute-config ships mkDefault "" and
+        # nothing in a GCE guest ever fills it in, which left cloud hosts
+        # named "nixos" and their nixos-upgrade resolving a configuration
+        # that does not exist. Below normal (100) so an image that pins its
+        # own identity (installer images, wsl) still wins.
+        { networking.hostName = lib.mkOverride 900 name; }
       ]
       ++ modules;
 

@@ -2,9 +2,9 @@
 # services the ship; this one keeps the warm pool that riptide keeps today,
 # without spending a folly worker's RAM to do it.
 #
-# The image module supplies the disk layout and takes the hostname from GCE
-# metadata, so the instance must be named `tender` for nixos-upgrade to resolve
-# its own configuration. Terraform is in terraform/gcp/projects/homelab-ng/bosun.tf.
+# The image module supplies the disk layout; the hostname is the registry
+# name, baked into the closure, which is what nixos-upgrade resolves.
+# Terraform is in terraform/gcp/projects/homelab-ng/bosun.tf.
 { config, inputs, ... }:
 {
   imports = [

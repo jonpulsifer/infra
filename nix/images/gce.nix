@@ -25,6 +25,11 @@
     };
   };
 
-  # get the hostname from gce
-  networking.hostName = lib.mkForce "";
+  # No hostname override: mkHost defaults it to the registry name. An empty
+  # hostname here was meant to let GCE metadata name the instance, but nothing
+  # in a NixOS guest consumes it -- the kernel's built-in "nixos" is what
+  # sticks, and nixos-upgrade then resolves nixosConfigurations."nixos", which
+  # does not exist, so every GCE host silently stopped self-upgrading. Each
+  # cloud host builds its own image from its own closure, so the baked name is
+  # correct from first boot.
 }

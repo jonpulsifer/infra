@@ -238,7 +238,14 @@ let
     case "$1" in
       bound|renew)
         $bb ifconfig "$interface" "$ip" netmask "''${subnet:-255.255.255.0}"
-        [ -n "$router" ] && $bb route add default gw "$router" dev "$interface"
+        # passt copies the host's addressing, and on GCE that is a /32 with an
+        # on-link gateway -- the router sits outside the interface's prefix, so
+        # a bare default route is refused. A host route to the gateway first
+        # makes it legal on both shapes of subnet.
+        [ -n "$router" ] && {
+          $bb ip route add "$router" dev "$interface" 2>/dev/null
+          $bb ip route add default via "$router" dev "$interface"
+        }
         $bb rm -f /etc/resolv.conf
         for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf; done
         ;;
