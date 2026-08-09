@@ -4,15 +4,15 @@ tags:: runbook, kubernetes, postgres, cnpg
 - # The rule
 	- **Reach a database through `kubectl cnpg`, never through a pod name.**
 	- ```bash
-	  kubectl --context offsite cnpg psql spindrift-db -n spindrift
+	  kubectl --context folly cnpg psql tronbyt -n tronbyt
 	  ```
 	- The plugin resolves the primary itself. A hand-written `exec <cluster>-1` names a pod that is only the primary *until the next failover*, so it is right until the moment it matters most. It also needs `-c postgres` to skip the bootstrap init container, which is the kind of detail the plugin exists to know.
 	- Same rule for the rest of the verbs — prefer the native tool over an equivalent assembled by hand.
 - # Where the databases are
 	- The operator is declared per cluster under `clusters/<cluster>/apps/cloudnative-pg/`. The `Cluster` objects themselves live with the app that owns them, in `clusters/` or in a chart under `packages/charts/`.
 	- ```bash
-	  kubectl --context offsite cnpg status spindrift-db -n spindrift
-	  kubectl --context folly   get cluster.postgresql.cnpg.io -A
+	  kubectl --context folly cnpg status tronbyt -n tronbyt
+	  kubectl --context folly get cluster.postgresql.cnpg.io -A
 	  ```
 - # Inspect
 	- Health, topology, replication lag, and recent operator activity in one screen:
@@ -42,7 +42,7 @@ tags:: runbook, kubernetes, postgres, cnpg
 	  ```
 	- Changing instance count, storage, or Postgres version is a manifest change that ships through git — see [[Runbooks/Kubernetes GitOps Change]].
 - # Backups are not universal
-	- **Do not assume a database has a backup.** Each `Cluster` decides, and at least one deliberately has none: the Spindrift control plane's own database (`packages/charts/spindrift/templates/database.yaml`) states its loss story is reconcile-from-sources, with the desired-state rows, the attempt log, and the config version pins as the part no source holds. Its PVC therefore outlives the `Cluster` on purpose, so deleting the release does not discard them.
+	- **Do not assume a database has a backup.** Each `Cluster` decides, and at least one chart deliberately declares none: the Spindrift control plane's database (`packages/charts/spindrift/templates/database.yaml`) states its loss story is reconcile-from-sources, with the desired-state rows, the attempt log, and the config version pins as the part no source holds. Its PVC therefore outlives the `Cluster` on purpose, so deleting the release does not discard them.
 	- Check what a given cluster actually has before relying on one:
 	- ```bash
 	  kubectl --context <cluster> get cluster.postgresql.cnpg.io <name> -n <namespace> \
