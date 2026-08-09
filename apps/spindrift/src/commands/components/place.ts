@@ -15,6 +15,13 @@
  * 3. **Refuse, naming the keys**, when something cannot be carried and was not
  *    supplied. Not a warning: §10 wants "a re-placement never comes up green and
  *    unconfigured", and a warning is a thing that gets clicked through.
+ * 4. **Write the placement.** The desired row for (Component, Target) is what
+ *    `deployApp` reads as where this Component now lives, so a move that wrote
+ *    no row was a move nothing could see: the next deploy still resolved the
+ *    old Target, refused the new one as "placed elsewhere — move it first",
+ *    and pointed back at the command that had already run. The old pair's row
+ *    stays — what is live there keeps serving until `unplaceComponent`
+ *    retires it.
  *
  * `createDeploy` refuses on the same condition, because a developer who skipped
  * Place and deployed straight at the new Target would otherwise get exactly the
@@ -23,7 +30,7 @@
 
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { targets, vessels } from '../../db/schema.ts';
+import { componentTargetDesired, targets, vessels } from '../../db/schema.ts';
 import { VARIABLE_NAME } from '../../domain/config.ts';
 import { targetLabel } from '../../domain/target.ts';
 import { carryReferences } from '../config/carry.ts';
@@ -109,6 +116,25 @@ export const placeComponent: Command<
   // a value to reach the store.
   const applied = await applyConfigChange(context, subject, input.supply, []);
   if (!applied.ok) return applied;
+
+  // The move itself, committed last so a refusal above leaves the placement
+  // where it was. Touching `updatedAt` on conflict is what makes a re-placement
+  // onto an already-placed pair the Component's newest row again.
+  const now = context.clock.now();
+  await context.db
+    .insert(componentTargetDesired)
+    .values({
+      componentId: input.componentId,
+      targetId: input.targetId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        componentTargetDesired.componentId,
+        componentTargetDesired.targetId,
+      ],
+      set: { updatedAt: now },
+    });
 
   return ok({
     ...applied.value,
