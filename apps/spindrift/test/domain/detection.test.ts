@@ -132,6 +132,62 @@ describe('the detection ladder', () => {
     });
   });
 
+  test('a subpath Dockerfile copying from beside itself names its own directory as the context', async () => {
+    // The failing arrangement: a standalone repository vendored under a
+    // subpath, its Dockerfile written against its own directory (`COPY
+    // go.mod ./` with go.mod beside it and not at the root). The sentence
+    // must say so, because the build routes probe the same rule and will
+    // build with the scope as the context — the sentence and the
+    // arrangement have to agree.
+    const result = await detectScope({
+      tree: fixture('vendored-standalone'),
+      source: { kind: 'repo', subpath: 'apps/ddns' },
+      planner: planner({
+        outcome: 'detected',
+        kind: 'service',
+        reason: 'Go — go.mod is in this directory',
+        kinds: [{ kind: 'service', available: true }],
+        buildCommand: null,
+        outputDirectory: null,
+      }),
+    });
+
+    expect(result.outcome).toBe('detected');
+    if (result.outcome !== 'detected') return;
+    expect(result.proposal.reason).toBe(
+      'Go — go.mod is in this directory; built from the Dockerfile in this directory, which copies go.mod from beside itself, so this directory is the build context',
+    );
+    expect(result.proposal.build).toEqual({
+      frontend: 'dockerfile',
+      dockerfile: 'Dockerfile',
+    });
+  });
+
+  test('a subpath Dockerfile written against the repository root keeps the root as the context', async () => {
+    // The monorepo convention: `COPY package.json ./` resolves at the root
+    // and not beside the Dockerfile, so nothing moves the context and the
+    // sentence names the root out loud instead of reading as if the
+    // directory were the context.
+    const result = await detectScope({
+      tree: fixture('monorepo-dockerfile'),
+      source: { kind: 'repo', subpath: 'apps/web' },
+      planner: planner({
+        outcome: 'detected',
+        kind: 'website',
+        reason: 'a static site generator',
+        kinds: [{ kind: 'website', available: true }],
+        buildCommand: 'bun run build',
+        outputDirectory: 'dist',
+      }),
+    });
+
+    expect(result.outcome).toBe('detected');
+    if (result.outcome !== 'detected') return;
+    expect(result.proposal.reason).toBe(
+      'a static site generator; built from the Dockerfile in this directory, with the repository root as the build context',
+    );
+  });
+
   test('classifies only the named monorepo scope', async () => {
     const planned: string[] = [];
     const result = await detectScope({

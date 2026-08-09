@@ -13,6 +13,10 @@
  * was one algorithm in name only.
  */
 import type { ComponentKind } from '../desired-state.ts';
+import {
+  type DockerfileBuildContext,
+  dockerfileBuildContext,
+} from './dockerfile-context.ts';
 import type { DetectionSource } from './scope.ts';
 import { resolveDetectionScope } from './scope.ts';
 import { parseSpindriftFile } from './spindrift-file.ts';
@@ -110,6 +114,24 @@ function joinPath(scope: string, file: string): string {
   return scope === '.' ? file : `${scope}/${file}`;
 }
 
+/**
+ * The sentence and the arrangement must agree (§5): the build routes probe the
+ * same rule this proposal's context came from, so what this says is what the
+ * build then does. A subpath scope names its context out loud, because the two
+ * conventions only coincide at the root.
+ */
+function dockerfileSentence(
+  scope: string,
+  context: DockerfileBuildContext,
+): string {
+  if (context.context === 'scope') {
+    return `built from the Dockerfile in this directory, which copies ${context.copies} from beside itself, so this directory is the build context`;
+  }
+  return scope === '.'
+    ? 'built from the Dockerfile in this directory'
+    : 'built from the Dockerfile in this directory, with the repository root as the build context';
+}
+
 export async function detectScope(
   input: DetectScopeInput,
 ): Promise<DetectionResult> {
@@ -145,6 +167,12 @@ export async function detectScope(
   }
 
   const dockerfile = await exists(tree, joinPath(prefix, 'Dockerfile'));
+  // Only a repo subpath has a root above it for the two conventions to
+  // disagree about: an archive's prefix *is* its root.
+  const context: DockerfileBuildContext =
+    dockerfile && source.kind === 'repo'
+      ? await dockerfileBuildContext(tree, prefix)
+      : { context: 'root' };
   return {
     outcome: 'detected',
     scope,
@@ -153,7 +181,7 @@ export async function detectScope(
       kind: plan.kind,
       kinds: plan.kinds,
       reason: dockerfile
-        ? `${plan.reason}; built from the Dockerfile in this directory`
+        ? `${plan.reason}; ${dockerfileSentence(scope, context)}`
         : plan.reason,
       build: dockerfile
         ? { frontend: 'dockerfile', dockerfile: 'Dockerfile' }

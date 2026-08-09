@@ -214,6 +214,49 @@ jobs:
           set -euo pipefail
           scope="${ROOT}/${SUBPATH}"
 
+          # The same probe ships inside the BuildKit program the other routes
+          # run (`buildkit.ts`, DOCKERFILE_CONTEXT_PROBE), and detection
+          # mirrors it at inspect time so the sentence the operator read is
+          # what happens here. `dockerfile-context-arm.test.ts` executes this
+          # copy and holds it identical to that one.
+          # Which directory this Dockerfile builds from: prints its own directory when
+          # a COPY/ADD source resolves beside it and not at the root, else the root.
+          spindrift_dockerfile_context() {
+            sdc_file="$1"; sdc_root="$2"; sdc_scope="$3"
+            sdc_context="$sdc_root"
+            set -f
+            while IFS= read -r sdc_line || [ -n "$sdc_line" ]; do
+              set -- $sdc_line
+              case "${1:-}" in
+                [Cc][Oo][Pp][Yy]|[Aa][Dd][Dd]) shift ;;
+                *) continue ;;
+              esac
+              sdc_stage=0
+              while [ "$#" -gt 0 ]; do
+                case "$1" in
+                  --from=*) sdc_stage=1; shift ;;
+                  --*) shift ;;
+                  *) break ;;
+                esac
+              done
+              if [ "$sdc_stage" -eq 1 ]; then continue; fi
+              while [ "$#" -gt 1 ]; do
+                case "$1" in
+                  .|/*|*:*|*'*'*|*'?'*|*'['*|*..*) ;;
+                  *)
+                    sdc_source="${1#./}"
+                    if [ -e "$sdc_scope/$sdc_source" ] && [ ! -e "$sdc_root/$sdc_source" ]; then
+                      sdc_context="$sdc_scope"
+                    fi
+                    ;;
+                esac
+                shift
+              done
+            done < "$sdc_file"
+            set +f
+            printf '%s\n' "$sdc_context"
+          }
+
           # A `files` artifact is not built at all: the scope *is* the site,
           # and what the registry holds is one layer that is the gzipped tar
           # `bundle.ts` reads back at deploy time. `FROM scratch` + `COPY . /`
@@ -239,21 +282,23 @@ jobs:
             exit 0
           fi
 
-          # The scope names the Dockerfile; the bundle root is what it builds.
-          # A monorepo App is one subpath of a tree it shares a lockfile,
-          # workspace and sibling packages with, and its Dockerfile is written
-          # against the root that `docker build -f apps/x/Dockerfile .` gives
-          # it — `COPY . .` then a path *into* the app. Handing that file the
-          # subpath as its context is the one arrangement under which every
-          # such Dockerfile fails, and fails deep inside the build with a
-          # missing directory rather than here with a reason.
+          # The scope names the Dockerfile; the Dockerfile names its context.
+          # A monorepo App's Dockerfile is written against the root that
+          # `docker build -f apps/x/Dockerfile .` gives it — `COPY . .` then a
+          # path *into* the app — while a standalone repository's Dockerfile
+          # is written against its own directory (`COPY go.mod ./` with go.mod
+          # beside it), and keeps that shape when the repository is vendored
+          # under a subpath. Handing either kind the other's context fails
+          # deep inside the build with a missing path rather than here with a
+          # reason, so the probe above reads the file's own COPY/ADD sources
+          # and keeps the root unless one resolves only beside the Dockerfile.
           #
           # Only this arm. The zero-config arm below keeps the scope, because
           # railpack detects a single app and a plan built against the root
           # would describe the wrong one.
           if [ -f "${scope}/Dockerfile" ]; then
             {
-              printf 'context=%s\n' "$ROOT"
+              printf 'context=%s\n' "$(spindrift_dockerfile_context "${scope}/Dockerfile" "$ROOT" "$scope")"
               printf 'file=%s\n' "${scope}/Dockerfile"
               printf 'buildArgs=\n'
             } >> "$GITHUB_OUTPUT"

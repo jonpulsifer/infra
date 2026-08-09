@@ -159,6 +159,69 @@ export function quote(value: string): string {
 }
 
 /**
+ * The context probe the Dockerfile arm runs, §5's tiebreak between the two
+ * COPY conventions one instruction set carries.
+ *
+ * A monorepo Dockerfile is written against the root that `docker build -f
+ * apps/x/Dockerfile .` gives it; a standalone repository's Dockerfile is
+ * written against its own directory (`COPY go.mod ./` with go.mod beside it)
+ * and keeps that shape when the repository is vendored under a subpath.
+ * Handing either kind the other's context fails deep inside the build with
+ * `"/go.mod": not found` — a checksum error that names neither convention.
+ * The file itself settles it: a COPY/ADD source that resolves beside the
+ * Dockerfile and not at the root names the Dockerfile's own directory as the
+ * context. Stage copies (`--from=`), URLs, globs and variables decide
+ * nothing, so the answer only ever moves off the root on positive evidence.
+ *
+ * One rule, three readers, held identical by tests: the hosted workflow
+ * carries this function verbatim (`spindrift-build.yml`, "Choose the
+ * frontend"; `test/adapters/dockerfile-context-arm.test.ts` executes the
+ * shipped copy), and `domain/detection/dockerfile-context.ts` mirrors it at
+ * inspect time so the sentence the operator reads is what the build does.
+ *
+ * `sh` throughout — no arrays, no process substitution — because the BuildKit
+ * image promises only a POSIX shell. Callers invoke it in a command
+ * substitution, which is what keeps its `set --` off their own arguments.
+ */
+export const DOCKERFILE_CONTEXT_PROBE = `# Which directory this Dockerfile builds from: prints its own directory when
+# a COPY/ADD source resolves beside it and not at the root, else the root.
+spindrift_dockerfile_context() {
+  sdc_file="$1"; sdc_root="$2"; sdc_scope="$3"
+  sdc_context="$sdc_root"
+  set -f
+  while IFS= read -r sdc_line || [ -n "$sdc_line" ]; do
+    set -- $sdc_line
+    case "\${1:-}" in
+      [Cc][Oo][Pp][Yy]|[Aa][Dd][Dd]) shift ;;
+      *) continue ;;
+    esac
+    sdc_stage=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --from=*) sdc_stage=1; shift ;;
+        --*) shift ;;
+        *) break ;;
+      esac
+    done
+    if [ "$sdc_stage" -eq 1 ]; then continue; fi
+    while [ "$#" -gt 1 ]; do
+      case "$1" in
+        .|/*|*:*|*'*'*|*'?'*|*'['*|*..*) ;;
+        *)
+          sdc_source="\${1#./}"
+          if [ -e "$sdc_scope/$sdc_source" ] && [ ! -e "$sdc_root/$sdc_source" ]; then
+            sdc_context="$sdc_scope"
+          fi
+          ;;
+      esac
+      shift
+    done
+  done < "$sdc_file"
+  set +f
+  printf '%s\\n' "$sdc_context"
+}`;
+
+/**
  * The `name=` field of the image exporter, carrying every tag (§12).
  *
  * The exporter takes one comma-separated list of full references, and its
@@ -284,18 +347,22 @@ cd "$root"/${quote(input.subpath)}
 # The two arms carry their own \`context\` local rather than sharing one below,
 # because they do not agree on it and the disagreement is the point.
 #
-# The scope names the Dockerfile; the bundle root is what it builds. A monorepo
-# App is one subpath of a tree it shares a lockfile, workspace and sibling
-# packages with, and its Dockerfile is written against the root that
-# \`docker build -f apps/x/Dockerfile .\` gives it — \`COPY . .\` then a path
-# *into* the app. Handing that file the subpath as its context is the one
-# arrangement under which every such Dockerfile fails, and fails deep inside
-# the build with a missing directory rather than here with a reason.
+# The scope names the Dockerfile; the Dockerfile names its context. A monorepo
+# App's Dockerfile is written against the root that \`docker build -f
+# apps/x/Dockerfile .\` gives it — \`COPY . .\` then a path *into* the app —
+# while a standalone repository's Dockerfile is written against its own
+# directory, and keeps that shape when the repository is vendored under a
+# subpath. Handing either kind the other's context fails deep inside the build
+# with a missing path rather than here with a reason, so the probe reads the
+# file's own COPY/ADD sources and keeps the root unless one resolves only
+# beside the Dockerfile.
 #
 # The zero-config arm keeps the scope, because railpack detects a single app
 # and a plan built against the root would describe the wrong one.
+${DOCKERFILE_CONTEXT_PROBE}
 if [ -f Dockerfile ]; then
-  set -- --frontend dockerfile.v0 --local dockerfile=. --local context="$root"
+  set -- --frontend dockerfile.v0 --local dockerfile=. \\
+    --local context="$(spindrift_dockerfile_context Dockerfile "$root" .)"
 else
 ${zeroConfigArm(input)}
 fi
