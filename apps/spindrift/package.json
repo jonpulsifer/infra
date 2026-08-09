@@ -9,7 +9,6 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "test": "bun test",
-    "test:chart-pins": "bun test test/conformance/second-target-admission.test.ts -t \"each chart consumer pins the version its Chart.yaml carries\"",
     "typecheck": "tsc --noEmit"
   },
   "//dependencies": "What the *server* imports at runtime, and nothing else. The UI's libraries are build inputs: they are compiled into dist/ and the shipped image never resolves them, so they sit in devDependencies and `bun install --production` leaves them out. test/web/routes.test.ts asserts the server's module graph agrees.",

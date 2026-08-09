@@ -3,21 +3,14 @@ name: spindrift-charts
 # Publishes both Spindrift charts as independently pinned, extractable OCI
 # artifacts instead of paths this repository's own GitRepository source has to
 # be checked out to reach. Each is pushed under the version its own Chart.yaml
-# carries, and each has a consumer that pins that version by tag:
+# carries, and an installation pins that version by tag through an
+# OCIRepository consumer — the installer's beside its release, the App chart's
+# on every Kubernetes Target, because each Target needs its own copy of that
+# source object in its own delivery namespace.
 #
-#   packages/charts/spindrift      → clusters/offsite/apps/spindrift/oci-repository.yaml
-#   packages/charts/spindrift-app  → clusters/base/platform/spindrift-target/oci-repository.yaml
-#
-# The App chart's consumer is in the per-Target base because every Kubernetes
-# Target needs its own copy of that source object — Spindrift points each
-# rendered HelmRelease's chartRef at the one in the Target's own delivery
-# namespace.
-#
-# **Bumping a chart's version without bumping its consumer's tag ships
+# **Bumping a chart's version without bumping a consumer's tag ships
 # nothing**, and bumping the consumer's tag before this workflow has pushed
-# that version leaves the source object failing to pull. The conformance suite
-# holds the pair together (apps/spindrift/test/conformance/), so the drift is a
-# red test rather than a silent no-op.
+# that version leaves the source object failing to pull.
 #
 # **A chart added here needs one manual step the first time.** GHCR creates the
 # package private on its first push and neither consumer carries a secretRef,

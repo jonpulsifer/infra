@@ -28,7 +28,7 @@ jobs:
   detect:
     runs-on: ubuntu-latest
     outputs:
-      has_changes: ${{ steps.classify.outputs.has_changes }}
+      has_changes: ${{ steps.changed-paths.outputs.any_changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -37,20 +37,16 @@ jobs:
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
           # The `clusters/` paths are here because spindrift's conformance
-          # tests read those declarations rather than a fixture: `charts.app`,
-          # a Target's delivery `sourceRef`, an `OCIRepository` tag, and the
-          # sources the DNS controller runs are all things the suite asserts
-          # and all things that change only there.
-          # `turbo.json`'s `spindrift#test` and `spindrift#test:chart-pins`
-          # inputs together name the same files — a path missing from all
-          # three lists is a guard that cannot run in CI.
+          # tests read the DNS controller's declaration rather than a fixture:
+          # the sources external-dns runs are something the suite asserts and
+          # something that changes only there. `turbo.json`'s `spindrift#test`
+          # inputs name the same files — a path missing from both lists is a
+          # guard that cannot run in CI.
           files: |
             apps/hub/**
             apps/slingshot/**
             apps/spindrift/**
             packages/charts/**
-            clusters/base/platform/spindrift-target/**
-            clusters/offsite/apps/spindrift/**
             clusters/*/networking/external-dns/helm-release.yaml
             clusters/*/networking/external-dns/kustomization.yaml
             packages/k6/**
@@ -60,47 +56,6 @@ jobs:
             turbo.json
             biome.json
             .github/workflows/typescript.yml
-      - id: classify
-        env:
-          ANY_CHANGED: ${{ steps.changed-paths.outputs.any_changed }}
-          ALL_CHANGED_FILES: ${{ steps.changed-paths.outputs.all_changed_files }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          has_changes="$ANY_CHANGED"
-
-          # Every release continuous delivery stamps this image's digest into,
-          # from `.github/containers.json`. Plural since the clean-installation
-          # acceptance environment consumes the same image: one bump rewrites
-          # both files, so a check that only knew the first would run the whole
-          # suite on every digest bump forever.
-          releases=(
-            clusters/offsite/apps/spindrift/helm-release.yaml
-            clusters/offsite/apps/spindrift-acceptance/helm-release.yaml
-          )
-
-          # Continuous delivery only rewrites the image digest. The rest of each
-          # release is a conformance-test input and remains significant, so this
-          # skips only when every changed file is one of those releases and
-          # every one of them differs at nothing but that line.
-          only_digests=true
-          for changed in $ALL_CHANGED_FILES; do
-            known=false
-            for release in "${releases[@]}"; do
-              [[ "$changed" == "$release" ]] && known=true && break
-            done
-            if ! "$known" || ! git diff --quiet \
-              --ignore-matching-lines='^[[:space:]]*image: ghcr\.io/jonpulsifer/spindrift:latest@sha256:[[:xdigit:]]{64}$' \
-              "$BASE_SHA" "$HEAD_SHA" -- "$changed"; then
-              only_digests=false
-              break
-            fi
-          done
-          if [[ -n "$ALL_CHANGED_FILES" ]] && "$only_digests"; then
-            has_changes=false
-          fi
-
-          echo "has_changes=$has_changes" >> "$GITHUB_OUTPUT"
 
   validate:
     needs: detect

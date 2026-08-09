@@ -468,9 +468,9 @@ jobs:
       # still re-verifies its own bundle at admission; nothing about that
       # changes. What is added here is a *second* signature over the same digest
       # with the same key, attached to the artifact **in the registry** — which
-      # is the only place a Target's native policy boundary can look. The
-      # offsite cluster's `spindrift-verify-images` asks cosign for exactly
-      # that, and core cannot put it there: a cosign signature is a
+      # is the only place a Target's native policy boundary can look. A
+      # Kubernetes Target's Kyverno image-verification policy asks cosign for
+      # exactly that, and core cannot put it there: a cosign signature is a
       # `sha256-<digest>.sig` object pushed to the repository, and the
       # controller holds no registry write credential. This job does, having
       # just pushed the artifact with it.

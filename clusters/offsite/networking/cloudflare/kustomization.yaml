@@ -4,6 +4,4 @@ kind: Kustomization
 resources:
   - ../../../base/networking/cloudflare
   - cloudflared.sops.yaml
-  - spindrift-external-secret.yaml
-  - spindrift-cloudflared.yaml
 namespace: cloudflare
