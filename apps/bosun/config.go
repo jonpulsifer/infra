@@ -151,8 +151,10 @@ func LoadConfig(path string) (*Config, error) {
 			// else's.
 			return nil, fmt.Errorf("config: class %s: a persisting class name may not contain '/' or '.'", name)
 		}
-		if c.Warm <= 0 {
-			return nil, fmt.Errorf("config: class %s: warm must be positive", name)
+		// warm = 0 is a parked class: declared, serving nothing. The pool
+		// reclaims its slot images on start, so parking also frees the disk.
+		if c.Warm < 0 {
+			return nil, fmt.Errorf("config: class %s: warm must not be negative", name)
 		}
 		if c.MaxLifetime <= 0 {
 			c.MaxLifetime = Duration(defaultMaxLifetime)
