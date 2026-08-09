@@ -20,6 +20,14 @@ locals {
   # re-checking the nested-virt column, not just the price.
   tender_machine_type = "c4-standard-8" # 8 vCPU / 30 GB
   tender_disk_size    = 100             # closure + hull + warm x workspace
+
+  # GCS lists objects lexicographically, so element zero is the *oldest* name
+  # the moment the prefix holds more than one build -- not a race, just
+  # reliably the wrong one. The nixpkgs filename carries version and commit
+  # date in sort order, so the newest image is the last element.
+  tender_image_object = reverse(sort([
+    for o in data.google_storage_bucket_objects.tender.bucket_objects : o.name
+  ]))[0]
 }
 
 # No IAM role bindings anywhere: this host needs nothing from GCP beyond
@@ -51,7 +59,7 @@ resource "google_compute_image" "tender" {
   family            = "tender"
   storage_locations = ["us-east1"]
   raw_disk {
-    source = "https://storage.googleapis.com/homelab-ng-free/${data.google_storage_bucket_objects.tender.bucket_objects[0].name}"
+    source = "https://storage.googleapis.com/homelab-ng-free/${local.tender_image_object}"
   }
   guest_os_features {
     type = "UEFI_COMPATIBLE"
