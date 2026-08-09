@@ -1,7 +1,7 @@
 icon:: 🌀
 tags:: architecture
 
-- Spindrift is the deploy control plane in `apps/spindrift/`. Flux installs it on offsite from `clusters/offsite/apps/spindrift/`; it is a platform workload and never one of its own Apps.
+- Spindrift is the deploy control plane in `apps/spindrift/`. Flux installs it on offsite from `clusters/offsite/apps/spindrift/`; it is a platform workload and never one of its own Apps. Standing an installation up from nothing — Terraform bootstrap through first enrolment — is [[Runbooks/Install Spindrift]].
 - ## Ownership boundary
 	- Platform desired state remains GitOps-first. Flux owns the control-plane namespace, shared operators, authentication proxy, admission policy, target namespace and RBAC, and the offsite edge workload under `clusters/`.
 	- Spindrift talks directly to delegated APIs after those prerequisites exist. On Kubernetes it owns `HelmRelease` resources in `spindrift-apps`; in GCP it owns App resources inside the App's pre-provisioned vessel. It never creates a cluster, namespace, project, VPC, tunnel, signing key, or policy engine.
