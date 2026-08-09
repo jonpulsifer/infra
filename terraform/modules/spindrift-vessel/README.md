@@ -10,6 +10,10 @@ root's `services.tf` and `iam.tf`: Spindrift's generated remediation stanzas
 append flat resources to those files and dedupe by grepping them for the
 quoted service/role strings, so the lists must live where the generator looks.
 
+`attestor` is explicit wiring, not a default: pass the
+`terraform/modules/spindrift-supply-chain` module's `attestor` output (or the
+same `projects/*/attestors/*` id a bring-your-own installation carries).
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -46,7 +50,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_attestor"></a> [attestor](#input\_attestor) | The Binary Authorization attestor every container admission must carry | `string` | `"projects/trusted-builds/attestors/provenance"` | no |
+| <a name="input_attestor"></a> [attestor](#input\_attestor) | The Binary Authorization attestor every container admission must carry, as projects/*/attestors/* — the spindrift-supply-chain module's attestor output | `string` | n/a | yes |
 | <a name="input_controller_member"></a> [controller\_member](#input\_controller\_member) | The IAM member the Spindrift controller acts as in this vessel | `string` | n/a | yes |
 | <a name="input_controller_roles"></a> [controller\_roles](#input\_controller\_roles) | Project roles the controller holds here. Pass from the root's iam.tf, for the same remediation-visibility reason as services. | `list(string)` | n/a | yes |
 | <a name="input_project"></a> [project](#input\_project) | The project this vessel is, in the boundary's own terms | `string` | n/a | yes |
