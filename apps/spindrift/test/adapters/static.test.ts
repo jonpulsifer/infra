@@ -39,6 +39,10 @@ import {
   FakeHosting,
   type FakeHostingOptions,
 } from '../harness/fakes/hosting-api.ts';
+import {
+  FakeOciRegistry,
+  type FakeOciRegistryOptions,
+} from '../harness/fakes/oci-registry.ts';
 import { CLOUD_ENDPOINTS } from '../harness/installation.ts';
 import { bytes, header, tar, tarball } from '../harness/tar.ts';
 
@@ -215,6 +219,104 @@ describe('the release is five steps, in the product’s order', () => {
     expect(
       api.pathsOf('POST').filter((path) => path.endsWith('/sites')),
     ).toEqual([]);
+  });
+});
+
+describe('a built files artifact is pulled out of the registry', () => {
+  const AR_HOST = 'region-docker.pkg.dev';
+  const AR_REPOSITORY = 'example-vessel/i/shop/site';
+  const DIGEST = `sha256:${'a'.repeat(64)}`;
+  const AR_REF = `${AR_HOST}/${AR_REPOSITORY}@${DIGEST}`;
+  const GHCR_REF = `ghcr.io/example/shop/site@${DIGEST}`;
+
+  function ociAdapter(options: Partial<FakeOciRegistryOptions> = {}): {
+    registry: FakeOciRegistry;
+    api: FakeHosting;
+    adapter: StaticDeployAdapter;
+  } {
+    const registry = new FakeOciRegistry({
+      host: AR_HOST,
+      repository: AR_REPOSITORY,
+      digest: DIGEST,
+      layer: SITE,
+      ...options,
+    });
+    const api = new FakeHosting({});
+    // One transport, split by host: the registry answers for itself and the
+    // hosting API answers for everything else — which is exactly the shape of
+    // the adapter's real traffic.
+    const adapter = new StaticDeployAdapter({
+      token: api.token,
+      fetch: async (request) =>
+        new URL(request.url).host === AR_HOST
+          ? registry.fetch(request)
+          : api.fetch(request),
+    });
+    return { registry, api, adapter };
+  }
+
+  function built(refs: readonly string[]): DesiredState {
+    return desired({ artifact: { type: 'files', digest: DIGEST, refs } });
+  }
+
+  test('the readable reference is chosen, pulled with the identity, and served', async () => {
+    const { registry, api, adapter } = ociAdapter();
+    const { verdict } = await drain(
+      adapter.apply(TARGET, built([GHCR_REF, AR_REF])),
+    );
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.servedPaths('shop-site')).toEqual([
+      '/assets/app.css',
+      '/index.html',
+    ]);
+    // Every registry call carried the same identity the hosting calls do —
+    // the read is federated, never anonymous and never a stored credential.
+    expect(registry.requests.length).toBeGreaterThan(0);
+    for (const request of registry.requests) {
+      expect(request.authorization).toStartWith('Bearer ');
+    }
+  });
+
+  test('an image at a files address is refused with the layer count in the sentence', async () => {
+    // The shape every Build made by a route with no files arm has: an
+    // ordinary image. The count is what tells that story apart from a
+    // corrupt push.
+    const { adapter } = ociAdapter({ layerCount: 4 });
+    const { verdict } = await drain(adapter.apply(TARGET, built([AR_REF])));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+      expect(blameFor(verdict.reason)).toBe('platform');
+      expect(verdict.detail).toContain('4 layers');
+    }
+  });
+
+  test('an artifact homed only where the identity cannot read is refused by name', async () => {
+    const { registry, adapter } = ociAdapter();
+    const { verdict } = await drain(adapter.apply(TARGET, built([GHCR_REF])));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+      expect(verdict.detail).toContain('ghcr.io');
+    }
+    // And nothing tried to pull anonymously on the way to refusing.
+    expect(registry.requests).toEqual([]);
+  });
+
+  test('a layer that is not a gzipped tar is refused as what it is', async () => {
+    const { adapter } = ociAdapter({
+      layerMediaType: 'application/vnd.oci.image.layer.v1.tar',
+    });
+    const { verdict } = await drain(adapter.apply(TARGET, built([AR_REF])));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+      expect(verdict.detail).toContain('gzipped tar');
+    }
   });
 });
 

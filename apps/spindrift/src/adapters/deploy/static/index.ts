@@ -66,6 +66,7 @@ import type {
   StartedRun,
 } from '../contract.ts';
 import { BundleError, type BundleFile, readBundle } from './bundle.ts';
+import { googleRegistryRef, OciPullError, pullFilesLayer } from './oci.ts';
 
 export interface StaticAdapterOptions {
   /** Mints a bearer token per request. Never a stored credential (§13). */
@@ -174,12 +175,30 @@ export class StaticDeployAdapter implements DeployAdapter {
       );
     }
     // No registry filter: a static Target serves `files`, and the reachability
-    // §3 models over registries is about pulling an image. Its discovery says
-    // so itself — `reachableRegistries: []`.
-    const location = artifactAddress(desired.artifact);
+    // §3 models over registries is about a *runtime* pulling an image. This
+    // adapter is the one that pulls for itself, so the choice here is by what
+    // its own identity can read: a staged URL is fetched directly (a supplied
+    // upload's address), and among registry references only a Google-family
+    // one is readable with the federated token this adapter already holds —
+    // `ghcr.io` would take a credential the manifest deliberately does not
+    // model (§13).
+    const staged = artifactAddress(desired.artifact);
+    const location = /^https?:\/\//.test(staged ?? '')
+      ? staged
+      : googleRegistryRef(desired.artifact.refs);
     if (location === null) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal('the artifact carries no address to fetch it from');
+      yield this.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
+      const hosts = desired.artifact.refs
+        .map((ref) => ref.split('/')[0])
+        .join(', ');
+      return {
+        phase: 'FAILED',
+        reason: 'ARTIFACT_UNAVAILABLE',
+        detail:
+          desired.artifact.refs.length === 0
+            ? 'the artifact carries no address to fetch it from'
+            : `static hosting fetches the bytes itself, and none of the artifact's homes (${hosts}) is a registry its identity can read`,
+      };
     }
 
     const site = siteId(desired);
@@ -365,17 +384,40 @@ export class StaticDeployAdapter implements DeployAdapter {
     http: CloudHttp,
     location: string,
   ): Promise<readonly BundleFile[]> {
-    const fetched = await http.bytes(location);
-    if (!fetched.ok) {
-      // §6 blames the **platform** for an artifact that cannot be fetched, and
-      // this is exactly that case: the build is green and the bytes are not
-      // there. Raised as a typed error so `apply` maps it to the right reason
-      // rather than to whichever one this branch happened to be near.
+    // A staged URL is a supplied upload's address and is fetched as it always
+    // was. Anything else is a registry reference — the shape every built
+    // artifact's ref has — and the bytes are the artifact's one layer.
+    if (/^https?:\/\//.test(location)) {
+      const fetched = await http.bytes(location);
+      if (!fetched.ok) {
+        // §6 blames the **platform** for an artifact that cannot be fetched,
+        // and this is exactly that case: the build is green and the bytes are
+        // not there. Raised as a typed error so `apply` maps it to the right
+        // reason rather than to whichever one this branch happened to be near.
+        throw new ArtifactUnavailable(
+          `the artifact at ${location} could not be fetched: ${fetched.message}`,
+        );
+      }
+      return readBundle(fetched.value);
+    }
+    let layer: Uint8Array<ArrayBuffer>;
+    try {
+      layer = await pullFilesLayer({
+        ref: location,
+        token: this.options.token,
+        ...(this.options.fetch === undefined
+          ? {}
+          : { fetch: this.options.fetch }),
+      });
+    } catch (cause) {
+      if (!(cause instanceof OciPullError)) throw cause;
+      // Same blame as the URL arm: the build is green and the bytes are not
+      // fetchable in the form this Target serves.
       throw new ArtifactUnavailable(
-        `the artifact at ${location} could not be fetched: ${fetched.message}`,
+        `the artifact at ${location} could not be fetched: ${cause.message}`,
       );
     }
-    return readBundle(fetched.value);
+    return readBundle(layer);
   }
 
   /** The site, created if this is the first deploy to it. */
