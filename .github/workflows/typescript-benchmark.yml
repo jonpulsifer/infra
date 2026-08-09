@@ -150,13 +150,15 @@ jobs:
           if [ "${{ inputs.caches }}" = "gha" ]; then
             echo "caches: gha — actions/cache on every label, no warm-disk shortcuts."
             if [ -n "${SKIFF_CACHE:-}" ]; then
-              # The one honest divergence: bun's store must not land on the
-              # guest's tmpfs root (a cold install ENOSPCs a 2.9 GiB class),
-              # so it goes on the disk — emptied, so the cache step still
-              # transfers every byte. The cache steps' paths follow the env.
-              rm -rf "$SKIFF_CACHE/gha-bun"
-              mkdir -p "$SKIFF_CACHE/gha-bun"
-              echo "BUN_INSTALL_CACHE_DIR=$SKIFF_CACHE/gha-bun" >> "$GITHUB_ENV"
+              # The warm-disk content is emptied so the cache step transfers
+              # every byte, and bun's store is redirected onto the disk — a
+              # second copy beside the old one overflows a 6G slot (measured:
+              # ENOSPC), and landing it on the tmpfs root OOMs the class.
+              # The tool cache survives: this input measures actions/cache,
+              # not mise.
+              rm -rf "$SKIFF_CACHE"/*
+              mkdir -p "$SKIFF_CACHE/bun"
+              echo "BUN_INSTALL_CACHE_DIR=$SKIFF_CACHE/bun" >> "$GITHUB_ENV"
               echo "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-unset (talking to GitHub)}"
             fi
             exit 0
