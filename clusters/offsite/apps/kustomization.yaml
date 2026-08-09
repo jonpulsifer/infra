@@ -7,9 +7,6 @@ resources:
   - cloudnative-pg
   - descheduler
   - hub
-  - spindrift
-  - spindrift-acceptance
-  - ../../base/platform/spindrift-target
   - dave.yaml
   - ../../base/apps/reloader
 patches:

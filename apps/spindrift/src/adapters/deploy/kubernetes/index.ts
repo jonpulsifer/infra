@@ -963,8 +963,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * ponytail: this observes the **last** render, not the next — a Target with
    * nothing deployed reads green and a skew is caught one deploy late. §7's
    * "read at pin time" wants the chart's own declaration *before* anything is
-   * applied, and the artifact that carries it is pinned
-   * (`clusters/base/platform/spindrift-target/oci-repository.yaml`) — but only
+   * applied, and the artifact that carries it is pinned by the Target's own
+   * `OCIRepository` consumer — but only
    * source-controller inside the Target fetches it, and the
    * `argo-application` flavour has no artifact at all. Upgrade path: pull the
    * `charts.app` artifact from the registry here and read its annotations.

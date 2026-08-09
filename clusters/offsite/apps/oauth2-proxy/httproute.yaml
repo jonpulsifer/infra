@@ -1,12 +1,8 @@
 ---
-# The authenticated edge, on the same gateway and the same wildcard listener as
-# the Apps it stands in front of.
-#
-# No `sectionName`: the route has to attach to **both** listeners. The tunnel
-# reaches this gateway over plain HTTP, and `oauth2.${SPINDRIFT_DOMAIN}` also
-# resolves straight to the gateway's own address for anything already on the
-# operator's network — pinning the route to one listener leaves the other
-# answering 404 to a redirect the filter has just issued.
+# The authenticated edge, on the shared gateway's own `oauth2-tls` listener
+# (`clusters/offsite/networking/gateway-api/cluster-gateway.yaml`), which
+# admits exactly this namespace and carries the certificate for exactly this
+# hostname.
 #
 # The name publishes like any other in this zone: external-dns reads this route
 # and writes an A record to the gateway, unproxied. That is the same boundary
@@ -20,8 +16,9 @@ metadata:
   namespace: oauth2-proxy
 spec:
   parentRefs:
-    - name: spindrift-apps
-      namespace: spindrift-apps
+    - name: cluster-gateway
+      namespace: default
+      sectionName: oauth2-tls
   hostnames:
     - "oauth2.${SPINDRIFT_DOMAIN}"
   rules:

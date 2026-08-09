@@ -38,6 +38,31 @@ spec:
               kubernetes.io/metadata.name: agents-sandbox
         kinds:
           - kind: HTTPRoute
+    # The authenticated edge. oauth2-proxy answers on a name in the App zone
+    # (`SPINDRIFT_DOMAIN`, see `clusters/base/cluster-settings.yaml`), and its
+    # HTTPRoute lives in its own namespace, so this listener names both: the
+    # exact hostname, and the one namespace allowed to attach to it. The
+    # cert-manager gateway-shim issues the certificate from the annotation at
+    # the top of this Gateway; the `letsencrypt-production` issuer's DNS-01
+    # solver covers the zone. external-dns reads the route and publishes the
+    # name at this Gateway's own address, unproxied — an RFC1918 address is the
+    # reach boundary, so nothing more has to be attached to keep it one.
+    - name: oauth2-tls
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "oauth2.${SPINDRIFT_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: oauth2-proxy
+        kinds:
+          - kind: HTTPRoute
     - name: bittorrent-tls
       protocol: HTTPS
       port: 443

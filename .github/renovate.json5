@@ -102,8 +102,8 @@
       // Cosign 3 refuses `--tlog-upload=false` outright — signing is configured
       // through a signing config that names a transparency log, and there is no
       // transparency log in this trust model: the signer is a KMS key whose
-      // public half `spindrift-verify-images` pins, and that policy says the
-      // same thing from its own side with `ctlog.ignoreTlog`. 2.x is also the
+      // public half a Target's Kyverno admission policy pins, saying the same
+      // thing from its own side with `ctlog.ignoreTlog`. 2.x is also the
       // keyed-signature format Kyverno 1.18 reads.
       //
       // Renovate bumped this to 3.1.2 and automerged it three minutes after the
