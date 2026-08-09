@@ -142,8 +142,18 @@ resource "google_compute_instance" "tender" {
     scopes = ["https://www.googleapis.com/auth/logging.write"]
   }
 
+  # Secure Boot off, and it is not a shortcut. nix/images/gce.nix builds an EFI
+  # image, and nothing signs the NixOS bootloader with a key GCE's UEFI db
+  # trusts, so the firmware rejects it and loops on the boot entry forever:
+  #
+  #   BdsDxe: failed to load Boot0001 ... Status: Security Violation
+  #
+  # oldboy has been in that loop, "RUNNING" and unbooted, since it was created.
+  # vTPM and integrity monitoring stay on; they measure the boot either way.
+  # Turning this back on means signing the bootloader (lanzaboote) and putting
+  # the certificate in the image, which is a project, not a flag.
   shielded_instance_config {
-    enable_secure_boot          = true
+    enable_secure_boot          = false
     enable_vtpm                 = true
     enable_integrity_monitoring = true
   }
