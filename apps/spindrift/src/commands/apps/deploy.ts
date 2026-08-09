@@ -53,6 +53,7 @@ import {
   targets,
   vessels,
 } from '../../db/schema.ts';
+import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { isFetchableBundleLocation } from '../../storage/archives.ts';
 import { createDeploy } from '../deploys/create.ts';
@@ -89,11 +90,11 @@ export const deployAppInput = z
      * The Target for a Component deploying for the first time — its id, or the
      * two facts that identify it spelled `<vessel>/<adapter>`.
      *
-     * Only a first deploy needs it: placement is a fact a deploy writes, so a
-     * Component that has never deployed has none to read back — `placeComponent`
-     * migrates configuration, it does not place. Absent, the Component's own
-     * history answers as it always has, and a value that disagrees with that
-     * history is refused rather than silently moving the Component.
+     * Only a first deploy needs it: placement is a fact `placeComponent` or a
+     * first deploy writes, so a Component that has done neither has none to
+     * read back. Absent, the Component's own placement answers as it always
+     * has, and a value that disagrees with it is refused rather than silently
+     * moving the Component — moves go through `placeComponent`.
      */
     target: z.string().trim().min(1).optional(),
   })
@@ -307,6 +308,11 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
             limit: 1,
           },
           desiredTargets: {
+            // Newest first, because the newest desired row is the Component's
+            // current address: every deploy touches its pair's row, and
+            // `placeComponent` touches the pair a move commits — so a moved
+            // Component's newest row is the Target it was moved to.
+            orderBy: (desiredTable, { desc }) => [desc(desiredTable.updatedAt)],
             limit: 1,
             with: {
               target: true,
@@ -356,9 +362,13 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     component = named;
   }
 
+  // The desired row is the placement of record — `placeComponent` moves it,
+  // and every deploy touches it — so it answers first. Deploy history only
+  // answers for a Component whose rows are gone, which is what an unplaced
+  // pair being deployed again looks like.
   const latestDeploy = component.deploys[0];
   const placedTargetId =
-    latestDeploy?.targetId ?? component.desiredTargets[0]?.targetId;
+    component.desiredTargets[0]?.targetId ?? latestDeploy?.targetId;
 
   let targetId = placedTargetId;
   if (input.target !== undefined) {
@@ -383,9 +393,9 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     if (named === undefined) {
       return failed('NOT_FOUND', `there is no Target '${input.target}'`);
     }
-    // History wins where it exists: a deploy that named a different Target
+    // Placement wins where it exists: a deploy that named a different Target
     // than the one this Component lives on is a move, and moves go through
-    // placement — not through a deploy that quietly lands somewhere new.
+    // `placeComponent` — not through a deploy that quietly lands somewhere new.
     if (placedTargetId !== undefined && placedTargetId !== named.id) {
       return failed(
         'INVALID_INPUT',
@@ -442,6 +452,30 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     buildToRun.status === 'FAILED' ||
     buildToRun.status === 'SUCCEEDED'
   ) {
+    // §3: shape follows the Target, not the predecessor. A rebuild is the
+    // remediation the cross-shape refusal prescribes — "this placement needs
+    // a rebuild" — so the new Build derives its shape from the Target this
+    // Component is placed on, the same derivation `createDeploy` admits with
+    // and `completeCreationDraft` creates with. Inheriting the predecessor's
+    // shape instead reruns it forever, and the Build that refusal asks for
+    // never becomes reachable.
+    const placedOn = targetId;
+    const target = await context.db.query.targets.findFirst({
+      where: (targetsTable, { eq: eqOp }) => eqOp(targetsTable.id, placedOn),
+      with: { vessel: true },
+    });
+    if (target === undefined) {
+      return failed('NOT_FOUND', `there is no Target with id ${targetId}`);
+    }
+    const shape = artifactTypeFor(
+      component.kind,
+      placementTargetOf(target, {
+        artifactTypes:
+          context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+        manifest: context.manifest,
+      }),
+    );
+
     // The bundle is staged before the row exists, so what the row records is
     // this Build's own source rather than the last one's. A refusal here is
     // returned unchanged, the same way `createDeploy`'s is: it names the App and
@@ -460,8 +494,8 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
       .values({
         componentId: component.id,
         commit: commitRef,
-        targetShape: buildToRun?.targetShape ?? 'image',
-        artifactType: buildToRun?.artifactType ?? 'image',
+        targetShape: shape,
+        artifactType: shape,
         bundleDigest: rerun.value.bundleDigest,
         bundleLocation: rerun.value.bundleLocation,
         // A repo Build's subpath is the App's declared subpath, never an

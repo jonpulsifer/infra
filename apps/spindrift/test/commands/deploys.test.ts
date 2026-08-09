@@ -25,6 +25,7 @@ import { placeIntent } from '../../src/commands/deploys/create.ts';
 import {
   createDeploy,
   dispatchBuild,
+  placeComponent,
   rollbackDeploy,
   uploadArchive,
 } from '../../src/commands/index.ts';
@@ -736,9 +737,9 @@ describe('deployApp selects which Component it acts on', () => {
   });
 
   /**
-   * Placement is a fact a deploy writes, so a Component that has never
-   * deployed has none to read back — `placeComponent` migrates configuration,
-   * it does not place. The first deploy is where a Target gets named.
+   * Placement is a fact `placeComponent` or a first deploy writes, so a
+   * Component that has done neither has none to read back. Naming a Target is
+   * how the first deploy writes it.
    */
   test('a first deploy names the Target that placement will remember', async () => {
     const { app, target } = await fixture();
@@ -838,6 +839,104 @@ describe('deployApp selects which Component it acts on', () => {
       .from(deploys)
       .where(eq(deploys.id, result.value.deployId!));
     expect(deploy?.componentId).toBe(component.id);
+  });
+});
+
+describe('a move across shapes reaches the Build the refusal asks for (§3)', () => {
+  /**
+   * The remediation loop, end to end: a website with an image-shaped history
+   * moves to static hosting, the deploy at the new placement refuses with
+   * "this placement needs a rebuild", the rebuild stages a *files* Build —
+   * the moved-to Target's shape, not the predecessor's — and deploying it is
+   * admitted. Before the rerun arm derived shape from the placed Target it
+   * inherited the predecessor's, so the Build this refusal prescribes was
+   * unreachable from the Component it refused.
+   */
+  test('move, rebuild into files, deploy admitted', async () => {
+    const { app, component, target } = await fixture({
+      kind: 'website',
+      reach: 'public',
+      auth: 'none',
+    });
+    // Image-shaped history on a runtime Target, placed and built long enough
+    // ago that the move below is unambiguously the newest placement.
+    const before = new Date(FROZEN.getTime() - 60_000);
+    await database().db.insert(componentTargetDesired).values({
+      componentId: component.id,
+      targetId: target.id,
+      updatedAt: before,
+    });
+    const imageBuild = await succeededBuild(component.id, 70, 'image');
+    await database()
+      .db.update(builds)
+      .set({ createdAt: before })
+      .where(eq(builds.id, imageBuild.id));
+
+    const staticVessel = await insertVessel(database().db, 'static', {
+      name: `static-${crypto.randomUUID()}`,
+    });
+    const [staticTarget] = await database()
+      .db.insert(targets)
+      .values(
+        targetValues({
+          adapter: 'static',
+          vesselId: staticVessel.id,
+          discovery: null,
+        }),
+      )
+      .returning();
+    const ctx = context(
+      registryOf(
+        new FakeDeployAdapter({ adapter: 'static', artifactTypes: ['files'] }),
+      ),
+    );
+
+    // The move commits, and commits the row `deployApp` reads as placement.
+    const moved = await placeComponent(
+      { componentId: component.id, targetId: staticTarget!.id, supply: [] },
+      ctx,
+    );
+    expect(moved.ok).toBe(true);
+    expect(await desiredRow(component.id, staticTarget!.id)).toBeDefined();
+
+    // The button now acts on the new placement, and refuses with the exact
+    // remediation the rest of this test follows.
+    const refused = await deployApp({ name: app.name }, ctx);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(refused.failure.message).toContain('needs a rebuild');
+
+    // Following it: the rebuild stages a Build of the *new* Target's shape.
+    const rebuilt = await deployApp({ name: app.name, rebuild: true }, ctx);
+    expect(rebuilt.ok).toBe(true);
+    if (!rebuilt.ok) return;
+    expect(rebuilt.value.phase).toBe('BUILDING');
+    const [staged] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, rebuilt.value.buildId));
+    expect(staged?.targetShape).toBe('files');
+    expect(staged?.artifactType).toBe('files');
+
+    // The build loop finishing is not under test; a finished files artifact is.
+    await database()
+      .db.update(builds)
+      .set({
+        status: 'SUCCEEDED',
+        artifactDigest: digest(71),
+        artifactRefs: ['https://shop.static.test/site'],
+      })
+      .where(eq(builds.id, rebuilt.value.buildId));
+
+    const admitted = await deployApp({ name: app.name }, ctx);
+    expect(admitted.ok).toBe(true);
+    if (!admitted.ok) return;
+    expect(admitted.value.phase).toBe('PENDING');
+    expect(admitted.value.buildId).toBe(rebuilt.value.buildId);
+
+    const desired = await desiredRow(component.id, staticTarget!.id);
+    expect(desired?.desiredBuildId).toBe(rebuilt.value.buildId);
   });
 });
 
