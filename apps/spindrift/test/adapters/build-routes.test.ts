@@ -18,7 +18,10 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { buildKitProgram } from '../../src/adapters/build/buildkit.ts';
+import {
+  buildKitProgram,
+  DOCKERFILE_CONTEXT_PROBE,
+} from '../../src/adapters/build/buildkit.ts';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import type {
   BuildEvent,
@@ -1157,15 +1160,19 @@ describe('the BuildKit program', () => {
     expect(bare).toContain('--opt attest:provenance=mode=max');
   });
 
-  test('builds a Dockerfile against the bundle root, not the scope', () => {
-    // The scope names the Dockerfile; the root is what it builds. A monorepo
-    // App shares a lockfile and sibling packages with the tree above it, and
-    // its Dockerfile is written against the root `docker build -f
-    // apps/web/Dockerfile .` gives it — `COPY . .` then a path *into* the app.
-    // Handed the scope, every such Dockerfile fails deep inside the build on a
-    // missing directory instead of here with a reason.
+  test('lets a Dockerfile name its own directory as the context', () => {
+    // The scope names the Dockerfile; the Dockerfile names its context. The
+    // bundle root stays the convention — a monorepo Dockerfile is written
+    // against the root `docker build -f apps/web/Dockerfile .` gives it —
+    // and the probe moves off it only on the file's own evidence: a COPY/ADD
+    // source resolving beside the Dockerfile and not at the root, which is
+    // how every standalone repository's Dockerfile is written. The probe is
+    // executed over real trees by `dockerfile-context-arm.test.ts`, which
+    // also holds the hosted workflow's copy identical to this one.
+    expect(program).toContain(DOCKERFILE_CONTEXT_PROBE);
+    expect(program).toContain('sdc_context="$sdc_root"');
     expect(program).toContain(
-      '--frontend dockerfile.v0 --local dockerfile=. --local context="$root"',
+      '--local context="$(spindrift_dockerfile_context Dockerfile "$root" .)"',
     );
     // And the two arms disagree on purpose, so neither may share one context
     // local on the `buildctl` line below them.
