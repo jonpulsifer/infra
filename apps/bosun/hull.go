@@ -221,7 +221,7 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 // so a hull's disks are declared raw because the hull contract says a disk is a
 // raw file the hull ships. A hull wanting qcow2 wants a manifest field, and a
 // failing test to go with it.
-func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
+func chArgs(h *hull, class Class, id string, p skiffPaths, cacheURL string) []string {
 	args := []string{
 		"--kernel", filepath.Join(h.dir, h.manifest.Kernel),
 		"--initramfs", filepath.Join(h.dir, h.manifest.Initrd),
@@ -248,6 +248,11 @@ func chArgs(h *hull, class Class, id string, p skiffPaths) []string {
 	if p.workspace != "" {
 		args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=off,image_type=raw", p.workspace))
 		cmdline += " bosun.workspace=" + guestDiskName(disks)
+	}
+	// A location an admin connected, not machinery bosun owns: the hull
+	// decides whether and how to consume it, like every other cmdline fact.
+	if cacheURL != "" {
+		cmdline += " bosun.cache=" + cacheURL
 	}
 	args = append(args,
 		"--net", fmt.Sprintf("vhost_user=on,socket=%s", p.netSock),

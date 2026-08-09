@@ -226,6 +226,16 @@ let
       # dirs on the root overlay itself (EINVAL on mount).
       $bb mount -t tmpfs -o mode=0710 tmpfs /var/lib/docker
     fi
+    # The host-local actions/cache service, when this host runs one. The
+    # runner's Worker is patched at build time (see the squashfs staging) so
+    # this env-provided URL survives into jobs and the stock actions/cache
+    # talks to the local server instead of GitHub's. No announcement, no
+    # override: the skiff behaves exactly as the hosted runner does.
+    for tok in $($bb cat /proc/cmdline); do
+      case "$tok" in
+        bosun.cache=*) echo "export ACTIONS_RESULTS_URL=''${tok#bosun.cache=}" >> /etc/skiff-env ;;
+      esac
+    done
     echo "skiff-mark workspace-ready $($bb cut -d' ' -f1 /proc/uptime)"
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       dockerd >/var/log/dockerd.log 2>&1 &
@@ -333,6 +343,20 @@ let
         chmod u+w root/etc/sudoers
         echo 'root ALL=(ALL:ALL) NOPASSWD:ALL' >> root/etc/sudoers
         chmod 440 root/etc/sudoers
+
+        # Stock Runner.Worker overwrites ACTIONS_RESULTS_URL with the value
+        # from GitHub's job message, which would clobber the host-provided
+        # cache endpoint. The documented fix (gha-cache-server.falcondev.io):
+        # rewrite the UTF-16LE string to a dead name, so the worker's
+        # overwrite lands on ACTIONS_RESULTS_ORL and the environment's URL
+        # survives. Same length, so no .NET metadata shifts. Skiffs never
+        # self-update -- the runner lives in this immutable squashfs -- so
+        # the patch cannot be reverted at runtime.
+        sed -i 's/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x52\x00\x45\x00\x53\x00\x55\x00\x4C\x00\x54\x00\x53\x00\x5F\x00\x55\x00\x52\x00\x4C\x00/\x41\x00\x43\x00\x54\x00\x49\x00\x4F\x00\x4E\x00\x53\x00\x5F\x00\x52\x00\x45\x00\x53\x00\x55\x00\x4C\x00\x54\x00\x53\x00\x5F\x00\x4F\x00\x52\x00\x4C\x00/g' \
+          root/home/runner/bin/Runner.Worker.dll
+        # A silent no-op patch would mean cache traffic quietly going to
+        # GitHub; fail the build instead. (`.` matches the UTF-16 NULs.)
+        LC_ALL=C grep -qa 'A.C.T.I.O.N.S._.R.E.S.U.L.T.S._.O.R.L' root/home/runner/bin/Runner.Worker.dll
 
         mkdir -p root/opt/bosun root/run/bosun
         install -m755 ${busybox}/bin/busybox root/opt/bosun/busybox

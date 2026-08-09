@@ -30,6 +30,7 @@ let
       metricsFile
       ;
     pollInterval = cfg.pollInterval;
+    cacheUrl = if cfg.cache.enable then "http://${cfg.cache.address}:${toString cfg.cache.port}/" else "";
     classes = lib.mapAttrs (_: c: {
       inherit (c)
         hull
@@ -252,6 +253,63 @@ in
         }
       );
     };
+
+    # A GitHub-Actions cache service on this host's own disk, announced to
+    # every skiff as `bosun.cache=<url>` on the cmdline. The Ubuntu hull
+    # patches its runner so the stock actions/cache action talks to it
+    # instead of GitHub's cache service -- the bench measured 49-76 s of
+    # `actions/cache` restore over the internet against 0 s from local disk,
+    # and this is that number for workflows that were never taught about
+    # SKIFF_CACHE.
+    #
+    # The server binds a dummy interface that exists only for this purpose,
+    # and the skiffs' egress filter gains exactly that /32: systemd's most-
+    # specific-match rule lets it through the RFC1918 deny without opening
+    # the host's real address, its loopback, or anything else on the LAN.
+    # The server itself validates each runner's GitHub-signed JWT against
+    # GitHub's JWKS, so an address is all a caller gets, not a cache.
+    cache = {
+      enable = mkEnableOption "a host-local GitHub Actions cache service for the skiffs";
+
+      address = mkOption {
+        type = types.str;
+        default = "10.113.113.1";
+        description = ''
+          Host-local dummy address the cache service binds. Deliberately
+          inside RFC1918 so it stays unroutable beyond this host; chosen
+          away from every declared fabric range.
+        '';
+      };
+
+      port = mkOption {
+        type = types.port;
+        default = 3000;
+      };
+
+      storageDir = mkOption {
+        type = types.path;
+        default = "/var/lib/bosun-cache";
+        description = "Cache payloads and the sqlite metadata DB live here.";
+      };
+
+      maxSizeBytes = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = ''
+          LRU-eviction cap on stored cache payloads. null leaves only the
+          server's own 90% volume-usage guard.
+        '';
+      };
+
+      image = mkOption {
+        type = types.str;
+        default = "ghcr.io/falcondev-oss/github-actions-cache-server:9.7.0";
+        description = ''
+          Pinned server image. v9+ speaks only the v2 twirp protocol, which
+          is what actions/cache >= 4.2 uses against github.com.
+        '';
+      };
+    };
   };
 
   config = mkIf cfg.enable {
@@ -287,7 +345,43 @@ in
     systemd.tmpfiles.rules = [
       "e ${cfg.logDir} - - - ${cfg.logRetention}"
       "d ${cfg.workspaceDir} 0700 bosun bosun -"
-    ];
+    ]
+    ++ lib.optional cfg.cache.enable "d ${cfg.cache.storageDir} 0700 root root -";
+
+    # The dummy interface the cache service binds. A netdev with no carrier
+    # and no routes beyond the host: the address exists so the skiffs' egress
+    # exception can name exactly one /32 that serves nothing but cache.
+    systemd.network.netdevs."20-bosun-cache" = mkIf cfg.cache.enable {
+      netdevConfig = {
+        Name = "bosun-cache0";
+        Kind = "dummy";
+      };
+    };
+    systemd.network.networks."20-bosun-cache" = mkIf cfg.cache.enable {
+      matchConfig.Name = "bosun-cache0";
+      address = [ "${cfg.cache.address}/32" ];
+      linkConfig.ActivationPolicy = "always-up";
+    };
+
+    virtualisation.oci-containers = mkIf cfg.cache.enable {
+      backend = "podman";
+      containers.bosun-cache = {
+        image = cfg.cache.image;
+        # Published on the dummy address only: the host's real interfaces
+        # never listen, so nothing off-host can reach the server even before
+        # any firewall has an opinion.
+        ports = [ "${cfg.cache.address}:${toString cfg.cache.port}:3000" ];
+        volumes = [ "${cfg.cache.storageDir}:/data" ];
+        environment = {
+          API_BASE_URL = "http://${cfg.cache.address}:${toString cfg.cache.port}";
+          STORAGE_FILESYSTEM_PATH = "/data/storage";
+          DB_SQLITE_PATH = "/data/cache-server.db";
+        }
+        // lib.optionalAttrs (cfg.cache.maxSizeBytes != null) {
+          CACHE_MAX_SIZE_BYTES = toString cfg.cache.maxSizeBytes;
+        };
+      };
+    };
 
     systemd.services.bosun = {
       description = "warm pool of ephemeral microVM Actions runners";
@@ -340,7 +434,10 @@ in
         # pool: job code reaches the public internet and nothing on the LAN.
         # systemd's IP filtering is hierarchical and inherits down the entire
         # cgroup subtree, which is why there is no per-skiff rule anywhere.
-        IPAddressAllow = "any";
+        # "any" is /0 and systemd's most-specific-match rule means the deny
+        # prefixes below still bite; the cache /32, when enabled, is more
+        # specific than 10.0.0.0/8 and punches exactly one host-local hole.
+        IPAddressAllow = [ "any" ] ++ lib.optional cfg.cache.enable "${cfg.cache.address}/32";
         IPAddressDeny = [
           "10.0.0.0/8"
           "172.16.0.0/12"

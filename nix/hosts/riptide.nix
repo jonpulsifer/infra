@@ -95,6 +95,14 @@
       # disks are reclaimed at 0 and rebuilt cold on the way back up.
       warm = 0;
     };
+
+    # 10 GB on the NVMe root for the actions/cache service. Announced to
+    # every skiff on this host; the parked class picks it up whenever it
+    # un-parks, and skiff-nixos ignores it until that hull learns the trick.
+    cache = {
+      enable = true;
+      maxSizeBytes = 10737418240;
+    };
   };
 
   # The pool's declared ceiling is 2048M + warm x 3072M -- 8 GiB at warm = 2,

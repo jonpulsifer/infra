@@ -54,7 +54,7 @@ func TestChArgsNoDevices(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk01", paths)
+	got := chArgs(h, class, "sk01", paths, "")
 	want := []string{
 		"--kernel", "/hulls/nixos/vmlinux",
 		"--initramfs", "/hulls/nixos/initrd",
@@ -88,7 +88,7 @@ func TestChArgsWithDevices(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk02", paths)
+	got := chArgs(h, class, "sk02", paths, "")
 	want := []string{
 		"--kernel", "/hulls/nixos/vmlinux",
 		"--initramfs", "/hulls/nixos/initrd",
@@ -123,7 +123,7 @@ func TestChArgsWithDisk(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk03", paths)
+	got := chArgs(h, class, "sk03", paths, "")
 	want := []string{
 		"--kernel", "/hulls/ubuntu/vmlinux",
 		"--initramfs", "/hulls/ubuntu/initrd",
@@ -317,7 +317,7 @@ func TestChArgsWorkspaceDiskComesLastAndIsNamedOnTheCmdline(t *testing.T) {
 	}
 	paths.workspace = "/var/lib/bosun/workspace/sk09.img"
 
-	got := chArgs(h, class, "sk09", paths)
+	got := chArgs(h, class, "sk09", paths, "")
 	want := []string{
 		"--kernel", "/hulls/ubuntu/vmlinux",
 		"--initramfs", "/hulls/ubuntu/initrd",
@@ -351,12 +351,28 @@ func TestChArgsNoWorkspaceLeavesCmdlineAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePaths: %v", err)
 	}
-	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk10", paths)
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk10", paths, "")
 	if slices.Contains(got, "--disk") {
 		t.Fatalf("workspace-less class got a disk: %v", got)
 	}
 	if !slices.Contains(got, "console=ttyS0 bosun.skiff=sk10 bosun.hull=sha256:deadbeef") {
 		t.Fatalf("cmdline changed: %v", got)
+	}
+}
+
+func TestChArgsAnnouncesCacheURLOnCmdline(t *testing.T) {
+	h := &hull{
+		dir:      "/hulls/nixos",
+		manifest: hullManifest{Kernel: "vmlinux", Initrd: "initrd", Cmdline: "console=ttyS0"},
+		digest:   "deadbeef",
+	}
+	paths, err := resolvePaths("/run/bosun", "/var/log/bosun", "sk12", nil)
+	if err != nil {
+		t.Fatalf("resolvePaths: %v", err)
+	}
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk12", paths, "http://10.113.113.1:3000/")
+	if !slices.Contains(got, "console=ttyS0 bosun.cache=http://10.113.113.1:3000/ bosun.skiff=sk12 bosun.hull=sha256:deadbeef") {
+		t.Fatalf("cache URL missing from cmdline: %v", got)
 	}
 }
 
