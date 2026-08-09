@@ -134,6 +134,19 @@ describe('the Dockerfile arm of “Choose the frontend”', () => {
     ).toBe('root');
   });
 
+  test('`COPY ./` names the whole context and decides nothing', async () => {
+    // `./` normalizes to an empty source, which resolves to a directory both
+    // roots have — never evidence. The shell probes always read it that way;
+    // the mirror once turned it into `{context: 'scope', copies: ''}` and a
+    // sentence claiming a context the build does not use.
+    expect(
+      await contextChosen({
+        [`${SUBPATH}/Dockerfile`]: 'FROM golang:1.24\nCOPY ./ /app\n',
+        [`${SUBPATH}/go.mod`]: 'module example.test/ddns\n',
+      }),
+    ).toBe('root');
+  });
+
   test('stage copies, globs and absolute paths decide nothing', async () => {
     expect(
       await contextChosen({
