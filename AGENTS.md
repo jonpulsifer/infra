@@ -95,7 +95,6 @@ Do not restate these values anywhere — read them.
 | --- | --- |
 | Cluster IPs/CIDRs, API-server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
 | Lab/future CIDRs and lab host IPs | `clusters/folly/config/lab-topology.json` |
-| `bluenose` vessel subnet CIDR | `terraform/gcp/projects/bluenose/config/vessel-topology.json` |
 
 Each cluster topology JSON **is** the Flux ConfigMap, applied as-is — JSON is
 valid YAML. Its `data` is flat `string→string` because Flux `substituteFrom`

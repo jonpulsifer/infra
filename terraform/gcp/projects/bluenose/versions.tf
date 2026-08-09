@@ -2,26 +2,13 @@ locals {
   project = "bluenose"
   region  = "northamerica-northeast1"
 
-  vessel_topology = jsondecode(file("${path.module}/config/vessel-topology.json"))
-
   # The pool every cluster workload federates through, one provider per cluster.
   # Declared in terraform/gcp/projects/homelab-ng/workload-identity.tf.
   fml_pool = "iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool"
-
-  spindrift_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift:spindrift"
-
-  # The clean-installation acceptance environment, declared in
-  # clusters/offsite/apps/spindrift-acceptance. Same cluster, same service
-  # account name, different namespace — which is a different subject entirely.
-  spindrift_acceptance_principal = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:spindrift-acceptance:spindrift"
 }
 
 data "google_project" "current" {
   project_id = local.project
-}
-
-data "google_project" "trusted_builds" {
-  project_id = "trusted-builds"
 }
 
 provider "google" {
@@ -36,9 +23,9 @@ provider "google-beta" {
   impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
 }
 
-# Service Networking otherwise charges its API request to the project that
-# owns the impersonated service account, even though the consumer network and
-# enabled API both belong to this vessel.
+# Kept until the vessel destroy applies: module.network's Service Networking
+# resources are bound to this aliased provider in state, and a destroy plan
+# needs the binding present. Removed once the state is empty of them.
 provider "google" {
   alias                       = "bluenose_quota"
   project                     = local.project
