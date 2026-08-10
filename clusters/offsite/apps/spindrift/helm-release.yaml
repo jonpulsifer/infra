@@ -205,7 +205,11 @@ spec:
         clientId: Iv1.918d699f36ee7afc
         apiBaseUrl: https://api.github.com
         oauthBaseUrl: https://github.com
-        buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
+        # `@main` on purpose: every caller written into a configuration PR
+        # copies this ref, and a branch keeps them all current — this
+        # repository's merge gate is the version gate. Pinning a sha here
+        # freezes every repo's builds at that commit with no re-pin path.
+        buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@main
         # Where every boundary below is declared. An unmet prerequisite
         # renders the Terraform that clears it, and this is the repository the
         # pull request adding that stanza is opened against.
