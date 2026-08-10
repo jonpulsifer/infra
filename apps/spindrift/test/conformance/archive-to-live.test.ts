@@ -38,7 +38,9 @@
  * §4 makes the two arms "one pipeline" and a pipeline claimed to be one is a
  * claim only a test that runs both can make.
  */
+
 import { describe, expect, test } from 'bun:test';
+import { gzipSync } from 'node:zlib';
 import { asc, eq } from 'drizzle-orm';
 import {
   completeCreationDraft,
@@ -88,9 +90,19 @@ const baseManifest = await fixtureManifest();
 
 const FROZEN = new Date('2026-08-03T12:00:00.000Z');
 
-/** The archive a developer picks in the browser. Real bytes, real digest. */
-const ARCHIVE = new TextEncoder().encode(
-  'PK not a real zip, but real bytes with a real digest\n',
+/**
+ * The archive a developer picks in the browser. Real bytes, real digest.
+ *
+ * A real gzipped tar, because the upload boundary now checks. It used to be a
+ * string carrying a ZIP's magic number and nothing else behind it — exactly the
+ * shape of upload that staged happily, spent a build, and died inside the
+ * builder at `tar: This does not look like a tar archive`. A ZIP is accepted
+ * too and converted on the way in; that path is covered in
+ * `test/web/upload.test.ts`, and this fixture stays the format the depot ends
+ * up holding, so every digest assertion below still means what it says.
+ */
+const ARCHIVE = new Uint8Array(
+  gzipSync(new TextEncoder().encode('a tarball, as far as the boundary reads')),
 );
 
 /**

@@ -9,6 +9,10 @@
  * returns the digest and location.
  */
 import {
+  ArchiveFormatError,
+  normalizeArchive,
+} from '../storage/archive-format.ts';
+import {
   type StagedArchive,
   sourceDepotFor,
   stageArchiveBytes,
@@ -106,6 +110,27 @@ export async function handleUpload(
       bytes = new Uint8Array(buffer);
     }
 
+    // The one container every build route can open, before anything durable
+    // happens. A ZIP is transcoded and anything else is refused here — see
+    // `storage/archive-format.ts` for why the boundary is the right place and
+    // why the digest is therefore over the converted bytes.
+    //
+    // Refused as a `400`, because it is: the request carried bytes this
+    // installation cannot stage, and saying so now is the whole difference
+    // between a wrong upload and a spent build that blames the platform.
+    let archive: ReturnType<typeof normalizeArchive>;
+    try {
+      archive = normalizeArchive(filename, bytes);
+    } catch (error: unknown) {
+      if (error instanceof ArchiveFormatError) {
+        return Response.json(
+          { ok: false, failure: { code: error.code, message: error.message } },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
+
     // One staging call, to one place, so the returned location describes where
     // the bytes actually are. A depot failure is a `500` that says so, because
     // a staged bundle nobody can retrieve is not a staged bundle.
@@ -119,7 +144,7 @@ export async function handleUpload(
 
     let staged: StagedArchive;
     try {
-      staged = await stageArchiveBytes(filename, bytes, depot);
+      staged = await stageArchiveBytes(archive.filename, archive.bytes, depot);
     } catch (error: unknown) {
       const message =
         error instanceof Error
