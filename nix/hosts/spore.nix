@@ -30,6 +30,14 @@
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
+  # Root is capped at 32G and every daily auto-upgrade generation drags a
+  # fresh rackpi5 native-boot image along (~1G delta), so the fleet's
+  # weekly/30d GC keeps a month of images and fills the disk.
+  nix.gc = {
+    dates = "daily";
+    options = "--delete-older-than 7d";
+  };
+
   # Signed native-boot publishing for rackpi5. The cross-host target is wired
   # in nix/lib/registry.nix, where rackpi5's piBootImg derivation is in scope.
   services.spore.enable = true;

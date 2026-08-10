@@ -14,8 +14,8 @@
     package = pkgs.nixVersions.latest;
     gc = {
       automatic = true;
-      dates = "weekly";
-      options = "--delete-older-than 30d";
+      dates = lib.mkDefault "weekly";
+      options = lib.mkDefault "--delete-older-than 30d";
     };
     # Free up to 5GiB whenever there is less than 2GiB left.
     extraOptions = ''
