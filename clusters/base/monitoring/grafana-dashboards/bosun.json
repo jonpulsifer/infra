@@ -1,0 +1,473 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Pool",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Heartbeat age",
+      "description": "Seconds since bosun last rewrote its textfile. Stale means bosun is dead, wedged, or writing somewhere node-exporter is not reading.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 120 },
+              { "color": "red", "value": 300 }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "time() - node_textfile_mtime_seconds{file=~\".*/bosun\\\\.prom\"}",
+          "refId": "A",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Skiffs booted now",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(bosun_skiffs)",
+          "refId": "A",
+          "legendFormat": "skiffs"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Jobs completed (24h)",
+      "description": "Guests that reached the end of their single job and powered themselves off.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(bosun_skiff_exits_total{reason=\"completed\"}[24h]))",
+          "refId": "A",
+          "legendFormat": "completed"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "GitHub API errors (1h)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(bosun_github_errors_total[1h]))",
+          "refId": "A",
+          "legendFormat": "errors"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Pool depth vs desired, by class",
+      "description": "Solid is booted skiffs; dashed is the class's configured warm count. A class below its dashed line for more than a few minutes is BosunPoolStarved.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".* desired" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "dash": [4, 4], "fill": "dash" } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (class) (bosun_skiffs)",
+          "refId": "A",
+          "legendFormat": "{{class}}"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max by (class) (bosun_skiffs_desired)",
+          "refId": "B",
+          "legendFormat": "{{class}} desired"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Busy skiffs, by class",
+      "description": "Skiffs GitHub reports as running a job. The gap to pool depth is warm capacity.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (class) (bosun_skiffs{state=\"busy\"})",
+          "refId": "A",
+          "legendFormat": "{{class}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Lifecycle",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Exits per hour, by reason",
+      "description": "completed is the healthy exit. wedged and killed each took a job down with them; drained is the stop path's deadline; jit_expired is idle recycling doing its job.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "completed" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "wedged" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "killed" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "drained" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "jit_expired" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "lifetime" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "boot_failed" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (reason) (rate(bosun_skiff_exits_total[1h])) * 3600 > 0",
+          "refId": "A",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Time to online, by class",
+      "description": "Average seconds from JIT mint to GitHub first reporting the runner online: boot, registration and connect together. Quantized by the poll interval; a hull regression moves it by tens of seconds.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(bosun_skiff_time_to_online_seconds_sum[1h]) / rate(bosun_skiff_time_to_online_seconds_count[1h])",
+          "refId": "A",
+          "legendFormat": "{{class}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Boots per hour, by class",
+      "description": "Refill rate. Tracks job throughput plus recycling; a boot storm with no matching completed exits is a crash loop.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (class) (rate(bosun_skiff_boots_total[1h])) * 3600",
+          "refId": "A",
+          "legendFormat": "{{class}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "GitHub API error rate",
+      "description": "Transient spikes here explain wedge kills and pool churn — one failed poll is a hiccup, a sustained rate is an outage.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(bosun_github_errors_total[5m]))",
+          "refId": "A",
+          "legendFormat": "errors/s"
+        }
+      ]
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 37,
+  "style": "dark",
+  "tags": ["bosun"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Bosun (skiff warm pool)",
+  "uid": "bosun",
+  "version": 1,
+  "weekStart": ""
+}
