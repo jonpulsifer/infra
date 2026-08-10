@@ -11,13 +11,11 @@ the root sees who may sign without chasing the module. `outputs.tf` hands the
 attestor id to the bluenose vessel root and the signer/registry pair to the
 installation manifest's `supplyChain` block.
 
-A ring named `keys` holding a key named `signer` is live in this project and
-in no state file, its only version `DESTROY_SCHEDULED`. GCP never deletes a
-ring or a key, so both names are spent — `supply-chain.tf` names the ring
-`spindrift` instead and lets the module create it, the key, and the first
-version. Reading the public half of a version that was generated moments ago
-can fail once with `PENDING_GENERATION`; the second apply converges, and the
-module README says so.
+The KMS ring and key are live in this project and in no state file, so
+`supply-chain.tf` adopts them with `import` blocks rather than creating them.
+GCP never deletes a ring or a key: creating fresh ones under these names
+collides, and any other name is a new signing key, which means a new public
+half for the cluster admission policy to pin.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
