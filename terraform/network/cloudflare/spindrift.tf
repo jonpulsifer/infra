@@ -10,6 +10,17 @@ module "tunnel_spindrift" {
   config = {
     ingress = [
       {
+        # The bosun outbox, and only it. tender long-polls this path from
+        # GCE — the control plane's own hostname is a LAN record a cloud
+        # host cannot reach — bearer-authed by SPINDRIFT_BOSUN_SECRET.
+        # Path-scoped so the session-authed rest of the control plane stays
+        # off the internet; everything else on this hostname falls through
+        # to the wildcard and 404s at the Apps gateway.
+        hostname = "spindrift-control.${cloudflare_zone.lolwtf_dev.name}"
+        path     = "^/internal/bosun/"
+        service  = "http://spindrift.spindrift.svc.cluster.local:3000"
+      },
+      {
         hostname = "*.${cloudflare_zone.lolwtf_dev.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
