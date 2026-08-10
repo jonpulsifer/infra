@@ -438,6 +438,25 @@ describe('observe, destroy, and what the site is called', () => {
     expect(await adapter.observe(TARGET, verdict.ref)).toBeNull();
   });
 
+  test('a destroy that does not remove the site is never reported as one', async () => {
+    // The regression this guards: a DELETE that lands on a path the API
+    // doesn't serve for site deletion still answers 404, which used to be
+    // trusted as "already gone". The site survives; destroy must throw
+    // rather than resolve, or unplaceComponent would orphan the Deploy row
+    // over a workload that is still serving.
+    const { api, adapter } = adapterFor({
+      refuseDelete: {
+        status: 404,
+        body: { error: { message: 'no such path' } },
+      },
+    });
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+    if (verdict.phase !== 'LIVE') throw new Error('nothing was placed');
+
+    await expect(adapter.destroy(TARGET, verdict.ref)).rejects.toThrow();
+    expect(api.hasSite('shop-site')).toBe(true);
+  });
+
   test('a long name is shortened deterministically, never collided', () => {
     const long = desired({
       app: 'a-very-long-application-name',

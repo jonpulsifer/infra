@@ -306,16 +306,31 @@ export class StaticDeployAdapter implements DeployAdapter {
     const site = parseRef(connection, ref);
     if (site === null) return;
 
-    const deleted = await this.http(connection).json<unknown>({
+    const http = this.http(connection);
+    await http.json<unknown>({
       method: 'DELETE',
+      path: `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites/${encodeURIComponent(site)}`,
+    });
+
+    // The DELETE's own status is not trusted either way: a 404 has meant both
+    // "already gone" and "this call hit a path the API does not serve" (the
+    // flat `sites/{site}` this used to DELETE, which 404s on every call and
+    // never removes anything). Read the site back instead — absent is
+    // destroyed, present is a destroy that did not happen and must not be
+    // reported as one.
+    const read = await http.json<HostingSite>({
+      method: 'GET',
       path: `${API_VERSION}/sites/${encodeURIComponent(site)}`,
     });
-    if (deleted.ok) return;
-    if (deleted.kind === 'status' && deleted.status === 404) return;
+    if (!read.ok && read.kind === 'status' && read.status === 404) return;
     throw new Error(
-      deleted.kind === 'status'
-        ? `deleting site ${site} failed with ${deleted.status}: ${deleted.message}`
-        : `deleting site ${site} failed: ${deleted.message}`,
+      read.ok
+        ? `site ${site} still exists after destroy`
+        : `could not verify site ${site} was destroyed: ${
+            read.kind === 'status'
+              ? `${read.status}: ${read.message}`
+              : read.message
+          }`,
     );
   }
 
