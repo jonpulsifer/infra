@@ -661,8 +661,9 @@ describe('the trust store', () => {
   });
 
   test('it defaults to the cluster’s own published root', async () => {
-    // An installation whose Targets are all in-cluster needs nothing else, and
-    // must not be made to declare a bundle to keep working.
+    // Sufficient when that root is self-signed: an installation whose Targets
+    // are all in-cluster on such a cluster needs nothing else, and must not
+    // be made to declare a bundle to keep working.
     expect(
       trustSource(await render(federated()), 'spindrift-web'),
     ).toContainEqual({
