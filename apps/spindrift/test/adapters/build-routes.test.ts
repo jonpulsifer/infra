@@ -356,6 +356,18 @@ describe('the hosted build route', () => {
     expect(text(events)).toContain('no run named');
   });
 
+  test('a run that queues past the old discovery default still succeeds', async () => {
+    // Observed live: the run sat queued past a 120s discovery deadline and the
+    // Build was FAILED for a run that went on to complete `success`. Discovery
+    // has no deadline of its own — it shares the build's own budget — so a slow
+    // queue is still inside it here, with no `discoveryMs` override to shrink
+    // that budget back down.
+    const { route } = hostedRoute({ actions: { discoveryDelay: 150 } });
+    const { result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('SUCCEEDED');
+  });
+
   test('a lookup that flakes after a successful dispatch is retried, not failed', async () => {
     // Observed live: the dispatch worked, the call that goes looking for the
     // run it created answered `500`, and the build was recorded `FAILED` while
