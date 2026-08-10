@@ -7,6 +7,7 @@ output "bootstrap_resources" {
       cluster_role_binding = kubernetes_cluster_role_binding_v1.coredns.metadata[0].name
       config_map           = "${kubernetes_config_map_v1.coredns.metadata[0].namespace}/${kubernetes_config_map_v1.coredns.metadata[0].name}"
       deployment           = "${kubernetes_deployment_v1.coredns.metadata[0].namespace}/${kubernetes_deployment_v1.coredns.metadata[0].name}"
+      reload_annotation    = kubernetes_deployment_v1.coredns.metadata[0].annotations["configmap.reloader.stakater.com/reload"]
       service              = "${kubernetes_service_v1.kube_dns.metadata[0].namespace}/${kubernetes_service_v1.kube_dns.metadata[0].name}"
       service_account      = "${kubernetes_service_account_v1.coredns.metadata[0].namespace}/${kubernetes_service_account_v1.coredns.metadata[0].name}"
     }

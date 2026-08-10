@@ -14,6 +14,7 @@ run "exposes_offsite_bootstrap_resources" {
         cluster_role_binding = "system:coredns"
         config_map           = "kube-system/coredns"
         deployment           = "kube-system/coredns"
+        reload_annotation    = "kube-root-ca.crt"
         service              = "kube-system/kube-dns"
         service_account      = "kube-system/coredns"
       }
