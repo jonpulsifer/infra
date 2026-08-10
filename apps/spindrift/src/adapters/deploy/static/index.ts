@@ -307,7 +307,7 @@ export class StaticDeployAdapter implements DeployAdapter {
     if (site === null) return;
 
     const http = this.http(connection);
-    await http.json<unknown>({
+    const deletion = await http.json<unknown>({
       method: 'DELETE',
       path: `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites/${encodeURIComponent(site)}`,
     });
@@ -325,7 +325,15 @@ export class StaticDeployAdapter implements DeployAdapter {
     if (!read.ok && read.kind === 'status' && read.status === 404) return;
     throw new Error(
       read.ok
-        ? `site ${site} still exists after destroy`
+        ? `site ${site} still exists after destroy${
+            deletion.ok
+              ? ''
+              : ` (delete answered ${
+                  deletion.kind === 'status'
+                    ? `${deletion.status}: ${deletion.message}`
+                    : deletion.message
+                })`
+          }`
         : `could not verify site ${site} was destroyed: ${
             read.kind === 'status'
               ? `${read.status}: ${read.message}`
