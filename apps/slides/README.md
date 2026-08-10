@@ -15,10 +15,17 @@ CSS belongs in the other.
 
 ## How they ship
 
-Through Spindrift, as `website` Apps whose source is an uploaded archive: zip
-the deck directory, `POST` it to `/internal/upload`, and the returned digest and
-location become an `uploadArchive` Build that the ordinary build route turns
-into a `files` artifact for the `bluenose/static` Target.
+Through Spindrift, as `website` Apps whose source is an uploaded archive: `POST`
+the deck directory to `/internal/upload`, and the returned digest and location
+become an `uploadArchive` Build that the ordinary build route turns into a
+`files` artifact for the `bluenose/static` Target.
+
+**It has to be a gzipped tarball.** The upload boundary takes any bytes and the
+field is called an archive, but the build route fetches it with
+`curl … | tar -xz`, so a ZIP reaches the builder intact and dies at
+`tar: This does not look like a tar archive` — reported four steps later as
+`ARTIFACT_UNAVAILABLE`, which reads as a platform fault rather than a wrong
+container format.
 
 A deck is therefore its own acceptance evidence — the deployed page is the
 product describing itself — which is why the copy carries live digests, build
