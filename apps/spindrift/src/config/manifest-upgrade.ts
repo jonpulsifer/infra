@@ -48,9 +48,59 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return scrubPlaceholderBuildWorkflow(
-    nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+  return movePinnedBuildWorkflowToMain(
+    scrubPlaceholderBuildWorkflow(
+      nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+    ),
   );
+}
+
+/**
+ * The one commit a seed declaration ever pinned `buildWorkflow` at, and this
+ * project's own vocabulary rather than anyone's identity — which is why the
+ * step below may match on it where the extraction contract forbids naming the
+ * repository the workflow lives in. Exactly this sha, never a pattern: any
+ * other ref is an operator's pin, and it is theirs whatever it names.
+ */
+const SEED_PINNED_WORKFLOW_REF = '@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6';
+
+/**
+ * The sha a seed declaration pinned, moved to `@main`.
+ *
+ * The reusable workflow ref may move — see the `buildWorkflow` docblock in
+ * `manifest.schema.ts`: a branch keeps every written caller current, and the
+ * platform repository's merge gate is the version gate. The seed declarations
+ * state `@main` now, but an installation seeded before that edit holds the pin
+ * where no mounted correction can reach it — the stored row governs — and
+ * every caller it writes into a connected repository copies a workflow frozen
+ * at that commit. The repository half of the value is kept, not restated:
+ * which repository publishes the workflow is the installation's fact, and the
+ * document already carries it.
+ *
+ * **Must run after {@link scrubPlaceholderBuildWorkflow}**: the placeholder it
+ * nulls ends in this same sha, and moved instead of nulled it would be a live
+ * `@main` pointer at a repository this project does not own. The corpus's
+ * placeholder snapshot holds that ordering in place.
+ */
+function movePinnedBuildWorkflowToMain(document: unknown): unknown {
+  const manifest = asDocument(document);
+  const github = asDocument(manifest?.github);
+  const workflow = github?.buildWorkflow;
+  if (
+    manifest === null ||
+    github === null ||
+    typeof workflow !== 'string' ||
+    !workflow.endsWith(SEED_PINNED_WORKFLOW_REF)
+  ) {
+    return document;
+  }
+  return {
+    ...manifest,
+    github: {
+      ...github,
+      buildWorkflow: `${workflow.slice(0, -SEED_PINNED_WORKFLOW_REF.length)}@main`,
+    },
+  };
 }
 
 /**

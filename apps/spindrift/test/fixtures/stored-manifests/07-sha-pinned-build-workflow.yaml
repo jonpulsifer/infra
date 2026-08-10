@@ -1,12 +1,15 @@
-# A stored manifest holding `05` after the scrub, which is also what a fresh
-# chart seed states — `github.buildWorkflow: null`, the schema's own word for
-# "no workflow published". `connectRepository` refuses on it until an operator
-# states a real one; nothing else in the document changes.
+# A stored manifest holding the one sha this repository's own seed
+# declarations ever pinned: `github.buildWorkflow` at `@0a7d0ea0…`. The
+# offsite rebuild seeded from a declaration that stated exactly this, so its
+# row holds the value where no mounted correction can reach it — and every
+# caller `connectRepository` writes copies a workflow frozen at that commit.
+# `movePinnedBuildWorkflowToMain` moves it to `@main`; nothing else in the
+# document changes.
 #
 # `installation.name` differs from every declaration this suite mounts, for the
 # reason `01` gives.
 installation:
-  name: stored-with-null-build-workflow
+  name: stored-with-sha-pinned-build-workflow
   controlPlaneVessel: cluster
   homeVessel: cloud
 
@@ -37,7 +40,7 @@ github:
   clientId: Iv1.example
   oauthBaseUrl: https://git.example.test
   apiBaseUrl: https://api.git.example.test
-  buildWorkflow: null
+  buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
 
 build:
   routes:
