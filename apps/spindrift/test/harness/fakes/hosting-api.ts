@@ -31,6 +31,15 @@ export interface FakeHostingOptions {
   readonly project?: string;
   /** Sites that already exist, by id. */
   readonly sites?: readonly string[];
+  /**
+   * A site that appears between the adapter's read and its create.
+   *
+   * The create race: two deploys of a new App, or a retry after a timeout
+   * that did land. The read says missing, the create says `ALREADY_EXISTS`,
+   * and the desired state is true either way — so this exists to prove the
+   * adapter treats it that way rather than failing on a site it wanted.
+   */
+  readonly appearsBeforeCreate?: string;
   /** Hashes the product already holds, so it will not ask for them again. */
   readonly held?: readonly string[];
   /**
@@ -209,6 +218,24 @@ export class FakeHosting {
       if (method === 'POST') {
         const id = url.searchParams.get('siteId') ?? '';
         if (id === '') return json(400, error('no siteId'));
+        // Somebody else got there between the read and this call.
+        if (this.options.appearsBeforeCreate === id && !this.sites.has(id)) {
+          this.sites.add(id);
+        }
+        // Creating a site that exists is a 409, not a second create. A fake
+        // that quietly succeeded here let a deploy-once adapter look
+        // idempotent: nothing in the suite could tell "the site was already
+        // there" from "the site was made", which is the whole difference
+        // between a revision and a first deploy.
+        if (this.sites.has(id)) {
+          return json(409, {
+            error: {
+              code: 409,
+              status: 'ALREADY_EXISTS',
+              message: `Site \`projects/${this.project}/sites/${id}\` already exists.`,
+            },
+          });
+        }
         this.sites.add(id);
         return json(200, site(id));
       }
@@ -221,6 +248,14 @@ export class FakeHosting {
     const projectSiteMatch = path.match(
       new RegExp(`^projects/${this.project}/sites/([^/]+)$`),
     );
+    // `projects.sites.get` — and the only form of it. Reading a site is
+    // project-scoped for the same reason deleting one is.
+    if (projectSiteMatch !== null && method === 'GET') {
+      const id = projectSiteMatch[1] as string;
+      return this.sites.has(id)
+        ? json(200, site(id))
+        : json(404, error('no site'));
+    }
     if (projectSiteMatch !== null && method === 'DELETE') {
       const id = projectSiteMatch[1] as string;
       if (this.options.refuseDelete !== undefined) {
@@ -257,15 +292,13 @@ export class FakeHosting {
       );
     }
 
-    const siteMatch = path.match(/^sites\/([^/]+)$/);
-    if (siteMatch !== null) {
-      const id = siteMatch[1] as string;
-      if (method === 'GET') {
-        return this.sites.has(id)
-          ? json(200, site(id))
-          : json(404, error('no site'));
-      }
-    }
+    // No flat `sites/{id}` resource: the real API routes the sub-collections
+    // below (`/versions`, `/releases`, `/domains`) under a bare site id, but
+    // the site *itself* is only ever `projects/{project}/sites/{id}`. A GET
+    // here falls through to the catch-all, which is what production does —
+    // and a 404 from a path that was never a path reads exactly like a 404
+    // from a site that is not there, which is how a deploy-once adapter
+    // survived this suite.
 
     const versionsMatch = path.match(/^sites\/([^/]+)\/versions$/);
     if (versionsMatch !== null && method === 'POST') {

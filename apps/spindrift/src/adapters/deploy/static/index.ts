@@ -312,15 +312,18 @@ export class StaticDeployAdapter implements DeployAdapter {
       path: `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites/${encodeURIComponent(site)}`,
     });
 
-    // The DELETE's own status is not trusted either way: a 404 has meant both
-    // "already gone" and "this call hit a path the API does not serve" (the
-    // flat `sites/{site}` this used to DELETE, which 404s on every call and
-    // never removes anything). Read the site back instead — absent is
-    // destroyed, present is a destroy that did not happen and must not be
-    // reported as one.
+    // The DELETE's own status is not trusted either way: a 404 means both
+    // "already gone" and "this call hit a path the API does not serve". Read
+    // the site back instead — absent is destroyed, present is a destroy that
+    // did not happen and must not be reported as one.
+    //
+    // The read is project-scoped for the same reason the DELETE above is. A
+    // read of the flat `sites/{site}` answers 404 unconditionally, which
+    // makes this check pass unconditionally — the exact blindness it exists
+    // to end, reintroduced one line below the comment describing it.
     const read = await http.json<HostingSite>({
       method: 'GET',
-      path: `${API_VERSION}/sites/${encodeURIComponent(site)}`,
+      path: this.sitePath(connection, site),
     });
     if (!read.ok && read.kind === 'status' && read.status === 404) return;
     throw new Error(
@@ -443,7 +446,20 @@ export class StaticDeployAdapter implements DeployAdapter {
     return readBundle(layer);
   }
 
-  /** The site, created if this is the first deploy to it. */
+  /**
+   * The site, ensured rather than created.
+   *
+   * A site is a durable place and a deploy is a revision of what it serves —
+   * the five steps below are the revision. So the only question here is
+   * whether the place exists, and "it already does" is this function
+   * succeeding, not failing.
+   *
+   * The read is `projects/{project}/sites/{id}`, which is the only form of it
+   * the API serves. The flat `sites/{id}` this used to GET is not a route:
+   * it 404s whether or not the site exists, so every deploy concluded the
+   * site was missing, tried to create it, and collided with the one the
+   * previous deploy made. A static App could be deployed exactly once.
+   */
   private async ensureSite(
     http: CloudHttp,
     connection: StaticAdapterConnection,
@@ -451,7 +467,7 @@ export class StaticDeployAdapter implements DeployAdapter {
   ): Promise<Outcome<HostingSite>> {
     const read = await http.json<HostingSite>({
       method: 'GET',
-      path: `${API_VERSION}/sites/${encodeURIComponent(site)}`,
+      path: this.sitePath(connection, site),
     });
     if (read.ok && read.value !== undefined) {
       return { ok: true, value: read.value };
@@ -466,8 +482,26 @@ export class StaticDeployAdapter implements DeployAdapter {
       query: { siteId: site },
       body: {},
     });
+    // Losing a create race is the desired state arriving from somewhere else.
+    // Read it back rather than trusting the 409's body, so what returns is a
+    // site this function actually saw.
+    if (!created.ok && created.kind === 'status' && created.status === 409) {
+      const after = await http.json<HostingSite>({
+        method: 'GET',
+        path: this.sitePath(connection, site),
+      });
+      if (after.ok && after.value !== undefined) {
+        return { ok: true, value: after.value };
+      }
+      return { ok: false, failure: created };
+    }
     if (!created.ok) return { ok: false, failure: created };
     return { ok: true, value: created.value ?? {} };
+  }
+
+  /** The one form of a site's own resource name the API serves. */
+  private sitePath(connection: StaticAdapterConnection, site: string): string {
+    return `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites/${encodeURIComponent(site)}`;
   }
 
   /**
