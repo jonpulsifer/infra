@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spindrift — a deploy control plane</title>
+
+<style>
+  /* ---------- tokens: light (chart paper) ---------- */
+  :root {
+    --paper:      #eceff0;
+    --surface:    #f7f9f9;
+    --surface-2:  #e2e8e8;
+    --ink:        #0c1d23;
+    --ink-2:      #3d565e;
+    --muted:      #64808a;
+    --rule:       #c3d0d2;
+    --rule-soft:  #d6dfe0;
+    --accent:     #0e6e78;   /* isobath teal */
+    --accent-ink: #0a545c;
+    --accent-wash:#dbe9ea;
+    --caution:    #a81b5f;   /* chart magenta: cautionary marks */
+    --caution-wash:#f3dfe9;
+    --good:       #1c7a52;
+    --good-wash:  #dceae2;
+    --grid:       rgba(14, 110, 120, 0.055);
+
+    --diag-box:   #f7f9f9;
+    --diag-box-2: #e6eeee;
+    --diag-line:  #93a9ad;
+
+    --measure: 60ch;
+    --pad-x: clamp(1.5rem, 6vw, 7rem);
+    --pad-y: clamp(2.5rem, 7vh, 5.5rem);
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Hoefler Text", Georgia, serif;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  /* ---------- tokens: dark (night bridge) ---------- */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #08161b;
+      --surface:    #0e2229;
+      --surface-2:  #14303a;
+      --ink:        #dbe8e9;
+      --ink-2:      #a6c0c5;
+      --muted:      #7d989f;
+      --rule:       #21414c;
+      --rule-soft:  #183440;
+      --accent:     #59c6d0;
+      --accent-ink: #8fdde4;
+      --accent-wash:#0f2f36;
+      --caution:    #f27baa;
+      --caution-wash:#341a27;
+      --good:       #5fc292;
+      --good-wash:  #102e24;
+      --grid:       rgba(89, 198, 208, 0.05);
+
+      --diag-box:   #0e2229;
+      --diag-box-2: #14303a;
+      --diag-line:  #4c6e78;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #08161b;
+    --surface:    #0e2229;
+    --surface-2:  #14303a;
+    --ink:        #dbe8e9;
+    --ink-2:      #a6c0c5;
+    --muted:      #7d989f;
+    --rule:       #21414c;
+    --rule-soft:  #183440;
+    --accent:     #59c6d0;
+    --accent-ink: #8fdde4;
+    --accent-wash:#0f2f36;
+    --caution:    #f27baa;
+    --caution-wash:#341a27;
+    --good:       #5fc292;
+    --good-wash:  #102e24;
+    --grid:       rgba(89, 198, 208, 0.05);
+
+    --diag-box:   #0e2229;
+    --diag-box-2: #14303a;
+    --diag-line:  #4c6e78;
+  }
+
+  /* ---------- page ---------- */
+  html {
+    scroll-snap-type: y proximity;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: clamp(1rem, 0.94rem + 0.28vw, 1.125rem);
+    line-height: 1.55;
+    overflow-x: hidden;
+    position: relative;
+  }
+  /* graticule */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 88px),
+      repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 88px);
+  }
+
+  ::selection { background: var(--accent); color: var(--paper); }
+  a { color: var(--accent-ink); }
+  a:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ---------- slide shell ---------- */
+  .slide {
+    position: relative;
+    z-index: 1;
+    scroll-snap-align: start;
+    min-height: 100svh;
+    padding: var(--pad-y) var(--pad-x) calc(var(--pad-y) + 1.5rem);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(1.1rem, 2.4vh, 2rem);
+    border-top: 1px solid var(--rule-soft);
+  }
+  .slide:first-of-type { border-top: 0; }
+  .slide > * { position: relative; }
+
+  .no {
+    position: absolute;
+    top: calc(var(--pad-y) * 0.55);
+    right: var(--pad-x);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    z-index: 2;
+  }
+  .no b { color: var(--accent); font-weight: 600; }
+  .no::before {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -0.85rem;
+    width: 2.4rem;
+    height: 1px;
+    background: var(--accent);
+    opacity: 0.6;
+  }
+
+  /* ---------- type ---------- */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 0 1 5rem;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.45;
+  }
+
+  h1, h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    text-wrap: balance;
+    letter-spacing: -0.015em;
+    line-height: 1.04;
+  }
+  h1 {
+    font-size: clamp(3.4rem, 13vw, 9.5rem);
+    line-height: 0.92;
+    letter-spacing: -0.035em;
+  }
+  h2 {
+    font-size: clamp(1.9rem, 1.1rem + 3.1vw, 3.6rem);
+    max-width: 20ch;
+  }
+  h2 em { font-style: italic; color: var(--accent); }
+  h3 {
+    font-family: var(--sans);
+    font-size: 0.78rem;
+    font-weight: 650;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .lede {
+    font-family: var(--serif);
+    font-size: clamp(1.15rem, 0.95rem + 0.85vw, 1.7rem);
+    line-height: 1.4;
+    color: var(--ink-2);
+    max-width: 34ch;
+    text-wrap: pretty;
+  }
+  p { max-width: var(--measure); text-wrap: pretty; }
+  .dim { color: var(--ink-2); }
+  .small { font-size: 0.9rem; }
+  code, .m { font-family: var(--mono); font-size: 0.88em; }
+  code {
+    background: var(--surface-2);
+    padding: 0.08em 0.34em;
+    border-radius: 3px;
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.2em 0.5em;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .t-good { color: var(--good); }
+  .t-cau  { color: var(--caution); }
+  .t-acc  { color: var(--accent); }
+
+  /* ---------- shared blocks ---------- */
+  .cols {
+    display: grid;
+    gap: clamp(1rem, 2.2vw, 2.2rem);
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+  .cols--2 { grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: clamp(0.95rem, 1.6vw, 1.4rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .card h4 {
+    font-family: var(--serif);
+    font-size: 1.22rem;
+    font-weight: 400;
+  }
+  .card p { font-size: 0.94rem; color: var(--ink-2); max-width: 42ch; }
+  .card--flag { border-top: 3px solid var(--accent); }
+  .card--cau  { border-top: 3px solid var(--caution); }
+
+  /* stepped sequence */
+  ol.steps {
+    list-style: none;
+    counter-reset: s;
+    display: grid;
+    gap: 0;
+    max-width: 46rem;
+    border-top: 1px solid var(--rule-soft);
+  }
+  ol.steps li {
+    counter-increment: s;
+    display: grid;
+    grid-template-columns: 3.4rem 1fr;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: clamp(0.4rem, 1vh, 0.7rem) 0;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: clamp(1rem, 0.9rem + 0.5vw, 1.3rem);
+  }
+  ol.steps li::before {
+    content: counter(s, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  ol.steps li:last-child { color: var(--caution); }
+
+  /* plain reasoned list */
+  ul.reasons {
+    list-style: none;
+    display: grid;
+    gap: clamp(0.7rem, 1.8vh, 1.15rem);
+    max-width: 52rem;
+  }
+  ul.reasons li {
+    display: grid;
+    grid-template-columns: 1.6rem 1fr;
+    gap: 0.9rem;
+    font-size: clamp(1rem, 0.92rem + 0.42vw, 1.28rem);
+    line-height: 1.42;
+    text-wrap: pretty;
+  }
+  ul.reasons li::before {
+    content: "";
+    margin-top: 0.62em;
+    height: 1px;
+    background: var(--caution);
+    opacity: 0.75;
+  }
+  ul.reasons li b { font-weight: 620; color: var(--ink); }
+
+  ul.ticks { list-style: none; display: grid; gap: 0.45rem; }
+  ul.ticks li {
+    display: grid; grid-template-columns: 1rem 1fr; gap: 0.6rem;
+    font-size: 0.96rem; color: var(--ink-2);
+  }
+  ul.ticks li::before {
+    content: "·"; color: var(--accent); font-weight: 700; text-align: center;
+  }
+
+  /* noun chips */
+  .nouns { display: flex; flex-wrap: wrap; gap: 0.55rem 0.7rem; align-items: stretch; }
+  .noun {
+    font-family: var(--serif);
+    font-size: clamp(1.25rem, 0.9rem + 1.5vw, 2.5rem);
+    padding: 0.3em 0.6em;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    color: var(--muted);
+    background: var(--surface);
+    white-space: nowrap;
+  }
+  .noun--authored {
+    color: var(--paper);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .noun--admin { border-style: dashed; }
+
+  /* lineage strip */
+  .lineage {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+  .lineage > div {
+    flex: 1 0 9rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--rule);
+    border-right: 0;
+    background: var(--surface);
+  }
+  .lineage > div:last-child {
+    border-right: 1px solid var(--rule);
+    background: var(--accent-wash);
+  }
+  .lineage b {
+    display: block;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 1.35rem;
+  }
+  .lineage span {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  /* quote / verbatim */
+  .verbatim {
+    font-family: var(--mono);
+    font-size: clamp(0.85rem, 0.78rem + 0.4vw, 1.05rem);
+    line-height: 1.5;
+    background: var(--surface);
+    border-left: 3px solid var(--caution);
+    padding: 1rem 1.2rem;
+    max-width: 54rem;
+    overflow-x: auto;
+  }
+
+  /* stat tiles */
+  .stats {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  }
+  .stat {
+    background: var(--surface);
+    padding: clamp(0.8rem, 1.6vw, 1.25rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .stat b {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.5rem);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  .stat span { font-size: 0.8rem; color: var(--ink-2); line-height: 1.3; }
+  .stat--cau b { color: var(--caution); }
+  .stat--ink b { color: var(--ink); }
+
+  /* timeline */
+  .log {
+    display: grid;
+    gap: 0;
+    max-width: 58rem;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .log > div {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr auto;
+    gap: 0.4rem 1.1rem;
+    align-items: baseline;
+    padding: clamp(0.45rem, 1.1vh, 0.8rem) 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .log time {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .log b { font-family: var(--serif); font-weight: 400; font-size: clamp(1.05rem, 0.95rem + 0.5vw, 1.35rem); }
+  .log p { grid-column: 2 / -1; font-size: 0.9rem; color: var(--ink-2); max-width: 58ch; margin-top: 0.15rem; }
+
+  /* figure */
+  figure { display: flex; flex-direction: column; gap: 0.7rem; }
+  .figwrap {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    padding: clamp(0.6rem, 1.5vw, 1.1rem);
+  }
+  .figwrap svg { display: block; width: 100%; min-width: 44rem; height: auto; }
+  figcaption { font-size: 0.85rem; color: var(--muted); max-width: 62ch; }
+
+  /* svg diagram styling */
+  .d-box  { fill: var(--diag-box);  stroke: var(--diag-line); stroke-width: 1; }
+  .d-box2 { fill: var(--diag-box-2); stroke: var(--diag-line); stroke-width: 1; }
+  .d-acc  { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.4; }
+  .d-zone { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 6 5; opacity: 0.8; }
+  .d-line { stroke: var(--diag-line); stroke-width: 1.4; fill: none; }
+  .d-flow { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+  .d-stop { stroke: var(--caution); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; }
+  .d-t    { fill: var(--ink); font-family: var(--sans); font-size: 13px; }
+  .d-t.b  { font-weight: 640; }
+  .d-s    { fill: var(--ink-2); font-family: var(--sans); font-size: 11.5px; }
+  .d-m    { fill: var(--ink-2); font-family: var(--mono); font-size: 11px; }
+  .d-lab  { fill: var(--accent); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; }
+  .d-cau  { fill: var(--caution); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; }
+  .d-hd   { fill: var(--accent); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; }
+
+  /* title slide */
+  .title-slide { justify-content: space-between; }
+  .title-mark { position: absolute; inset: 0; overflow: hidden; pointer-events: none; opacity: 0.5; }
+  .title-mark svg { position: absolute; right: -6%; top: 50%; transform: translateY(-50%); width: min(70vw, 60rem); height: auto; }
+  .contour { fill: none; stroke: var(--accent); stroke-width: 1.1; opacity: 0.35; }
+  .contour:nth-child(even) { opacity: 0.2; }
+  .colophon {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.6rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    padding-top: 0.9rem;
+  }
+  .colophon b { color: var(--accent); font-weight: 500; }
+
+  .rule-kicker {
+    font-family: var(--serif);
+    font-size: clamp(1.25rem, 1rem + 1.1vw, 2.1rem);
+    line-height: 1.3;
+    max-width: 30ch;
+    border-left: 3px solid var(--accent);
+    padding-left: 1.1rem;
+    text-wrap: pretty;
+  }
+
+  .split {
+    display: grid;
+    gap: clamp(1.2rem, 3vw, 3rem);
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+  @media (min-width: 60rem) {
+    .split { grid-template-columns: minmax(16rem, 0.85fr) minmax(0, 1.15fr); }
+    .split--wide { grid-template-columns: minmax(14rem, 0.6fr) minmax(0, 1.4fr); }
+  }
+
+  @media (max-width: 34rem) {
+    .log > div { grid-template-columns: 1fr; }
+    .log time { order: -1; }
+  }
+</style>
+<style>*,*::before,*::after{box-sizing:border-box}*{margin:0}img,svg{display:block;max-width:100%}</style>
+</head>
+<body>
+
+<!-- ============================== 01 title ============================== -->
+<section class="slide title-slide">
+  <span class="no"><b>01</b> / 12</span>
+  <div class="title-mark" aria-hidden="true">
+    <svg viewBox="0 0 800 620" role="presentation">
+      <path class="contour" d="M40 560 C 180 520, 250 430, 300 330 C 350 230, 430 150, 590 108 C 690 82, 760 78, 800 76"/>
+      <path class="contour" d="M40 500 C 190 462, 268 380, 322 288 C 380 190, 462 120, 610 84 C 700 62, 762 58, 800 56"/>
+      <path class="contour" d="M60 448 C 210 410, 292 330, 350 246 C 412 158, 496 96, 636 62"/>
+      <path class="contour" d="M110 400 C 250 360, 330 286, 392 208 C 452 132, 534 78, 660 46"/>
+      <path class="contour" d="M180 356 C 300 316, 378 246, 440 174 C 496 110, 570 62, 676 30"/>
+      <path class="contour" d="M262 316 C 358 278, 428 214, 486 146"/>
+      <circle cx="486" cy="146" r="3.5" fill="var(--accent)" stroke="none" opacity="0.7"/>
+    </svg>
+  </div>
+
+  <p class="eyebrow">Deploy control plane · <span class="m" style="text-transform:none;letter-spacing:0">apps/spindrift</span></p>
+
+  <div style="display:flex;flex-direction:column;gap:clamp(1rem,3vh,2rem)">
+    <h1>Spindrift</h1>
+    <p class="lede" style="max-width:32ch">A deployment is an artifact, a place, and a version of its config.</p>
+    <p class="small dim" style="max-width:46ch">Pin those three and almost everything people build deploy tooling for stops being a feature.</p>
+  </div>
+
+  <p class="colophon">
+    <span>One contract</span>
+    <span><b>3</b> parts</span>
+    <span>Auth <b>in the contract</b></span>
+  </p>
+</section>
+
+<!-- ============================== 02 problem ============================== -->
+<section class="slide">
+  <span class="no"><b>02</b> / 12</span>
+  <p class="eyebrow">The problem</p>
+  <h2>“I wrote a thing. Put it somewhere with a URL.”</h2>
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <p class="dim">Two Kubernetes clusters. A set of GCP projects. A network fabric. A working GitOps pipeline. None of it reduces that sentence to a few minutes.</p>
+      <p class="rule-kicker">Every step is solved infrastructure. Assembling them is the work — and it is the work every single time.</p>
+    </div>
+    <ol class="steps">
+      <li>Write a Dockerfile</li>
+      <li>Author a Helm release or a Kustomization</li>
+      <li>Find a hostname</li>
+      <li>Wire a route</li>
+      <li>Add a secret</li>
+      <li>Open a PR, wait for CI, wait for Flux</li>
+      <li>Read pod logs to find out why it did not come up</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================== 03 the contract ============================== -->
+<section class="slide">
+  <span class="no"><b>03</b> / 12</span>
+  <p class="eyebrow">The whole idea</p>
+  <h2>A deploy is three things, <em>pinned</em></h2>
+  <div class="lineage" style="margin-block:0.5rem">
+    <div><b>Artifact</b><span>what runs — by digest</span></div>
+    <div><b>Target</b><span>where it runs</span></div>
+    <div><b>configVersion</b><span>what it reads — by digest</span></div>
+  </div>
+  <p class="rule-kicker">Every part is named by <em>value</em>, not by reference. Nothing in the triple means “latest”.</p>
+  <p class="verbatim">deploy 2 · artifact files·sha256:1d7ea… · target bluenose/static · configVersion sha256:4f53cda1…</p>
+  <p class="small dim" style="max-width:60ch">A real row off the running installation. That line is the deployment — not a description of one, not a pointer to one. Reproducing it needs nothing that could have moved since.</p>
+</section>
+
+<!-- ============================== 04 lineage ============================== -->
+<section class="slide">
+  <span class="no"><b>04</b> / 12</span>
+  <p class="eyebrow">What makes the triple possible</p>
+  <h2>Identity is kept separate from placement</h2>
+  <div class="lineage">
+    <div><b>Source</b><span>one staged bundle, by digest</span></div>
+    <div><b>Build</b><span>component · commit · target-shape</span></div>
+    <div><b>Artifact</b><span>image | files, by digest</span></div>
+    <div><b>Deploy</b><span>the triple</span></div>
+  </div>
+  <div class="cols">
+    <div class="card card--flag">
+      <h4>One Build → one Artifact → many Deploys</h4>
+      <p>What was built never learns where it went. That one separation is what the rest of this deck is downstream of.</p>
+    </div>
+    <div class="card">
+      <h4>Two authored nouns</h4>
+      <p>A human writes an <b>App</b> and a <b>Component</b>. Build, Artifact and Deploy are produced, never typed.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 05 what it buys ============================== -->
+<section class="slide">
+  <span class="no"><b>05</b> / 12</span>
+  <p class="eyebrow">Consequences, not features</p>
+  <h2>Four things nobody had to build</h2>
+  <div class="cols">
+    <div class="card card--flag">
+      <span class="tag t-acc">Rollback</span>
+      <h4>An older triple</h4>
+      <p>Not a rebuild. Retention depth is 10, which is therefore also rollback depth.</p>
+    </div>
+    <div class="card card--flag">
+      <span class="tag t-acc">Two runtimes</span>
+      <h4>No new concept</h4>
+      <p>An artifact is <code>image</code> or <code>files</code>. Kubernetes, Cloud Run and static hosting are the same triple with a different <em>where</em>.</p>
+    </div>
+    <div class="card card--flag">
+      <span class="tag t-acc">Concurrency</span>
+      <h4>Impossible, not racy</h4>
+      <p>The triple is taken under a locking read against the transactional <code>Component@Target.desired</code> row.</p>
+    </div>
+    <div class="card card--flag">
+      <span class="tag t-acc">Config</span>
+      <h4>Cannot drift underneath</h4>
+      <p>Scoped to (Component, Target) and pinned by digest into the deploy — so a running deployment reads what it was deployed with.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 06 auth is desired state ============================== -->
+<section class="slide">
+  <span class="no"><b>06</b> / 12</span>
+  <p class="eyebrow">Auth, first-class</p>
+  <h2>Who may reach it is <em>part of the contract</em></h2>
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <p class="dim"><code>reach</code> and <code>auth</code> are fields on the Component, sitting in desired state beside the image and the config — not a policy bolted on afterwards, and not a wiki page about which ingress to copy.</p>
+      <p class="rule-kicker">So they are pinned into the deploy like everything else. A deployment records who could reach it, as a fact, at that version.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.9rem">
+      <div class="lineage">
+        <div><b>Internal</b><span>cluster only</span></div>
+        <div><b>Private</b><span>an RFC1918 address — the record type <em>is</em> the boundary</span></div>
+        <div><b>Public</b><span>through the tunnel</span></div>
+      </div>
+      <p class="small dim">Private is the default. Nothing becomes reachable because somebody forgot a field.</p>
+    </div>
+  </div>
+  <p class="verbatim">reach: private · auth: proxy   →   AUTH_UNSUPPORTED excludes every Target that cannot authenticate at that reach</p>
+  <p class="small dim" style="max-width:64ch">That is what first-class buys. A Target declares which reaches it can <em>authenticate</em>, not just which it can serve, and one that cannot is removed from placement before a build is ever dispatched. Auth decides <b>where you are allowed to deploy</b>.</p>
+</section>
+
+<!-- ============================== 07 auth, both sides ============================== -->
+<section class="slide">
+  <span class="no"><b>07</b> / 12</span>
+  <p class="eyebrow">Two boundaries, same discipline</p>
+  <h2>Enforced somewhere Spindrift does not own</h2>
+  <div class="cols cols--2">
+    <div class="card card--flag">
+      <span class="tag t-acc">The App edge</span>
+      <h4>A filter on the route, not a library in the app</h4>
+      <p>An <code>auth: proxy</code> Component gets an ExternalAuth filter on its HTTPRoute, enforced in-cluster by an authentication proxy that <b>Flux owns and Spindrift never installs</b>. Nothing is linked into the application; an App cannot opt itself out.</p>
+    </div>
+    <div class="card card--flag">
+      <span class="tag t-acc">The control plane</span>
+      <h4>A passkey against a real origin</h4>
+      <p>First run is one screen: an installation nobody has claimed shows enrolment, a claimed one shows sign-in, and there is no toggle. The token is consumed on use, so the window in which anyone else could claim it closes the moment enrolment completes. No password exists to phish.</p>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="card card--cau">
+      <h4>And it is allowed to disqualify a backend</h4>
+      <p>Static hosting refuses <code>auth: proxy</code> outright — there is no non-bypassable origin to put a boundary in front of, so the placement is rejected rather than shipped with a caveat. A guarantee that quietly degrades is not a guarantee.</p>
+    </div>
+    <div class="card">
+      <h4>The hostname is the ceremony</h4>
+      <p>A passkey is scoped to the origin in the address bar, so the control plane's hostname is picked before anything is installed. An installation with a placeholder hostname cannot enrol anybody — which is why that is step one of the runbook, not a detail.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 06 ownership ============================== -->
+<section class="slide">
+  <span class="no"><b>08</b> / 12</span>
+  <p class="eyebrow">Where the contract stops</p>
+  <h2>Terraform owns the vessel. Spindrift owns the <em>contents</em>.</h2>
+    <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 920 560" role="img" aria-label="Ownership boundary: Flux and Terraform provision vessel prerequisites; Spindrift writes only into the contents through delegated APIs, and clears missing prerequisites by opening a pull request that Atlantis applies.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--diag-line)"/>
+          </marker>
+        </defs>
+
+        <!-- vessel zone -->
+        <rect class="d-zone" x="340" y="40" width="560" height="336" rx="14"/>
+        <text class="d-hd" x="356" y="64">VESSEL — A CLUSTER OR A CLOUD PROJECT</text>
+
+        <!-- prerequisites -->
+        <rect class="d-box2" x="360" y="80" width="520" height="112" rx="8"/>
+        <text class="d-t b" x="378" y="106">Prerequisites — provisioned by whatever GitOps owns that platform</text>
+        <text class="d-s" x="378" y="132">Kubernetes: control-plane namespace · admission policy · target namespace + RBAC · edge workload</text>
+        <text class="d-s" x="378" y="152">GCP: project · VPC · tunnel · signing key · attestor · policy engine</text>
+        <text class="d-s" x="378" y="176">Shared operators · the authentication proxy · CA bundle · SOPS Secret · OCIRepository</text>
+
+        <!-- contents -->
+        <rect class="d-acc" x="360" y="222" width="520" height="132" rx="8"/>
+        <text class="d-t b" x="378" y="248">Contents — Spindrift owns these, through delegated APIs</text>
+        <text class="d-m" x="378" y="274">HelmRelease resources in `spindrift-apps`</text>
+        <text class="d-m" x="378" y="296">App resources inside the pre-provisioned vessel project</text>
+        <text class="d-s" x="378" y="324">It places workloads and never removes one: deleting an App or</text>
+        <text class="d-s" x="378" y="342">disconnecting a Target strands what is running, deliberately.</text>
+
+        <!-- left actors -->
+        <rect class="d-box" x="30" y="80" width="250" height="46" rx="6"/>
+        <text class="d-t b" x="46" y="102">Flux</text>
+        <text class="d-s" x="46" y="118">renders it on a Kubernetes Target</text>
+
+        <rect class="d-box" x="30" y="138" width="250" height="46" rx="6"/>
+        <text class="d-t b" x="46" y="160">Terraform</text>
+        <text class="d-s" x="46" y="176">renders it in GCP</text>
+
+        <path class="d-line" d="M280 103 L352 116" marker-end="url(#ahg)"/>
+        <path class="d-line" d="M280 161 L352 148" marker-end="url(#ahg)"/>
+
+        <!-- spindrift -->
+        <rect class="d-acc" x="30" y="250" width="250" height="88" rx="8"/>
+        <text class="d-t b" x="46" y="278">Spindrift</text>
+        <text class="d-s" x="46" y="298">the running controller —</text>
+        <text class="d-s" x="46" y="316">authority granted to it, not to a human</text>
+
+        <path class="d-flow" d="M280 300 L352 290" marker-end="url(#ah)"/>
+        <text class="d-lab" x="316" y="324" text-anchor="middle">writes</text>
+
+        <!-- barred: never creates -->
+        <path class="d-stop" d="M204 250 L300 202"/>
+        <path class="d-stop" d="M244 216 L262 236 M262 216 L244 236" stroke-dasharray="0"/>
+        <text class="d-cau" x="252" y="196" text-anchor="middle">never creates</text>
+
+        <text class="d-s" x="360" y="396">A cluster, namespace, project, VPC, tunnel, signing key or policy engine is never created by Spindrift.</text>
+
+        <!-- propose loop -->
+        <rect class="d-box" x="30" y="432" width="250" height="58" rx="6"/>
+        <text class="d-t b" x="46" y="456">Pull request</text>
+        <text class="d-s" x="46" y="474">the Terraform stanza + the root it belongs in</text>
+
+        <rect class="d-box" x="330" y="432" width="190" height="58" rx="6"/>
+        <text class="d-t b" x="346" y="456">Atlantis</text>
+        <text class="d-s" x="346" y="474">applies it</text>
+
+        <rect class="d-box" x="570" y="432" width="310" height="58" rx="6"/>
+        <text class="d-t b" x="586" y="456">The standing check turns the row green</text>
+        <text class="d-s" x="586" y="474">cleared outside Terraform? the row says so instead</text>
+
+        <path class="d-flow" d="M155 338 L155 424" marker-end="url(#ah)"/>
+        <text class="d-lab" x="166" y="392">unmet prerequisite</text>
+        <path class="d-flow" d="M280 461 L322 461" marker-end="url(#ah)"/>
+        <path class="d-flow" d="M520 461 L562 461" marker-end="url(#ah)"/>
+        <path class="d-flow" d="M725 432 L725 384" marker-end="url(#ah)"/>
+      </svg>
+    </div>
+    <figcaption>The contract governs contents, never the container. Spindrift places a triple inside a vessel somebody else provisioned, and when a prerequisite is missing it writes a pull request rather than the resource — which is also why the authentication proxy enforcing an App edge is one Flux owns and Spindrift only routes to.</figcaption>
+  </figure>
+
+</section>
+
+<!-- ============================== 07 supply chain ============================== -->
+<section class="slide">
+  <span class="no"><b>09</b> / 12</span>
+  <p class="eyebrow">Making the artifact half checkable</p>
+  <h2>One signature, <em>two verifiers</em></h2>
+    <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 940 530" role="img" aria-label="Supply chain: a source is staged to a bundle digest, built by one of four routes, producing one artifact digest; core verifies backend provenance against the target minimum SLSA level before signing with the KMS key, and two verifiers — Kyverno on clusters, Binary Authorization in the cloud — admit the deploy.">
+        <defs>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- source -->
+        <rect class="d-box" x="20" y="128" width="160" height="84" rx="6"/>
+        <text class="d-t b" x="36" y="152">Source</text>
+        <text class="d-s" x="36" y="172">repo at a commit</text>
+        <text class="d-s" x="36" y="190">or a ZIP upload</text>
+        <text class="d-s" x="36" y="206">— immutable, staged</text>
+
+        <rect class="d-box2" x="20" y="244" width="160" height="60" rx="6"/>
+        <text class="d-t b" x="36" y="266">Source receipt</text>
+        <text class="d-s" x="36" y="284">what was fetched or</text>
+        <text class="d-s" x="36" y="298">uploaded, by which principal</text>
+        <path class="d-flow" d="M100 212 L100 236" marker-end="url(#ah2)"/>
+        <text class="d-lab" x="112" y="230">signed</text>
+
+        <!-- bundle -->
+        <rect class="d-box" x="212" y="128" width="150" height="84" rx="6"/>
+        <text class="d-t b" x="228" y="152">Bundle digest</text>
+        <text class="d-m" x="228" y="174">sha256:…</text>
+        <text class="d-s" x="228" y="194">a required build</text>
+        <text class="d-s" x="228" y="208">parameter on every route</text>
+        <path class="d-flow" d="M180 170 L204 170" marker-end="url(#ah2)"/>
+
+        <!-- routes -->
+        <rect class="d-box" x="404" y="30" width="210" height="58" rx="6"/>
+        <text class="d-t b" x="420" y="52">Hosted CI</text>
+        <text class="d-s" x="420" y="72">GitHub Actions, SHA-pinned</text>
+        <text class="d-lab" x="598" y="52" text-anchor="end">SLSA L2</text>
+
+        <rect class="d-box" x="404" y="100" width="210" height="58" rx="6"/>
+        <text class="d-t b" x="420" y="122">Cloud builder</text>
+        <text class="d-s" x="420" y="142">Cloud Build</text>
+        <text class="d-lab" x="598" y="122" text-anchor="end">SLSA L2</text>
+
+        <rect class="d-box" x="404" y="170" width="210" height="58" rx="6"/>
+        <text class="d-t b" x="420" y="192">Pool — a bosun skiff</text>
+        <text class="d-s" x="420" y="212">a microVM host, dialling in</text>
+        <text class="d-lab" x="598" y="192" text-anchor="end">SLSA L2</text>
+
+        <rect class="d-box" x="404" y="240" width="210" height="58" rx="6"/>
+        <text class="d-t b" x="420" y="262">In-cluster Job</text>
+        <text class="d-s" x="420" y="282">offline-capable</text>
+        <text class="d-cau" x="598" y="262" text-anchor="end">SLSA L1</text>
+
+        <path class="d-flow" d="M362 158 L396 62" marker-end="url(#ah2)"/>
+        <path class="d-flow" d="M362 166 L396 132" marker-end="url(#ah2)"/>
+        <path class="d-flow" d="M362 174 L396 202" marker-end="url(#ah2)"/>
+        <path class="d-flow" d="M362 182 L396 272" marker-end="url(#ah2)"/>
+
+        <text class="d-s" x="404" y="322">Admin-ranked routes, chosen after placement. The same BuildKit program over the same staged bundle —</text>
+        <text class="d-s" x="404" y="338">so which route ran is a property of a Build, not a different pipeline.</text>
+
+        <!-- artifact -->
+        <rect class="d-box" x="660" y="128" width="200" height="84" rx="6"/>
+        <text class="d-t b" x="676" y="152">Artifact</text>
+        <text class="d-s" x="676" y="172">one digest, type image or files</text>
+        <text class="d-s" x="676" y="190">staged in trusted-builds/i,</text>
+        <text class="d-s" x="676" y="206">swept at 24h — ghcr holds it</text>
+        <path class="d-flow" d="M614 60 L652 150" marker-end="url(#ah2)"/>
+        <path class="d-flow" d="M614 130 L652 162" marker-end="url(#ah2)"/>
+        <path class="d-flow" d="M614 200 L652 182" marker-end="url(#ah2)"/>
+        <path class="d-stop" d="M614 272 L652 196"/>
+        <path class="d-stop" d="M625 226 L641 242 M641 226 L625 242" stroke-dasharray="0"/>
+        <text class="d-cau" x="752" y="246" text-anchor="end">an L2+ Target</text>
+        <text class="d-cau" x="752" y="262" text-anchor="end">refuses L1</text>
+
+        <!-- return rail -->
+        <path class="d-flow" d="M760 212 L760 352 Q760 362 750 362 L110 362 Q100 362 100 372 L100 388" marker-end="url(#ah2)"/>
+        <text class="d-lab" x="430" y="356" text-anchor="middle">the one artifact digest</text>
+
+        <!-- row two -->
+        <rect class="d-box2" x="20" y="392" width="196" height="92" rx="6"/>
+        <text class="d-t b" x="36" y="416">Verify</text>
+        <text class="d-s" x="36" y="436">the build backend's provenance</text>
+        <text class="d-s" x="36" y="452">against the Target minimum</text>
+        <text class="d-s" x="36" y="468">(default L2) — before signing</text>
+
+        <rect class="d-acc" x="248" y="392" width="196" height="92" rx="6"/>
+        <text class="d-t b" x="264" y="416">Sign &amp; attest</text>
+        <text class="d-s" x="264" y="436">KMS signer key in</text>
+        <text class="d-m" x="264" y="454">trusted-builds</text>
+        <text class="d-s" x="264" y="472">via the `provenance` attestor</text>
+        <path class="d-flow" d="M216 438 L240 438" marker-end="url(#ah2)"/>
+
+        <rect class="d-box" x="478" y="376" width="200" height="52" rx="6"/>
+        <text class="d-t b" x="494" y="398">Kyverno ClusterPolicy</text>
+        <text class="d-s" x="494" y="416">on the clusters, at admission</text>
+
+        <rect class="d-box" x="478" y="448" width="200" height="52" rx="6"/>
+        <text class="d-t b" x="494" y="470">Binary Authorization</text>
+        <text class="d-s" x="494" y="488">the vessel's own enforcing policy</text>
+
+        <path class="d-flow" d="M444 428 L470 404" marker-end="url(#ah2)"/>
+        <path class="d-flow" d="M444 450 L470 470" marker-end="url(#ah2)"/>
+        <text class="d-lab" x="478" y="444">one signature, two verifiers</text>
+
+        <rect class="d-acc" x="714" y="396" width="200" height="84" rx="6"/>
+        <text class="d-t b" x="730" y="422">Deploy — admitted</text>
+        <text class="d-s" x="730" y="442">an unsigned digest is rejected;</text>
+        <text class="d-s" x="730" y="460">a failed check is red, with no</text>
+        <text class="d-s" x="730" y="476">silent fallback</text>
+        <path class="d-flow" d="M678 402 L706 424" marker-end="url(#ah2)"/>
+        <path class="d-flow" d="M678 474 L706 452" marker-end="url(#ah2)"/>
+      </svg>
+    </div>
+    <figcaption>Because the artifact is named by digest, it is a thing a signature can be about. Four build routes converge on one digest; one key signs it; Kyverno on the clusters and Binary Authorization in the cloud each re-check it at admission.</figcaption>
+  </figure>
+
+</section>
+
+<!-- ============================== 10 the sibling ============================== -->
+<section class="slide">
+  <span class="no"><b>10</b> / 12</span>
+  <p class="eyebrow">A sibling, not a subsystem</p>
+  <h2>The fourth route arrived without a <em>new concept</em></h2>
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <p class="dim"><b>Bosun</b> is a peer project: a warm pool of ephemeral microVMs, each serving exactly one CI job before it is scuttled. It is not part of Spindrift and Spindrift does not run it — a Build is routed to it by label, and nothing else about it is known here.</p>
+      <p class="rule-kicker">The same shape this map has ruled four times. A registry, a base image, a log store, a Target — all of them <em>a place an admin connects</em>, never machinery the control plane owns.</p>
+      <p class="small dim">So a runner pool is not an exception being made. It is that ruling applied a fifth time, and the proof it was the right ruling is that the fourth build backend cost one row in a list.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:1.1rem">
+      <div class="cols">
+        <div class="card card--flag">
+          <span class="tag t-acc">The seam</span>
+          <h4>The only far side that dials in</h4>
+          <p>Every other route reaches out — a workflow dispatch, a cloud API, a Job on a cluster this process already holds a token for. A bosun host is an operator's machine Spindrift <b>cannot reach</b>. So the route writes an intent to an outbox row in its own Postgres and polls that row for a verdict, while the host long-polls in over three shared-secret endpoints.</p>
+        </div>
+        <div class="card card--flag">
+          <span class="tag t-acc">Why it earns its place</span>
+          <h4>A hosted outage stops being fatal</h4>
+          <p>Two of the three original routes are somebody else's service. The pool is the one that keeps building when they are down — and it clears the same <span class="m">SLSA L2</span> bar, verified against the build hull's own builder identity before core signs the digest.</p>
+        </div>
+      </div>
+      <p class="verbatim">claim · heartbeat · result   →   the endpoint just happens to be this installation's own database</p>
+      <p class="small dim" style="max-width:64ch">Its deck is a sibling of this one, deployed the same way through the same product: <b>bosun-slides-web.web.app</b></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 10 proven ============================== -->
+<section class="slide">
+  <span class="no"><b>11</b> / 12</span>
+  <p class="eyebrow">Evidence, not assertion</p>
+  <h2>Every clause proven on a <em>live</em> installation</h2>
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <p class="rule-kicker">Enrolment. Target connection. Archive to URL. Repository to signed artifact. Admission on a second Target.</p>
+      <p class="small dim">Not fixtures — a running installation, with the digests, build numbers and response codes written down each time. An independent confirmer re-observed the last of them from scratch.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:1.1rem">
+      <div class="stats">
+        <div class="stat"><b>2,065</b><span>tests green</span></div>
+        <div class="stat"><b>5</b><span>clauses proven live</span></div>
+        <div class="stat"><b>3/4</b><span>Targets healthy on first probe</span></div>
+        <div class="stat stat--cau"><b>4</b><span>defects only a live install found</span></div>
+      </div>
+      <ul class="ticks">
+        <li>Two Terraform roots that each need the other applied first — the runbook stated one direction.</li>
+        <li>A derived string carries no dependency edge, so grants ran before the account they named existed.</li>
+        <li>Six prerequisite rows failing with one byte-identical 401.</li>
+        <li>A read on a URL the API does not serve, which made a second deploy collide with the site the first one created — so a static App could be published exactly once.</li>
+      </ul>
+      <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">That last one is fixed, and <b>this revision is the proof</b>: these words reached you as a second deploy onto the site the first one made.</p>
+      <p class="small dim">Three of the four are wrong <em>sentences</em> shown to an operator. No passing suite would ever have caught them.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 09 close ============================== -->
+<section class="slide">
+  <span class="no"><b>12</b> / 12</span>
+  <p class="eyebrow">Where it stands</p>
+  <h2>This page is its own acceptance evidence</h2>
+  <p class="lede" style="max-width:44ch">Uploaded as an archive. Built on the hosted route into a <span class="m">files</span> artifact. Served at a URL by the thing it describes.</p>
+  <div class="cols">
+    <div class="card card--flag">
+      <h4>What the contract cost</h4>
+      <p>Three fields on a row. Everything else in this deck — rollback, two runtimes, safe concurrency, an auth boundary that cannot be opted out of — is downstream of deciding to name things by value.</p>
+    </div>
+    <div class="card card--cau">
+      <h4>Open</h4>
+      <p>The v1 gate waits on the remaining ticket set. The defects still outstanding are mostly wrong <em>sentences</em> shown to an operator — the failure mode a green suite is worst at catching.</p>
+    </div>
+  </div>
+  <p class="colophon">
+    <span>Artifact <b>+</b> Target <b>+</b> configVersion</span>
+    <span>Everything else is bookkeeping</span>
+  </p>
+</section>
+
+</body>
+</html>
