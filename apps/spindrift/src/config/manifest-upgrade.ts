@@ -48,9 +48,47 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return scrubPlaceholderBuildWorkflow(
-    nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+  return movePinnedBuildWorkflowToMain(
+    scrubPlaceholderBuildWorkflow(
+      nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+    ),
   );
+}
+
+/**
+ * The one sha this repository's own seed declarations ever pinned, moved to
+ * `@main`.
+ *
+ * The reusable workflow ref may move — see the `buildWorkflow` docblock in
+ * `manifest.schema.ts`: a branch keeps every written caller current, and the
+ * platform repository's merge gate is the version gate. The seed declarations
+ * state `@main` now, but an installation seeded before that edit holds the pin
+ * where no mounted correction can reach it — the stored row governs — and
+ * every caller it writes into a connected repository copies a workflow frozen
+ * at that commit.
+ *
+ * Exact-match on the one historical value, never a pattern: any other ref is
+ * an operator's pin, and it is theirs whatever it names.
+ */
+function movePinnedBuildWorkflowToMain(document: unknown): unknown {
+  const manifest = asDocument(document);
+  const github = asDocument(manifest?.github);
+  if (
+    manifest === null ||
+    github === null ||
+    github.buildWorkflow !==
+      'jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6'
+  ) {
+    return document;
+  }
+  return {
+    ...manifest,
+    github: {
+      ...github,
+      buildWorkflow:
+        'jonpulsifer/infra/.github/workflows/spindrift-build.yml@main',
+    },
+  };
 }
 
 /**

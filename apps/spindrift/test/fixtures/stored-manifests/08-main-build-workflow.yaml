@@ -1,12 +1,20 @@
-# A stored manifest holding `05` after the scrub, which is also what a fresh
-# chart seed states — `github.buildWorkflow: null`, the schema's own word for
-# "no workflow published". `connectRepository` refuses on it until an operator
-# states a real one; nothing else in the document changes.
+# A stored manifest as this build writes one: `07` after
+# `movePinnedBuildWorkflowToMain`, which is also what the seed declarations
+# state — `github.buildWorkflow` at `@main`, so every caller written into a
+# connected repository stays current with the platform repository's merge gate.
+#
+# **The newest file in this corpus, and the test asserts this build needs no
+# upgrade to read it.** That is the forcing function: change the manifest schema
+# in any way that stops accepting this document, and the assertion fails. The
+# fix is never to edit this file — it is to copy it to the next number, edit
+# *that* to the new shape, and teach `manifest-upgrade.ts` how to get from here
+# to there. Doing it the other way round is exactly how a schema change reaches
+# production able to discard a configured installation.
 #
 # `installation.name` differs from every declaration this suite mounts, for the
 # reason `01` gives.
 installation:
-  name: stored-with-null-build-workflow
+  name: stored-with-main-build-workflow
   controlPlaneVessel: cluster
   homeVessel: cloud
 
@@ -37,7 +45,7 @@ github:
   clientId: Iv1.example
   oauthBaseUrl: https://git.example.test
   apiBaseUrl: https://api.git.example.test
-  buildWorkflow: null
+  buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@main
 
 build:
   routes:
