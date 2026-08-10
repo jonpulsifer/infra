@@ -22,7 +22,8 @@ data "google_storage_bucket_objects" "files" {
 }
 
 locals {
-  # Same lexicographic trap as tender's image; see bosun.tf.
+  # GCS lists objects lexicographically, so element zero is the oldest name
+  # the moment the prefix holds more than one build; the newest is last.
   nixos_image_object = reverse(sort([
     for o in data.google_storage_bucket_objects.files.bucket_objects : o.name
   ]))[0]

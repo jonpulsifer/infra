@@ -19,12 +19,6 @@ creation_rules:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
           # riptide (ssh-to-age of its ed25519 host key)
           - age15ylde96ar2x0q5gzqrxhkheh5puwtqf0rkuv6khgsv3xfhqu35hquw70ym
-  - path_regex: nix/secrets/tender\.sops\.ya?ml
-    key_groups:
-      - age:
-          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
-          # tender (ssh-to-age of its ed25519 host key, 2026-08-10 boot)
-          - age1r3g45ssdtcvjuz07n7cp4d2jrngpx03ekkggq0hk4pgx5ky70sgsqnvx3l
   - path_regex: nix/secrets/optiplex\.sops\.ya?ml
     key_groups:
       - age:

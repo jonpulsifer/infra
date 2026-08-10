@@ -177,8 +177,11 @@ spec:
           # is the route that still works when the Actions plane is down.
           # The builder id must match the constant the build-hull stamps
           # into its provenance statement (nix/images/hull-ubuntu.nix,
-          # buildRun) — a mismatch fails closed at verification. The class
-          # names tender's skiff-build-xl pool (nix/hosts/tender.nix).
+          # buildRun) — a mismatch fails closed at verification. No host
+          # serves the class while tender rests; the route stays declared so
+          # a resurrection serves it with no configuration steps, and a
+          # build that falls through to it times out at the build budget
+          # rather than hanging forever.
           - name: pool
             adapter: bosun
             class: skiff-build-xl
