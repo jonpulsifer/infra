@@ -284,7 +284,7 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
         // The two fields `restricted` demands that exist only on a container,
         // so the pod block above cannot supply them. Every container in the pod
         // needs them, and this operator builds **two**: `server`, patched here,
-        // and a `metrics-exporter` sidecar it adds unasked — which has its own
+        // and the metrics exporter sidecar it adds unasked — which has its own
         // spec field rather than living in `containers`, and so is set below.
         // Admission fails the whole pod on the one that is missing them, which
         // is why hardening only the obvious container hardens nothing.
