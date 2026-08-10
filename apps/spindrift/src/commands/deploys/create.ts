@@ -40,10 +40,14 @@ import {
   builds,
   components,
   componentTargetDesired,
+  datastores,
   deploys,
 } from '../../db/schema.ts';
 import { DEFAULT_MINIMUM_BUILD_LEVEL } from '../../domain/build-route.ts';
-import type { DesiredDocument } from '../../domain/desired-state.ts';
+import {
+  DATASTORE_VARIABLE,
+  type DesiredDocument,
+} from '../../domain/desired-state.ts';
 import {
   artifactTypeFor,
   DEFAULT_PLATFORM,
@@ -163,6 +167,17 @@ export type DeployCheck =
 /** Refuse a check, in the envelope a command returns unchanged. */
 function refuse(code: CommandFailureCode, message: string): DeployCheck {
   return { ok: false, failure: { code, message } };
+}
+
+/**
+ * The Datastores a refusal is about, named the way their owner named them.
+ *
+ * Every one that is wrong, not the first: a developer who fixes the one the
+ * message named and is refused again for the next has been told a fact rather
+ * than the problem.
+ */
+function names(rows: readonly { readonly name: string }[]): string {
+  return rows.map((row) => row.name).join(', ');
 }
 
 export const createDeploy: Command<
@@ -479,6 +494,51 @@ export async function checkDeployable(
 
   const config = await readPinnedConfig(context.db, component.id, target.id);
 
+  // §11: "Delivery follows the Datastore's placement." Attached at the App, so
+  // every Component of the App is released with the same set — which is what
+  // makes the two refusals below properties of the release rather than of one
+  // Component.
+  const attached = await context.db
+    .select({
+      name: datastores.name,
+      engine: datastores.engine,
+      connectionRef: datastores.connectionRef,
+      targetId: datastores.targetId,
+    })
+    .from(datastores)
+    .where(eq(datastores.appId, app.id));
+
+  // An in-cluster Datastore is cluster-local, and the credential is delivered
+  // as a `secretKeyRef` at the operator's own Secret — a reference that cannot
+  // leave the namespace it is rendered in, let alone the cluster. Released
+  // anyway, the pod sits in `CreateContainerConfigError` and the Deploy reports
+  // a timeout rather than the cause.
+  //
+  // `checkDeployable` runs `reachExclusions` only, deliberately (above), so
+  // `placement.ts`'s `DATASTORE_IS_CLUSTER_LOCAL` — the same fact, asked where a
+  // Target is *offered* — does not cover this path. Asked again here for the
+  // reason the reach gate is: a boundary enforced only where a placement is
+  // offered is advisory.
+  const elsewhere = attached.filter((row) => row.targetId !== target.id);
+  if (elsewhere.length > 0) {
+    return refuse(
+      'NOT_DEPLOYABLE',
+      `${targetRowLabel(target)} cannot reach ${names(elsewhere)} — a Datastore is delivered only to the Target it lives on`,
+    );
+  }
+
+  // Still provisioning: the operator has not generated the credential yet, so
+  // there is no reference to render. This is the config demand rule above read
+  // for datastores — a release that comes up green with no `DATABASE_URL` is
+  // precisely what refusing before the intent exists to prevent.
+  const unprovisioned = attached.filter((row) => row.connectionRef === null);
+  if (unprovisioned.length > 0) {
+    return refuse(
+      'NOT_DEPLOYABLE',
+      `${names(unprovisioned)} ${unprovisioned.length === 1 ? 'is' : 'are'} still provisioning and ${unprovisioned.length === 1 ? 'has' : 'have'} no connection to deliver yet`,
+    );
+  }
+
   return {
     ok: true,
     value: {
@@ -500,6 +560,20 @@ export async function checkDeployable(
           ? {}
           : { schedule: component.schedule }),
         config: config.document,
+        // Optional, so absent rather than an empty array: an App with nothing
+        // attached pins the document it always pinned, and a `desired` written
+        // before datastores existed reads back identically to one written now.
+        ...(attached.length === 0
+          ? {}
+          : {
+              datastores: attached.map((row) => ({
+                // Resolved here, once, and pinned resolved — exactly as §10
+                // pins resolved config variable names. Nothing downstream ever
+                // sees the engine.
+                name: DATASTORE_VARIABLE[row.engine],
+                connection: row.connectionRef as string,
+              })),
+            }),
         // §3 keeps core out of scheduling and detection has not landed, so
         // nothing states a platform or a size yet. Pinned as the constant it
         // has always been applied as, so that the day something does state one

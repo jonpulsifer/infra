@@ -660,3 +660,90 @@ describe('config delivery', () => {
     expect(pod.volumes).toEqual([{ name: 'tmp', emptyDir: {} }]);
   });
 });
+
+describe('datastore delivery', () => {
+  /**
+   * One Datastore of each engine, as Spindrift renders them (§11).
+   *
+   * The two shapes are what the engines actually are, not a chart preference:
+   * CloudNativePG generates a credential and puts it in a Secret it owns, and
+   * Valkey as this platform runs it authenticates nobody, so its connection is
+   * an address. The chart tells them apart by which key is present — it is
+   * never told which engine either one is.
+   */
+  const ATTACHED = {
+    app: {
+      datastores: [
+        { name: 'DATABASE_URL', secretName: 'orders-app', secretKey: 'uri' },
+        {
+          name: 'REDIS_URL',
+          value: 'redis://cache.spindrift-apps.svc.cluster.local:6379',
+        },
+      ],
+    },
+  };
+
+  /** The container's env, keyed by variable, from whichever workload rendered. */
+  function env(object: {
+    spec?: any;
+  }): Record<string, { value?: string; valueFrom?: any }> {
+    const containers =
+      object.spec.template?.spec.containers ??
+      object.spec.jobTemplate.spec.template.spec.containers;
+    return Object.fromEntries(
+      containers[0].env.map((entry: { name: string }) => [entry.name, entry]),
+    );
+  }
+
+  test('a generated credential is read straight from the operator-owned Secret', async () => {
+    const variables = env(one(await render(ATTACHED), 'Deployment'));
+
+    // The operator's key, not the variable's — the whole connection string is
+    // under `uri` in CloudNativePG's `<cluster>-app` Secret, and that Secret is
+    // not one this chart materializes.
+    expect(variables.DATABASE_URL?.valueFrom.secretKeyRef).toEqual({
+      name: 'orders-app',
+      key: 'uri',
+    });
+    expect(variables.DATABASE_URL?.value).toBeUndefined();
+  });
+
+  test('an address with no credential in it is rendered as a value', async () => {
+    const variables = env(one(await render(ATTACHED), 'Deployment'));
+
+    expect(variables.REDIS_URL?.value).toBe(
+      'redis://cache.spindrift-apps.svc.cluster.local:6379',
+    );
+    expect(variables.REDIS_URL?.valueFrom).toBeUndefined();
+  });
+
+  test('the credential never travels the pinned-store path', async () => {
+    // The assertion that pins the design: an attached Datastore renders no
+    // ExternalSecret, so it demands no `platform.secretStore.name` — which the
+    // baseline leaves empty, and which config delivery refuses to render
+    // without. If this ever starts failing, the credential has been routed
+    // through Spindrift's own store seam and is being copied rather than
+    // referenced.
+    const objects = await render(ATTACHED);
+    expect(kinds(objects)).not.toContain('ExternalSecret');
+  });
+
+  test('a job gets its connections too', async () => {
+    // Both workloads reach the container through `spindrift-app.podSpec`, so
+    // this is a claim that nothing branched on kind on the way — a scheduled
+    // task that needs a database is the ordinary case, not an exception.
+    const variables = env(
+      one(
+        await render({ ...ATTACHED, app: { ...ATTACHED.app, kind: 'job' } }),
+        'CronJob',
+      ),
+    );
+
+    expect(variables.DATABASE_URL?.valueFrom.secretKeyRef.name).toBe(
+      'orders-app',
+    );
+    expect(variables.REDIS_URL?.value).toBe(
+      'redis://cache.spindrift-apps.svc.cluster.local:6379',
+    );
+  });
+});

@@ -40,6 +40,7 @@ import {
   builds,
   components,
   componentTargetDesired,
+  datastores,
   deploys,
   targets,
 } from '../../src/db/schema.ts';
@@ -1609,5 +1610,158 @@ describe('§16: verify → sign → record is fail-closed', () => {
     expect(row?.status).toBe('FAILED');
     expect(row?.signature).toBeNull();
     expect(row?.artifactDigest).toBeNull();
+  });
+});
+
+describe('§11: an attached Datastore is pinned into the intent', () => {
+  /** A managed Datastore on a Target, with or without a connection yet. */
+  async function attach(
+    appId: string,
+    targetId: string,
+    engine: 'postgres' | 'valkey',
+    connectionRef: string | null,
+  ) {
+    const [row] = await database()
+      .db.insert(datastores)
+      .values({
+        name: `${engine}-store`,
+        engine,
+        provenance: 'managed',
+        appId,
+        targetId,
+        connectionRef,
+      })
+      .returning();
+    return row!;
+  }
+
+  test('a Datastore with no connection yet refuses the release', async () => {
+    // The operator has not generated the credential, so there is no reference
+    // to render. Released anyway, the App comes up green with the variable it
+    // was configured with missing — which is the state §10's config demand rule
+    // exists to prevent, read for datastores.
+    const { app, component, target } = await fixture();
+    await attach(app.id, target.id, 'postgres', null);
+    const build = await succeededBuild(component.id, 80);
+
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain('postgres-store');
+    expect(result.failure.message).toContain('provisioning');
+    // Refused before the intent exists, so the loop has nothing to find.
+    expect(await desiredRow(component.id, target.id)).toBeUndefined();
+  });
+
+  test('a Datastore on another Target refuses the release, and says which', async () => {
+    // A `secretKeyRef` cannot leave the namespace it renders in, let alone the
+    // cluster. Released anyway, the pod sits in CreateContainerConfigError and
+    // the Deploy reports a timeout rather than the cause.
+    const { app, component, target, label } = await fixture();
+    const other = await insertVessel(database().db, 'kubernetes', {
+      name: `cluster-${crypto.randomUUID()}`,
+    });
+    const [elsewhere] = await database()
+      .db.insert(targets)
+      .values(
+        targetValues({
+          adapter: 'kubernetes',
+          vesselId: other.id,
+          discovery: null,
+        }),
+      )
+      .returning();
+    await attach(
+      app.id,
+      elsewhere!.id,
+      'postgres',
+      'secret://spindrift-apps/postgres-store-app',
+    );
+    const build = await succeededBuild(component.id, 81);
+
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain(label);
+    expect(result.failure.message).toContain('postgres-store');
+  });
+
+  test('the variable each engine is read through is fixed, and pinned resolved', async () => {
+    // This is the assertion that fails if anyone renames the variables, makes
+    // them settable, or routes a datastore back through `ConfigEntry` — which
+    // would put a pinned version on a credential whose rotation the engine's
+    // operator owns.
+    const { app, component, target } = await fixture();
+    await attach(
+      app.id,
+      target.id,
+      'postgres',
+      'secret://spindrift-apps/postgres-store-app',
+    );
+    await attach(
+      app.id,
+      target.id,
+      'valkey',
+      'redis://valkey-store.spindrift-apps.svc.cluster.local:6379',
+    );
+    const build = await succeededBuild(component.id, 82);
+
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter())),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const [row] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.id, result.value.deployId));
+    expect(
+      [...(row?.desired.datastores ?? [])].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    ).toEqual([
+      {
+        name: 'DATABASE_URL',
+        connection: 'secret://spindrift-apps/postgres-store-app',
+      },
+      {
+        name: 'REDIS_URL',
+        connection:
+          'redis://valkey-store.spindrift-apps.svc.cluster.local:6379',
+      },
+    ]);
+  });
+
+  test('an App with nothing attached pins the document it always pinned', async () => {
+    // Absent, not an empty array: the field is optional so that a `desired`
+    // written before §11's delivery existed reads back identically to one
+    // written now, and nothing has to migrate.
+    const { component, target } = await fixture();
+    const build = await succeededBuild(component.id, 83);
+
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(registryOf(capableAdapter())),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const [row] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.id, result.value.deployId));
+    expect(row?.desired.datastores).toBeUndefined();
   });
 });

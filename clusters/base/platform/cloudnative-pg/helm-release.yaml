@@ -1,0 +1,34 @@
+---
+# The four fields below the chart pin are written out rather than inherited.
+#
+# Under `clusters/<site>/apps` this HelmRelease was reshaped by that overlay's
+# blanket HelmRelease patches — `spec.interval`, `spec.maxHistory`,
+# `spec.upgrade`, and `spec.chart.spec.interval` on the sources that have one.
+# A path under `clusters/base/platform` is reconciled by its own Flux
+# Kustomization and never passes through those patches, so an operator that
+# looked reconciled would quietly be running the chart's own defaults: no
+# history bound and no `cleanupOnFail`, which is how a failed upgrade leaves a
+# release stuck pending rather than rolling back.
+#
+# The values are the ones the app overlays set, not new ones. Changing them here
+# is a decision about the operator alone, which is the point of the move.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+  namespace: cloudnative-pg
+spec:
+  interval: 5m0s
+  maxHistory: 2
+  chart:
+    spec:
+      chart: cloudnative-pg
+      version: 0.28.2
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+      interval: 10m0s
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 5

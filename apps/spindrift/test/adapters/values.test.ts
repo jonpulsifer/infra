@@ -27,7 +27,15 @@
 
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
+import {
+  appValues,
+  VALUES_CONTRACT,
+} from '../../src/adapters/deploy/kubernetes/values.ts';
+import type {
+  DatastoreAttachment,
+  DesiredState,
+} from '../../src/domain/desired-state.ts';
+import { DEFAULT_PLATFORM } from '../../src/domain/placement.ts';
 
 const CHART_YAML = join(
   import.meta.dir,
@@ -43,5 +51,73 @@ describe('the value contract has two halves and they must agree', () => {
     expect(chart.annotations?.['spindrift.dev/values-contract']).toBe(
       VALUES_CONTRACT,
     );
+  });
+});
+
+describe('a connection reference becomes an env entry (§11)', () => {
+  function desiredWith(
+    datastores: readonly DatastoreAttachment[],
+  ): DesiredState {
+    return {
+      deploy: 'deploy-1',
+      app: 'shop',
+      component: 'web',
+      target: 'metal/kubernetes',
+      kind: 'service',
+      artifact: { type: 'image', digest: 'sha256:feed', refs: [] },
+      reach: 'private',
+      auth: 'proxy',
+      config: [],
+      datastores,
+      requirements: { platform: DEFAULT_PLATFORM, resources: {} },
+      hostname: { canonical: 'shop-web.apps.example.test' },
+    };
+  }
+
+  test('a secret reference names the operator-owned Secret and its own key', () => {
+    // `uri` is CloudNativePG's key for the whole connection string in the
+    // `<cluster>-app` Secret it generates — a Kubernetes fact, parsed here
+    // rather than in `domain/`, which stores the reference opaque.
+    const values = appValues(
+      desiredWith([
+        {
+          name: 'DATABASE_URL',
+          connection: 'secret://spindrift-apps/orders-app',
+        },
+      ]),
+      'registry.example.test/shop/web@sha256:feed',
+    );
+
+    expect(values.datastores).toEqual([
+      { name: 'DATABASE_URL', secretName: 'orders-app', secretKey: 'uri' },
+    ]);
+  });
+
+  test('an address carries no credential, so it is a plain value', () => {
+    const values = appValues(
+      desiredWith([
+        {
+          name: 'REDIS_URL',
+          connection: 'redis://cache.spindrift-apps.svc.cluster.local:6379',
+        },
+      ]),
+      'registry.example.test/shop/web@sha256:feed',
+    );
+
+    expect(values.datastores).toEqual([
+      {
+        name: 'REDIS_URL',
+        value: 'redis://cache.spindrift-apps.svc.cluster.local:6379',
+      },
+    ]);
+  });
+
+  test('a document pinned before §11 renders no datastores at all', () => {
+    const { datastores: _pinned, ...before } = desiredWith([]);
+
+    expect(
+      appValues(before, 'registry.example.test/shop/web@sha256:feed')
+        .datastores,
+    ).toEqual([]);
   });
 });

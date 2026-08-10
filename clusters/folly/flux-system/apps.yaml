@@ -12,6 +12,13 @@ spec:
     kind: GitRepository
     name: infra
   dependsOn:
+    # The operator installs `postgresql.cnpg.io/v1` and this overlay declares
+    # Cluster objects of that kind. While the operator lived inside `apps` the
+    # ordering was Flux's problem to solve within one Kustomization; now that it
+    # is its own, the CRD can be absent when `apps` first applies — and Flux
+    # dry-runs every object in a Kustomization before applying any, so one
+    # unknown kind refuses the whole overlay rather than just itself.
+    - name: cloudnative-pg
     - name: monitoring
   decryption:
     provider: sops

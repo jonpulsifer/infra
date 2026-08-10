@@ -269,32 +269,34 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
   ): Promise<DatastoreConnection | null> {
     if (parsed.engine === 'postgres') {
       // CloudNativePG names the application credential `<cluster>-app` and puts
-      // `uri`, `host`, `port`, `dbname`, `username` and `password` in it. Read
-      // back rather than assumed: a bootstrap that has not reached the initdb
-      // step yet has no such Secret, and reporting a reference to one that is
-      // not there would configure an App against nothing.
-      const secret = `${parsed.name}-app`;
-      const found = await api.get({
-        apiVersion: 'v1',
-        plural: 'secrets',
-        namespace: parsed.namespace,
-        name: secret,
-      });
-      return found === null ? null : `secret://${parsed.namespace}/${secret}`;
+      // `uri`, `host`, `port`, `dbname`, `username` and `password` in it.
+      //
+      // Asserted rather than read back, and the caller is why: this is only
+      // reached at `phase === 'LIVE'`, which for this engine *is* CNPG's
+      // `Ready=True` condition — written downstream of the bootstrap that
+      // creates the Secret. A `get` here could only ever confirm what the
+      // condition already stated, and it would cost the one grant this whole
+      // design exists to avoid: RBAC matches `resourceNames` literally, so
+      // reading `<cluster>-app` means reading every Secret in the namespace.
+      return `secret://${parsed.namespace}/${parsed.name}-app`;
     }
-    // The Valkey operator fronts a cluster with a Service of the same name. The
-    // same read-back rule applies, and for a sharper reason: this is the one
-    // fact here that is a naming convention rather than a documented API field,
-    // so it is confirmed against the cluster instead of asserted.
+    // The Valkey operator fronts a cluster with a Service of the same name.
+    // Confirmed against the cluster rather than asserted, because this is the
+    // one fact here that is a naming convention rather than a documented API
+    // field — and `services: get` is a grant that names an ordinary object.
     const service = await api.get({
       apiVersion: 'v1',
       plural: 'services',
       namespace: parsed.namespace,
       name: parsed.name,
     });
+    // `redis://`, not `valkey://`. This fills `REDIS_URL` (the variable is fixed
+    // by engine), and every client that reads it — node-redis, ioredis,
+    // redis-py — parses `redis://` and rejects a scheme it does not know. A
+    // scheme naming the server would be honest and unusable.
     return service === null
       ? null
-      : `valkey://${parsed.name}.${parsed.namespace}.svc:6379`;
+      : `redis://${parsed.name}.${parsed.namespace}.svc:6379`;
   }
 }
 

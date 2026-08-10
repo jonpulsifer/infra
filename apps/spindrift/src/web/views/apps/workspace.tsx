@@ -132,6 +132,37 @@ export type SetConfig = (change: {
   | { readonly ok: false; readonly message: string }
 >;
 
+/**
+ * Creating one managed Datastore on the Target this workspace is placed on
+ * (§11), as the screen above needs it answered.
+ *
+ * No Target on the shape, for the reason {@link SetConfig} carries no pair: the
+ * workspace has exactly one placement on screen and the screen above binds it
+ * once. No variable name either, ever — the name a connection is read through
+ * is fixed by engine (`DATABASE_URL`, `REDIS_URL`), so offering a field for it
+ * would be offering a choice that core does not accept.
+ */
+export type CreateDatastore = (create: {
+  readonly name: string;
+  readonly engine: 'postgres' | 'valkey';
+}) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
+ * Attaching, detaching or destroying one Datastore, by id.
+ *
+ * One shape for the three because they take the same argument and answer the
+ * same question — the App is bound by the screen above, exactly as it is for
+ * {@link SetConfig}, and every refusal these three carry is a sentence core
+ * composed. Three separate types would differ only in their name.
+ */
+export type DatastoreAct = (
+  datastoreId: string,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
 export function Workspace({
   view,
   onDeploy,
@@ -144,6 +175,10 @@ export function Workspace({
   onSelectComponent,
   onRunJob,
   onSetAutoDeploy,
+  onCreateDatastore,
+  onAttachDatastore,
+  onDetachDatastore,
+  onDestroyDatastore,
   onFollowExecution,
   executionLines,
   tab = 'overview',
@@ -202,6 +237,18 @@ export function Workspace({
    * at all rather than rendered dead.
    */
   onSetAutoDeploy?: SetAutoDeploy;
+  /**
+   * The four acts a Datastore has (§11). Absent where the screen wires no acts,
+   * for the same reason {@link onSetReach} is.
+   *
+   * `onCreateDatastore` is additionally absent where the placed Target's
+   * adapter cannot provision one — see the call site below, which decides it on
+   * the **adapter type** rather than on what the adapter claims to serve.
+   */
+  onCreateDatastore?: CreateDatastore;
+  onAttachDatastore?: DatastoreAct;
+  onDetachDatastore?: DatastoreAct;
+  onDestroyDatastore?: DatastoreAct;
   /** Follow one run's output, or nothing when the name is `null`. */
   onFollowExecution?: (execution: string | null) => void;
   /** The lines of whichever run is being followed. */
@@ -341,7 +388,27 @@ export function Workspace({
                 ? {}
                 : { onSelectComponent })}
             />
-            <Datastores datastores={view.datastores} />
+            {/*
+              Creating is offered on a `kubernetes` placement and nowhere else,
+              and the test is the **adapter type**, not what the adapter says it
+              serves: the cloud adapter claims both engines deliberately and
+              throws `UNIMPLEMENTED` from every verb, because a Vessel carries
+              no network to place a private endpoint in. Asking by engine would
+              render a form whose every submission is refused. The other three
+              stay offered whatever the placement: they act on rows that already
+              exist, and a Datastore that got created somehow — externally
+              registered, or created while the App sat on another Target — is
+              still one an operator has to be able to detach.
+            */}
+            <Datastores
+              datastores={view.datastores}
+              {...(onCreateDatastore && view.target === 'kubernetes'
+                ? { onCreateDatastore }
+                : {})}
+              {...(onAttachDatastore ? { onAttachDatastore } : {})}
+              {...(onDetachDatastore ? { onDetachDatastore } : {})}
+              {...(onDestroyDatastore ? { onDestroyDatastore } : {})}
+            />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {/*
@@ -1021,18 +1088,93 @@ export function ReachEditor({
 }
 
 /**
+ * What one Datastore's row says.
+ *
+ * The phase is in the line rather than in the badge, which stays the engine —
+ * the engine is what a reader scans this column for, and it is the fact that
+ * decides which variable the connection arrives on. Without the phase the row
+ * read as finished the instant it was asked for: a CloudNativePG cluster takes
+ * minutes to bootstrap, and `postgres · managed · Metal` said nothing about
+ * which of those minutes this is. `detail` is the operator's own sentence and
+ * is stated only where there is one, so an ordinary row is not padded with an
+ * empty segment.
+ */
+function datastoreDetail(datastore: DatastoreView): string {
+  const parts = [
+    datastore.provenance,
+    datastore.target,
+    datastore.phase,
+    datastore.attachedTo ? `attached to ${datastore.attachedTo}` : 'unattached',
+  ];
+  if (datastore.detail) parts.push(datastore.detail);
+  return parts.join(' · ');
+}
+
+/**
  * §11: Datastores are top-level and attached, never a field. An unattached one
  * is still listed — it exists whether or not this App uses it, and attaching it
  * is an act with placement consequences (§3), not a toggle.
+ *
+ * **Every act is a command, and every refusal is core's sentence.** Attaching
+ * carries the rules — one store per engine per App, cluster-local placement —
+ * and destroying refuses while attached, so nothing here guesses at whether a
+ * button will be accepted; it presses, and reports what came back. The one
+ * refusal composed on this side is the absence of a handler, which is the
+ * both-or-neither rule the section header already enforces.
  */
-function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
+function Datastores({
+  datastores,
+  onCreateDatastore,
+  onAttachDatastore,
+  onDetachDatastore,
+  onDestroyDatastore,
+}: {
+  datastores: readonly DatastoreView[];
+  onCreateDatastore?: CreateDatastore;
+  onAttachDatastore?: DatastoreAct;
+  onDetachDatastore?: DatastoreAct;
+  onDestroyDatastore?: DatastoreAct;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  /*
+    One refusal line for the whole section, the way `ConfigSection` keeps one
+    for its deletes: a row has nowhere to put a sentence, and three buttons that
+    each swallowed their own would lose the only thing a press produces when it
+    is refused.
+  */
+  const act = (run: DatastoreAct, id: string) => {
+    setRefusal(null);
+    void run(id).then((result) => {
+      if (!result.ok) setRefusal(result.message);
+    });
+  };
+
   return (
     <Card>
-      {/* No action, for the reason the Components header has none: attaching a
-          Datastore is an act with placement consequences (§3, §11) and no
-          command behind this button, so it pressed and did nothing. */}
-      <SectionHeader eyebrow="Attached resources" title="Datastores" />
+      <SectionHeader
+        eyebrow="Attached resources"
+        title="Datastores"
+        {...(onCreateDatastore
+          ? {
+              action: adding ? 'Close' : 'Create Datastore',
+              onAction: () => setAdding((current) => !current),
+            }
+          : {})}
+      />
       <CardContent className="pt-0">
+        {onCreateDatastore && adding ? (
+          <NewDatastoreForm
+            onCreateDatastore={onCreateDatastore}
+            onDone={() => setAdding(false)}
+          />
+        ) : null}
+        {refusal ? (
+          <p className="mb-2 rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+            {refusal}
+          </p>
+        ) : null}
         {datastores.length === 0 ? (
           <EmptyState title="No Datastores attached.">
             Attach an existing Postgres or Redis Datastore, or create a managed
@@ -1041,26 +1183,163 @@ function Datastores({ datastores }: { datastores: readonly DatastoreView[] }) {
         ) : (
           datastores.map((datastore) => (
             <Row
-              key={datastore.name}
+              key={datastore.id}
               badge={
                 <Badge tone={datastore.attachedTo ? 'success' : 'idle'}>
                   {datastore.engine}
                 </Badge>
               }
               title={datastore.name}
-              detail={
-                datastore.attachedTo
-                  ? `${datastore.provenance} · ${datastore.target} · attached to ${datastore.attachedTo}`
-                  : `${datastore.provenance} · ${datastore.target} · unattached`
+              detail={datastoreDetail(datastore)}
+              trailing={
+                <div className="flex shrink-0 items-center gap-1">
+                  {/*
+                    Attach or detach, never both: the row already says which it
+                    is, and offering the act it is not in would be a button
+                    whose only outcome is core's refusal.
+                  */}
+                  {datastore.attachedTo === null && onAttachDatastore ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => act(onAttachDatastore, datastore.id)}
+                    >
+                      Attach
+                    </Button>
+                  ) : null}
+                  {datastore.attachedTo !== null && onDetachDatastore ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => act(onDetachDatastore, datastore.id)}
+                    >
+                      Detach
+                    </Button>
+                  ) : null}
+                  {onDestroyDatastore ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => act(onDestroyDatastore, datastore.id)}
+                    >
+                      Destroy
+                    </Button>
+                  ) : null}
+                </div>
               }
-              // The per-row `Attach` had no `onClick` either. An unattached
-              // Datastore says so in its detail line, which is the honest half
-              // of what that button was claiming.
             />
           ))
         )}
+        {/*
+          Which variable it arrives on, said once for the section rather than
+          per row. It is fixed by engine and there is no form field for it
+          anywhere, so this line is the only place a developer finds out what
+          their container will be handed.
+        */}
+        <p className="pt-2 text-xs text-muted-foreground">
+          A Postgres connection arrives as DATABASE_URL and a Valkey one as
+          REDIS_URL, on the next Deploy — attaching writes a row, it does not
+          restart what is running.
+        </p>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Creating one managed Datastore — a name and an engine, and nothing else.
+ *
+ * **No variable-name field, and there never will be one.** The connection is
+ * read through a name fixed by engine, pinned into the release by
+ * `createDeploy` and rendered by the chart; a field here could only disagree
+ * with all three. Size is the same decision made the other way: `storageGiB` is
+ * a defaulted command input, reachable over the API, because a developer has no
+ * basis on day one for a number that a resize command would own.
+ */
+function NewDatastoreForm({
+  onCreateDatastore,
+  onDone,
+}: {
+  onCreateDatastore: CreateDatastore;
+  onDone: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [engine, setEngine] = useState<'postgres' | 'valkey'>('postgres');
+  const [saving, setSaving] = useState(false);
+  const [outcome, setOutcome] = useState<
+    | { readonly kind: 'created' }
+    | { readonly kind: 'refused'; readonly message: string }
+    | null
+  >(null);
+
+  const save = async () => {
+    setSaving(true);
+    setOutcome(null);
+    try {
+      const result = await onCreateDatastore({ name: name.trim(), engine });
+      if (result.ok) {
+        setOutcome({ kind: 'created' });
+        setName('');
+      } else {
+        setOutcome({ kind: 'refused', message: result.message });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-border-soft pb-3">
+      <Field
+        name="datastore-name"
+        label="Name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        placeholder="primary"
+      />
+      <div className="grid gap-2 sm:grid-cols-2">
+        {/* The same tiles the creation flow states reach and auth with, so a
+            developer meets the choice grid once rather than per screen. */}
+        <Choice
+          selected={engine === 'postgres'}
+          title="postgres"
+          note="Arrives as DATABASE_URL"
+          onClick={() => setEngine('postgres')}
+        />
+        <Choice
+          selected={engine === 'valkey'}
+          title="valkey"
+          note="Arrives as REDIS_URL"
+          onClick={() => setEngine('valkey')}
+        />
+      </div>
+      {outcome?.kind === 'refused' ? (
+        <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+          {outcome.message}
+        </p>
+      ) : null}
+      {outcome?.kind === 'created' ? (
+        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+          Created and attached. It provisions in the background — the row says
+          how far it has got, and the connection reaches a container on the next
+          Deploy.
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={saving || name.trim() === ''}
+          onClick={() => {
+            void save();
+          }}
+        >
+          {saving ? 'Creating…' : 'Create Datastore'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDone} disabled={saving}>
+          {outcome?.kind === 'created' ? 'Close' : 'Cancel'}
+        </Button>
+      </div>
+    </div>
   );
 }
 

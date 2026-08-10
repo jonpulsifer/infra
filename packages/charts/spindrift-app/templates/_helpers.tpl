@@ -129,6 +129,25 @@ has no port to probe.
           # legal Secret key in every store, so it is never used as one.
           key: {{ .name }}
     {{- end }}
+    {{- range .Values.app.datastores }}
+    - name: {{ .name }}
+      {{- if .secretName }}
+      # Straight at the Secret the engine's operator generated — never a Secret
+      # this chart materializes, so the credential never transits Spindrift and
+      # a rotation lands on the next pod without a Deploy. The key is the
+      # operator's, not the variable's, which is the one place this differs from
+      # `secretEnv` above.
+      valueFrom:
+        secretKeyRef:
+          name: {{ .secretName }}
+          key: {{ .secretKey }}
+      {{- else }}
+      # No credential to reference: this engine, as this platform runs it,
+      # authenticates nobody and the address is not a secret. Writing a hostname
+      # into a Secret would only make it look like one.
+      value: {{ .value | quote }}
+      {{- end }}
+    {{- end }}
   volumeMounts:
     - name: tmp
       mountPath: /tmp

@@ -158,10 +158,18 @@ export const getAppWorkspace: Command<
     };
   });
 
+  // Keyed on the id, never the name. The unique key on `datastores` is
+  // (target_id, name), so two Targets may each legitimately hold a `primary` —
+  // a name-keyed map dropped the second one silently, and the row that
+  // vanished would be exactly the one an operator came here to find. The id is
+  // what every act on this row resolves on, so it is carried regardless, and
+  // with it on the row the two lists are disjoint by construction: `appId` is
+  // this App's or it is null.
   const datastoresMap = new Map<string, DatastoreView>();
 
-  for (const ds of app.datastores) {
-    datastoresMap.set(ds.name, {
+  for (const ds of [...app.datastores, ...unattachedDatastores]) {
+    datastoresMap.set(ds.id, {
+      id: ds.id,
       name: ds.name,
       engine: ds.engine,
       provenance: ds.provenance,
@@ -169,21 +177,15 @@ export const getAppWorkspace: Command<
       // is the App's first and never the selection: the same store reporting
       // two different attachments as the selection moves is a second answer to
       // a question that has one.
-      attachedTo: app.components[0]?.name ?? app.name,
+      attachedTo:
+        ds.appId === null ? null : (app.components[0]?.name ?? app.name),
       target: targetRowLabel(ds.target),
+      // What it is doing, and why it is doing it. A managed store converges
+      // like a Deploy does, so a row without these read as finished the
+      // instant it was asked for and as broken while it was bootstrapping.
+      phase: ds.phase,
+      ...(ds.detail === null ? {} : { detail: ds.detail }),
     });
-  }
-
-  for (const ds of unattachedDatastores) {
-    if (!datastoresMap.has(ds.name)) {
-      datastoresMap.set(ds.name, {
-        name: ds.name,
-        engine: ds.engine,
-        provenance: ds.provenance,
-        attachedTo: null,
-        target: targetRowLabel(ds.target),
-      });
-    }
   }
 
   // Keys only, never values (§10) — `configuredKeys` is the same read

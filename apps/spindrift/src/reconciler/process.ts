@@ -13,6 +13,10 @@ import { reconcilerLoopDuration } from '../telemetry/index.ts';
 import { dispatchAutoDeploys } from './auto-deploy.ts';
 import { DEFAULT_BUILD_INTERVALS, runBuildLoop } from './build-loop.ts';
 import { DEFAULT_REAP_INTERVAL_MS, runConfigLoop } from './config-loop.ts';
+import {
+  DEFAULT_DATASTORE_INTERVAL_MS,
+  runDatastoreLoop,
+} from './datastore-loop.ts';
 import { DEFAULT_INTERVALS, runDeployLoop } from './deploy-loop.ts';
 import { runRepoLoop } from './repo-loop.ts';
 import { runTargetLoop } from './target-loop.ts';
@@ -23,6 +27,7 @@ export type ReconcilerLoopName =
   | 'vessel'
   | 'repository'
   | 'config'
+  | 'datastore'
   | 'build'
   | 'deploy'
   | 'manifest';
@@ -199,6 +204,18 @@ export async function runReconciler(
             onPass: () => passed('config'),
           },
         ),
+    },
+    {
+      // Unconditional like its siblings, and cheap when idle: the pass selects
+      // only unsettled managed Datastores, so an installation whose databases
+      // have all come up runs one query and makes no adapter call.
+      name: 'datastore',
+      run: (signal) =>
+        runDatastoreLoop(context, {
+          intervalMs: DEFAULT_DATASTORE_INTERVAL_MS,
+          signal,
+          onPass: () => passed('datastore'),
+        }),
     },
     {
       name: 'deploy',

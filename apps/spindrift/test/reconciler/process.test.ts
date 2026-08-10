@@ -71,6 +71,7 @@ describe('reconciler process lifecycle', () => {
           if (
             (passes.get('target') ?? 0) === 2 &&
             passes.has('config') &&
+            passes.has('datastore') &&
             passes.has('build') &&
             passes.has('deploy')
           ) {
@@ -131,6 +132,7 @@ describe('reconciler loop composition', () => {
           if (
             passed.has('target') &&
             passed.has('config') &&
+            passed.has('datastore') &&
             passed.has('build') &&
             passed.has('deploy') &&
             events.some((candidate) => candidate.type === 'disabled')
@@ -146,7 +148,7 @@ describe('reconciler loop composition', () => {
         .filter((event) => event.type === 'pass')
         .map((event) => event.loop)
         .sort(),
-    ).toEqual(['build', 'config', 'deploy', 'target', 'vessel']);
+    ).toEqual(['build', 'config', 'datastore', 'deploy', 'target', 'vessel']);
     expect(events.find((event) => event.type === 'disabled')).toEqual({
       type: 'disabled',
       loop: 'repository',
@@ -173,6 +175,7 @@ describe('reconciler loop composition', () => {
             passed.has('target') &&
             passed.has('repository') &&
             passed.has('config') &&
+            passed.has('datastore') &&
             passed.has('build') &&
             passed.has('deploy')
           ) {
@@ -185,6 +188,7 @@ describe('reconciler loop composition', () => {
     expect([...passed].sort()).toEqual([
       'build',
       'config',
+      'datastore',
       'deploy',
       'repository',
       'target',

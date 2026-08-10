@@ -128,6 +128,46 @@ rules:
       - spindrift-app
     verbs:
       - get
+  # Datastores. Both operators are reached the way the delivery path reaches
+  # Flux: a server-side apply and a poll. `create` beside `patch` for the same
+  # reason the HelmRelease rule above pairs them — an apply is a PATCH, and an
+  # apply that has to create the object is authorized as a create too.
+  # `get` is the observe poll; `delete` is destroy. No `list`, no `watch`:
+  # every read here is by the name core already stored on the row.
+  - apiGroups:
+      - postgresql.cnpg.io
+    resources:
+      - clusters
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
+  - apiGroups:
+      - valkey.io
+    resources:
+      - valkeyclusters
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
+  # The Valkey operator fronts a cluster with a Service of the same name, which
+  # is a convention rather than an API field, so it is confirmed rather than
+  # asserted before a Datastore is reported LIVE.
+  #
+  # No `secrets` rule, deliberately, and this Role still names no Secret:
+  # CloudNativePG's `<cluster>-app` is read by the kubelet on the App's behalf
+  # through a `secretKeyRef`, never by Spindrift. RBAC matches resourceNames
+  # literally, so a Secret grant here could not have been narrower than "every
+  # Secret in spindrift-apps" — which is exactly what the direct-secretKeyRef
+  # design exists to avoid needing.
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
 ---
 # `CHART_SOURCE`, for the repository form — a Target whose installation names
 # `charts.app` as a path rather than as an artifact reads the source object here

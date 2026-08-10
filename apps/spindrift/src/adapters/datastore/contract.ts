@@ -76,10 +76,13 @@ export interface DatastoreRequest {
  * - `secret://<container>/<item>` — the backend generated a credential and put
  *   it somewhere the Target can already read. A cluster's Secret, a project's
  *   Secret Manager entry.
- * - `valkey://<host>:<port>` — there is no credential to reference, because the
+ * - `redis://<host>:<port>` — there is no credential to reference, because the
  *   engine as this platform runs it authenticates nobody. The address is not a
  *   secret and pretending it is would mean writing a Secret that holds a
- *   hostname.
+ *   hostname. The scheme names the wire protocol rather than the server: this
+ *   string is handed to an App as `REDIS_URL`, and node-redis, ioredis and
+ *   redis-py all reject a scheme they do not recognise, so `valkey://` would be
+ *   a reference no client could open.
  *
  * A string rather than a union because that is what `datastores.connection_ref`
  * stores and what an `external` Datastore's human author writes into the same

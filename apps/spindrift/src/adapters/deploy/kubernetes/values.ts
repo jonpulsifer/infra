@@ -15,6 +15,7 @@
  */
 import {
   artifactAddress,
+  type DatastoreAttachment,
   type DesiredState,
 } from '../../../domain/desired-state.ts';
 import type { KubernetesConnection } from '../../../domain/target.ts';
@@ -29,7 +30,7 @@ import type { KubernetesConnection } from '../../../domain/target.ts';
  * the values believes the contract to be — and `packages/charts/spindrift-app`
  * declares the same number in its own `Chart.yaml`.
  */
-export const VALUES_CONTRACT = '3';
+export const VALUES_CONTRACT = '4';
 
 /** The three classes §7 names, as the chart's three top-level keys. */
 export const VALUE_CLASSES = {
@@ -97,6 +98,22 @@ interface SecretEnvValue {
   remote: { key: string; version: string };
 }
 
+/**
+ * One attached Datastore, as the chart takes it (§11).
+ *
+ * Two shapes, told apart by which key is present rather than by an engine
+ * field: the chart must not learn the engine vocabulary, and there is nothing
+ * it could do with the engine that the shape does not already say.
+ *
+ * The reference names the Secret the engine's *operator* generated, not one the
+ * chart materializes, so the credential is never read by Spindrift and never
+ * copied. That is also why this is not a {@link SecretEnvValue}: there is no
+ * pinned remote and no ExternalSecret in this path at all.
+ */
+export type DatastoreValue =
+  | { name: string; secretName: string; secretKey: string }
+  | { name: string; value: string };
+
 /** Spindrift's class, rendered from what core described. */
 export interface AppValues {
   name: string;
@@ -112,6 +129,7 @@ export interface AppValues {
   artifactDigest: string;
   hostnames: string[];
   secretEnv: SecretEnvValue[];
+  datastores: DatastoreValue[];
 }
 
 /** The whole inline blob one release is applied with. */
@@ -186,6 +204,44 @@ export function appValues(desired: DesiredState, image: string): AppValues {
       secretName: configSecretName(desired),
       remote: { key: entry.secret.key, version: entry.secret.version },
     })),
+    // Absent on every document pinned before §11's delivery existed, and on
+    // every App with nothing attached.
+    datastores: (desired.datastores ?? []).map(datastoreValue),
+  };
+}
+
+/**
+ * A connection reference, as the chart's env entry.
+ *
+ * **The scheme is parsed here, in the adapter.** Core stores the reference as
+ * an opaque string (`adapters/datastore/contract.ts`) precisely so that no
+ * backend's naming scheme reaches it, and `uri` — the key CloudNativePG writes
+ * the whole connection string under in the `<cluster>-app` Secret it generates
+ * — is a Kubernetes fact. It belongs beside the chart that reads it, not in
+ * `domain/`, which would then know one operator's Secret layout.
+ *
+ * Anything that is not a `secret://` reference holds no credential to reference:
+ * a Valkey connection is `redis://host:port`, which is an address. Writing it
+ * into a Secret would make it look like a secret without making it one.
+ */
+function datastoreValue(attachment: DatastoreAttachment): DatastoreValue {
+  const SECRET = 'secret://';
+  if (!attachment.connection.startsWith(SECRET)) {
+    return { name: attachment.name, value: attachment.connection };
+  }
+  // ponytail: the `<container>` segment is dropped unchecked. A `secretKeyRef`
+  // cannot cross a namespace, and it does not have to: a Datastore is
+  // provisioned into its Target's `connection.namespace`, which is the release's
+  // own `targetNamespace`. Nothing here holds that namespace to compare against,
+  // so a Target renamespaced after a Datastore was provisioned would render a
+  // reference to a Secret that is not there and leave the pod in
+  // `CreateContainerConfigError`. Thread the release namespace in and refuse on
+  // a mismatch if a Target ever becomes renamespaceable.
+  const path = attachment.connection.slice(SECRET.length);
+  return {
+    name: attachment.name,
+    secretName: path.slice(path.indexOf('/') + 1),
+    secretKey: 'uri',
   };
 }
 
