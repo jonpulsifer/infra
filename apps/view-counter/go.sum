@@ -14,6 +14,8 @@ cloud.google.com/go/firestore v1.23.0 h1:lFkdUEqdb1FxJNeZ17ZCrpok/+5yZdWapEzDCwL
 cloud.google.com/go/firestore v1.23.0/go.mod h1:2EWfSUj+iqHckyH7uSjLI+lDgSAWJs9jL/uP45PnuQQ=
 cloud.google.com/go/firestore v1.24.0 h1:x0Z3hrgjYgo2wI9whuBRQcNc2hYwzZDQy/7pkUXbXcs=
 cloud.google.com/go/firestore v1.24.0/go.mod h1:5aojyjN4olKUnBZDCRWwM+NsdrrCX3t1qfyERZGOonM=
+cloud.google.com/go/firestore v1.25.0 h1:yY3rQKyQXNhnhETdseNayF6W1p4x0bdg9ZYS4hKJfOw=
+cloud.google.com/go/firestore v1.25.0/go.mod h1:0PU6hj+r/QlhB6BLsRX+Kt/SYefTXrpYrBeHbYaSis8=
 cloud.google.com/go/functions v1.19.7 h1:7LcOD18euIVGRUPaeCmgO6vfWSLNIsi6STWRQcdANG8=
 cloud.google.com/go/functions v1.19.7/go.mod h1:xbcKfS7GoIcaXr2FSwmtn9NXal1JR4TV6iYZlgXffwA=
 cloud.google.com/go/longrunning v0.9.0 h1:0EzbDEGsAvOZNbqXopgniY0w0a1phvu5IdUFq8grmqY=
