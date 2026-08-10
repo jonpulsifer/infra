@@ -52,6 +52,7 @@ import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
   buildSucceeded,
+  DEFAULT_BUILD_TIMEOUT_MS,
   deadlineFrom,
   type PollingOptions,
 } from './route.ts';
@@ -169,9 +170,6 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
   /** How long to keep looking for the run a dispatch started. */
   readonly discoveryMs?: number;
 }
-
-/** Long enough for a queued run to appear, short enough to fail visibly. */
-export const DEFAULT_RUN_DISCOVERY_MS = 120_000;
 
 /**
  * Where an archive builds: the repository half of the pinned reference.
@@ -451,7 +449,10 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
 
     const discovery = deadlineFrom({
       ...this.options,
-      timeoutMs: this.options.discoveryMs ?? DEFAULT_RUN_DISCOVERY_MS,
+      timeoutMs:
+        this.options.discoveryMs ??
+        this.options.timeoutMs ??
+        DEFAULT_BUILD_TIMEOUT_MS,
     });
     let run: ActionsRun | null = null;
     // A lookup the far side would not answer is retried until the discovery
