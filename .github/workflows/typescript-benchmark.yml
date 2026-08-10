@@ -23,6 +23,7 @@ on:
           - infra-folly
           - skiff-ubuntu
           - skiff-ubuntu-xl
+          - skiff-ubuntu-bench
           - ubuntu-latest
         default: all
       caches:

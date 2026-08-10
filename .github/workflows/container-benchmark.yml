@@ -27,6 +27,7 @@ on:
           - both
           - ubuntu-latest
           - skiff-ubuntu-xl
+          - skiff-ubuntu-bench
         default: both
 
 permissions:
