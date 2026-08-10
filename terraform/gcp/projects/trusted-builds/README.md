@@ -1,3 +1,22 @@
+# trusted-builds
+
+`trusted-builds` is the artifacts project every Spindrift vessel's supply
+chain runs through: a KMS key signs, a Binary Authorization attestor checks
+admission against the signature, and an Artifact Registry repository
+(`artifact-registry.tf`) stages what Cloud Run pulls. The chain itself is
+`terraform/modules/spindrift-supply-chain`, called from `supply-chain.tf`;
+the principal lists it takes — who signs, who verifies, who reads and writes
+the repository — are declared as locals in `locals.tf` so an operator reading
+the root sees who may sign without chasing the module. `outputs.tf` hands the
+attestor id to the bluenose vessel root and the signer/registry pair to the
+installation manifest's `supplyChain` block.
+
+The KMS ring and key are live in this project and in no state file, so
+`supply-chain.tf` adopts them with `import` blocks rather than creating them.
+GCP never deletes a ring or a key: creating fresh ones under these names
+collides, and any other name is a new signing key, which means a new public
+half for the cluster admission policy to pin.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -14,7 +33,9 @@
 
 ## Modules
 
-No modules.
+| Name | Source | Version |
+| ---- | ------ | ------- |
+| <a name="module_supply_chain"></a> [supply\_chain](#module\_supply\_chain) | ../../../modules/spindrift-supply-chain | n/a |
 
 ## Resources
 
@@ -30,6 +51,7 @@ No modules.
 | [google_storage_bucket.trusted_artifacts](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket) | resource |
 | [google_storage_bucket_iam_policy.trusted_artifacts](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket_iam_policy) | resource |
 | [google_iam_policy.trusted_artifacts](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/iam_policy) | data source |
+| [google_project.bluenose](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/project) | data source |
 | [google_project.current](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/project) | data source |
 
 ## Inputs
@@ -38,5 +60,8 @@ No inputs.
 
 ## Outputs
 
-No outputs.
+| Name | Description |
+| ---- | ----------- |
+| <a name="output_attestor"></a> [attestor](#output\_attestor) | Binary Authorization attestor id (projects/*/attestors/*) the bluenose vessel root's attestor variable takes. |
+| <a name="output_supply_chain_manifest_block"></a> [supply\_chain\_manifest\_block](#output\_supply\_chain\_manifest\_block) | The installation manifest's supplyChain block: signer key uri and registry namespace. |
 <!-- END_TF_DOCS -->
