@@ -32,7 +32,7 @@
   };
 
   # One warm FHS slot at the site with the fast internet. The class shape
-  # matches tender's so the label stays homogeneous; what differs here is the
+  # is the standard skiff-ubuntu shape so the label stays homogeneous; the
   # neighbourhood -- kubelet, yarr and harmonia share the same 4 cores and
   # 16 GiB, and that contention is part of any number measured on this slot.
   services.bosun = {
