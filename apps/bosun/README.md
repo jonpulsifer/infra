@@ -131,3 +131,44 @@ Measured on tender with the suite's 614 MB bun store:
 73 s through the stock cache path equals a hosted runner's best same-sha
 case — and a workflow migrated onto a skiff label gets it with no workflow
 changes at all.
+
+### The build-backend bench — GHA hosted, Cloud Build, and the pool
+
+Measured 2026-08-10, after tender's return, via
+`.github/workflows/container-benchmark.yml` and the TypeScript benchmark's
+`skiff-ubuntu-xl` label (tender-pinned: 4 vCPU / 3 GiB / 20 G disk —
+`skiff-ubuntu` can land on a 2-vCPU host, which is not the size-matched
+comparison). The container workload is one cold build of
+`apps/spindrift/Dockerfile` — `--no-cache --pull`, dockerd's embedded
+BuildKit on every backend, `docker system prune -af` first so a persisting
+skiff cannot smuggle warm layers. Cloud Build ran the same build from
+GCS-staged source, timed by the Build resource's own clock (machine time,
+in-cloud fetch included, queue excluded); GCB has no 4-vCPU point, so both
+its default machine and `e2-highcpu-8` are shown.
+
+| backend | cores/RAM | cold image build (3 runs) |
+| --- | --- | --- |
+| GHA hosted `ubuntu-latest` | 4 / 16 GiB | **25, 28, 25 s** |
+| Cloud Build `e2-highcpu-8` | 8 / 8 GiB | 33, 34, 35 s |
+| skiff-ubuntu-xl (tender) | 4 / 3 GiB | 34, 36, 37 s |
+| Cloud Build default | 2 / 8 GiB | 48, 51, 55 s |
+
+A cold image build is registry-bound, and that is the whole table: hosted
+sits closest to the registries, Cloud Build needs twice the cores to match a
+skiff pulling through passt over GCE's network, and nobody is CPU-bound.
+
+The same session's TypeScript suite, same commit, one wave per row:
+
+| caches | skiff-ubuntu-xl | ubuntu-latest |
+| --- | --- | --- |
+| none (cold, network-isolated) | **294 s** (Test 204 s) | 325 s (Test 231 s) |
+| best, first run (populating) | **305 s** (Test 206 s) | 388 s (Test 288 s) |
+| best, warm steady state | **57 s** | 66 s |
+
+The xl class repeats the plain class's result on 3 GiB against hosted's
+16 GiB: the suite is CPU-and-database-bound, tender's Test step holds a
+±1 s spread (204–206 s) where hosted swings 231–288 s, and the warm-slot
+steady state — the number a developer actually feels on push — is under a
+minute on both, with the skiff ahead. One wave was discarded with cause:
+both labels failed "Initialize containers" simultaneously, a registry
+hiccup fetching the Postgres service image, which is not a runner property.
