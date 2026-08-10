@@ -9,6 +9,7 @@ resources:
   - helm-repository-open-telemetry.yaml
   - opentelemetry-collector.yaml
   - opentelemetry-collector-servicemonitor.yaml
+  - grafana-dashboards
   - alertmanager-discord.yaml
   - coredns-rules.yaml
   - helm-repository-grafana.yaml

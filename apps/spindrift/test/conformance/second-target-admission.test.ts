@@ -7,14 +7,15 @@
  * - Placement can select that Target by its real name and explains any non-candidate state before dispatch.
  * - The already-built immutable artifact is deployed without another Build, and the second Target
  *   independently verifies the same real signature.
- * - The App chart renders as an independently pinned, extractable artifact when the installation
- *   names one.
+ * - Installer and App chart distribution use independently pinned, extractable artifacts rather than
+ *   depending on this installation's repository-local chart path.
  * - Status, diagnosis, and logs identify the second Target while preserving the App-first product view.
  * - End-to-end acceptance proves enrolment, Target connection, archive-to-URL,
  *   repository-to-signed-artifact, and second-Target admission on a clean installation.
  * - Only after every ticket's acceptance criteria pass is the effort recorded as Spindrift v1.
  */
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import { helmRelease } from '../../src/adapters/deploy/kubernetes/flux-helmrelease.ts';
@@ -69,6 +70,9 @@ function digest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, '0')}`;
 }
 
+/** The repository root, for reading the cluster manifests this test proves. */
+const REPO_ROOT = join(import.meta.dir, '../../../..');
+
 /**
  * Whether a rendered `HelmRelease`'s chart source is an independently pinned,
  * extractable artifact rather than a path resolved inside this installation's
@@ -91,6 +95,16 @@ function isExtractableChartSource(release: {
   };
 }): boolean {
   return release.spec?.chartRef?.kind === 'OCIRepository';
+}
+
+/**
+ * Whether an App chart reference names an artifact independent of this
+ * repository, rather than a path only this repository's own checkout
+ * resolves — the same distinction {@link isExtractableChartSource} draws for
+ * the installer, applied to the string `manifest.charts.app` carries.
+ */
+function isExtractableAppChartRef(ref: string): boolean {
+  return ref.startsWith('oci://');
 }
 
 function harnessRegistry(
@@ -295,6 +309,105 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     );
   });
 
+  test('Installer chart distribution is an independently pinned, extractable OCI artifact', async () => {
+    // Read the real cluster manifests rather than a fixture: the point of
+    // this criterion is what this installation actually deploys from, and a
+    // fixture that says the right thing while the repo says the old thing is
+    // exactly the false positive this test replaces.
+    const helmRelease = Bun.YAML.parse(
+      await Bun.file(
+        join(REPO_ROOT, 'clusters/offsite/apps/spindrift/helm-release.yaml'),
+      ).text(),
+    ) as Parameters<typeof isExtractableChartSource>[0];
+    expect(isExtractableChartSource(helmRelease)).toBe(true);
+
+    const ociRepository = Bun.YAML.parse(
+      await Bun.file(
+        join(REPO_ROOT, 'clusters/offsite/apps/spindrift/oci-repository.yaml'),
+      ).text(),
+    ) as { spec?: { url?: string; ref?: { tag?: string; digest?: string } } };
+    expect(ociRepository.spec?.url).toMatch(/^oci:\/\//);
+    expect(
+      ociRepository.spec?.ref?.tag ?? ociRepository.spec?.ref?.digest,
+    ).toBeTruthy();
+  });
+
+  test('the installer check catches a repository-local chart path', () => {
+    // The exact shape clusters/offsite/apps/spindrift/helm-release.yaml
+    // carried before this ticket: `packages/charts/spindrift` resolved
+    // through GitRepository/infra. A detector nobody has seen fail is not a
+    // detector — this is the proof the assertion above is not vacuous.
+    const beforeThisFix = {
+      spec: {
+        chart: {
+          spec: {
+            chart: 'packages/charts/spindrift',
+            sourceRef: {
+              kind: 'GitRepository',
+              name: 'infra',
+              namespace: 'flux-system',
+            },
+          },
+        },
+      },
+    };
+    expect(isExtractableChartSource(beforeThisFix)).toBe(false);
+  });
+
+  test('App chart distribution is an independently pinned, extractable OCI artifact', async () => {
+    // The declaration this installation is seeded from, not a fixture, for the
+    // same reason the installer assertion above reads it: what matters is what
+    // this installation deploys every Component through.
+    const release = Bun.YAML.parse(
+      await Bun.file(
+        join(REPO_ROOT, 'clusters/offsite/apps/spindrift/helm-release.yaml'),
+      ).text(),
+    ) as {
+      spec?: {
+        values?: {
+          manifest?: {
+            charts?: { app?: string };
+            targets?: {
+              connection?: {
+                delivery?: {
+                  sourceRef?: { name?: string; namespace?: string };
+                };
+              };
+            }[];
+          };
+        };
+      };
+    };
+    const declared = release.spec?.values?.manifest;
+    expect(isExtractableAppChartRef(declared?.charts?.app ?? '')).toBe(true);
+
+    // And that the reference is one every Kubernetes Target can actually
+    // resolve. The chart reference is the only discriminant the adapter has, so
+    // an `oci://` value with a Target still pointed at a GitRepository is a
+    // declaration that renders a chartRef at an object of the wrong kind — the
+    // failure mode the `charts.app` string alone cannot show.
+    const sources = (declared?.targets ?? [])
+      .map((target) => target.connection?.delivery?.sourceRef)
+      .filter((ref) => ref !== undefined);
+    expect(sources.length).toBeGreaterThan(0);
+    for (const ref of sources) {
+      expect(ref).toEqual({
+        name: 'spindrift-app',
+        namespace: 'spindrift-apps',
+      });
+    }
+  });
+
+  test('the App-chart check catches a repository-local chart path', () => {
+    // The proof the assertion above is not the vacuous one it replaces. The old
+    // guard asked only that `manifest.charts.app` was a defined string, which
+    // the exact value this installation carried before this ticket satisfies —
+    // so it passed the whole time nothing was built.
+    expect(isExtractableAppChartRef('packages/charts/spindrift-app')).toBe(
+      false,
+    );
+  });
+
   test('an oci:// App chart is rendered as an extractable source, not a path', () => {
     // The declaration is only half the claim: `charts.app` naming an artifact
     // means nothing unless the object the adapter writes fetches from it. This
@@ -325,6 +438,51 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
 
     expect(isExtractableChartSource(path)).toBe(false);
     expect(path.spec?.chart?.spec?.sourceRef?.kind).toBe('GitRepository');
+  });
+
+  test('each chart consumer pins the version its Chart.yaml carries', async () => {
+    // `.github/workflows/spindrift-charts.yml` pushes each chart under the
+    // version its own Chart.yaml names, and each consumer pins that version by
+    // tag. Bumping one without the other is silent both ways: a version ahead
+    // of the tag ships nothing, and a tag ahead of the push leaves the source
+    // object failing to pull. This is the only thing holding the pair together.
+    //
+    // Fast lane: this test alone is `spindrift#test:chart-pins` in
+    // `turbo.json`, with its own narrow `inputs` (the three files below, plus
+    // this file) and no `build` dependency — so a PR that only bumps a chart
+    // version and its consumer tag reruns this one fast assertion (still pays
+    // for the file's per-test isolated schema, via the describe-scoped
+    // `withIsolatedDatabase()` below, but nothing more) instead of
+    // cache-busting the full `spindrift#test` suite. The two
+    // `oci-repository.yaml` consumers stay
+    // out of `spindrift#test`'s own inputs because every check the rest of
+    // the suite makes against them (existence of a `tag`/`digest`, `url`
+    // shape) is strictly weaker than this test's exact-match checks — nothing
+    // else needs a fresher copy than this test already demands. `Chart.yaml`
+    // for `spindrift-app` is the one file both tasks still list:
+    // `values.test.ts` reads a different field of it (the values-contract
+    // annotation) that this test does not touch and does not subsume.
+    const consumers: [string, string][] = [
+      ['spindrift', 'clusters/offsite/apps/spindrift/oci-repository.yaml'],
+      [
+        'spindrift-app',
+        'clusters/base/platform/spindrift-target/oci-repository.yaml',
+      ],
+    ];
+    for (const [chart, consumer] of consumers) {
+      const { version } = Bun.YAML.parse(
+        await Bun.file(
+          join(REPO_ROOT, `packages/charts/${chart}/Chart.yaml`),
+        ).text(),
+      ) as { version?: string };
+      const source = Bun.YAML.parse(
+        await Bun.file(join(REPO_ROOT, consumer)).text(),
+      ) as { spec?: { url?: string; ref?: { tag?: string } } };
+      expect(source.spec?.url).toBe(
+        `oci://ghcr.io/jonpulsifer/charts/${chart}`,
+      );
+      expect(source.spec?.ref?.tag).toBe(version);
+    }
   });
 
   test('Status, diagnosis, and logs identify the second Target while preserving App-first product view', async () => {

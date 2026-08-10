@@ -48,11 +48,23 @@
         "$TURBO_ROOT$/packages/charts/spindrift-app/Chart.yaml",
         "$TURBO_ROOT$/packages/charts/spindrift-app/values.yaml",
         "$TURBO_ROOT$/packages/charts/spindrift-app/templates/**",
+        "$TURBO_ROOT$/clusters/offsite/apps/spindrift/helm-release.yaml",
         "$TURBO_ROOT$/clusters/base/networking/external-dns/helm-release.yaml",
         "$TURBO_ROOT$/clusters/*/networking/external-dns/kustomization.yaml"
       ],
       "env": ["DATABASE_URL"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "spindrift#test:chart-pins": {
+      "inputs": [
+        "test/conformance/second-target-admission.test.ts",
+        "$TURBO_ROOT$/packages/charts/spindrift/Chart.yaml",
+        "$TURBO_ROOT$/packages/charts/spindrift-app/Chart.yaml",
+        "$TURBO_ROOT$/clusters/base/platform/spindrift-target/oci-repository.yaml",
+        "$TURBO_ROOT$/clusters/offsite/apps/spindrift/oci-repository.yaml"
+      ],
+      "env": ["DATABASE_URL"],
+      "outputs": []
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],

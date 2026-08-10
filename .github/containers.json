@@ -32,6 +32,9 @@
     ],
     "rackstat": [
       "clusters/folly/apps/tronbyt/07-rackstat-deployment.yaml"
+    ],
+    "spindrift": [
+      "clusters/offsite/apps/spindrift/helm-release.yaml"
     ]
   },
   "ignore": [
