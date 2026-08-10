@@ -1,18 +1,24 @@
 ---
-# Shared dashboards shipped to every cluster's Grafana via the
-# kube-prometheus-stack dashboard sidecar, which discovers ConfigMaps labeled
-# grafana_dashboard: "1". Add dashboards here rather than per-site so both
-# clusters present the same panel set without external fetches.
+# Dashboards for services that run on both clusters. Each cluster's Grafana
+# sidecar picks up any ConfigMap labelled grafana_dashboard, so this ships to
+# folly and offsite alike; folly's own dashboards ConfigMap keeps its
+# folly-only ones. The name differs from folly's "dashboards" so the two
+# generators cannot collide in the monitoring namespace.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: monitoring
 configMapGenerator:
-  - name: spindrift-dashboard
+  - name: dashboards-base
     files:
+      - bosun.json
       - spindrift.json
 generatorOptions:
   disableNameSuffixHash: true
-  labels:
-    grafana_dashboard: "1"
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
+patches:
+  - path: dashboards.yaml
+    target:
+      kind: ConfigMap
+      name: dashboards-base
+      version: v1
