@@ -48,16 +48,9 @@
       warm = 1;
     };
 
-    # Image builds: the 20G disk is the point — see tender.nix. The 200G
-    # root carries it easily.
-    classes.skiff-ubuntu-xl = {
-      hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
-      vcpus = 4;
-      memory = "3072M";
-      workspace = "20G";
-      persist = true;
-      warm = 1;
-    };
+    # No xl class here on purpose: image builds want cores and disk this box
+    # is already spending on kubelet, yarr and harmonia. The suite slot and
+    # the cache service are what the fast-internet site contributes.
 
     # 30 GB of the 200 GB root for the actions/cache service — this is the
     # site with the fast internet, so a cold miss refills it cheapest here.
@@ -67,7 +60,7 @@
     };
   };
 
-  # Class ceiling is two 3072M skiffs; the bound exists so a runaway pool can
+  # Class ceiling is one 3072M skiff; the bound exists so a runaway pool can
   # never make the host OOM killer choose between a skiff and kubelet.
-  systemd.services.bosun.serviceConfig.MemoryMax = "7G";
+  systemd.services.bosun.serviceConfig.MemoryMax = "4G";
 }
