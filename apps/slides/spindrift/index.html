@@ -533,7 +533,7 @@
     </svg>
   </div>
 
-  <p class="eyebrow">Deploy control plane · <span class="m" style="text-transform:none;letter-spacing:0">apps/spindrift</span></p>
+  <p class="eyebrow">Adapter-based deploy control plane · <span class="m" style="text-transform:none;letter-spacing:0">apps/spindrift</span></p>
 
   <div style="display:flex;flex-direction:column;gap:clamp(1rem,3vh,2rem)">
     <h1>Spindrift</h1>
@@ -544,6 +544,7 @@
   <p class="colophon">
     <span>One contract</span>
     <span><b>3</b> parts</span>
+    <span><b>5</b> adapter seams</span>
     <span>Auth <b>in the contract</b></span>
   </p>
 </section>
@@ -555,8 +556,8 @@
   <h2>“I wrote a thing. Put it somewhere with a URL.”</h2>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">Two Kubernetes clusters. A set of GCP projects. A network fabric. A working GitOps pipeline. None of it reduces that sentence to a few minutes.</p>
-      <p class="rule-kicker">Every step is solved infrastructure. Assembling them is the work — and it is the work every single time.</p>
+      <p class="dim">Nothing on that list is unsolved. Clusters exist, registries exist, GitOps engines exist, certificates are free. What nobody hands you is the assembly — and the assembly is the work, in full, every single time, no matter how much infrastructure you already own.</p>
+      <p class="rule-kicker">Seven decisions, made by hand, by whoever is holding it. Each one is a place to be quietly wrong for a month.</p>
     </div>
     <ol class="steps">
       <li>Write a Dockerfile</li>
@@ -608,9 +609,42 @@
   </div>
 </section>
 
-<!-- ============================== 05 what it buys ============================== -->
+<!-- ============================== 05 the seams ============================== -->
 <section class="slide">
   <span class="no"><b>05</b> / 12</span>
+  <p class="eyebrow">Where the far sides plug in</p>
+  <h2>Every outside thing sits behind a contract, and <em>none of them</em> is the architecture</h2>
+  <p class="dim" style="max-width:74ch">A seam is a place behaviour can be swapped without editing at that place. One implementation would leave a seam hypothetical; every one of these has at least two.</p>
+  <div class="tablewrap">
+    <table class="bench">
+      <thead>
+        <tr><th scope="col">Seam</th><th scope="col">What varies across it</th><th scope="col">Adapters today</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Build</th><td>where the artifact is produced</td><td>GitHub Actions · Cloud Build · microVM pool · in-cluster Job</td></tr>
+        <tr><th scope="row">Deploy</th><td>what runtime receives it</td><td>Kubernetes · Cloud Run · static hosting</td></tr>
+        <tr><th scope="row">Delivery</th><td>which operator drives it</td><td>Flux HelmRelease · Argo Application</td></tr>
+        <tr><th scope="row">Config store</th><td>where the value of record lives</td><td>Secret Manager · 1Password · HTTP</td></tr>
+        <tr><th scope="row">Datastore</th><td>where a Target's state lives</td><td>cloud project · cluster</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cols">
+    <div class="card card--flag">
+      <h4>Flux is an adapter, not the architecture</h4>
+      <p>A Target declares which operator drives it, and Spindrift writes that operator's own object. Both flavours end at the same status type and nothing above them branches — so the GitOps engine is a choice a Target makes, never a thing the platform is built out of.</p>
+    </div>
+    <div class="card card--flag">
+      <h4>What a seam is worth, measured once</h4>
+      <p>A whole fourth way of building — a microVM pool on a machine this process cannot reach, calling in the opposite direction — arrived as one row in a list. Everything above the seam was already written.</p>
+    </div>
+  </div>
+  <p class="verbatim">apply · observe · destroy · run · executions · tail · inspect   →   seven verbs, and “deploy anything, anywhere” is behind them</p>
+</section>
+
+<!-- ============================== 06 what it buys ============================== -->
+<section class="slide">
+  <span class="no"><b>06</b> / 12</span>
   <p class="eyebrow">Consequences, not features</p>
   <h2>Four things nobody had to build</h2>
   <div class="cols">
@@ -637,54 +671,41 @@
   </div>
 </section>
 
-<!-- ============================== 06 auth is desired state ============================== -->
+<!-- ============================== 07 auth ============================== -->
 <section class="slide">
-  <span class="no"><b>06</b> / 12</span>
+  <span class="no"><b>07</b> / 12</span>
   <p class="eyebrow">Auth, first-class</p>
   <h2>Who may reach it is <em>part of the contract</em></h2>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim"><code>reach</code> and <code>auth</code> are fields on the Component, sitting in desired state beside the image and the config — not a policy bolted on afterwards, and not a wiki page about which ingress to copy.</p>
-      <p class="rule-kicker">So they are pinned into the deploy like everything else. A deployment records who could reach it, as a fact, at that version.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:0.9rem">
+      <p class="dim"><code>reach</code> and <code>auth</code> are fields on the Component, sitting in desired state beside the image and the config — not a policy bolted on afterwards, and not a wiki page about which ingress to copy. So they are pinned into the deploy like everything else, and a deployment records who could reach it, as a fact, at that version.</p>
       <div class="lineage">
         <div><b>Internal</b><span>cluster only</span></div>
         <div><b>Private</b><span>an RFC1918 address — the record type <em>is</em> the boundary</span></div>
         <div><b>Public</b><span>through the tunnel</span></div>
       </div>
       <p class="small dim">Private is the default. Nothing becomes reachable because somebody forgot a field.</p>
+      <p class="rule-kicker">A Target declares which reaches it can <em>authenticate</em>, not merely which it can serve. So auth decides where you are allowed to deploy.</p>
     </div>
-  </div>
-  <p class="verbatim">reach: private · auth: proxy   →   AUTH_UNSUPPORTED excludes every Target that cannot authenticate at that reach</p>
-  <p class="small dim" style="max-width:64ch">That is what first-class buys. A Target declares which reaches it can <em>authenticate</em>, not just which it can serve, and one that cannot is removed from placement before a build is ever dispatched. Auth decides <b>where you are allowed to deploy</b>.</p>
-</section>
-
-<!-- ============================== 07 auth, both sides ============================== -->
-<section class="slide">
-  <span class="no"><b>07</b> / 12</span>
-  <p class="eyebrow">Two boundaries, same discipline</p>
-  <h2>Enforced somewhere Spindrift does not own</h2>
-  <div class="cols cols--2">
-    <div class="card card--flag">
-      <span class="tag t-acc">The App edge</span>
-      <h4>A filter on the route, not a library in the app</h4>
-      <p>An <code>auth: proxy</code> Component gets an ExternalAuth filter on its HTTPRoute, enforced in-cluster by an authentication proxy that <b>Flux owns and Spindrift never installs</b>. Nothing is linked into the application; an App cannot opt itself out.</p>
-    </div>
-    <div class="card card--flag">
-      <span class="tag t-acc">The control plane</span>
-      <h4>A passkey against a real origin</h4>
-      <p>First run is one screen: an installation nobody has claimed shows enrolment, a claimed one shows sign-in, and there is no toggle. The token is consumed on use, so the window in which anyone else could claim it closes the moment enrolment completes. No password exists to phish.</p>
-    </div>
-  </div>
-  <div class="cols">
-    <div class="card card--cau">
-      <h4>And it is allowed to disqualify a backend</h4>
-      <p>Static hosting refuses <code>auth: proxy</code> outright — there is no non-bypassable origin to put a boundary in front of, so the placement is rejected rather than shipped with a caveat. A guarantee that quietly degrades is not a guarantee.</p>
-    </div>
-    <div class="card">
-      <h4>The hostname is the ceremony</h4>
-      <p>A passkey is scoped to the origin in the address bar, so the control plane's hostname is picked before anything is installed. An installation with a placeholder hostname cannot enrol anybody — which is why that is step one of the runbook, not a detail.</p>
+    <div style="display:flex;flex-direction:column;gap:1.1rem">
+      <div class="cols">
+        <div class="card card--flag">
+          <span class="tag t-acc">The App edge</span>
+          <h4>A filter on the route, not a library in the app</h4>
+          <p>An <code>auth: proxy</code> Component gets an ExternalAuth filter on its HTTPRoute, enforced by an authentication proxy the platform owns and <b>Spindrift never installs</b>. Nothing is linked into the application, so an App cannot opt itself out of its own edge.</p>
+        </div>
+        <div class="card card--flag">
+          <span class="tag t-acc">The control plane</span>
+          <h4>A passkey against a real origin</h4>
+          <p>First run is one screen: an unclaimed installation shows enrolment, a claimed one shows sign-in, and there is no toggle. The token is consumed on use. A passkey is scoped to the origin in the address bar, which is why the hostname is chosen before anything is installed — and why no password exists to phish.</p>
+        </div>
+        <div class="card card--cau">
+          <span class="tag t-cau">The refusal</span>
+          <h4>It is allowed to disqualify a backend</h4>
+          <p>Static hosting refuses <code>auth: proxy</code> outright — there is no non-bypassable origin to put a boundary in front of, so the placement is rejected rather than shipped with a caveat. A guarantee that quietly degrades is not a guarantee.</p>
+        </div>
+      </div>
+      <p class="verbatim">reach: private · auth: proxy   →   AUTH_UNSUPPORTED excludes every Target that cannot authenticate at that reach, before a build is ever dispatched</p>
     </div>
   </div>
 </section>
@@ -693,7 +714,8 @@
 <section class="slide">
   <span class="no"><b>08</b> / 12</span>
   <p class="eyebrow">Where the contract stops</p>
-  <h2>Terraform owns the vessel. Spindrift owns the <em>contents</em>.</h2>
+  <h2>It cannot create what it deploys into — so it opens a <em>pull request</em></h2>
+  <p class="dim" style="max-width:76ch">Spindrift holds delegated write access to contents: a release object in one namespace, an App inside one pre-provisioned project. It holds nothing that can create a cluster, a project, a VPC, a tunnel, a signing key or a policy engine. When a prerequisite is missing it writes the infrastructure code that would clear it and opens that as a pull request — a human merges, the apply bot applies, and a standing check turns the row green.</p>
     <figure>
     <div class="figwrap">
       <svg viewBox="0 0 920 560" role="img" aria-label="Ownership boundary: Flux and Terraform provision vessel prerequisites; Spindrift writes only into the contents through delegated APIs, and clears missing prerequisites by opening a pull request that Atlantis applies.">
@@ -727,12 +749,12 @@
 
         <!-- left actors -->
         <rect class="d-box" x="30" y="80" width="250" height="46" rx="6"/>
-        <text class="d-t b" x="46" y="102">Flux</text>
-        <text class="d-s" x="46" y="118">renders it on a Kubernetes Target</text>
+        <text class="d-t b" x="46" y="102">Platform GitOps</text>
+        <text class="d-s" x="46" y="118">Flux, on a Kubernetes Target</text>
 
         <rect class="d-box" x="30" y="138" width="250" height="46" rx="6"/>
-        <text class="d-t b" x="46" y="160">Terraform</text>
-        <text class="d-s" x="46" y="176">renders it in GCP</text>
+        <text class="d-t b" x="46" y="160">Infrastructure as code</text>
+        <text class="d-s" x="46" y="176">Terraform, in the cloud project</text>
 
         <path class="d-line" d="M280 103 L352 116" marker-end="url(#ahg)"/>
         <path class="d-line" d="M280 161 L352 148" marker-end="url(#ahg)"/>
@@ -759,8 +781,8 @@
         <text class="d-s" x="46" y="474">the Terraform stanza + the root it belongs in</text>
 
         <rect class="d-box" x="330" y="432" width="190" height="58" rx="6"/>
-        <text class="d-t b" x="346" y="456">Atlantis</text>
-        <text class="d-s" x="346" y="474">applies it</text>
+        <text class="d-t b" x="346" y="456">The apply bot</text>
+        <text class="d-s" x="346" y="474">Atlantis, on the pull request</text>
 
         <rect class="d-box" x="570" y="432" width="310" height="58" rx="6"/>
         <text class="d-t b" x="586" y="456">The standing check turns the row green</text>
@@ -847,8 +869,8 @@
         <rect class="d-box" x="660" y="128" width="200" height="84" rx="6"/>
         <text class="d-t b" x="676" y="152">Artifact</text>
         <text class="d-s" x="676" y="172">one digest, type image or files</text>
-        <text class="d-s" x="676" y="190">staged in trusted-builds/i,</text>
-        <text class="d-s" x="676" y="206">swept at 24h — ghcr holds it</text>
+        <text class="d-s" x="676" y="190">staged in a build project,</text>
+        <text class="d-s" x="676" y="206">swept at 24 h by design</text>
         <path class="d-flow" d="M614 60 L652 150" marker-end="url(#ah2)"/>
         <path class="d-flow" d="M614 130 L652 162" marker-end="url(#ah2)"/>
         <path class="d-flow" d="M614 200 L652 182" marker-end="url(#ah2)"/>
@@ -904,20 +926,20 @@
 <!-- ============================== 10 the sibling ============================== -->
 <section class="slide">
   <span class="no"><b>10</b> / 12</span>
-  <p class="eyebrow">A sibling, not a subsystem</p>
-  <h2>The fourth route arrived without a <em>new concept</em></h2>
+  <p class="eyebrow">The seam that runs backwards</p>
+  <h2>One adapter dials <em>in</em>, and the interface never noticed</h2>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim"><b>Bosun</b> is a peer project: a warm pool of ephemeral microVMs, each serving exactly one CI job before it is scuttled. It is not part of Spindrift and Spindrift does not run it — a Build is routed to it by label, and nothing else about it is known here.</p>
-      <p class="rule-kicker">The same shape this map has ruled four times. A registry, a base image, a log store, a Target — all of them <em>a place an admin connects</em>, never machinery the control plane owns.</p>
-      <p class="small dim">So a runner pool is not an exception being made. It is that ruling applied a fifth time, and the proof it was the right ruling is that the fourth build backend cost one row in a list.</p>
+      <p class="dim">Three build adapters reach outward — a workflow dispatch, a cloud API, a Job on a cluster this process already holds a token for. The fourth is a pool of microVMs on a machine Spindrift cannot open a connection to at all. Every instinct says that needs a new concept.</p>
+      <p class="rule-kicker">It needed a row in a list. The route writes an intent to an outbox row and polls that row for a verdict — exactly the way the other three poll a status endpoint. The endpoint just happens to be its own database.</p>
+      <p class="small dim">That is the test a contract passes or fails, and it is not a test you can run on paper. An interface that only admits far sides you are able to dial was never a seam; it was the shape of the three things that happened to exist when it was written.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1.1rem">
       <div class="cols">
         <div class="card card--flag">
-          <span class="tag t-acc">The seam</span>
-          <h4>The only far side that dials in</h4>
-          <p>Every other route reaches out — a workflow dispatch, a cloud API, a Job on a cluster this process already holds a token for. A bosun host is an operator's machine Spindrift <b>cannot reach</b>. So the route writes an intent to an outbox row in its own Postgres and polls that row for a verdict, while the host long-polls in over three shared-secret endpoints.</p>
+          <span class="tag t-acc">The far side</span>
+          <h4>A peer project, not a subsystem</h4>
+          <p><b>Bosun</b> keeps a warm pool of ephemeral microVMs, each serving exactly one CI job before it is destroyed. Spindrift does not run it, install it, or know anything about it beyond a label — the host long-polls in over three shared-secret endpoints and claims what it finds.</p>
         </div>
         <div class="card card--flag">
           <span class="tag t-acc">Why it earns its place</span>
@@ -973,11 +995,12 @@
     </div>
     <div class="card card--cau">
       <h4>Open</h4>
-      <p>The v1 gate waits on the remaining ticket set. The defects still outstanding are mostly wrong <em>sentences</em> shown to an operator — the failure mode a green suite is worst at catching.</p>
+      <p>The work left before a v1 is known and unglamorous. What is still outstanding is mostly wrong <em>sentences</em> shown to an operator — the failure mode a green suite is worst at catching, and the one the previous slide is entirely about.</p>
     </div>
   </div>
   <p class="colophon">
     <span>Artifact <b>+</b> Target <b>+</b> configVersion</span>
+    <span><b>5</b> seams, every one of them real</span>
     <span>Everything else is bookkeeping</span>
   </p>
 </section>
