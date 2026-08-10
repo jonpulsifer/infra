@@ -12,10 +12,12 @@ import (
 // metrics is bosun's counters. Gauges are not kept here -- they are read off
 // the live pool at write time, since the running skiffs are the state.
 type metrics struct {
-	mu       sync.Mutex
-	boots    map[string]int            // class -> skiffs booted
-	exits    map[string]map[string]int // class -> reason -> skiffs gone
-	ghErrors int
+	mu          sync.Mutex
+	boots       map[string]int            // class -> skiffs booted
+	exits       map[string]map[string]int // class -> reason -> skiffs gone
+	onlineSum   map[string]float64        // class -> total mint-to-online seconds
+	onlineCount map[string]int            // class -> skiffs that came online
+	ghErrors    int
 }
 
 // Exit reasons. "completed" is the one that means a job ran: the guest reached
@@ -41,7 +43,12 @@ const (
 )
 
 func newMetrics() *metrics {
-	return &metrics{boots: map[string]int{}, exits: map[string]map[string]int{}}
+	return &metrics{
+		boots:       map[string]int{},
+		exits:       map[string]map[string]int{},
+		onlineSum:   map[string]float64{},
+		onlineCount: map[string]int{},
+	}
 }
 
 func (m *metrics) boot(class string) {
@@ -57,6 +64,17 @@ func (m *metrics) exit(class, reason string) {
 		m.exits[class] = map[string]int{}
 	}
 	m.exits[class][reason]++
+}
+
+// online records how long a skiff took from JIT mint to GitHub first reporting
+// its runner online -- boot, registration and connect together. The five
+// hand-run benches all measured this edge by stopwatch; recording it makes a
+// hull or network regression visible without one.
+func (m *metrics) online(class string, seconds float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onlineSum[class] += seconds
+	m.onlineCount[class]++
 }
 
 func (m *metrics) githubError() {
@@ -99,6 +117,13 @@ func (m *metrics) render(live map[string]poolState, desired map[string]int) stri
 		for _, reason := range []string{exitCompleted, exitWedged, exitLifetime, exitJITExpired, exitBootFailed, exitKilled, exitDrained} {
 			b.WriteString(fmt.Sprintf("bosun_skiff_exits_total{class=%q,reason=%q} %d\n", class, reason, m.exits[class][reason]))
 		}
+	}
+
+	b.WriteString("# HELP bosun_skiff_time_to_online_seconds Mint-to-online latency; avg = rate(sum)/rate(count).\n")
+	b.WriteString("# TYPE bosun_skiff_time_to_online_seconds summary\n")
+	for _, class := range sortedKeys(desired) {
+		b.WriteString(fmt.Sprintf("bosun_skiff_time_to_online_seconds_sum{class=%q} %g\n", class, m.onlineSum[class]))
+		b.WriteString(fmt.Sprintf("bosun_skiff_time_to_online_seconds_count{class=%q} %d\n", class, m.onlineCount[class]))
 	}
 
 	b.WriteString("# HELP bosun_github_errors_total GitHub API calls that failed.\n")
