@@ -23,9 +23,8 @@ creation_rules:
     key_groups:
       - age:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
-          # stage one: operator only. The previous host recipient died with
-          # the instance's disk; the new ssh-to-age recipient lands here after
-          # first boot, per the SOPS runbook's two-stage flow.
+          # tender (ssh-to-age of its ed25519 host key, 2026-08-10 boot)
+          - age1r3g45ssdtcvjuz07n7cp4d2jrngpx03ekkggq0hk4pgx5ky70sgsqnvx3l
   - path_regex: nix/secrets/optiplex\.sops\.ya?ml
     key_groups:
       - age:
