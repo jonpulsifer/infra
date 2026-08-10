@@ -138,4 +138,11 @@
     kind = "package";
     module = ../images/hull-ubuntu.nix;
   };
+
+  # The Ubuntu hull's build variant: same rootfs and boot plumbing, a
+  # Spindrift build script in place of the ARC runner.
+  hull-build-ubuntu = {
+    kind = "package";
+    module = ../images/hull-build-ubuntu.nix;
+  };
 }
