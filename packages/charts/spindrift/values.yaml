@@ -25,11 +25,19 @@ serviceAccount:
     expirationSeconds: 3600
     mountPath: /var/run/secrets/spindrift
     # The ConfigMap projected at `ca.crt` — the one file `NODE_EXTRA_CA_CERTS`
-    # names. The cluster's own published root by default, which is all an
-    # installation whose Targets are in-cluster ever needs. An installation
-    # holding a Target on another cluster names a ConfigMap carrying that
-    # cluster's chain as well, because the variable takes exactly one file and a
-    # projected volume cannot merge two sources onto one path.
+    # names. Defaults to the cluster's own published root, `kube-root-ca.crt`,
+    # because it is the only trust material every cluster publishes with zero
+    # operator input — a template cannot introspect certificate content to
+    # refuse a bad default at install time. That default is sufficient only
+    # when the published root is self-signed. A cluster whose CA is issued by
+    # an intermediate must name a ConfigMap carrying the full chain (the
+    # leaf-issuing CA, every intermediate, and the self-signed root); Node
+    # does no partial-chain verification through `NODE_EXTRA_CA_CERTS`, so a
+    # bare intermediate-issued root fails every verification with
+    # `unable to get issuer certificate`. An installation holding a Target on
+    # another cluster names a ConfigMap carrying that cluster's chain as well,
+    # because the variable takes exactly one file and a projected volume
+    # cannot merge two sources onto one path.
     caConfigMap: kube-root-ca.crt
 
 # Where the control plane's own UI is served. Empty renders no Gateway and no
