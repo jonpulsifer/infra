@@ -140,14 +140,15 @@ export function serializeSpindriftFile(proposal: DetectionProposal): string {
  *
  * Thin is the requirement, and it has two halves. **The run happens in the
  * connected repository** — §15 gives that repository the Actions minutes and
- * the billing — while **the machinery lives in the pinned reusable workflow**,
+ * the billing — while **the machinery lives in the manifest's reusable
+ * workflow**,
  * so what lands in somebody's repo is a dispatch trigger and a `uses:`.
  *
  * The single opaque `spec` input is what keeps it thin over time. A caller with
  * one input per build parameter would have to be regenerated — and re-reviewed,
  * in every connected repository — each time a build gained a parameter. The
- * reusable workflow is pinned by commit and versioned by the platform, so it is
- * the right place for that shape to live.
+ * reusable workflow is named by the manifest and versioned by the platform, so
+ * it is the right place for that shape to live.
  *
  * **`correlation` is the one exception, and it is not a build parameter.** The
  * dispatch API answers `204` and names no run, so a dispatched build has to be
@@ -165,7 +166,7 @@ export function buildWorkflowCaller(buildWorkflow: string): string {
 #
 # Spindrift dispatches this workflow when it needs a build. The run happens
 # here, on this repository’s own Actions minutes; everything it does lives in
-# the reusable workflow below, which is pinned by commit.
+# the reusable workflow below, which the platform versions.
 name: ${RUN_NAME_PREFIX}
 run-name: ${RUN_NAME_PREFIX} \${{ inputs.correlation }}
 on:
@@ -207,7 +208,7 @@ ${rows}
 
 Each \`${SPINDRIFT_FILE}\` is yours to edit, here or later. Once it is on the default branch it wins over detection.
 
-\`${WORKFLOW_PATH}\` runs builds for this repository on its own Actions minutes. It calls a reusable workflow pinned by commit.
+\`${WORKFLOW_PATH}\` runs builds for this repository on its own Actions minutes. It calls a reusable workflow the platform versions.
 `;
 }
 

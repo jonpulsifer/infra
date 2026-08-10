@@ -221,8 +221,8 @@ export const connectRepository: Command<
     );
   }
 
-  // §15's transaction carries one CI caller, and the caller has to name a
-  // pinned reusable workflow. An installation that has not published one has no
+  // §15's transaction carries one CI caller, and the caller has to name the
+  // manifest's reusable workflow. An installation that has not published one has no
   // configuration PR to open — refused here rather than opened without the
   // caller, because a repository connected without a build route is connected
   // to nothing. The manifest schema says this refusal out loud ("null means
@@ -233,7 +233,7 @@ export const connectRepository: Command<
   if (buildWorkflow === null) {
     return failed(
       'NOT_DEPLOYABLE',
-      'this installation has pinned no reusable build workflow (github.buildWorkflow), so there is no CI caller to write into the configuration pull request; pin one, then connect again',
+      'this installation has published no reusable build workflow (github.buildWorkflow), so there is no CI caller to write into the configuration pull request; publish one, then connect again',
     );
   }
 

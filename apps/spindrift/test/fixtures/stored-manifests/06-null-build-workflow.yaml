@@ -1,7 +1,7 @@
 # A stored manifest as this build writes one: `05` after the scrub, which is
 # also what a fresh chart seed states — `github.buildWorkflow: null`, the
-# schema's own word for "no workflow pinned". `connectRepository` refuses on it
-# until an operator states a real pin; nothing else in the document changes.
+# schema's own word for "no workflow published". `connectRepository` refuses on
+# it until an operator states a real one; nothing else in the document changes.
 #
 # **The newest file in this corpus, and the test asserts this build needs no
 # upgrade to read it.** That is the forcing function: change the manifest schema

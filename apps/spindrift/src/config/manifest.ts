@@ -139,7 +139,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
      * `owner/repo@sha` here is not inert scaffolding the way
      * `spindrift.example.com` is — it is a foreign repository handed the
      * build of every repo an unseeded installation connects. Null makes the
-     * gap loud: connect refuses until an operator pins a real workflow.
+     * gap loud: connect refuses until an operator states a real workflow.
      */
     buildWorkflow: null,
   },

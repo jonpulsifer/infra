@@ -717,8 +717,8 @@ function ScanPanel({
             className="mt-0.5 size-4 shrink-0 text-warning"
           />
           <p className="text-xs">
-            This installation has pinned no reusable build workflow, so
-            repositories cannot be connected until an operator publishes one.
+            This installation has published no reusable build workflow, so
+            repositories cannot be connected until an operator states one.
           </p>
         </div>
       ) : null}

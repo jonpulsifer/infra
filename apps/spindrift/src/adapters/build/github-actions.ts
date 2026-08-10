@@ -2,10 +2,11 @@
  * The hosted-CI build route (§4).
  *
  * §4 puts the default build "somewhere with a fast pipe rather than at home
- * behind Starlink", and §15 puts the run in the connected repository: "the
- * connected repo owns its Actions minutes; a **SHA-pinned reusable workflow**
- * plus a workflow-ref-scoped cloud identity hold the machinery." Everything
- * awkward about this file follows from that one arrangement.
+ * behind Starlink", and §15 puts the run in the connected repository: the
+ * connected repo owns its Actions minutes, while a **reusable workflow the
+ * manifest names** plus a workflow-ref-scoped cloud identity hold the
+ * machinery. Everything awkward about this file follows from that one
+ * arrangement.
  *
  * **Three consequences worth knowing before reading the code.**
  *
@@ -141,15 +142,17 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
   readonly name: string;
   readonly host: ActionsHost;
   /**
-   * The reusable workflow, `owner/repo/.github/workflows/<file>@<sha>`, exactly
-   * as the manifest pins it.
+   * The reusable workflow, `owner/repo/.github/workflows/<file>@<ref>`, exactly
+   * as the manifest names it.
    *
-   * Only the repository half is read here, and the reason is the pin: a
-   * dispatch names a *branch*, so dispatching the reusable workflow directly
-   * would run whatever is on the default branch and discard the commit §15
-   * requires. This route therefore always dispatches a **caller** — the one the
-   * configuration PR wrote in a connected repository, or the one committed
-   * beside the reusable workflow here — and the caller is what holds the pin.
+   * Only the repository half is read here: a dispatch addresses a workflow
+   * file in one repository, and §15 puts the run in the repository that owns
+   * its minutes — so dispatching the reusable workflow directly would run on
+   * the platform's own minutes and ignore the ref the manifest states. This
+   * route therefore always dispatches a **caller** — the one the configuration
+   * PR wrote in a connected repository, or the one committed beside the
+   * reusable workflow here — and the caller's `uses:` carries the manifest's
+   * ref.
    */
   readonly buildWorkflow: string;
   /** The zero-config BuildKit frontend the installation pinned (§4). */
@@ -172,7 +175,7 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
 }
 
 /**
- * Where an archive builds: the repository half of the pinned reference.
+ * Where an archive builds: the repository half of the manifest's reference.
  *
  * The manifest schema already refuses anything that does not match this shape,
  * so a failure here is a programming error rather than a configuration one —
@@ -184,9 +187,7 @@ export function reusableWorkflowRepository(reference: string): string {
     reference,
   );
   if (match === null) {
-    throw new TypeError(
-      `not a pinned reusable workflow reference: ${reference}`,
-    );
+    throw new TypeError(`not a reusable workflow reference: ${reference}`);
   }
   return match[1] as string;
 }
@@ -294,8 +295,8 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
    */
   readonly carriesRegistryCredential: boolean;
   /**
-   * Both, because the run holds two identities at once and the pinned workflow
-   * uses each: `docker/login-action` against `ghcr.io` with the run's own
+   * Both, because the run holds two identities at once and the reusable
+   * workflow uses each: `docker/login-action` against `ghcr.io` with the run's own
    * token, and `google-github-actions/auth` federating into the artifact
    * registry. So the hosted route is the one that publishes everywhere this
    * installation pushes, and it is why nothing here has ever needed a stored
@@ -306,7 +307,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     'artifactRegistry',
   ];
   /**
-   * §16's profile level. A reusable workflow pinned by commit, running on a
+   * §16's profile level. A platform-controlled reusable workflow, running on a
    * runner the repository does not control, producing signed provenance — that
    * is L2. It is not L3: the workflow runs with the connected repository's own
    * permissions, so its own maintainers can reach the build environment.
@@ -354,9 +355,9 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       source.origin.repository !== this.platformRepository
         ? [source.origin.repository, this.platformRepository]
         : [this.platformRepository];
-    // Always a caller, never the reusable workflow itself — a dispatch names a
-    // branch, so dispatching the reusable workflow directly would discard the
-    // commit §15 pins. The connected repository runs the caller the
+    // Always a caller, never the reusable workflow itself — a dispatch runs in
+    // the repository it addresses, and §15 puts the run on the connected
+    // repository's own minutes. The connected repository runs the caller the
     // configuration PR wrote there; the platform repository runs the one
     // committed beside the reusable workflow. Same file name, same inputs.
     const workflow = CALLER_WORKFLOW_FILE;
@@ -707,9 +708,11 @@ function spkiPemToDer(pem: string): Uint8Array<ArrayBuffer> {
  * is what lets this route tell "your build failed" apart from "our scaffolding
  * failed" — a distinction §6 spends its whole blame column on.
  *
- * Coupled to the workflow by name, which is sound only because the manifest
- * pins that workflow by SHA (`github.buildWorkflow`): the file this route
- * dispatches cannot change under it without the pin rolling too.
+ * Coupled to the workflow by name. The manifest may name a moving ref
+ * (`github.buildWorkflow`), so the file this route dispatches can be newer
+ * than this constant — a step rename there reads as scaffolding blame until
+ * this catches up, the same skew window the platform repository's own
+ * local-reference caller already has.
  */
 export const DEVELOPER_BUILD_STEP = 'Build and push';
 

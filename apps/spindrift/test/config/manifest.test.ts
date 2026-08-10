@@ -207,9 +207,10 @@ describe('a vessel’s kind is not a list of the runtimes on it', () => {
 /**
  * §15 gives the connected repository the Actions minutes and the billing, so
  * the caller Spindrift writes into somebody's repository runs with that
- * repository's own permissions. A ref that can be moved is therefore a way to
- * run arbitrary steps in every connected repository at once, and the schema is
- * where that is refused rather than warned about.
+ * repository's own permissions. The ref names who holds that power: a commit
+ * sha freezes it, a branch hands it to the platform repository's merge gate
+ * and keeps every caller current. The schema takes either and still refuses a
+ * value that does not address a workflow file at some ref at all.
  */
 describe('the reusable build workflow ref', () => {
   const line = (value: string) => `  buildWorkflow: ${value}`;
@@ -221,9 +222,18 @@ describe('the reusable build workflow ref', () => {
     ['a branch', 'example/platform/.github/workflows/build.yml@main'],
     ['a tag', 'example/platform/.github/workflows/build.yml@v1.2.3'],
     [
-      'an abbreviated sha',
-      'example/platform/.github/workflows/build.yml@4bf1f21',
+      'a full sha',
+      `example/platform/.github/workflows/build.yml@${'0'.repeat(40)}`,
     ],
+  ] as const)('accepts %s', (_name, ref) => {
+    const manifest = parseManifest(
+      fixtureText.replace(current ?? '', line(ref)),
+      'test',
+    );
+    expect(manifest.github.buildWorkflow).toBe(ref);
+  });
+
+  test.each([
     ['no ref at all', 'example/platform/.github/workflows/build.yml'],
     [
       'a path that is not a workflow',
