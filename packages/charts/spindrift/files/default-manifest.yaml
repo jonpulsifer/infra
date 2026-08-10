@@ -40,7 +40,12 @@ github:
   clientId: Iv1.918d699f36ee7afc
   oauthBaseUrl: https://github.com
   apiBaseUrl: https://api.github.com
-  buildWorkflow: spindrift/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
+  # Null, never a placeholder ref: this value is written into a caller
+  # workflow inside connected repositories, so a stand-in owner/repo@sha would
+  # hand a foreign repository the build of every repo an unseeded installation
+  # connects. Null makes connect refuse until an operator pins a real workflow
+  # — see the doc comment on `DEFAULT_PLACEHOLDER_MANIFEST.github.buildWorkflow`.
+  buildWorkflow: null
 build:
   routes:
     - name: hosted

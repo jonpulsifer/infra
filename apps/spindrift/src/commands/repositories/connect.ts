@@ -118,6 +118,13 @@ export interface ConnectRepositoryResult {
   readonly defaultBranch: string;
   /** The configuration pull request an operator now has to merge, or null if PR creation failed. */
   readonly pullRequest: number | null;
+  /**
+   * Why `pullRequest` is null, when it is. The repository stays connected
+   * either way — the repo loop reads the default branch, not the PR — but a
+   * connection whose PR silently never opened reads exactly like one whose PR
+   * opened fine, and the operator deserves the difference.
+   */
+  readonly pullRequestError: string | null;
   /** Always null: nothing is authoritative before that merge (§15). */
   readonly authoritativeCommit: null;
 }
@@ -218,8 +225,17 @@ export const connectRepository: Command<
   // pinned reusable workflow. An installation that has not published one has no
   // configuration PR to open — refused here rather than opened without the
   // caller, because a repository connected without a build route is connected
-  // to nothing.
+  // to nothing. The manifest schema says this refusal out loud ("null means
+  // repositories cannot be connected"), and `inspectRepository` answers
+  // `canConnect: false` for the same reason, so the button that reaches this
+  // path is already disabled.
   const buildWorkflow = context.manifest.github?.buildWorkflow ?? null;
+  if (buildWorkflow === null) {
+    return failed(
+      'NOT_DEPLOYABLE',
+      'this installation has pinned no reusable build workflow (github.buildWorkflow), so there is no CI caller to write into the configuration pull request; pin one, then connect again',
+    );
+  }
 
   // Every read below refuses through the one taxonomy (`access.ts`): §15's
   // lost-access rule reaches back to here — a repository the App cannot see is
@@ -289,27 +305,29 @@ export const connectRepository: Command<
     .returning();
 
   let pullRequest: number | null = null;
-  if (buildWorkflow !== null) {
-    const transaction = configurationTransaction({
-      scopes,
-      buildWorkflow,
-    });
+  let pullRequestError: string | null = null;
+  const transaction = configurationTransaction({
+    scopes,
+    buildWorkflow,
+  });
 
-    try {
-      const opened = await openConfigurationPullRequest(host, ref, {
-        fullName: input.fullName,
-        defaultBranch,
-        transaction,
-      });
-      pullRequest = opened.number;
-      await context.db
-        .update(repositories)
-        .set({ configPullRequest: opened.number, updatedAt: now })
-        .where(eq(repositories.id, row!.id));
-    } catch {
-      // Fail open: opening the configuration PR failed (e.g. GitHub permission or API error),
-      // but the repository remains connected.
-    }
+  try {
+    const opened = await openConfigurationPullRequest(host, ref, {
+      fullName: input.fullName,
+      defaultBranch,
+      transaction,
+    });
+    pullRequest = opened.number;
+    await context.db
+      .update(repositories)
+      .set({ configPullRequest: opened.number, updatedAt: now })
+      .where(eq(repositories.id, row!.id));
+  } catch (cause) {
+    // Fail open: the repository stays connected and the repo loop still adopts
+    // its default branch; only the PR is lost, and the result says which and
+    // why rather than leaving `pullRequest: null` to mean three different
+    // things.
+    pullRequestError = cause instanceof Error ? cause.message : String(cause);
   }
 
   return ok({
@@ -317,6 +335,7 @@ export const connectRepository: Command<
     fullName: row!.fullName,
     defaultBranch,
     pullRequest,
+    pullRequestError,
     authoritativeCommit: null,
   });
 };

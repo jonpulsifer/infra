@@ -2323,6 +2323,10 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
           fullName: result.value.fullName,
           number: result.value.pullRequest,
         });
+      } else if (result.value.pullRequestError !== null) {
+        setActionError(
+          `Connected, but the configuration pull request could not be opened: ${result.value.pullRequestError}`,
+        );
       }
       setRefresh((value) => value + 1);
     } catch (cause) {

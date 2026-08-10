@@ -133,8 +133,15 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     clientId: 'Iv1.918d699f36ee7afc',
     oauthBaseUrl: 'https://github.com',
     apiBaseUrl: 'https://api.github.com',
-    buildWorkflow:
-      'spindrift/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6',
+    /**
+     * Null, never a placeholder ref. `connectRepository` writes this value
+     * into a caller workflow inside somebody's repository, so a stand-in
+     * `owner/repo@sha` here is not inert scaffolding the way
+     * `spindrift.example.com` is — it is a foreign repository handed the
+     * build of every repo an unseeded installation connects. Null makes the
+     * gap loud: connect refuses until an operator pins a real workflow.
+     */
+    buildWorkflow: null,
   },
   build: {
     routes: [{ name: 'hosted', adapter: 'github-actions' }],
