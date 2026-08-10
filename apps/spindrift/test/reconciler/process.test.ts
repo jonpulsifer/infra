@@ -413,6 +413,10 @@ async function pendingBuildNoRouteSatisfies() {
   await db
     .insert(componentTargetDesired)
     .values({ componentId: component!.id, targetId: target!.id });
+  await db
+    .update(components)
+    .set({ placedTargetId: target!.id })
+    .where(eq(components.id, component!.id));
   await db.insert(builds).values({
     componentId: component!.id,
     commit: 'abcdef0',

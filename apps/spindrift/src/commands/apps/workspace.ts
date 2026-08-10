@@ -82,19 +82,9 @@ export const getAppWorkspace: Command<
             orderBy: (builds, { desc }) => [desc(builds.createdAt)],
             limit: 1,
           },
-          desiredTargets: {
-            // Newest first — the placement of record, exactly as `deployApp`
-            // reads it. A moved Component keeps the old pair's row until it is
-            // retired, and an unordered pick could name either.
-            orderBy: (desiredTable, { desc }) => [desc(desiredTable.updatedAt)],
-            limit: 1,
-            with: {
-              // With its vessel, for the reason the deploy's Target carries
-              // one: `workspaceTarget` is either of these two rows and the
-              // screen states the boundary from whichever it got.
-              target: { with: { vessel: true } },
-            },
-          },
+          // The placement of record — the stored fact `deployApp` acts on,
+          // with its vessel because the screen states the boundary from it.
+          placedTarget: { with: { vessel: true } },
         },
       },
       datastores: {
@@ -133,8 +123,10 @@ export const getAppWorkspace: Command<
 
   const latestDeploy = selected?.deploys[0];
   const latestTarget = latestDeploy?.target;
-  const desiredTarget = selected?.desiredTargets[0]?.target;
-  const workspaceTarget = latestTarget ?? desiredTarget;
+  // The placement of record, never deploy history: the screen names the Target
+  // the deploy button would act on, including for a moved-but-never-deployed
+  // Component — where history would name the Target it moved away from.
+  const workspaceTarget = selected?.placedTarget ?? undefined;
 
   const now = context.clock.now();
 

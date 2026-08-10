@@ -208,6 +208,10 @@ describe('a push that reaches an opted-in App', () => {
       targetId: target!.id,
       updatedAt: NOW,
     });
+    await db
+      .update(components)
+      .set({ placedTargetId: target!.id })
+      .where(eq(components.id, component!.id));
     const digest = `sha256:${'a'.repeat(64)}`;
     const [build] = await db
       .insert(builds)

@@ -18,6 +18,7 @@ import type {
 import {
   attemptEvents,
   builds,
+  components,
   componentTargetDesired,
   deploys,
   targets,
@@ -134,6 +135,10 @@ async function scaffold(
     componentId: component.value.componentId,
     targetId: target!.id,
   });
+  await ctx.db
+    .update(components)
+    .set({ placedTargetId: target!.id })
+    .where(eq(components.id, component.value.componentId));
 
   return {
     appName: name,
@@ -465,6 +470,12 @@ describe('getAppWorkspace command', () => {
       buildId: build!.id,
       phase: 'LIVE',
     });
+    // The intent path that placed this deploy would have established the
+    // placement of record; seeding the row directly has to write the fact too.
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: target!.id })
+      .where(eq(components.id, createdComp.value.componentId));
 
     const result = await getAppWorkspace({ name: appName }, ctx);
     expect(result.ok).toBe(true);
@@ -528,6 +539,12 @@ describe('getAppWorkspace command', () => {
       buildId: build!.id,
       phase: 'LIVE',
     });
+    // The intent path that placed this deploy would have established the
+    // placement of record; seeding the row directly has to write the fact too.
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: target!.id })
+      .where(eq(components.id, createdComp.value.componentId));
 
     const result = await getAppWorkspace({ name: appName }, ctx);
     expect(result.ok).toBe(true);
@@ -570,6 +587,10 @@ describe('getAppWorkspace command', () => {
       componentId: createdComp.value.componentId,
       targetId: target!.id,
     });
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: target!.id })
+      .where(eq(components.id, createdComp.value.componentId));
     await database()
       .db.insert(builds)
       .values({
@@ -1567,6 +1588,10 @@ describe('deployApp command', () => {
       componentId: createdComp.value.componentId,
       targetId: targetRow!.id,
     });
+    await ctx.db
+      .update(components)
+      .set({ placedTargetId: targetRow!.id })
+      .where(eq(components.id, createdComp.value.componentId));
 
     const [buildRow] = await ctx.db
       .insert(builds)
@@ -1641,6 +1666,10 @@ describe('deployApp command', () => {
       componentId: createdComp.value.componentId,
       targetId: targetRow!.id,
     });
+    await ctx.db
+      .update(components)
+      .set({ placedTargetId: targetRow!.id })
+      .where(eq(components.id, createdComp.value.componentId));
 
     const [buildRow] = await ctx.db
       .insert(builds)
@@ -1766,6 +1795,10 @@ describe('deployApp command', () => {
       componentId: createdComp.value.componentId,
       targetId: targetRow!.id,
     });
+    await ctx.db
+      .update(components)
+      .set({ placedTargetId: targetRow!.id })
+      .where(eq(components.id, createdComp.value.componentId));
 
     await ctx.db.insert(builds).values({
       componentId: createdComp.value.componentId,

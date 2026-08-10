@@ -30,7 +30,12 @@
 
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { componentTargetDesired, targets, vessels } from '../../db/schema.ts';
+import {
+  components,
+  componentTargetDesired,
+  targets,
+  vessels,
+} from '../../db/schema.ts';
 import { VARIABLE_NAME } from '../../domain/config.ts';
 import { targetLabel } from '../../domain/target.ts';
 import { carryReferences } from '../config/carry.ts';
@@ -118,23 +123,32 @@ export const placeComponent: Command<
   if (!applied.ok) return applied;
 
   // The move itself, committed last so a refusal above leaves the placement
-  // where it was. Touching `updatedAt` on conflict is what makes a re-placement
-  // onto an already-placed pair the Component's newest row again.
+  // where it was. Two writes in one transaction: the pair's desired row, which
+  // is what the loops act on, and `placedTargetId`, the placement of record —
+  // this command is the only one that *moves* it. The old pair's desired row
+  // stays: what is live there keeps serving until `unplaceComponent` retires
+  // it.
   const now = context.clock.now();
-  await context.db
-    .insert(componentTargetDesired)
-    .values({
-      componentId: input.componentId,
-      targetId: input.targetId,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [
-        componentTargetDesired.componentId,
-        componentTargetDesired.targetId,
-      ],
-      set: { updatedAt: now },
-    });
+  await context.db.transaction(async (tx) => {
+    await tx
+      .insert(componentTargetDesired)
+      .values({
+        componentId: input.componentId,
+        targetId: input.targetId,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          componentTargetDesired.componentId,
+          componentTargetDesired.targetId,
+        ],
+        set: { updatedAt: now },
+      });
+    await tx
+      .update(components)
+      .set({ placedTargetId: input.targetId, updatedAt: now })
+      .where(eq(components.id, input.componentId));
+  });
 
   return ok({
     ...applied.value,

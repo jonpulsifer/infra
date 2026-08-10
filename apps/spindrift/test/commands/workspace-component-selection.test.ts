@@ -28,6 +28,7 @@ import type {
 } from '../../src/commands/types.ts';
 import {
   builds,
+  components,
   componentTargetDesired,
   configItems,
   deploys,
@@ -90,6 +91,10 @@ async function placed(
   const targetId = target?.id as string;
 
   await ctx.db.insert(componentTargetDesired).values({ componentId, targetId });
+  await ctx.db
+    .update(components)
+    .set({ placedTargetId: targetId })
+    .where(eq(components.id, componentId));
 
   const artifactDigest = `sha256:${'a'.repeat(64)}`;
   const [build] = await ctx.db

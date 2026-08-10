@@ -105,6 +105,7 @@ describe('a dispatch refusal the operator can see', () => {
         appId: app!.id,
         name: overrides.componentName ?? 'web',
         kind: 'service',
+        placedTargetId: targetId,
       })
       .returning();
     await ctx.db

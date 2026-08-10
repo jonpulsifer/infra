@@ -286,6 +286,9 @@ export const completeCreationDraft: Command<
           expose: row.draft.kind === 'job' ? null : true,
           reach: row.draft.reach,
           auth: row.draft.auth,
+          // The draft's chosen Target is this Component's first placement of
+          // record, written at birth rather than inferred later.
+          placedTargetId: row.draft.targetId,
           createdAt: now,
           updatedAt: now,
         })

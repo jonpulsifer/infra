@@ -42,12 +42,13 @@
  * one here would name an artifact that does not exist (§4: "a build records an
  * artifact rather than deploying one").
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { targetAdapterSchema } from '../../config/manifest.schema.ts';
 import {
   type apps,
   builds,
+  components,
   componentTargetDesired,
   repositories,
   targets,
@@ -295,28 +296,9 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         // two the same sentence about different Components.
         orderBy: (componentsTable, { asc }) => [asc(componentsTable.createdAt)],
         with: {
-          deploys: {
-            orderBy: (deploysTable, { desc }) => [desc(deploysTable.createdAt)],
-            limit: 1,
-            with: {
-              target: true,
-              build: true,
-            },
-          },
           builds: {
             orderBy: (buildsTable, { desc }) => [desc(buildsTable.createdAt)],
             limit: 1,
-          },
-          desiredTargets: {
-            // Newest first, because the newest desired row is the Component's
-            // current address: every deploy touches its pair's row, and
-            // `placeComponent` touches the pair a move commits — so a moved
-            // Component's newest row is the Target it was moved to.
-            orderBy: (desiredTable, { desc }) => [desc(desiredTable.updatedAt)],
-            limit: 1,
-            with: {
-              target: true,
-            },
           },
         },
       },
@@ -362,13 +344,11 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     component = named;
   }
 
-  // The desired row is the placement of record — `placeComponent` moves it,
-  // and every deploy touches it — so it answers first. Deploy history only
-  // answers for a Component whose rows are gone, which is what an unplaced
-  // pair being deployed again looks like.
-  const latestDeploy = component.deploys[0];
-  const placedTargetId =
-    component.desiredTargets[0]?.targetId ?? latestDeploy?.targetId;
+  // The placement of record, read off the Component itself: the one fact
+  // `placeComponent` moves, a first placement establishes, and
+  // `unplaceComponent` clears. Nothing here infers it from desired rows or
+  // deploy history — an unplaced Component is unplaced, whatever once served.
+  const placedTargetId = component.placedTargetId ?? undefined;
 
   let targetId = placedTargetId;
   if (input.target !== undefined) {
@@ -527,11 +507,12 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
       .where(eq(builds.id, buildToRun.id));
   }
 
-  // The desired row, and nothing on it. `runBuildPass` joins Build → Component →
-  // this row → Target to find the route to dispatch on, so a Build with no such
-  // row is one no loop can see. `desiredBuildId` and `desiredDeployId` stay
-  // untouched: those say what should be *live* here, and only an intent written
-  // under §6's lock gets to answer that.
+  // The desired row, and nothing on it. `runBuildPass` dispatches a Build
+  // against the Target its Component is placed on, and `dispatchBuild` checks
+  // that placement names a desired row — so a Build with no such row is one no
+  // loop can run. `desiredBuildId` and `desiredDeployId` stay untouched: those
+  // say what should be *live* here, and only an intent written under §6's lock
+  // gets to answer that.
   await context.db
     .insert(componentTargetDesired)
     .values({
@@ -540,6 +521,17 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
       updatedAt: now,
     })
     .onConflictDoNothing();
+
+  // A first deploy of an unplaced Component establishes its placement of
+  // record, exactly as `placeIntent` does on the deployable branch.
+  // Conditional on NULL, so a Build staged for an already-placed Component
+  // never moves it.
+  await context.db
+    .update(components)
+    .set({ placedTargetId: targetId })
+    .where(
+      and(eq(components.id, component.id), isNull(components.placedTargetId)),
+    );
 
   return ok({
     deployId: null,

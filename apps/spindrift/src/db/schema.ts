@@ -534,6 +534,22 @@ export const components = pgTable(
      */
     reach: reachState('reach').notNull().default('private'),
     auth: authMode('auth').notNull().default('proxy'),
+    /**
+     * The placement of record: the Target this Component lives on, as a stored
+     * fact rather than an inference over `componentTargetDesired`.
+     *
+     * The newest desired row could not answer this — every intent bumps its
+     * pair's `updatedAt`, so a rollback or config-set addressed at a retired
+     * pair made the old row newest and every reader followed it back. Only
+     * `placeComponent` moves this; the first act that places a Component with
+     * none (a creation draft, a first deploy) establishes it; and
+     * `unplaceComponent` clears it when the pair it retires is this one.
+     * Desired rows for other Targets are what still serves there, not where
+     * the Component is.
+     */
+    placedTargetId: uuid('placed_target_id').references(() => targets.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1413,6 +1429,10 @@ export const componentsRelations = relations(components, ({ one, many }) => ({
   deploys: many(deploys),
   configItems: many(configItems),
   desiredTargets: many(componentTargetDesired),
+  placedTarget: one(targets, {
+    fields: [components.placedTargetId],
+    references: [targets.id],
+  }),
 }));
 
 export const buildsRelations = relations(builds, ({ one, many }) => ({

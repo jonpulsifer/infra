@@ -179,6 +179,19 @@ export const unplaceComponent: Command<
     await tx
       .delete(componentTargetDesired)
       .where(eq(componentTargetDesired.id, desired.id));
+    // The placement of record clears only when the pair being retired *is* it.
+    // Unplacing the old pair after a move is retirement of what still served
+    // there, and the Component's home — wherever `placeComponent` put it —
+    // is not this command's to touch.
+    await tx
+      .update(components)
+      .set({ placedTargetId: null, updatedAt: now })
+      .where(
+        and(
+          eq(components.id, input.componentId),
+          eq(components.placedTargetId, input.targetId),
+        ),
+      );
     await tx
       .update(deploys)
       .set({ orphanedAt: now, updatedAt: now })

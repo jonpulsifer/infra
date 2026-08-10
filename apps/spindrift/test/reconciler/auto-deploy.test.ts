@@ -69,6 +69,10 @@ async function deployableApp(autoDeploy: boolean) {
     targetId: target!.id,
     updatedAt: NOW,
   });
+  await db
+    .update(components)
+    .set({ placedTargetId: target!.id })
+    .where(eq(components.id, component!.id));
   const digest = `sha256:${crypto.randomUUID().replaceAll('-', '').padEnd(64, '0')}`;
   const [build] = await db
     .insert(builds)

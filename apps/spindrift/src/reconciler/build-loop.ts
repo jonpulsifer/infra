@@ -12,13 +12,7 @@ import {
   recordDispatchWait,
 } from '../commands/builds/dispatch.ts';
 import { buildRouteFor } from '../commands/builds/route.ts';
-import {
-  builds,
-  components,
-  componentTargetDesired,
-  targets,
-  vessels,
-} from '../db/schema.ts';
+import { builds, components, targets, vessels } from '../db/schema.ts';
 import { artifactTypeFor } from '../domain/placement.ts';
 import { targetLabel } from '../domain/target.ts';
 import {
@@ -53,10 +47,15 @@ export interface BuildLoopOptions {
 export async function runBuildPass(
   context: BuildDispatchContext,
 ): Promise<number> {
+  // One row per PENDING Build: the placement of record is a stored fact on the
+  // Component (`placedTargetId`), so there is nothing to rank or dedupe — the
+  // old pair's desired row a move leaves behind is what still serves there,
+  // never a second candidate. Left joins, because an unplaced Component's
+  // Build is a refusal this loop owes a sentence, not a row to drop.
   const rows = await context.db
     .select({
       buildId: builds.id,
-      targetId: componentTargetDesired.targetId,
+      targetId: targets.id,
       // Carried for the refusal below, which needs an attempt reference and
       // cannot get one from `dispatchBuild` — it never reaches it.
       appId: components.appId,
@@ -66,83 +65,65 @@ export async function runBuildPass(
       // the `where` clause, so this is the age of a Build still waiting to be
       // claimed.
       createdAt: builds.createdAt,
-      // For binding the Build to a placement that admits its shape: what this
-      // Build produces, what the Component is, and enough of the Target to
-      // derive the shape it takes — plus the row's `updatedAt`, which is what
-      // says which placement is the one of record.
+      // For holding the Build to the placement's shape: what this Build
+      // produces, what the Component is, and enough of the Target to derive
+      // the shape it takes.
       targetShape: builds.targetShape,
       kind: components.kind,
       adapter: targets.adapter,
       vessel: vessels.name,
-      desiredUpdatedAt: componentTargetDesired.updatedAt,
     })
     .from(builds)
     .innerJoin(components, eq(builds.componentId, components.id))
-    .innerJoin(
-      componentTargetDesired,
-      eq(componentTargetDesired.componentId, components.id),
-    )
-    .innerJoin(targets, eq(targets.id, componentTargetDesired.targetId))
-    .innerJoin(vessels, eq(vessels.id, targets.vesselId))
+    .leftJoin(targets, eq(targets.id, components.placedTargetId))
+    .leftJoin(vessels, eq(vessels.id, targets.vesselId))
     .where(eq(builds.status, 'PENDING'))
-    .orderBy(asc(builds.id), asc(targets.rank));
-
-  // A moved Component deliberately keeps the old pair's desired row until what
-  // still serves there is retired, so a PENDING Build can join two placements —
-  // and only one of them takes the shape this Build produces. Each Build is
-  // bound to the newest desired row whose Target admits its shape: the same
-  // newest-row-is-the-placement-of-record reading `deployApp` uses. Rank is
-  // only the tie-break the ordering above already applied.
-  const perBuild = new Map<number, typeof rows>();
-  for (const row of rows) {
-    const group = perBuild.get(row.buildId);
-    if (group === undefined) perBuild.set(row.buildId, [row]);
-    else group.push(row);
-  }
-  const shapeTaken = (candidate: (typeof rows)[number]) =>
-    artifactTypeFor(candidate.kind, {
-      capabilities: {
-        artifactTypes:
-          context.adapters.deploy(candidate.adapter)?.artifactTypes ?? [],
-      },
-    });
+    .orderBy(asc(builds.id));
 
   let dispatched = 0;
-  for (const group of perBuild.values()) {
-    let row: (typeof rows)[number] | undefined;
-    for (const candidate of group) {
-      if (shapeTaken(candidate) !== candidate.targetShape) continue;
-      if (
-        row === undefined ||
-        candidate.desiredUpdatedAt > row.desiredUpdatedAt
-      ) {
-        row = candidate;
-      }
-    }
-    if (row === undefined) {
-      // No placement takes what this Build produces. Binding it anywhere would
-      // evaluate route and policy against a Target the artifact can never land
-      // on, so the Build stays PENDING and says so: placing the Component
-      // somewhere that admits the shape is an operator act that makes the next
-      // tick work.
-      const pending = group[0]!;
-      const refused = group
-        .map(
-          (candidate) =>
-            `${targetLabel(candidate)} takes ${shapeTaken(candidate)}`,
-        )
-        .join('; ');
+  for (const row of rows) {
+    if (row.targetId === null || row.adapter === null || row.vessel === null) {
+      // Nowhere to bind: the Component is placed on no Target, so there is no
+      // route or policy to evaluate this Build against. It stays PENDING and
+      // says so — placing the Component is the operator act that makes the
+      // next tick work.
       await recordDispatchWait(
         context,
         {
           attempt: {
-            appId: pending.appId,
-            componentId: pending.componentId,
-            buildId: pending.buildId,
+            appId: row.appId,
+            componentId: row.componentId,
+            buildId: row.buildId,
           },
-          waitingOn: pending.waitingOn,
+          waitingOn: row.waitingOn,
         },
-        `this Build produces a ${pending.targetShape} artifact and no Target this Component is placed on takes one (${refused}), so nothing can run it`,
+        'this Component is placed on no Target, so nothing can run this Build',
+      );
+      continue;
+    }
+    const shapeTaken = artifactTypeFor(row.kind, {
+      capabilities: {
+        artifactTypes:
+          context.adapters.deploy(row.adapter)?.artifactTypes ?? [],
+      },
+    });
+    if (shapeTaken !== row.targetShape) {
+      // The placement of record does not take what this Build produces —
+      // it was staged for a placement the Component has since moved off.
+      // Binding it anywhere else would evaluate route and policy against a
+      // Target the artifact can never land on, so the Build stays PENDING and
+      // says so.
+      await recordDispatchWait(
+        context,
+        {
+          attempt: {
+            appId: row.appId,
+            componentId: row.componentId,
+            buildId: row.buildId,
+          },
+          waitingOn: row.waitingOn,
+        },
+        `this Build produces a ${row.targetShape} artifact and the Target this Component is placed on takes another (${targetLabel({ vessel: row.vessel, adapter: row.adapter })} takes ${shapeTaken}), so nothing can run it`,
       );
       continue;
     }
@@ -202,10 +183,10 @@ export async function runBuildPass(
       );
     }
   }
-  // `perBuild` holds every distinct Build this pass looked at, all of them
-  // PENDING by the `where` clause — the backlog this pass found, whether or
-  // not it managed to dispatch all of it.
-  reconcilerQueueDepth.record(perBuild.size, { kind: 'build' });
+  // Every Build this pass looked at — one row each, all of them PENDING by
+  // the `where` clause — the backlog this pass found, whether or not it
+  // managed to dispatch all of it.
+  reconcilerQueueDepth.record(rows.length, { kind: 'build' });
   return dispatched;
 }
 

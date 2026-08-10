@@ -33,7 +33,7 @@
  * already succeeded, so there is nothing here to run and — structurally — no
  * `adapters.build` lookup to run it with.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   apps,
@@ -241,6 +241,20 @@ export async function placeIntent(
     if (vetoed !== null) {
       return { vetoed, deployId: null, supersededBuildId: null };
     }
+
+    // A first intent for a Component with no placement of record establishes
+    // one — that is what "a first deploy writes it" means. Conditional on NULL
+    // so an intent addressed at a retired pair (rollback, config-set) never
+    // moves a placed Component: only `placeComponent` does that.
+    await tx
+      .update(components)
+      .set({ placedTargetId: checked.targetId })
+      .where(
+        and(
+          eq(components.id, checked.componentId),
+          isNull(components.placedTargetId),
+        ),
+      );
 
     const [deploy] = await tx
       .insert(deploys)

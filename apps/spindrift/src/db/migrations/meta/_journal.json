@@ -211,6 +211,13 @@
       "when": 1785374380773,
       "tag": "0029_vessel_checklist",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785374380774,
+      "tag": "0030_component_placement_of_record",
+      "breakpoints": true
     }
   ]
 }

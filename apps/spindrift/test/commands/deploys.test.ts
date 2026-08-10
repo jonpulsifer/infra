@@ -647,6 +647,7 @@ describe('deployApp selects which Component it acts on', () => {
         kind: 'job',
         reach: 'none',
         auth: 'none',
+        placedTargetId: targetId,
       })
       .returning();
     await db
@@ -776,6 +777,10 @@ describe('deployApp selects which Component it acts on', () => {
       targetId: target.id,
       updatedAt: FROZEN,
     });
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: target.id })
+      .where(eq(components.id, component.id));
     const elsewhereVessel = await insertVessel(database().db, 'kubernetes', {
       name: `cluster-${crypto.randomUUID()}`,
     });
@@ -823,6 +828,10 @@ describe('deployApp selects which Component it acts on', () => {
       targetId: target.id,
       updatedAt: FROZEN,
     });
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: target.id })
+      .where(eq(components.id, component.id));
 
     const result = await deployApp(
       { name: app.name },

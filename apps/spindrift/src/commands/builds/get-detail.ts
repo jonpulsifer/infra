@@ -53,14 +53,9 @@ export const getBuildDetail: Command<
       component: {
         with: {
           app: true,
-          desiredTargets: {
-            // Newest first — the placement of record, exactly as `deployApp`
-            // reads it. A moved Component keeps the old pair's row until it is
-            // retired, and an unordered pick could name either.
-            orderBy: (desiredTable, { desc }) => [desc(desiredTable.updatedAt)],
-            limit: 1,
-            with: { target: { with: { vessel: true } } },
-          },
+          // The placement of record — the stored fact, exactly what
+          // `deployApp` acts on.
+          placedTarget: { with: { vessel: true } },
         },
       },
       deploys: {
@@ -75,11 +70,11 @@ export const getBuildDetail: Command<
   }
 
   const { view: buildView } = await buildViewOf(context, build);
-  const target = build.component.desiredTargets[0]?.target ?? null;
+  const target = build.component.placedTarget;
 
   // Where this Build is headed, resolved the same way `deployApp` resolves it:
-  // the desired row is what says which Target a Component belongs on before any
-  // intent has named one.
+  // the placement of record is what says which Target a Component belongs on
+  // before any intent has named one.
   const previousLive = target
     ? await context.db.query.deploys.findFirst({
         where: (deploys, { eq, and }) =>
@@ -100,14 +95,14 @@ export const getBuildDetail: Command<
     appId: build.component.app.id,
     app: build.component.app.name,
     component: build.component.name,
-    target: target === undefined ? 'not placed' : targetRowLabel(target),
+    target: targetRowLabel(target),
     commit: build.commit,
     phase: PHASE[build.status],
     phaseWord: buildView === null ? 'Extracted' : PHASE_WORD[build.status],
     headline: headlineFor(
       build.status,
       buildView?.runner ?? null,
-      target === undefined ? null : targetRowLabel(target),
+      target === null ? null : targetRowLabel(target),
     ),
     url: build.component.app.vanityDomain ?? '',
     // A Build never serves anything: §6's exposure is only ever changed by an
