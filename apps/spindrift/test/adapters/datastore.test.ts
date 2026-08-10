@@ -149,11 +149,11 @@ describe('provision', () => {
     expect(spec.containers).toEqual([
       { name: 'server', securityContext: hardened },
     ]);
-    // The sidecar the operator adds unasked, hardened through its own field.
-    // Admission fails the whole pod on whichever container lacks these, so
-    // asserting only `server` would assert a pod that still cannot be created —
-    // which is exactly what shipped before a live provision found it.
-    expect(spec.exporter).toEqual({ securityContext: hardened });
+    // The sidecar the operator adds unasked is switched off, and the assertion
+    // is on the switch rather than on the absence of a container: admission
+    // fails the whole pod on whichever container lacks the fields above, so a
+    // sidecar that came back without them would take the datastore with it.
+    expect(spec.exporter).toEqual({ enabled: false });
   });
 
   test('a hyphenated name becomes a typeable SQL identifier', async () => {
