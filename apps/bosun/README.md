@@ -172,3 +172,26 @@ steady state — the number a developer actually feels on push — is under a
 minute on both, with the skiff ahead. One wave was discarded with cause:
 both labels failed "Initialize containers" simultaneously, a registry
 hiccup fetching the Postgres service image, which is not a runner property.
+
+### Size-matched: skiff-ubuntu-bench vs hosted, spec for spec
+
+Same session, after tender grew to c4-highmem-8: `skiff-ubuntu-bench` is
+4 vCPU / 16 GiB / 20 G — a public-repo `ubuntu-latest` runner's exact spec —
+so the memory column reads zero. Three container waves and the TypeScript
+suite, same methodology as above:
+
+| workload | skiff-ubuntu-bench | ubuntu-latest |
+| --- | --- | --- |
+| cold image build (3 runs) | **36, 34, 32 s** | 23, 25, 49 s |
+| suite, caches none | **243 s** (Test 174 s) | 375 s (Test 293 s) |
+| suite, best, populating | **249 s** | 271 s |
+| suite, best, warm steady (2 runs) | **54, 54 s** | 74, 99 s |
+
+Two findings. First, RAM was worth exactly what the old ARC-era pair
+suggested: the suite's Test step drops 204 s → 174 s moving a skiff from
+3 GiB to 16 GiB, and spec-for-spec the skiff now wins every row — cold by a
+third, warm steady state by 30–45%. Second, the variance story is the
+benchmark's real headline: across every table in this section the skiff's
+spread is a few seconds while hosted swings 23–49 s on the same cold image
+build and 271–375 s on the same cold suite. A hosted runner is a lottery
+ticket priced at its best draw; a skiff is the same machine every time.
