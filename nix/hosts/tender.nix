@@ -36,7 +36,7 @@
   # job sees, and carrying the NixOS hull's closure would roughly double the
   # image this host is imported from for a family nothing in CI targets.
   #
-  # Sized against c4-standard-8's 8 vCPU / 30 GB, with no kubelet to share
+  # Sized against c4-highmem-8's 8 vCPU / 62 GB, with no kubelet to share
   # with: 4x3072M is 12 GiB of the pool's declared ceiling, and 4x6G of
   # workspace is reserved up front out of the 100 GB boot disk. warm = 4 is
   # double what riptide can hold, which is the point -- concurrency, not
@@ -63,6 +63,19 @@
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
       memory = "3072M";
+      workspace = "20G";
+      persist = true;
+      warm = 1;
+    };
+
+    # The hosted-shaped bench class: 4 vCPU / 16 GiB, the exact spec of a
+    # public-repo ubuntu-latest runner, so the benchmark's memory column
+    # reads zero instead of 3-vs-16. Exists for measurement; park it
+    # (warm = 0) when nothing is being measured.
+    classes.skiff-ubuntu-bench = {
+      hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
+      vcpus = 4;
+      memory = "16384M";
       workspace = "20G";
       persist = true;
       warm = 1;
@@ -96,9 +109,9 @@
       classes = [ "skiff-build-xl" ];
     };
 
-    # 30 GB of the 100 GB boot disk for the actions/cache service; the
-    # workspace disks (3x6G + 20G) reserve another 38 GB and the closure
-    # needs the rest.
+    # 30 GB of the 130 GB boot disk for the actions/cache service; the
+    # workspace disks (3x6G + 20G + 20G + 20G) reserve another 78 GB and the
+    # closure needs the rest.
     cache = {
       enable = true;
       maxSizeBytes = 32212254720;
@@ -108,5 +121,5 @@
   # 30 GiB total and nothing else on the box, so the bound is generous rather
   # than tight -- but it still exists, because without one the *host* OOM
   # killer picks the victim and on a spot instance that is a job either way.
-  systemd.services.bosun.serviceConfig.MemoryMax = "24G";
+  systemd.services.bosun.serviceConfig.MemoryMax = "48G";
 }

@@ -18,8 +18,11 @@
 locals {
   # The one knob worth turning while measuring. Changing family means
   # re-checking the nested-virt column, not just the price.
-  tender_machine_type = "c4-standard-8" # 8 vCPU / 30 GB
-  tender_disk_size    = 100             # closure + hull + warm x workspace
+  # highmem rather than standard-16: memory, not cores, bounds warm-pool
+  # depth, a 16 GiB hosted-shaped bench class needs the headroom, and staying
+  # at 8 vCPUs keeps the C4 CPU quota question unasked.
+  tender_machine_type = "c4-highmem-8" # 8 vCPU / 62 GB
+  tender_disk_size    = 130             # closure + hull + cache + warm x workspace (the bench class adds a fifth 20G slot)
 
   # GCS lists objects lexicographically, so element zero is the *oldest* name
   # the moment the prefix holds more than one build -- not a race, just
