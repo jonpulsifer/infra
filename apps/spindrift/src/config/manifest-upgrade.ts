@@ -56,8 +56,16 @@ export function upgradeManifestDocument(document: unknown): unknown {
 }
 
 /**
- * The one sha this repository's own seed declarations ever pinned, moved to
- * `@main`.
+ * The one commit a seed declaration ever pinned `buildWorkflow` at, and this
+ * project's own vocabulary rather than anyone's identity — which is why the
+ * step below may match on it where the extraction contract forbids naming the
+ * repository the workflow lives in. Exactly this sha, never a pattern: any
+ * other ref is an operator's pin, and it is theirs whatever it names.
+ */
+const SEED_PINNED_WORKFLOW_REF = '@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6';
+
+/**
+ * The sha a seed declaration pinned, moved to `@main`.
  *
  * The reusable workflow ref may move — see the `buildWorkflow` docblock in
  * `manifest.schema.ts`: a branch keeps every written caller current, and the
@@ -65,19 +73,24 @@ export function upgradeManifestDocument(document: unknown): unknown {
  * state `@main` now, but an installation seeded before that edit holds the pin
  * where no mounted correction can reach it — the stored row governs — and
  * every caller it writes into a connected repository copies a workflow frozen
- * at that commit.
+ * at that commit. The repository half of the value is kept, not restated:
+ * which repository publishes the workflow is the installation's fact, and the
+ * document already carries it.
  *
- * Exact-match on the one historical value, never a pattern: any other ref is
- * an operator's pin, and it is theirs whatever it names.
+ * **Must run after {@link scrubPlaceholderBuildWorkflow}**: the placeholder it
+ * nulls ends in this same sha, and moved instead of nulled it would be a live
+ * `@main` pointer at a repository this project does not own. The corpus's
+ * placeholder snapshot holds that ordering in place.
  */
 function movePinnedBuildWorkflowToMain(document: unknown): unknown {
   const manifest = asDocument(document);
   const github = asDocument(manifest?.github);
+  const workflow = github?.buildWorkflow;
   if (
     manifest === null ||
     github === null ||
-    github.buildWorkflow !==
-      'jonpulsifer/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6'
+    typeof workflow !== 'string' ||
+    !workflow.endsWith(SEED_PINNED_WORKFLOW_REF)
   ) {
     return document;
   }
@@ -85,8 +98,7 @@ function movePinnedBuildWorkflowToMain(document: unknown): unknown {
     ...manifest,
     github: {
       ...github,
-      buildWorkflow:
-        'jonpulsifer/infra/.github/workflows/spindrift-build.yml@main',
+      buildWorkflow: `${workflow.slice(0, -SEED_PINNED_WORKFLOW_REF.length)}@main`,
     },
   };
 }
