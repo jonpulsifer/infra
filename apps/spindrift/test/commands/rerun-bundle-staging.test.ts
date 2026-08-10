@@ -130,6 +130,10 @@ describe('the bundle a rerun stages', () => {
     await ctx.db
       .insert(componentTargetDesired)
       .values({ componentId: component!.id, targetId: target!.id });
+    await ctx.db
+      .update(components)
+      .set({ placedTargetId: target!.id })
+      .where(eq(components.id, component!.id));
     if (options.previousBuild === false) {
       return { app: app!, component: component!, build: null };
     }

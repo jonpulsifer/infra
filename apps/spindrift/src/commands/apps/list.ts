@@ -51,6 +51,11 @@ export const listApps: Command<
               build: true,
             },
           },
+          // The placement of record, for a Component that holds one and has
+          // never deployed — without it the row read `none`, indistinguishable
+          // from unplaced, and the difference decides whether an unplace is
+          // needed before delete.
+          placedTarget: { with: { vessel: true } },
         },
       },
     },
@@ -102,15 +107,22 @@ export const listApps: Command<
     const comp = worst?.component;
     const deploy = worst?.deploy;
     const target = deploy?.target;
+    // Placed but never deployed: the placement of record answers where the
+    // deploy history cannot, marked so the row is distinguishable from a
+    // placement something has shipped to — and from `none`, which now means
+    // exactly "not placed anywhere".
+    const placed = deploy === undefined ? comp?.placedTarget : undefined;
 
     return {
       id: app.id,
       name: app.name,
-      vessel: target?.vessel.name ?? '',
+      vessel: target?.vessel.name ?? placed?.vessel.name ?? '',
       source,
       kind: comp?.kind ?? 'service',
       phase: worst?.phase ?? 'PENDING',
-      target: target?.adapter ?? 'none',
+      target:
+        target?.adapter ??
+        (placed == null ? 'none' : `${placed.adapter} (awaiting first deploy)`),
       url: deploy?.url ?? app.vanityDomain ?? '',
       urlLive: deploy?.phase === 'LIVE',
       componentCount: app.components.length,

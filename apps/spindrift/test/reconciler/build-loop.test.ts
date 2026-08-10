@@ -2,13 +2,11 @@
  * Which placement `runBuildPass` binds a Build's dispatch to.
  *
  * A moved Component deliberately keeps the old pair's desired row until what
- * still serves there is retired, so a PENDING Build can join two placements.
- * The loop used to bind each Build to whichever Target ranked lowest — which,
- * after a move across shapes, is the *old* Target: the files Build the move's
- * own refusal prescribed was then routed and policy-checked against the image
- * Target it can never land on. These tests hold the loop to the Build's own
- * shape: bind to the newest desired row whose Target admits it, and where none
- * does, say so instead of dispatching anywhere.
+ * still serves there is retired, so the rows alone cannot say where a Build
+ * belongs. The loop binds every Build to the placement of record —
+ * `components.placedTargetId`, the stored fact `placeComponent` moves — and
+ * where that placement does not take the Build's shape, says so instead of
+ * dispatching anywhere.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -121,8 +119,8 @@ async function movedWebsite() {
     .returning();
 
   // The move's residue: the old pair's row survives so unplacement can retire
-  // what still serves there, and the new pair's row is the newest — the
-  // placement of record.
+  // what still serves there, the new pair has its own row, and the placement
+  // of record — the fact the move wrote — names the static Target.
   await db.insert(componentTargetDesired).values({
     componentId: component!.id,
     targetId: runtimeTarget!.id,
@@ -133,6 +131,10 @@ async function movedWebsite() {
     targetId: staticTarget!.id,
     updatedAt: FROZEN,
   });
+  await db
+    .update(components)
+    .set({ placedTargetId: staticTarget!.id })
+    .where(eq(components.id, component!.id));
 
   // The rebuild the move remediation staged: a files Build, PENDING.
   const [build] = await db
@@ -210,17 +212,22 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     });
   });
 
-  test('a Build whose shape no placement takes waits and says so', async () => {
-    const { runtimeTarget, runtimeVessel, staticTarget, build } =
+  test('a Build whose shape the placement of record does not take waits and says so', async () => {
+    const { component, runtimeTarget, runtimeVessel, staticTarget, build } =
       await movedWebsite();
     const db = database().db;
 
-    // Retire the placement that admitted the shape, leaving only the image
-    // Target. Binding the files Build there anyway would evaluate policy
-    // against a Target the artifact can never land on.
+    // Move the Component back onto the image Target: the files Build now
+    // belongs to a placement the Component no longer holds. Binding it to the
+    // image Target anyway would evaluate policy against a Target the artifact
+    // can never land on.
     await db
       .delete(componentTargetDesired)
       .where(eq(componentTargetDesired.targetId, staticTarget.id));
+    await db
+      .update(components)
+      .set({ placedTargetId: runtimeTarget.id })
+      .where(eq(components.id, component.id));
 
     const route = new FakeBuildAdapter();
     expect(await runBuildPass(context(registryOf(route)))).toBe(0);
@@ -232,5 +239,25 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     expect(row.dispatchWaitingOn).toContain(
       `${runtimeVessel.name}/${runtimeTarget.adapter} takes image`,
     );
+  });
+
+  test('an unplaced Component’s Build waits and says so', async () => {
+    const { component, build } = await movedWebsite();
+    const db = database().db;
+
+    // Unplacement clears the fact. The desired rows that remain are what
+    // still serves, never a place to bind a Build to.
+    await db
+      .update(components)
+      .set({ placedTargetId: null })
+      .where(eq(components.id, component.id));
+
+    const route = new FakeBuildAdapter();
+    expect(await runBuildPass(context(registryOf(route)))).toBe(0);
+
+    const row = await buildRow(build.id);
+    expect(row.status).toBe('PENDING');
+    expect(route.built).toHaveLength(0);
+    expect(row.dispatchWaitingOn).toContain('placed on no Target');
   });
 });
