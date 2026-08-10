@@ -175,6 +175,13 @@ resource "kubernetes_deployment_v1" "coredns" {
       "k8s-app"            = "kube-dns"
       "kubernetes.io/name" = "CoreDNS"
     }
+    # CoreDNS builds its API-server root pool once, at process start. A CA
+    # rotation rewrites kube-root-ca.crt in place and nothing else restarts
+    # CoreDNS, so it keeps trusting the old CA and silently wedges. Reloader
+    # turns that ConfigMap change into the restart that makes the rotation take.
+    annotations = {
+      "configmap.reloader.stakater.com/reload" = "kube-root-ca.crt"
+    }
   }
   spec {
     # Two, spread across nodes where there are two to spread across: a CoreDNS
