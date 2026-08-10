@@ -112,6 +112,47 @@ describe('provision', () => {
     });
   });
 
+  test('writes a ValkeyCluster the restricted standard will admit', async () => {
+    const { fake, adapter, target } = adapterOn();
+
+    await adapter.provision(target, {
+      name: 'sessions',
+      engine: 'valkey',
+      storageGiB: 1,
+    });
+
+    // Every field `restricted` demands, asserted as the standard states them
+    // rather than as one blob: the operator supplies none of these, so a
+    // regression here is not a wrong value but an object admission refuses —
+    // and the refusal lands on a StatefulSet the adapter never reads.
+    const spec = fake.get('valkeyclusters/spindrift-apps/sessions')
+      ?.spec as Record<string, any>;
+    expect(spec.podSecurityContext).toMatchObject({
+      runAsNonRoot: true,
+      seccompProfile: { type: 'RuntimeDefault' },
+    });
+    // Not redundant beside `runAsNonRoot`: the valkey image has no `USER` and
+    // drops from root itself, so without an explicit non-root uid the kubelet
+    // refuses it as root-by-image.
+    expect(spec.podSecurityContext.runAsUser).toBeGreaterThan(0);
+    // The volume has to be writable by whatever that uid is.
+    expect(spec.podSecurityContext.fsGroup).toBe(
+      spec.podSecurityContext.runAsGroup,
+    );
+    // Container-only fields, so they cannot be satisfied by the pod block
+    // above. The name is the operator's own container — a patch naming
+    // anything else is silently a second container.
+    expect(spec.containers).toEqual([
+      {
+        name: 'server',
+        securityContext: {
+          allowPrivilegeEscalation: false,
+          capabilities: { drop: ['ALL'] },
+        },
+      },
+    ]);
+  });
+
   test('a hyphenated name becomes a typeable SQL identifier', async () => {
     const { fake, adapter, target } = adapterOn();
 

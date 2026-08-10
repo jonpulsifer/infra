@@ -250,6 +250,40 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
         shards: 1,
         replicas: 0,
         persistence: { size },
+        // Restricted Pod Security, stated here because nothing else states it.
+        // `spindrift-apps` enforces the `restricted` standard, and the Valkey
+        // operator sets no security context of its own — it copies
+        // `podSecurityContext` through and leaves the container's empty — so a
+        // ValkeyCluster written without this creates its StatefulSet, has every
+        // pod refused by admission, and sits in `WAITING` with the only useful
+        // sentence on an object the adapter never reads. CloudNativePG needs no
+        // equivalent: it sets a compliant context itself.
+        //
+        // `runAsUser` is not redundant beside `runAsNonRoot`. The valkey image
+        // has no `USER` and drops from root in its entrypoint, so the kubelet
+        // would refuse it as root-by-image with nothing but the flag. 999/1000
+        // is the `valkey` user that image creates, so the data directory it
+        // wants and the identity it runs as agree.
+        podSecurityContext: {
+          runAsNonRoot: true,
+          runAsUser: 999,
+          runAsGroup: 1000,
+          // The volume, group-owned so the same identity can write it.
+          fsGroup: 1000,
+          seccompProfile: { type: 'RuntimeDefault' },
+        },
+        // The two fields `restricted` demands that exist only on a container.
+        // A strategic merge patch onto the operator's own container, which it
+        // names `server` — everything else about it is left to the operator.
+        containers: [
+          {
+            name: 'server',
+            securityContext: {
+              allowPrivilegeEscalation: false,
+              capabilities: { drop: ['ALL'] },
+            },
+          },
+        ],
       },
     };
   }
