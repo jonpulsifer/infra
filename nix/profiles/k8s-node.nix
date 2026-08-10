@@ -44,4 +44,12 @@ in
     enable = true;
     inherit network;
   };
+
+  # The in-cluster node-exporter DaemonSet scrapes this drop box on every
+  # node (clusters/folly/monitoring/kube-prometheus.yaml); a node without
+  # the directory trips NodeTextFileCollectorScrapeError. Ownership is left
+  # unmanaged ("-") so bosun's StateDirectory keeps the dir on riptide.
+  systemd.tmpfiles.rules = [
+    "d /var/lib/prometheus-node-exporter-text-files 0755 - - -"
+  ];
 }
