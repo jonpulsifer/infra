@@ -214,7 +214,7 @@ describe('connecting a repository', () => {
     expect(await database().db.select().from(repositories)).toEqual([]);
   });
 
-  test('connects without configuration PR when this installation has published no build workflow', async () => {
+  test('refuses when this installation has published no build workflow', async () => {
     const fake = new FakeGitHub();
     fake.commitFiles('main', { 'README.md': 'unconnected' });
     const base = await context(fake);
@@ -227,19 +227,14 @@ describe('connecting a repository', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.pullRequest).toBeNull();
-
-    const [row] = await database()
-      .db.select()
-      .from(repositories)
-      .where(eq(repositories.id, result.value.repositoryId));
-    expect(row).toMatchObject({
-      fullName: fake.fullName,
-      access: 'active',
-      configPullRequest: null,
-    });
+    // The schema's word ("null means repositories cannot be connected") is the
+    // command's word too: a repository connected without a build route is
+    // connected to nothing, so nothing is written at all.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain('build workflow');
+    expect(await database().db.select().from(repositories)).toEqual([]);
     expect(fake.pulls).toEqual([]);
   });
 
@@ -261,6 +256,9 @@ describe('connecting a repository', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.pullRequest).toBeNull();
+    // Fail open, but never silently: the result names the failure, so a null
+    // pull request is distinguishable from one that was never needed.
+    expect(result.value.pullRequestError).toContain('pull request error');
 
     const [row] = await database()
       .db.select()

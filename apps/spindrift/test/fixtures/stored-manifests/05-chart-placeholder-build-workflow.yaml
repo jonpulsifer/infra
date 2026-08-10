@@ -1,21 +1,18 @@
-# A stored manifest as this build writes one: the two vessels this installation
-# is built on are named by the installation itself, and the four keys that
-# described the second one without saying so are its properties.
+# The `04` shape as a chart-seeded installation's stored row holds it: every
+# key current, and `github.buildWorkflow` carrying the seed document's
+# placeholder ref instead of an operator's pin.
 #
-# `03` stated `cloud.homeVesselProject`, `cloud.artifactsProject`,
-# `sources.defaultBucket` and `secretStore.container` as four unrelated
-# top-level values. Nothing said they described one boundary, so nothing noticed
-# when they stopped describing the same one. `manifest-upgrade.ts` recovers the
-# home vessel by matching `cloud.homeVesselProject` against a declared vessel's
-# project — and, where the old document named a project no vessel declared,
-# takes the first cloud vessel rather than minting a boundary out of a string.
-# The control plane is the vessel of the rank-0 Target, which is where every
-# document written so far put it.
+# That value is not inert the way `spindrift.example.com` is. `connectRepository`
+# writes it into a caller workflow inside connected repositories, and it names a
+# repository this project does not own — so `manifest-upgrade.ts` nulls exactly
+# this string, and only this string, on the way through validation. This file is
+# what proves that scrub is load-bearing: it boots, the row is rewritten with
+# `buildWorkflow: null`, and nothing else about the document moves.
 #
 # `installation.name` differs from every declaration this suite mounts, for the
 # reason `01` gives.
 installation:
-  name: stored-with-installation-vessels
+  name: stored-with-chart-placeholder-workflow
   controlPlaneVessel: cluster
   homeVessel: cloud
 
@@ -46,7 +43,7 @@ github:
   clientId: Iv1.example
   oauthBaseUrl: https://git.example.test
   apiBaseUrl: https://api.git.example.test
-  buildWorkflow: example/platform/.github/workflows/spindrift-build.yml@4bf1f21a7c1e2d3b5a6f708192a3b4c5d6e7f809
+  buildWorkflow: spindrift/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6
 
 build:
   routes:

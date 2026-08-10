@@ -48,7 +48,38 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return nameInstallationVessels(dropTargetNames(addDeclaredVessels(document)));
+  return scrubPlaceholderBuildWorkflow(
+    nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+  );
+}
+
+/**
+ * The one placeholder workflow ref a seed document ever carried, nulled.
+ *
+ * The chart's seed document stated this exact value where it now states null,
+ * and the stored row keeps whatever seeded it — so an installation seeded from
+ * that document holds the value where no mounted correction can reach it. It
+ * is not inert the way `spindrift.example.com` is: `connectRepository` writes
+ * it into a caller workflow inside connected repositories, and it names a
+ * repository this project does not own. Null is the schema's own word for "no
+ * workflow pinned", and connect refuses on it until an operator states a real
+ * one.
+ *
+ * Exact-match on the one historical string, never a pattern: any other value
+ * is an operator's pin, and it is theirs whatever it names.
+ */
+function scrubPlaceholderBuildWorkflow(document: unknown): unknown {
+  const manifest = asDocument(document);
+  const github = asDocument(manifest?.github);
+  if (
+    manifest === null ||
+    github === null ||
+    github.buildWorkflow !==
+      'spindrift/infra/.github/workflows/spindrift-build.yml@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6'
+  ) {
+    return document;
+  }
+  return { ...manifest, github: { ...github, buildWorkflow: null } };
 }
 
 /**

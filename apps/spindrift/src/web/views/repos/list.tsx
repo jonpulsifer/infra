@@ -717,15 +717,17 @@ function ScanPanel({
             className="mt-0.5 size-4 shrink-0 text-warning"
           />
           <p className="text-xs">
-            This installation has published no build workflow, so connecting
-            writes a repository row but opens no configuration pull request.
+            This installation has pinned no reusable build workflow, so
+            repositories cannot be connected until an operator publishes one.
           </p>
         </div>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button
-          disabled={connecting || deployable.length === 0}
+          disabled={
+            connecting || deployable.length === 0 || !inspection.canConnect
+          }
           onClick={() => onConnect({ fullName })}
         >
           {connecting ? 'Opening pull request…' : 'Connect repository'}
