@@ -18,7 +18,11 @@ variable "config" {
   type = object({
     ingress = list(object({
       hostname = optional(string)
-      service  = string
+      # Regex over the request path. A rule with one matches only that slice
+      # of its hostname, which is what lets a single path prefix go public
+      # without the rest of the origin coming with it.
+      path    = optional(string)
+      service = string
     }))
   })
   default = {

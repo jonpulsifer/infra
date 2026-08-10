@@ -169,8 +169,9 @@ spec:
             # engine every build on this route runs, and a moving tag is an
             # engine that changes underneath a reproducible build.
             image: moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
-          # The outage fallback: a bosun host long-polls the outbox over the
-          # same tunnel and /internal/* posture the GitHub webhook rides,
+          # The outage fallback: a bosun host long-polls the outbox over a
+          # path-scoped tunnel hostname that exposes /internal/bosun/ and
+          # nothing else (terraform/network/cloudflare/spindrift.tf),
           # claims the request, and builds it on a microVM skiff. Ranked
           # last — hosted and managed win whenever they are reachable; this
           # is the route that still works when the Actions plane is down.

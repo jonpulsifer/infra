@@ -84,11 +84,14 @@
     };
 
     # The outage fallback this host exists to serve: long-poll Spindrift's
-    # outbox and run claimed builds on skiff-build-xl. The hostname is the
-    # control plane's public tunnel — reachable from GCE, and outside the
-    # RFC1918 deny bosun's unit already carries.
+    # outbox and run claimed builds on skiff-build-xl. The hostname is a
+    # path-scoped rule on the spindrift tunnel exposing /internal/bosun/
+    # and nothing else (terraform/network/cloudflare/spindrift.tf) — the
+    # control plane's own hostname is a LAN record a cloud host cannot
+    # reach, and the tunnel address is public, outside the RFC1918 deny
+    # bosun's unit carries.
     spindrift = {
-      url = "https://spindrift.lolwtf.ca";
+      url = "https://spindrift-control.lolwtf.dev";
       tokenFile = config.sops.secrets."spindrift-pool-token".path;
       classes = [ "skiff-build-xl" ];
     };
