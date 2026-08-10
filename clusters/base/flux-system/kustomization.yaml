@@ -8,4 +8,5 @@ resources:
   - kyverno.yaml
   - onepassword-connect.yaml
   - sandbox.yaml
+  - spindrift-policy.yaml
   - valkey-operator.yaml

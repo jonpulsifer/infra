@@ -1,0 +1,75 @@
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: spindrift-verify-images
+  annotations:
+    pod-policies.kyverno.io/autogen-controllers: none
+    policies.kyverno.io/category: Software Supply Chain Security
+    policies.kyverno.io/description: >-
+      Admit Spindrift workloads only when every digest-pinned image has a
+      signature from the trusted-builds signer.
+spec:
+  background: true
+  webhookConfiguration:
+    failurePolicy: Fail
+    timeoutSeconds: 30
+  rules:
+    - name: verify-trusted-build-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - spindrift-apps
+              selector:
+                matchExpressions:
+                  - key: spindrift.dev/deploy
+                    operator: Exists
+      verifyImages:
+        - imageReferences:
+            - "*"
+          failureAction: Enforce
+          mutateDigest: false
+          required: true
+          verifyDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    # sha512, because that is what the key is:
+                    # `google_kms_crypto_key.signer` is
+                    # `RSA_SIGN_PKCS1_4096_SHA512`
+                    # (terraform/gcp/projects/trusted-builds/kms.tf), so cosign
+                    # hashes with SHA-512 and a verifier told sha256 is
+                    # verifying with the wrong digest.
+                    signatureAlgorithm: sha512
+                    # There is no public transparency log in this trust model —
+                    # the signer is a KMS key whose public half is pinned right
+                    # below, and the build workflow signs with
+                    # `--tlog-upload=false` for the same reason core's own
+                    # signer does. Left at the default, Kyverno looks for a
+                    # Rekor entry that by construction does not exist and
+                    # refuses every signature.
+                    #
+                    # Under `rekor`, and `ctlog` is a different thing: `ctlog`
+                    # carries `ignoreSCT` for certificate timestamps, which a
+                    # keyed signature has none of.
+                    rekor:
+                      ignoreTlog: true
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA73ui5ytn67hfYn4/Rizf
+                      GBA8pfyorGVjm9eA4DduLL05VR0UVm/PINij33GVrKgjR4lhic8IVTKT7sJ6DYkW
+                      pxoPHZFgKwXmnJh0uYvoqJdYssVbE5cVuiea/BUUjT+wdIGNv0hIpMWnVJf+VKRg
+                      f7Dz8xtvOGaPog9Sr2/bxVLeTSej+R0EBOxGPYp8fIMab6ItMfu4N+0RhrXenosr
+                      M2j+E15wakURn2wxJLRWg/S+ipnbE4/vC+Y0rfm2PUgDkq45WcbEyefZ3AvRSNlg
+                      z9PjYmZyY04E/L22s2w95IMXR+0V4ROwCyVrsu+USsWN1FNMImWIKFupjOXguZTy
+                      QwGjdoUhGAvI3vQm4Mt2SDJdSOd2TydH+/Iuhy9sK2l1sboKINVzlSHXlaK7x8qx
+                      mFvn2EWNgrmgYgcfV+mS34p6thp07ODOAheWDm1LwIG2k5AJXT3WqgF2+n7LVUZI
+                      nKpF058uYFSy/f8CaqzHUKc11eWUSG2jqFbMrW3Iq5e3t9YhQDeENsEMKIVOQSOb
+                      Fz4KL6es/V8aDXgR0oXrD6HJNuSKAibTP1GMUSK/8PM1UkGTo42y6ut0ujerhxsp
+                      FXF36WRT9ZIQjZaJrVNZFn7DfWFRI+d9co5zITwQHZkzDiVYobhtUcMfdKyRQ2tj
+                      hKFOfxgmlZHygCDq2U86XCUCAwEAAQ==
+                      -----END PUBLIC KEY-----

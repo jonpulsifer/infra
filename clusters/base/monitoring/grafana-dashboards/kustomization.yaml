@@ -1,3 +1,4 @@
+---
 # Dashboards for services that run on both clusters. Each cluster's Grafana
 # sidecar picks up any ConfigMap labelled grafana_dashboard, so this ships to
 # folly and offsite alike; folly's own dashboards ConfigMap keeps its
@@ -10,6 +11,7 @@ configMapGenerator:
   - name: dashboards-base
     files:
       - bosun.json
+      - spindrift.json
 generatorOptions:
   disableNameSuffixHash: true
   annotations:
