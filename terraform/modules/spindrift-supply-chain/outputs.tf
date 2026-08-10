@@ -14,8 +14,18 @@ output "signer_uri" {
 }
 
 output "signer_key_version_uri" {
-  description = "Latest key version as //cloudkms.googleapis.com/v1/… — the public key id the attestor registers and sign-and-create stamps. Null with a bring-your-own attestor, which registers its own."
-  value       = local.create_attestor ? "//cloudkms.googleapis.com/v1/${data.google_kms_crypto_key_latest_version.signer[0].name}" : null
+  description = "Latest key version as //cloudkms.googleapis.com/v1/… — the public key id the attestor registers and sign-and-create stamps. Null only when both the key and the attestor are brought; a bring-your-own attestor paired with a created key takes this to register it."
+  value       = (local.create_key || local.create_attestor) ? "//cloudkms.googleapis.com/v1/${data.google_kms_crypto_key_latest_version.signer[0].name}" : null
+}
+
+output "signer_public_key_pem" {
+  description = "PEM public half of the latest key version — what a bring-your-own attestor registers for a module-created key. Null only when both the key and the attestor are brought."
+  value       = (local.create_key || local.create_attestor) ? data.google_kms_crypto_key_latest_version.signer[0].public_key[0].pem : null
+}
+
+output "signer_public_key_algorithm" {
+  description = "Signature algorithm of that version, as Binary Authorization's pkix registration wants it. Null only when both the key and the attestor are brought."
+  value       = (local.create_key || local.create_attestor) ? data.google_kms_crypto_key_latest_version.signer[0].public_key[0].algorithm : null
 }
 
 output "note" {

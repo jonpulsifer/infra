@@ -28,9 +28,16 @@ Two postures:
   - **Own attestor:** all attestor- and note-side IAM lives with it —
     `attestorsViewer` for the attesters, `attestorsVerifier` for each
     vessel's Binary Authorization service agent, `notes.attacher` for the
-    attesters and `notes.occurrences.viewer` for the agents on its note.
+    attesters and `notes.occurrences.viewer` for the agents on its note
+    (including the attestor project's own agent — on a created attestor the
+    module composes that grant itself).
     If its occurrences record outside this module's project, mirror the
     `occurrences.editor` grant there too.
+  - **Own attestor, created key:** the registration is the caller's, and the
+    module hands over everything it takes — `signer_key_version_uri` as the
+    public key id, `signer_public_key_pem`, and
+    `signer_public_key_algorithm`. Only when both the key and the attestor
+    are brought do those outputs go null.
 
 Every grant is an additive `*_iam_member`; the module never owns the full
 policy on the key, attestor, or note, so nothing brought in is stomped.
@@ -40,8 +47,13 @@ teardown must stay cheap. GCP itself refuses to delete KMS rings and keys: a
 destroy orphans them, and a rebuild in the same project either imports the
 orphans or picks fresh `key_ring_name`/`signer_key_name` values.
 
-`examples/auto` and `examples/bring-your-own` are one validating caller per
-posture.
+The very first apply on a fresh key can fail reading its public half — the
+version can still be `PENDING_GENERATION` when the attestor registration
+reads it. The second apply converges; that retry is the procedure, not a
+defect.
+
+`examples/` holds one validating caller per posture: `auto`,
+`bring-your-own`, and the two mixed postures `byo-key` and `byo-attestor`.
 
 Pass `attester_principals` (and the other principal lists) as locals
 declared in the calling root, for the same reason `spindrift-vessel` takes
@@ -90,6 +102,7 @@ No modules.
 | [google_project_iam_member.controller_builds](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_project_iam_member.controller_probe_viewer](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_kms_crypto_key_latest_version.signer](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/kms_crypto_key_latest_version) | data source |
+| [google_project.this](https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/project) | data source |
 
 ## Inputs
 
@@ -107,7 +120,7 @@ No modules.
 | <a name="input_repository"></a> [repository](#input\_repository) | Artifact Registry repository id the reader/writer grants attach to. The module never creates it — the repository may be shared with non-Spindrift consumers, so it stays declared where it lives. | `string` | n/a | yes |
 | <a name="input_signer_key"></a> [signer\_key](#input\_signer\_key) | Existing KMS crypto key to sign with, as its full resource id (projects/*/locations/*/keyRings/*/cryptoKeys/*). Set it and the module creates no ring or key, only the grants on the one provided. | `string` | `null` | no |
 | <a name="input_signer_key_name"></a> [signer\_key\_name](#input\_signer\_key\_name) | Name of the signer crypto key inside the ring. Same unremovability caveat as the ring. | `string` | `"signer"` | no |
-| <a name="input_verifier_agents"></a> [verifier\_agents](#input\_verifier\_agents) | Binary Authorization service agents of the vessels that verify admission against the attestor. Empty on first bootstrap — a vessel's agent exists only after its Binary Authorization API is enabled; add each agent once its vessel does. | `list(string)` | `[]` | no |
+| <a name="input_verifier_agents"></a> [verifier\_agents](#input\_verifier\_agents) | Binary Authorization service agents of the vessels that verify admission against the attestor. Empty on first bootstrap — a vessel's agent exists only after its Binary Authorization API is enabled; add each agent once its vessel does. The attestor project's own agent gets its note read automatically; this list is only the vessels'. | `list(string)` | `[]` | no |
 
 ## Outputs
 
@@ -117,6 +130,8 @@ No modules.
 | <a name="output_note"></a> [note](#output\_note) | Container-analysis note id (projects/*/notes/*). Null with a bring-your-own attestor. |
 | <a name="output_registry_namespace"></a> [registry\_namespace](#output\_registry\_namespace) | Artifact Registry namespace Spindrift publishes to — supplyChain.registry material. A namespace, not a repository: core appends {app}/{component}. |
 | <a name="output_signer_key"></a> [signer\_key](#output\_signer\_key) | Signer crypto key resource id (projects/*/locations/*/keyRings/*/cryptoKeys/*) |
-| <a name="output_signer_key_version_uri"></a> [signer\_key\_version\_uri](#output\_signer\_key\_version\_uri) | Latest key version as //cloudkms.googleapis.com/v1/… — the public key id the attestor registers and sign-and-create stamps. Null with a bring-your-own attestor, which registers its own. |
+| <a name="output_signer_key_version_uri"></a> [signer\_key\_version\_uri](#output\_signer\_key\_version\_uri) | Latest key version as //cloudkms.googleapis.com/v1/… — the public key id the attestor registers and sign-and-create stamps. Null only when both the key and the attestor are brought; a bring-your-own attestor paired with a created key takes this to register it. |
+| <a name="output_signer_public_key_algorithm"></a> [signer\_public\_key\_algorithm](#output\_signer\_public\_key\_algorithm) | Signature algorithm of that version, as Binary Authorization's pkix registration wants it. Null only when both the key and the attestor are brought. |
+| <a name="output_signer_public_key_pem"></a> [signer\_public\_key\_pem](#output\_signer\_public\_key\_pem) | PEM public half of the latest key version — what a bring-your-own attestor registers for a module-created key. Null only when both the key and the attestor are brought. |
 | <a name="output_signer_uri"></a> [signer\_uri](#output\_signer\_uri) | The key as the installation manifest's supplyChain.signer names it: gcpkms:// prefixed to the key's resource id |
 <!-- END_TF_DOCS -->

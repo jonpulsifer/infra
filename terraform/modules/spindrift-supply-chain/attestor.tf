@@ -1,10 +1,29 @@
 # Reading the latest version needs `roles/cloudkms.viewer` on the key at plan
 # time — with a bring-your-own key, the caller arranges that for whatever
-# identity runs the plan.
+# identity runs the plan. The read runs unless BOTH the key and the attestor
+# are brought — a created key with a bring-your-own attestor still needs the
+# version URI and public half exposed as outputs, or the caller cannot
+# register the key the module just made.
+#
+# Greenfield race, known: on the very first apply the fresh key's version can
+# still be PENDING_GENERATION when this reads its public half, and the apply
+# fails; the second apply converges. Not worth a sleep resource — the retry
+# is the documented procedure.
 data "google_kms_crypto_key_latest_version" "signer" {
-  count = local.create_attestor ? 1 : 0
+  count = (local.create_key || local.create_attestor) ? 1 : 0
 
   crypto_key = local.signer_key_id
+}
+
+# The attestor project's own Binary Authorization service agent reads
+# occurrences on the note too — verification happens where the attestor
+# lives, not only in each vessel. Composed from the project number so the
+# working shape survives a rebuild without anyone remembering to list it;
+# `verifier_agents` stays the roster of *vessel* agents.
+data "google_project" "this" {
+  count = local.create_attestor ? 1 : 0
+
+  project_id = var.project
 }
 
 resource "google_container_analysis_note" "provenance" {
@@ -87,7 +106,10 @@ resource "google_container_analysis_note_iam_member" "attacher" {
 }
 
 resource "google_container_analysis_note_iam_member" "occurrences_viewer" {
-  for_each = toset(local.create_attestor ? var.verifier_agents : [])
+  for_each = toset(local.create_attestor ? concat(
+    var.verifier_agents,
+    ["serviceAccount:service-${data.google_project.this[0].number}@gcp-sa-binaryauthorization.iam.gserviceaccount.com"],
+  ) : [])
 
   project = google_container_analysis_note.provenance[0].project
   note    = google_container_analysis_note.provenance[0].name
