@@ -142,6 +142,13 @@ let
     $bb mount -t devpts devpts /dev/pts
     $bb mount -t tmpfs shm /dev/shm
     $bb mount -t cgroup2 cgroup2 /sys/fs/cgroup
+    # devtmpfs carries no fd symlinks; full distros get them from their init.
+    # bash process substitution (<(...)) opens /dev/fd/N, so without these the
+    # build script dies at its first jq-fed while loop.
+    $bb ln -sf /proc/self/fd /dev/fd
+    $bb ln -sf /proc/self/fd/0 /dev/stdin
+    $bb ln -sf /proc/self/fd/1 /dev/stdout
+    $bb ln -sf /proc/self/fd/2 /dev/stderr
 
     $bb hostname skiff
     echo "127.0.0.1 localhost skiff" > /etc/hosts
