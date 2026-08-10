@@ -49,6 +49,12 @@ export interface FakeHostingOptions {
   readonly refuseList?: { status: number; body: unknown };
   /** When set, creating a version is refused with this. */
   readonly refuseVersion?: { status: number; body: unknown };
+  /**
+   * When set, deleting a site at the real (project-scoped) path answers with
+   * this instead of removing the site — the regression arrangement for a
+   * destroy that must not report success it did not earn.
+   */
+  readonly refuseDelete?: { status: number; body: unknown };
   /** When set, adding a domain answers with this. */
   readonly domainAnswer?: { status: number; body: unknown };
   readonly token?: string;
@@ -208,6 +214,28 @@ export class FakeHosting {
       }
     }
 
+    // `projects.sites.delete` — the only path the real API serves for site
+    // deletion. There is no flat `sites.delete`; the flat `sites/{id}` form
+    // below answers reads only, so a DELETE aimed at it falls through to the
+    // catch-all 404, same as the real API.
+    const projectSiteMatch = path.match(
+      new RegExp(`^projects/${this.project}/sites/([^/]+)$`),
+    );
+    if (projectSiteMatch !== null && method === 'DELETE') {
+      const id = projectSiteMatch[1] as string;
+      if (this.options.refuseDelete !== undefined) {
+        return json(
+          this.options.refuseDelete.status,
+          this.options.refuseDelete.body,
+        );
+      }
+      if (!this.sites.has(id)) return json(404, error('no site'));
+      this.sites.delete(id);
+      this.released.delete(id);
+      this.domains.delete(id);
+      return json(200, {});
+    }
+
     const versionMatch = path.match(/^sites\/([^/]+)\/versions\/([^/:]+)$/);
     if (versionMatch !== null) {
       return this.finalize(
@@ -236,13 +264,6 @@ export class FakeHosting {
         return this.sites.has(id)
           ? json(200, site(id))
           : json(404, error('no site'));
-      }
-      if (method === 'DELETE') {
-        if (!this.sites.has(id)) return json(404, error('no site'));
-        this.sites.delete(id);
-        this.released.delete(id);
-        this.domains.delete(id);
-        return json(200, {});
       }
     }
 
