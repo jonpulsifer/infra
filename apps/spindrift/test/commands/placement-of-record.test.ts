@@ -21,6 +21,7 @@ import {
   placeComponent,
   rollbackDeploy,
   setConfig,
+  unplaceComponent,
 } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
@@ -265,6 +266,52 @@ describe('an intent addressed at the old pair does not move the placement', () =
     expect(workspace.ok).toBe(true);
     if (!workspace.ok) return;
     expect(workspace.value.workspace.targetId).toBe(to.target.id);
+  });
+});
+
+describe('unplacing clears the fact only for the pair that is it', () => {
+  test('unplacing the placement itself sets the Component home to nowhere', async () => {
+    const { component, from } = await fixture();
+    const ctx = await context(
+      registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+    );
+
+    const placed = await placeComponent(
+      { componentId: component.id, targetId: from.target.id, supply: [] },
+      ctx,
+    );
+    expect(placed.ok).toBe(true);
+    expect(await placedTargetOf(component.id)).toBe(from.target.id);
+
+    const retracted = await unplaceComponent(
+      { componentId: component.id, targetId: from.target.id },
+      ctx,
+    );
+    expect(retracted.ok).toBe(true);
+    expect(await placedTargetOf(component.id)).toBeNull();
+  });
+
+  test('unplacing the retired pair after a move leaves the home where the move put it', async () => {
+    const { component, from, to } = await fixture();
+    const ctx = await context(
+      registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+    );
+
+    for (const targetId of [from.target.id, to.target.id]) {
+      const placed = await placeComponent(
+        { componentId: component.id, targetId, supply: [] },
+        ctx,
+      );
+      expect(placed.ok).toBe(true);
+    }
+    expect(await placedTargetOf(component.id)).toBe(to.target.id);
+
+    const retracted = await unplaceComponent(
+      { componentId: component.id, targetId: from.target.id },
+      ctx,
+    );
+    expect(retracted.ok).toBe(true);
+    expect(await placedTargetOf(component.id)).toBe(to.target.id);
   });
 });
 
