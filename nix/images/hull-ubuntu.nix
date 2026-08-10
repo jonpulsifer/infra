@@ -215,11 +215,19 @@ let
       # tmpfs, so it costs the class's memory *and* is gone next boot. Naming it
       # here rather than in a workflow makes it a property of the machine, which
       # is what it is: the runner reads it before any job exists.
-      $bb mkdir -p /mnt/skiff/tools
+      $bb mkdir -p /mnt/skiff/tools /mnt/skiff/cache/bun /mnt/skiff/cache/xdg
       {
         echo 'export SKIFF_CACHE=/mnt/skiff/cache'
         echo 'export RUNNER_TOOL_CACHE=/mnt/skiff/tools'
         echo 'export AGENT_TOOLSDIRECTORY=/mnt/skiff/tools'
+        # $HOME is the tmpfs root, so a tool cache written there is charged
+        # against the class's memory -- bun's store alone is ~1.5G, which
+        # ENOSPCed the first unmodified workflow this pool served (measured:
+        # typescript.yml, bun extracting its own platform packages). A hosted
+        # runner's $HOME is a 90G SSD; fidelity here means big caches land on
+        # the disk without the workflow having to know.
+        echo 'export BUN_INSTALL_CACHE_DIR=/mnt/skiff/cache/bun'
+        echo 'export XDG_CACHE_HOME=/mnt/skiff/cache/xdg'
       } > /etc/skiff-env
     else
       # A plain tmpfs: docker's overlayfs snapshotter cannot put upper/work

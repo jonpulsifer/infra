@@ -63,6 +63,9 @@ type pool struct {
 	launch launcher
 	logger *slog.Logger
 	stats  *metrics
+	// host is baked into every runner's name (skiff-<host>-<id>) so a job's
+	// own "Set up job" log says which bosun host to look at.
+	host string
 
 	mu     sync.Mutex
 	skiffs map[string]*skiff
@@ -73,15 +76,27 @@ type pool struct {
 }
 
 func newPool(cfg *Config, gh githubClient, launch launcher, logger *slog.Logger) *pool {
+	host, _ := os.Hostname()
 	return &pool{
 		cfg:    cfg,
 		gh:     gh,
 		launch: launch,
 		logger: logger,
 		stats:  newMetrics(),
+		host:   host,
 		skiffs: map[string]*skiff{},
 		slots:  map[string]map[int]struct{}{},
 	}
+}
+
+// runnerName is what GitHub shows in a job's "Set up job" header. It carries
+// the bosun host because that is the first thing anyone debugging a job needs
+// and nothing else in the job log says it.
+func (p *pool) runnerName(id string) string {
+	if p.host == "" {
+		return "skiff-" + id
+	}
+	return "skiff-" + p.host + "-" + id
 }
 
 // workspaceSlotName is the image a persisting class's slot always reuses. Named
@@ -264,7 +279,7 @@ func (p *pool) spawn(ctx context.Context, className string) {
 	}
 	// Mint immediately before boot, never stockpiled: the config expires
 	// ~1h from this call, not from when a guest first connects.
-	runnerID, jitConfig, err := p.gh.GenerateJITConfig(ctx, p.cfg.Repo, "skiff-"+id, []string{className})
+	runnerID, jitConfig, err := p.gh.GenerateJITConfig(ctx, p.cfg.Repo, p.runnerName(id), []string{className})
 	if err != nil {
 		logger.Error("generate jitconfig", "error", err)
 		return
