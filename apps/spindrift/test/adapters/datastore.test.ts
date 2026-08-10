@@ -142,15 +142,18 @@ describe('provision', () => {
     // Container-only fields, so they cannot be satisfied by the pod block
     // above. The name is the operator's own container — a patch naming
     // anything else is silently a second container.
+    const hardened = {
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ['ALL'] },
+    };
     expect(spec.containers).toEqual([
-      {
-        name: 'server',
-        securityContext: {
-          allowPrivilegeEscalation: false,
-          capabilities: { drop: ['ALL'] },
-        },
-      },
+      { name: 'server', securityContext: hardened },
     ]);
+    // The sidecar the operator adds unasked, hardened through its own field.
+    // Admission fails the whole pod on whichever container lacks these, so
+    // asserting only `server` would assert a pod that still cannot be created —
+    // which is exactly what shipped before a live provision found it.
+    expect(spec.exporter).toEqual({ securityContext: hardened });
   });
 
   test('a hyphenated name becomes a typeable SQL identifier', async () => {
@@ -262,10 +265,12 @@ describe('observe', () => {
       engine: 'valkey',
       storageGiB: 1,
     });
-    fake.place('services/spindrift-apps/sessions', {
+    // `valkey-`, the prefix the operator gives everything it creates. A
+    // Service placed under the bare name is the cluster as it is *not*.
+    fake.place('services/spindrift-apps/valkey-sessions', {
       apiVersion: 'v1',
       kind: 'Service',
-      metadata: { name: 'sessions', namespace: 'spindrift-apps' },
+      metadata: { name: 'valkey-sessions', namespace: 'spindrift-apps' },
     });
 
     const state = await adapter.observe(
@@ -276,7 +281,9 @@ describe('observe', () => {
     // ACL user is declared, so the address is the whole of it. `redis://`
     // because this lands in `REDIS_URL` and no mainstream client parses a
     // `valkey://` scheme.
-    expect(state?.connection).toBe('redis://sessions.spindrift-apps.svc:6379');
+    expect(state?.connection).toBe(
+      'redis://valkey-sessions.spindrift-apps.svc:6379',
+    );
   });
 
   test('a degraded Valkey is FAILED with §6s reason for readiness that never passed', async () => {

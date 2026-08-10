@@ -86,6 +86,15 @@ export const ENGINE_KINDS = {
  */
 const NAME_LIMIT = 50;
 
+/**
+ * What the Valkey operator prefixes everything it creates with.
+ *
+ * `resourcePrefix` in the operator's own `internal/controller/utils.go`. Named
+ * here because two places need it and neither is allowed to guess: the address
+ * a Datastore hands out, and the Service that address is confirmed against.
+ */
+const VALKEY_RESOURCE_PREFIX = 'valkey-';
+
 export interface KubernetesDatastoreOptions {
   /** Minted per request. Never a stored credential (§13). */
   readonly token: TokenProvider;
@@ -272,9 +281,13 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
           fsGroup: 1000,
           seccompProfile: { type: 'RuntimeDefault' },
         },
-        // The two fields `restricted` demands that exist only on a container.
-        // A strategic merge patch onto the operator's own container, which it
-        // names `server` — everything else about it is left to the operator.
+        // The two fields `restricted` demands that exist only on a container,
+        // so the pod block above cannot supply them. Every container in the pod
+        // needs them, and this operator builds **two**: `server`, patched here,
+        // and the metrics exporter sidecar it adds unasked — which has its own
+        // spec field rather than living in `containers`, and so is set below.
+        // Admission fails the whole pod on the one that is missing them, which
+        // is why hardening only the obvious container hardens nothing.
         containers: [
           {
             name: 'server',
@@ -284,6 +297,17 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
             },
           },
         ],
+        // The sidecar, hardened through the field the operator gives it rather
+        // than through `containers` — it is not in that list, and a patch
+        // naming it there would add a third container instead of amending the
+        // second. Left enabled: the fleet scrapes what it runs, and switching
+        // metrics off to satisfy a policy would be answering the wrong question.
+        exporter: {
+          securityContext: {
+            allowPrivilegeEscalation: false,
+            capabilities: { drop: ['ALL'] },
+          },
+        },
       },
     };
   }
@@ -314,23 +338,31 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       // reading `<cluster>-app` means reading every Secret in the namespace.
       return `secret://${parsed.namespace}/${parsed.name}-app`;
     }
-    // The Valkey operator fronts a cluster with a Service of the same name.
+    // The Valkey operator fronts a cluster with a Service named for it, under
+    // the prefix it gives everything it creates (`resourcePrefix = "valkey-"`
+    // in the operator's `internal/controller/utils.go`, and its own e2e suite
+    // reads back `service valkey-<cluster>`).
+    //
     // Confirmed against the cluster rather than asserted, because this is the
     // one fact here that is a naming convention rather than a documented API
     // field — and `services: get` is a grant that names an ordinary object.
-    const service = await api.get({
+    // The confirmation is what makes a wrong guess here a Datastore that never
+    // reports a connection rather than one that hands out an address nothing
+    // answers on.
+    const service = `${VALKEY_RESOURCE_PREFIX}${parsed.name}`;
+    const found = await api.get({
       apiVersion: 'v1',
       plural: 'services',
       namespace: parsed.namespace,
-      name: parsed.name,
+      name: service,
     });
     // `redis://`, not `valkey://`. This fills `REDIS_URL` (the variable is fixed
     // by engine), and every client that reads it — node-redis, ioredis,
     // redis-py — parses `redis://` and rejects a scheme it does not know. A
     // scheme naming the server would be honest and unusable.
-    return service === null
+    return found === null
       ? null
-      : `redis://${parsed.name}.${parsed.namespace}.svc:6379`;
+      : `redis://${service}.${parsed.namespace}.svc:6379`;
   }
 }
 
