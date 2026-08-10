@@ -41,7 +41,12 @@
     tokenFile = config.sops.secrets."bosun-github-token".path;
     classes.skiff-ubuntu = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
-      vcpus = 4;
+      # 2, not 4: this box has 4 cores shared with kubelet, yarr and
+      # harmonia, and a skiff that can contend for all of them is how the
+      # suite's DB-timing tests flake -- the same signature the ARC runner
+      # here showed twice in the bench. Half the cores caps the contention;
+      # the bench put the Build delta at seconds, not minutes.
+      vcpus = 2;
       memory = "3072M";
       workspace = "6G";
       persist = true;

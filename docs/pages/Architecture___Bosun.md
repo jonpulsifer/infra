@@ -35,7 +35,8 @@ tags:: architecture
 	- Denying RFC1918 breaks DNS, so a public resolver is pinned and the deny stays absolute.
 - ## State
 	- One directory per skiff under `/run`, holding the runner id and the hull digest. `/run` is tmpfs, so a reboot clears it, which is correct — there is no database.
-	- Orphaned VMMs cannot exist: systemd's default `KillMode=control-group` takes the whole cgroup down with the unit. That also means **a bosun restart fails every in-flight job**, so a `nixos-rebuild switch` kills running CI on that host.
+	- A stop **drains** instead of failing every in-flight job. Idle skiffs are scuttled registration-first: GitHub refuses to delete a busy runner's registration, so a successful delete proves no job can land on that skiff and its VMM is safe to kill. Busy skiffs get the module's `drainTimeout` (default 15 min) to finish — which is also how long a `nixos-rebuild switch` may block on that host.
+	- Orphaned VMMs still cannot exist: the unit runs `KillMode=mixed`, so the stop signal reaches the daemon alone but systemd SIGKILLs the whole cgroup at the stop timeout.
 	- Because a cgroup kill leaves no chance to run teardown, bosun sweeps on start and deregisters what it finds.
 - ## Where it runs
 	- [[Fleet/riptide]] enables `services.bosun`. It shares the box with kubelet.

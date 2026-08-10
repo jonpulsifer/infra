@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -68,5 +69,17 @@ func main() {
 	logger.Info("warm pool filled", "classes", len(cfg.Classes))
 
 	p.pollLoop(ctx)
+
+	// SIGTERM landed: drain rather than die. Refills are already stopped by
+	// the cancelled run context; what remains is giving busy skiffs their
+	// window to finish, on a fresh context because the drain's own GitHub
+	// calls must outlive the one that just ended. Restoring the default
+	// signal disposition first keeps a second signal as the escape hatch:
+	// it kills the process outright, and sweep-on-start owns the mess.
+	stop()
+	logger.Info("draining", "timeout", cfg.DrainTimeout.String())
+	drainCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.DrainTimeout))
+	defer cancel()
+	p.drain(drainCtx)
 	logger.Info("shutting down")
 }

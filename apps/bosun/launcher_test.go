@@ -18,6 +18,7 @@ type fakeProc struct {
 	exitCh chan error
 	once   sync.Once
 	waited atomic.Bool // someone is Wait()ing, so this process gets reaped
+	killed atomic.Bool // Kill was called; drain tests assert ordering against it
 }
 
 func newFakeProc() *fakeProc {
@@ -30,6 +31,7 @@ func (p *fakeProc) Wait() error {
 }
 
 func (p *fakeProc) Kill() error {
+	p.killed.Store(true)
 	p.once.Do(func() { p.exitCh <- errFakeKilled })
 	return nil
 }

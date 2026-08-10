@@ -62,6 +62,21 @@
       memory = "2048M";
       warm = 1;
     };
+
+    # A little one, for science: platform experiments that want a real skiff
+    # without claiming real capacity. This site rides the satellite link, so
+    # production CI labels are served from oldschool -- one small slot is the
+    # agreed exception, not the start of a pool. 4G workspace, not 6G,
+    # because the ~20 GiB free on this root also backs the 10G cache cap
+    # below and skiff-ubuntu's parked slots: the standing reservation stays
+    # small so the un-park arithmetic stays possible at all.
+    classes.skiff-ubuntu-lite = {
+      hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
+      vcpus = 1;
+      memory = "2048M";
+      workspace = "4G";
+      warm = 1;
+    };
     # The FHS family: apt, dockerd, and the ARC image's toolchain, no Nix.
     # A scratch disk carries the runner's workspace and docker's data root, so
     # `memory` here is a RAM figure and nothing else -- without one the guest
@@ -88,10 +103,14 @@
       memory = "3072M";
       workspace = "6G";
       persist = true;
-      # Parked: this host keeps its single skiff-nixos slot and oldschool
-      # serves skiff-ubuntu. Restore warm = 2 to serve the label from here
-      # again; the slot disks are reclaimed at 0 and rebuilt cold on the way
-      # back up.
+      # Parked, and not as spare capacity: a CI job's traffic -- checkout,
+      # caches, docker pulls -- does not belong on this site's satellite
+      # link, so oldschool serves skiff-ubuntu from the fast-internet site.
+      # Un-parking is a last resort, not a rebalancing lever, and re-does
+      # the disk arithmetic first as well as the memory's: two 6G slots
+      # plus the lite slot's 4G plus a full 10G cache oversubscribe the
+      # ~20 GiB free here. The slot disks are reclaimed at 0 and rebuilt
+      # cold on the way back up.
       warm = 0;
     };
 
@@ -104,12 +123,13 @@
     };
   };
 
-  # The pool's declared ceiling is 2048M + warm x 3072M -- 8 GiB at warm = 2,
-  # inside the limit
-  # below with room to spare: riptide has 15.2 GiB total, ~5 GiB held by
-  # kubelet and the system, and no swap. Without a bound the *host* OOM killer
-  # picks the victim, which on a worker node may be a pod or kubelet rather
-  # than a skiff.
+  # The pool's declared ceiling is 2048M + 2048M with skiff-ubuntu parked,
+  # well inside the limit below. Un-parking skiff-ubuntu at warm = 2 would
+  # take the declared total to 10 GiB -- over this limit and over what the
+  # host can spare (15.2 GiB total, ~5 GiB held by kubelet and the system,
+  # no swap), so that last resort re-does this arithmetic first. Without a
+  # bound the *host* OOM killer picks the victim, which on a worker node may
+  # be a pod or kubelet rather than a skiff.
   #
   # Every skiff is a child of this unit, so the limit covers the whole pool
   # the same way IPAddressDeny does. Raising warm further is now a disk
