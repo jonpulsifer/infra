@@ -26,7 +26,7 @@ variable "attestor_viewers" {
 
 variable "verifier_agents" {
   type        = list(string)
-  description = "Binary Authorization service agents of the vessels that verify admission against the attestor. Empty on first bootstrap — a vessel's agent exists only after its Binary Authorization API is enabled; add each agent once its vessel does."
+  description = "Binary Authorization service agents of the vessels that verify admission against the attestor. Empty on first bootstrap — a vessel's agent exists only after its Binary Authorization API is enabled; add each agent once its vessel does. The attestor project's own agent gets its note read automatically; this list is only the vessels'."
   default     = []
 }
 
