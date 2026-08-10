@@ -82,10 +82,11 @@ in
             {
               expression = ''
                 claims.sub in [
-                  "system:serviceaccount:atlantis:atlantis"
+                  "system:serviceaccount:atlantis:atlantis",
+                  "system:serviceaccount:spindrift:spindrift"
                 ]
               '';
-              message = "only the Atlantis service account may authenticate across clusters";
+              message = "only the Atlantis and Spindrift service accounts may authenticate across clusters";
             }
           ];
           claimMappings.username.expression = ''"federated:" + claims.sub'';
