@@ -34,6 +34,12 @@ set -euo pipefail
 manifest=".github/containers.json"
 
 mapfile -t changed_files <<<"${CHANGED_FILES:-}"
+# tj-actions' safe_output escapes the newline separator, so every element but
+# the last arrives with a trailing backslash. The per-path prefix globs below
+# tolerated that; the exact-match rebuild-all grep did not, which silently
+# killed rebuild-on-workflow-change. Strip it regardless of the action's
+# current escaping mood.
+changed_files=("${changed_files[@]%\\}")
 
 # A change to the workflow, this script, or the allowlist rebuilds every image.
 rebuild_all=false

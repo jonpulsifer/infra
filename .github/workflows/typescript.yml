@@ -8,13 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: 'Runner target (infra-offsite, infra-folly, ubuntu-latest)'
+        description: 'Runner target (skiff-ubuntu, infra-offsite, infra-folly, ubuntu-latest)'
         type: choice
         options:
+          - skiff-ubuntu
           - infra-offsite
           - infra-folly
           - ubuntu-latest
-        default: ubuntu-latest
+        default: skiff-ubuntu
 
 permissions:
   contents: read
@@ -60,7 +61,11 @@ jobs:
   validate:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    # The warm pool: acquisition is ~1 s, the suite runs level with a hosted
+    # runner (bench, ticketed), and actions/cache restores from the bosun
+    # host's local cache service instead of over the internet. The dispatch
+    # input still reaches any other label for comparison runs.
+    runs-on: ${{ inputs.runner || 'skiff-ubuntu' }}
     permissions:
       contents: read
       id-token: write
@@ -114,7 +119,10 @@ jobs:
       - name: Cache Bun store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.bun/install/cache
+          # A skiff's hull points bun's store at the workspace disk; the
+          # cache step must follow it or it caches an empty directory. On a
+          # hosted runner the env is unset and this is the usual path.
+          path: ${{ env.BUN_INSTALL_CACHE_DIR || '~/.bun/install/cache' }}
           key: bun-store-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
             bun-store-${{ runner.os }}-

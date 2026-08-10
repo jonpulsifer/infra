@@ -47,6 +47,17 @@
       persist = true;
       warm = 1;
     };
+
+    # No xl class here on purpose: image builds want cores and disk this box
+    # is already spending on kubelet, yarr and harmonia. The suite slot and
+    # the cache service are what the fast-internet site contributes.
+
+    # 30 GB of the 200 GB root for the actions/cache service — this is the
+    # site with the fast internet, so a cold miss refills it cheapest here.
+    cache = {
+      enable = true;
+      maxSizeBytes = 32212254720;
+    };
   };
 
   # Class ceiling is one 3072M skiff; the bound exists so a runaway pool can
