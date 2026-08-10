@@ -220,6 +220,47 @@ describe('the release is five steps, in the product’s order', () => {
       api.pathsOf('POST').filter((path) => path.endsWith('/sites')),
     ).toEqual([]);
   });
+
+  // The one above starts from a site somebody else made, so it never exercises
+  // the case an App actually lives: *this* deploy created the site, and the
+  // next one has to land on it. That is the ordinary act — pushing a new
+  // revision of a site you already published — and it was impossible.
+  test('a site this adapter created takes the next deploy as a revision', async () => {
+    const { api, adapter } = adapterFor();
+
+    const first = await drain(adapter.apply(TARGET, desired()));
+    expect(first.verdict.phase).toBe('LIVE');
+
+    const second = await drain(
+      adapter.apply(TARGET, desired({ deploy: 'deploy-2' })),
+    );
+    expect(second.verdict.phase).toBe('LIVE');
+
+    // One site, made once, serving the newer release.
+    expect(
+      api.pathsOf('POST').filter((path) => path.endsWith('/sites')),
+    ).toHaveLength(1);
+    expect(api.serving('shop-site')?.labels['spindrift-deploy']).toBe(
+      'deploy-2',
+    );
+  });
+
+  test('losing the create race is the desired state, not a failure', async () => {
+    const { api, adapter } = adapterFor({ appearsBeforeCreate: 'shop-site' });
+
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    // The create was attempted and refused; the deploy carried on onto the
+    // site that turned up, because a site that exists is what was wanted.
+    expect(
+      api.pathsOf('POST').filter((path) => path.endsWith('/sites')),
+    ).toHaveLength(1);
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.servedPaths('shop-site')).toEqual([
+      '/assets/app.css',
+      '/index.html',
+    ]);
+  });
 });
 
 describe('a built files artifact is pulled out of the registry', () => {
