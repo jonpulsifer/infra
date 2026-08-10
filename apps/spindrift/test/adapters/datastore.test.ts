@@ -173,17 +173,16 @@ describe('observe', () => {
     expect(first?.connection).toBeNull();
   });
 
-  test('reports the CloudNativePG credential once the Secret exists', async () => {
-    const { fake, adapter, target } = adapterOn();
+  // Nothing is placed at `secrets/spindrift-apps/orders-app`, deliberately: a
+  // Ready CloudNativePG cluster is the statement that its `-app` Secret exists,
+  // so the reference is named without reading it and this adapter needs no
+  // grant on Secrets at all.
+  test('names the CloudNativePG credential without reading it', async () => {
+    const { adapter, target } = adapterOn();
     await adapter.provision(target, {
       name: 'orders',
       engine: 'postgres',
       storageGiB: 1,
-    });
-    fake.place('secrets/spindrift-apps/orders-app', {
-      apiVersion: 'v1',
-      kind: 'Secret',
-      metadata: { name: 'orders-app', namespace: 'spindrift-apps' },
     });
 
     const state = await adapter.observe(
@@ -233,8 +232,10 @@ describe('observe', () => {
       'valkey/spindrift-apps/sessions',
     );
     // No credential to reference: the operator authenticates nobody unless an
-    // ACL user is declared, so the address is the whole of it.
-    expect(state?.connection).toBe('valkey://sessions.spindrift-apps.svc:6379');
+    // ACL user is declared, so the address is the whole of it. `redis://`
+    // because this lands in `REDIS_URL` and no mainstream client parses a
+    // `valkey://` scheme.
+    expect(state?.connection).toBe('redis://sessions.spindrift-apps.svc:6379');
   });
 
   test('a degraded Valkey is FAILED with §6s reason for readiness that never passed', async () => {
