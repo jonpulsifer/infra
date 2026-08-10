@@ -576,7 +576,7 @@
       <li>Share a kernel with whatever ran before you</li>
     </ol>
   </div>
-  <p class="verbatim">measured on this repo's real suite: cache restore <b>49–76 s</b> · runner acquisition <b>1–59 s</b> · the same cold suite on hosted, twice: <b>271 s</b> and <b>375 s</b></p>
+  <p class="verbatim">measured on this repo's own suite — cache restore over the internet <b>49–76 s</b> · waiting for a container runner <b>1–59 s</b> · the same cold suite on a hosted runner <b>271–375 s</b>, depending on the day</p>
 </section>
 
 <!-- ============================== 03 the idea ============================== -->
@@ -738,7 +738,7 @@
       <div class="stats">
         <div class="stat"><b>2,287</b><span>lines of Go, in eight files</span></div>
         <div class="stat"><b>0</b><span>third-party dependencies</span></div>
-        <div class="stat"><b>0</b><span>listening ports</span></div>
+        <div class="stat"><b>0</b><span>inbound ports on the daemon</span></div>
         <div class="stat"><b>0</b><span>databases</span></div>
       </div>
       <p class="small dim">State lives in <code>/run/bosun/&lt;id&gt;/</code>, which is tmpfs — so a reboot clears it and that is correct. Desired state is the host's NixOS configuration, which is why the daemon has no runtime configuration surface at all.</p>
@@ -909,14 +909,14 @@
 <section class="slide">
   <span class="no"><b>11</b> / 11</span>
   <p class="eyebrow">Where it stands</p>
-  <h2>Two lab hosts, four warm slots, and an honest open list</h2>
+  <h2>Two lab hosts, three warm slots, and an honest open list</h2>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
       <div class="lineage">
         <div><b>riptide</b><span>folly · nixos + ubuntu-lite</span></div>
-        <div><b>oldschool</b><span>offsite · ubuntu, and the cache</span></div>
+        <div><b>oldschool</b><span>offsite · ubuntu, 2 vCPU</span></div>
       </div>
-      <p class="small dim">Each host runs a local <code>actions/cache</code> service on its own disk, which the stock action talks to transparently: 14 s to restore where GitHub's service took 49–76 s. A workflow gets that by changing one label and nothing else.</p>
+      <p class="small dim">Both hosts run a local <code>actions/cache</code> service on their own disk, which the stock action talks to transparently: 14 s to restore where GitHub's service took 49–76 s. A workflow gets that by changing one label and nothing else.</p>
       <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">Bosun drains on stop rather than dying: idle skiffs are scuttled registration-first — GitHub refuses to delete a busy runner, so a successful delete <b>proves</b> no job can land there — and busy ones get fifteen minutes to finish.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1rem">
