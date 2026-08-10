@@ -553,7 +553,7 @@
     <span><b>4</b> nouns</span>
     <span><b>2,287</b> lines of Go</span>
     <span><b>0</b> dependencies</span>
-    <span>Peer of <b>Spindrift</b></span>
+    <span><b>0</b> inbound ports</span>
   </p>
 </section>
 
@@ -564,7 +564,7 @@
   <h2>“I pushed. Now everybody waits.”</h2>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">A CI job on somebody else's runner pays a fixed tax before it computes anything, and pays it again on every push. Two clusters and a metal fleet sitting idle downstairs do not reduce it by a second.</p>
+      <p class="dim">Before a job computes anything it re-acquires a machine, a toolchain and a cache it already had the last time it ran. That tax is fixed, it is paid again on every push, and a bigger runner does not remove it — a faster CPU runs the same six steps.</p>
       <p class="rule-kicker">None of this is your build. All of it is on the critical path between a push and an answer.</p>
     </div>
     <ol class="steps">
@@ -576,7 +576,8 @@
       <li>Share a kernel with whatever ran before you</li>
     </ol>
   </div>
-  <p class="verbatim">measured on this repo's own suite — cache restore over the internet <b>49–76 s</b> · waiting for a container runner <b>1–59 s</b> · the same cold suite on a hosted runner <b>271–375 s</b>, depending on the day</p>
+  <p class="verbatim">measured on one real repository's suite — restoring a dependency cache over the internet <b>49–76 s</b> · waiting for a container runner <b>1–59 s</b> · the same cold suite on a hosted runner <b>271–375 s</b>, same commit, different days</p>
+  <p class="small dim" style="max-width:68ch">The lever everyone knows about is to run it somewhere else. Almost nobody pulls it, because CI is welded to the place the code lives: the label, the cache, the queue, the identity and the logs all belong to one vendor, and moving the compute has meant giving up all five.</p>
 </section>
 
 <!-- ============================== 03 the idea ============================== -->
@@ -604,8 +605,8 @@
         <text class="d-t b" x="38" y="198">bosun</text>
         <text class="d-s" x="38" y="220">keeps N skiffs of each class</text>
         <text class="d-s" x="38" y="238">booted and registered —</text>
-        <text class="d-s" x="38" y="256">N is a number in the host's</text>
-        <text class="d-m" x="38" y="272">NixOS configuration</text>
+        <text class="d-s" x="38" y="256">N is declared, not derived —</text>
+        <text class="d-m" x="38" y="272">one number, one config file</text>
 
         <!-- skiff -->
         <rect class="d-acc" x="360" y="170" width="220" height="110" rx="8"/>
@@ -659,47 +660,44 @@
   </div>
 </section>
 
-<!-- ============================== 04 vocabulary ============================== -->
+<!-- ============================== 04 adoption ============================== -->
 <section class="slide">
   <span class="no"><b>04</b> / 11</span>
-  <p class="eyebrow">Four nouns, and no fifth</p>
-  <h2>Everything here is a <em>skiff</em>, a <em>hull</em>, a <em>class</em>, or bosun</h2>
-  <div class="nouns">
-    <span class="noun noun--authored">skiff</span>
-    <span class="noun noun--authored">hull</span>
-    <span class="noun noun--authored">class</span>
-    <span class="noun">bosun</span>
-  </div>
-  <div class="cols">
-    <div class="card card--flag">
-      <h4>skiff</h4>
-      <p>One ephemeral microVM serving exactly one job. The unit of isolation and the unit of accounting.</p>
+  <p class="eyebrow">What adoption costs</p>
+  <h2>One line moves, and it is the <em>label</em></h2>
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:1.1rem">
+      <p class="verbatim" style="border-left-color:var(--good)"><span style="color:var(--caution)">- &nbsp;runs-on: ubuntu-latest</span><br /><span style="color:var(--good)">+ &nbsp;runs-on: skiff-ubuntu</span></p>
+      <p class="dim">The workflow is otherwise untouched. Same steps, same third-party actions, same <code>actions/cache</code> — the stock action, which the hull points at a cache service on the host's own disk instead of one across the internet.</p>
+      <p class="rule-kicker">Nothing about a skiff is visible to the job running inside it. A runner you have to write YAML for is a migration, not a runner.</p>
     </div>
-    <div class="card card--flag">
-      <h4>hull</h4>
-      <p>The immutable artifact a skiff boots from — a kernel, an initrd, and whatever else its manifest names. One hull serves many skiffs.</p>
-    </div>
-    <div class="card card--flag">
-      <h4>class</h4>
-      <p>What a <code>runs-on:</code> label resolves to: which hull, how many vCPUs, how much memory, how much disk, how many kept warm.</p>
-    </div>
-    <div class="card">
-      <h4>bosun</h4>
-      <p>The daemon, and the project. The ship's officer historically responsible for the boats.</p>
+    <div style="display:flex;flex-direction:column;gap:1.1rem">
+      <div class="stats">
+        <div class="stat stat--ink"><b>1</b><span>line changed in the workflow</span></div>
+        <div class="stat stat--ink"><b>0</b><span>firewall changes — a pool only ever dials out</span></div>
+        <div class="stat"><b>14 s</b><span>cache restore on-host, against 49–76 s over the internet</span></div>
+        <div class="stat"><b>1 s</b><span>queue to start, on every run</span></div>
+      </div>
+      <p class="small dim" style="max-width:62ch">Two shapes already exist for this. One keeps your workflow and swaps the hardware behind the label. The other keeps a hosted orchestrator and moves the agents onto machines you own. This keeps the label, moves the machines, and then deletes the orchestrator — because a warm pool never needed one.</p>
     </div>
   </div>
-  <p class="small dim" style="max-width:64ch">The vocabulary was constrained before it was chosen: GitHub already owns <span class="m">runner</span>, <span class="m">job</span> and <span class="m">label</span>; Spindrift owns <span class="m">Vessel</span>, <span class="m">Target</span>, <span class="m">Build</span> and <span class="m">Deploy</span>; the repo owns <span class="m">Fleet</span>. <span class="m">image</span> already meant three other things here, which is why a hull is not called one.</p>
 </section>
 
 <!-- ============================== 05 the hull contract ============================== -->
 <section class="slide">
   <span class="no"><b>05</b> / 11</span>
-  <p class="eyebrow">Where the daemon stops</p>
+  <p class="eyebrow">Four nouns, and the seam between them</p>
   <h2>The hull describes itself. bosun never learns <em>why</em>.</h2>
+  <div class="lineage">
+    <div><b>skiff</b><span>one microVM · one job · then scuttled</span></div>
+    <div><b>hull</b><span>the kernel + initrd it boots from</span></div>
+    <div><b>class</b><span>what a runs-on: label resolves to</span></div>
+    <div><b>bosun</b><span>the daemon, and the project</span></div>
+  </div>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
       <p class="dim">A hull is a directory holding a <code>hull.json</code> beside the files it names — a kernel, an initrd, a command line, and a list of devices. bosun translates that manifest into hypervisor arguments and provisions what it asks for.</p>
-      <p class="rule-kicker">There is no per-family branching anywhere in the daemon. Two very different operating systems boot through one code path.</p>
+      <p class="rule-kicker">There is no per-family branching anywhere in the daemon. Two unrelated operating systems boot through one code path.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1.1rem">
       <div class="cols">
@@ -723,7 +721,7 @@
         </div>
       </div>
       <p class="verbatim">the contract names no runner, no version, no operating system and no package manager</p>
-      <p class="small dim" style="max-width:64ch">Which is what makes “no Nix in the cloud” an ordinary sentence instead of a special case. Two families exist today: a NixOS hull with the host's own <code>/nix/store</code> shared in, and an Ubuntu hull that is this repo's existing Actions-runner image flattened into a read-only squashfs. The shared store is therefore a property of <em>one hull</em>, not of the platform.</p>
+      <p class="small dim" style="max-width:66ch">Two hull families exist today: a NixOS hull that mounts the host's own <code>/nix/store</code> read-only, and an Ubuntu hull that is an ordinary container image flattened into a read-only squashfs. The daemon cannot tell them apart — which is why the shared store is a property of <em>one hull</em> and never of the platform. One implementation would have made this seam hypothetical; two is what makes it real.</p>
     </div>
   </div>
 </section>
@@ -741,14 +739,14 @@
         <div class="stat"><b>0</b><span>inbound ports on the daemon</span></div>
         <div class="stat"><b>0</b><span>databases</span></div>
       </div>
-      <p class="small dim">State lives in <code>/run/bosun/&lt;id&gt;/</code>, which is tmpfs — so a reboot clears it and that is correct. Desired state is the host's NixOS configuration, which is why the daemon has no runtime configuration surface at all.</p>
+      <p class="small dim">State lives in <code>/run/bosun/&lt;id&gt;/</code>, which is tmpfs — so a reboot clears it, and that is correct. Desired state is one config file on the host, which is why the daemon has no runtime configuration surface at all: no API that can resize the pool, and so no drift between what is running and what was declared.</p>
     </div>
     <ul class="reasons">
       <li><b>The webhook receiver</b> — a warm pool is never told a job was queued, so there is nothing to receive.</li>
       <li><b>The queue listener and the control plane</b> — both existed to answer a question the inversion deleted.</li>
       <li><b>Credential transport over vsock</b> — a kernel module, a CID allocator and a guest listener, for one string delivered once at boot. It is a file in a per-skiff directory instead.</li>
       <li><b>Snapshot and restore</b> — measured, not assumed: restore is flat at ~1.8 s, and the Ubuntu hull reaches the runner in 0.68–0.97 s. A snapshot cannot pay for itself against a guest that cheap.</li>
-      <li><b>The orphan scan and the re-adoption path</b> — systemd's default <code>KillMode=control-group</code> kills <code>setsid</code> grandchildren, so an orphaned hypervisor cannot exist to be reclaimed.</li>
+      <li><b>Re-adopting an orphaned hypervisor</b> — systemd SIGKILLs the whole cgroup at the stop timeout, so a VMM cannot outlive the daemon and be found again later. Sweeping stale registrations on start is the entire recovery path.</li>
     </ul>
   </div>
 </section>
@@ -760,8 +758,8 @@
   <h2>Deny the LAN. Allow the internet.</h2>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">The obvious policy — “reach GitHub and nothing else” — breaks every job in this repository, which already fetches seven public hosts plus three Nix substituters. Every one of them is public, and that is what makes the inverted policy both possible and cheap.</p>
-      <p class="rule-kicker">One <code>IPAddressDeny</code> directive on bosun's own unit. Every skiff inherits it down the cgroup subtree.</p>
+      <p class="dim">The obvious policy — “reach the CI provider and nothing else” — breaks every real job, which pulls package registries, base images and release binaries from a dozen public hosts. So invert it. One <code>IPAddressDeny</code> on bosun's own unit denies RFC1918 and <code>169.254.0.0/16</code>, and systemd's IP filtering inherits down the cgroup subtree to every skiff underneath it. There is no per-skiff rule anywhere.</p>
+      <p class="rule-kicker">A job reaches the internet and cannot reach anything of yours — including the cloud metadata service, which sits on the wrong side of that same line.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1.1rem">
       <div class="cols">
@@ -775,8 +773,13 @@
           <h4>Removed the moment it is spent</h4>
           <p>bosun deletes it host-side as soon as GitHub reports the runner online. virtiofs passes through to the host filesystem, so it vanishes inside the guest with no cooperation from the guest — untrusted job code never sees a live credential.</p>
         </div>
+        <div class="card card--flag">
+          <span class="tag t-acc">The tenancy</span>
+          <h4>One job, one kernel</h4>
+          <p>Not a scrubbed workspace, and not a fresh container on a kernel the last job also used. A skiff is its own kernel, and it stops existing when the job ends — so there is no residue for the next job to inherit and nothing to scrub correctly.</p>
+        </div>
       </div>
-      <p class="small dim" style="max-width:64ch">RFC1918 and <code>169.254.0.0/16</code>, so a cloud metadata service is on the wrong side of the line too. Denying RFC1918 also breaks DNS on every host the fleet has, so a public resolver is pinned and the deny stays absolute rather than growing an exception.</p>
+      <p class="small dim" style="max-width:66ch">Denying RFC1918 also breaks DNS, so a public resolver is pinned and the deny stays absolute rather than growing its first exception. An allowlist with one hole in it is an allowlist nobody can reason about a year later.</p>
     </div>
   </div>
 </section>
@@ -825,14 +828,15 @@
     <li><b>GitHub silently removes an expired registration while the agent keeps running.</b> A skiff aged past its credential was offered a job at its own label and never claimed it; by 89 minutes the runner was a 404 while the VMM was alive and idle. Without recycling, that is a permanent RAM leak wearing the costume of a healthy skiff.</li>
     <li><b>The suite outgrew its class</b> — restored tests that each stand up a database segfaulted at 3 GiB and passed on hosted from the same commit. Long test durations plus a moving crash site is starvation, not a logic bug.</li>
   </ul>
-  <p class="small dim" style="max-width:66ch">Every one of these was live behaviour on a real host. The generalisable lesson is written into the map: a comment that says “if this becomes a problem in practice” is a prediction with no alarm attached. That one came true in nine hours.</p>
+  <p class="small dim" style="max-width:66ch">Every one of these was live behaviour on a real host, and none of them is exotic. The generalisable lesson: a code comment reading “if this becomes a problem in practice” is a prediction with no alarm attached to it. That one came true in nine hours.</p>
 </section>
 
 <!-- ============================== 10 the sibling ============================== -->
 <section class="slide">
   <span class="no"><b>10</b> / 11</span>
-  <p class="eyebrow">Where it meets Spindrift</p>
-  <h2>A peer, not a subsystem — and the only route that <em>dials in</em></h2>
+  <p class="eyebrow">Beyond CI</p>
+  <h2>A producer that cannot reach the pool can still <em>feed</em> it</h2>
+  <p class="dim" style="max-width:72ch">No inbound port is the point of the design, and also the obvious objection: how does anything other than GitHub hand a pool work? By not pushing. A producer writes an intent to a row in its own database, and the pool long-polls in to claim it. Spindrift — a deploy control plane, and a peer project, not an owner — routes container builds this way.</p>
   <figure>
     <div class="figwrap">
       <svg viewBox="0 0 920 400" role="img" aria-label="Spindrift's build routes: the hosted GitHub Actions route, the managed Cloud Build route, and the in-cluster Job route are all dialled outward by the Spindrift process. The bosun route is the mirror image: Spindrift writes an intent to a build outbox row in its own Postgres, and an operator-controlled bosun host that Spindrift cannot reach long-polls in to claim it, heartbeat, and post the result.">
@@ -900,7 +904,7 @@
     </div>
     <div class="card card--cau">
       <h4>Declared, and honestly unserved</h4>
-      <p>The cloud host that served this class is at rest again — the size-matched benchmark was what it was resurrected to answer. The route stays declared and ranked last, so a resurrection serves it with no configuration at all.</p>
+      <p>The host that served this class is powered down again; answering the benchmark two slides back is what it was woken for. The route stays declared and ranked last, so bringing a host back serves it with no configuration change at all — which is the same claim, tested by its absence.</p>
     </div>
   </div>
 </section>
@@ -909,24 +913,24 @@
 <section class="slide">
   <span class="no"><b>11</b> / 11</span>
   <p class="eyebrow">Where it stands</p>
-  <h2>Two lab hosts, three warm slots, and an honest open list</h2>
+  <h2>Two hosts, three warm slots, and an honest open list</h2>
   <div class="split">
     <div style="display:flex;flex-direction:column;gap:1rem">
       <div class="lineage">
-        <div><b>riptide</b><span>folly · nixos + ubuntu-lite</span></div>
-        <div><b>oldschool</b><span>offsite · ubuntu, 2 vCPU</span></div>
+        <div><b>Two hosts</b><span>one on-site, one remote — nothing in common</span></div>
+        <div><b>Three warm slots</b><span>same daemon · same hulls · nothing between them</span></div>
       </div>
-      <p class="small dim">Both hosts run a local <code>actions/cache</code> service on their own disk, which the stock action talks to transparently: 14 s to restore where GitHub's service took 49–76 s. A workflow gets that by changing one label and nothing else.</p>
+      <p class="small dim">A host joins by importing the module and naming its classes. Nothing coordinates the two, because there is no fleet controller to coordinate with — a pool is per-host by construction, and the only shared fact is a label GitHub already knows how to route on.</p>
       <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">Bosun drains on stop rather than dying: idle skiffs are scuttled registration-first — GitHub refuses to delete a busy runner, so a successful delete <b>proves</b> no job can land there — and busy ones get fifteen minutes to finish.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:1rem">
       <div class="card card--cau">
         <h4>Open</h4>
         <ul class="ticks">
-          <li>The production suite is back on hosted while a class grows — that is a memory bound guarding kubelet on a shared box, which is an operator's arithmetic and not a workflow's to make.</li>
+          <li>The production suite is back on hosted while a class grows — the pool's host shares its box with other workloads, so the class's memory bound is an operator's arithmetic and not a workflow's to make.</li>
           <li>Every decision that reads GitHub — busy or idle, lifetime, pool count — has the same single-source dependency, and none of them has been thought about under a GitHub outage.</li>
           <li>What a guest breakout would actually cost, given the data path is three unprivileged processes rather than root.</li>
-          <li>arm64. The fleet has native arm64 and nobody has asked the question.</li>
+          <li>arm64. Native arm64 hosts are sitting right there and nobody has asked the question.</li>
         </ul>
       </div>
     </div>
