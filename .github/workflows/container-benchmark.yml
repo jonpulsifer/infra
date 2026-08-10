@@ -1,0 +1,77 @@
+name: Container Benchmark
+
+# One identical cold docker build — apps/spindrift/Dockerfile, the heaviest
+# first-party image — on every runner label under test. The engine is dockerd's
+# embedded BuildKit (DOCKER_BUILDKIT=1) on every label, deliberately: buildx
+# plugin versions vary by label, the embedded engine is the common denominator,
+# and Cloud Build's docker builder runs the same way — so a difference in these
+# numbers is the machine and its network, not the toolchain.
+#
+# `--no-cache --pull` plus the prune step make cold mean cold everywhere: a
+# skiff of a persisting class mounts the docker data-root the previous run left
+# behind, and without the prune its "cold" build would start with every base
+# layer already on disk — an advantage the hosted runner never has.
+#
+# The Cloud Build leg is not here. GCB builds are submitted out-of-band from a
+# staged GCS source (an in-workflow submit would need cloudbuild grants the WIF
+# identity does not carry, and would time the runner's uplink instead of the
+# service); its timing comes from the Build resource's own clock.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Runner label to test'
+        type: choice
+        options:
+          - both
+          - ubuntu-latest
+          - skiff-ubuntu-xl
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    outputs:
+      runners: ${{ steps.set.outputs.runners }}
+    steps:
+      - id: set
+        run: |
+          if [ "${{ inputs.target }}" = "both" ]; then
+            echo 'runners=["ubuntu-latest", "skiff-ubuntu-xl"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: configure
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJson(needs.configure.outputs.runners) }}
+    name: build (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: What am I
+        run: |
+          printf 'label      %s\n' '${{ matrix.runner }}'
+          printf 'kernel     %s\n' "$(uname -r)"
+          printf 'cores      %s\n' "$(nproc)"
+          printf 'memory     %s\n' "$(awk '/MemTotal/ {printf "%.1f GiB", $2/1048576}' /proc/meminfo)"
+          printf 'uptime     %ss\n' "$(cut -d' ' -f1 /proc/uptime)"
+          docker info --format 'storage    {{.Driver}}' || true
+      - name: Make cold mean cold
+        run: docker system prune -af >/dev/null 2>&1 || true
+      - name: Cold build
+        env:
+          DOCKER_BUILDKIT: '1'
+        run: |
+          time docker build --no-cache --pull \
+            -f apps/spindrift/Dockerfile \
+            -t bench/spindrift:local .
