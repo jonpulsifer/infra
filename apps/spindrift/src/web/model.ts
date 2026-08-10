@@ -509,6 +509,15 @@ export type Runtime =
 
 /** One Datastore as the workspace lists it (§11). */
 export interface DatastoreView {
+  /**
+   * The Datastore's id, and the only thing on this row an act can be aimed at.
+   *
+   * `attachDatastore`, `detachDatastore` and `destroyDatastore` all resolve on
+   * it. A row carrying only a name could not name one of them: the unique key
+   * is (target_id, name), so two Targets may legitimately hold a `primary` and
+   * the name is enough to read and not enough to write.
+   */
+  readonly id: string;
   readonly name: string;
   readonly engine: 'postgres' | 'valkey';
   readonly provenance: 'managed' | 'external';
@@ -516,6 +525,24 @@ export interface DatastoreView {
   readonly attachedTo: string | null;
   /** Where it lives — a cluster-local one pins its App to that Target (§11). */
   readonly target: string;
+  /**
+   * How far provisioning has got (§11).
+   *
+   * A managed Datastore is created and then converged, exactly like a Deploy,
+   * so a row without this said `postgres · managed · Metal` for the several
+   * minutes a CloudNativePG cluster takes to bootstrap and read as finished
+   * the instant it was asked for.
+   */
+  readonly phase: DeployPhase;
+  /** The operator's own sentence, which is what a stuck Datastore is read from. */
+  readonly detail?: string;
+  /*
+    No `connectionRef`, deliberately. It names a Secret, and every screen in
+    this file states references and never credentials — the same posture
+    `getAppWorkspace` takes for config, where keys travel and values never do.
+    Nothing on this row acts on it either: the connection reaches a container
+    through the chart's `secretKeyRef`, never through the browser.
+  */
 }
 
 /** One Component as the workspace lists it. */

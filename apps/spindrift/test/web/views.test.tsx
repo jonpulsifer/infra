@@ -881,6 +881,78 @@ describe('the App workspace', () => {
     expect(markup).toContain('unattached');
   });
 
+  describe('the Datastore acts (§11)', () => {
+    // The workspace states the placed Target by its **adapter**, so this is the
+    // one fixture field that has to be the enum rather than the pretty label
+    // the design screens carry.
+    const onKubernetes = {
+      ...WORKSPACE_SCENARIOS.service,
+      target: 'kubernetes',
+    };
+    const acts = {
+      onCreateDatastore: async () => ({ ok: true }) as const,
+      onAttachDatastore: async () => ({ ok: true }) as const,
+      onDetachDatastore: async () => ({ ok: true }) as const,
+      onDestroyDatastore: async () => ({ ok: true }) as const,
+    };
+
+    test('offers none of them when the screen wires none', () => {
+      // The both-or-neither rule: `Attach Datastore` and its per-row twin were
+      // buttons with no handler behind them for the whole life of this card,
+      // and a control that does nothing on press reads as a broken feature
+      // rather than an absent one.
+      const markup = workspace(onKubernetes);
+      expect(markup).not.toContain('Create Datastore');
+      expect(markup).not.toContain('>Attach<');
+      expect(markup).not.toContain('>Detach<');
+      expect(markup).not.toContain('>Destroy<');
+    });
+
+    test('offers create on a kubernetes placement, with the row acts', () => {
+      const markup = renderToStaticMarkup(
+        <Workspace view={onKubernetes} {...acts} />,
+      );
+      expect(markup).toContain('Create Datastore');
+      // Attach or detach, never both on one row: `primary` is attached and
+      // `cache` is not, so the section shows exactly one of each.
+      expect(markup).toContain('>Attach<');
+      expect(markup).toContain('>Detach<');
+      expect(markup).toContain('>Destroy<');
+    });
+
+    test('offers no create where the adapter cannot provision one', () => {
+      // By adapter type, never by what the adapter claims to serve: the cloud
+      // adapter advertises both engines and throws UNIMPLEMENTED from every
+      // verb, so asking it by engine would render a form whose every
+      // submission is refused. The row acts stay — those act on rows.
+      const markup = renderToStaticMarkup(
+        <Workspace
+          view={{ ...WORKSPACE_SCENARIOS.service, target: 'cloudrun' }}
+          {...acts}
+        />,
+      );
+      expect(markup).not.toContain('Create Datastore');
+      expect(markup).toContain('>Detach<');
+    });
+
+    test('states the variable each engine arrives on, and asks for neither', () => {
+      // Fixed by engine, so there is no field for it anywhere and this line is
+      // where a developer finds out what their container will be handed.
+      const markup = renderToStaticMarkup(
+        <Workspace view={onKubernetes} {...acts} />,
+      );
+      expect(markup).toContain('DATABASE_URL');
+      expect(markup).toContain('REDIS_URL');
+      expect(markup).not.toContain('datastore-variable');
+    });
+
+    test('a provisioning Datastore reads as provisioning, not as broken', () => {
+      const markup = workspace(WORKSPACE_SCENARIOS.service);
+      expect(markup).toContain('WAITING');
+      expect(markup).toContain('Waiting for 1 shard to report ready');
+    });
+  });
+
   describe('the timeline', () => {
     const view = WORKSPACE_SCENARIOS.service;
     const markup = workspace(view);

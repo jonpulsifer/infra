@@ -48,6 +48,8 @@ import {
   NewApp,
 } from './views/apps/new/index.tsx';
 import {
+  type CreateDatastore,
+  type DatastoreAct,
   type RunJob,
   type SetAutoDeploy,
   type SetConfig,
@@ -1555,6 +1557,120 @@ function WorkspaceScreen({
     }
   };
 
+  /*
+    The four Datastore acts (§11). Every one of them is `handleSetConfig`'s
+    shape: the pair the screen is showing is bound here so the card does not
+    restate it, the command's own refusal is passed through unedited, and the
+    workspace is re-read on success rather than patched — `phase` and
+    `attachedTo` are rows this act just changed, and a guess about what the
+    write did is the one thing that can disagree with the reconcile loop.
+  */
+  const workspaceIds = () =>
+    state.type === 'success'
+      ? { appId: state.workspace.appId, targetId: state.workspace.targetId }
+      : { appId: undefined, targetId: undefined };
+
+  /**
+   * Create, then attach — two dispatches, because `createDatastore` takes no
+   * App.
+   *
+   * That is the deliberate shape: `attachDatastore` is the single place the
+   * attachment rules live (one store per engine per App, cluster-local
+   * placement), and accepting an App on create would mean a second copy of them
+   * that goes stale. So the failure of the second call is honest rather than
+   * hidden — the Datastore exists, unattached, and the row is on screen saying
+   * so, which is why the reload happens either way.
+   */
+  const handleCreateDatastore: CreateDatastore = async (create) => {
+    const { appId, targetId } = workspaceIds();
+    if (appId === undefined || targetId === undefined) {
+      return {
+        ok: false,
+        message: 'This App has no Component placed on a Target yet',
+      };
+    }
+    try {
+      const created = await command('createDatastore', {
+        name: create.name,
+        engine: create.engine,
+        targetId,
+        // Restated rather than omitted, the way `useBucket`'s `makeDefault` is:
+        // `InputOf` reads a command's schema *output*, so a `.default()` is
+        // still a required property to a typed caller. It is the schema's own
+        // number and there is no field for it — §11 gives a Datastore no size
+        // control, and a form asking a developer for one on the day they
+        // create it is asking a question they cannot answer.
+        storageGiB: 10,
+      });
+      if (!created.ok) return { ok: false, message: created.failure.message };
+      const attached = await command('attachDatastore', {
+        datastoreId: created.value.id,
+        appId,
+      });
+      setReloadToken((token) => token + 1);
+      return attached.ok
+        ? { ok: true }
+        : { ok: false, message: attached.failure.message };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Creating the Datastore failed',
+      };
+    }
+  };
+
+  const handleAttachDatastore: DatastoreAct = async (datastoreId) => {
+    const { appId } = workspaceIds();
+    if (appId === undefined) {
+      return {
+        ok: false,
+        message: 'This App has no id to attach a Datastore to',
+      };
+    }
+    try {
+      const result = await command('attachDatastore', { datastoreId, appId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Attaching failed',
+      };
+    }
+  };
+
+  const handleDetachDatastore: DatastoreAct = async (datastoreId) => {
+    try {
+      const result = await command('detachDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Detaching failed',
+      };
+    }
+  };
+
+  const handleDestroyDatastore: DatastoreAct = async (datastoreId) => {
+    try {
+      const result = await command('destroyDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Destroying failed',
+      };
+    }
+  };
+
   return (
     <>
       <Workspace
@@ -1568,6 +1684,10 @@ function WorkspaceScreen({
         onSetAutoDeploy={handleSetAutoDeploy}
         onSetConfig={handleSetConfig}
         onSelectComponent={handleSelectComponent}
+        onCreateDatastore={handleCreateDatastore}
+        onAttachDatastore={handleAttachDatastore}
+        onDetachDatastore={handleDetachDatastore}
+        onDestroyDatastore={handleDestroyDatastore}
         {...(runs === null
           ? {}
           : {
