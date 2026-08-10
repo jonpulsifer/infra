@@ -102,11 +102,19 @@ jobs:
   validate:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-    # The warm pool: acquisition is ~1 s, the suite runs level with a hosted
-    # runner (bench, ticketed), and actions/cache restores from the bosun
-    # host's local cache service instead of over the internet. The dispatch
-    # input still reaches any other label for comparison runs.
-    runs-on: ${{ inputs.runner || 'skiff-ubuntu' }}
+    # A hosted runner, because the suite no longer fits `skiff-ubuntu`'s
+    # 3072M/2-vcpu class. Restoring the installation's conformance tests —
+    # each one standing up an isolated database — takes the Test step past
+    # what that slot can hold: it dies at ~229 s where a hosted runner
+    # finishes in 255 s, twice, with the DB-timing signature the class's own
+    # comment on `oldschool` predicts and a Bun segfault behind it.
+    #
+    # The warm pool is still the destination and the rest of its case stands
+    # (~1 s acquisition, cache served locally rather than over the internet).
+    # What it needs is a bigger class, and that is a memory bound guarding
+    # kubelet on a shared box — an operator's arithmetic, not a workflow's.
+    # The dispatch input reaches any label, which is how the A/B above ran.
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     permissions:
       contents: read
       id-token: write
