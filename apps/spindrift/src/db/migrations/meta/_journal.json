@@ -225,6 +225,13 @@
       "when": 1786363272470,
       "tag": "0031_bosun_build_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786363272471,
+      "tag": "0032_datastore_lifecycle",
+      "breakpoints": true
     }
   ]
 }

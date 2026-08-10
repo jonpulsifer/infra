@@ -875,28 +875,83 @@ export const componentTargetDesired = pgTable(
  * Datastores and never cascades" (§2) — detachment is `appId = null`, the
  * row survives.
  */
-export const datastores = pgTable('datastores', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  engine: datastoreEngine('engine').notNull(),
-  provenance: datastoreProvenance('provenance').notNull(),
-  appId: uuid('app_id').references(() => apps.id, { onDelete: 'set null' }),
-  /** §11: "Delivery follows the Datastore's placement." */
-  targetId: uuid('target_id')
-    .notNull()
-    .references(() => targets.id, { onDelete: 'restrict' }),
-  /**
-   * §11: "an in-cluster secret reference in-cluster... a pinned store
-   * reference everywhere else." Never a copy of the credential itself.
-   */
-  connectionRef: text('connection_ref'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const datastores = pgTable(
+  'datastores',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    engine: datastoreEngine('engine').notNull(),
+    provenance: datastoreProvenance('provenance').notNull(),
+    appId: uuid('app_id').references(() => apps.id, { onDelete: 'set null' }),
+    /** §11: "Delivery follows the Datastore's placement." */
+    targetId: uuid('target_id')
+      .notNull()
+      .references(() => targets.id, { onDelete: 'restrict' }),
+    /**
+     * The adapter's own handle on what it provisioned, opaque to core exactly
+     * like `deploys.ref` (`adapters/datastore/contract.ts`: `DatastoreRef`).
+     *
+     * Stored rather than recomputed because `observe` and `destroy` both take
+     * it as an argument and there is nowhere else to keep it. Re-deriving it
+     * would mean core knowing that the Kubernetes adapter spells a handle
+     * `<engine>/<namespace>/<name>` — a format that file declares opaque, and
+     * that the cloud adapter does not share.
+     *
+     * Null until `provision` returns, which is what makes an `external`
+     * Datastore — nothing was provisioned, so there is no handle — and a
+     * `managed` row whose provision failed look the same to every reader that
+     * has to decide whether an adapter call is owed.
+     */
+    ref: text('ref'),
+    /**
+     * §6's verdict on the datastore, in §6's own vocabulary.
+     *
+     * The same enum a Deploy carries, for the reason `contract.ts` already
+     * argues for `DatastoreState`: "one shared vocabulary, not one per
+     * contract — the user sees a single timeline and must not meet two
+     * vocabularies along it."
+     *
+     * `PENDING` by default because the row is written *before* `provision` is
+     * called — a name collision has to hit the unique key below before
+     * anything exists in the cluster to collide with.
+     */
+    phase: deployPhase('phase').notNull().default('PENDING'),
+    /**
+     * The operator's sentence, as the datastore loop last read it.
+     *
+     * The one column a stuck datastore is diagnosed from: `phase` says
+     * WAITING, and only this says whether that is a PVC nobody can bind or an
+     * image still pulling. No `reason` beside it — a `FailureReason` with no
+     * consumer would be a third column that can only agree with the second.
+     */
+    detail: text('detail'),
+    /**
+     * §11: "an in-cluster secret reference in-cluster... a pinned store
+     * reference everywhere else." Never a copy of the credential itself.
+     */
+    connectionRef: text('connection_ref'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Two Datastores named `primary` on one Target are one object on the far
+    // side: every adapter names what it provisions after the Datastore, and a
+    // server-side apply of the second silently adopts the first. Destroying
+    // either then deletes the other's storage. The constraint is here rather
+    // than as a check in `createDatastore` because the race between two
+    // concurrent creates is exactly what an application-level check cannot
+    // win.
+    //
+    // Scoped to the Target, not the installation: §11 puts a Datastore on a
+    // Target, so two clusters each holding a `primary` are two objects that
+    // never meet.
+    unique('datastores_target_name_unique').on(table.targetId, table.name),
+  ],
+);
 
 // --- Target and User ---------------------------------------------------
 

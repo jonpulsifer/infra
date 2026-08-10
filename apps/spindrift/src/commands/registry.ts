@@ -71,6 +71,13 @@ import {
   startCreationDraft,
   startCreationDraftInput,
 } from './creation-drafts/lifecycle.ts';
+import { attachDatastore, attachDatastoreInput } from './datastores/attach.ts';
+import { createDatastore, createDatastoreInput } from './datastores/create.ts';
+import {
+  destroyDatastore,
+  destroyDatastoreInput,
+} from './datastores/destroy.ts';
+import { detachDatastore, detachDatastoreInput } from './datastores/detach.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { listDeploys, listDeploysInput } from './deploys/list.ts';
@@ -225,6 +232,13 @@ export const commandRegistry = {
   unplaceComponent: {
     input: unplaceComponentInput,
     handler: unplaceComponent,
+  },
+  createDatastore: { input: createDatastoreInput, handler: createDatastore },
+  attachDatastore: { input: attachDatastoreInput, handler: attachDatastore },
+  detachDatastore: { input: detachDatastoreInput, handler: detachDatastore },
+  destroyDatastore: {
+    input: destroyDatastoreInput,
+    handler: destroyDatastore,
   },
   setConfig: { input: setConfigInput, handler: setConfig },
   configureInstallation: {
