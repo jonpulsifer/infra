@@ -29,6 +29,7 @@ import {
   boolean,
   check,
   customType,
+  index,
   integer,
   pgEnum,
   pgTable,
@@ -158,6 +159,24 @@ export const buildStatus = pgEnum('build_status', ['PENDING', ...BUILD_STATES]);
 
 /** §4: "a declared `logFidelity` of `LIVE_TEXT | LIVE_STATUS | ON_COMPLETION`." */
 export const logFidelity = pgEnum('log_fidelity', LOG_FIDELITIES);
+
+/**
+ * The bosun build outbox's own lifecycle — not {@link buildStatus}, and not
+ * built from a shared contract tuple the way that one is from
+ * {@link BUILD_STATES}. A `build_requests` row is core's *outbox entry*, one
+ * layer below a Build: `PENDING` until a bosun host claims it, `CLAIMED` for
+ * the life of its lease, `DONE` once a result has landed (win or lose). The
+ * one place this vocabulary is read outside this file is
+ * `src/storage/build-outbox.ts`, and it reads it off `BuildRequest['state']`
+ * rather than restating the tuple — kept here, beside the table, because
+ * nothing outside the outbox needs to name these three states.
+ */
+export const BUILD_REQUEST_STATES = ['PENDING', 'CLAIMED', 'DONE'] as const;
+
+export const buildRequestState = pgEnum(
+  'build_request_state',
+  BUILD_REQUEST_STATES,
+);
 
 /** §6: "PENDING -> APPLYING -> WAITING -> LIVE | FAILED". */
 export const deployPhase = pgEnum('deploy_phase', DEPLOY_PHASES);
@@ -1408,6 +1427,57 @@ export const registryCredentials = pgTable('registry_credentials', {
     .defaultNow(),
 });
 
+/**
+ * The bosun build route's outbox (Task: bosun build route).
+ *
+ * Bosun is a warm-pool microVM runner daemon this process cannot reach — it
+ * long-polls in, rather than being dialed the way the in-cluster Job or the
+ * hosted dispatch are. An outbox row is the queue entry that makes that
+ * direction of contact possible: `enqueue` writes one, a bosun host claims it
+ * over `POST /internal/bosun/claim`, and `complete` is the same row's last
+ * write. `src/storage/build-outbox.ts` is the seam; this table is only ever
+ * read or written through it.
+ *
+ * `lease_expires` is what makes a claim revocable without a second actor —
+ * `builds.leased_at` is the precedent (a claimed dispatch that stops
+ * heartbeating is eventually reclaimed), except here reclamation is a plain
+ * `UPDATE ... WHERE state = 'CLAIMED' AND lease_expires < now()` rather than a
+ * comparison against a fixed timeout, because the poller extends it itself on
+ * every heartbeat.
+ *
+ * `result` lands only once, `iff state != 'DONE'` — a late result from a
+ * lease-expired claimant that got superseded still lands if nothing else
+ * claimed the row in between, because a real result beats a rerun.
+ */
+export const buildRequests = pgTable(
+  'build_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** The bosun class this request is routed to, e.g. a skiff pool name. */
+    class: text('class').notNull(),
+    /** The composed request document, handed back to the claimant verbatim. */
+    request: jsonbDocument('request').notNull(),
+    state: buildRequestState('state').notNull().default('PENDING'),
+    leaseExpires: timestamp('lease_expires', { withTimezone: true }),
+    /** `null` until `complete` writes it; also `null` for a cancelled request. */
+    result: jsonbDocument('result'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // What `claim` scans: the oldest PENDING row of a given class.
+    index('build_requests_state_class_created_at_idx').on(
+      table.state,
+      table.class,
+      table.createdAt,
+    ),
+  ],
+);
+
 // --- Relations (query-builder convenience; no schema effect) ---------------
 
 export const appsRelations = relations(apps, ({ one, many }) => ({
@@ -1589,3 +1659,5 @@ export type ConfigAuditEvent = typeof configAuditEvents.$inferSelect;
 export type NewConfigAuditEvent = typeof configAuditEvents.$inferInsert;
 export type AttemptEvent = typeof attemptEvents.$inferSelect;
 export type NewAttemptEvent = typeof attemptEvents.$inferInsert;
+export type BuildRequest = typeof buildRequests.$inferSelect;
+export type NewBuildRequest = typeof buildRequests.$inferInsert;

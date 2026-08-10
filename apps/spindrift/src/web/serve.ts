@@ -33,6 +33,7 @@ import {
   loadStoredManifest,
 } from '../config/manifest-store.ts';
 import { createDb } from '../db/client.ts';
+import { BOSUN_SECRET_VAR } from './bosun-route.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
 import { WEBHOOK_SECRET_VAR } from './webhook-route.ts';
@@ -247,6 +248,11 @@ export async function start(
       // request, rebuilt only when `configureInstallation` actually changed
       // something.
       current: installationNow,
+    },
+    {
+      db,
+      clock: systemClock,
+      secret: Bun.env[BOSUN_SECRET_VAR]?.trim() || null,
     },
   );
 

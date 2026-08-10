@@ -13,6 +13,7 @@
  * tell `NATIVE` from `IMMUTABLE_ITEM_PER_VERSION` — a tested claim rather than a
  * stated one.
  */
+import { BosunBuildRoute } from '../../src/adapters/build/bosun.ts';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import { GitHubActionsBuildRoute } from '../../src/adapters/build/github-actions.ts';
 import {
@@ -27,6 +28,7 @@ import { StaticDeployAdapter } from '../../src/adapters/deploy/static/index.ts';
 import { SecretManagerStore } from '../../src/adapters/store/gcp-secret-manager.ts';
 import { OnePasswordStore } from '../../src/adapters/store/onepassword.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
+import { FakeBosunOutbox } from '../harness/fakes/bosun-outbox.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeCloudBuild } from '../harness/fakes/cloud-build-api.ts';
 import { FakeCloudRun } from '../harness/fakes/cloudrun-api.ts';
@@ -231,6 +233,37 @@ buildAdapterSuite('in-cluster', () => {
     id: () => 'conformance',
     intervalMs: 1,
     sleep: async () => {},
+  });
+});
+
+// Bosun's far side is polled, not dialed, so its fake scripts the outbox row
+// rather than an HTTP API — see `FakeBosunOutbox`. A single `DONE` state is
+// enough for the suite: none of its assertions poll, so nothing here needs
+// the pacing overrides the dialed routes give their fakes.
+buildAdapterSuite('bosun', () => {
+  const conformanceDigest = `sha256:${'d'.repeat(64)}`;
+  const outbox = new FakeBosunOutbox({
+    states: [
+      {
+        state: 'DONE',
+        result: {
+          status: 'SUCCEEDED',
+          log: encodeBuildReport({
+            bundleDigest: 'sha256:bundle',
+            digest: conformanceDigest,
+            refs: [`registry.example.test/app@${conformanceDigest}`],
+            baseDigest: null,
+          }),
+        },
+      },
+    ],
+  });
+  return new BosunBuildRoute({
+    name: 'bosun',
+    class: 'skiff-conformance',
+    outbox,
+    zeroConfigFrontend: 'registry.example.test/zero-config:pinned',
+    provenanceBuilderId: 'https://bosun.example.test/skiff',
   });
 });
 
