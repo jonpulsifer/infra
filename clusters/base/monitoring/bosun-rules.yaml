@@ -1,8 +1,9 @@
 ---
-# bosun runs on riptide as a host service, outside the cluster. Its metrics
-# arrive through node-exporter's textfile collector (see the extraArgs in
+# bosun runs as a host service on a node of each cluster (riptide on folly,
+# oldschool on offsite), outside the cluster itself. Its metrics arrive through
+# node-exporter's textfile collector (see the extraArgs in each cluster's
 # kube-prometheus.yaml), so there is no target to declare here — only what to
-# alert on.
+# alert on, the same on both sites.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -73,8 +74,8 @@ spec:
             description: "A wedged guest takes its job down with it. Check the skiff serial logs in /var/log/bosun on the host."
 ---
 # Not bosun-specific, and the reason bosun's leak ran for nine hours without
-# anyone noticing: this cluster deploys 161 alert rules and not one of them
-# looks at whether a node is saturated.
+# anyone noticing: each cluster deploys over 160 alert rules and not one of
+# them looks at whether a node is saturated.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

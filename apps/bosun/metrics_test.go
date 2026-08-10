@@ -14,6 +14,8 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 	m.boot("skiff-test")
 	m.exit("skiff-test", exitCompleted)
 	m.exit("skiff-test", exitWedged)
+	m.online("skiff-test", 17.5)
+	m.online("skiff-test", 2.5)
 	m.githubError()
 
 	got := m.render(
@@ -29,6 +31,8 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 		`bosun_skiff_exits_total{class="skiff-test",reason="completed"} 1`,
 		`bosun_skiff_exits_total{class="skiff-test",reason="wedged"} 1`,
 		`bosun_skiff_exits_total{class="skiff-test",reason="lifetime"} 0`,
+		`bosun_skiff_time_to_online_seconds_sum{class="skiff-test"} 20`,
+		`bosun_skiff_time_to_online_seconds_count{class="skiff-test"} 2`,
 		`bosun_github_errors_total 1`,
 	} {
 		if !strings.Contains(got, want) {
@@ -38,7 +42,7 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 
 	// Every series needs its metadata, or the textfile collector rejects the
 	// whole file rather than the line.
-	for _, name := range []string{"bosun_skiffs", "bosun_skiffs_desired", "bosun_skiff_boots_total", "bosun_skiff_exits_total", "bosun_github_errors_total"} {
+	for _, name := range []string{"bosun_skiffs", "bosun_skiffs_desired", "bosun_skiff_boots_total", "bosun_skiff_exits_total", "bosun_skiff_time_to_online_seconds", "bosun_github_errors_total"} {
 		if !strings.Contains(got, "# TYPE "+name+" ") {
 			t.Errorf("missing TYPE line for %s", name)
 		}

@@ -630,6 +630,9 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	s.mu.Unlock()
 
 	if justConnected {
+		// The poll interval quantizes this, but a hull regression moves it by
+		// tens of seconds, which survives the rounding.
+		p.stats.online(s.class, time.Since(s.mintedAt).Seconds())
 		if err := os.Remove(filepath.Join(s.paths.dir, "jitconfig")); err != nil && !os.IsNotExist(err) {
 			logger.Warn("delete jitconfig", "error", err)
 		} else {
