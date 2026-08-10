@@ -48,6 +48,14 @@ let
       virtiofsd = "${pkgs.virtiofsd}/bin/virtiofsd";
       passt = lib.getExe' pkgs.passt "passt";
     };
+    spindrift =
+      if cfg.spindrift == null then
+        null
+      else
+        {
+          inherit (cfg.spindrift) url tokenFile classes;
+          pollInterval = cfg.spindrift.pollInterval;
+        };
   };
 in
 {
@@ -273,6 +281,52 @@ in
                 Budget for a skiff once its runner goes busy. Measured from
                 the busy transition, not from boot -- otherwise time spent
                 waiting in the warm pool eats the job's budget.
+              '';
+            };
+          };
+        }
+      );
+    };
+
+    spindrift = mkOption {
+      default = null;
+      description = ''
+        Turns this host into a Spindrift build source alongside its GitHub
+        warm pool: bosun long-polls {option}`spindrift.url` for a build
+        request in one of {option}`spindrift.classes`, boots a skiff of that
+        class with the request written into its share instead of a JIT
+        config, and posts the result back once the skiff halts. null (the
+        default) means this host never talks to Spindrift.
+
+        A class serving builds should set its own `warm = 0`: a build skiff
+        boots on claim rather than ahead of time the way a GitHub-registered
+        skiff does, so keeping one warm buys nothing.
+      '';
+      type = types.nullOr (
+        types.submodule {
+          options = {
+            url = mkOption {
+              type = types.str;
+              description = "Base URL of the Spindrift instance whose outbox this host claims builds from.";
+            };
+            tokenFile = mkOption {
+              type = types.path;
+              description = "File holding the bearer token bosun authenticates to Spindrift with.";
+            };
+            classes = mkOption {
+              type = types.listOf types.str;
+              description = ''
+                Which of {option}`classes` this host claims builds for. Every
+                entry must also be declared there.
+              '';
+            };
+            pollInterval = mkOption {
+              type = types.str;
+              default = "30s";
+              description = ''
+                Wait before retrying after a failed claim. Not the poll
+                cadence itself -- the claim call long-polls Spindrift
+                server-side, so a successful round trip is the wait.
               '';
             };
           };

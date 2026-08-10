@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -35,6 +36,16 @@ type skiff struct {
 	helpersLog *os.File
 	helpers    []proc // virtiofsd(s) + passt
 	ch         proc   // cloud-hypervisor; Wait() on this is "did the job finish"
+
+	// build marks a skiff spawned for a Spindrift build request rather than a
+	// GitHub runner. It carries no registration to poll or deregister, and
+	// awaitExit never spawns a replacement for one -- buildLoop's own claim
+	// loop is what decides whether another skiff boots.
+	build   bool
+	buildID string
+	// done closes once retire has finished tearing this build skiff down, so
+	// runBuild knows it is safe to read the diag share for a result.
+	done chan struct{}
 }
 
 // setExitReason records why bosun is about to kill this skiff. The poll loop
@@ -357,6 +368,111 @@ func (p *pool) spawn(ctx context.Context, className string) {
 	go p.awaitExit(ctx, s, logger)
 }
 
+// spawnBuild boots one skiff to run a claimed Spindrift build instead of
+// registering it as a GitHub runner. It shares spawn's low-level machinery --
+// claimSlot, writeState's build sibling writeBuildState, boot, and
+// awaitExit -- but duplicates spawn's setup (draining guard, id, hull,
+// paths) rather than threading a build/non-build fork through spawn itself:
+// the two diverge immediately after that prefix on the one thing that
+// matters (a GitHub JIT mint vs a request write), and forking spawn's own
+// early-return chain would cost more clarity than the small duplication
+// here does.
+//
+// Returns (nil, errDraining) when a stop is in progress: bosun never ran the
+// build, so runBuild must NOT post a result -- staying silent lets the claim's
+// lease expire and another host pick the request up, where a FAILED post
+// would close the Spindrift build permanently for work nobody attempted. Any
+// other nil return is a real setup failure, already logged; runBuild reports
+// that one, and Spindrift's lease expiry is not waited on for it.
+func (p *pool) spawnBuild(ctx context.Context, claim *buildClaim) (*skiff, error) {
+	p.mu.Lock()
+	if p.draining {
+		p.mu.Unlock()
+		return nil, errDraining
+	}
+	p.spawning++
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		p.spawning--
+		p.mu.Unlock()
+	}()
+
+	class, ok := p.cfg.Classes[claim.Class]
+	if !ok {
+		p.logger.Error("spawnBuild: unknown class", "class", claim.Class)
+		return nil, fmt.Errorf("unknown class %q", claim.Class)
+	}
+	logger := p.logger.With("class", claim.Class, "build_id", claim.ID)
+
+	id, err := newSkiffID()
+	if err != nil {
+		logger.Error("generate skiff id", "error", err)
+		return nil, err
+	}
+	logger = logger.With("skiff", id)
+
+	h, err := loadHull(class.Hull)
+	if err != nil {
+		logger.Error("load hull", "error", err)
+		return nil, err
+	}
+
+	paths, err := resolvePaths(p.cfg.RuntimeDir, p.cfg.LogDir, id, h.manifest.Devices)
+	if err != nil {
+		logger.Error("resolve paths", "error", err)
+		return nil, err
+	}
+
+	slot := -1
+	if class.Workspace != "" {
+		if class.Persist {
+			slot = p.claimSlot(claim.Class)
+			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, workspaceSlotName(claim.Class, slot))
+			logger = logger.With("workspace_slot", slot)
+		} else {
+			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, id+".img")
+		}
+	}
+	now := time.Now()
+	s := &skiff{
+		id: id, class: claim.Class, paths: paths, slot: slot, mintedAt: now,
+		busySince: now, // busy by construction; see pollBuildSkiff
+		build:     true, buildID: claim.ID, done: make(chan struct{}),
+	}
+
+	if err := p.writeBuildState(paths.dir, claim.Request, h.digest); err != nil {
+		logger.Error("write build state", "error", err)
+		s.setExitReason(exitBootFailed)
+		p.retire(ctx, s, logger)
+		return nil, err
+	}
+
+	if err := p.boot(s, h, class, logger); err != nil {
+		logger.Error("boot", "error", err)
+		s.setExitReason(exitBootFailed)
+		p.retire(ctx, s, logger)
+		return nil, err
+	}
+
+	p.mu.Lock()
+	if p.draining {
+		p.mu.Unlock()
+		logger.Info("drain: scuttling build skiff spawned mid-stop")
+		s.setExitReason(exitDrained)
+		p.retire(ctx, s, logger)
+		return nil, errDraining
+	}
+	p.skiffs[id] = s
+	p.mu.Unlock()
+
+	p.stats.boot(claim.Class)
+	logger.Info("build skiff booted")
+	p.publish()
+	go p.awaitExit(ctx, s, logger)
+	return s, nil
+}
+
 // writeState makes runtimeDir/<id> — bosun's entire state for this skiff.
 // /run is tmpfs, so a reboot clears it; there is no database.
 func (p *pool) writeState(dir string, runnerID int64, jitConfig, hullDigest string) error {
@@ -367,6 +483,20 @@ func (p *pool) writeState(dir string, runnerID int64, jitConfig, hullDigest stri
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "runner-id"), []byte(strconv.FormatInt(runnerID, 10)), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "hull"), []byte(hullDigest), 0o600)
+}
+
+// writeBuildState is writeState's build-skiff sibling: request.json where a
+// GitHub skiff has jitconfig, plus the same hull digest. No runner-id file --
+// a build skiff never registers with GitHub, so retire and sweep have
+// nothing to deregister for it.
+func (p *pool) writeBuildState(dir string, request json.RawMessage, hullDigest string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "request.json"), request, 0o400); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "hull"), []byte(hullDigest), 0o600)
@@ -426,7 +556,7 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 		return fmt.Errorf("start passt: %w", err)
 	}
 
-	chProc, err := p.launch.Start(binPath(p.cfg.Bin.CloudHypervisor, "cloud-hypervisor"), chArgs(h, class, s.id, s.paths, p.cfg.CacheURL), helpersLog, helpersLog)
+	chProc, err := p.launch.Start(binPath(p.cfg.Bin.CloudHypervisor, "cloud-hypervisor"), chArgs(h, class, s.id, s.paths, p.cfg.CacheURL, s.build), helpersLog, helpersLog)
 	if err != nil {
 		return fmt.Errorf("start cloud-hypervisor: %w", err)
 	}
@@ -471,6 +601,10 @@ func (p *pool) awaitExit(ctx context.Context, s *skiff, logger *slog.Logger) {
 	}
 	logger.Info("skiff halted", "error", err)
 	p.retire(ctx, s, logger)
+	if s.build {
+		close(s.done) // runBuild is waiting to read the diag share for a result
+		return        // buildLoop's own claim loop decides whether another skiff boots
+	}
 	if ctx.Err() != nil {
 		return // shutting down; do not refill
 	}
@@ -501,10 +635,11 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 	// else deregisters here, on a context that survives shutdown: by the time
 	// a drain-era retire runs, the run context is cancelled, and a DELETE that
 	// never happens is a ghost registration until the next sweep.
+	// A build skiff never registered with GitHub in the first place.
 	s.mu.Lock()
 	deregistered := s.deregistered
 	s.mu.Unlock()
-	if !deregistered {
+	if !s.build && !deregistered {
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if err := p.gh.DeleteRunner(dctx, p.cfg.Repo, s.runnerID); err != nil {
@@ -603,6 +738,10 @@ func (p *pool) pollOnce(ctx context.Context) {
 //   - Idle past jitExpiry: the credential this skiff registered with is now
 //     dead and it never connected; recycle it for a fresh one.
 func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
+	if s.build {
+		p.pollBuildSkiff(s)
+		return
+	}
 	logger := p.logger.With("skiff", s.id, "class", s.class)
 	status, busy, err := p.gh.GetRunner(ctx, p.cfg.Repo, s.runnerID)
 	if err != nil {
@@ -654,6 +793,22 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 		s.setExitReason(exitJITExpired)
 		killBestEffort(s.ch, logger, "idle-expired cloud-hypervisor")
 	}
+}
+
+// pollBuildSkiff is a build skiff's entire reconciliation: it never
+// registers with GitHub, so the wedge and JIT-expiry checks above do not
+// apply, and the only thing left to reap is the class's lifetime budget. A
+// build skiff is busy by construction, so busySince is set at spawn rather
+// than on a status transition, and the same exceededLifetime check every
+// busy GitHub skiff gets applies here unchanged.
+func (p *pool) pollBuildSkiff(s *skiff) {
+	if !p.exceededLifetime(s.class, s.busySince) {
+		return
+	}
+	logger := p.logger.With("skiff", s.id, "class", s.class, "build_id", s.buildID)
+	logger.Info("build max lifetime exceeded, killing", "running_for", time.Since(s.busySince))
+	s.setExitReason(exitLifetime)
+	killBestEffort(s.ch, logger, "expired cloud-hypervisor")
 }
 
 // drain is the stop path: the run context is already cancelled, so awaitExit
@@ -725,6 +880,12 @@ func (p *pool) empty() bool {
 // DELETE would be refused anyway.
 func (p *pool) scuttleIdle(ctx context.Context) {
 	for _, s := range p.snapshot() {
+		if s.build {
+			// No GitHub registration to prove idle against, and busy by
+			// construction anyway; killRemaining condemns it at the drain
+			// deadline like any other busy skiff.
+			continue
+		}
 		s.mu.Lock()
 		busy := !s.busySince.IsZero()
 		condemned := s.exitReason != ""

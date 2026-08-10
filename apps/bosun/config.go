@@ -11,14 +11,14 @@ import (
 
 // Config is bosun's on-disk JSON configuration. A NixOS module generates it.
 type Config struct {
-	Repo         string           `json:"repo"`
-	TokenFile    string           `json:"tokenFile"`
-	RuntimeDir   string           `json:"runtimeDir"`
-	LogDir       string           `json:"logDir"`
-	WorkspaceDir string           `json:"workspaceDir"` // real storage, not tmpfs: it holds whole filesystem images
-	MetricsFile  string           `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
-	CacheURL     string           `json:"cacheUrl"`     // empty disables; announced to every skiff as bosun.cache on the cmdline
-	PollInterval Duration         `json:"pollInterval"`
+	Repo         string   `json:"repo"`
+	TokenFile    string   `json:"tokenFile"`
+	RuntimeDir   string   `json:"runtimeDir"`
+	LogDir       string   `json:"logDir"`
+	WorkspaceDir string   `json:"workspaceDir"` // real storage, not tmpfs: it holds whole filesystem images
+	MetricsFile  string   `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
+	CacheURL     string   `json:"cacheUrl"`     // empty disables; announced to every skiff as bosun.cache on the cmdline
+	PollInterval Duration `json:"pollInterval"`
 	// DrainTimeout bounds how long a stop waits for busy skiffs to finish
 	// their jobs. Idle skiffs are scuttled immediately; what this buys is a
 	// deploy that no longer fails every in-flight job, and what it costs is
@@ -26,6 +26,22 @@ type Config struct {
 	DrainTimeout Duration         `json:"drainTimeout"`
 	Classes      map[string]Class `json:"classes"`
 	Bin          BinPaths         `json:"bin"`
+	// Spindrift turns this host into a build source alongside its GitHub warm
+	// pool. nil (the default) means bosun never talks to Spindrift.
+	Spindrift *SpindriftConfig `json:"spindrift,omitempty"`
+}
+
+// SpindriftConfig is how a bosun host long-polls a Spindrift outbox for
+// build requests and runs each on a skiff of one of Classes, instead of only
+// ever registering GitHub runners.
+type SpindriftConfig struct {
+	URL       string   `json:"url"`
+	TokenFile string   `json:"tokenFile"`
+	Classes   []string `json:"classes"`
+	// PollInterval is the retry wait after a failed claim, not the poll
+	// cadence itself -- the claim call long-polls server-side, so a
+	// successful round trip is the wait.
+	PollInterval Duration `json:"pollInterval"`
 }
 
 // Class is one warm-pool class: a hull to boot, its resources, how many
@@ -184,6 +200,28 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.DrainTimeout <= 0 {
 		cfg.DrainTimeout = Duration(defaultDrainTimeout)
 	}
+
+	if cfg.Spindrift != nil {
+		sd := cfg.Spindrift
+		if sd.URL == "" {
+			return nil, fmt.Errorf("config: spindrift.url is required")
+		}
+		if sd.TokenFile == "" {
+			return nil, fmt.Errorf("config: spindrift.tokenFile is required")
+		}
+		if len(sd.Classes) == 0 {
+			return nil, fmt.Errorf("config: spindrift.classes is required")
+		}
+		for _, name := range sd.Classes {
+			if _, ok := cfg.Classes[name]; !ok {
+				return nil, fmt.Errorf("config: spindrift.classes: class %q is not declared in classes", name)
+			}
+		}
+		if sd.PollInterval <= 0 {
+			sd.PollInterval = Duration(defaultPollInterval)
+		}
+	}
+
 	return &cfg, nil
 }
 
