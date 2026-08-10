@@ -6,8 +6,8 @@
  * standing relationship to this installation's cloud project. It cannot read
  * `gs://` and it holds nothing that would let it authenticate to GCS. So the
  * durable object address has to be turned into something `curl` resolves, and
- * the reusable workflow — SHA-pinned by the manifest, therefore not ours to
- * change — already does exactly one thing with what it is handed:
+ * the reusable workflow — named by the manifest, not composed at dispatch —
+ * already does exactly one thing with what it is handed:
  * `curl --fail --location "$LOCATION"`.
  *
  * A **V4 signed URL** is what fits that sentence. It is a bearer capability and

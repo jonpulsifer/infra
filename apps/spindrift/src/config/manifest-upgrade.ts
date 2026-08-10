@@ -62,8 +62,8 @@ export function upgradeManifestDocument(document: unknown): unknown {
  * is not inert the way `spindrift.example.com` is: `connectRepository` writes
  * it into a caller workflow inside connected repositories, and it names a
  * repository this project does not own. Null is the schema's own word for "no
- * workflow pinned", and connect refuses on it until an operator states a real
- * one.
+ * workflow published", and connect refuses on it until an operator states a
+ * real one.
  *
  * Exact-match on the one historical string, never a pattern: any other value
  * is an operator's pin, and it is theirs whatever it names.

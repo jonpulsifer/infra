@@ -99,7 +99,7 @@ describe('the Spindrift file Spindrift writes', () => {
 });
 
 describe('the CI caller', () => {
-  test('calls the pinned reusable workflow and nothing else', () => {
+  test("calls the manifest's reusable workflow and nothing else", () => {
     const caller = buildWorkflowCaller(BUILD_WORKFLOW);
     expect(caller).toContain(`uses: ${BUILD_WORKFLOW}`);
     // §15: the run happens in the connected repository, so the trigger is a

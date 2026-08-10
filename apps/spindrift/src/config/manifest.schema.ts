@@ -593,25 +593,30 @@ export const installationManifestSchema = z
           .refine((value) => !value.endsWith('/'), 'must not end with a slash'),
         /**
          * The reusable build workflow the configuration PR's one caller calls
-         * (§15).
+         * (§15), as `owner/repo/.github/workflows/<file>@<ref>`.
          *
-         * **Pinned to a commit, and the schema is what enforces it.** §15 gives
-         * the connected repository the Actions minutes and the billing, which
-         * means the workflow runs with that repository's own permissions —
-         * so a mutable ref here would let whoever can move it run arbitrary
-         * steps in every connected repository at once. A branch or tag is
-         * refused rather than warned about.
+         * **The ref may move, and that is a named trade.** §15 gives the
+         * connected repository the Actions minutes and the billing, which
+         * means the workflow runs with that repository's own permissions — so
+         * whoever can move the ref runs arbitrary steps in every connected
+         * repository at once. A branch ref hands that power to the platform
+         * repository's own merge gate, and buys the fleet its currency: the
+         * caller written into each connected repository tracks the platform's
+         * present workflow instead of freezing at whatever commit was current
+         * when that repository connected — a freeze nothing walks back,
+         * because no fleet re-pin exists. An installation that wants the
+         * freeze anyway states a commit sha; the schema takes either.
          *
          * Nullable, stated the way `auth.gateway` is: an installation that has
          * not published a reusable workflow yet has no honest value to put here,
-         * and a placeholder commit would be a configuration that looks complete
+         * and a placeholder would be a configuration that looks complete
          * and fails at the first build. Null means repositories cannot be
          * connected — `connectRepository` says so — and nothing else changes.
          */
         buildWorkflow: nonEmptyString
           .regex(
-            /^[^/@\s]+\/[^/@\s]+\/\.github\/workflows\/[^@\s]+@[0-9a-f]{40}$/,
-            'must be owner/repo/.github/workflows/<file>@<40-character commit sha>',
+            /^[^/@\s]+\/[^/@\s]+\/\.github\/workflows\/[^@\s]+@\S+$/,
+            'must be owner/repo/.github/workflows/<file>@<ref>',
           )
           .nullable(),
         /**
