@@ -6,11 +6,12 @@ locals {
   # the module enables iam.googleapis.com, which the controller service account
   # depends on, so referencing the resource here would be a cycle.
   #
-  # The cost of breaking it this way is that the module's grants name a member
-  # Terraform has not created yet. On a greenfield vessel the first apply can
-  # fail on a grant to a service account that does not exist; the account is
-  # created in the same apply and the second converges. That retry is the
-  # procedure here, the same as the supply chain's.
+  # A string carries no dependency edge, so nothing orders the module's grants
+  # against the account they name. The `depends_on` on the module call below
+  # supplies that edge in the one direction that works: the account first, then
+  # everything granted to it. Granting to a service account that does not exist
+  # is a 400, not a retryable eventual-consistency error, so leaving the order
+  # to the graph fails every apply rather than converging on the second.
   controller_member = "serviceAccount:spindrift-controller@${local.project}.iam.gserviceaccount.com"
 }
 
@@ -27,6 +28,12 @@ module "vessel" {
   # trusted-builds' spindrift-supply-chain module creates, as
   # `projects/{project}/attestors/{name}`.
   attestor = "projects/trusted-builds/attestors/provenance"
+
+  # The edge the derived `controller_member` string cannot carry. Creating the
+  # account before this project's own APIs are enabled works because a vessel
+  # project has `iam.googleapis.com` on before its first apply — nothing can
+  # create the service account that apply grants to otherwise.
+  depends_on = [google_service_account.spindrift_controller]
 }
 
 module "network" {

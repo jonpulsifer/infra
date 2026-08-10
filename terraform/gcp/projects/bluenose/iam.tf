@@ -7,8 +7,6 @@
 resource "google_service_account" "spindrift_controller" {
   account_id   = "spindrift-controller"
   display_name = "Spindrift platform controller"
-
-  depends_on = [module.vessel]
 }
 
 # The offsite cluster's spindrift installation, namespace spindrift. The
