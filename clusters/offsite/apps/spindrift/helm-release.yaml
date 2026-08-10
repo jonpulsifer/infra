@@ -169,6 +169,19 @@ spec:
             # engine every build on this route runs, and a moving tag is an
             # engine that changes underneath a reproducible build.
             image: moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+          # The outage fallback: a bosun host long-polls the outbox over the
+          # same tunnel and /internal/* posture the GitHub webhook rides,
+          # claims the request, and builds it on a microVM skiff. Ranked
+          # last — hosted and managed win whenever they are reachable; this
+          # is the route that still works when the Actions plane is down.
+          # The builder id must match the constant the build-hull stamps
+          # into its provenance statement (nix/images/hull-ubuntu.nix,
+          # buildRun) — a mismatch fails closed at verification. The class
+          # names tender's skiff-build-xl pool (nix/hosts/tender.nix).
+          - name: pool
+            adapter: bosun
+            class: skiff-build-xl
+            provenanceBuilderId: https://bosun.lolwtf.ca/skiff
         # Railpack publishes the frontend as its own repository. Pinned to a
         # version rather than a moving tag: it is the only input to a
         # zero-config build that no digest covers.
