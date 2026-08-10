@@ -88,11 +88,10 @@
       memory = "3072M";
       workspace = "6G";
       persist = true;
-      # warm = 0 while tender carries this label: the lab keeps a single warm
-      # slot (skiff-nixos above) and every skiff-ubuntu job lands on the cloud
-      # pool, which is also what makes the cloud bench numbers unambiguous.
-      # Restore warm = 2 to serve the label from this host again; the slot
-      # disks are reclaimed at 0 and rebuilt cold on the way back up.
+      # Parked: this host keeps its single skiff-nixos slot and oldschool
+      # serves skiff-ubuntu. Restore warm = 2 to serve the label from here
+      # again; the slot disks are reclaimed at 0 and rebuilt cold on the way
+      # back up.
       warm = 0;
     };
 
