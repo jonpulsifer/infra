@@ -11,6 +11,7 @@
  * The shape is §6's, field for field. A field this file does not name is a field
  * core does not get to describe.
  */
+import type { DatastoreEngine } from '../adapters/datastore/contract.ts';
 import { registryHostOf } from './artifact-name.ts';
 
 /**
@@ -198,6 +199,44 @@ export interface ConfigEntry {
   secret: SecretReference;
 }
 
+/**
+ * The variable each engine's connection is read through (§11).
+ *
+ * **Fixed by engine.** Never a column, never a form field, and never offered.
+ * Every mainstream client for these two engines already reads these names, so a
+ * settable name could only ever have been the same name typed by hand — and a
+ * settable name is what lets two Postgres Datastores both claim `DATABASE_URL`
+ * on one App, which is a release that comes up green with one of them silently
+ * missing. The refusal lives at attach; this constant is why there is exactly
+ * one thing to refuse about.
+ */
+export const DATASTORE_VARIABLE = {
+  postgres: 'DATABASE_URL',
+  valkey: 'REDIS_URL',
+} as const satisfies Record<DatastoreEngine, string>;
+
+/**
+ * One attached Datastore, as the variable its connection fills.
+ *
+ * Deliberately **not** a {@link ConfigEntry}: no {@link SecretReference}, so no
+ * version. §10 pins a config version because a config change must produce a new
+ * Deploy rather than silently not applying; a Datastore credential is the
+ * opposite case — the engine's operator owns its rotation, and pinning a version
+ * would fight the operator for it. What is pinned here is the *reference*, which
+ * is stable across every rotation behind it.
+ *
+ * No engine either. Core resolves the variable name once, where the Deploy's
+ * intent is written, and pins the resolved name exactly as §10 pins resolved
+ * config variable names. Nothing downstream branches on the engine — the
+ * connection's own scheme says everything the renderer needs.
+ */
+export interface DatastoreAttachment {
+  /** The variable, already resolved through {@link DATASTORE_VARIABLE}. */
+  readonly name: string;
+  /** The Datastore's stored `connection_ref` — a reference, never a credential. */
+  readonly connection: string;
+}
+
 /** Where the artifact can run (§3's `arch` capability). */
 export interface Platform {
   os: string;
@@ -264,6 +303,21 @@ export interface DesiredState {
   schedule?: string;
 
   config: readonly ConfigEntry[];
+
+  /**
+   * The Datastores attached to this App when the intent was written (§11).
+   *
+   * Optional rather than nullable, like `expose` and `schedule` above, which is
+   * also what makes every `desired` document written before this field existed
+   * read back as `undefined` — the column is jsonb with no runtime parse, so an
+   * absent key is the only shape an old row can have.
+   *
+   * It lands in {@link DesiredDocument} and is pinned, for the identical reason
+   * that file argues for config: a rollback must come back up with the
+   * attachment it was released with, not with whatever is attached today.
+   */
+  datastores?: readonly DatastoreAttachment[];
+
   requirements: Requirements;
   hostname: Hostname;
 }

@@ -69,6 +69,27 @@ app:
   # platform's secret operator materializes it.
   secretEnv: []
 
+  # One entry per attached Datastore, in two shapes:
+  #
+  #   [{ name, secretName, secretKey }]  the engine's operator generated a
+  #                                      credential and put it in a Secret
+  #   [{ name, value }]                  the engine authenticates nobody, so
+  #                                      the address is all there is
+  #
+  # `name` is fixed by the Datastore's engine and resolved before it reaches
+  # here, which is why there is no engine field: the chart would have nothing
+  # to do with one that the shape does not already say.
+  #
+  # The reference points **directly** at the Secret the engine's operator owns,
+  # not at one this chart materializes. So the credential never transits
+  # Spindrift and never travels the `secretEnv` pinned-store path — which also
+  # means a rotation the operator performs is picked up by the next pod with no
+  # Deploy, and that an attached Datastore renders no ExternalSecret and so
+  # demands no `platform.secretStore.name`. Same namespace by construction: a
+  # Datastore is provisioned into its Target's namespace, which is the release's,
+  # and a `secretKeyRef` cannot cross one.
+  datastores: []
+
   # Entrypoint overrides. Empty means the image's own.
   command: []
   args: []
