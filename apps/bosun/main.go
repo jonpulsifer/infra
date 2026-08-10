@@ -68,6 +68,26 @@ func main() {
 	p.fill(ctx)
 	logger.Info("warm pool filled", "classes", len(cfg.Classes))
 
+	// buildDone closes once buildLoop has returned, so shutdown can wait for
+	// it: buildLoop keeps running (heartbeating, then posting a result) past
+	// ctx's cancellation for a build already in flight, and letting main
+	// return while that is still happening would abandon the result mid-post.
+	var buildDone chan struct{}
+	if cfg.Spindrift != nil {
+		sdTokenRaw, err := os.ReadFile(cfg.Spindrift.TokenFile)
+		if err != nil {
+			logger.Error("read spindrift token file", "path", cfg.Spindrift.TokenFile, "error", err)
+			os.Exit(1)
+		}
+		sd := newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw)))
+		buildDone = make(chan struct{})
+		go func() {
+			defer close(buildDone)
+			p.buildLoop(ctx, sd, cfg.Spindrift.Classes, time.Duration(cfg.Spindrift.PollInterval))
+		}()
+		logger.Info("spindrift build source enabled", "classes", cfg.Spindrift.Classes)
+	}
+
 	p.pollLoop(ctx)
 
 	// SIGTERM landed: drain rather than die. Refills are already stopped by
@@ -81,5 +101,8 @@ func main() {
 	drainCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.DrainTimeout))
 	defer cancel()
 	p.drain(drainCtx)
+	if buildDone != nil {
+		<-buildDone
+	}
 	logger.Info("shutting down")
 }

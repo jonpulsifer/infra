@@ -19,8 +19,16 @@
 {
   lib,
   pkgs,
+  # "runner" boots the ARC runner (`Runner.Listener run`, the default and the
+  # only thing this file built before this parameter existed). "build" swaps
+  # in a script that runs a Spindrift build instead — same kernel, same
+  # initrd, same setup, same squashfs assembly; only the run script and one
+  # extra rootfs binary (buildx) differ, so that plumbing stays one source of
+  # truth for both.
+  variant ? "runner",
 }:
 let
+  isBuild = variant == "build";
   # Same kernel derivation the NixOS hull boots, so riptide's store already
   # has it: the `dev` output's vmlinux carries the PVH entry note
   # cloud-hypervisor needs, and /lib/modules below comes from the same build.
@@ -54,6 +62,16 @@ let
   busybox = pkgs.pkgsStatic.busybox;
   # dockerd shells out to iptables; the container-image rootfs has none.
   iptables = pkgs.pkgsStatic.iptables;
+
+  # The build variant's one extra binary: a static buildx plugin, since the
+  # runner image carries the docker CLI but not buildx. Upstream's release
+  # binary, not pkgs.docker-buildx — that one is glibc-dynamic against
+  # nixpkgs' glibc, which does not exist in this Ubuntu guest (see the
+  # dockerStatic comment above).
+  buildxPlugin = pkgs.fetchurl {
+    url = "https://github.com/docker/buildx/releases/download/v0.30.1/buildx-v0.30.1.linux-amd64";
+    hash = "sha256-w3EU/NA0Al7GjiJGV8ilqFDfRy3tPdy8p1rTp+u5cQ0=";
+  };
 
   # Everything stage-1 needs before there is a rootfs to load modules from.
   # The full module tree rides inside the rootfs for everything later (docker
@@ -273,7 +291,7 @@ let
   # Stage 2, line 2: the one job this skiff was booted for. The runner
   # deregisters itself after one job and exits; this script then powers off,
   # which exits the VMM with 0 — the launcher's completion signal.
-  run = pkgs.writeScript "skiff-run" ''
+  runnerRun = pkgs.writeScript "skiff-run" ''
     #!/opt/bosun/busybox sh
     export HOME=/home/runner
     export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -295,6 +313,258 @@ let
     echo "skiff-mark runner-exit $(/opt/bosun/busybox cut -d' ' -f1 /proc/uptime)"
     /opt/bosun/busybox poweroff -f
   '';
+
+  # The build variant's stage 2, line 2: a Spindrift build instead of a job.
+  # Real bash, not busybox sh — this needs curl/tar/jq/docker from the
+  # Ubuntu rootfs, none of which busybox's ash can call into meaningfully
+  # more than by exec'ing them anyway. Every line printed is captured to
+  # $diag/result/build.log (see the setup script's bosun-diag mount), and
+  # the EXIT trap is what keeps the two invariants this hull's wait entry
+  # depends on: /home/runner/_diag/result/status always gets written, and
+  # the VM always powers off, on every exit path — not just the ones this
+  # script anticipated (same reasoning as the runner variant's poweroff
+  # placement above).
+  buildRun = pkgs.writeScript "skiff-build" ''
+    #!/bin/bash
+    # Stage 2, line 2 for the build variant: fetch the bundle §5 staged, run it
+    # through the same frontend ladder spindrift-build.yml runs on GitHub's own
+    # runners, and push. Everything printed here — including the marker line
+    # core reads — is captured to $diag/result/build.log as well as the serial
+    # console, and $diag/result/status is the one file that always lands: this
+    # trap is what makes "always write a status, always power off" true on every
+    # exit path, not just the ones this script anticipated.
+    set -euo pipefail
+    export HOME=/home/runner
+    export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    [ -f /etc/skiff-env ] && . /etc/skiff-env
+
+    diag=/home/runner/_diag
+    result="$diag/result"
+    mkdir -p "$result"
+
+    status_written=0
+    write_status() {
+      printf '%s' "$1" > "$result/status"
+      status_written=1
+    }
+    finish() {
+      rc=$?
+      if [ "$status_written" -eq 0 ]; then
+        if [ "$rc" -eq 0 ]; then write_status SUCCEEDED; else write_status FAILED; fi
+      fi
+      # Flush the log through virtiofs before the VMM dies: poweroff -f gives
+      # the page cache no chance on its own, and the report marker is the last
+      # line of exactly this file.
+      sync
+      /opt/bosun/busybox poweroff -f
+    }
+    trap finish EXIT
+
+    # Straight into the log file, not through a tee to the console: a tee is a
+    # background process poweroff -f races, and losing its unflushed tail
+    # loses the marker line. The log reaches the operator through the diag
+    # share and the posted result; the serial console keeps the setup script's
+    # boot marks.
+    exec > "$result/build.log" 2>&1
+    echo "skiff-mark build-start $(cut -d' ' -f1 /proc/uptime)"
+
+    req=/run/bosun/request.json
+    if [ ! -f "$req" ]; then
+      echo "skiff-build: missing $req" >&2
+      exit 1
+    fi
+
+    bundle_digest=$(jq -r '.source.bundleDigest' "$req")
+    location=$(jq -r '.source.origin.location' "$req")
+    subpath=$(jq -r '.source.origin.subpath // ""' "$req")
+    artifact_type=$(jq -r '.spec.artifactType // "image"' "$req")
+    frontend=$(jq -r '.spec.zeroConfigFrontend // ""' "$req")
+    destination=$(jq -r '.spec.destinations[0]' "$req")
+    # spec.platform arrives as either an OCI-shaped object or a plain
+    # "os/arch" string; buildx wants the string either way.
+    platform=$(jq -r '
+      .spec.platform as $p
+      | if ($p == null) then ""
+        elif ($p | type) == "string" then $p
+        elif ($p | type) == "object" then (($p.os // "linux") + "/" + ($p.architecture // $p.arch // "amd64"))
+        else "" end
+    ' "$req")
+
+    # The workspace mount setup carved out of the scratch disk when the class
+    # sized one (see skiff-setup); a class with no disk still made the mount
+    # point, so /tmp is only ever a fallback for a boot that skipped setup.
+    workdir=/home/runner/_work
+    [ -d "$workdir" ] || workdir=/tmp
+    build_root="$workdir/build"
+    mkdir -p "$build_root"
+
+    echo "skiff-mark bundle-fetch $(cut -d' ' -f1 /proc/uptime)"
+    bundle_file="$build_root/bundle.tar.gz"
+    curl --fail --silent --show-error --location -o "$bundle_file" "$location"
+
+    want="''${bundle_digest#sha256:}"
+    got="$(sha256sum "$bundle_file" | cut -d' ' -f1)"
+    if [ "$want" != "$got" ]; then
+      echo "skiff-build: bundle digest mismatch: want $want got $got" >&2
+      exit 1
+    fi
+
+    bundle_root="$build_root/bundle"
+    mkdir -p "$bundle_root"
+    tar -xzf "$bundle_file" -C "$bundle_root"
+
+    # §5's unwrap: a bundle whose root is exactly one directory has that
+    # directory as its real root — the same rule spindrift-build.yml applies.
+    root="$bundle_root"
+    shopt -s dotglob nullglob
+    entries=("$root"/*)
+    if [ "''${#entries[@]}" -eq 1 ] && [ -d "''${entries[0]}" ]; then
+      root="''${entries[0]}"
+    fi
+    shopt -u dotglob nullglob
+    scope="$root/$subpath"
+
+    # setup backgrounds dockerd; wait for the socket rather than racing it.
+    # The runner variant never needed this because Runner.Listener's own
+    # startup and job assignment mask the daemon's.
+    for _ in $(seq 1 100); do
+      docker version >/dev/null 2>&1 && break
+      /opt/bosun/busybox sleep 0.2
+    done
+    if ! docker version >/dev/null 2>&1; then
+      echo "skiff-build: dockerd never came up" >&2
+      exit 1
+    fi
+
+    echo "skiff-mark registry-login $(cut -d' ' -f1 /proc/uptime)"
+    auth_count=$(jq -r '(.spec.registryAuth // []) | length' "$req")
+    for ((i = 0; i < auth_count; i++)); do
+      host=$(jq -r ".spec.registryAuth[$i].host" "$req")
+      username=$(jq -r ".spec.registryAuth[$i].username" "$req")
+      jq -r ".spec.registryAuth[$i].secret" "$req" | docker login "$host" --username "$username" --password-stdin
+    done
+
+    echo "skiff-mark frontend-select $(cut -d' ' -f1 /proc/uptime)"
+    frontend_build_arg=""
+    if [ "$artifact_type" = "files" ]; then
+      # A `files` artifact is not built at all — see spindrift-build.yml's
+      # "Choose the frontend" step for why `FROM scratch` + `COPY . /` is
+      # what makes the scope itself the pushed layer.
+      dockerfile="$build_root/Dockerfile.files"
+      printf 'FROM scratch\nCOPY . /\n' > "$dockerfile"
+      context="$scope"
+      file="$dockerfile"
+    elif [ -f "$scope/Dockerfile" ]; then
+      # ponytail: skips the workflow's COPY/ADD context-sniffing probe and
+      # always builds from the bundle root; upgrade to the probe in
+      # spindrift-build.yml's "Choose the frontend" step if a scoped
+      # Dockerfile that expects its own directory as context shows up here.
+      context="$root"
+      file="$scope/Dockerfile"
+    else
+      plan_dir="$build_root/railpack-plan"
+      mkdir -p "$plan_dir"
+      docker run --rm \
+        -v "$scope:/scope:ro" -v "$plan_dir:/out" \
+        --entrypoint /railpack "$frontend" \
+        prepare /scope --plan-out /out/railpack-plan.json
+      context="$scope"
+      file="$plan_dir/railpack-plan.json"
+      frontend_build_arg="BUILDKIT_SYNTAX=$frontend"
+    fi
+
+    build_arg_flags=()
+    while IFS= read -r kv; do
+      [ -n "$kv" ] && build_arg_flags+=(--build-arg "$kv")
+    done < <(jq -r '(.spec.buildArgs // {}) | to_entries[] | "\(.key)=\(.value)"' "$req")
+    [ -n "$frontend_build_arg" ] && build_arg_flags+=(--build-arg "$frontend_build_arg")
+
+    tag_flags=()
+    while IFS= read -r t; do
+      [ -n "$t" ] && tag_flags+=(-t "$t")
+    done < <(jq -r '.spec.destinations[] as $d | (.spec.tags // ["latest"])[] | $d + ":" + .' "$req")
+
+    platform_flags=()
+    [ -n "$platform" ] && platform_flags=(--platform "$platform")
+
+    echo "skiff-mark build-push $(cut -d' ' -f1 /proc/uptime)"
+    metadata_file="$build_root/metadata.json"
+    docker buildx build \
+      --push \
+      "''${tag_flags[@]}" \
+      "''${build_arg_flags[@]}" \
+      "''${platform_flags[@]}" \
+      --provenance=mode=max --sbom=true \
+      --metadata-file "$metadata_file" \
+      -f "$file" \
+      "$context"
+
+    digest=$(jq -r '."containerimage.digest"' "$metadata_file")
+
+    # Best effort, and null when it is not there — mirrors spindrift-build.yml's
+    # "Report what was built" base-digest extraction exactly.
+    base="$(docker buildx imagetools inspect "''${destination}@''${digest}" --format '{{ json .Provenance }}' 2>/dev/null \
+      | jq -r '[.. | .uri? // empty | select(startswith("pkg:docker"))][0] // empty' \
+      | grep -oE 'sha256(:|%3A)[0-9a-f]{64}' \
+      | sed 's/%3A/:/' || true)"
+
+    refs=$(jq -c --arg digest "$digest" '[.spec.destinations[] | . + "@" + $digest]' "$req")
+
+    skiff_id=""
+    hull_digest=""
+    for tok in $(cat /proc/cmdline); do
+      case "$tok" in
+        bosun.skiff=*) skiff_id="''${tok#bosun.skiff=}" ;;
+        bosun.hull=*) hull_digest="''${tok#bosun.hull=}" ;;
+      esac
+    done
+
+    report="$(jq -nc \
+      --arg bundleDigest "$bundle_digest" \
+      --arg digest "$digest" \
+      --arg destination "$destination" \
+      --arg ref "''${destination}@''${digest}" \
+      --argjson refs "$refs" \
+      --arg base "$base" \
+      --arg invocationId "$skiff_id" \
+      --arg hullDigest "$hull_digest" \
+      '{bundleDigest: $bundleDigest,
+        digest: $digest,
+        refs: $refs,
+        baseDigest: (if $base == "" then null else $base end),
+        buildkitProvenanceRef: $ref,
+        sbomRef: $ref,
+        statement: {
+          _type: "https://in-toto.io/Statement/v1",
+          subject: [{
+            name: $destination,
+            digest: {sha256: ($digest | ltrimstr("sha256:"))}
+          }],
+          predicateType: "https://slsa.dev/provenance/v1",
+          predicate: {
+            buildDefinition: {
+              buildType: "https://bosun.lolwtf.ca/buildtypes/skiff/v1",
+              externalParameters: {
+                bundleDigest: $bundleDigest
+              },
+              internalParameters: {
+                hullDigest: $hullDigest
+              }
+            },
+            runDetails: {
+              builder: {id: "https://bosun.lolwtf.ca/skiff"},
+              metadata: {invocationId: $invocationId}
+            }
+          }
+        }}')"
+
+    echo "skiff-mark build-done $(cut -d' ' -f1 /proc/uptime)"
+    write_status SUCCEEDED
+    echo "spindrift-result $(printf '%s' "$report" | base64 | tr -d '\n')"
+  '';
+
+  # The one job this skiff was booted for, whichever job that is.
+  run = if isBuild then buildRun else runnerRun;
 
   inittab = pkgs.writeText "inittab" ''
     ::sysinit:/opt/bosun/setup
@@ -332,6 +602,13 @@ let
         # dockerd, containerd, runc and friends.
         tar -xzf ${dockerStatic}
         install -m755 docker/* root/usr/local/bin/
+
+        ${lib.optionalString isBuild ''
+          # The build variant's one rootfs addition: buildx as a CLI plugin,
+          # in the path the docker CLI's plugin discovery looks in.
+          mkdir -p root/usr/local/lib/docker/cli-plugins
+          install -m755 ${buildxPlugin} root/usr/local/lib/docker/cli-plugins/docker-buildx
+        ''}
 
         # Static iptables where dockerd's PATH will find it.
         mkdir -p root/usr/local/sbin

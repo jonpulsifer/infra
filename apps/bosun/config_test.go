@@ -155,6 +155,105 @@ func TestLoadConfigRejectsAPersistingClassNameThatWouldEscapeItsImageName(t *tes
 	}
 }
 
+func TestLoadConfigDefaultsSpindriftPollInterval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff-build": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 0}},
+		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/run/secrets/spindrift", "classes": ["skiff-build"]}
+	}`)
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Spindrift == nil {
+		t.Fatal("spindrift config should be set")
+	}
+	if time.Duration(cfg.Spindrift.PollInterval) != defaultPollInterval {
+		t.Errorf("spindrift pollInterval default: got %s", cfg.Spindrift.PollInterval)
+	}
+}
+
+func TestLoadConfigOmittedSpindriftIsNil(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff-nixos": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 1}}
+	}`)
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Spindrift != nil {
+		t.Fatalf("spindrift should be nil when omitted, got %+v", cfg.Spindrift)
+	}
+}
+
+func TestLoadConfigRejectsSpindriftMissingURL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
+		"spindrift": {"tokenFile": "/x", "classes": ["skiff-build"]}
+	}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for spindrift with no url")
+	}
+}
+
+func TestLoadConfigRejectsSpindriftMissingTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
+		"spindrift": {"url": "https://spindrift.example", "classes": ["skiff-build"]}
+	}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for spindrift with no tokenFile")
+	}
+}
+
+func TestLoadConfigRejectsSpindriftWithNoClasses(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
+		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/x", "classes": []}
+	}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for spindrift with no classes")
+	}
+}
+
+// A build class Spindrift is told to claim for must also be a class bosun
+// actually knows how to boot -- otherwise a claim would arrive for a class
+// spawnBuild can never resolve.
+func TestLoadConfigRejectsSpindriftClassNotDeclaredInClasses(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{
+		"repo": "acme/widgets",
+		"tokenFile": "/run/secrets/token",
+		"classes": {"skiff-nixos": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 1}},
+		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/x", "classes": ["skiff-build"]}
+	}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for a spindrift class not declared in classes")
+	}
+}
+
 // The same names are fine when nothing persists: only the slot image naming
 // constrains them.
 func TestLoadConfigAllowsADottedClassNameThatDoesNotPersist(t *testing.T) {

@@ -56,8 +56,23 @@ function noWebhook(db: Database): WebhookRouteDeps {
   };
 }
 
+/** Inert: `/readyz` never routes a claim, so reaching these is the bug. */
+function noBosun(db: Database) {
+  return {
+    db,
+    clock: { now: () => new Date('2026-01-01T00:00:00Z') },
+    secret: null,
+  };
+}
+
 async function readyz(db: Database): Promise<Response> {
-  const routes = webRoutes(CLIENT, noSession, authDeps(db), noWebhook(db));
+  const routes = webRoutes(
+    CLIENT,
+    noSession,
+    authDeps(db),
+    noWebhook(db),
+    noBosun(db),
+  );
   const handler = routes[READY_PATH] as () => Promise<Response>;
   return handler();
 }

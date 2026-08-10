@@ -18,6 +18,7 @@ import type { GatewayDeps } from '../../src/auth/gateway.ts';
 import { AUTH_ACTS, authPathFor } from '../../src/auth/routes.ts';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { Database } from '../../src/db/client.ts';
+import { BOSUN_PATHS, type BosunRouteDeps } from '../../src/web/bosun-route.ts';
 import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
 import { HEALTH_PATH, READY_PATH, webRoutes } from '../../src/web/routes.ts';
@@ -90,10 +91,32 @@ const noWebhook: WebhookRouteDeps = {
   },
 };
 
+/**
+ * Bosun deps that would throw if reached, and a secret that is never
+ * configured — this file asserts over the *shape* of the table, so a claim
+ * actually reaching the outbox here would mean the assertion had gone wrong.
+ */
+const noBosun: BosunRouteDeps = {
+  db: new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error('a route-table test reached the database');
+      },
+    },
+  ) as Database,
+  clock: {
+    now: () => {
+      throw new Error('a route-table test read the clock');
+    },
+  },
+  secret: null,
+};
+
 /** A stand-in for the client, so this file never depends on a build having run. */
 const CLIENT = { '/': new Response('the client document') };
 
-const served = webRoutes(CLIENT, noSession, noAuth, noWebhook);
+const served = webRoutes(CLIENT, noSession, noAuth, noWebhook, noBosun);
 
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
 
@@ -109,6 +132,7 @@ describe('what the web process serves', () => {
         ...STREAM_PATHS,
         UPLOAD_PATH,
         WEBHOOK_PATH,
+        ...BOSUN_PATHS,
       ].sort(),
     );
   });
@@ -131,6 +155,7 @@ describe('what the web process serves', () => {
         ...STREAM_PATHS,
         UPLOAD_PATH,
         WEBHOOK_PATH,
+        ...BOSUN_PATHS,
       ].sort(),
     );
   });

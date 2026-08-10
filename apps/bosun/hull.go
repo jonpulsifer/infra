@@ -211,6 +211,11 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 // filesystem: what a workspace holds is the hull's business, the same way its
 // rootfs is, and bosun never learns what was put there.
 //
+// build marks a skiff spawned for a Spindrift build request rather than a
+// GitHub runner: the guest finds request.json instead of a jitconfig in the
+// same "bosun" share, and bosun.mode=build on the cmdline is what tells it
+// which one to expect.
+//
 // image_type=raw is not optional and not cosmetic. cloud-hypervisor 52 refuses
 // sector-0 writes on a disk whose type it had to auto-detect -- it logs
 // "Autodetected raw image type. Disabling sector 0 writes", then answers the
@@ -221,7 +226,7 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 // so a hull's disks are declared raw because the hull contract says a disk is a
 // raw file the hull ships. A hull wanting qcow2 wants a manifest field, and a
 // failing test to go with it.
-func chArgs(h *hull, class Class, id string, p skiffPaths, cacheURL string) []string {
+func chArgs(h *hull, class Class, id string, p skiffPaths, cacheURL string, build bool) []string {
 	args := []string{
 		"--kernel", filepath.Join(h.dir, h.manifest.Kernel),
 		"--initramfs", filepath.Join(h.dir, h.manifest.Initrd),
@@ -253,6 +258,9 @@ func chArgs(h *hull, class Class, id string, p skiffPaths, cacheURL string) []st
 	// decides whether and how to consume it, like every other cmdline fact.
 	if cacheURL != "" {
 		cmdline += " bosun.cache=" + cacheURL
+	}
+	if build {
+		cmdline += " bosun.mode=build"
 	}
 	args = append(args,
 		"--net", fmt.Sprintf("vhost_user=on,socket=%s", p.netSock),

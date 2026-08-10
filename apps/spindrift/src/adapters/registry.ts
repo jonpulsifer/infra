@@ -48,11 +48,13 @@ import { GitHubApp } from '../integrations/github/app.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
 import { GitHubDeviceOAuth } from '../integrations/github/oauth.ts';
 import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
+import { buildOutbox } from '../storage/build-outbox.ts';
 import { withGitHubRegistryCredential } from '../storage/github-registry-credential.ts';
 import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
 import { SlsaVerifier } from '../supply-chain/verify.ts';
+import type { BosunOutbox } from './build/bosun.ts';
 import type { BuildAdapter } from './build/contract.ts';
 import { findBuildRouteDescriptor } from './build/descriptors.ts';
 import { GcpDiscovery } from './cloud-discovery.ts';
@@ -228,11 +230,21 @@ export function createAdapterRegistry(
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
 
+  // The bosun route's outbox: built once, over the same `db` the registry
+  // credential store is, and `null` under the identical condition —
+  // "no database, no durable state this route can claim against".
+  const outbox =
+    options.db === undefined
+      ? null
+      : buildOutbox(options.db, () =>
+          (options.clock ?? { now: () => new Date() }).now(),
+        );
+
   // §16's ordered list: the manifest's order *is* the admin rank, so the map is
   // built from it in order and `buildRouteProfiles` reads it back the same way.
   const buildRoutes = new Map<string, BuildAdapter>();
   for (const route of options.manifest.build.routes) {
-    const built = createBuildRoute(route, options, app, cloud);
+    const built = createBuildRoute(route, options, app, cloud, outbox);
     if (built !== null) buildRoutes.set(route.name, built);
   }
 
@@ -469,6 +481,7 @@ function createBuildRoute(
   options: RegistryOptions,
   app: GitHubApp | null,
   cloud: TokenProvider,
+  outbox: BosunOutbox | null,
 ): BuildAdapter | null {
   const descriptor = findBuildRouteDescriptor(route.adapter);
   if (!descriptor) return null;
@@ -479,6 +492,7 @@ function createBuildRoute(
     app,
     cloud,
     token,
+    outbox,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.env ? { env: options.env } : {}),
   });

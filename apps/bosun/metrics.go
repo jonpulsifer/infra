@@ -12,12 +12,15 @@ import (
 // metrics is bosun's counters. Gauges are not kept here -- they are read off
 // the live pool at write time, since the running skiffs are the state.
 type metrics struct {
-	mu          sync.Mutex
-	boots       map[string]int            // class -> skiffs booted
-	exits       map[string]map[string]int // class -> reason -> skiffs gone
-	onlineSum   map[string]float64        // class -> total mint-to-online seconds
-	onlineCount map[string]int            // class -> skiffs that came online
-	ghErrors    int
+	mu           sync.Mutex
+	boots        map[string]int            // class -> skiffs booted
+	exits        map[string]map[string]int // class -> reason -> skiffs gone
+	onlineSum    map[string]float64        // class -> total mint-to-online seconds
+	onlineCount  map[string]int            // class -> skiffs that came online
+	ghErrors     int
+	buildClaims  int
+	buildResults map[string]int // "succeeded"|"failed" -> builds finished
+	sdErrors     int
 }
 
 // Exit reasons. "completed" is the one that means a job ran: the guest reached
@@ -44,10 +47,11 @@ const (
 
 func newMetrics() *metrics {
 	return &metrics{
-		boots:       map[string]int{},
-		exits:       map[string]map[string]int{},
-		onlineSum:   map[string]float64{},
-		onlineCount: map[string]int{},
+		boots:        map[string]int{},
+		exits:        map[string]map[string]int{},
+		onlineSum:    map[string]float64{},
+		onlineCount:  map[string]int{},
+		buildResults: map[string]int{},
 	}
 }
 
@@ -81,6 +85,27 @@ func (m *metrics) githubError() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ghErrors++
+}
+
+func (m *metrics) buildClaimed() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.buildClaims++
+}
+
+// buildResult records one finished build by outcome. status is always
+// buildSucceeded or buildFailed, so lower-casing it is the whole mapping to
+// the metric's label.
+func (m *metrics) buildResult(status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.buildResults[strings.ToLower(status)]++
+}
+
+func (m *metrics) spindriftError() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sdErrors++
 }
 
 // render writes the Prometheus text exposition format. It is a handful of
@@ -129,6 +154,20 @@ func (m *metrics) render(live map[string]poolState, desired map[string]int) stri
 	b.WriteString("# HELP bosun_github_errors_total GitHub API calls that failed.\n")
 	b.WriteString("# TYPE bosun_github_errors_total counter\n")
 	b.WriteString(fmt.Sprintf("bosun_github_errors_total %d\n", m.ghErrors))
+
+	b.WriteString("# HELP bosun_build_claims_total Spindrift build requests claimed.\n")
+	b.WriteString("# TYPE bosun_build_claims_total counter\n")
+	b.WriteString(fmt.Sprintf("bosun_build_claims_total %d\n", m.buildClaims))
+
+	b.WriteString("# HELP bosun_build_results_total Spindrift builds finished, by outcome.\n")
+	b.WriteString("# TYPE bosun_build_results_total counter\n")
+	for _, status := range []string{"succeeded", "failed"} {
+		b.WriteString(fmt.Sprintf("bosun_build_results_total{status=%q} %d\n", status, m.buildResults[status]))
+	}
+
+	b.WriteString("# HELP bosun_spindrift_errors_total Spindrift API calls that failed.\n")
+	b.WriteString("# TYPE bosun_spindrift_errors_total counter\n")
+	b.WriteString(fmt.Sprintf("bosun_spindrift_errors_total %d\n", m.sdErrors))
 	return b.String()
 }
 

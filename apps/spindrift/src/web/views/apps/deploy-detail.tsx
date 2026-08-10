@@ -92,6 +92,7 @@ const BUILD_ADAPTER: Record<string, { logo: LogoName; label: string }> = {
   'github-actions': { logo: 'github', label: 'GitHub Actions' },
   'cloud-build': { logo: 'google-cloud', label: 'Cloud Build' },
   'in-cluster': { logo: 'kubernetes', label: 'in-cluster' },
+  bosun: { logo: 'nixos', label: 'bosun' },
 };
 
 /**

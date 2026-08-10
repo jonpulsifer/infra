@@ -90,6 +90,12 @@ function serve() {
         throw new Error('an auth-route test reached installation state');
       },
     },
+    {
+      db: auth.db,
+      clock: auth.clock,
+      // Likewise: this file is about the auth surface, not bosun.
+      secret: null,
+    },
   );
 
   return { auth, routes };

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -778,5 +780,231 @@ func TestPersistingClassGivesEachLiveSkiffItsOwnSlotAndHandsItBack(t *testing.T)
 	}
 	if got := p.claimSlot("skiff-test"); got != victim.slot {
 		t.Errorf("released slot not reused: claimed %d, want %d", got, victim.slot)
+	}
+}
+
+// A build claim boots a skiff the same way a GitHub label does, except the
+// share carries request.json instead of a jitconfig and the cmdline tells
+// the guest which one to expect.
+func TestSpawnBuildBootsSkiffWithRequestJSONAndNoJITConfig(t *testing.T) {
+	p, _, fl := testPool(t)
+	ctx := context.Background()
+	claim := &buildClaim{ID: "build-1", Class: "skiff-test", Request: json.RawMessage(`{"repo":"acme/widgets"}`)}
+
+	s, err := p.spawnBuild(ctx, claim)
+	if err != nil || s == nil {
+		t.Fatalf("spawnBuild: %v", err)
+	}
+	if !s.build || s.buildID != "build-1" {
+		t.Fatalf("skiff not marked as a build skiff: %+v", s)
+	}
+
+	got, err := os.ReadFile(filepath.Join(s.paths.dir, "request.json"))
+	if err != nil {
+		t.Fatalf("request.json missing: %v", err)
+	}
+	if string(got) != `{"repo":"acme/widgets"}` {
+		t.Fatalf("unexpected request.json contents: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(s.paths.dir, "jitconfig")); !os.IsNotExist(err) {
+		t.Fatalf("build skiff should not have a jitconfig, err=%v", err)
+	}
+
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	found := false
+	for i, a := range chCall.args {
+		if a == "--cmdline" && i+1 < len(chCall.args) && strings.Contains(chCall.args[i+1], "bosun.mode=build") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cmdline missing bosun.mode=build: %v", chCall.args)
+	}
+}
+
+// The end-to-end path: runBuild boots the skiff, and once it halts the
+// result posted to Spindrift is composed from whatever the guest left in the
+// diag share -- the same share retire deliberately keeps around.
+func TestBuildSkiffExitPostsResultFromDiagFiles(t *testing.T) {
+	p, _, fl := testPool(t)
+	ctx := context.Background()
+	claim := &buildClaim{ID: "build-1", Class: "skiff-test", Request: json.RawMessage(`{}`)}
+	sd := &fakeSpindrift{}
+
+	done := make(chan struct{})
+	go func() {
+		p.runBuild(ctx, sd, claim)
+		close(done)
+	}()
+
+	waitFor(t, "cloud-hypervisor launched for the build skiff", func() bool {
+		_, ok := fl.last("cloud-hypervisor")
+		return ok
+	})
+	s := onlySkiff(t, p)
+
+	// Fake the guest: it drops its result into the diag share before halting.
+	resultDir := filepath.Join(s.paths.diagDir, "result")
+	if err := os.MkdirAll(resultDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(resultDir, "status"), "SUCCEEDED")
+	writeFile(t, filepath.Join(resultDir, "build.log"), "build ok\n")
+
+	chCall, _ := fl.last("cloud-hypervisor")
+	chCall.proc.exit(nil)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runBuild did not return after the build skiff halted")
+	}
+
+	results := sd.postedResults()
+	if len(results) != 1 {
+		t.Fatalf("want 1 posted result, got %d", len(results))
+	}
+	if results[0].id != "build-1" || results[0].res.Status != buildSucceeded || results[0].res.Log != "build ok\n" {
+		t.Fatalf("unexpected posted result: %+v", results[0])
+	}
+}
+
+// A guest that halts without ever writing a result -- crashed before it
+// could, or the hull does not understand bosun.mode=build at all -- must not
+// leave Spindrift's build row hanging until its lease expires.
+func TestBuildSkiffExitWithNoResultFilesPostsFailed(t *testing.T) {
+	p, _, fl := testPool(t)
+	ctx := context.Background()
+	claim := &buildClaim{ID: "build-2", Class: "skiff-test", Request: json.RawMessage(`{}`)}
+	sd := &fakeSpindrift{}
+
+	done := make(chan struct{})
+	go func() {
+		p.runBuild(ctx, sd, claim)
+		close(done)
+	}()
+
+	waitFor(t, "cloud-hypervisor launched for the build skiff", func() bool {
+		_, ok := fl.last("cloud-hypervisor")
+		return ok
+	})
+	chCall, _ := fl.last("cloud-hypervisor")
+	chCall.proc.exit(nil)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runBuild did not return after the build skiff halted")
+	}
+
+	results := sd.postedResults()
+	if len(results) != 1 || results[0].res.Status != buildFailed {
+		t.Fatalf("want a single FAILED result, got %+v", results)
+	}
+}
+
+// awaitExit's replacement logic is scoped to GitHub skiffs: a build skiff's
+// next boot is buildLoop's own claim loop, not an automatic refill.
+func TestBuildSkiffExitDoesNotRefillTheClass(t *testing.T) {
+	p, _, fl := testPool(t)
+	ctx := context.Background()
+	claim := &buildClaim{ID: "build-3", Class: "skiff-test", Request: json.RawMessage(`{}`)}
+	sd := &fakeSpindrift{}
+
+	go p.runBuild(ctx, sd, claim)
+	waitFor(t, "cloud-hypervisor launched for the build skiff", func() bool {
+		_, ok := fl.last("cloud-hypervisor")
+		return ok
+	})
+	chCall, _ := fl.last("cloud-hypervisor")
+	chCall.proc.exit(nil)
+
+	waitFor(t, "build skiff retired", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return len(p.skiffs) == 0
+	})
+
+	time.Sleep(20 * time.Millisecond) // give a wrongly-spawned replacement a chance to appear
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.skiffs) != 0 {
+		t.Fatalf("build skiff exit refilled the class: %d skiffs", len(p.skiffs))
+	}
+}
+
+// A build skiff has no GitHub registration to prove idle against, and is
+// busy by construction, so drain's registration-first scuttle must leave it
+// alone entirely -- not even attempt a DeleteRunner call.
+func TestDrainDoesNotScuttleAnInFlightBuildSkiffViaScuttleIdle(t *testing.T) {
+	p, gh, _ := testPool(t)
+	ctx := context.Background()
+	claim := &buildClaim{ID: "build-4", Class: "skiff-test", Request: json.RawMessage(`{}`)}
+
+	s, err := p.spawnBuild(ctx, claim)
+	if err != nil || s == nil {
+		t.Fatalf("spawnBuild: %v", err)
+	}
+
+	p.scuttleIdle(context.Background())
+
+	p.mu.Lock()
+	_, stillThere := p.skiffs[s.id]
+	p.mu.Unlock()
+	if !stillThere {
+		t.Fatal("scuttleIdle killed a build skiff, which has no registration to prove idle against")
+	}
+	if len(gh.deletedIDs()) != 0 {
+		t.Fatalf("scuttleIdle called DeleteRunner for a build skiff: %v", gh.deletedIDs())
+	}
+}
+
+// The wedge and JIT-expiry checks do not apply to a build skiff, but the
+// class's lifetime budget still does -- measured from spawn, since a build
+// skiff is busy from the moment it boots.
+func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
+	p, _, _ := testPool(t)
+	p.cfg.Classes["skiff-test"] = Class{
+		Hull:  p.cfg.Classes["skiff-test"].Hull,
+		VCPUs: 1, Memory: "512M", Warm: 0,
+		MaxLifetime: Duration(time.Millisecond),
+	}
+	ctx := context.Background()
+	claim := &buildClaim{ID: "build-5", Class: "skiff-test", Request: json.RawMessage(`{}`)}
+
+	s, err := p.spawnBuild(ctx, claim)
+	if err != nil || s == nil {
+		t.Fatalf("spawnBuild: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	p.pollOnce(ctx)
+
+	if r := s.reason(); r != exitLifetime {
+		t.Fatalf("want exitLifetime, got %q", r)
+	}
+}
+
+// A claim that lands just as a stop begins is refused by spawnBuild -- and
+// runBuild must post nothing for it: the build was never attempted, so
+// staying silent lets Spindrift's lease expire and another host claim the
+// request, where a FAILED post would close the build permanently.
+func TestDrainRefusedClaimPostsNoResult(t *testing.T) {
+	p, _, _ := testPool(t)
+	ctx := context.Background()
+	claim := &buildClaim{ID: "build-6", Class: "skiff-test", Request: json.RawMessage(`{}`)}
+	sd := &fakeSpindrift{}
+
+	p.mu.Lock()
+	p.draining = true
+	p.mu.Unlock()
+
+	p.runBuild(ctx, sd, claim)
+
+	if results := sd.postedResults(); len(results) != 0 {
+		t.Fatalf("drain-refused claim posted a result: %+v", results)
 	}
 }

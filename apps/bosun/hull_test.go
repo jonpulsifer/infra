@@ -54,7 +54,7 @@ func TestChArgsNoDevices(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk01", paths, "")
+	got := chArgs(h, class, "sk01", paths, "", false)
 	want := []string{
 		"--kernel", "/hulls/nixos/vmlinux",
 		"--initramfs", "/hulls/nixos/initrd",
@@ -73,6 +73,25 @@ func TestChArgsNoDevices(t *testing.T) {
 	}
 }
 
+func TestChArgsAppendsBuildModeForABuildSkiff(t *testing.T) {
+	h := &hull{
+		dir:      "/hulls/nixos",
+		manifest: hullManifest{Kernel: "vmlinux", Initrd: "initrd", Cmdline: "console=ttyS0"},
+		digest:   "deadbeef",
+	}
+	class := Class{VCPUs: 4, Memory: "4096M"}
+	paths, err := resolvePaths("/run/bosun", "/var/log/bosun", "sk01", h.manifest.Devices)
+	if err != nil {
+		t.Fatalf("resolvePaths: %v", err)
+	}
+
+	got := chArgs(h, class, "sk01", paths, "", true)
+	want := "console=ttyS0 bosun.mode=build bosun.skiff=sk01 bosun.hull=sha256:deadbeef"
+	if !slices.Contains(got, want) {
+		t.Fatalf("cmdline missing bosun.mode=build:\n got:  %v\n want cmdline: %q", got, want)
+	}
+}
+
 func TestChArgsWithDevices(t *testing.T) {
 	h := &hull{
 		dir: "/hulls/nixos",
@@ -88,7 +107,7 @@ func TestChArgsWithDevices(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk02", paths, "")
+	got := chArgs(h, class, "sk02", paths, "", false)
 	want := []string{
 		"--kernel", "/hulls/nixos/vmlinux",
 		"--initramfs", "/hulls/nixos/initrd",
@@ -123,7 +142,7 @@ func TestChArgsWithDisk(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk03", paths, "")
+	got := chArgs(h, class, "sk03", paths, "", false)
 	want := []string{
 		"--kernel", "/hulls/ubuntu/vmlinux",
 		"--initramfs", "/hulls/ubuntu/initrd",
@@ -317,7 +336,7 @@ func TestChArgsWorkspaceDiskComesLastAndIsNamedOnTheCmdline(t *testing.T) {
 	}
 	paths.workspace = "/var/lib/bosun/workspace/sk09.img"
 
-	got := chArgs(h, class, "sk09", paths, "")
+	got := chArgs(h, class, "sk09", paths, "", false)
 	want := []string{
 		"--kernel", "/hulls/ubuntu/vmlinux",
 		"--initramfs", "/hulls/ubuntu/initrd",
@@ -351,7 +370,7 @@ func TestChArgsNoWorkspaceLeavesCmdlineAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePaths: %v", err)
 	}
-	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk10", paths, "")
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk10", paths, "", false)
 	if slices.Contains(got, "--disk") {
 		t.Fatalf("workspace-less class got a disk: %v", got)
 	}
@@ -370,7 +389,7 @@ func TestChArgsAnnouncesCacheURLOnCmdline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePaths: %v", err)
 	}
-	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk12", paths, "http://10.113.113.1:3000/")
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk12", paths, "http://10.113.113.1:3000/", false)
 	if !slices.Contains(got, "console=ttyS0 bosun.cache=http://10.113.113.1:3000/ bosun.skiff=sk12 bosun.hull=sha256:deadbeef") {
 		t.Fatalf("cache URL missing from cmdline: %v", got)
 	}

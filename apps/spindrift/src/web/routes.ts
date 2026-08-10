@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Eight kinds of route exist, and three of the eight are generated:
+ * Nine kinds of route exist, and three of the nine are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -24,8 +24,11 @@
  * 6. **The webhook** (`webhook-route.ts`), the one route with no session at
  *    all — its authentication is the GitHub HMAC over the raw body, not a
  *    cookie, so it cannot go through `DispatchDeps.authenticate` either.
- * 7. **{@link HEALTH_PATH}**, a liveness probe that consults nothing.
- * 8. **{@link READY_PATH}**, a readiness probe that does — see below.
+ * 7. **Bosun** (`bosun-route.ts`), the other route with no session — a
+ *    warm-pool poller cannot hold one either, so it carries an installation
+ *    Secret bearer token the same way the webhook carries a signature.
+ * 8. **{@link HEALTH_PATH}**, a liveness probe that consults nothing.
+ * 9. **{@link READY_PATH}**, a readiness probe that does — see below.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -36,6 +39,7 @@ import type { EnrolmentDeps } from '../auth/enrol.ts';
 import type { GatewayDeps } from '../auth/gateway.ts';
 import { authRoutes } from '../auth/routes.ts';
 import type { Database } from '../db/client.ts';
+import { type BosunRouteDeps, bosunRoutes } from './bosun-route.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
 import { streamRoutes } from './streams.ts';
 import { uploadRoutes } from './upload.ts';
@@ -99,6 +103,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
   deps: DispatchDeps,
   auth: EnrolmentDeps & GatewayDeps,
   webhook: WebhookRouteDeps,
+  bosun: BosunRouteDeps,
 ) {
   return {
     ...client,
@@ -109,5 +114,6 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...streamRoutes(deps),
     ...uploadRoutes(deps),
     ...webhookRoutes(webhook),
+    ...bosunRoutes(bosun),
   };
 }
