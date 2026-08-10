@@ -44,11 +44,26 @@
       memory = "3072M";
       workspace = "6G";
       persist = true;
-      warm = 4;
+      warm = 3;
     };
 
-    # 30 GB of the 100 GB boot disk for the actions/cache service; the four
-    # workspace disks reserve another 24 GB and the closure needs the rest.
+    # Image builds. A docker build lives in the guest's docker data root on
+    # the workspace disk, and a fat image plus persisted layers of earlier
+    # builds does not fit in 6G — the whole container matrix ENOSPCed there
+    # (dpkg padding, buildkit "failed to reserve cache"). Same hull, same
+    # RAM; only the disk differs, which is exactly what a class is for.
+    classes.skiff-ubuntu-xl = {
+      hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
+      vcpus = 4;
+      memory = "3072M";
+      workspace = "20G";
+      persist = true;
+      warm = 1;
+    };
+
+    # 30 GB of the 100 GB boot disk for the actions/cache service; the
+    # workspace disks (3x6G + 20G) reserve another 38 GB and the closure
+    # needs the rest.
     cache = {
       enable = true;
       maxSizeBytes = 32212254720;

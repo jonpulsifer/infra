@@ -41,11 +41,13 @@ jobs:
   build:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
-    # The warm pool. dockerd runs inside every skiff, buildx brings its own
-    # buildkitd container, and `type=gha` cache traffic lands on the bosun
-    # host's local cache service via ACTIONS_RESULTS_URL — layer caches stop
-    # crossing the internet.
-    runs-on: skiff-ubuntu
+    # The warm pool's image-build class: same hull, 20G workspace, because a
+    # docker build lives in the guest's docker data root and the whole matrix
+    # ENOSPCed on the suite-sized 6G disk. dockerd runs inside every skiff,
+    # buildx brings its own buildkitd container, and `type=gha` cache traffic
+    # lands on the bosun host's local cache service via ACTIONS_RESULTS_URL —
+    # layer caches stop crossing the internet.
+    runs-on: skiff-ubuntu-xl
     permissions:
       contents: write
       id-token: write
