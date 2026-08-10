@@ -9,7 +9,8 @@ tags:: runbook, kubernetes, postgres, cnpg
 	- The plugin resolves the primary itself. A hand-written `exec <cluster>-1` names a pod that is only the primary *until the next failover*, so it is right until the moment it matters most. It also needs `-c postgres` to skip the bootstrap init container, which is the kind of detail the plugin exists to know.
 	- Same rule for the rest of the verbs — prefer the native tool over an equivalent assembled by hand.
 - # Where the databases are
-	- The operator is declared per cluster under `clusters/<cluster>/apps/cloudnative-pg/`. The `Cluster` objects themselves live with the app that owns them, in `clusters/` or in a chart under `packages/charts/`.
+	- The operator is declared once for both clusters under `clusters/base/platform/cloudnative-pg/`. The `Cluster` objects themselves live with the app that owns them, in `clusters/` or in a chart under `packages/charts/`.
+	- One set is not authored in git: a `Cluster` in `spindrift-apps` is a Datastore Spindrift provisioned through the cluster API, and the row in its database is the desired state. Inspect it like any other; change it through the product. See [[Architecture/Spindrift]].
 	- ```bash
 	  kubectl --context folly cnpg status tronbyt -n tronbyt
 	  kubectl --context folly get cluster.postgresql.cnpg.io -A

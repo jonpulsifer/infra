@@ -29,6 +29,12 @@ OVERLAYS=(
   clusters/folly/monitoring
   clusters/offsite/monitoring
   clusters/offsite/monitoring-crds
+  # Shared platform operators. Each is one path both clusters reconcile from its
+  # own Flux Kustomization, so neither is reached by the aggregate overlays
+  # above — cloudnative-pg dropped out of every render the moment it moved out
+  # of clusters/*/apps, and valkey-operator was never in one to begin with.
+  clusters/base/platform/cloudnative-pg
+  clusters/base/platform/valkey-operator
 )
 
 WORK="$(mktemp -d)"

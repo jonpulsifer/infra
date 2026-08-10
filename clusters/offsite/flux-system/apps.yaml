@@ -11,6 +11,17 @@ spec:
   sourceRef:
     kind: GitRepository
     name: infra
+  dependsOn:
+    # The operator installs `postgresql.cnpg.io/v1`, and this overlay reaches
+    # that kind indirectly: Spindrift's own release renders a CNPG Cluster
+    # (`packages/charts/spindrift/templates/database.yaml`). Nothing here
+    # declares the kind directly, so it is helm-controller rather than the
+    # Kustomization dry-run that meets a missing CRD — the install fails, burns
+    # its remediation retries, and then sits failed until someone forces it.
+    # While the operator lived inside `apps` that ordering was Flux's problem to
+    # solve within one Kustomization; now that it is its own, this is what says
+    # the operator is there first.
+    - name: cloudnative-pg
   decryption:
     provider: sops
     secretRef:
