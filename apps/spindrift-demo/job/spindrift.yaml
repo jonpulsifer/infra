@@ -11,6 +11,13 @@
 # Component, not to a directory: the same code is a job you press Run on and a
 # job that fires every five minutes, and which one it is is the operator's
 # choice at Place, not the repository's.
+#
+# There is no datastore key either, and that one is not an omission this file
+# could correct: a Datastore is top-level and attached, never a field of the
+# thing attached to it, because it outlives every App and can be reattached to
+# another. So the job reads `REDIS_URL` and says what it found, and whether
+# anything fills it is decided by attaching a `valkey` Datastore — the same
+# code demoing both states without this file knowing which it is in.
 version: 1
 component:
   kind: job
