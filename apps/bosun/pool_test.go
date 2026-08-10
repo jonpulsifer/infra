@@ -18,10 +18,9 @@ import (
 // them. t.TempDir() reports that as a failed cleanup on a test whose own
 // assertions all passed, which is a fault in the harness rather than in bosun.
 //
-// The goroutines are bounded by the test binary either way. What is deliberately
-// not built to close this is a graceful pool shutdown: bosun's real teardown is
-// systemd killing the cgroup and sweep-on-start deregistering what is left, so
-// a stop path existing only for tests would be machinery the daemon never runs.
+// The goroutines are bounded by the test binary either way. drain is the
+// daemon's real stop path, but it is not the answer here: it empties the pool,
+// and most of these tests assert on a pool that is deliberately still running.
 func poolTempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "bosun-pool-")
@@ -44,6 +43,9 @@ func testPool(t *testing.T) (*pool, *fakeGitHub, *fakeLaunch) {
 		RuntimeDir:   filepath.Join(dir, "run"),
 		LogDir:       filepath.Join(dir, "log"),
 		WorkspaceDir: filepath.Join(dir, "workspace"),
+		// Real config always has one (LoadConfig defaults it); drain's poll
+		// ticker would panic on zero. Short, so drain-path tests retry fast.
+		PollInterval: Duration(25 * time.Millisecond),
 		Classes: map[string]Class{
 			"skiff-test": {Hull: hullDir, VCPUs: 1, Memory: "512M", Warm: 1, MaxLifetime: Duration(time.Hour)},
 		},
@@ -272,6 +274,162 @@ func TestPoolDoesNotRefillDuringShutdown(t *testing.T) {
 	defer p.mu.Unlock()
 	if len(p.skiffs) != 0 {
 		t.Fatalf("pool refilled during shutdown: %d skiffs", len(p.skiffs))
+	}
+}
+
+// Drain's safety argument, end to end: the registration is deleted before the
+// VMM is killed, so GitHub can never hand this skiff a job mid-scuttle — and
+// the fake refuses the DELETE for a busy runner exactly as GitHub does, which
+// is what makes bosun's own (poll-interval-stale) busy flag irrelevant.
+func TestDrainScuttlesIdleSkiffRegistrationFirst(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	cancel() // SIGTERM: refills are off
+
+	// The ordering is the safety property, so it is asserted at the moment
+	// of the DELETE rather than inferred from the end state: a kill-first
+	// scuttle would leave a live registration GitHub could hand a job to.
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	gh.onDelete = func(int64) {
+		if chCall.proc.killed.Load() {
+			t.Error("VMM was killed before its registration was deleted")
+		}
+	}
+
+	done := make(chan struct{})
+	go func() { p.drain(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain did not return for an all-idle pool")
+	}
+
+	if got := gh.deletedIDs(); len(got) != 1 || got[0] != s.runnerID {
+		t.Fatalf("want the idle skiff's registration deleted, got %v", got)
+	}
+	if !p.empty() {
+		t.Fatal("pool not empty after drain")
+	}
+	p.stats.mu.Lock()
+	drained := p.stats.exits["skiff-test"][exitDrained]
+	p.stats.mu.Unlock()
+	if drained != 1 {
+		t.Fatalf("idle scuttle not counted as drained: %d", drained)
+	}
+}
+
+// A busy skiff is left to finish its job: the DELETE is refused, drain waits,
+// and the pool empties only when the guest halts itself — counted as
+// completed, because the job was.
+func TestDrainWaitsForBusySkiffToFinish(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	gh.setStatus(s.runnerID, "online", true)
+	p.pollOnce(ctx) // bosun observes the job start
+	cancel()
+
+	done := make(chan struct{})
+	go func() { p.drain(context.Background()); close(done) }()
+
+	time.Sleep(100 * time.Millisecond) // several drain ticks
+	select {
+	case <-done:
+		t.Fatal("drain returned while a job was still running")
+	default:
+	}
+
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	chCall.proc.exit(nil) // the job finished; the guest powered off
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain did not return after the busy guest halted")
+	}
+
+	p.stats.mu.Lock()
+	completed := p.stats.exits["skiff-test"][exitCompleted]
+	drained := p.stats.exits["skiff-test"][exitDrained]
+	p.stats.mu.Unlock()
+	if completed != 1 || drained != 0 {
+		t.Fatalf("a job that finished during drain must count as completed, got completed=%d drained=%d", completed, drained)
+	}
+}
+
+// A refill can race the stop signal: awaitExit's ctx check may pass an
+// instant before cancellation, so spawn itself must refuse once drain has
+// begun — otherwise a freshly minted skiff joins a pool drain already swept,
+// and GitHub can hand it a brand-new job mid-stop.
+func TestSpawnRefusesDuringDrain(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	gh.setStatus(s.runnerID, "online", true)
+	p.pollOnce(ctx) // busy, so drain stays in its wait loop
+	cancel()
+
+	done := make(chan struct{})
+	go func() { p.drain(context.Background()); close(done) }()
+	waitFor(t, "drain marks the pool draining", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.draining
+	})
+
+	p.spawn(ctx, "skiff-test") // the racing refill
+	gh.mu.Lock()
+	mints := len(gh.generated)
+	gh.mu.Unlock()
+	if mints != 1 {
+		t.Fatalf("a spawn during drain minted a registration: %d mints", mints)
+	}
+
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	chCall.proc.exit(nil)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain did not return after the busy guest halted")
+	}
+}
+
+// The drain budget is what bounds how long a stop can block a deploy: at the
+// deadline whatever remains is killed and retired, and the loss is visible in
+// the exit counter rather than folded into a clean shutdown.
+func TestDrainDeadlineKillsRemainingBusySkiff(t *testing.T) {
+	p, gh, _ := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	gh.setStatus(s.runnerID, "online", true)
+	p.pollOnce(ctx)
+	cancel()
+
+	drainCtx, dcancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer dcancel()
+	p.drain(drainCtx)
+
+	if !p.empty() {
+		t.Fatal("pool not empty after the drain deadline")
+	}
+	p.stats.mu.Lock()
+	drained := p.stats.exits["skiff-test"][exitDrained]
+	p.stats.mu.Unlock()
+	if drained != 1 {
+		t.Fatalf("deadline kill not counted as drained: %d", drained)
 	}
 }
 

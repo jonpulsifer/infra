@@ -19,6 +19,7 @@ type fakeGitHub struct {
 	statuses  map[int64]fakeRunnerStatus
 	deleted   []int64
 	generated []fakeGenerated
+	onDelete  func(runnerID int64) // observation hook for a successful delete; drain tests pin ordering with it
 }
 
 type fakeRunnerStatus struct {
@@ -58,9 +59,23 @@ func (f *fakeGitHub) GetRunner(ctx context.Context, repo string, runnerID int64)
 func (f *fakeGitHub) DeleteRunner(ctx context.Context, repo string, runnerID int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// The real API refuses to delete a runner that is running a job (422),
+	// and drain's whole safety argument rests on that refusal.
+	if s, ok := f.statuses[runnerID]; ok && s.busy {
+		return fmt.Errorf("fake: runner %d is busy", runnerID)
+	}
 	f.deleted = append(f.deleted, runnerID)
 	delete(f.statuses, runnerID)
+	if f.onDelete != nil {
+		f.onDelete(runnerID)
+	}
 	return nil
+}
+
+func (f *fakeGitHub) deletedIDs() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int64(nil), f.deleted...)
 }
 
 func (f *fakeGitHub) setStatus(runnerID int64, status string, busy bool) {

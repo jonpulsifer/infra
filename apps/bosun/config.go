@@ -19,6 +19,11 @@ type Config struct {
 	MetricsFile  string           `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
 	CacheURL     string           `json:"cacheUrl"`     // empty disables; announced to every skiff as bosun.cache on the cmdline
 	PollInterval Duration         `json:"pollInterval"`
+	// DrainTimeout bounds how long a stop waits for busy skiffs to finish
+	// their jobs. Idle skiffs are scuttled immediately; what this buys is a
+	// deploy that no longer fails every in-flight job, and what it costs is
+	// a stop (and so a deploy) that blocks for up to this long.
+	DrainTimeout Duration         `json:"drainTimeout"`
 	Classes      map[string]Class `json:"classes"`
 	Bin          BinPaths         `json:"bin"`
 }
@@ -80,6 +85,7 @@ const (
 	defaultLogDir       = "/var/log/bosun"
 	defaultWorkspaceDir = "/var/lib/bosun/workspace"
 	defaultPollInterval = 30 * time.Second
+	defaultDrainTimeout = 15 * time.Minute
 
 	// defaultMaxLifetime backstops a class that declares no budget. It is a
 	// default rather than "unlimited" because the busy-time budget is the
@@ -174,6 +180,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = Duration(defaultPollInterval)
+	}
+	if cfg.DrainTimeout <= 0 {
+		cfg.DrainTimeout = Duration(defaultDrainTimeout)
 	}
 	return &cfg, nil
 }

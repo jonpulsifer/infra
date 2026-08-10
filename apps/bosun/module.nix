@@ -30,6 +30,7 @@ let
       metricsFile
       ;
     pollInterval = cfg.pollInterval;
+    drainTimeout = "${toString cfg.drainTimeout}s";
     cacheUrl = if cfg.cache.enable then "http://${cfg.cache.address}:${toString cfg.cache.port}/" else "";
     classes = lib.mapAttrs (_: c: {
       inherit (c)
@@ -155,6 +156,31 @@ in
         How often to ask GitHub whether a skiff's runner is online and busy.
         One request per skiff, by id -- never the runner list, which carries
         ghosts from registrations no skiff ever consumed.
+      '';
+    };
+
+    drainTimeout = mkOption {
+      # positive, not unsigned: 0 would read as "stop immediately" but the
+      # daemon treats a non-positive value as unset and drains for the 15 min
+      # default anyway, while TimeoutStopSec would drop to 60 -- a stop that
+      # ends in a cgroup SIGKILL mid-drain. The immediate-stop spelling is
+      # `systemctl kill bosun`, not a zero here.
+      type = types.ints.positive;
+      default = 900;
+      description = ''
+        Seconds a stop waits for busy skiffs to finish their jobs. Idle
+        skiffs are scuttled immediately, registration first, so no job can
+        land on one mid-drain; at the deadline whatever is still busy is
+        killed. A stop is what every deploy and token rotation does to this
+        unit, so this is also how long `nixos-rebuild switch` may block on
+        this host -- the price of a deploy no longer failing every in-flight
+        job. Must exceed the longest job this host's classes are expected to
+        run; a wedged busy guest is reaped earlier by its class's
+        `maxLifetime` where that is shorter.
+
+        The unit's TimeoutStopSec is derived from this with a minute of
+        slack, so systemd's cgroup SIGKILL stays the backstop rather than
+        the mechanism.
       '';
     };
 
@@ -405,6 +431,21 @@ in
         # stops it.
         Restart = "always";
         RestartSec = "5s";
+
+        # Drain needs the stop signal to reach the daemon alone: the default
+        # KillMode=control-group SIGTERMs every process in the cgroup at
+        # stop, killing the very VMMs drain exists to let finish. mixed still
+        # SIGKILLs the whole cgroup at the timeout, so the no-orphans
+        # guarantee stands -- the backstop moved, the mechanism changed.
+        #
+        # The trade lives on the crash path: when the daemon dies uncleanly
+        # with skiffs booted, nothing SIGTERMs the surviving VMMs, so the
+        # restart waits out the full stop timeout while the orphaned runners
+        # keep serving jobs on their own -- a crash costs minutes of stale
+        # pool where control-group killed everything in seconds. A startup
+        # crash loop boots no VMMs and still cycles at RestartSec.
+        KillMode = "mixed";
+        TimeoutStopSec = cfg.drainTimeout + 60;
 
         RuntimeDirectory = "bosun";
         RuntimeDirectoryMode = "0700";

@@ -30,6 +30,7 @@ type skiff struct {
 	offlineStreak int       // consecutive offline observations; reset by any other status
 	busySince     time.Time // zero until the runner first reports busy; maxLifetime is measured from here
 	exitReason    string    // why bosun killed this skiff; empty means the guest halted itself
+	deregistered  bool      // drain already deleted the GitHub registration; retire must not again
 
 	helpersLog *os.File
 	helpers    []proc // virtiofsd(s) + passt
@@ -73,6 +74,12 @@ type pool struct {
 	// per class. Tracked rather than derived from skiffs because a slot is
 	// claimed before there is a skiff to derive it from -- see claimSlot.
 	slots map[string]map[int]struct{}
+	// draining refuses new spawns and, with spawning, lets drain wait out a
+	// refill that raced the stop signal: a skiff between mint and map-add is
+	// in neither the map nor the process table, and without the counter
+	// drain could declare the pool empty while one was mid-boot.
+	draining bool
+	spawning int
 }
 
 func newPool(cfg *Config, gh githubClient, launch launcher, logger *slog.Logger) *pool {
@@ -252,6 +259,21 @@ func (p *pool) fill(ctx context.Context) {
 // its lifetime off to awaitExit. Errors are logged and swallowed: a single
 // failed spawn should not take down the rest of the pool.
 func (p *pool) spawn(ctx context.Context, className string) {
+	// Checked under the same mutex drain sets it under, so every spawn either
+	// happens-before drain's first scuttle pass or is refused outright.
+	p.mu.Lock()
+	if p.draining {
+		p.mu.Unlock()
+		return
+	}
+	p.spawning++
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		p.spawning--
+		p.mu.Unlock()
+	}()
+
 	class, ok := p.cfg.Classes[className]
 	if !ok {
 		p.logger.Error("spawn: unknown class", "class", className)
@@ -315,6 +337,17 @@ func (p *pool) spawn(ctx context.Context, className string) {
 	}
 
 	p.mu.Lock()
+	if p.draining {
+		// Drain began mid-boot. The registration minted above may postdate
+		// drain's scuttle pass, so this skiff must not join the pool: retire
+		// deregisters it and kills what boot started, and the spawning
+		// counter keeps drain from returning before that finishes.
+		p.mu.Unlock()
+		logger.Info("drain: scuttling skiff spawned mid-stop")
+		s.setExitReason(exitDrained)
+		p.retire(ctx, s, logger)
+		return
+	}
 	p.skiffs[id] = s
 	p.mu.Unlock()
 
@@ -463,8 +496,20 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 		s.helpersLog.Close()
 	}
 
-	if err := p.gh.DeleteRunner(ctx, p.cfg.Repo, s.runnerID); err != nil {
-		logger.Warn("delete runner on retire", "runner_id", s.runnerID, "error", err)
+	// An idle-scuttled skiff's registration was already deleted — first, on
+	// purpose, because that is what proved no job could land on it. Everything
+	// else deregisters here, on a context that survives shutdown: by the time
+	// a drain-era retire runs, the run context is cancelled, and a DELETE that
+	// never happens is a ghost registration until the next sweep.
+	s.mu.Lock()
+	deregistered := s.deregistered
+	s.mu.Unlock()
+	if !deregistered {
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := p.gh.DeleteRunner(dctx, p.cfg.Repo, s.runnerID); err != nil {
+			logger.Warn("delete runner on retire", "runner_id", s.runnerID, "error", err)
+		}
 	}
 
 	// diagDir is deliberately not removed: it is the evidence, and this is
@@ -524,14 +569,7 @@ func (p *pool) pollLoop(ctx context.Context) {
 }
 
 func (p *pool) pollOnce(ctx context.Context) {
-	p.mu.Lock()
-	snapshot := make([]*skiff, 0, len(p.skiffs))
-	for _, s := range p.skiffs {
-		snapshot = append(snapshot, s)
-	}
-	p.mu.Unlock()
-
-	for _, s := range snapshot {
+	for _, s := range p.snapshot() {
 		p.pollSkiff(ctx, s)
 	}
 	// Every tick, whether anything changed or not: the file's mtime is the
@@ -612,6 +650,119 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 		logger.Info("idle past JIT expiry, recycling")
 		s.setExitReason(exitJITExpired)
 		killBestEffort(s.ch, logger, "idle-expired cloud-hypervisor")
+	}
+}
+
+// drain is the stop path: the run context is already cancelled, so awaitExit
+// no longer refills, and what remains is emptying the pool without failing a
+// running job — the thing a plain stop did twice during the CI migration.
+//
+// Idle skiffs are scuttled registration-first: GitHub refuses to delete a
+// busy runner, so a successful DELETE proves no job can ever land on that
+// skiff and its VMM is safe to kill — bosun's own busy flag, up to a poll
+// interval stale, never gets a vote. A failed DELETE means the runner is
+// busy (the guest finishes its job and halts on its own) or GitHub is
+// unreachable (retried next tick).
+//
+// ctx is the drain budget, not the run context. When it expires, whatever
+// remains is killed here rather than left to systemd's cgroup SIGKILL, so
+// each skiff still gets a retire and a best-effort deregistration.
+func (p *pool) drain(ctx context.Context) {
+	p.mu.Lock()
+	p.draining = true
+	p.mu.Unlock()
+	// The last write before the process exits, so the drained exit counter
+	// reaches the textfile at all. The next start rewrites the file with
+	// fresh counters, so this is best-effort visibility for the scrape that
+	// lands in between, not durable accounting.
+	defer p.publish()
+	p.scuttleIdle(ctx)
+	check := time.NewTicker(100 * time.Millisecond)
+	defer check.Stop()
+	poll := time.NewTicker(time.Duration(p.cfg.PollInterval))
+	defer poll.Stop()
+	for {
+		if p.empty() {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			p.logger.Warn("drain budget exhausted, killing remaining skiffs")
+			p.killRemaining()
+			p.awaitEmpty(30 * time.Second)
+			return
+		case <-poll.C:
+			// Busy skiffs still need the lifetime reaper, and the metrics
+			// file's mtime is still the heartbeat.
+			p.pollOnce(ctx)
+			p.scuttleIdle(ctx)
+		case <-check.C:
+		}
+	}
+}
+
+func (p *pool) snapshot() []*skiff {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	skiffs := make([]*skiff, 0, len(p.skiffs))
+	for _, s := range p.skiffs {
+		skiffs = append(skiffs, s)
+	}
+	return skiffs
+}
+
+func (p *pool) empty() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.skiffs) == 0 && p.spawning == 0
+}
+
+// scuttleIdle deregisters and kills every skiff not known to be busy and not
+// already condemned. Known-busy ones are skipped without an API call — the
+// DELETE would be refused anyway.
+func (p *pool) scuttleIdle(ctx context.Context) {
+	for _, s := range p.snapshot() {
+		s.mu.Lock()
+		busy := !s.busySince.IsZero()
+		condemned := s.exitReason != ""
+		s.mu.Unlock()
+		if busy || condemned {
+			continue
+		}
+		logger := p.logger.With("skiff", s.id, "class", s.class)
+		if err := p.gh.DeleteRunner(ctx, p.cfg.Repo, s.runnerID); err != nil {
+			logger.Info("drain: leaving skiff to finish", "error", err)
+			continue
+		}
+		s.mu.Lock()
+		s.deregistered = true
+		s.exitReason = exitDrained
+		s.mu.Unlock()
+		logger.Info("drain: idle skiff scuttled")
+		killBestEffort(s.ch, logger, "drained cloud-hypervisor")
+	}
+}
+
+// killRemaining condemns whatever the drain budget ran out on. Every one of
+// these is a lost job or a wedged guest; the exit counter says which host and
+// class it cost.
+func (p *pool) killRemaining() {
+	for _, s := range p.snapshot() {
+		if s.reason() != "" {
+			continue
+		}
+		s.setExitReason(exitDrained)
+		killBestEffort(s.ch, p.logger.With("skiff", s.id, "class", s.class), "cloud-hypervisor at drain deadline")
+	}
+}
+
+// awaitEmpty gives the awaitExit goroutines a bounded window to finish their
+// retires — deregistration included — before main returns and systemd
+// SIGKILLs the cgroup.
+func (p *pool) awaitEmpty(limit time.Duration) {
+	deadline := time.Now().Add(limit)
+	for !p.empty() && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

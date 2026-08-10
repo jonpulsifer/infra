@@ -33,6 +33,11 @@ const (
 	// OOM-killed job as a finished one hides exactly the thing worth alerting
 	// on.
 	exitKilled = "killed"
+	// exitDrained is a skiff scuttled by the stop path: idle ones after their
+	// registration was deleted (so no job was lost), busy ones only at the
+	// drain deadline (so a job was — which is why the reason is visible in
+	// the exit counter rather than folded into "killed").
+	exitDrained = "drained"
 )
 
 func newMetrics() *metrics {
@@ -91,7 +96,7 @@ func (m *metrics) render(live map[string]poolState, desired map[string]int) stri
 	b.WriteString("# HELP bosun_skiff_exits_total Skiffs gone since bosun started, by why.\n")
 	b.WriteString("# TYPE bosun_skiff_exits_total counter\n")
 	for _, class := range sortedKeys(desired) {
-		for _, reason := range []string{exitCompleted, exitWedged, exitLifetime, exitJITExpired, exitBootFailed, exitKilled} {
+		for _, reason := range []string{exitCompleted, exitWedged, exitLifetime, exitJITExpired, exitBootFailed, exitKilled, exitDrained} {
 			b.WriteString(fmt.Sprintf("bosun_skiff_exits_total{class=%q,reason=%q} %d\n", class, reason, m.exits[class][reason]))
 		}
 	}

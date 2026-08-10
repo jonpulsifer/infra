@@ -18,6 +18,13 @@ names. bosun carries no branching per hull family; it only translates the
 manifest into cloud-hypervisor argv, and computes the hull's digest itself
 from hull.json plus the files it names.
 
+On SIGTERM bosun drains rather than dies: idle skiffs are scuttled
+registration-first (GitHub refuses to delete a busy runner, so a successful
+delete proves no job can land on one mid-drain), busy skiffs get
+`drainTimeout` (default 15m) to finish their job, and whatever remains at the
+deadline is killed and counted under the `drained` exit reason. A stop — and
+so a deploy — blocks for up to that long.
+
 ## Build and test
 
 ```
@@ -42,6 +49,7 @@ Path given via `-config`. Example:
   "logDir": "/var/log/bosun",
   "workspaceDir": "/var/lib/bosun/workspace",
   "pollInterval": "30s",
+  "drainTimeout": "15m",
   "classes": {
     "skiff-nixos": {"hull": "/nix/store/...-hull-nixos", "vcpus": 4, "memory": "4096M", "warm": 1, "maxLifetime": "1h"},
     "skiff-ubuntu": {"hull": "/nix/store/...-hull-ubuntu", "vcpus": 4, "memory": "3072M", "workspace": "6G", "warm": 2, "maxLifetime": "1h"}
