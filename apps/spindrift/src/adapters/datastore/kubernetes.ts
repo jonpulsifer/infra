@@ -297,17 +297,20 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
             },
           },
         ],
-        // The sidecar, hardened through the field the operator gives it rather
-        // than through `containers` — it is not in that list, and a patch
-        // naming it there would add a third container instead of amending the
-        // second. Left enabled: the fleet scrapes what it runs, and switching
-        // metrics off to satisfy a policy would be answering the wrong question.
-        exporter: {
-          securityContext: {
-            allowPrivilegeEscalation: false,
-            capabilities: { drop: ['ALL'] },
-          },
-        },
+        // The metrics sidecar, off — stated rather than left to the absence of
+        // a field, because that absence is what turned it off by accident.
+        // `enabled` has no default in the CRD, so naming `exporter` at all to
+        // carry a security context was already switching it off; a reader
+        // deserves to see the decision rather than infer it from a missing key.
+        //
+        // Off rather than hardened because hardening it is not one line: the
+        // pod block above runs every container as uid 999, which is the valkey
+        // user, and the exporter is a different image with no reason to accept
+        // it — the operator's own hardened sample gives the two distinct uids.
+        // Nothing scrapes a datastore sidecar in this fleet yet, so switching
+        // it on is a change worth making when something wants the metrics, with
+        // the uid question answered against a running pod rather than guessed.
+        exporter: { enabled: false },
       },
     };
   }
