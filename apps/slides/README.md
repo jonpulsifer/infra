@@ -20,12 +20,16 @@ the deck directory to `/internal/upload`, and the returned digest and location
 become an `uploadArchive` Build that the ordinary build route turns into a
 `files` artifact for the `bluenose/static` Target.
 
-**It has to be a gzipped tarball.** The upload boundary takes any bytes and the
-field is called an archive, but the build route fetches it with
-`curl … | tar -xz`, so a ZIP reaches the builder intact and dies at
-`tar: This does not look like a tar archive` — reported four steps later as
-`ARTIFACT_UNAVAILABLE`, which reads as a platform fault rather than a wrong
-container format.
+The upload boundary normalizes the container before anything durable happens: a
+gzipped tar stages as-is, a ZIP is transcoded into one, and anything else is
+refused with a `400` naming what arrived. Every build route opens a staged
+bundle with `tar -xz`, so gzip is the wire format rather than a preference, and
+the one conversion sits in front of the depot instead of in three fetchers —
+`apps/spindrift/src/storage/archive-format.ts` carries the reasoning.
+
+The digest describes the **converted** bytes, so a ZIP upload's `bundleDigest`
+names the tarball the builders actually fetch, not the file that left this
+machine.
 
 A deck is therefore its own acceptance evidence — the deployed page is the
 product describing itself — which is why the copy carries live digests, build
