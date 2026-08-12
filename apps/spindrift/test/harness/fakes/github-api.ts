@@ -583,7 +583,14 @@ export class FakeGitHub {
     const update = rest.match(/^\/git\/refs\/heads\/(.+)$/);
     if (update && method === 'PATCH') {
       const name = decodeURIComponent(update[1] ?? '');
-      if (!this.branches.has(name)) return this.notFound();
+      // The host's own answer, and not the one it is easy to assume: updating a
+      // ref that is not there is a `422`, message and all. This fake said `404`
+      // for years and the production client was written to match the fake, so
+      // the create-the-branch path it falls through to was never once taken
+      // against GitHub.
+      if (!this.branches.has(name)) {
+        return this.json({ message: 'Reference does not exist' }, 422);
+      }
       this.branches.set(name, String(body.sha ?? ''));
       return this.json({ ref: `refs/heads/${name}` });
     }
@@ -605,6 +612,18 @@ export class FakeGitHub {
       };
       this.pulls.push(pull);
       return this.json(pull, 201);
+    }
+
+    // Rewriting an open pull request's prose, which is what a second connect
+    // does to the one it finds already standing on its branch.
+    const editPull = rest.match(/^\/pulls\/(\d+)$/);
+    if (editPull && method === 'PATCH') {
+      const number = Number(editPull[1]);
+      const pull = this.pulls.find((candidate) => candidate.number === number);
+      if (pull === undefined) return this.notFound();
+      if (body.title !== undefined) pull.title = String(body.title);
+      if (body.body !== undefined) pull.body = String(body.body);
+      return this.json(pull);
     }
 
     return null;

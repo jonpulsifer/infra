@@ -319,6 +319,14 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
    * for is Spindrift's own configuration branch: re-running a connection should
    * replace what it wrote last time rather than fail on a non-fast-forward, and
    * the branch holds nothing a human authored.
+   *
+   * **`422` is what a branch that is not there answers.** GitHub's ref-update
+   * endpoint documents `200`, `409` and `422` and no `404` at all — a `404` is
+   * what *reading* a missing ref answers, which is why `branchHead` is right to
+   * expect one and this is not. Tolerating only `404` here made the create
+   * below unreachable, so the first connection of every repository threw on the
+   * branch it was about to cut, and `connectRepository`'s fail-open turned that
+   * into a repository connected with no configuration pull request.
    */
   async setBranch(
     ref: InstallationRef,
@@ -330,7 +338,7 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       method: 'PATCH',
       path: `/repos/${fullName}/git/refs/heads/${branch}`,
       body: { sha: commit, force: true },
-      tolerate: [404],
+      tolerate: [404, 422],
     });
     if (updated !== null) return;
 
@@ -341,7 +349,18 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
     });
   }
 
-  /** Open the pull request and return its number. If a PR already exists for the head branch, find and return it. */
+  /**
+   * Open the pull request and return its number.
+   *
+   * A second connection force-updates the branch and then finds GitHub refusing
+   * to open a second pull request for the same head. The existing one *is* the
+   * answer — it now carries the commit just pushed — so it is found rather than
+   * reported as a failure, and its title and body are rewritten to the
+   * transaction that just landed on it. Leaving the prose alone would leave an
+   * operator reviewing a description of the previous connection over the diff
+   * of this one, which is the thing `connectRepository`'s own header promises
+   * does not happen.
+   */
   async openPullRequest(
     ref: InstallationRef,
     fullName: string,
@@ -368,25 +387,37 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
         fullName,
         input.head,
       );
-      if (existing !== null) {
-        return existing;
-      }
-      throw cause;
+      if (existing === null) throw cause;
+      await this.http(ref).send({
+        method: 'PATCH',
+        path: `/repos/${fullName}/pulls/${existing}`,
+        body: { title: input.title, body: input.body },
+      });
+      return existing;
     }
   }
 
-  /** Find an open pull request for a given head branch. */
+  /**
+   * Find an open pull request for a given head branch.
+   *
+   * Asked of GitHub rather than filtered here: the unfiltered listing is thirty
+   * newest-first, so a repository with a page of open dependency bumps answered
+   * "no such pull request" about one that was sitting right there — and the
+   * branch had already been force-updated by then, so the operator was told the
+   * opposite of what had happened.
+   */
   async findOpenPullRequest(
     ref: InstallationRef,
     fullName: string,
     headBranch: string,
   ): Promise<number | null> {
+    const owner = fullName.slice(0, fullName.indexOf('/'));
     try {
       const pulls = await this.http(ref).json<
         Array<{ number: number; head: { ref?: string } }>
       >({
         method: 'GET',
-        path: `/repos/${fullName}/pulls?state=open`,
+        path: `/repos/${fullName}/pulls?state=open&per_page=${PAGE_SIZE}&head=${encodeURIComponent(`${owner}:${headBranch}`)}`,
       });
       if (Array.isArray(pulls)) {
         const match = pulls.find((p) => p.head?.ref === headBranch);

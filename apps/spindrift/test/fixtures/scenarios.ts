@@ -937,6 +937,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     lastReconciledSha: 'a1b2c3d',
     staleReason: null,
     appSubpaths: ['apps/hub', 'apps/api', 'apps/wiki'],
+    configPullRequest: null,
   },
   {
     repositoryId: 100002,
@@ -947,6 +948,8 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     lastReconciledSha: 'e4f5g6h',
     staleReason: null,
     appSubpaths: ['.'],
+    // Connected, and still one merge short of governing itself.
+    configPullRequest: 42,
   },
   {
     repositoryId: 100004,
@@ -958,6 +961,7 @@ export const LINKED_REPOS: readonly LinkedRepoView[] = [
     lastReconciledSha: 'i7j8k9l',
     staleReason: null,
     appSubpaths: ['.'],
+    configPullRequest: null,
   },
 ];
 

@@ -299,6 +299,16 @@ export const connectRepository: Command<
       set: {
         installationId: ref.installationId,
         defaultBranch,
+        // Everything above this line has already read the repository — the
+        // installation, its facts, and a whole tree scan — so a freeze standing
+        // on the row is a statement about the world that this command has just
+        // disproved. Left in place it outlives the connect by a whole repo-loop
+        // interval, with the Repositories screen reading "connection lost" over
+        // a connection that plainly works and the creation wizard refusing on
+        // the same stale fact.
+        access: 'active',
+        frozenReason: null,
+        frozenAt: null,
         updatedAt: now,
       },
     })

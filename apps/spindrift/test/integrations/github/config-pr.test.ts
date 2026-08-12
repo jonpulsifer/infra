@@ -90,6 +90,27 @@ describe('the Spindrift file Spindrift writes', () => {
     );
   });
 
+  test.each(['true', 'false', 'null', '~', '3', '1.5'])(
+    'round-trips a build command YAML would otherwise retype: %s',
+    (command) => {
+      // Plain by shape and not a string once parsed, which is a file Spindrift
+      // wrote and can never read back. One refused scope makes the repo loop
+      // reject the whole commit, so the repository stops advancing for every
+      // App on it until a human edits it by hand.
+      const typed: DetectionProposal = {
+        ...railpack,
+        build: {
+          frontend: 'railpack',
+          buildCommand: command,
+          outputDirectory: null,
+        },
+      };
+      expect(parseSpindriftFile(serializeSpindriftFile(typed)).build).toEqual(
+        typed.build,
+      );
+    },
+  );
+
   test('is block-style YAML a person can edit', () => {
     const written = serializeSpindriftFile(railpack);
     expect(written).toContain('component:\n  kind: website');
@@ -225,6 +246,67 @@ describe('opening it against the repository API', () => {
     });
     expect(fake.pulls[0]?.body).toContain('apps/site');
     expect(fake.pulls[0]?.body).toContain('services/api');
+  });
+
+  test('cuts the configuration branch when there is not one yet', async () => {
+    // The bug this pins cost every repository its configuration pull request on
+    // the first connect, and reported nothing: GitHub answers a ref *update*
+    // for a ref that does not exist with `422`, not `404` — 404 is what reading
+    // one answers — so a client tolerating only 404 threw on the branch it was
+    // about to create, and `connectRepository` fails open on that throw.
+    const fake = new FakeGitHub();
+    const { opened } = await open(fake);
+
+    expect(fake.head(CONFIG_BRANCH)).toBe(opened.commit);
+    const created = fake.requests.filter(
+      (request) =>
+        request.method === 'POST' && request.path.endsWith('/git/refs'),
+    );
+    expect(created).toHaveLength(1);
+  });
+
+  test('a second connection rewrites the pull request it finds standing', async () => {
+    const fake = new FakeGitHub();
+    const first = await open(fake);
+
+    // The far side from the second connect onwards: the branch takes the new
+    // commit, and the pull request for it already exists.
+    const existing = (async (request: any) => {
+      const url = new URL(typeof request === 'string' ? request : request.url);
+      if (request.method === 'POST' && url.pathname.endsWith('/pulls')) {
+        return new Response(
+          JSON.stringify({
+            message: 'Validation Failed',
+            errors: [
+              { message: `A pull request already exists for ${CONFIG_BRANCH}` },
+            ],
+          }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return fake.fetch(request);
+    }) as any;
+
+    const transaction = configurationTransaction({
+      scopes: [{ scope: 'services/api', proposal: dockerfile }],
+      buildWorkflow: BUILD_WORKFLOW,
+    });
+    const second = await openConfigurationPullRequest(
+      app(fake, existing),
+      { installationId: fake.installationId },
+      { fullName: fake.fullName, defaultBranch: 'main', transaction },
+    );
+
+    expect(second.number).toBe(first.opened.number);
+    // Reviewing a description of the first connection over the diff of the
+    // second is the thing `connectRepository`'s own header promises does not
+    // happen — the branch was corrected and the prose was not.
+    const pull = fake.pulls.find(
+      (candidate) => candidate.number === second.number,
+    );
+    expect(pull?.title).toBe(transaction.title);
+    expect(pull?.body).toContain('services/api');
+    expect(pull?.body).not.toContain('apps/site');
   });
 
   test('re-running the connection replaces the branch rather than failing', async () => {

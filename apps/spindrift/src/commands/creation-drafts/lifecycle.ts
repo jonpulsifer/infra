@@ -77,6 +77,19 @@ export interface CompletedCreation extends CreateAppResult {
   readonly targetId: string;
   readonly buildId: number;
   readonly buildStatus: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  /**
+   * The configuration pull request creating this App opened, if it opened one.
+   *
+   * Read back off the repository row rather than only forwarded from the
+   * connect, so a reload of a completed draft still names the pull request
+   * somebody has to merge — the number is the whole of what makes §15's
+   * "merging it is what connects this repository" actionable.
+   */
+  readonly configPullRequest: number | null;
+  /** Why no pull request was opened. Null whenever one was, or none was due. */
+  readonly configPullRequestError: string | null;
+  /** `owner/name`, so the number can be made into a link. */
+  readonly configRepository: string | null;
 }
 
 const preparations = new Map<
@@ -334,6 +347,10 @@ export const completeCreationDraft: Command<
           targetId: row.draft.targetId,
           buildId: build!.id,
           buildStatus: build!.status,
+          configPullRequest: prepared.value.configPullRequest,
+          configPullRequestError: prepared.value.configPullRequestError,
+          configRepository:
+            row.draft.source.kind === 'repo' ? row.draft.source.repo : null,
         },
       });
     },
@@ -349,6 +366,18 @@ interface PreparedCreation {
   readonly bundleLocation: string;
   readonly subpath: string;
   readonly supplied: boolean;
+  /**
+   * The configuration pull request this creation opened, if it opened one.
+   *
+   * Carried rather than discarded because Deploy is the *only* place a
+   * grant-only repository gets connected, and §15 makes merging that pull
+   * request the act that connects it. An App created without its number on
+   * screen is an App whose repository has a branch on it nobody was told about
+   * and a `spindrift.yaml` that will never reach the default branch.
+   */
+  readonly configPullRequest: number | null;
+  /** Why there is no number, when there is none. Null on every other path. */
+  readonly configPullRequestError: string | null;
 }
 
 async function prepareOnce(
@@ -423,10 +452,16 @@ async function prepareCreation(
       bundleLocation: location,
       subpath: draft.source.subpath ?? '.',
       supplied,
+      // An archive has no repository, so there is nothing to connect and no
+      // pull request to merge.
+      configPullRequest: null,
+      configPullRequestError: null,
     });
   }
 
   let repository = await repositoryRow(context, draft.source.repo);
+  let configPullRequest: number | null = null;
+  let configPullRequestError: string | null = null;
   if (
     draft.source.connect === true &&
     (repository?.access !== 'active' || repository.authoritativeCommit === null)
@@ -437,7 +472,9 @@ async function prepareCreation(
       context,
     );
     if (!connected.ok) return connected;
-    repository = connected.value;
+    repository = connected.value.repository;
+    configPullRequest = connected.value.pullRequest;
+    configPullRequestError = connected.value.pullRequestError;
   }
   if (
     repository?.access !== 'active' ||
@@ -480,6 +517,8 @@ async function prepareCreation(
     bundleLocation: staged.location,
     subpath: draft.source.subpath,
     supplied: false,
+    configPullRequest,
+    configPullRequestError,
   });
 }
 
@@ -519,24 +558,38 @@ async function connectAndAdopt(
   fullName: string,
   subpath: string,
   context: CommandContext,
-): Promise<CommandResult<Repository>> {
+): Promise<
+  CommandResult<{
+    readonly repository: Repository;
+    /** The pull request the connect opened, forwarded rather than dropped. */
+    readonly pullRequest: number | null;
+    readonly pullRequestError: string | null;
+  }>
+> {
   const connected = await connectRepository(
     { fullName, scopes: [subpath] },
     context,
   );
   if (!connected.ok) return connected;
+  const { pullRequest, pullRequestError } = connected.value;
 
   const row = await repositoryRow(context, fullName);
   if (row === undefined) {
     throw new Error(`connecting ${fullName} wrote no repository row`);
   }
   const host = context.adapters.repository?.() ?? null;
-  if (host === null) return ok(row);
+  if (host === null) {
+    return ok({ repository: row, pullRequest, pullRequestError });
+  }
   await reconcileRepository(
     { db: context.db, clock: context.clock, host },
     row,
   );
-  return ok((await repositoryRow(context, fullName)) ?? row);
+  return ok({
+    repository: (await repositoryRow(context, fullName)) ?? row,
+    pullRequest,
+    pullRequestError,
+  });
 }
 
 async function completedCreation(
@@ -579,6 +632,16 @@ async function completedCreation(
   if (!completed || !component || !build || !placement) {
     throw new Error('creation draft points at an incomplete App intent');
   }
+  // The receipt has to survive a reload, and the connect that opened the pull
+  // request happened once, on a response nobody kept. The row is where the
+  // number lives, which is the only reason the column is written at all.
+  const repository =
+    completed.repositoryId === null
+      ? undefined
+      : await context.db.query.repositories.findFirst({
+          where: (repositories, { eq }) =>
+            eq(repositories.id, completed.repositoryId!),
+        });
   return ok({
     draft: {
       id: row.id,
@@ -596,6 +659,9 @@ async function completedCreation(
       targetId: placement.targetId,
       buildId: build.id,
       buildStatus: build.status,
+      configPullRequest: repository?.configPullRequest ?? null,
+      configPullRequestError: null,
+      configRepository: repository?.fullName ?? null,
     },
   });
 }
@@ -751,8 +817,12 @@ async function revalidate(
     blockers.push({
       code: 'BUILD_ROUTE_UNAVAILABLE',
       title: `No eligible build route can build for ${targetRowLabel(selectedTarget)}.`,
+      // Names where, because build routes are not on this screen and the
+      // banner carrying this sentence has nothing to press. The draft is a
+      // durable row reachable by URL, which is the other half of the
+      // instruction: leaving to fix it loses nothing.
       remediation:
-        'Configure a route that clears this Target’s minimum Build Level, then review the draft again.',
+        'Configure a route that clears this Target’s minimum Build Level under Settings → Build routes, then come back to this draft — it is kept.',
     });
   }
 

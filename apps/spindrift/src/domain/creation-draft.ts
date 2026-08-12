@@ -19,12 +19,7 @@ export const ENTRIES = [
   {
     id: 'repo',
     label: 'Link repo',
-    note: 'Detect the kind from one directory',
-  },
-  {
-    id: 'discover',
-    label: 'Discover',
-    note: 'List every directory a repo can deploy',
+    note: 'Detect what a repository holds and pick a directory',
   },
 ] as const;
 
@@ -34,6 +29,15 @@ export const ENTRIES = [
 export const componentKind = z.enum(['service', 'website', 'job']);
 export const reach = z.enum(['none', 'private', 'public']);
 export const auth = z.enum(['none', 'proxy']);
+/**
+ * `discover` is accepted and never offered.
+ *
+ * It pressed the same reducer arm as `repo` and produced the same screen —
+ * choosing a repository lists every directory read from it either way — so the
+ * two tiles were one tile drawn twice, and the pair read as a choice with
+ * consequences. It stays in the vocabulary because drafts are durable rows: a
+ * value dropped from the enum is a stored draft that no longer parses.
+ */
 const entry = z.enum(['service', 'website', 'upload', 'repo', 'discover']);
 
 /**
@@ -215,7 +219,15 @@ export type DraftAction =
   | { type: 'reach'; reach: Reach }
   | { type: 'auth'; auth: Auth }
   | { type: 'repo'; fullName: string; url: string; connect?: boolean }
-  | { type: 'subpath'; subpath: string }
+  /**
+   * A directory being typed, and — once — the operator having finished typing.
+   *
+   * `settled` is what counts as the answer. Taking every keystroke as one meant
+   * the first character of `apps/web` marked the draft answered: the "nothing
+   * is chosen to deploy from here" prerequisite cleared and, once the debounced
+   * save landed, Deploy went green for a path nothing had read.
+   */
+  | { type: 'subpath'; subpath: string; settled?: boolean }
   /**
    * What the detector found, applied.
    *
@@ -325,11 +337,23 @@ export function initialCreationDraft(input: {
       note: 'the installation home vessel',
     },
     targetId: input.targetId ?? '',
-    reach: 'private',
-    auth: 'proxy',
+    reach: OPENING_REACH,
+    auth: OPENING_AUTH,
     config: [],
   };
 }
+
+/**
+ * What a draft opens on, named so a screen can tell a default from a decision.
+ *
+ * These two rows state a definition of their value and the same sentence
+ * renders whichever way it got there, so "still the value it was born with" is
+ * the only signal available that nobody has looked at it. Exported rather than
+ * inlined twice, because a default that drifts from what the screen calls a
+ * default is a screen that lies quietly.
+ */
+export const OPENING_REACH: Reach = 'private';
+export const OPENING_AUTH: Auth = 'proxy';
 
 /** An archive nobody has staged yet — what the `Upload` tile opens on. */
 function emptyArchive(): DraftSource {
@@ -368,10 +392,22 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
     // switches away from is kept, so that pressing the other tile and coming
     // back is a look rather than a loss.
     case 'entry': {
-      const kind =
+      // A tile that names a kind names it, and one that names a source says
+      // nothing about the kind at all. Falling back to `detection.kind` made
+      // `Upload` and `Link repo` silently revert a kind the operator had
+      // corrected two rows down, taking the "corrected" badge with it and
+      // reporting nothing. A named kind detection has ruled out is ignored for
+      // the same reason the Component row disables it: a tile that is selected
+      // and greyed at once, wearing the reason it cannot be chosen, is not an
+      // answer anybody gave.
+      const named =
         action.entry === 'service' || action.entry === 'website'
           ? action.entry
-          : draft.detection.kind;
+          : null;
+      const kind =
+        named !== null && draft.detection.unavailable[named] === undefined
+          ? named
+          : draft.kind;
       const wanted = sourceKindFor(action.entry);
       if (wanted === null || wanted === draft.source.kind) {
         return { ...draft, entry: action.entry, kind };
@@ -464,15 +500,16 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
         detection: openingDetection(),
       };
     }
-    // Typing a directory is the operator answering where the App is, so it
+    // Naming a directory is the operator answering where the App is, so it
     // stands however detection reads it (story 32) and it survives the draft
-    // being closed and reopened.
+    // being closed and reopened. Half a path on the way to one is not that
+    // answer, so the flag waits for the edit to settle.
     case 'subpath':
       return draft.source.kind === 'repo'
         ? {
             ...draft,
             source: { ...draft.source, subpath: action.subpath },
-            scopeByOperator: true,
+            ...(action.settled === true ? { scopeByOperator: true } : {}),
           }
         : draft;
     case 'archive':
@@ -536,7 +573,11 @@ export function blockersFor(
     blockers.push({
       code: 'CONFIG_INCOMPLETE',
       title: `${missing.length} configuration key${missing.length === 1 ? '' : 's'} still needs a value.`,
-      remediation: `Supply ${missing.map((key) => key.name).join(', ')} under Config. Values are write-only once stored, so they cannot be filled in later from here.`,
+      // Not "under Config": that disclosure lists keys and holds no input, and
+      // no action on this screen can supply one. The App's own Config screen is
+      // where a value goes, and saying so beats naming a control that cannot do
+      // it.
+      remediation: `Supply ${missing.map((key) => key.name).join(', ')} from the App's Config screen once it exists. Values are write-only once stored, so they cannot be filled in later from here.`,
     });
   }
 

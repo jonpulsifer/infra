@@ -805,6 +805,16 @@ export interface LinkedRepoView {
   readonly staleReason: string | null;
   /** App subpaths connected to this repository. */
   readonly appSubpaths: readonly string[];
+  /**
+   * The configuration pull request this connection opened, while it is still
+   * the thing standing between the repository and its own builds.
+   *
+   * Null once the repo loop has adopted a Spindrift file from the default
+   * branch, which is what merging it looks like from here: nothing subscribes
+   * to `pull_request` deliveries, so a merge is observed as configuration
+   * arriving on the default branch rather than as a pull request closing.
+   */
+  readonly configPullRequest: number | null;
 }
 
 /**

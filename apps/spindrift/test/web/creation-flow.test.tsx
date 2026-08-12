@@ -263,7 +263,18 @@ describe('non-candidate Targets are listed rather than hidden', () => {
 
 describe('the draft reducer', () => {
   test('a tile that names a kind preselects it', () => {
-    const next = draftReducer(INITIAL_DRAFT, {
+    // `website` is ruled out on the shared fixture, which is a different case
+    // — see below — so this is asked about a kind detection allows.
+    const openToWebsite: Draft = {
+      ...INITIAL_DRAFT,
+      kind: 'job',
+      detection: {
+        ...INITIAL_DRAFT.detection,
+        available: ['service', 'website', 'job'],
+        unavailable: {},
+      },
+    };
+    const next = draftReducer(openToWebsite, {
       type: 'entry',
       entry: 'website',
     });
@@ -273,12 +284,25 @@ describe('the draft reducer', () => {
     expect(next.source).toEqual(INITIAL_DRAFT.source);
   });
 
-  test("a tile that names no kind leaves detection's proposal standing", () => {
+  test('a tile naming a kind detection ruled out does not select it', () => {
+    // The Component row draws that kind disabled, wearing the reason it cannot
+    // be chosen (§3). A tile that wrote it anyway produced the one state the
+    // grammar has no reading for: selected and greyed at once.
+    expect(INITIAL_DRAFT.detection.unavailable.website).toBeDefined();
     const next = draftReducer(INITIAL_DRAFT, {
       type: 'entry',
-      entry: 'upload',
+      entry: 'website',
     });
-    expect(next.kind).toBe(INITIAL_DRAFT.detection.kind);
+    expect(next.kind).toBe(INITIAL_DRAFT.kind);
+  });
+
+  test('a tile that names no kind leaves the draft’s kind standing', () => {
+    // Not detection's kind — the operator's, if they corrected it. Reverting to
+    // the proposal on a press about where the *source* comes from undid a
+    // correction made two rows down and took its "corrected" badge with it.
+    const corrected: Draft = { ...INITIAL_DRAFT, kind: 'job' };
+    const next = draftReducer(corrected, { type: 'entry', entry: 'upload' });
+    expect(next.kind).toBe('job');
   });
 
   test('the Upload tile switches the source to an archive', () => {
@@ -474,13 +498,26 @@ describe('the draft reducer', () => {
     expect(next.detection.reason).not.toContain('spindrift.yaml');
   });
 
-  test('a directory the operator typed is recorded as theirs', () => {
+  test('a directory the operator settled on is recorded as theirs', () => {
     // Durable rather than session state, because the guard it feeds is about
     // the read that runs when a saved draft is reopened.
     const next = draftReducer(INITIAL_DRAFT, {
       type: 'subpath',
       subpath: 'apps/ddnsd',
+      settled: true,
     });
     expect(next.scopeByOperator).toBe(true);
+  });
+
+  test('a directory still being typed is not yet an answer', () => {
+    // The keystroke that took `a` for an answer cleared the prerequisite that
+    // says nothing has been chosen to deploy, and once the debounced save
+    // landed Deploy went green for a path nothing had read.
+    const next = draftReducer(INITIAL_DRAFT, {
+      type: 'subpath',
+      subpath: 'a',
+    });
+    expect(next.source).toMatchObject({ subpath: 'a' });
+    expect(next.scopeByOperator).toBe(INITIAL_DRAFT.scopeByOperator);
   });
 });

@@ -12,7 +12,7 @@
  * decides, which is exactly what a five-step rail cost.
  */
 import { ChevronRight, Lock, Pencil } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import type {
   Auth,
   ComponentKind,
@@ -52,14 +52,33 @@ export function Row({
    * places that do not fit is behind a disclosure. Same rule §18 gives the
    * build log: collapsed on green, open on anything else.
    *
-   * Toggling takes over from it, so a reader who closed a row keeps it closed.
+   * **It opens by itself and never closes by itself.** Every input to
+   * `unsettled` is asynchronous — a repository read landing, a `listTargets`
+   * refetch answering — so a row that tracked it in both directions collapsed
+   * several hundred pixels of controls under the reader's cursor in reply to
+   * something nobody pressed, and everything below jumped up to meet them.
+   * Closing is the operator's, through Done.
    */
   unsettled?: boolean;
   /** The correction, if this row has one. Absent makes the row a fact. */
   children?: ReactNode;
 }) {
   const [toggled, setToggled] = useState<boolean | null>(null);
-  const open = toggled ?? unsettled;
+  // Sticky: having been unsettled once is what holds the row open, so an answer
+  // arriving from a read nobody pressed reveals nothing and hides nothing.
+  const opened = useRef(unsettled);
+  // A row that goes unsettled *again* is asking a question the operator's
+  // earlier Done was not an answer to — the blocker under the card says "pick
+  // one under Source", and one press a minute ago must not be what makes that
+  // sentence point at a row that will never reopen.
+  const previously = useRef(unsettled);
+  if (unsettled) {
+    opened.current = true;
+    if (!previously.current) setToggled(null);
+  }
+  previously.current = unsettled;
+
+  const open = toggled ?? opened.current;
   const setOpen = (next: (current: boolean) => boolean) =>
     setToggled(next(open));
 
