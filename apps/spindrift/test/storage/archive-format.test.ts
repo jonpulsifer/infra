@@ -13,13 +13,18 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import {
+  type ArchiveFormat,
   ArchiveFormatError,
   normalizeArchive,
   sniffArchiveFormat,
 } from '../../src/storage/archive-format.ts';
 import { zipOf } from '../fixtures/zip.ts';
+import { bytes, tarball } from '../harness/tar.ts';
 
 /**
  * Read the produced tar the way an extractor does, so the assertions are about
@@ -208,5 +213,62 @@ describe('normalizeArchive', () => {
     }
     expect(thrown).toBeInstanceOf(ArchiveFormatError);
     expect((thrown as ArchiveFormatError).code).toBe('MALFORMED_ZIP');
+  });
+});
+
+/**
+ * One upload per format the boundary accepts, keyed by the union itself: a new
+ * member of {@link ArchiveFormat} fails the typecheck here until it has a
+ * sample, and then has to survive the extraction below like the others.
+ */
+const ACCEPTED: Record<ArchiveFormat, Uint8Array> = {
+  gzip: tarball([{ name: 'index.html', bytes: bytes('hi') }]),
+  zip: zipOf([{ path: 'index.html', text: 'hi' }]),
+};
+
+const WORKFLOW = join(
+  import.meta.dir,
+  '../../../../.github/workflows/spindrift-build.yml',
+);
+const FETCH_STEP = 'Fetch the staged bundle';
+
+describe('the wire format of a staged bundle', () => {
+  test('the hosted route opens it with `tar -xz`', async () => {
+    const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
+      jobs: { build: { steps: { name?: string; run?: string }[] } };
+    };
+    const step = document.jobs.build.steps.find((s) => s.name === FETCH_STEP);
+    // The half of the contract that lives outside this repository's type
+    // system. Change the fetcher to open something else and the samples below
+    // stop describing what a builder receives.
+    expect(step?.run).toContain('| tar -xz');
+  });
+
+  test('every upload it accepts becomes something `tar -xz` extracts', async () => {
+    for (const [format, upload] of Object.entries(ACCEPTED)) {
+      const normalized = normalizeArchive(`upload.${format}`, upload);
+      const workspace = await mkdtemp(join(tmpdir(), 'spindrift-bundle-'));
+      try {
+        // Real tar, not this suite's reader: the failure being pinned is a
+        // builder saying `This does not look like a tar archive`, and only the
+        // program that says it can prove it will not.
+        const proc = Bun.spawn(['tar', '-xz', '-C', workspace], {
+          stdin: normalized.bytes,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        const code = await proc.exited;
+        if (code !== 0) {
+          throw new Error(
+            `tar -xz refused a normalized ${format} upload: ${await new Response(proc.stderr).text()}`,
+          );
+        }
+        expect(await readFile(join(workspace, 'index.html'), 'utf8')).toBe(
+          'hi',
+        );
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    }
   });
 });
