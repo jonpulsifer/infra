@@ -261,6 +261,25 @@ describe('the release is five steps, in the product’s order', () => {
       '/index.html',
     ]);
   });
+
+  test('a name reserved by a deleted site is refused as spent, not as existing', async () => {
+    // The other 409, and the opposite of the one above: a site id is global
+    // and permanent — "the `SITE_ID` cannot be reactivated by you or anyone
+    // else" — so a name a deleted site burnt collides forever with nothing to
+    // read back. Reported as "already exists" it sends an operator looking for
+    // a site that is not there and can never be there.
+    const { adapter } = adapterFor({ reserved: ['shop-site'] });
+
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('REJECTED');
+      expect(verdict.detail).toContain('shop-site');
+      expect(verdict.detail).toContain('reserved permanently');
+      expect(verdict.detail).toContain('cannot be reclaimed');
+    }
+  });
 });
 
 describe('a built files artifact is pulled out of the registry', () => {

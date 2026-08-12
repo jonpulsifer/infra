@@ -13,7 +13,9 @@
  *
  * - **Stranded workloads.** Nothing is torn down (§13) — after the delete, this
  *   list is the only record that those workloads are there, so the flow does not
- *   close on its own when there is one. The operator dismisses it.
+ *   close on its own when there is one. The operator dismisses it. One on static
+ *   hosting says so twice over, because the hand clean-up it points at spends
+ *   the site id permanently and that is worth reading before confirming.
  * - **Retained secrets.** §10's store items are reaped with the App; the ones a
  *   store refused are named, because nothing will reach them again.
  *
@@ -366,21 +368,36 @@ function Body({ state }: { state: AppDeletion }) {
 }
 
 function Stranded({ stranded }: { stranded: readonly StrandedWorkload[] }) {
+  const spent = stranded.filter((workload) => workload.nameSpent);
   return (
-    <ul className="mt-2 flex flex-col gap-1">
-      {stranded.map((workload) => (
-        <li
-          key={workload.deployId}
-          className="flex flex-wrap items-baseline gap-x-2 font-mono text-xs"
-        >
-          <span className="font-semibold">{workload.component}</span>
-          <span className="text-muted-foreground">on {workload.target}</span>
-          {workload.url ? (
-            <span className="text-subtle">{workload.url}</span>
-          ) : null}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="mt-2 flex flex-col gap-1">
+        {stranded.map((workload) => (
+          <li
+            key={workload.deployId}
+            className="flex flex-wrap items-baseline gap-x-2 font-mono text-xs"
+          >
+            <span className="font-semibold">{workload.component}</span>
+            <span className="text-muted-foreground">on {workload.target}</span>
+            {workload.url ? (
+              <span className="text-subtle">{workload.url}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {/* The half of "remove it on the Target by hand" that cannot be undone
+          by doing it again: a static hosting site id is global and permanent,
+          so the manual clean-up spends the address forever. */}
+      {spent.length > 0 ? (
+        <p className="mt-2 text-sm text-destructive">
+          {spent.length === 1
+            ? `${spent[0]?.component} is on static hosting, and its site id is spent permanently`
+            : `${spent.map((workload) => workload.component).join(', ')} are on static hosting, and their site ids are spent permanently`}{' '}
+          — removing the site does not give the name back, and nothing can ever
+          be deployed under it again.
+        </p>
+      ) : null}
+    </>
   );
 }
 

@@ -25,6 +25,15 @@
  * handed in — and the vanity name is added to the same site as a domain, which
  * is what makes "moving an App between backends is one record re-point" true
  * for this backend.
+ *
+ * **A site id is spent once and never returned.** "Deleting a site is a
+ * permanent action. If you delete a site, Firebase doesn't maintain records of
+ * deployed files or deployment history, and the `SITE_ID` cannot be reactivated
+ * by you or anyone else." The id is `siteId(desired)` — derived from the App
+ * and Component names — so a destroyed site burns that pair's address globally,
+ * and a later deploy of the same pair collides with a reservation nothing in
+ * the project can see. Both halves of that are said out loud: `destroy` below,
+ * and `ensureSite`'s reading of a 409 it cannot reconcile.
  */
 import type {
   StoreAdapter,
@@ -300,6 +309,16 @@ export class StaticDeployAdapter implements DeployAdapter {
     };
   }
 
+  /**
+   * Remove the site — and with it, permanently, the right to its name.
+   *
+   * There is no soft form of this on this backend and no undo: the site id is
+   * global and the product never releases one, so a caller that tears a static
+   * placement down has spent that App/Component pair's address for every
+   * project, forever. `deleteApp` never reaches here (§13) and says the same
+   * thing about the site it strands, because the operator finishing that
+   * clean-up by hand spends the name just as thoroughly.
+   */
   async destroy(target: DeployTarget, ref: DeployRef): Promise<void> {
     const connection = this.connectionOf(target);
     if (connection === null) return;
@@ -485,6 +504,14 @@ export class StaticDeployAdapter implements DeployAdapter {
     // Losing a create race is the desired state arriving from somewhere else.
     // Read it back rather than trusting the 409's body, so what returns is a
     // site this function actually saw.
+    //
+    // The read-back is also what tells that case apart from the other thing a
+    // 409 means, and they are opposites: a site id is global and permanent —
+    // "Deleting a site is a permanent action. If you delete a site, ... the
+    // `SITE_ID` cannot be reactivated by you or anyone else" — so a name this
+    // project once used and deleted collides forever, with nothing to read
+    // back. Reported as what it is rather than as the API's "already exists",
+    // which sends an operator looking for a site that is not there.
     if (!created.ok && created.kind === 'status' && created.status === 409) {
       const after = await http.json<HostingSite>({
         method: 'GET',
@@ -493,7 +520,13 @@ export class StaticDeployAdapter implements DeployAdapter {
       if (after.ok && after.value !== undefined) {
         return { ok: true, value: after.value };
       }
-      return { ok: false, failure: created };
+      return {
+        ok: false,
+        failure: {
+          ...created,
+          message: `the site id ${site} is taken and is not in this project — a site id is reserved permanently once used, including after its site is deleted, so this one is spent and cannot be reclaimed. Rename the App or the Component to deploy under a different name.`,
+        },
+      };
     }
     if (!created.ok) return { ok: false, failure: created };
     return { ok: true, value: created.value ?? {} };
