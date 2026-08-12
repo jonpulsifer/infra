@@ -62,6 +62,54 @@ const ARGO: KubernetesDelivery = {
   server: 'https://kubernetes.default.svc',
 };
 
+/**
+ * The same Target told where {@link OCI_CHART} is served.
+ *
+ * An Argo Target's repository is the operator's own field, so an installation
+ * that declares an artifact needs one naming the registry rather than the git
+ * repository a path-sourced installation is checked out of.
+ */
+const ARGO_OCI: KubernetesDelivery = {
+  flavour: 'argo-application',
+  namespace: 'delivery',
+  project: 'default',
+  repoUrl: 'registry.example.test/charts',
+  revision: '1.4.0',
+  server: 'https://kubernetes.default.svc',
+};
+
+/** The status an `Application` reports once Argo has synced it. */
+const SYNCED = () => ({
+  health: { status: 'Healthy' },
+  sync: { status: 'Synced' },
+});
+
+/**
+ * Everything an Argo Target's checklist needs to be green but the chart.
+ *
+ * No Flux source object, because this flavour has none to read: Argo fetches
+ * the repository itself and the reference lives in the `Application`.
+ */
+const ARGO_CLUSTER: FakeKubernetesOptions = {
+  objects: {
+    'namespaces//apps': {
+      apiVersion: 'v1',
+      kind: 'Namespace',
+      metadata: { name: 'apps' },
+    },
+  },
+  lists: {
+    clustersecretstores: [
+      {
+        apiVersion: 'external-secrets.io/v1',
+        kind: 'ClusterSecretStore',
+        metadata: { name: 'vault' },
+        spec: { provider: { gcpsm: {} } },
+      },
+    ],
+  },
+};
+
 /** A cluster that serves everything the checklist looks for. */
 const SERVED = {
   'helm.toolkit.fluxcd.io/v2': ['HelmRelease'],
@@ -319,12 +367,7 @@ describe('the delivery object', () => {
   });
 
   test('the Target declares the flavour: the same state, an Argo Application', async () => {
-    const { adapter, cluster } = adapterFor({
-      status: () => ({
-        health: { status: 'Healthy' },
-        sync: { status: 'Synced' },
-      }),
-    });
+    const { adapter, cluster } = adapterFor({ status: SYNCED });
     const { verdict } = await drain(
       adapter.apply(target({ delivery: ARGO }), desiredState()),
     );
@@ -335,9 +378,40 @@ describe('the delivery object', () => {
     const spec = applied?.spec as any;
     expect(spec.source.helm.valuesObject.app.component).toBe('web');
     expect(spec.destination.namespace).toBe('apps');
+    // A path is a directory only a checkout of the repository resolves, which
+    // is the form a non-artifact chart reference has here too.
+    expect(spec.source.repoURL).toBe('https://git.example.test/infra');
+    expect(spec.source.path).toBe(CHART);
+    expect(spec.source.chart).toBeUndefined();
     // The namespace is vessel (§7): a sync that created it would let a
     // `destroy()` remove it.
     expect(spec.syncPolicy.syncOptions).toBeUndefined();
+  });
+
+  test('an oci:// chart is an Argo chart reference, never a path', async () => {
+    // The Argo half of the same per-Target pin the Flux test above asserts.
+    // Argo takes an OCI chart the way Helm's own client does — the registry in
+    // `repoURL`, the chart's own name in `chart`, and its documentation is
+    // explicit that "the oci:// syntax is not included" — and it refuses a
+    // source carrying a `path` beside a `chart`. So an artifact reference
+    // written into `path` is not a release: Argo answers `ComparisonError`,
+    // and nothing before the first deploy would have said so.
+    const { adapter, cluster } = adapterFor({ status: SYNCED }, OCI_CHART);
+    const { verdict } = await drain(
+      adapter.apply(target({ delivery: ARGO_OCI }), desiredState()),
+    );
+
+    expect(verdict.phase).toBe('LIVE');
+    const spec = cluster.get('applications/delivery/blog-web')?.spec as any;
+    expect(spec.source.repoURL).toBe('registry.example.test/charts');
+    expect(spec.source.chart).toBe('spindrift-app');
+    expect(spec.source.path).toBeUndefined();
+    expect(spec.source.targetRevision).toBe('1.4.0');
+    // Everything else about the Application is the object it always was: the
+    // source moved, not the delivery.
+    expect(spec.source.helm.valuesObject.app.image).toBe(
+      'registry.example.test/blog/web@sha256:feed',
+    );
   });
 
   test('the values carry the three classes, with Spindrift winning the shared one', async () => {
@@ -864,6 +938,66 @@ describe('the checklist', () => {
     );
     expect(operator?.met).toBe(false);
     expect(operator?.detail).toContain('HelmRelease');
+  });
+
+  test('an Argo Target on a cluster that serves no Application says which operator is missing', async () => {
+    // The checklist asks the API server what it serves, per flavour: a cluster
+    // running Flux is not a cluster an Argo Target can deliver through, and the
+    // sentence names the kind that is absent rather than "Flux or Argo".
+    const { adapter } = adapterFor(
+      {
+        servedKinds: { 'helm.toolkit.fluxcd.io/v2': ['HelmRelease'] },
+        ...ARGO_CLUSTER,
+      },
+      OCI_CHART,
+    );
+
+    const { prerequisites } = await adapter.inspect(
+      target({ delivery: ARGO_OCI }),
+    );
+    const operator = prerequisites.find(
+      (item) => item.name === 'DELIVERY_OPERATOR',
+    );
+    expect(operator?.met).toBe(false);
+    expect(operator?.detail).toContain('Application');
+    expect(operator?.detail).not.toContain('HelmRelease');
+  });
+
+  test('an Argo Target pointed at another registry is not this chart’s source', async () => {
+    // The Argo mirror of the `OCIRepository` comparison above, and the same
+    // gap: the Application carries the Target's own repository with this
+    // installation's chart name under it, so a Target naming somewhere else
+    // pulls a different chart under this installation's declaration. Nothing
+    // else reads the two references together, and a row that reported met
+    // without comparing them is a check that never observed what it names.
+    const { adapter } = adapterFor(ARGO_CLUSTER, OCI_CHART);
+
+    const { prerequisites } = await adapter.inspect(target({ delivery: ARGO }));
+    const chartSource = prerequisites.find(
+      (item) => item.name === 'CHART_SOURCE',
+    );
+    expect(chartSource?.met).toBe(false);
+    expect(chartSource?.detail).toContain('https://git.example.test/infra');
+    expect(chartSource?.detail).toContain('registry.example.test/charts');
+  });
+
+  test('an Argo Target naming the registry this installation is served from is met', async () => {
+    // The mirror, so the check above is not simply always-red — and the path
+    // form is met on the same cluster, because a path is written into the
+    // Application itself and has no second reference to disagree with.
+    const artifact = adapterFor(ARGO_CLUSTER, OCI_CHART);
+    expect(
+      (
+        await artifact.adapter.inspect(target({ delivery: ARGO_OCI }))
+      ).prerequisites.filter((item) => !item.met),
+    ).toEqual([]);
+
+    const path = adapterFor(ARGO_CLUSTER, CHART);
+    expect(
+      (
+        await path.adapter.inspect(target({ delivery: ARGO }))
+      ).prerequisites.filter((item) => !item.met),
+    ).toEqual([]);
   });
 
   test('an identity that may not write the delivery object fails OIDC', async () => {

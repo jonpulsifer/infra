@@ -74,6 +74,8 @@ import {
   applicationStatus,
   applicationValues,
   argoApplication,
+  argoChartRef,
+  argoRepository,
 } from './argo-application.ts';
 import { diagnose } from './diagnose.ts';
 import {
@@ -1050,10 +1052,25 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     delivery: KubernetesDelivery,
   ): Promise<[boolean, string?]> {
     if (delivery.flavour === 'argo-application') {
-      // Argo resolves the repository itself, with credentials Spindrift never
-      // sees, so there is nothing here to read. The honest check is that a
-      // repository was named at all; a wrong one surfaces as a sync error on
-      // the first deploy.
+      // Argo fetches the repository itself, with credentials Spindrift never
+      // sees, so this flavour has no source object in the cluster to read —
+      // whether the operator is there at all is `DELIVERY_OPERATOR`'s question
+      // and it asks the API server directly.
+      //
+      // What is left is checkable, and in the artifact form it is checkable
+      // exactly. The Application carries the Target's own `repoUrl` and this
+      // installation's chart *name* under it, so a Target naming another
+      // registry pulls a different chart under this installation's declaration
+      // — the same gap the `OCIRepository` `url` comparison below closes for
+      // Flux, and nothing else would say so. The repository form has no such
+      // gap: the path is written into the Application itself.
+      if (chartSourceKind(this.options.chart) === OCI_REPOSITORY) {
+        const declared = argoChartRef(this.options.chart).repository;
+        return [
+          argoRepository(delivery.repoUrl) === declared,
+          `this Target fetches the App chart from ${delivery.repoUrl.length > 0 ? delivery.repoUrl : 'no repository at all'}, not the ${declared} that serves the ${this.options.chart} this installation declares`,
+        ];
+      }
       return [
         delivery.repoUrl.length > 0,
         'this Target names no repository to fetch the App chart from',
@@ -1273,7 +1290,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         project: connection.delivery.project,
         repoUrl: connection.delivery.repoUrl,
         revision: connection.delivery.revision,
-        path: this.options.chart,
+        chart: this.options.chart,
         labels,
         values,
       });

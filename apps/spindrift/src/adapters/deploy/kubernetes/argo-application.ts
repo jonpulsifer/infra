@@ -6,9 +6,17 @@
  * object rather than manifests to a repository. What differs is only how the
  * object is spelled and where its verdict is written, which is why both
  * flavours end at {@link DeliveryStatus} and nothing above them branches.
+ *
+ * **The chart reference decides the shape of the source**, the same way it does
+ * on the Flux side and through the same `chartSourceKind`. Argo takes an OCI
+ * chart the way Helm's own client does — the registry in `repoURL`, the chart's
+ * own name in `chart` — and refuses a source carrying a `path` beside it, so an
+ * artifact reference written into `path` is an Application Argo answers with
+ * `ComparisonError` rather than a release.
  */
 import type { FailureReason } from '../contract.ts';
 import type { KubernetesObject } from './api.ts';
+import { chartSourceKind, OCI_REPOSITORY } from './flux-helmrelease.ts';
 import type { DeliveryStatus } from './status.ts';
 
 /** The API this flavour writes. */
@@ -17,6 +25,41 @@ export const APPLICATION = {
   kind: 'Application',
   plural: 'applications',
 } as const;
+
+const OCI_SCHEME = 'oci://';
+
+/**
+ * A repository as Argo takes it, however the reference spelled it.
+ *
+ * Argo's own documentation is explicit that for an OCI chart "the `oci://`
+ * syntax is not included" in `repoURL`, so the scheme comes off here rather
+ * than at each of the two call sites that would otherwise have to remember.
+ */
+export function argoRepository(reference: string): string {
+  return reference.startsWith(OCI_SCHEME)
+    ? reference.slice(OCI_SCHEME.length)
+    : reference;
+}
+
+/**
+ * Where an `oci://` chart reference splits into Argo's two fields.
+ *
+ * The last segment is the chart's own name and everything before it is the
+ * repository. A reference with no segment to split off keeps an empty
+ * repository, which no Target can match — nonsense configuration reads as an
+ * unmet `CHART_SOURCE` rather than as an Application pointed at a registry
+ * nobody named.
+ */
+export function argoChartRef(chart: string): {
+  readonly repository: string;
+  readonly chart: string;
+} {
+  const reference = argoRepository(chart);
+  const at = reference.lastIndexOf('/');
+  return at === -1
+    ? { repository: '', chart: reference }
+    : { repository: reference.slice(0, at), chart: reference.slice(at + 1) };
+}
 
 /** What rendering one `Application` needs beyond the values themselves. */
 export interface ApplicationSpec {
@@ -30,8 +73,8 @@ export interface ApplicationSpec {
   project: string;
   repoUrl: string;
   revision: string;
-  /** The chart's path inside the repository (§20's manifest value). */
-  path: string;
+  /** How this installation names the App chart (§20's manifest value). */
+  chart: string;
   labels: Record<string, string>;
   values: Record<string, unknown>;
 }
@@ -64,9 +107,15 @@ export function argoApplication(spec: ApplicationSpec): KubernetesObject {
         namespace: spec.destinationNamespace,
       },
       source: {
-        repoURL: spec.repoUrl,
+        repoURL: argoRepository(spec.repoUrl),
         targetRevision: spec.revision,
-        path: spec.path,
+        // The same split Flux makes, in Argo's spelling: a path is a directory
+        // only a checkout of the repository resolves, a chart is an artifact
+        // the registry serves under its own name. Argo refuses a source that
+        // carries both, so the reference picks one and never states the other.
+        ...(chartSourceKind(spec.chart) === OCI_REPOSITORY
+          ? { chart: argoChartRef(spec.chart).chart }
+          : { path: spec.chart }),
         helm: {
           releaseName: spec.name,
           // Argo's inline values, which is the same single blob §7 requires:
