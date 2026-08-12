@@ -46,17 +46,45 @@ jobs:
     # the GCE box, torn down as a cost decision. This repo is public, so
     # hosted runners are free. The lab pool still serves the suite.
     runs-on: ubuntu-latest
+    # GITHUB_TOKEN pushes images and nothing else; the digest branch and its
+    # pull request are written by the App token minted below.
     permissions:
-      contents: write
+      contents: read
       id-token: write
       packages: write
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
+      # Deliberately not GITHUB_TOKEN. When a workflow using GITHUB_TOKEN opens
+      # a pull request or pushes to one, GitHub's recursion prevention parks
+      # every run that push triggers in `action_required` before a single job
+      # starts — so the required contexts are never reported at all, absent
+      # rather than skipped, and the pull request can never go green. That is
+      # not a ruleset to relax and no permission grant reaches it; an App
+      # installation token is the documented way out. Simplify this back to
+      # GITHUB_TOKEN and continuous delivery stops dead behind a queue of
+      # parked runs, with every step of this job still green.
+      #
+      # Minted only on the ref that pushes, so pull request builds — forks
+      # included, which cannot read the secret at all — fall through to
+      # `github.token` on the checkout below and never see it. Scoped by
+      # default to this repository, and narrowed to the two permissions the
+      # push and the `gh` calls actually use — notably not `workflows: write`,
+      # which is why the push fallback further down is still load bearing.
+      - name: Mint continuous delivery App token
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: cd_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.CD_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          token: ${{ steps.cd_token.outputs.token || github.token }}
       # Which images need what is declared in each app's build.json, not here.
       # This job knows how to run a build; it does not know any app's name.
       - name: Authenticate build to Google Cloud
@@ -132,7 +160,7 @@ jobs:
           IMAGE_NAME: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
           MANIFESTS: ${{ toJson(matrix.manifests) }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.cd_token.outputs.token }}
         run: |
           set -euo pipefail
           mapfile -t targets < <(jq -r '.[]' <<<"$MANIFESTS")
@@ -223,8 +251,9 @@ jobs:
           if ! git push origin "$BRANCH_NAME" --force; then
             # A prior run that failed after pushing leaves this branch cut from
             # an older main, so the next push introduces every commit in
-            # between — and GITHUB_TOKEN may never write one that touched
-            # .github/workflows/, whatever this job's `permissions:` say.
+            # between — and neither GITHUB_TOKEN nor an App without
+            # `workflows: write` may write one that touched .github/workflows/,
+            # whatever this job's `permissions:` say.
             # Recreating the ref reduces the push to the single manifest-only
             # commit above. Only on failure, so an open PR keeps its identity
             # and its running checks in the ordinary case.
