@@ -164,6 +164,13 @@ function editStart(
   );
   // The address is the vessel's, not the surface's — which is exactly why an
   // edit may state it where a proposal may not.
+  if (location.kind === 'vercel-team') {
+    return {
+      kind: 'vercel-team',
+      team: location.team,
+      proposal: connectionProposal([target], 'vercel-team'),
+    };
+  }
   return location.kind === 'cluster'
     ? {
         kind: 'cluster',

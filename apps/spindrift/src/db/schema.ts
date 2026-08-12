@@ -222,6 +222,7 @@ export const targetAdapter = pgEnum('target_adapter', [
   'kubernetes',
   'cloudrun',
   'static',
+  'vercel',
 ]);
 
 /**

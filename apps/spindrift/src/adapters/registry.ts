@@ -67,6 +67,7 @@ import type { DeployAdapter } from './deploy/contract.ts';
 import type { TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
 import { StaticDeployAdapter } from './deploy/static/index.ts';
+import { VercelDeployAdapter } from './deploy/vercel/index.ts';
 import type { SecretStore } from './store/contract.ts';
 import { SecretManagerStore } from './store/gcp-secret-manager.ts';
 import { OnePasswordStore } from './store/onepassword.ts';
@@ -133,6 +134,8 @@ export interface RegistryOptions {
   readonly env?: Record<string, string | undefined>;
   /** Likewise for the store's own access path, which authorizes separately. */
   readonly storeToken?: () => string | Promise<string>;
+  /** And for the edge platform, whose bearer is neither of the above. */
+  readonly vercelToken?: TokenProvider;
   /**
    * And for the cloud APIs — the runtimes a Target is deployed to and the build
    * service a cloud build is submitted to, which are one credential.
@@ -260,6 +263,14 @@ export function createAdapterRegistry(
     }),
     static: new StaticDeployAdapter({
       token: cloud,
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    }),
+    // The one adapter with two identities: the platform is driven with the
+    // installation's own bearer, and the artifact is read out of the artifacts
+    // registry with the federated token every other adapter already holds.
+    vercel: new VercelDeployAdapter({
+      token: options.vercelToken ?? vercelToken(options.env ?? Bun.env),
+      artifactToken: cloud,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
   };
@@ -551,6 +562,40 @@ export function storeToken(env: Record<string, string | undefined> = Bun.env) {
     if (!token) {
       throw new AdapterUnavailableError(
         `${STORE_TOKEN_VARIABLE} is not set: this installation cannot write to its secret store`,
+      );
+    }
+    return token;
+  };
+}
+
+/**
+ * The bearer the edge platform is driven with.
+ *
+ * Read per call and never captured, exactly like {@link storeToken} and for the
+ * identical reason: the installation Secret is the only place it lives, and a
+ * value read once at boot stops working the moment the Secret is rotated. It is
+ * the same kind of credential as the Connect token — a long-lived bearer an
+ * operator issues — rather than the federated one every cloud Target uses,
+ * because the platform federates outward only and offers nothing to exchange a
+ * projected token for.
+ *
+ * A Target on an installation that set none is not absent: the provider refuses,
+ * `CloudHttp` turns that into a transport failure carrying this sentence, and
+ * the Target connects with its whole checklist unmet and the reason stated —
+ * §13's "connect always succeeds" rather than an adapter that is quietly
+ * missing. Exactly what `cloudTokenFor` does for an installation with no
+ * federation.
+ */
+export const VERCEL_TOKEN_VARIABLE = 'SPINDRIFT_VERCEL_TOKEN';
+
+export function vercelToken(
+  env: Record<string, string | undefined> = Bun.env,
+): TokenProvider {
+  return (): string => {
+    const token = env[VERCEL_TOKEN_VARIABLE]?.trim();
+    if (!token) {
+      throw new AdapterUnavailableError(
+        `${VERCEL_TOKEN_VARIABLE} is not set: this installation cannot reach a Vercel Target`,
       );
     }
     return token;

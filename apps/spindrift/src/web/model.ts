@@ -1021,6 +1021,11 @@ export interface TargetListItem {
         readonly carried: CloudBoundaryFacts;
         readonly proposal: TargetConnectionProposal;
       }
+    | {
+        readonly kind: 'vercel-team';
+        readonly team: string;
+        readonly proposal: TargetConnectionProposal;
+      }
     | null;
   /**
    * What this Target's boundary is to the installation, from
@@ -1130,4 +1135,6 @@ export interface TargetConnectionProposal {
   readonly runEndpoint?: string;
   readonly hostingEndpoint?: string;
   readonly policyEndpoint?: string;
+  /** The edge platform's API root, as an already-connected team states it. */
+  readonly vercelEndpoint?: string;
 }

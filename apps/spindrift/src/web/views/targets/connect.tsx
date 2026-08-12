@@ -102,6 +102,8 @@ export function ConnectTargetForm(props: {
   apiServer?: string;
   /** The same fact for a cloud boundary, on the same one path — an edit. */
   project?: string;
+  /** And for an edge platform's boundary: the team this surface deploys into. */
+  team?: string;
   /** What an edit of a cloud boundary restates so the act does not delete it. */
   carried?: CloudBoundaryFacts;
   /** The surfaces this one act probes that boundary for. */
@@ -116,12 +118,21 @@ export function ConnectTargetForm(props: {
       <Heading {...props} />
       {props.kind === 'cluster' ? (
         <ConnectCluster {...props} />
+      ) : props.kind === 'vercel-team' ? (
+        <ConnectVercel {...props} />
       ) : (
         <ConnectCloud {...props} />
       )}
     </div>
   );
 }
+
+/** What an operator calls the boundary they are connecting. */
+const BOUNDARY_NOUN: Record<VesselKind, string> = {
+  cluster: 'cluster',
+  'gcp-project': 'cloud project',
+  'vercel-team': 'Vercel team',
+};
 
 function Heading({
   kind,
@@ -143,9 +154,7 @@ function Heading({
           <Layers aria-hidden="true" className="size-4 text-muted-foreground" />
         )}
         <span className="font-mono text-sm font-semibold">{vessel}</span>
-        <Badge tone="idle">
-          {kind === 'cluster' ? 'cluster' : 'cloud project'}
-        </Badge>
+        <Badge tone="idle">{BOUNDARY_NOUN[kind]}</Badge>
         {proposal.carriedFrom !== null ? (
           <span className="ml-auto text-xs text-muted-foreground">
             defaults carried from{' '}
@@ -830,6 +839,83 @@ function ConnectCloud({
               // are not decisions being made again — the fresh-connect path
               // sends none, having nothing to preserve.
               ...carried,
+            })
+          }
+        >
+          {connecting ? 'Connecting…' : 'Connect'}
+        </Button>
+        <Button variant="ghost" onClick={onCancel} disabled={connecting}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A Vercel team's one surface, in one act.
+ *
+ * Flat for the reason the cloud form above it is: a team has no discovery API
+ * to enumerate itself through before it is named. Two fields rather than four —
+ * there is no region to pick and no second control plane, because the platform
+ * serves one network and one API.
+ *
+ * **No field for the token**, and that is the point rather than an omission:
+ * the bearer this Target is driven with is the installation's, read from its
+ * Secret per request, so a form that took one would be storing a credential per
+ * Target — the thing §13's rule is actually about. A team whose token is
+ * missing or unauthorized connects anyway and reads `API_TOKEN` unmet, which is
+ * §13's "connect always succeeds" doing its job.
+ */
+function ConnectVercel({
+  vessel,
+  team: knownTeam = '',
+  proposal,
+  connecting,
+  onConnect,
+  onCancel,
+}: {
+  vessel: string;
+  team?: string;
+  proposal: TargetConnectionProposal;
+  connecting: boolean;
+  onConnect: (input: ConnectTargetInput) => void;
+  onCancel: () => void;
+}) {
+  const [team, setTeam] = useState(knownTeam);
+  const [endpoint, setEndpoint] = useState(proposal.vercelEndpoint ?? '');
+  const ready = team.trim() !== '' && endpoint.trim() !== '';
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field
+          name="team"
+          label="Team"
+          value={team}
+          onChange={(event) => setTeam(event.target.value)}
+          hint={
+            knownTeam === ''
+              ? "Not carried — a second team prefilled with the first one's slug would read as correct."
+              : 'This boundary’s own slug or team_… id.'
+          }
+        />
+        <Field
+          name="vercel-endpoint"
+          label="API"
+          value={endpoint}
+          onChange={(event) => setEndpoint(event.target.value)}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          disabled={!ready || connecting}
+          onClick={() =>
+            onConnect({
+              kind: 'vercel-team',
+              vessel,
+              team: team.trim(),
+              endpoint: endpoint.trim(),
             })
           }
         >

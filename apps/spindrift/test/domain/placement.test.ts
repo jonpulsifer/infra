@@ -34,6 +34,7 @@ const ARTIFACT_TYPES = {
   kubernetes: ['image'],
   cloudrun: ['image'],
   static: ['files'],
+  vercel: ['files'],
 } as const;
 
 /** One Target, capable of everything except what a test says otherwise. */

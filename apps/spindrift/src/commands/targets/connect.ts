@@ -183,6 +183,25 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       logHistorySeconds: z.number().int().nonnegative().optional(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('vercel-team'),
+      /** The boundary being connected, by name. Its one surface is `vercel`. */
+      vessel: targetNameSchema,
+      /** The team or account slug, or its `team_…` id. Both address the API. */
+      team: z.string().trim().min(1),
+      /** The platform's API root. Asked for rather than assumed (§20). */
+      endpoint: z.url(),
+      /**
+       * §33's static reachability input.
+       *
+       * No `reachableRegistries`: nothing here pulls an image — the deploy
+       * uploads the bytes — and no `logHistorySeconds`, because there is no
+       * runtime whose output a tail could reach back into.
+       */
+      servedHosts: z.array(z.string().trim().min(1)).optional(),
+    })
+    .strict(),
 ]);
 
 export type ConnectTargetInput = z.infer<typeof connectTargetInput>;
@@ -258,6 +277,12 @@ function connectionFor(
         : { chartValues: input.chartValues }),
     };
   }
+  if (adapter === 'vercel') {
+    if (input.kind !== 'vercel-team') {
+      throw new Error('only a Vercel team registers a Vercel Target');
+    }
+    return { adapter, endpoint: input.endpoint };
+  }
   if (input.kind !== 'gcp-project') {
     throw new Error('a cluster does not register a cloud Target');
   }
@@ -293,17 +318,26 @@ function vesselFor(input: ConnectTargetInput): {
 } {
   return {
     kind: input.kind,
-    location:
-      input.kind === 'cluster'
-        ? { kind: 'cluster', apiServer: input.apiServer }
-        : { kind: 'gcp-project', project: input.project },
+    location: locationOf(input),
     servedHosts:
       input.servedHosts === undefined ? null : [...input.servedHosts],
     reachableRegistries:
-      input.reachableRegistries === undefined
+      input.kind === 'vercel-team' || input.reachableRegistries === undefined
         ? null
         : [...input.reachableRegistries],
   };
+}
+
+/** Where the boundary is, in the terms its own kind states it in. */
+function locationOf(input: ConnectTargetInput): VesselLocation {
+  switch (input.kind) {
+    case 'cluster':
+      return { kind: 'cluster', apiServer: input.apiServer };
+    case 'gcp-project':
+      return { kind: 'gcp-project', project: input.project };
+    case 'vercel-team':
+      return { kind: 'vercel-team', team: input.team };
+  }
 }
 
 export const connectTarget: Command<

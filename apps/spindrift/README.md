@@ -4,8 +4,9 @@ Connect a repo, press Deploy, get a URL.
 
 Spindrift is a deploy layer, not a platform: it owns the UI and the feel, and
 adapts to whatever builds and delivers underneath — a Kubernetes cluster, Cloud
-Run, or static hosting. The design lives in `.agent/plans/spindrift/spec.md`
-(private) and is referenced from the source as `§N`.
+Run, static hosting, or Vercel. The design lives in
+`.agent/plans/spindrift/spec.md` (private) and is referenced from the source as
+`§N`.
 
 **An uploaded bundle reaches a Kubernetes cluster and comes back with a URL.**
 The five nouns have tables, the three adapter contracts are written, and
@@ -26,10 +27,19 @@ Job — and every one of them runs the same BuildKit program over the same
 staged bundle, so which route ran is a property of a Build rather than a
 different pipeline.
 
-All three deploy backends exist too — a cluster through its GitOps operator, the
-cloud runtime through its own API, and static hosting through a release — and
-one conformance suite runs over every one of them, which is what keeps "core
-describes, the adapter renders" a tested claim rather than a stated one.
+Four deploy backends exist too — a cluster through its GitOps operator, the
+cloud runtime through its own API, static hosting through a release, and Vercel
+through an upload and a deployment — and one conformance suite runs over every
+one of them, which is what keeps "core describes, the adapter renders" a tested
+claim rather than a stated one.
+
+The Vercel backend is the one reached with a stored bearer rather than with
+federation: the platform federates outward only, so there is nothing to exchange
+a projected token for, and the credential is one installation-wide value
+(`SPINDRIFT_VERCEL_TOKEN`) rather than a column on a Target. It never hands the
+platform a repository to build — §4's separation holds here as everywhere, so
+the deployment carries a finished `files` tree with no framework and no build
+command, and a rollback re-deploys rather than rebuilding.
 
 Datastore provisioning has no command yet: the App workspace lists what the
 `datastores` table and each adapter already know (`src/adapters/datastore/`),

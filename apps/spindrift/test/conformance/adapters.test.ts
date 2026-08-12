@@ -25,6 +25,7 @@ import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { StaticDeployAdapter } from '../../src/adapters/deploy/static/index.ts';
+import { VercelDeployAdapter } from '../../src/adapters/deploy/vercel/index.ts';
 import { SecretManagerStore } from '../../src/adapters/store/gcp-secret-manager.ts';
 import { OnePasswordStore } from '../../src/adapters/store/onepassword.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
@@ -39,6 +40,7 @@ import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 import { FakeOnePasswordConnect } from '../harness/fakes/onepassword-connect.ts';
 import { FakeSecretManager } from '../harness/fakes/secret-manager-api.ts';
 import { FakeSecretStore } from '../harness/fakes/store-adapter.ts';
+import { FakeVercel } from '../harness/fakes/vercel-api.ts';
 import { bytes, tarball } from '../harness/tar.ts';
 import {
   assertEveryAdapterEnrolled,
@@ -149,6 +151,30 @@ deployAdapterSuite(
       },
     });
     return new StaticDeployAdapter({ token: api.token, fetch: api.fetch });
+  },
+  'image',
+);
+
+deployAdapterSuite(
+  'vercel',
+  () => {
+    const api = new FakeVercel({
+      bundle: {
+        origin: BUNDLE_DEPOT,
+        bytes: tarball([
+          { name: 'index.html', bytes: bytes('<!doctype html>hello') },
+        ]),
+      },
+    });
+    // The polling is real and the waiting is not, exactly as the cloud runtime
+    // route above is driven.
+    return new VercelDeployAdapter({
+      token: api.token,
+      artifactToken: api.token,
+      fetch: api.fetch,
+      pollIntervalMs: 1,
+      sleep: async () => {},
+    });
   },
   'image',
 );

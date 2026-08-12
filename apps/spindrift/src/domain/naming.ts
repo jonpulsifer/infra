@@ -50,7 +50,11 @@ export function isLabel(value: string): boolean {
  * cluster's load-balancer range is RFC1918 — which is why it is the one place
  * core has to supply a name.
  */
-const PLATFORM_NAMES_ITS_OWN: readonly TargetAdapter[] = ['cloudrun', 'static'];
+const PLATFORM_NAMES_ITS_OWN: readonly TargetAdapter[] = [
+  'cloudrun',
+  'static',
+  'vercel',
+];
 
 /** Whether core mints the canonical name for a Target of this adapter type. */
 export function coreMintsCanonical(adapter: TargetAdapter): boolean {

@@ -82,6 +82,14 @@ import type { SurfaceProbe } from './vessel.ts';
  * unrelated reasons and clear by unrelated remediations: one is an operator
  * this cluster does not run, the other is a service this project has not
  * enabled.
+ *
+ * `API_TOKEN` is `OIDC_FEDERATION`'s counterpart on the one backend that has no
+ * federation to check. It is a separate name for the reason `PLATFORM_API` is:
+ * the two are unmet for unrelated reasons and clear by unrelated acts — one is
+ * a trust relationship an operator declares in Terraform, the other is a bearer
+ * an operator issues and puts in this installation's Secret — and a Vercel
+ * Target reading `OIDC_FEDERATION: unmet` would send them to configure a
+ * federation that does not exist on either side.
  */
 export const PREREQUISITES = [
   'DELIVERY_OPERATOR',
@@ -91,6 +99,7 @@ export const PREREQUISITES = [
   'VESSEL',
   'CHART_CONTRACT',
   'PLATFORM_API',
+  'API_TOKEN',
 ] as const;
 
 export type Prerequisite = (typeof PREREQUISITES)[number];
@@ -123,6 +132,10 @@ export const PREREQUISITES_BY_ADAPTER = {
   ],
   cloudrun: ['PLATFORM_API', 'OIDC_FEDERATION', 'VESSEL'],
   static: ['PLATFORM_API', 'OIDC_FEDERATION', 'VESSEL'],
+  // The same three questions with the middle one asked of a bearer instead of
+  // a federation: is the platform answering, may this credential act here, and
+  // does the team exist.
+  vercel: ['PLATFORM_API', 'API_TOKEN', 'VESSEL'],
 } as const satisfies Record<TargetAdapter, readonly Prerequisite[]>;
 
 /** What a Target of this adapter type is asked, in the order it is shown. */
@@ -349,6 +362,9 @@ export const KINDS_BY_ADAPTER = {
   kubernetes: ['service', 'website', 'job'],
   cloudrun: ['service', 'website', 'job'],
   static: ['website'],
+  // A `files` artifact is what this backend takes, so a website and nothing
+  // else — the same reasoning the row above it carries.
+  vercel: ['website'],
 } as const satisfies Record<TargetAdapter, readonly ComponentKind[]>;
 
 /**
@@ -383,6 +399,7 @@ export const FIRES_SCHEDULES_BY_ADAPTER = {
   kubernetes: true,
   cloudrun: true,
   static: false,
+  vercel: false,
 } as const satisfies Record<TargetAdapter, boolean>;
 
 /**
@@ -406,6 +423,9 @@ export const ASSERTED_REACHES_BY_ADAPTER = {
   // no address on the operator's own network for a record to point at.
   cloudrun: ['none', 'public'],
   static: ['public'],
+  // An edge network is public by construction and has no address on the
+  // operator's own network for a `private` record to point at.
+  vercel: ['public'],
 } as const satisfies Record<TargetAdapter, readonly Reach[]>;
 
 /**
@@ -425,6 +445,9 @@ export const ASSERTED_AUTH_REACHES_BY_ADAPTER = {
   kubernetes: [],
   cloudrun: ['none', 'public'],
   static: [],
+  // Vercel Authentication is a paid plan's edge check rather than something on
+  // by construction, so it is an operator's assertion like a cluster's proxy.
+  vercel: [],
 } as const satisfies Record<TargetAdapter, readonly Reach[]>;
 
 /**
