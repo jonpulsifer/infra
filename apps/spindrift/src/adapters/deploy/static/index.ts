@@ -55,8 +55,8 @@ import {
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import {
+  fetchableBundleUrl,
   parseGcsLocation,
-  signedObjectUrl,
 } from '../../../storage/signed-url.ts';
 import { cloudChecklist, cloudSurfaceProbe } from '../cloud/checklist.ts';
 import type { FederationOptions } from '../cloud/federation.ts';
@@ -449,10 +449,23 @@ export class StaticDeployAdapter implements DeployAdapter {
     // What is fetched and what is *named* part company here on purpose: a
     // signed URL is a bearer capability, so every sentence below names the
     // address the artifact carries and never the one that was minted from it.
-    const url =
-      parseGcsLocation(location) === null
-        ? location
-        : await this.signedDepotUrl(location);
+    let url: string;
+    try {
+      url = await fetchableBundleUrl(
+        location,
+        this.options.federation,
+        this.options.fetch,
+      );
+    } catch (cause) {
+      // Failing to mint a signed URL is `ARTIFACT_UNAVAILABLE` like every other
+      // way the bytes do not arrive: the build is green, and §6 blames the
+      // platform for that.
+      throw new ArtifactUnavailable(
+        `the artifact at ${location} could not be signed for: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
     if (/^https?:\/\//.test(url)) {
       const fetched = await http.bytes(url);
       if (!fetched.ok) {
@@ -484,43 +497,6 @@ export class StaticDeployAdapter implements DeployAdapter {
       );
     }
     return readBundle(layer);
-  }
-
-  /**
-   * A depot object, exchanged for something this adapter can actually GET.
-   *
-   * The same V4 signed URL a hosted build route is handed, minted the same way
-   * — `signBlob` under the federated identity, nothing stored (§13) — because a
-   * second way to read one bucket is a second thing to grant and to get wrong.
-   *
-   * Failing to mint one is `ARTIFACT_UNAVAILABLE` like every other way the
-   * bytes do not arrive: the build is green, and §6 blames the platform for
-   * that. The refusal names the object, never the URL.
-   */
-  private async signedDepotUrl(location: string): Promise<string> {
-    const federation = this.options.federation ?? null;
-    if (federation === null) {
-      throw new ArtifactUnavailable(
-        `the artifact is staged at ${location} and this installation configures no cloud federation, so nothing can be signed to fetch it with`,
-      );
-    }
-    try {
-      return await signedObjectUrl({
-        location,
-        federation: {
-          ...federation,
-          ...(this.options.fetch === undefined
-            ? {}
-            : { fetch: this.options.fetch }),
-        },
-      });
-    } catch (cause) {
-      throw new ArtifactUnavailable(
-        `the artifact at ${location} could not be signed for: ${
-          cause instanceof Error ? cause.message : String(cause)
-        }`,
-      );
-    }
   }
 
   /**
@@ -799,11 +775,17 @@ class ArtifactUnavailable extends Error {
   override readonly name = 'ArtifactUnavailable';
 }
 
-/** A staged bundle's address wears a scheme; a registry reference never does. */
-const STAGED_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+/**
+ * A staged bundle's address wears a scheme; a registry reference never does.
+ *
+ * Exported because every `files` backend makes the same three-way distinction
+ * and words its last case differently — see {@link fetchableStagedAddress}.
+ */
+export const STAGED_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 /**
- * A supplied upload's address, where this adapter can end up holding the bytes.
+ * A supplied upload's address, where a `files` backend can end up holding the
+ * bytes.
  *
  * Two schemes qualify, for one reason each: `https://` is already fetchable,
  * and `gs://` is the depot's own address — not a URL, but one a signature turns
@@ -811,8 +793,13 @@ const STAGED_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
  * an installation with no depot stages onto its own pod's disk: those bytes are
  * not reachable from here at all, and falling through to the registry branch
  * answers that with a sentence about registry access instead.
+ *
+ * Shared with the other `files` backends rather than written once each: they
+ * fetch the same bundle for the same reason, and three of them disagreeing
+ * about which addresses are fetchable is the bug this function exists to have
+ * exactly one answer to.
  */
-function fetchableStagedAddress(staged: string | null): string | null {
+export function fetchableStagedAddress(staged: string | null): string | null {
   if (staged === null) return null;
   const fetchable =
     /^https?:\/\//.test(staged) || parseGcsLocation(staged) !== null;

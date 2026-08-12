@@ -275,17 +275,22 @@ export function createAdapterRegistry(
     }),
     // The one adapter with two identities: the platform is driven with the
     // installation's own bearer, and the artifact is read out of the artifacts
-    // registry with the federated token every other adapter already holds.
+    // registry with the federated token every other adapter already holds. The
+    // federation is neither of those — it is the signature a supplied upload's
+    // `gs://` object takes, the same one the static backend above needs.
     vercel: new VercelDeployAdapter({
       token: options.vercelToken ?? vercelToken(options.env ?? Bun.env),
       artifactToken: cloud,
+      federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
-    // The second backend federation does not reach, and the simpler of the two:
-    // it fetches its own artifact with the same bearer it deploys with, because
-    // a staged bundle is a plain GET.
+    // The simpler of the two edge backends: it fetches its own artifact with the
+    // same bearer it deploys with, because a staged bundle is a plain GET. The
+    // federation is not a second bearer — it is the signature the one address
+    // that is *not* a plain GET takes, a supplied upload's `gs://` object.
     'cloudflare-pages': new PagesDeployAdapter({
       token: options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
+      federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
   };

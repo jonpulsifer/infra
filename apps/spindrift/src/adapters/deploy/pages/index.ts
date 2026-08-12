@@ -48,6 +48,7 @@ import type {
   TargetInspection,
 } from '../../../domain/capabilities.ts';
 import {
+  type Artifact,
   type ArtifactType,
   artifactAddress,
   type DesiredState,
@@ -58,6 +59,8 @@ import {
 } from '../../../domain/target.ts';
 import type { SurfaceProbe } from '../../../domain/vessel.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
+import { fetchableBundleUrl } from '../../../storage/signed-url.ts';
+import type { FederationOptions } from '../cloud/federation.ts';
 import {
   CloudHttp,
   type CloudResponse,
@@ -84,6 +87,7 @@ import type {
   StartedRun,
 } from '../contract.ts';
 import { BundleError, type BundleFile, readBundle } from '../static/bundle.ts';
+import { fetchableStagedAddress, STAGED_SCHEME } from '../static/index.ts';
 import {
   type AssetManifest,
   type Envelope,
@@ -103,6 +107,16 @@ export interface PagesAdapterOptions {
    * type here would push that difference into every call site.
    */
   readonly token: TokenProvider;
+  /**
+   * How this installation signs for an object in its source depot, or `null`
+   * where it configured none.
+   *
+   * Not a second account credential: a supplied upload was never built, so its
+   * bytes are a `gs://` object rather than a URL, and reading one takes a V4
+   * signature rather than any bearer this backend holds. `storage/signed-url.ts`
+   * is where that exchange and its one grant are written down.
+   */
+  readonly federation?: FederationOptions | null;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
   readonly now?: () => number;
@@ -188,8 +202,8 @@ export class PagesDeployAdapter implements DeployAdapter {
       );
     }
 
-    // **ponytail:** a staged URL only. This adapter fetches the bytes with its
-    // own identity, and that identity is an account credential for *this*
+    // **ponytail:** a staged address only. This adapter fetches the bytes with
+    // its own identity, and that identity is an account credential for *this*
     // platform — it authorizes nothing at a container registry, so a registry
     // reference is an address this Target genuinely cannot read rather than one
     // it has not got around to. The cloud static Target's OCI arm works because
@@ -197,16 +211,18 @@ export class PagesDeployAdapter implements DeployAdapter {
     // here until the build route can stage a `files` artifact somewhere this
     // can GET, which is what `depot`-shaped addresses already are. Give it the
     // registry arm when a credential-free pull path exists, not before.
+    //
+    // A depot object is one of those addresses: `gs://` is not a URL, but a
+    // signature turns it into one, and that is what a supplied upload's bytes
+    // are — the same predicate the other two files backends choose by.
     const staged = artifactAddress(desired.artifact);
-    if (staged === null || !/^https?:\/\//.test(staged)) {
+    const location = fetchableStagedAddress(staged);
+    if (location === null) {
       yield this.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
       return {
         phase: 'FAILED',
         reason: 'ARTIFACT_UNAVAILABLE',
-        detail:
-          desired.artifact.refs.length === 0
-            ? 'the artifact carries no address to fetch it from'
-            : `Cloudflare Pages fetches the bytes itself, and this artifact is addressed as ${staged} — a registry reference its account credential cannot read`,
+        detail: unfetchableArtifact(desired.artifact, staged),
       };
     }
 
@@ -218,7 +234,7 @@ export class PagesDeployAdapter implements DeployAdapter {
 
     let files: readonly BundleFile[];
     try {
-      files = await this.fetchBundle(http, staged);
+      files = await this.fetchBundle(http, location);
     } catch (cause) {
       const failure = bundleFailure(cause, ref);
       yield this.status('FAILED', {
@@ -463,7 +479,24 @@ export class PagesDeployAdapter implements DeployAdapter {
     http: CloudHttp,
     location: string,
   ): Promise<readonly BundleFile[]> {
-    const fetched = await http.bytes(location);
+    // What is fetched and what is *named* part company here on purpose: a
+    // signed URL is a bearer capability, so both sentences below name the
+    // address the artifact carries and never the one minted from it.
+    let url: string;
+    try {
+      url = await fetchableBundleUrl(
+        location,
+        this.options.federation,
+        this.options.fetch,
+      );
+    } catch (cause) {
+      throw new ArtifactUnavailable(
+        `the artifact at ${location} could not be signed for: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+    const fetched = await http.bytes(url);
     if (!fetched.ok) {
       // §6 blames the **platform** for an artifact that cannot be fetched, and
       // this is exactly that: the build is green and the bytes are not there.
@@ -783,6 +816,28 @@ function notAssessed(): { met: false; assessed: false; detail: string } {
 /** The artifact was addressed and the bytes were not there (§6's platform blame). */
 class ArtifactUnavailable extends Error {
   override readonly name = 'ArtifactUnavailable';
+}
+
+/**
+ * Why nothing here can be fetched, said about the address that failed.
+ *
+ * The three cases the other files backends distinguish, worded for this one: no
+ * address at all, a bundle staged somewhere nothing outside one process
+ * reaches, and an artifact addressed only as a registry reference. Telling the
+ * middle one apart is the point — it used to take the registry sentence, which
+ * sends an operator to a credential problem over a bundle sitting on a disk.
+ */
+function unfetchableArtifact(
+  artifact: Artifact,
+  staged: string | null,
+): string {
+  if (artifact.refs.length === 0) {
+    return 'the artifact carries no address to fetch it from';
+  }
+  if (staged !== null && STAGED_SCHEME.test(staged)) {
+    return `the artifact is staged at ${staged}, which names this installation's own disk rather than an address Cloudflare Pages can fetch`;
+  }
+  return `Cloudflare Pages fetches the bytes itself, and this artifact is addressed as ${staged} — a registry reference its account credential cannot read`;
 }
 
 /**

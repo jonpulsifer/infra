@@ -231,6 +231,79 @@ describe('a deploy is check, upload, deploy', () => {
   });
 });
 
+describe('a supplied upload is fetched out of the depot', () => {
+  /** Where `stageArchiveBytes` puts an upload when the installation has one. */
+  const OBJECT = 'gs://bluenose-spindrift-source/abc123.tgz';
+
+  const FEDERATION = {
+    audience:
+      '//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/prov',
+    tokenUrl: 'https://sts.googleapis.test/v1/token',
+    tokenPath: '/var/run/secrets/spindrift/gcp-token',
+    impersonationUrl:
+      'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/controller@vessel.iam.gserviceaccount.com:generateAccessToken',
+  };
+
+  test('a bundle staged at gs:// is signed for, fetched, and served', async () => {
+    // Nothing built a supplied upload, so it has no registry reference and no
+    // URL — only the depot address, which this backend's account credential
+    // has no bearing on at all. A V4 signature is what reads it.
+    const api = new FakeCloudflarePages({
+      // The depot serves on the storage host, which is where a signed URL
+      // points — so the adapter's own fetch of the object runs for real.
+      bundle: { origin: 'https://storage.googleapis.com', bytes: SITE },
+    });
+    const signed: string[] = [];
+    const fetched: string[] = [];
+    const adapter = new PagesDeployAdapter({
+      token: api.token,
+      federation: { ...FEDERATION, readToken: async () => 'jwt' },
+      fetch: async (request) => {
+        if (request.url.startsWith(FEDERATION.tokenUrl)) {
+          return Response.json({
+            access_token: 'federated-token',
+            expires_in: 3600,
+          });
+        }
+        if (request.url.includes(':signBlob')) {
+          signed.push(request.url);
+          // Two bytes, so the hex encoding is checkable without arithmetic.
+          return Response.json({ signedBlob: btoa('\x01\xfe') });
+        }
+        if (request.url.startsWith('https://storage.googleapis.com')) {
+          fetched.push(request.url);
+        }
+        return api.fetch(request);
+      },
+    });
+
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({
+          artifact: {
+            type: 'files',
+            digest: 'sha256:bundle',
+            refs: [OBJECT],
+          },
+        }),
+      ),
+    );
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.servedPaths(PROJECT)).toEqual([
+      '/assets/app.css',
+      '/index.html',
+    ]);
+    // Signed with the federated identity rather than a stored credential
+    // (§13), and the object fetched with the capability that signature is.
+    expect(signed).toHaveLength(1);
+    expect(fetched).toHaveLength(1);
+    expect(fetched[0]).toContain('/bluenose-spindrift-source/abc123.tgz?');
+    expect(fetched[0]).toContain('X-Goog-Signature=01fe');
+  });
+});
+
 describe('the digest travels where a deployment can carry it', () => {
   test('observe reads back the digest apply deployed', async () => {
     const { adapter } = adapterFor();
@@ -358,6 +431,33 @@ describe('what this Target cannot fetch, it says so about', () => {
     expect(verdict.phase).toBe('FAILED');
     if (verdict.phase === 'FAILED') {
       expect(verdict.detail).toContain('no address');
+    }
+  });
+
+  test('a bundle nothing can fetch says that, rather than blaming a credential', async () => {
+    // An installation with no depot stages an upload on the web pod's own
+    // disk. That is unfetchable, and it used to take the registry sentence — a
+    // true statement about a different problem, which sends the operator to a
+    // credential they cannot fix this with.
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({
+          artifact: {
+            type: 'files',
+            digest: 'sha256:bundle',
+            refs: ['upload://abc123'],
+          },
+        }),
+      ),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+      expect(blameFor(verdict.reason)).toBe('platform');
+      expect(verdict.detail).toContain('upload://abc123');
+      expect(verdict.detail).not.toContain('registry');
     }
   });
 

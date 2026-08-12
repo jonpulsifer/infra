@@ -178,6 +178,105 @@ describe('§4: build stays separate from deploy', () => {
   });
 });
 
+describe('a supplied upload is fetched out of the depot', () => {
+  /** Where `stageArchiveBytes` puts an upload when the installation has one. */
+  const OBJECT = 'gs://bluenose-spindrift-source/abc123.tgz';
+
+  const FEDERATION = {
+    audience:
+      '//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/prov',
+    tokenUrl: 'https://sts.googleapis.test/v1/token',
+    tokenPath: '/var/run/secrets/spindrift/gcp-token',
+    impersonationUrl:
+      'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/controller@vessel.iam.gserviceaccount.com:generateAccessToken',
+  };
+
+  /** A supplied artifact: the bundle's own address, and no registry anywhere. */
+  function supplied(location: string): DesiredState {
+    return desired({
+      artifact: { type: 'files', digest: 'sha256:bundle', refs: [location] },
+    });
+  }
+
+  function depotAdapter(): {
+    api: FakeVercel;
+    adapter: VercelDeployAdapter;
+    signed: string[];
+    fetched: string[];
+  } {
+    // The depot serves on the storage host, which is also where a signed URL
+    // points — so the adapter's own fetch of the object runs for real.
+    const api = new FakeVercel({
+      bundle: { origin: 'https://storage.googleapis.com', bytes: SITE },
+    });
+    const signed: string[] = [];
+    const fetched: string[] = [];
+    const adapter = new VercelDeployAdapter({
+      token: api.token,
+      artifactToken: api.token,
+      federation: { ...FEDERATION, readToken: async () => 'jwt' },
+      pollIntervalMs: 1,
+      sleep: async () => {},
+      fetch: async (request) => {
+        if (request.url.startsWith(FEDERATION.tokenUrl)) {
+          return Response.json({
+            access_token: 'federated-token',
+            expires_in: 3600,
+          });
+        }
+        if (request.url.includes(':signBlob')) {
+          signed.push(request.url);
+          // Two bytes, so the hex encoding is checkable without arithmetic.
+          return Response.json({ signedBlob: btoa('\x01\xfe') });
+        }
+        if (request.url.startsWith('https://storage.googleapis.com')) {
+          fetched.push(request.url);
+        }
+        return api.fetch(request);
+      },
+    });
+    return { api, adapter, signed, fetched };
+  }
+
+  test('a bundle staged at gs:// is signed for, fetched, and deployed', async () => {
+    // Both files backends take a supplied upload, and this one reached the
+    // same dead end: nothing built the bundle, so there is no registry
+    // reference, and the depot address is not something an HTTP client
+    // resolves.
+    const { api, adapter, signed, fetched } = depotAdapter();
+    const { verdict } = await drain(adapter.apply(TARGET, supplied(OBJECT)));
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.servedPaths(PROJECT)).toEqual(['assets/app.css', 'index.html']);
+    // Signed with the federated identity rather than a stored credential
+    // (§13), and the object fetched with the capability that signature is —
+    // neither of this adapter's two bearers was what read it.
+    expect(signed).toHaveLength(1);
+    expect(fetched).toHaveLength(1);
+    expect(fetched[0]).toContain('/bluenose-spindrift-source/abc123.tgz?');
+    expect(fetched[0]).toContain('X-Goog-Signature=01fe');
+  });
+
+  test('a bundle nothing can fetch says that, rather than blaming a registry', async () => {
+    // An installation with no depot stages an upload on the web pod's own
+    // disk. That is unfetchable, and it used to be reported as an artifact
+    // homed on a registry this identity cannot read — a true sentence about a
+    // different problem, which sends the operator to IAM.
+    const { adapter } = depotAdapter();
+    const { verdict } = await drain(
+      adapter.apply(TARGET, supplied('upload://abc123')),
+    );
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+      expect(blameFor(verdict.reason)).toBe('platform');
+      expect(verdict.detail).toContain('upload://abc123');
+      expect(verdict.detail).not.toContain('registry');
+    }
+  });
+});
+
 describe('§9: Vercel serves Public only', () => {
   test('anything but a public reach is refused, as core’s bug', async () => {
     for (const reach of ['none', 'private'] as const) {

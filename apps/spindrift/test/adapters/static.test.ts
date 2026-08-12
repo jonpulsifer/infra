@@ -504,6 +504,28 @@ describe('a supplied upload is fetched out of the depot', () => {
       expect(verdict.detail).not.toContain('registry');
     }
   });
+
+  test('an installation that federates nothing refuses rather than crashes', async () => {
+    // The construction every adapter site that omits `federation` produces —
+    // the conformance harness is one. A depot object is unreadable without a
+    // signature, and the refusal says that about the object rather than
+    // throwing out of `apply` as an INTERNAL nobody can act on.
+    const api = new FakeHosting({
+      bundle: { origin: 'https://storage.googleapis.com', bytes: SITE },
+    });
+    const adapter = new StaticDeployAdapter({
+      token: api.token,
+      fetch: api.fetch,
+    });
+    const { verdict } = await drain(adapter.apply(TARGET, supplied(OBJECT)));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+      expect(verdict.detail).toContain(OBJECT);
+      expect(verdict.detail).toContain('federation');
+    }
+  });
 });
 
 describe('§9: the vanity name is one record on the serving site', () => {
