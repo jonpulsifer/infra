@@ -417,6 +417,32 @@
   .stat--cau b { color: var(--caution); }
   .stat--ink b { color: var(--ink); }
 
+  /* measurement table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table.bench {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 34rem;
+    font-size: clamp(0.85rem, 0.8rem + 0.3vw, 1rem);
+  }
+  table.bench th, table.bench td {
+    text-align: left;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  table.bench thead th {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  table.bench tbody tr:last-child th,
+  table.bench tbody tr:last-child td { border-bottom: 0; }
+  table.bench tbody th { font-weight: 500; color: var(--ink-2); }
+  table.bench td { font-variant-numeric: tabular-nums; }
+
   /* timeline */
   .log {
     display: grid;
@@ -845,7 +871,7 @@
         <rect class="d-box" x="404" y="100" width="210" height="58" rx="6"/>
         <text class="d-t b" x="420" y="122">Cloud builder</text>
         <text class="d-s" x="420" y="142">Cloud Build</text>
-        <text class="d-lab" x="598" y="122" text-anchor="end">SLSA L2</text>
+        <text class="d-lab" x="598" y="122" text-anchor="end">SLSA L3</text>
 
         <rect class="d-box" x="404" y="170" width="210" height="58" rx="6"/>
         <text class="d-t b" x="420" y="192">Pool — a bosun skiff</text>
@@ -943,8 +969,8 @@
         </div>
         <div class="card card--flag">
           <span class="tag t-acc">Why it earns its place</span>
-          <h4>A hosted outage stops being fatal</h4>
-          <p>Two of the three original routes are somebody else's service. The pool is the one that keeps building when they are down — and it clears the same <span class="m">SLSA L2</span> bar, verified against the build hull's own builder identity before core signs the digest.</p>
+          <h4>Proven, and honestly unserved</h4>
+          <p>Two of the three original routes are somebody else's service; this one owes them nothing, and it clears the same <span class="m">SLSA L2</span> bar — verified against the build hull's own builder identity before core signs the digest. No host serves the class today: the route stays declared and ranked last, so bringing a host back serves it with no configuration change, and a build that falls through to it times out at the build budget rather than hanging.</p>
         </div>
       </div>
       <p class="verbatim">claim · heartbeat · result   →   the endpoint just happens to be this installation's own database</p>
@@ -965,7 +991,7 @@
     </div>
     <div style="display:flex;flex-direction:column;gap:1.1rem">
       <div class="stats">
-        <div class="stat"><b>2,065</b><span>tests green</span></div>
+        <div class="stat"><b>2,188</b><span>tests green</span></div>
         <div class="stat"><b>5</b><span>clauses proven live</span></div>
         <div class="stat"><b>3/4</b><span>Targets healthy on first probe</span></div>
         <div class="stat stat--cau"><b>4</b><span>defects only a live install found</span></div>
@@ -973,7 +999,7 @@
       <ul class="ticks">
         <li>Two Terraform roots that each need the other applied first — the runbook stated one direction.</li>
         <li>A derived string carries no dependency edge, so grants ran before the account they named existed.</li>
-        <li>Six prerequisite rows failing with one byte-identical 401.</li>
+        <li>Six prerequisite rows failing with one byte-identical certificate-trust sentence.</li>
         <li>A read on a URL the API does not serve, which made a second deploy collide with the site the first one created — so a static App could be published exactly once.</li>
       </ul>
       <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">That last one is fixed, and <b>this revision is the proof</b>: these words reached you as a second deploy onto the site the first one made.</p>
