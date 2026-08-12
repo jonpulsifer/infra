@@ -520,13 +520,23 @@ export class StaticDeployAdapter implements DeployAdapter {
       if (after.ok && after.value !== undefined) {
         return { ok: true, value: after.value };
       }
-      return {
-        ok: false,
-        failure: {
-          ...created,
-          message: `the site id ${site} is taken and is not in this project — a site id is reserved permanently once used, including after its site is deleted, so this one is spent and cannot be reclaimed. Rename the App or the Component to deploy under a different name.`,
-        },
-      };
+      // Only a read-back that came back and said *not here* is evidence of
+      // that, and `CloudHttp` exists precisely so this call can tell the three
+      // apart: "this project is not there" is a `404`, "this project refuses
+      // me" and "the service is off" are not, and neither of the latter two
+      // knows anything about the name. Telling an operator to rename the App
+      // because a socket died would spend a second id to route around a blip,
+      // so a read-back that did not answer keeps the API's own report.
+      if (!after.ok && after.kind === 'status' && after.status === 404) {
+        return {
+          ok: false,
+          failure: {
+            ...created,
+            message: `the site id ${site} is taken and is not in this project — a site id is reserved permanently once used, including after its site is deleted, so this one is spent and cannot be reclaimed. Rename the App or the Component to deploy under a different name.`,
+          },
+        };
+      }
+      return { ok: false, failure: created };
     }
     if (!created.ok) return { ok: false, failure: created };
     return { ok: true, value: created.value ?? {} };

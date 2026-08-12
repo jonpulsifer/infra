@@ -280,6 +280,35 @@ describe('the release is five steps, in the product’s order', () => {
       expect(verdict.detail).toContain('cannot be reclaimed');
     }
   });
+
+  test('a 409 whose read-back never answered is not called spent', async () => {
+    // Permanence is a claim about the name, and the only evidence for it is a
+    // read-back that came back and said the site is not here. A read-back that
+    // fell over says nothing about the name — and this sentence is the one
+    // that sends an operator to rename the App, which spends a second id.
+    const { api } = adapterFor({ reserved: ['shop-site'] });
+    let reads = 0;
+    const adapter = new StaticDeployAdapter({
+      token: api.token,
+      fetch: (request) => {
+        const isSiteRead =
+          request.method === 'GET' &&
+          new URL(request.url).pathname.endsWith('/sites/shop-site');
+        if (isSiteRead && ++reads > 1) {
+          return Promise.resolve(new Response('', { status: 503 }));
+        }
+        return api.fetch(request);
+      },
+    });
+
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.detail).not.toContain('reserved permanently');
+      expect(verdict.detail).toContain('already exists');
+    }
+  });
 });
 
 describe('a built files artifact is pulled out of the registry', () => {
