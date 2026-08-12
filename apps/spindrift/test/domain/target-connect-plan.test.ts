@@ -36,8 +36,11 @@ const BASE: ClusterConnectChoices = {
   vessel: 'metal',
   apiServer: 'https://cluster.invalid:6443',
   namespace: 'apps',
-  deliveryNamespace: 'apps',
-  sourceRef: { name: 'charts', namespace: 'delivery' },
+  delivery: {
+    flavour: 'flux-helmrelease',
+    namespace: 'apps',
+    sourceRef: { name: 'charts', namespace: 'delivery' },
+  },
   gateway: null,
   externalAuth: null,
   secretStore: null,
@@ -150,6 +153,36 @@ describe('a cluster connect plan', () => {
     expect(parsed.data.vessel).toBe('metal');
     expect(parsed.data.reaches).toEqual(plan.reaches);
     expect(parsed.data.connection?.chartValues).toEqual(plan.chartValues);
+  });
+
+  test('declares an Argo Target the manifest’s own way', () => {
+    // §6 puts the flavour on the Target, so the screen has to be able to
+    // produce either one — and the arm that is not the default is the one that
+    // can drift into a shape the manifest would refuse.
+    const plan = clusterConnectPlan({
+      ...BLENDED,
+      delivery: {
+        flavour: 'argo-application',
+        namespace: 'argocd',
+        project: 'default',
+        repoUrl: 'https://git.invalid/charts.git',
+        revision: 'main',
+        server: 'https://kubernetes.default.svc',
+      },
+    });
+    const parsed = targetSeedSchema.safeParse(targetSeedOf(plan));
+
+    if (!parsed.success) throw parsed.error;
+    if (parsed.data.adapter !== 'kubernetes') {
+      throw new Error(`declared a ${parsed.data.adapter} Target`);
+    }
+    expect(parsed.data.connection?.delivery).toEqual(plan.delivery);
+    // The rest of the plan is flavour-blind, which is what makes the operator a
+    // choice rather than a second screen.
+    expect(plan.reaches).toEqual(['none', 'private', 'public']);
+    expect(platformOf(plan).networkPolicy).toEqual({
+      allowedNamespaces: ['edge', 'auth'],
+    });
   });
 
   test('declares the boundary the same act connects', () => {

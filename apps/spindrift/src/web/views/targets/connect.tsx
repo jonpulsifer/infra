@@ -47,6 +47,11 @@ import {
 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import {
+  KUBERNETES_DELIVERY_FLAVOURS,
+  type KubernetesDelivery,
+  type KubernetesDeliveryFlavour,
+} from '../../../domain/target.ts';
+import {
   type ClusterConnectChoices,
   clusterConnectPlan,
   targetSeedOf,
@@ -335,6 +340,18 @@ function ClusterComponents({
   const [source, setSource] = useState(
     refKey(probe.chartSources, proposal.sourceRef),
   );
+  const [flavour, setFlavour] = useState<KubernetesDeliveryFlavour>(
+    pickFlavour(probe.deliveryFlavours, proposal.deliveryFlavour),
+  );
+  // Argo's half. None of it is readable: `repoURL` and `targetRevision` are
+  // where *this installation's* chart lives, which the cluster has no opinion
+  // about, and a project is a name Argo would answer for only if it were asked
+  // about one that already exists. So the two that have a conventional answer
+  // start at it and the two that do not start empty and gate the button.
+  const [project, setProject] = useState('default');
+  const [repoUrl, setRepoUrl] = useState('');
+  const [revision, setRevision] = useState('');
+  const [server, setServer] = useState('https://kubernetes.default.svc');
   const [gatewayName, setGatewayName] = useState(
     refKey(probe.gateways, undefined),
   );
@@ -374,12 +391,27 @@ function ClusterComponents({
     probe.gateways.find((entry) => refOf(entry) === gatewayName)?.address ??
     null;
 
+  const delivery: KubernetesDelivery =
+    flavour === 'argo-application'
+      ? {
+          flavour,
+          namespace: deliveryNamespace,
+          project: project.trim(),
+          repoUrl: repoUrl.trim(),
+          revision: revision.trim(),
+          server: server.trim(),
+        }
+      : {
+          flavour: 'flux-helmrelease',
+          namespace: deliveryNamespace,
+          sourceRef: chosenSource ?? { name: '', namespace: '' },
+        };
+
   const choices: ClusterConnectChoices = {
     vessel,
     apiServer,
     namespace,
-    deliveryNamespace,
-    sourceRef: chosenSource ?? { name: '', namespace: '' },
+    delivery,
     gateway:
       gatewayOn && chosenGateway !== null
         ? {
@@ -402,51 +434,108 @@ function ClusterComponents({
   };
   const plan = clusterConnectPlan(choices);
 
-  const servesFlux = probe.deliveryFlavours.includes('flux-helmrelease');
+  const serves = probe.deliveryFlavours.includes(delivery.flavour);
+  const kind =
+    delivery.flavour === 'argo-application' ? 'Application' : 'HelmRelease';
   const ready =
     vessel !== '' &&
     namespace !== '' &&
     deliveryNamespace !== '' &&
-    chosenSource !== null;
+    (delivery.flavour === 'argo-application'
+      ? delivery.project !== '' &&
+        delivery.repoUrl !== '' &&
+        delivery.revision !== '' &&
+        delivery.server !== ''
+      : chosenSource !== null);
 
   return (
     <div className="flex flex-col gap-3 border-t border-border-soft pt-4">
-      {!servesFlux ? (
+      {!serves ? (
         <Notice tone="warning">
-          This cluster serves no <span className="font-mono">HelmRelease</span>,
-          so a Target here has nothing to deliver through. Connecting still
-          records it — the checklist will say the same thing, and keep saying it
-          until Flux is installed.
+          This cluster serves no <span className="font-mono">{kind}</span>, so a
+          Target delivered that way has nothing to deliver through. Connecting
+          still records it — the checklist will say the same thing, and keep
+          saying it until the operator is installed.
         </Notice>
       ) : null}
 
       <Component
         icon={<Waypoints aria-hidden="true" className="size-4" />}
         title="Delivery"
-        because="Flux applies the App chart. Spindrift writes the HelmRelease through the API."
+        because="The GitOps operator applies the App chart. Spindrift writes its object through the API — never manifests to a repository (§6)."
         required
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Choice
+            name="delivery-flavour"
+            label="Operator"
+            value={delivery.flavour}
+            onChange={(value) => setFlavour(value as KubernetesDeliveryFlavour)}
+            // Both, always, and never only what the probe found: a cluster
+            // whose Argo CRDs are applied but not yet established reads as
+            // serving neither, and a picker offering neither is a cluster that
+            // cannot be connected until somebody else's reconcile finishes.
+            // What was read shows up as the notice above instead.
+            options={[...KUBERNETES_DELIVERY_FLAVOURS]}
+            hint={
+              probe.deliveryFlavours.length === 0
+                ? 'Neither operator was readable here. Pick the one this cluster will run.'
+                : `Read off this cluster: ${probe.deliveryFlavours.join(', ')}.`
+            }
+          />
+          <Choice
             name="delivery-namespace"
-            label="HelmRelease namespace"
+            label={`${kind} namespace`}
             value={deliveryNamespace}
             onChange={setDeliveryNamespace}
             options={namespaces}
             hint="Read off this cluster."
           />
-          <Choice
-            name="chart-source"
-            label="Chart source"
-            value={source}
-            onChange={setSource}
-            options={probe.chartSources.map(refOf)}
-            hint={
-              probe.chartSources.length === 0
-                ? 'No source of the kind this installation’s chart needs was readable here — the App chart has nowhere to come from.'
-                : 'The Flux source the App chart is fetched from.'
-            }
-          />
+          {delivery.flavour === 'argo-application' ? (
+            <>
+              <Field
+                name="argo-project"
+                label="Project"
+                value={project}
+                onChange={(event) => setProject(event.target.value)}
+                hint="The Argo project the Application belongs to."
+              />
+              <Field
+                name="argo-server"
+                label="Destination cluster"
+                value={server}
+                onChange={(event) => setServer(event.target.value)}
+                hint="In Argo’s vocabulary. The in-cluster name, because the Application is created in the cluster it deploys to."
+              />
+              <Field
+                name="argo-repo-url"
+                label="Chart repository"
+                value={repoUrl}
+                onChange={(event) => setRepoUrl(event.target.value)}
+                hint="Where the App chart is fetched from. Argo resolves it with credentials Spindrift never sees, so nothing here was read."
+              />
+              <Field
+                name="argo-revision"
+                label="Revision"
+                value={revision}
+                onChange={(event) => setRevision(event.target.value)}
+                hint="The branch, tag, or version the chart is taken at."
+              />
+            </>
+          ) : (
+            <Choice
+              name="chart-source"
+              label="Chart source"
+              value={source}
+              onChange={setSource}
+              options={probe.chartSources.map(refOf)}
+              hint={
+                probe.chartSources.length === 0
+                  ? 'No source of the kind this installation’s chart needs was readable here — the App chart has nowhere to come from.'
+                  : 'The Flux source the App chart is fetched from.'
+              }
+            />
+          )}
         </div>
       </Component>
 
@@ -927,6 +1016,23 @@ function refKey(
         );
   const chosen = match ?? entries[0];
   return chosen === undefined ? '' : refOf(chosen);
+}
+
+/**
+ * Which operator to start on.
+ *
+ * What a working Target of this installation already uses, when this cluster
+ * serves it — that is the answer for the second cluster of a fleet, and the
+ * whole point of carrying a proposal. Otherwise whatever this cluster was found
+ * serving, and Flux when it was found serving neither: an unreadable cluster
+ * gets a pick that is editable rather than a blank one that gates the button.
+ */
+function pickFlavour(
+  served: readonly KubernetesDeliveryFlavour[],
+  proposed: KubernetesDeliveryFlavour | undefined,
+): KubernetesDeliveryFlavour {
+  if (proposed !== undefined && served.includes(proposed)) return proposed;
+  return served[0] ?? proposed ?? 'flux-helmrelease';
 }
 
 /** The preferred option when this cluster has it, otherwise the first one. */
