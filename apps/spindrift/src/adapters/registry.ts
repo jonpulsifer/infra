@@ -263,6 +263,12 @@ export function createAdapterRegistry(
     }),
     static: new StaticDeployAdapter({
       token: cloud,
+      // The one adapter that also reads the source depot: a supplied upload
+      // was never built, so its bytes are a `gs://` object rather than a
+      // registry reference, and fetching one takes a signature rather than a
+      // bearer. The federation itself, because signing happens *before*
+      // impersonation — `storage/signed-url.ts` says why.
+      federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
     // The one adapter with two identities: the platform is driven with the
