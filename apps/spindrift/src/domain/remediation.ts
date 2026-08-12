@@ -252,7 +252,7 @@ const NOT_TERRAFORM: Partial<Record<AnyPrerequisite, string>> = {
   DELIVERY_OPERATOR:
     'a delivery operator is installed into the cluster itself, which is the GitOps tree rather than Terraform',
   CHART_SOURCE:
-    'a chart source is an object inside the cluster, created by whatever reconciles that cluster rather than by Terraform',
+    'a chart source is an object inside the cluster or the repository recorded on the Target itself, and Terraform declares neither',
   WRITABLE_STORE:
     'a cluster’s writable store is an object inside the cluster, created by whatever reconciles that cluster rather than by Terraform',
   CHART_CONTRACT:

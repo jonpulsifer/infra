@@ -378,6 +378,10 @@ describe('the rows Terraform does not clear', () => {
       if (change.kind !== 'none') continue;
       expect(change.reason).toContain('Terraform');
       expect(change.reason).toContain('cluster');
+      // An Argo Target's chart source is the repository recorded on the Target
+      // rather than an object any reconciler creates, so a reason naming only
+      // the cluster object sends that operator to a tree with nothing in it.
+      if (name === 'CHART_SOURCE') expect(change.reason).toContain('Target');
     }
   });
 });
