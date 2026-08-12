@@ -545,6 +545,46 @@ export interface DatastoreView {
   */
 }
 
+/**
+ * One Datastore as the global ledger lists it — every one this installation
+ * holds, not one App's attached subset.
+ *
+ * `attachedTo` differs from {@link DatastoreView}'s field of the same name on
+ * purpose: the workspace's row names the App's first Component, because that
+ * screen is already a Component-shaped list and has nowhere else to point.
+ * This ledger has no Component selected — it has no App selected — so
+ * `attachedTo` is the App's own name, which is what §11 actually attaches a
+ * Datastore to.
+ *
+ * `targetId` and `appId` travel here and not on `DatastoreView` because this
+ * is the one screen that can Detach or Destroy a Datastore without an App
+ * workspace already open to supply them.
+ */
+export interface DatastoreListItem {
+  readonly id: string;
+  readonly name: string;
+  readonly engine: 'postgres' | 'valkey';
+  readonly provenance: 'managed' | 'external';
+  /** The App it is attached to, by name, or `null` while it is unattached. */
+  readonly attachedTo: string | null;
+  readonly target: string;
+  readonly targetId: string;
+  readonly appId: string | null;
+  readonly phase: DeployPhase;
+  /**
+   * Whether `provision` ever returned a handle (§11).
+   *
+   * `false` covers both an `external` Datastore, which nothing ever
+   * provisioned, and a `managed` one whose provisioning attempt has not
+   * (yet, or ever) returned — the same two cases `destroyDatastore` collapses
+   * before deciding whether it owes the adapter a call.
+   */
+  readonly provisioned: boolean;
+  readonly detail?: string;
+  readonly when: string;
+  readonly at: string;
+}
+
 /** One Component as the workspace lists it. */
 export interface ComponentView {
   /**

@@ -122,7 +122,13 @@ function scalar(value: string): string {
  * not about what this scope is. Writing it into the repository would make a
  * reason somebody read once into a value the next detection run has to honour.
  */
-export function serializeSpindriftFile(proposal: DetectionProposal): string {
+export function serializeSpindriftFile(
+  // Narrowed to the three fields it reads, so the creation screen can render
+  // the file a scope is about to get from what `inspectRepository` answered,
+  // rather than reimplementing this emitter in the browser. A preview composed
+  // by a second copy of the writer is a preview that drifts from it.
+  proposal: Pick<DetectionProposal, 'kind' | 'build' | 'watchPaths'>,
+): string {
   const lines = [
     '# Managed by Spindrift, and yours to edit.',
     '#',

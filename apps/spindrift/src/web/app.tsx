@@ -69,6 +69,10 @@ import { Gate } from './views/auth/gate.tsx';
 import { InstallationSettings } from './views/auth/installation.tsx';
 import { Onboarding } from './views/auth/onboarding.tsx';
 import { IdentitySettings } from './views/auth/settings.tsx';
+import {
+  DatastoreLedger,
+  type DatastoreAct as DatastoreLedgerAct,
+} from './views/operations/datastores.tsx';
 import { DeployLedger } from './views/operations/deploys.tsx';
 import { Overview } from './views/operations/overview.tsx';
 import {
@@ -402,6 +406,11 @@ export function Screen({
     return <SourcesScreen onNavigate={onNavigate} />;
   if (path.startsWith('/artifacts'))
     return <ArtifactsScreen onNavigate={onNavigate} />;
+  // Must land before the catch-all below, which otherwise reads any
+  // unmatched single segment as an App name — `/datastores` would render a
+  // `WorkspaceScreen` for an App called "datastores" that does not exist.
+  if (path.startsWith('/datastores'))
+    return <DatastoresScreen onNavigate={onNavigate} />;
   // The one screen keyed on the route rather than on the object in it, because
   // it is the one screen that *names* its object partway through: a draft
   // starts, the path is rewritten to `/apps/new/<id>`, and a key reading that
@@ -2472,6 +2481,99 @@ function SourcesScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
       sources={state.result.sources}
       limit={state.result.limit}
       onNavigate={onNavigate}
+    />
+  );
+}
+
+/**
+ * The top-level Datastores ledger — every store this installation holds,
+ * unscoped to any one App's workspace (§11's "top-level and attached, not a
+ * field", read as a screen).
+ *
+ * Detach and Destroy are wired here rather than left to `DatastoreLedger`
+ * calling `command` itself, for the same reason `WorkspaceScreen`'s Datastore
+ * handlers are: the reload after a successful act belongs to whoever owns
+ * the list being reloaded, and only this screen holds that state.
+ */
+function DatastoresScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'error'; message: string }
+    | { type: 'success'; result: OutputOf<'listDatastores'> }
+  >({ type: 'loading' });
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    command('listDatastores', {})
+      .then((result) => {
+        if (!live) return;
+        setState(
+          result.ok
+            ? { type: 'success', result: result.value }
+            : { type: 'error', message: result.failure.message },
+        );
+      })
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [reloadToken]);
+
+  const handleDetach: DatastoreLedgerAct = async (datastoreId) => {
+    try {
+      const result = await command('detachDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Detaching failed',
+      };
+    }
+  };
+
+  const handleDestroy: DatastoreLedgerAct = async (datastoreId) => {
+    try {
+      const result = await command('destroyDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Destroying failed',
+      };
+    }
+  };
+
+  if (state.type === 'loading') return <LedgerSkeleton />;
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Datastores"
+        message={state.message}
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
+    );
+  }
+  return (
+    <DatastoreLedger
+      datastores={state.result.datastores}
+      onNavigate={onNavigate}
+      onDetach={handleDetach}
+      onDestroy={handleDestroy}
     />
   );
 }

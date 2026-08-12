@@ -65,11 +65,7 @@ import type {
 } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '../../ui/collapsible.tsx';
+import { Declaration as SharedDeclaration } from '../../ui/declaration.tsx';
 import { Field, Label } from '../../ui/field.tsx';
 import { cn } from '../../ui/utils.ts';
 
@@ -714,34 +710,27 @@ function Declaration({
 }: {
   plan: ReturnType<typeof clusterConnectPlan>;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger className="flex w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-        Declaration
-        <span className="ml-auto font-mono">
-          {open ? 'hide' : 'manifest entry'}
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-2 flex flex-col gap-1.5">
-        <p className="text-[11px] text-subtle">
+    <SharedDeclaration
+      label="manifest entry"
+      note={
+        <>
           The same connection, under <span className="font-mono">vessels:</span>{' '}
           and <span className="font-mono">targets:</span> in the installation
           manifest. A declaration seeds an installation that has none; it does
           not overwrite one that is already configured.
-        </p>
-        {/* Both arrays, because one connect act names a boundary and a surface
-            on it. JSON, which is valid YAML — an emitter would be a thing to
-            maintain for output nobody parses back. */}
-        <pre className="overflow-x-auto rounded-md border border-border bg-background px-3 py-2 font-mono text-[11px]">
-          {JSON.stringify(
-            { vessels: [vesselSeedOf(plan)], targets: [targetSeedOf(plan)] },
-            null,
-            2,
-          )}
-        </pre>
-      </CollapsibleContent>
-    </Collapsible>
+        </>
+      }
+      // Both arrays, because one connect act names a boundary and a surface on
+      // it. The two seeds come from `domain/target-onboarding.ts`, which is
+      // what the server connects with — so this is the act, not a rendering of
+      // what somebody hopes the act is.
+      text={JSON.stringify(
+        { vessels: [vesselSeedOf(plan)], targets: [targetSeedOf(plan)] },
+        null,
+        2,
+      )}
+    />
   );
 }
 

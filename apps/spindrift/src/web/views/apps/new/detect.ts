@@ -16,7 +16,9 @@
  *   candidate moves the path out from under the operator, and leaving the old
  *   sentence standing describes a directory nobody named.
  */
+
 import type { Draft, DraftAction } from '../../../../domain/creation-draft.ts';
+import { serializeSpindriftFile } from '../../../../integrations/github/config-pr.ts';
 import type { InputOf, OutputOf } from '../../../client.ts';
 
 /** One directory `inspectRepository` had something to say about. */
@@ -36,6 +38,42 @@ export function inspection(
   scope?: string,
 ): InputOf<'inspectRepository'> {
   return scope === undefined ? { fullName } : { fullName, scopes: [scope] };
+}
+
+/**
+ * The `spindrift.yaml` this scope will get, as the writer would write it.
+ *
+ * Deploy is where a repository GitHub merely grants gets connected, and
+ * connecting commits one of these per scope in the configuration pull request
+ * (§15). Rendering it here is the difference between an operator agreeing to
+ * "Deploy" and agreeing to a file landing in their repository — and it goes
+ * through `serializeSpindriftFile`, the same emitter the commit uses, because a
+ * preview composed by a second copy of the writer is a preview that drifts from
+ * it.
+ *
+ * `null` for a scope detection could make nothing of: there is no proposal, so
+ * there is no file, and §5's assertion path writes one only once the operator
+ * has said what it should contain.
+ */
+export function spindriftFileFor(
+  scope: InspectedScope | undefined,
+): string | null {
+  if (scope === undefined || scope.outcome !== 'detected') return null;
+  return serializeSpindriftFile({
+    kind: scope.kind,
+    build:
+      scope.frontend === 'dockerfile'
+        ? {
+            frontend: 'dockerfile',
+            dockerfile: scope.dockerfile ?? 'Dockerfile',
+          }
+        : {
+            frontend: 'railpack',
+            buildCommand: scope.buildCommand,
+            outputDirectory: scope.outputDirectory,
+          },
+    watchPaths: scope.watchPaths,
+  });
 }
 
 /** A fresh answer about one directory, in place, with the rest left alone. */

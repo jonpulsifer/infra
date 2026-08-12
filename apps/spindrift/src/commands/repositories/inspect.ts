@@ -71,6 +71,15 @@ export type InspectedScope =
       readonly frontend: 'railpack' | 'dockerfile';
       /** Set only for the `dockerfile` frontend. */
       readonly dockerfile: string | null;
+      /**
+       * The zero-config build command, when the ladder proposed one.
+       *
+       * Carried for the same reason `outputDirectory` is: together they are the
+       * whole of a `railpack` build, and the creation screen writes the
+       * `spindrift.yaml` this scope will get *out of this view*. A field left
+       * out here is a field the preview would have to invent.
+       */
+      readonly buildCommand: string | null;
       /** Where a static rendering would lift files from, when there is one. */
       readonly outputDirectory: string | null;
       readonly watchPaths: readonly string[];
@@ -120,6 +129,10 @@ function viewOf(scope: string, proposal: DetectionProposal): InspectedScope {
     dockerfile:
       proposal.build.frontend === 'dockerfile'
         ? proposal.build.dockerfile
+        : null,
+    buildCommand:
+      proposal.build.frontend === 'railpack'
+        ? proposal.build.buildCommand
         : null,
     outputDirectory:
       proposal.build.frontend === 'railpack'

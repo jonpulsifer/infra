@@ -65,6 +65,7 @@ const detected = (
   reason,
   frontend: 'railpack',
   dockerfile: null,
+  buildCommand: null,
   outputDirectory: null,
   watchPaths: [scope],
   configured: false,
@@ -350,7 +351,13 @@ describe('a draft somebody already answered', () => {
 
     // It still asks — the directories stay on screen to choose from.
     expect(called).toContain('inspectRepository');
-    expect(screen.text()).toContain('api-worker · job');
+    // The typed Component name is on the Name row and the corrected kind is on
+    // the Component row: two answers somebody gave, both still theirs after a
+    // read that proposed neither.
+    const text = screen.text();
+    expect(text).toContain('almanac · api-worker');
+    expect(text).toContain('Componentjob');
+    expect(text).toContain('corrected');
     // And it wrote nothing, because it decided nothing.
     expect(saved).toEqual([]);
 

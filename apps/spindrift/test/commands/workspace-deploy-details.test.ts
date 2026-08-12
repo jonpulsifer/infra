@@ -664,6 +664,85 @@ describe('the workspace as a way into the system', () => {
     expect(result.value.workspace.activity.length).toBe(10);
   });
 
+  test('one build’s step transitions do not evict every other checkpoint', async () => {
+    // What the screen actually showed: ten rows, all reading "Build 23
+    // succeeded", each distinguished only by a grey subtitle naming an Actions
+    // step. The Actions poller writes one status event per (job, step, state),
+    // so a single build produced twenty of them and the limit spent itself on
+    // one attempt — the sequence this timeline exists to show was the thing it
+    // could no longer show. A status event carrying a `resource` is one step
+    // inside an attempt, not a state of the attempt; the Build and Deploy
+    // screens are where those belong, and they select on the same column from
+    // the other side.
+    const ctx = context();
+    const { appName, appId, componentId, target } = await scaffold(ctx, {
+      prefix: 'stepstorm',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'f202020',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'e'.repeat(64)}`,
+        status: 'SUCCEEDED',
+        runner: 'hosted runner',
+      })
+      .returning();
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        desired: aDesiredDocument(),
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'LIVE',
+      })
+      .returning();
+
+    const attempt = {
+      appId,
+      componentId,
+      attemptKind: 'build' as const,
+      buildId: build!.id,
+      eventType: 'status' as const,
+    };
+    await ctx.db.insert(attemptEvents).values([
+      { ...attempt, phase: 'SUCCEEDED' },
+      ...Array.from({ length: 20 }, (_unused, index) => ({
+        ...attempt,
+        phase: index % 2 === 0 ? 'RUNNING' : 'SUCCEEDED',
+        resource: `build / build / step ${index}`,
+      })),
+      {
+        appId,
+        componentId,
+        attemptKind: 'deploy' as const,
+        deployId: deploy!.id,
+        eventType: 'status' as const,
+        phase: 'LIVE',
+      },
+    ]);
+
+    const result = await getAppWorkspace({ name: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const activity = result.value.workspace.activity;
+    // Two attempts, one row each — not twenty rows of one of them.
+    expect(activity).toHaveLength(2);
+    expect(activity.map((entry) => entry.title)).toEqual([
+      `Deploy ${deploy!.id} live`,
+      `Build ${build!.id} succeeded`,
+    ]);
+    // And a finished Build reads as having gone right, which it did not when
+    // only a Deploy's LIVE earned the green marker.
+    expect(activity.every((entry) => entry.status === 'ok')).toBe(true);
+    expect(activity.some((entry) => entry.detail.includes('step'))).toBe(false);
+  });
+
   test('carries status checkpoints only, each with an attempt to open', async () => {
     // `attempt_events` constrains every row to exactly one attempt, so every
     // entry has somewhere to go. An entry that led nowhere would be the one
