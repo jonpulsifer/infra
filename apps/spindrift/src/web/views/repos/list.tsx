@@ -866,6 +866,37 @@ function ConnectedRepositories({
                   <p className="text-sm">{repo.error}</p>
                 </div>
               ) : null}
+              {/* Connected, and still waiting on the one merge that makes any
+                  of it authoritative. The row is the durable place to say so:
+                  the banner above answers the press that opened it and is gone
+                  on the next load, and creating an App from the wizard opens
+                  this pull request without ever visiting this screen. */}
+              {repo.configPullRequest !== null ? (
+                <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+                  <AlertTriangle
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0 text-warning"
+                  />
+                  <p>
+                    Configuration pull request{' '}
+                    <a
+                      className="font-semibold underline underline-offset-2"
+                      href={githubUrl(
+                        repo.fullName,
+                        'pull',
+                        String(repo.configPullRequest),
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      #{repo.configPullRequest}
+                    </a>{' '}
+                    is open. Nothing in this repository is authoritative until
+                    it merges, and its builds run on the platform repository
+                    until then.
+                  </p>
+                </div>
+              ) : null}
               {/* Still connected, and the commit beside it is older than it
                   looks: listing refreshes every row, and one the host would
                   not answer about says so rather than passing for current. */}

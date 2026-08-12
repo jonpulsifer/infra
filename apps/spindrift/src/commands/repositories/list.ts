@@ -112,6 +112,7 @@ export const listRepositories: Command<
       lastReconciledSha: repo.authoritativeCommit ?? null,
       staleReason: staleReasons.get(repo.id) ?? null,
       appSubpaths,
+      configPullRequest: repo.configPullRequest ?? null,
     });
   }
 

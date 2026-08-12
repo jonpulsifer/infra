@@ -350,6 +350,13 @@ export async function reconcileRepository(
     };
   }
 
+  // Adopting a Spindrift file from the default branch is what the merge of the
+  // configuration pull request looks like from in here — no `pull_request`
+  // delivery is subscribed to, and none is needed, because the merge is only
+  // interesting for having put the file where this loop reads it. Clearing the
+  // number is what stops "merge your configuration PR" standing on a screen
+  // over a pull request that landed weeks ago.
+  const adopted = outcomes.some((outcome) => outcome.outcome === 'adopted');
   await context.db
     .update(repositories)
     .set({
@@ -357,6 +364,7 @@ export async function reconcileRepository(
       authoritativeCommit: head,
       reconciledAt: now,
       updatedAt: now,
+      ...(adopted ? { configPullRequest: null } : {}),
     })
     .where(eq(repositories.id, repository.id));
 

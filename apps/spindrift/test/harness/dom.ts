@@ -126,6 +126,23 @@ export class FakeNode {
   removeEventListener(): void {}
 
   /**
+   * Just enough of `HTMLSelectElement.options` to mount a `<select>`.
+   *
+   * React's `updateOptions` runs on every select as it is created — it reads
+   * `node.options` and walks it looking for the one whose `value` matches, so a
+   * select without that collection throws before the tree is ever on screen.
+   * Derived from `childNodes` rather than maintained beside them, so an option
+   * React inserts later is in the list without a second write path.
+   *
+   * Which option ends up marked `selected` is not modelled: nothing here
+   * renders a selection, and `textContent` — what these tests read — carries
+   * every option's label either way.
+   */
+  get options(): FakeNode[] {
+    return this.childNodes.filter((child) => child.tagName === 'OPTION');
+  }
+
+  /**
    * `commitMount` calls this directly on a mounted `input`/`select`/`button`
    * carrying `autoFocus`, so a tree with an autofocused control does not mount
    * without it. There is no focus in this shim — `activeElement` stays `null` —

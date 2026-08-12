@@ -85,9 +85,27 @@ export interface ConfigurationTransaction {
   readonly files: readonly ConfigurationFile[];
 }
 
+/** Anything outside this needs quoting for YAML to read it as written. */
+const PLAIN = /^[A-Za-z0-9][\w./-]*$/;
+
+/**
+ * What YAML resolves to a boolean, a null or a number rather than to a string.
+ *
+ * Plain by the shape test above and still not a string once parsed, which is
+ * the whole failure: a `buildCommand` of `true` is emitted bare, comes back
+ * from `parseSpindriftFile` as a boolean, and `buildSchema` refuses the
+ * document. One refused scope makes the repo loop reject the entire commit, so
+ * the repository stops advancing for every App on it until a human edits a file
+ * Spindrift wrote.
+ */
+const TYPED =
+  /^(?:true|false|null|~|[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)$/i;
+
 /** Quote a scalar only where YAML would otherwise read it as something else. */
 function scalar(value: string): string {
-  return /^[A-Za-z0-9][\w./-]*$/.test(value) ? value : JSON.stringify(value);
+  return PLAIN.test(value) && !TYPED.test(value)
+    ? value
+    : JSON.stringify(value);
 }
 
 /**

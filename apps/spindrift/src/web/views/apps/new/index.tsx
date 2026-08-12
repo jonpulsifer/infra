@@ -34,6 +34,8 @@ import type {
 import {
   appNameSchema,
   componentNameSchema,
+  OPENING_AUTH,
+  OPENING_REACH,
 } from '../../../../domain/creation-draft.ts';
 import {
   type ClientResult,
@@ -55,6 +57,8 @@ import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { Field } from '../../../ui/field.tsx';
+import { notify } from '../../../ui/toast.tsx';
+import { cn } from '../../../ui/utils.ts';
 import { deployDraft } from './deploy.ts';
 import {
   type InspectedScope,
@@ -162,7 +166,9 @@ function unreadRepository(
     {
       code: 'REPOSITORY_UNAVAILABLE',
       title: `Spindrift could not read ${draft.source.repo}.`,
-      remediation: `${trouble.message} Until it can be read, everything below Source is the draft's opening claim rather than anything found in the repository.`,
+      // The message itself is already on screen, as the Source row's reason.
+      // Repeating it here read as two separate problems with one repository.
+      remediation: `Until it can be read, everything below Source is the draft's opening claim rather than anything found in the repository.`,
     },
   ];
 }
@@ -176,6 +182,48 @@ function answeredScope(draft: Draft): boolean {
 function issueWith(schema: ZodType<string>, value: string): string | null {
   const parsed = schema.safeParse(value);
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? null);
+}
+
+/**
+ * What creating the App did to the repository, said once, on the way out.
+ *
+ * Deploy is the only place a repository GitHub merely grants gets connected,
+ * and connecting opens the one configuration pull request §15 makes
+ * authoritative on merge. `connectRepository` fails open on that pull request —
+ * the repository stays connected either way — so a silence here is the
+ * difference between "merge this" and "your builds will never run on your own
+ * repository", and neither was ever said on this screen.
+ */
+function reportConfigPullRequest(app: {
+  readonly configPullRequest: number | null;
+  readonly configPullRequestError: string | null;
+  readonly configRepository: string | null;
+}): void {
+  const { configPullRequest, configPullRequestError, configRepository } = app;
+  if (configRepository === null) return;
+  if (configPullRequest !== null) {
+    const url = `https://github.com/${configRepository}/pull/${configPullRequest}`;
+    notify({
+      tone: 'success',
+      title: `Configuration PR opened: ${configRepository}#${configPullRequest}`,
+      detail:
+        'Merging it puts the Spindrift file and the build workflow on the default branch. Until then nothing in this repository is authoritative, and its builds run on the platform repository.',
+      action: {
+        label: 'Review it',
+        onSelect: () => {
+          window.open(url, '_blank', 'noopener,noreferrer');
+        },
+      },
+    });
+    return;
+  }
+  if (configPullRequestError !== null) {
+    notify({
+      tone: 'destructive',
+      title: `${configRepository} is connected, but its configuration PR did not open`,
+      detail: `${configPullRequestError} Open it again from Repositories, or add the Spindrift file and the build workflow by hand.`,
+    });
+  }
 }
 
 /** A refusal, and what the operator was doing when it arrived. */
@@ -329,8 +377,17 @@ export function NewApp({
   ];
   const blockers = [
     ...localBlockers,
+    // Deduped on what the blocker *says*, not on its code. Both sides mint
+    // `SOURCE_UNAVAILABLE` about different facts — "nothing is chosen to deploy
+    // from this repository" here, "no authoritative commit ready to stage"
+    // there — and matching on the code alone hid the server's sentence behind
+    // the local one, so clearing the first revealed a second, unrelated
+    // problem that had been there all along.
     ...serverBlockers.filter(
-      (server) => !localBlockers.some((local) => local.code === server.code),
+      (server) =>
+        !localBlockers.some(
+          (local) => local.code === server.code && local.title === server.title,
+        ),
     ),
   ];
   const target = targets.find((option) => option.targetId === draft.targetId);
@@ -545,10 +602,17 @@ export function NewApp({
     });
   };
 
-  /** A settled subpath edit asks about the directory it now names. */
+  /**
+   * A settled subpath edit asks about the directory it now names.
+   *
+   * And is the point the typing counts as an answer — the flag rides on this
+   * dispatch rather than on every keystroke, so a half-typed path no longer
+   * clears the prerequisite that says nothing has been chosen yet.
+   */
   const settleSubpath = () => {
     const source = draftRef.current.source;
     if (source.kind !== 'repo' || source.repo === '' || !source.subpath) return;
+    dispatch({ type: 'subpath', subpath: source.subpath, settled: true });
     void inspect(source.repo, source.subpath);
   };
 
@@ -612,6 +676,12 @@ export function NewApp({
       setRefusal(null);
       setServerBlockers(outcome.result.draft.blockers);
       if (outcome.result.app === null) return;
+      // Said before the navigation, because after it this screen is gone and
+      // the pull request is the one thing creation did that is not on the App
+      // it navigates to. §15 makes merging it the act that connects the
+      // repository, so an App created with an unmentioned pull request is an
+      // App whose next Build runs on the wrong repository's minutes.
+      reportConfigPullRequest(outcome.result.app);
       onCreated?.({
         id: outcome.result.app.appId,
         name: outcome.result.app.name,
@@ -669,7 +739,13 @@ export function NewApp({
           why={
             readElsewhere && draft.source.kind === 'repo'
               ? `${draft.detection.reason} — read in ${draft.detection.scope}, and the root directory now names ${draft.source.subpath}.`
-              : draft.detection.reason
+              : draft.kind !== draft.detection.kind
+                ? // The badge says a correction happened; the reason underneath
+                  // was still detection's, so the row read `web · website` over
+                  // "the default is a long-running service" and flatly
+                  // contradicted the value beside it.
+                  `You chose ${draft.kind}. Detection read ${draft.detection.kind} — ${draft.detection.reason}`
+                : draft.detection.reason
           }
           tone={
             draft.kind === draft.detection.kind ? null : (
@@ -809,7 +885,17 @@ export function NewApp({
           }
         />
 
-        <Row label="Reach" value={draft.reach} why={REACH_NOTE[draft.reach]}>
+        {/*
+          `Row`'s whole claim is that a stated reason is what separates a
+          default from something somebody typed — and these two notes are
+          dictionary definitions of the value, identical whether the operator
+          chose it or the draft was born with it. Saying which is the reason.
+        */}
+        <Row
+          label="Reach"
+          value={draft.reach}
+          why={`${draft.reach === OPENING_REACH ? 'Default — ' : ''}${REACH_NOTE[draft.reach]}`}
+        >
           <div className="grid gap-2 sm:grid-cols-3">
             {REACHES.map((reach) => (
               <Choice
@@ -829,7 +915,11 @@ export function NewApp({
           refusal validation makes, stated by not asking.
         */}
         {draft.reach !== 'none' && (
-          <Row label="Auth" value={draft.auth} why={AUTH_NOTE[draft.auth]}>
+          <Row
+            label="Auth"
+            value={draft.auth}
+            why={`${draft.auth === OPENING_AUTH ? 'Default — ' : ''}${AUTH_NOTE[draft.auth]}`}
+          >
             <div className="grid gap-2 sm:grid-cols-2">
               {AUTHS.map((auth) => (
                 <Choice
@@ -919,7 +1009,17 @@ export function NewApp({
           onClick={start}
         >
           <Rocket aria-hidden="true" />
-          {submitting ? 'Creating…' : saving ? 'Saving…' : 'Deploy'}
+          {/* Every arm of the disable expression says which one it is. Reading
+              the repository was the one that did not, so the button went dead
+              on open — before anybody had touched it — under a label promising
+              it would create something. */}
+          {submitting
+            ? 'Creating…'
+            : saving
+              ? 'Saving…'
+              : detecting
+                ? 'Reading the repository…'
+                : 'Deploy'}
         </Button>
         <p className="text-xs text-muted-foreground">
           {blockers.length > 0
@@ -1174,15 +1274,20 @@ function SourceRow({
 }
 
 /**
- * Every directory the repository was read for, as a list to choose from.
+ * Every directory the repository was read for, as one control to choose from.
  *
  * §5 says discovery "proposes a list of candidate directories for a human to
  * choose from", and this is that list rather than a summary of it. A directory
  * detection knows how to build is selectable and wears the kind and the
  * sentence behind it; one it does not is here too, disabled, wearing what it
- * found instead — §3's grammar, which only works if the alternatives are
- * visible. An empty list means nothing has been read yet, which is a different
- * thing from a repository with nothing in it.
+ * found instead — §3's grammar, which only works if the alternatives stay
+ * readable. A `<select>` keeps them readable and keeps a monorepo's twenty
+ * directories from burying the rows below Source, which a grid of tiles did.
+ * The reason rides in each option's own label for the same reason: a dropdown
+ * has nowhere else to put a per-option sentence.
+ *
+ * An empty list means nothing has been read yet, which is a different thing
+ * from a repository with nothing in it.
  */
 function ScopeChooser({
   subpath,
@@ -1195,25 +1300,46 @@ function ScopeChooser({
 }) {
   if (scopes === null || scopes.length === 0) return null;
 
+  // The directory the draft names is what it is deploying, whatever detection
+  // made of it — story 32 keeps that escape hatch open, and Deploy is not
+  // blocked on it. So the control points at it rather than drawing it as the
+  // one row that cannot be chosen while it is the row in force. Only a subpath
+  // nothing has read at all leaves the placeholder standing.
+  const chosen = scopes.find((scope) => scope.scope === subpath);
+
   return (
     <div className="flex flex-col gap-2">
       <Eyebrow>Directories Spindrift read</Eyebrow>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <select
+        aria-label="Directories Spindrift read"
+        value={chosen?.scope ?? ''}
+        onChange={(event) => {
+          const picked = scopes.find(
+            (scope) => scope.scope === event.currentTarget.value,
+          );
+          if (picked !== undefined) onChoose(picked);
+        }}
+        className={cn(
+          'h-9 w-full rounded-md border border-border bg-card px-3',
+          'font-mono text-sm text-foreground',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
+        )}
+      >
+        <option value="" disabled>
+          {`Choose one of ${scopes.length} directories…`}
+        </option>
         {scopes.map((scope) => (
-          <Choice
+          <option
             key={scope.scope}
-            selected={scope.outcome === 'detected' && scope.scope === subpath}
-            disabled={scope.outcome !== 'detected'}
-            title={scope.scope}
-            note={
-              scope.outcome === 'detected'
-                ? `${scope.kind} — ${scope.reason}`
-                : scope.detail
-            }
-            onClick={() => onChoose(scope)}
-          />
+            value={scope.scope}
+            disabled={scope.outcome !== 'detected' && scope.scope !== subpath}
+          >
+            {scope.outcome === 'detected'
+              ? `${scope.scope} — ${scope.kind} — ${scope.reason}`
+              : `${scope.scope} — cannot build: ${scope.detail}`}
+          </option>
         ))}
-      </div>
+      </select>
       <p className="text-xs text-muted-foreground">
         Choosing one detects that directory and names the Component after it.
         Nothing is picked for you when there is more than one.
