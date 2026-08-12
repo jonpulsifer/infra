@@ -25,7 +25,10 @@
  * record that those workloads exist — and each entry says whether it keeps
  * *acting*, not merely sitting: a stranded service is inert, but a stranded
  * `kind: job` Component with a `schedule` bills on every tick, forever, in a
- * vessel project nobody is watching (`StrandedWorkload.firing`).
+ * vessel project nobody is watching (`StrandedWorkload.firing`). An entry also
+ * says whether the address it holds is spent for good, because on static
+ * hosting it is (`StrandedWorkload.nameSpent`) and that is not recoverable by
+ * going and tidying up afterwards.
  *
  * **It does reap the config store**, and that is not the same thing. §10's
  * store items are per-key material this App put there and nothing else will ever
@@ -89,6 +92,22 @@ export interface StrandedWorkload {
    * which Build is live.
    */
   readonly firing: boolean;
+  /**
+   * Whether the name this workload holds is spent permanently.
+   *
+   * Static hosting site ids are global and never given back: "Deleting a site
+   * is a permanent action. If you delete a site, Firebase doesn't maintain
+   * records of deployed files or deployment history, and the `SITE_ID` cannot
+   * be reactivated by you or anyone else." So the tidy-up this review sends
+   * the operator to do — remove it on the Target by hand — costs that name
+   * for good, and neither this App nor any other can ever deploy under it
+   * again. Said before the confirmation rather than after, because the row
+   * that names which address was spent is one of the rows about to go.
+   *
+   * Derived from the Target's adapter: it is a fact about the platform the
+   * workload sits on, not about the Deploy.
+   */
+  readonly nameSpent: boolean;
 }
 
 /** What deleting this App does, whether or not it has been done yet. */
@@ -244,6 +263,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
       target: targetLabel(deploy),
       url: deploy.url,
       firing: deploy.componentKind === 'job' && deploy.schedule !== null,
+      nameSpent: deploy.adapter === 'static',
     })),
     detachedDatastores: attached.map((datastore) => datastore.name),
     configKeys: pinned.map(

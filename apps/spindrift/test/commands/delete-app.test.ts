@@ -99,17 +99,11 @@ function context(registry: AdapterRegistry): CommandContext {
 }
 
 /** A connected Target to hang Deploys off, on its own named vessel. */
-async function seedTarget(name: string) {
-  const vessel = await insertVessel(database().db, 'kubernetes', { name });
+async function seedTarget(name: string, adapter: 'kubernetes' | 'static') {
+  const vessel = await insertVessel(database().db, adapter, { name });
   const [target] = await database()
     .db.insert(targets)
-    .values(
-      targetValues({
-        vesselId: vessel.id,
-        adapter: 'kubernetes',
-        health: 'healthy',
-      }),
-    )
+    .values(targetValues({ vesselId: vessel.id, adapter, health: 'healthy' }))
     .returning();
   return target!;
 }
@@ -183,7 +177,7 @@ async function seedApp(
 
 describe('the review writes nothing', () => {
   test('it names what would go, and everything is still there', async () => {
-    const target = await seedTarget('folly');
+    const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('review-me', { targetId: target.id });
     const { registry } = fakes();
 
@@ -251,7 +245,7 @@ describe('confirm deletes', () => {
   test('the restrict-referenced Build and Deploy go with it', async () => {
     // Without the ordered deletes this is the test that fails, and it fails as
     // a foreign-key violation from Postgres rather than as a wrong row count.
-    const target = await seedTarget('folly');
+    const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('has-history', {
       targetId: target.id,
       phase: 'FAILED',
@@ -286,7 +280,7 @@ describe('confirm deletes', () => {
 
 describe('a live workload is named and left running', () => {
   test('the review names it, and confirming never calls destroy', async () => {
-    const target = await seedTarget('folly');
+    const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('is-live', { targetId: target.id });
     const { registry, built } = fakes();
 
@@ -303,6 +297,7 @@ describe('a live workload is named and left running', () => {
         target: 'folly/kubernetes',
         url: 'web.example.test',
         firing: false,
+        nameSpent: false,
       },
     ]);
 
@@ -322,7 +317,7 @@ describe('a live workload is named and left running', () => {
   });
 
   test('a scheduled job is named as one that keeps firing', async () => {
-    const target = await seedTarget('folly');
+    const target = await seedTarget('folly', 'kubernetes');
     await seedApp('bills-forever', {
       targetId: target.id,
       kind: 'job',
@@ -344,8 +339,29 @@ describe('a live workload is named and left running', () => {
     expect(review.value.stranded[0]?.firing).toBe(true);
   });
 
+  test('a workload on static hosting is named as one whose name is spent', async () => {
+    // A site id is global and permanent — "the `SITE_ID` cannot be reactivated
+    // by you or anyone else" — so the hand clean-up this review sends the
+    // operator to do costs that address forever. The review has to say so
+    // before the confirmation, because it is the one consequence of deleting
+    // an App that going back and undoing it does not answer.
+    const target = await seedTarget('hosting', 'static');
+    await seedApp('spends-its-name', { targetId: target.id });
+    const { registry } = fakes();
+
+    const review = await deleteApp(
+      { name: 'spends-its-name', confirm: false },
+      context(registry),
+    );
+
+    expect(review.ok).toBe(true);
+    if (!review.ok) return;
+    expect(review.value.stranded).toHaveLength(1);
+    expect(review.value.stranded[0]?.nameSpent).toBe(true);
+  });
+
   test('an unscheduled job is stranded but not firing', async () => {
-    const target = await seedTarget('folly');
+    const target = await seedTarget('folly', 'kubernetes');
     await seedApp('idle-job', { targetId: target.id, kind: 'job' });
     const { registry } = fakes();
 
@@ -362,7 +378,7 @@ describe('a live workload is named and left running', () => {
 
 describe('a Datastore survives the App it was attached to', () => {
   test('it is detached, not deleted (§11)', async () => {
-    const target = await seedTarget('folly');
+    const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('has-a-database');
     const db = database().db;
     const [datastore] = await db

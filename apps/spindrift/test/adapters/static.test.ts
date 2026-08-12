@@ -261,6 +261,54 @@ describe('the release is five steps, in the product’s order', () => {
       '/index.html',
     ]);
   });
+
+  test('a name reserved by a deleted site is refused as spent, not as existing', async () => {
+    // The other 409, and the opposite of the one above: a site id is global
+    // and permanent — "the `SITE_ID` cannot be reactivated by you or anyone
+    // else" — so a name a deleted site burnt collides forever with nothing to
+    // read back. Reported as "already exists" it sends an operator looking for
+    // a site that is not there and can never be there.
+    const { adapter } = adapterFor({ reserved: ['shop-site'] });
+
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('REJECTED');
+      expect(verdict.detail).toContain('shop-site');
+      expect(verdict.detail).toContain('reserved permanently');
+      expect(verdict.detail).toContain('cannot be reclaimed');
+    }
+  });
+
+  test('a 409 whose read-back never answered is not called spent', async () => {
+    // Permanence is a claim about the name, and the only evidence for it is a
+    // read-back that came back and said the site is not here. A read-back that
+    // fell over says nothing about the name — and this sentence is the one
+    // that sends an operator to rename the App, which spends a second id.
+    const { api } = adapterFor({ reserved: ['shop-site'] });
+    let reads = 0;
+    const adapter = new StaticDeployAdapter({
+      token: api.token,
+      fetch: (request) => {
+        const isSiteRead =
+          request.method === 'GET' &&
+          new URL(request.url).pathname.endsWith('/sites/shop-site');
+        if (isSiteRead && ++reads > 1) {
+          return Promise.resolve(new Response('', { status: 503 }));
+        }
+        return api.fetch(request);
+      },
+    });
+
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.detail).not.toContain('reserved permanently');
+      expect(verdict.detail).toContain('already exists');
+    }
+  });
 });
 
 describe('a built files artifact is pulled out of the registry', () => {

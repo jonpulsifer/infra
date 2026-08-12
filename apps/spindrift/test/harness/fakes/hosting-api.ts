@@ -40,6 +40,15 @@ export interface FakeHostingOptions {
    * adapter treats it that way rather than failing on a site it wanted.
    */
   readonly appearsBeforeCreate?: string;
+  /**
+   * Site ids that are taken but are in no project this fake will show.
+   *
+   * The permanent reservation: "If you delete a site, ... the `SITE_ID` cannot
+   * be reactivated by you or anyone else." So the create collides forever and
+   * the read-back finds nothing — the one 409 the adapter cannot reconcile,
+   * and the one it must not report as an ordinary already-exists.
+   */
+  readonly reserved?: readonly string[];
   /** Hashes the product already holds, so it will not ask for them again. */
   readonly held?: readonly string[];
   /**
@@ -227,7 +236,7 @@ export class FakeHosting {
         // idempotent: nothing in the suite could tell "the site was already
         // there" from "the site was made", which is the whole difference
         // between a revision and a first deploy.
-        if (this.sites.has(id)) {
+        if (this.sites.has(id) || this.options.reserved?.includes(id)) {
           return json(409, {
             error: {
               code: 409,
