@@ -549,6 +549,23 @@ export const components = pgTable(
     /** Job only: a cron expression. */
     schedule: text('schedule'),
     /**
+     * The entrypoint this Component runs the image with, and the arguments it
+     * runs it with — `null` for the image's own, which is what every row
+     * written before these columns existed means.
+     *
+     * Nullable for the same reason `expose` and `schedule` above are: a field
+     * that only some Components state, on the one Component table. Not
+     * per-kind, though — a monolith's `web`, `worker` and `cleanup` are one
+     * image run three ways, so a service and a job both have one.
+     *
+     * `jsonb` rather than `text[]` because an argv is a document core never
+     * predicates on, and because that is what the pinned copy in
+     * `deploys.desired` already is — one encoding for the two places the same
+     * list lives, rather than an array here and a JSON list there.
+     */
+    command: jsonbDocument('command').$type<string[]>(),
+    args: jsonbDocument('args').$type<string[]>(),
+    /**
      * §9: network-serving Components carry a reach and an auth. The default is
      * the old `private` state, unchanged in meaning — reachable on the
      * operator's own network, behind the Target's authenticated edge.

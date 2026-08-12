@@ -559,6 +559,12 @@ export async function checkDeployable(
         ...(component.schedule === null
           ? {}
           : { schedule: component.schedule }),
+        // The entrypoint this release runs, pinned for the same reason as
+        // everything else here: null on the row is the image's own, and an
+        // edit after this intent was written must not change what this intent
+        // placed. Two Components off one image differ here and nowhere else.
+        ...(component.command === null ? {} : { command: component.command }),
+        ...(component.args === null ? {} : { args: component.args }),
         config: config.document,
         // Optional, so absent rather than an empty array: an App with nothing
         // attached pins the document it always pinned, and a `desired` written

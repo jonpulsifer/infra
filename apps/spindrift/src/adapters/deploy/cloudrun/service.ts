@@ -182,6 +182,15 @@ export function workloadContainer(
   const limits = resourceLimits(desired);
   return {
     image: context.image,
+    // The entrypoint, honoured rather than dropped. `Container.command` and
+    // `Container.args` are the runtime's own fields and mean what they mean in
+    // a pod spec, so the neutral description needs no translation here — and a
+    // field the Kubernetes adapter honours silently ignored on this one would
+    // make the same Component two different workloads depending on where it
+    // landed. Absent rather than empty: an empty list is a rendered override
+    // of nothing, and the runtime reads that as "run no command".
+    ...(desired.command === undefined ? {} : { command: [...desired.command] }),
+    ...(desired.args === undefined ? {} : { args: [...desired.args] }),
     env: environment(desired.config, context.project),
     ...(limits === null ? {} : { resources: { limits } }),
   };

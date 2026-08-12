@@ -246,6 +246,13 @@
       "when": 1786363272473,
       "tag": "0034_edge_hosting_target",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786363272474,
+      "tag": "0035_component_entrypoint",
+      "breakpoints": true
     }
   ]
 }

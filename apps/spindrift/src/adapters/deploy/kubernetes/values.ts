@@ -125,6 +125,8 @@ export interface AppValues {
   reach: DesiredState['reach'];
   auth: DesiredState['auth'];
   schedule: string;
+  command: string[];
+  args: string[];
   deployId: string;
   artifactDigest: string;
   hostnames: string[];
@@ -191,6 +193,14 @@ export function appValues(desired: DesiredState, image: string): AppValues {
     // An absent schedule is a suspended CronJob, which is why this is '' and
     // not omitted: the chart branches on emptiness, not on presence.
     schedule: desired.schedule ?? '',
+    // Empty is the image's own entrypoint, which is why these are `[]` and not
+    // omitted: the chart's `podSpec` wraps each in `with`, which skips an
+    // empty list exactly as it skips an absent key, so a Deployment and a
+    // CronJob both fall back to the image. `VALUES_CONTRACT` does not move for
+    // these — the chart has declared both keys since it was written, and
+    // writing a key the chart already accepts is not a contract change.
+    command: [...(desired.command ?? [])],
+    args: [...(desired.args ?? [])],
     deployId: desired.deploy,
     artifactDigest: desired.artifact.digest,
     hostnames: [

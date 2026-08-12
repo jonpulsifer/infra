@@ -41,9 +41,14 @@ import {
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
 import { listArtifacts, listArtifactsInput } from './artifacts/list.ts';
+import { adoptBuild, adoptBuildInput } from './builds/adopt.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
 import { getBuildDetail, getBuildDetailInput } from './builds/get-detail.ts';
 import { listBuilds, listBuildsInput } from './builds/list.ts';
+import {
+  setComponentCommand,
+  setComponentCommandInput,
+} from './components/command.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
 import {
@@ -229,6 +234,10 @@ export const commandRegistry = {
     input: setComponentScheduleInput,
     handler: setComponentSchedule,
   },
+  setComponentCommand: {
+    input: setComponentCommandInput,
+    handler: setComponentCommand,
+  },
   unplaceComponent: {
     input: unplaceComponentInput,
     handler: unplaceComponent,
@@ -255,6 +264,7 @@ export const commandRegistry = {
   },
   replaceConfig: { input: replaceConfigInput, handler: replaceConfig },
   uploadArchive: { input: uploadArchiveInput, handler: uploadArchive },
+  adoptBuild: { input: adoptBuildInput, handler: adoptBuild },
   dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },
   createDeploy: { input: createDeployInput, handler: createDeploy },
   rollbackDeploy: { input: rollbackDeployInput, handler: rollbackDeploy },
