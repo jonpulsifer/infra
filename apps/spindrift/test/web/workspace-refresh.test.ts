@@ -85,4 +85,41 @@ describe('refreshing the App workspace', () => {
 
     expect(refreshedWorkspace(SERVICE, job)).toEqual(job);
   });
+
+  test('keeps the socket’s "nothing is running" over the read that cannot tell', () => {
+    // `getAppWorkspace` answers `stream` for any placed Component without
+    // asking the adapter, so this is the disagreement on every tick for a
+    // Component that is placed and not running. Letting the read win put the
+    // card back to an empty log until the socket said `none` again — a title
+    // and a body that swapped every twenty seconds for as long as the screen
+    // was open.
+    const silent: WorkspaceView = {
+      ...SERVICE,
+      runtime: { kind: 'none', because: 'No replicas are running.' },
+    };
+
+    const merged = refreshedWorkspace(silent, firstPage(SERVICE));
+
+    expect(merged.runtime).toEqual({
+      kind: 'none',
+      because: 'No replicas are running.',
+    });
+  });
+
+  test('lets the read win once the release has moved', () => {
+    // A Deploy is the thing that changes what is running, so it is what makes
+    // the socket's last answer stale rather than more current than the read.
+    const silent: WorkspaceView = {
+      ...SERVICE,
+      runtime: { kind: 'none', because: 'No replicas are running.' },
+    };
+    const redeployed = firstPage({
+      ...SERVICE,
+      latestDeployId: (SERVICE.latestDeployId ?? 0) + 1,
+    });
+
+    const merged = refreshedWorkspace(silent, redeployed);
+
+    expect(merged.runtime.kind).toBe('stream');
+  });
 });
