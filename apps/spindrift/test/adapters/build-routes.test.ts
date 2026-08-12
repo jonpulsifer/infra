@@ -1152,6 +1152,15 @@ describe('the BuildKit program', () => {
     expect(program).toContain(`--opt source='${FRONTEND}'`);
   });
 
+  test('opens a staged bundle the one way every route opens one', () => {
+    // The second of the readers `storage/archive-format.ts` converts a ZIP
+    // for; the hosted workflow's copy is pinned in
+    // `test/storage/archive-format.test.ts`. This program carries no unzip
+    // binary in either image that runs it, so the two drifting apart is a
+    // build that dies at `tar: This does not look like a tar archive`.
+    expect(program).toContain('| tar -xz');
+  });
+
   test('an empty build-arg set leaves no blank continuation line', () => {
     // A `\` continuation followed by a blank line ends the command there, and
     // the flag on the next line becomes a command of its own — observed live

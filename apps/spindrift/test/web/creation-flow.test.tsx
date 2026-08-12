@@ -14,6 +14,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { sniffArchiveFormat } from '../../src/storage/archive-format.ts';
 import {
   blockersFor,
   type Draft,
@@ -30,6 +31,8 @@ import {
   REPOSITORY_OPTIONS,
   TARGET_OPTIONS,
 } from '../fixtures/scenarios.ts';
+import { zipOf } from '../fixtures/zip.ts';
+import { bytes, tar, tarball } from '../harness/tar.ts';
 
 const CANDIDATES = TARGET_OPTIONS.filter((target) => target.candidate).map(
   (target) => target.targetId,
@@ -519,5 +522,47 @@ describe('the draft reducer', () => {
     });
     expect(next.source).toMatchObject({ subpath: 'a' });
     expect(next.scopeByOperator).toBe(INITIAL_DRAFT.scopeByOperator);
+  });
+});
+
+/**
+ * The chooser's `accept` list is a hand-written claim about
+ * `storage/archive-format.ts`, which decides by magic number and has never
+ * heard of a filename. Nothing but this ties the two together, so the screen
+ * offered a plain `.tar` the boundary answers with `UNKNOWN_FORMAT` — an
+ * operator following the screen earning a `400`.
+ */
+describe('the archive chooser', () => {
+  /** Real bytes of the container each extension names. */
+  const SAMPLES: Record<string, Uint8Array> = {
+    '.zip': zipOf([{ path: 'index.html', text: 'hi' }]),
+    '.tar.gz': tarball([{ name: 'index.html', bytes: bytes('hi') }]),
+    '.tgz': tarball([{ name: 'index.html', bytes: bytes('hi') }]),
+    // Not offered, and here to be the reason why rather than an absence: a
+    // plain tar carries neither magic number the boundary reads.
+    '.tar': tar([{ name: 'index.html', bytes: bytes('hi') }]),
+  };
+
+  test('offers only containers the upload boundary accepts', () => {
+    const markup = render(
+      draftReducer(clean, { type: 'entry', entry: 'upload' }),
+    );
+    const offered = [...markup.matchAll(/accept="([^"]*)"/g)].flatMap((match) =>
+      (match[1] ?? '').split(','),
+    );
+    // Zero would make every assertion below vacuous — the picker renders only
+    // once the draft is on an archive source.
+    expect(offered.length).toBeGreaterThan(0);
+
+    const unsampled: string[] = [];
+    const refused: string[] = [];
+    for (const extension of offered) {
+      const sample = SAMPLES[extension];
+      // An extension with no bytes here is one this test cannot answer for:
+      // write the sample before putting the extension on the screen.
+      if (sample === undefined) unsampled.push(extension);
+      else if (sniffArchiveFormat(sample) === null) refused.push(extension);
+    }
+    expect({ unsampled, refused }).toEqual({ unsampled: [], refused: [] });
   });
 });
