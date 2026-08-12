@@ -104,12 +104,23 @@ export const placeComponent: Command<
       .from(targets)
       .innerJoin(vessels, eq(vessels.id, targets.vesselId))
       .where(eq(targets.id, input.targetId));
+    // The keys structurally as well as in the sentence. A caller that has to
+    // *collect* them — the workspace's move form, which re-posts this same
+    // command with `supply` filled in — would otherwise have to parse them back
+    // out of prose written for a person, and the field they belong against is
+    // what `issues` says: `connectTarget` already refuses this way
+    // (`targets/connect.ts:318-328`). The sentence is unchanged; this is the
+    // same refusal addressed to the form as well as to the reader.
     return failed(
       'NOT_DEPLOYABLE',
       demandSentence(
         missing,
         target === undefined ? input.targetId : targetLabel(target),
       ),
+      missing.map((key) => ({
+        path: `supply.${key}`,
+        message: 'must be supplied to finish the move',
+      })),
     );
   }
 

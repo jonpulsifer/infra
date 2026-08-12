@@ -11,12 +11,12 @@
  * could not make editable without becoming an edit command itself.
  *
  * **Same shape as `setComponentReach`, for the same reasons.** This is a
- * deploy, not a settings toggle: `desiredStateFor`
- * (`src/reconciler/deploy-loop.ts:280`) reads `component.schedule` fresh on
- * every attempt, so writing this row changes nothing that is currently
- * running — the Cloud Scheduler job in front of a live Deploy keeps firing on
- * the old cadence until somebody presses Deploy again. `pendingRelease` names
- * where that is still true.
+ * deploy, not a settings toggle: `createDeploy` pins the Component's schedule
+ * when the intent is written and `desiredStateFor` replays that pinned
+ * document on every attempt, so writing this row changes nothing that is
+ * currently running — the Cloud Scheduler job in front of a live Deploy keeps
+ * firing on the old cadence until somebody presses Deploy again.
+ * `pendingRelease` names where that is still true.
  *
  * **`null` removes it, and is required rather than optional.** `createComponent`
  * defaults an absent `schedule` to "unscheduled" because that is what silence
@@ -25,14 +25,16 @@
  * it alone", so removing a schedule has to be said, not implied by leaving it
  * out.
  *
- * **Unlike `reach`/`auth`, there is no `deploys.schedule` pin to diff
- * against** — no attempt ever needed one, because nothing about a job's
- * cadence has to survive a rollback the way a released reach does. So
- * `pendingRelease` cannot tell "this Target's live release already fires on
- * the new cadence" from "it does not" the way `setComponentReach` can; it
- * conservatively names every Target this Component is placed on. Pressing
- * Deploy on a Target that happened to already match is a no-op release, not a
- * wrong one.
+ * **`pendingRelease` here is conservative, and no longer has to be.** It names
+ * every Target this Component is placed on rather than only those whose live
+ * release fires on the old cadence, because when it was written there was no
+ * pinned schedule to diff against. There is one now: `deploys.desired`
+ * replaced `config_document`, `reach` and `auth` with the whole document
+ * (`src/db/schema.ts:754-773`), and `schedule` is on `DesiredState`, so the
+ * narrowing `setComponentReach` does — and `setComponentCommand` after it — is
+ * available here too. Narrowing it is not this comment's job. Until somebody
+ * does, pressing Deploy on a Target that happened to already match is a no-op
+ * release, not a wrong one.
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -59,7 +61,7 @@ export interface SetComponentScheduleResult {
   /**
    * The Targets this Component is placed on, by name and sorted — press
    * Deploy on each to put the new cadence (or its removal) in front of what is
-   * currently running there. See the module comment for why this cannot be
+   * currently running there. See the module comment for why this is not
    * narrowed the way `setComponentReach`'s equivalent is.
    */
   readonly pendingRelease: readonly string[];

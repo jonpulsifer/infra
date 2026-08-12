@@ -7,8 +7,14 @@
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
+import type { ComponentKind } from '../domain/desired-state.ts';
 import { readSession, signOut } from './auth-client.ts';
-import { command, type InputOf, type OutputOf } from './client.ts';
+import {
+  command,
+  type InputOf,
+  type OutputOf,
+  type TransportFailure,
+} from './client.ts';
 import { DeleteAppDialog, useAppDeletion } from './components/delete-app.tsx';
 import { AppShell } from './components/shell.tsx';
 import type {
@@ -48,12 +54,15 @@ import {
   NewApp,
 } from './views/apps/new/index.tsx';
 import {
+  type CreateComponent,
   type CreateDatastore,
   type DatastoreAct,
+  type MoveComponent,
   type RunJob,
   type SetAutoDeploy,
   type SetConfig,
   type SetReach,
+  type UnplaceComponent,
   Workspace,
 } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
@@ -1138,6 +1147,105 @@ export function refreshedWorkspace(
   };
 }
 
+/**
+ * The Target a press on Deploy has to name, or nothing where it must not.
+ *
+ * Placement is a fact `placeComponent` or a first deploy writes, so a Component
+ * that has done neither has none to read back and `deployApp` refuses rather
+ * than guessing (`src/commands/apps/deploy.ts:390-395`). That never mattered
+ * while every Component was declared by the create flow, which places as it
+ * creates — and it matters for every Component the Components card adds, because
+ * `createComponent` deliberately writes no placement.
+ *
+ * `targetId` is the *selected* Component's placement of record
+ * (`src/commands/apps/workspace.ts:129`), so its absence is the whole test, and
+ * a sibling's row is where the answer comes from: an App's Components are placed
+ * one Target apiece and a `job` added beside a `service` joins the Target that
+ * service is on. What travels is the `<vessel>/<adapter>` spelling the row
+ * already states, which `deployApp` resolves (`deploy.ts:352-362`).
+ *
+ * **Never for a Component that has a placement.** A Target named against one is
+ * a move, and moves go through `placeComponent` — `deployApp` refuses the
+ * disagreement (`deploy.ts:379-386`) rather than landing somewhere new, and this
+ * side does not put it in the position of having to.
+ *
+ * Exported for `test/web/component-create.test.ts`, for the reason
+ * {@link refreshedWorkspace} is: reaching it through the mounted screen means
+ * pressing Deploy, which the DOM shim does not simulate.
+ */
+export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
+  if (view.targetId !== undefined) return undefined;
+  return view.components.find((component) => component.target !== undefined)
+    ?.target;
+}
+
+/**
+ * What the Components card's form posts, composed per kind.
+ *
+ * `createComponentInput` is a `.strict()` discriminated union
+ * (`src/commands/components/create.ts:68-98`), so this is a branch rather than
+ * one object with optional fields: `schedule` reaching a service is a
+ * validation failure, not a field the handler ignores.
+ *
+ * `reach`, `auth` and `expose` are the schema's own defaults, restated here
+ * because `InputOf` reads a command's schema *output* — the same reason
+ * `handleCreateDatastore` restates `storageGiB` below, and the same care: no
+ * form offers any of the three, so this is the one place they are named, and
+ * naming them here is what keeps the form from having a second opinion.
+ *
+ * Exported for `test/web/component-create.test.ts`, for the reason
+ * {@link refreshedWorkspace} is: what is under test is which fields a kind
+ * sends, and reaching it through the mounted screen means pressing a tile,
+ * which the DOM shim does not simulate.
+ */
+export function componentCreation(
+  appId: string,
+  create: { name: string; kind: ComponentKind; schedule?: string },
+): InputOf<'createComponent'> {
+  const common = {
+    appId,
+    name: create.name,
+    reach: 'private',
+    auth: 'proxy',
+  } as const;
+  switch (create.kind) {
+    case 'service':
+      return { ...common, kind: 'service', expose: true };
+    case 'website':
+      return { ...common, kind: 'website' };
+    case 'job':
+      return {
+        ...common,
+        kind: 'job',
+        // Absent rather than empty for an unscheduled job — §7 renders that as
+        // a suspended CronJob, and `''` is not a five-field cron expression.
+        ...(create.schedule === undefined ? {} : { schedule: create.schedule }),
+      };
+  }
+}
+
+/**
+ * The keys a refused move demands, read off the refusal rather than out of it.
+ *
+ * `placeComponent` names them twice: in §10's sentence, which is written for a
+ * person, and as `issues` at `supply.<KEY>`, which is written for this. Only
+ * the second is safe to build a form from — the first is prose, and a form
+ * assembled by splitting prose breaks the day somebody improves the wording.
+ *
+ * Every other refusal answers `[]`, which is what makes the empty case the
+ * test: a move refused for a reason that is not a demand is a sentence to
+ * read, not a form to fill.
+ *
+ * Exported for `test/web/component-move.test.ts`, for the reason
+ * {@link refreshedWorkspace} is: reaching it through the mounted screen means
+ * pressing Move, which the DOM shim does not simulate.
+ */
+export function demandedKeys(failure: TransportFailure): readonly string[] {
+  return (failure.issues ?? [])
+    .filter((issue) => issue.path.startsWith('supply.'))
+    .map((issue) => issue.path.slice('supply.'.length));
+}
+
 function WorkspaceScreen({
   appName,
   onNavigate,
@@ -1174,6 +1282,17 @@ function WorkspaceScreen({
    */
   const [following, setFollowing] = useState<string | null>(null);
   const [runLines, setRunLines] = useState<readonly LogLine[]>([]);
+  /**
+   * The Targets a move can name (§3).
+   *
+   * Read once beside the workspace rather than folded into it: `getAppWorkspace`
+   * answers about one App, and the installation's Targets are not one App's
+   * fact — the Targets screen reads the same list. Empty until it arrives, and
+   * empty is also what a failed read leaves, which is the honest state: the
+   * move control is not offered over a list this screen has not got, rather
+   * than offered over an empty one.
+   */
+  const [targets, setTargets] = useState<readonly TargetListItem[]>([]);
 
   // There is no workspace left to stand on once the App is gone.
   const deletion = useAppDeletion(() => onNavigate('/apps'));
@@ -1211,6 +1330,25 @@ function WorkspaceScreen({
       live = false;
     };
   }, [appName, component, reloadToken]);
+
+  // Once, on mount. Connecting a Target happens on another screen, and a move
+  // does not change what Targets exist — so this list has nothing to re-read
+  // it for, and putting it on the polling interval would be a second query per
+  // tick answering the same way every time.
+  useEffect(() => {
+    let live = true;
+    command('listTargets', {})
+      .then((result) => {
+        if (live && result.ok) setTargets(result.value.targets);
+      })
+      // Silently, and the consequence is stated where it lands: the Move
+      // control is not offered without this list, which is a control that is
+      // absent rather than one that opens on nothing.
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   /**
    * Keep the workspace current while something is moving.
@@ -1385,6 +1523,7 @@ function WorkspaceScreen({
   // truthy, so `onClick={handleDeploy}` would silently rebuild every press.
   const handleDeploy = async (rebuild: boolean) => {
     if (state.type !== 'success') return;
+    const firstPlacement = targetForFirstDeploy(state.workspace);
     setDeploying(true);
     try {
       // By id where the workspace knows one: `apps` does not constrain `name`,
@@ -1398,6 +1537,10 @@ function WorkspaceScreen({
         ...(state.workspace.componentId === undefined
           ? {}
           : { component: state.workspace.componentId }),
+        // The Target a Component deploying for the first time is placed on, and
+        // nothing at all for one that is already placed. See
+        // {@link targetForFirstDeploy}.
+        ...(firstPlacement === undefined ? {} : { target: firstPlacement }),
       });
       if (result.ok) {
         // Both arms navigate. §4 makes "a Build started" a different act from
@@ -1525,6 +1668,107 @@ function WorkspaceScreen({
   const handleSelectComponent = (name: string) => {
     setFollowing(null);
     setComponent(name);
+  };
+
+  /**
+   * Add a Component to this App (§2), then re-read: the card that opened this
+   * form is the list the new row belongs in, and a Component that does not
+   * appear reads as a press that did nothing.
+   *
+   * Nothing else is written. `createComponent` leaves `placedTargetId` NULL and
+   * the first Deploy fills it (`src/commands/apps/deploy.ts:529-534`), which is
+   * why this handler does not follow up with a placement of its own — two acts
+   * would be two answers to which Target this Component lives on.
+   */
+  const handleCreateComponent: CreateComponent = async (create) => {
+    const { appId } = workspaceIds();
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to add a Component to' };
+    }
+    try {
+      const result = await command(
+        'createComponent',
+        componentCreation(appId, create),
+      );
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Creating the Component failed',
+      };
+    }
+  };
+
+  /**
+   * Move a Component to another Target (§3, §10), then re-read: the placement
+   * this screen states, the pairs still serving and the config keys are all
+   * rows this act just changed.
+   *
+   * **One post, with whatever the form supplied on it.** The retry after a
+   * demand is this same call again, not a `setConfig` pass followed by a second
+   * attempt — `placeComponent` takes `supply` precisely so the move and the
+   * values it demands commit together, and a two-step version would write those
+   * values at a placement that does not exist yet.
+   *
+   * No deploy follows. The artifact travels on the next press of Deploy and on
+   * nothing else: §3 makes a cross-shape move a rebuild, and deciding that here
+   * would be the substitution `deployApp` refuses to make on the operator's
+   * behalf.
+   */
+  const handleMoveComponent: MoveComponent = async (move) => {
+    try {
+      const result = await command('placeComponent', {
+        componentId: move.componentId,
+        targetId: move.targetId,
+        supply: move.supply.map((entry) => ({
+          key: entry.key,
+          value: entry.value,
+        })),
+      });
+      if (!result.ok) {
+        return {
+          ok: false,
+          message: result.failure.message,
+          demanded: demandedKeys(result.failure),
+        };
+      }
+      setReloadToken((token) => token + 1);
+      return { ok: true, carried: result.value.carried };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'The move failed',
+        demanded: [],
+      };
+    }
+  };
+
+  /**
+   * Retire one pair that still serves (§6, §13), then re-read.
+   *
+   * The teardown is the thing being asked for by name — `unplaceComponent`'s
+   * own header argues why that is §13's exception rather than a violation of
+   * it — so there is no confirmation here that the command does not have:
+   * pressing Unplace on a named pair is the confirmation.
+   */
+  const handleUnplaceComponent: UnplaceComponent = async (pair) => {
+    try {
+      const result = await command('unplaceComponent', pair);
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true, destroyed: result.value.destroyed };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Retiring the pair failed',
+      };
+    }
   };
 
   /**
@@ -1684,6 +1928,10 @@ function WorkspaceScreen({
         onSetAutoDeploy={handleSetAutoDeploy}
         onSetConfig={handleSetConfig}
         onSelectComponent={handleSelectComponent}
+        onCreateComponent={handleCreateComponent}
+        onMoveComponent={handleMoveComponent}
+        onUnplaceComponent={handleUnplaceComponent}
+        targets={targets}
         onCreateDatastore={handleCreateDatastore}
         onAttachDatastore={handleAttachDatastore}
         onDetachDatastore={handleDetachDatastore}

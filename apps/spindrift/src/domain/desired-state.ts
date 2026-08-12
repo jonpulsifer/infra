@@ -302,6 +302,27 @@ export interface DesiredState {
   /** Job only. A cron expression; absent means the CronJob is suspended (§7). */
   schedule?: string;
 
+  /**
+   * The entrypoint this release runs the image with; absent means the image's
+   * own.
+   *
+   * Optional rather than nullable, like `expose` and `schedule` above, which is
+   * also what makes every `desired` document written before these fields
+   * existed read back correctly — the column is jsonb with no runtime parse, so
+   * an absent key is the only shape an old row can have.
+   *
+   * Not per-kind: a monolith's `web`, `worker` and `cleanup` are one image run
+   * three ways, so a service and a job both carry one. And it lands in
+   * {@link DesiredDocument}, so it is **pinned per release** — the same
+   * argument that file makes for config, read for the entrypoint: an artifact
+   * replayed later must come up under the command it was released with, not
+   * under whatever the Component says today. An older image may not even carry
+   * the binary a newer command names.
+   */
+  command?: readonly string[];
+  /** The arguments to {@link DesiredState.command}, or to the image's own. */
+  args?: readonly string[];
+
   config: readonly ConfigEntry[];
 
   /**

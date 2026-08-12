@@ -575,6 +575,31 @@ export interface ComponentView {
    * placed genuinely has no answer here.
    */
   readonly target?: string;
+  /**
+   * Every (Component, Target) pair that still serves — the desired rows, not
+   * the placement.
+   *
+   * A move is what makes the two differ: `placeComponent` leaves the pair it
+   * moved away from in place, because what is live there keeps serving until
+   * `unplaceComponent` retires it. So {@link target} is where this Component's
+   * newest release went and this is every pair still standing behind one — one
+   * row on an ordinary Component, two through a move, and that difference is
+   * the whole reason `unplaceComponent` needs a control per pair rather than
+   * one button.
+   *
+   * Empty is also the answer for a Component nothing has placed, which is what
+   * the screen tests before it offers a move at all: a first placement is
+   * `deployApp`'s to write, not a move.
+   *
+   * The id travels because the act does: `unplaceComponent` resolves on
+   * (componentId, targetId), and a label is not one. Optional for the reason
+   * every other addition to this file is — the fixtures build `ComponentView`
+   * literally.
+   */
+  readonly serving?: readonly {
+    readonly targetId: string;
+    readonly label: string;
+  }[];
   readonly url?: string;
   readonly urlLive?: boolean;
   /** When this Component's newest release was written, in words. */
