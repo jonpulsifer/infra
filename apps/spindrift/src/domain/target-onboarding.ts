@@ -28,7 +28,11 @@ import type {
   PendingTargetConnection,
   TargetConnectionProposal,
 } from '../web/model.ts';
-import { type TargetConnection, targetLabel } from './target.ts';
+import {
+  type KubernetesDelivery,
+  type TargetConnection,
+  targetLabel,
+} from './target.ts';
 import { surfacesToProbe, type VesselKind } from './vessel.ts';
 
 /** The donor, spelled the way every other surface names a Target. */
@@ -199,10 +203,17 @@ export interface ClusterConnectChoices {
   readonly apiServer: string;
   /** Where App workloads land. Never created by Spindrift (§7). */
   readonly namespace: string;
-  /** Where the `HelmRelease` object itself is created. */
-  readonly deliveryNamespace: string;
-  /** The Flux source object the App chart is fetched from. */
-  readonly sourceRef: { readonly name: string; readonly namespace: string };
+  /**
+   * Which operator drives this Target, and what that operator needs (§6).
+   *
+   * Whole rather than field-by-field, because the two flavours share only the
+   * namespace their object is created in: everything else a `HelmRelease` needs
+   * is meaningless to an `Application` and the other way round. Carrying the
+   * union means the screen cannot assemble a half-Flux, half-Argo delivery, and
+   * the choice reaches `connectTarget` in the same shape the manifest declares
+   * it.
+   */
+  readonly delivery: KubernetesDelivery;
   /** The gateway routes attach to, and the address it answers on. */
   readonly gateway: {
     readonly name: string;
@@ -228,11 +239,7 @@ export interface ClusterConnectPlan {
   readonly vessel: string;
   readonly apiServer: string;
   readonly namespace: string;
-  readonly delivery: {
-    readonly flavour: 'flux-helmrelease';
-    readonly namespace: string;
-    readonly sourceRef: { readonly name: string; readonly namespace: string };
-  };
+  readonly delivery: KubernetesDelivery;
   readonly chartValues: Record<string, unknown>;
   readonly reaches: Reach[];
   readonly authReaches: Reach[];
@@ -299,11 +306,7 @@ export function clusterConnectPlan(
     vessel: choices.vessel,
     apiServer: choices.apiServer,
     namespace: choices.namespace,
-    delivery: {
-      flavour: 'flux-helmrelease',
-      namespace: choices.deliveryNamespace,
-      sourceRef: choices.sourceRef,
-    },
+    delivery: choices.delivery,
     // Only `platform`. §7 gives that key to the operator whole and Spindrift
     // renders `app` and `shared` per deploy, so writing either here would be
     // saving a value the next deploy overwrites.
