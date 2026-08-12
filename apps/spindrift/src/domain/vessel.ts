@@ -51,7 +51,7 @@ import type { Remediation } from './remediation.ts';
  * is vendor-shaped in the same way, naming one provider's tenancy container,
  * which is what makes them additive.
  */
-export const VESSEL_KINDS = ['cluster', 'gcp-project'] as const;
+export const VESSEL_KINDS = ['cluster', 'gcp-project', 'vercel-team'] as const;
 
 export type VesselKind = (typeof VESSEL_KINDS)[number];
 
@@ -70,6 +70,11 @@ export type VesselKind = (typeof VESSEL_KINDS)[number];
 export const PROBED_SURFACES_BY_VESSEL_KIND = {
   cluster: ['kubernetes'],
   'gcp-project': ['cloudrun', 'static'],
+  // One today. The file header's "an edge platform's account serves static
+  // sites *and* runs functions" is this boundary, and the second surface is a
+  // row here on the day a build route emits `.vercel/output` with functions in
+  // it — which is what the deploy adapter is already shaped to hand over.
+  'vercel-team': ['vercel'],
 } as const satisfies Record<VesselKind, readonly TargetAdapter[]>;
 
 /** What one connect act asks a vessel of this kind about. */
@@ -153,6 +158,10 @@ export const VESSEL_PREREQUISITES_BY_KIND_AND_ROLE = {
     controlPlane: [],
     app: [],
   },
+  // The shared services are cloud objects and nothing here knows how to ask an
+  // edge platform for them, so an installation cannot make this boundary its
+  // home. Empty rather than four permanently-red rows: see the header above.
+  'vercel-team': { home: [], controlPlane: [], app: [] },
 } as const satisfies Record<
   VesselKind,
   Record<VesselRole, readonly VesselPrerequisite[]>
@@ -271,7 +280,10 @@ export type SurfaceProbe =
  * **No credential, in either arm** (§13). What authorizes a call is minted per
  * request by whatever federates.
  */
-export type VesselLocation = ClusterLocation | GcpProjectLocation;
+export type VesselLocation =
+  | ClusterLocation
+  | GcpProjectLocation
+  | VercelTeamLocation;
 
 export interface ClusterLocation {
   kind: 'cluster';
@@ -283,6 +295,19 @@ export interface GcpProjectLocation {
   kind: 'gcp-project';
   /** The project every surface on this vessel deploys into (§14). */
   project: string;
+}
+
+export interface VercelTeamLocation {
+  kind: 'vercel-team';
+  /**
+   * The team or account every surface on this vessel deploys into.
+   *
+   * Not spelled `project`, though the field one arm up is: a Vercel project is
+   * one site inside this boundary — the adapter creates one per Component —
+   * and reusing the word would make the tenancy boundary and the thing placed
+   * on it the same noun.
+   */
+  team: string;
 }
 
 /**

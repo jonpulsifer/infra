@@ -45,7 +45,8 @@ import type { VesselLocation } from './vessel.ts';
 export type TargetConnection =
   | KubernetesConnection
   | CloudRunConnection
-  | StaticConnection;
+  | StaticConnection
+  | VercelConnection;
 
 /** A stored Target after its operator has supplied adapter connection facts. */
 export type TargetWithConnection<
@@ -117,6 +118,27 @@ export interface CloudRunConnection {
 export interface StaticConnection {
   adapter: 'static';
   /** The hosting product's API root, without a trailing slash. */
+  endpoint: string;
+}
+
+/**
+ * How a Vercel Target is reached (§13).
+ *
+ * The same shape `StaticConnection` has, for the same reason: an edge platform
+ * serves one site from its own network rather than from a region an operator
+ * picks, and there is no runtime whose output a tail could reach back into.
+ *
+ * **No credential here either** (§13's rule), though this is the one backend
+ * where what authorizes a call is not federated: Vercel has no inbound OIDC to
+ * exchange a projected token for, so the bearer is an installation-Secret
+ * value read per request — `SPINDRIFT_VERCEL_TOKEN` in `adapters/registry.ts`,
+ * exactly where the 1Password Connect token already lives. A field for it here
+ * would put one copy per Target in the database, which is the thing the rule is
+ * actually about.
+ */
+export interface VercelConnection {
+  adapter: 'vercel';
+  /** The platform's API root, without a trailing slash. */
   endpoint: string;
 }
 
@@ -223,7 +245,8 @@ export interface DeployTargetRef extends TargetIdentity {
 export type AdapterConnection =
   | (KubernetesConnection & VesselFacts & { apiServer: string })
   | (CloudRunConnection & VesselFacts & { project: string })
-  | (StaticConnection & VesselFacts & { project: string });
+  | (StaticConnection & VesselFacts & { project: string })
+  | (VercelConnection & VesselFacts & { team: string });
 
 /** The boundary's half of the flat view, identical for every surface on it. */
 interface VesselFacts {
@@ -250,6 +273,10 @@ export type CloudRunAdapterConnection = Extract<
 export type StaticAdapterConnection = Extract<
   AdapterConnection,
   { adapter: 'static' }
+>;
+export type VercelAdapterConnection = Extract<
+  AdapterConnection,
+  { adapter: 'vercel' }
 >;
 
 /** The Vessel columns {@link deployTargetOf} reads, without importing the row. */
@@ -296,10 +323,7 @@ export function deployTargetOf(
       ? {}
       : { reachableRegistries: vessel.reachableRegistries }),
   };
-  const where =
-    vessel.location.kind === 'cluster'
-      ? { apiServer: vessel.location.apiServer }
-      : { project: vessel.location.project };
+  const where = addressOf(vessel.location);
 
   return {
     vessel: vessel.name,
@@ -316,6 +340,32 @@ export function deployTargetOf(
     } as AdapterConnection,
   };
 }
+
+/** The one address a boundary of this kind states, in its own kind's terms. */
+function addressOf(location: VesselLocation): Record<string, string> {
+  switch (location.kind) {
+    case 'cluster':
+      return { apiServer: location.apiServer };
+    case 'gcp-project':
+      return { project: location.project };
+    case 'vercel-team':
+      return { team: location.team };
+  }
+}
+
+/**
+ * The field name each surface's arm of {@link AdapterConnection} requires.
+ *
+ * Keyed by adapter rather than derived from a Target's vessel, because that is
+ * the direction the question runs: the surface needs one address and the
+ * boundary either stated that one or stated another kind's.
+ */
+const ADDRESS_BY_ADAPTER = {
+  kubernetes: 'apiServer',
+  cloudrun: 'project',
+  static: 'project',
+  vercel: 'team',
+} as const satisfies Record<TargetAdapter, string>;
 
 /**
  * The address this surface needs that its vessel's location does not state.
@@ -341,12 +391,11 @@ export function unstatedAddress(target: DeployTargetRef): string | null {
   // `in` rather than a property read: the arm the compiler picked is the one
   // the cast asserted, so the key is only actually there when the boundary's
   // location was the matching shape.
+  const address = ADDRESS_BY_ADAPTER[target.adapter];
   const stated =
-    target.adapter === 'kubernetes'
-      ? 'apiServer' in connection && connection.apiServer !== ''
-      : 'project' in connection && connection.project !== '';
+    address in connection &&
+    (connection as unknown as Record<string, unknown>)[address] !== '';
   if (stated) return null;
-  const address = target.adapter === 'kubernetes' ? 'apiServer' : 'project';
   return `this vessel's location states no ${address}, so a ${target.adapter} surface on it has no address to be reached at`;
 }
 

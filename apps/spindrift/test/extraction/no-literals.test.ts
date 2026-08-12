@@ -129,6 +129,10 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // the places a real installation literal could hide. Naming the specific
   // header keeps the scanner at full strength over the rest of the file.
   'set-cookie',
+  // The header the edge platform checks an uploaded file's integrity with.
+  // Same kind of thing again: a vendor's own header name, identical for every
+  // installation, written by a deploy adapter rather than by a browser bundle.
+  'x-vercel-digest',
   // The header an OCI registry states its authentication challenge in. Same
   // kind of thing as the one above, read by the registry probe — which lives
   // outside `src/web/` because it is a far side rather than a browser bundle.

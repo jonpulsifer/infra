@@ -1,0 +1,14 @@
+-- A fourth runtime surface, and the first boundary that is not a cloud project.
+--
+-- Two enums grow by one label each and nothing else moves: a Target already
+-- carries its adapter, a Vessel already carries its kind, and the address a
+-- `vercel-team` boundary states lives in the `location` JSON the domain reads
+-- — so there is no column to add and no row to backfill.
+--
+-- `ADD VALUE` runs inside the migrator's transaction on PostgreSQL 12 and
+-- above, which is what CloudNativePG serves. The restriction that remains is
+-- that a value added in a transaction cannot be *used* in the same one, and
+-- nothing here writes a row.
+ALTER TYPE "public"."target_adapter" ADD VALUE 'vercel';
+--> statement-breakpoint
+ALTER TYPE "public"."vessel_kind" ADD VALUE 'vercel-team';

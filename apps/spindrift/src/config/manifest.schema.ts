@@ -73,7 +73,12 @@ export const gatewayAuthSchema = z
  * The delivery adapter a Target speaks (§6). One Target has exactly one
  * adapter type, because placement determines artifact shape (§13).
  */
-export const targetAdapterSchema = z.enum(['kubernetes', 'cloudrun', 'static']);
+export const targetAdapterSchema = z.enum([
+  'kubernetes',
+  'cloudrun',
+  'static',
+  'vercel',
+]);
 
 /**
  * The secret store this installation resolves the reach rule with (§10, §20).
@@ -256,6 +261,24 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
         .optional(),
     })
     .strict(),
+  z
+    .object({
+      ...vesselFacts,
+      kind: z.literal('vercel-team'),
+      location: z
+        .object({
+          /**
+           * The team or account every surface on this vessel deploys into.
+           *
+           * A slug or a `team_…` id: the API takes either under `teamId`, and
+           * an operator reads the slug off the dashboard URL.
+           */
+          team: nonEmptyString,
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
 ]);
 
 /**
@@ -326,6 +349,18 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
     .object({
       vessel: targetNameSchema,
       adapter: z.literal('static'),
+      connection: z
+        .object({
+          endpoint: z.url(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      vessel: targetNameSchema,
+      adapter: z.literal('vercel'),
       connection: z
         .object({
           endpoint: z.url(),

@@ -178,6 +178,28 @@ export type CloudConnectInput = Extract<
   { kind: 'gcp-project' }
 >;
 
+/** Where the fake edge platform answers, for the same reason as above. */
+export const VERCEL_ENDPOINT = 'https://vercel.example.test';
+
+/** The connect input a Vercel team takes, with anything overridden. */
+export function vercelInput(
+  overrides: Partial<VercelConnectInput> = {},
+): VercelConnectInput {
+  return {
+    kind: 'vercel-team',
+    vessel: 'edge',
+    team: 'example-team',
+    endpoint: VERCEL_ENDPOINT,
+    ...overrides,
+  };
+}
+
+/** The Vercel arm of `connectTargetInput`. */
+export type VercelConnectInput = Extract<
+  ConnectTargetInput,
+  { kind: 'vercel-team' }
+>;
+
 /**
  * The **surface** half of a connection, as its adapter needs it.
  *
@@ -217,6 +239,8 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
       const input = cloudInput();
       return { adapter, endpoint: input.hostingEndpoint };
     }
+    case 'vercel':
+      return { adapter, endpoint: vercelInput().endpoint };
   }
 }
 
@@ -233,6 +257,7 @@ const FIXTURE_VESSEL_KIND = {
   kubernetes: 'cluster',
   cloudrun: 'gcp-project',
   static: 'gcp-project',
+  vercel: 'vercel-team',
 } as const satisfies Record<TargetAdapter, VesselKind>;
 
 export function fixtureVesselKind(adapter: TargetAdapter): VesselKind {
@@ -248,7 +273,9 @@ export function vesselFor(adapter: TargetAdapter): NewVessel {
     location:
       kind === 'cluster'
         ? { kind: 'cluster', apiServer: clusterInput().apiServer }
-        : { kind: 'gcp-project', project: cloudInput().project },
+        : kind === 'vercel-team'
+          ? { kind: 'vercel-team', team: vercelInput().team }
+          : { kind: 'gcp-project', project: cloudInput().project },
   };
 }
 

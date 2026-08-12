@@ -136,12 +136,36 @@ function cloudProposal(
   };
 }
 
+/**
+ * What a fresh connect of a Vercel team would be prefilled with.
+ *
+ * One field, and the team is deliberately not it — same reason `apiServer` and
+ * `project` are absent above: it is the value that names *this* boundary, and a
+ * second team prefilled with the first one's slug would read as correct and
+ * deploy into somebody else's account.
+ */
+function vercelProposal(
+  rows: readonly OnboardingTargetRow[],
+): TargetConnectionProposal {
+  const from = donor(rows, 'vercel');
+  const connection = from?.connection;
+  if (connection?.adapter !== 'vercel') return { carriedFrom: null };
+  return { carriedFrom: labelOf(from), vercelEndpoint: connection.endpoint };
+}
+
 /** What a screen would propose for a fresh connect of this shape. */
 export function connectionProposal(
   rows: readonly OnboardingTargetRow[],
   kind: VesselKind,
 ): TargetConnectionProposal {
-  return kind === 'cluster' ? kubernetesProposal(rows) : cloudProposal(rows);
+  switch (kind) {
+    case 'cluster':
+      return kubernetesProposal(rows);
+    case 'gcp-project':
+      return cloudProposal(rows);
+    case 'vercel-team':
+      return vercelProposal(rows);
+  }
 }
 
 /**

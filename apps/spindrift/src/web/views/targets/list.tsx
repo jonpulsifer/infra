@@ -924,7 +924,9 @@ function TargetCard({
               vessel={target.vessel}
               {...(target.edit.kind === 'cluster'
                 ? { apiServer: target.edit.apiServer }
-                : { project: target.edit.project })}
+                : target.edit.kind === 'vercel-team'
+                  ? { team: target.edit.team }
+                  : { project: target.edit.project })}
               // The whole act, not this card: one connect asks the boundary
               // about every surface its kind is probed for, and saying so is
               // what stops the confirmation from under-reporting what it

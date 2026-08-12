@@ -304,6 +304,23 @@ spec:
           # namespace on this host were ever added to `supplyChain.registry`.
           reachableRegistries:
             - northamerica-northeast1-docker.pkg.dev
+        # The edge platform's team, and the one boundary here reached with a
+        # stored bearer rather than with federation: Vercel federates outward
+        # only, so there is nothing to exchange the projected token for. The
+        # bearer is `SPINDRIFT_VERCEL_TOKEN` in `secret.sops.yaml` — one
+        # installation-wide value, not a per-Target credential.
+        #
+        # No `terraformRoot`: no root here declares this boundary, and naming
+        # one would offer a remediation Atlantis has nowhere to apply.
+        #
+        # No `reachableRegistries` either, and that is the surface's shape
+        # rather than an omission: nothing on the far side pulls an image. The
+        # adapter reads the `files` artifact itself, with the same federated
+        # token every cloud Target uses, and uploads the bytes.
+        - name: jonpulsifer
+          kind: vercel-team
+          location:
+            team: jonpulsifer
       targets:
         - vessel: offsite
           # Every reach: this cluster has a load-balancer address on the lab net
@@ -465,6 +482,16 @@ spec:
           adapter: static
           connection:
             endpoint: https://firebasehosting.googleapis.com
+        # A website placed here is served from the platform's own edge, so this
+        # Target serves `public` and no other reach by construction — there is
+        # nothing to assert. The build stays where it already runs: what crosses
+        # the seam is a finished `files` tree, and the deployment names no
+        # framework and no build command, so a rollback re-deploys the digest
+        # rather than building it a second time.
+        - vessel: jonpulsifer
+          adapter: vercel
+          connection:
+            endpoint: https://api.vercel.com
       # §10's one store of record, and the only one every Target here reaches.
       #
       # A Cloud Run revision resolves a pinned secret reference out of its own

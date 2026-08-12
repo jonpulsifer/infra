@@ -158,6 +158,12 @@ export class CloudHttp {
     readonly url: string;
     readonly bytes: Uint8Array;
     readonly contentType: string;
+    /**
+     * Whatever else the API requires of an upload — a content digest it checks
+     * the bytes against, a length it will not infer. Additive rather than a
+     * second verb: one API's integrity header is not a different kind of call.
+     */
+    readonly headers?: Readonly<Record<string, string>>;
   }): Promise<CloudResponse<void>> {
     try {
       const request = new Request(input.url, {
@@ -165,6 +171,7 @@ export class CloudHttp {
         headers: {
           Authorization: `Bearer ${await this.endpoint.token()}`,
           'Content-Type': input.contentType,
+          ...input.headers,
         },
         body: input.bytes as unknown as BodyInit,
       });

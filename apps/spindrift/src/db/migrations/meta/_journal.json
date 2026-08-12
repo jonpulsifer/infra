@@ -232,6 +232,13 @@
       "when": 1786363272471,
       "tag": "0032_datastore_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786363272472,
+      "tag": "0033_vercel_surface",
+      "breakpoints": true
     }
   ]
 }
