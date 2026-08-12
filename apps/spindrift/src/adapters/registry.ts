@@ -66,6 +66,7 @@ import { CloudRunDeployAdapter } from './deploy/cloudrun/index.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
 import type { TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
+import { PagesDeployAdapter } from './deploy/pages/index.ts';
 import { StaticDeployAdapter } from './deploy/static/index.ts';
 import { VercelDeployAdapter } from './deploy/vercel/index.ts';
 import type { SecretStore } from './store/contract.ts';
@@ -134,8 +135,9 @@ export interface RegistryOptions {
   readonly env?: Record<string, string | undefined>;
   /** Likewise for the store's own access path, which authorizes separately. */
   readonly storeToken?: () => string | Promise<string>;
-  /** And for the edge platform, whose bearer is neither of the above. */
+  /** And for the two edge platforms, whose bearers are neither of the above. */
   readonly vercelToken?: TokenProvider;
+  readonly cloudflareToken?: TokenProvider;
   /**
    * And for the cloud APIs — the runtimes a Target is deployed to and the build
    * service a cloud build is submitted to, which are one credential.
@@ -279,12 +281,20 @@ export function createAdapterRegistry(
       artifactToken: cloud,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
+    // The second backend federation does not reach, and the simpler of the two:
+    // it fetches its own artifact with the same bearer it deploys with, because
+    // a staged bundle is a plain GET.
+    'cloudflare-pages': new PagesDeployAdapter({
+      token: options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    }),
   };
 
-  // §11's lifecycle, keyed the way the deploy adapters are. `static` is absent
-  // rather than mapped to a refusing adapter: static hosting has no runtime to
-  // dial a datastore from, so a Datastore placed there is not an unfinished path
-  // but a placement that never made sense — and `null` already says exactly that.
+  // §11's lifecycle, keyed the way the deploy adapters are. Both static
+  // hosting adapters are absent rather than mapped to a refusing one: neither
+  // has a runtime to dial a datastore from, so a Datastore placed there is not
+  // an unfinished path but a placement that never made sense — and `null`
+  // already says exactly that.
   const datastoreAdapters: Partial<Record<TargetAdapter, DatastoreAdapter>> = {
     kubernetes: new KubernetesDatastoreAdapter({
       token:
@@ -602,6 +612,37 @@ export function vercelToken(
     if (!token) {
       throw new AdapterUnavailableError(
         `${VERCEL_TOKEN_VARIABLE} is not set: this installation cannot reach a Vercel Target`,
+      );
+    }
+    return token;
+  };
+}
+
+/**
+ * The bearer a Cloudflare account is driven with.
+ *
+ * The same posture as {@link vercelToken}, one vendor over and for the same
+ * reason — that platform has no inbound OIDC either — so the two are deliberately
+ * spelled the same way rather than each inventing a shape. Scope it to edit that
+ * account's hosting product and nothing else: core reaches no zone with it, and
+ * `test/extraction/no-dns-credential.test.ts` is what keeps that true.
+ *
+ * One consequence is stated rather than hidden: a value read from the
+ * environment cannot vary by vessel, so an installation reaches one account.
+ * **ponytail:** give it a per-vessel encrypted row
+ * (`crypto/credential-envelope.ts`, as `storage/registry-credentials.ts` does)
+ * when a second account is a real requirement rather than a hypothetical one.
+ */
+export const CLOUDFLARE_TOKEN_VARIABLE = 'SPINDRIFT_CLOUDFLARE_TOKEN';
+
+export function cloudflareToken(
+  env: Record<string, string | undefined> = Bun.env,
+): TokenProvider {
+  return (): string => {
+    const token = env[CLOUDFLARE_TOKEN_VARIABLE]?.trim();
+    if (!token) {
+      throw new AdapterUnavailableError(
+        `${CLOUDFLARE_TOKEN_VARIABLE} is not set: this installation cannot reach a Cloudflare Target`,
       );
     }
     return token;

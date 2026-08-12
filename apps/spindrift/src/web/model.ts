@@ -1026,6 +1026,11 @@ export interface TargetListItem {
         readonly team: string;
         readonly proposal: TargetConnectionProposal;
       }
+    | {
+        readonly kind: 'cloudflare-account';
+        readonly account: string;
+        readonly proposal: TargetConnectionProposal;
+      }
     | null;
   /**
    * What this Target's boundary is to the installation, from
@@ -1137,4 +1142,6 @@ export interface TargetConnectionProposal {
   readonly policyEndpoint?: string;
   /** The edge platform's API root, as an already-connected team states it. */
   readonly vercelEndpoint?: string;
+  /** The same fact for a `cloudflare-account` boundary's one surface. */
+  readonly pagesEndpoint?: string;
 }

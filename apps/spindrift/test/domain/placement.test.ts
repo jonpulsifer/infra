@@ -8,11 +8,13 @@
  * that only returned what fits would satisfy the type and lose the feature.
  */
 import { describe, expect, test } from 'bun:test';
+import type { TargetAdapter } from '../../src/config/manifest.schema.ts';
 import {
   ASSERTED_REACHES_BY_ADAPTER,
   type CapabilityContext,
   resolveCapabilities,
 } from '../../src/domain/capabilities.ts';
+import type { ArtifactType } from '../../src/domain/desired-state.ts';
 import {
   artifactTypeFor,
   DEFAULT_PLATFORM,
@@ -35,7 +37,8 @@ const ARTIFACT_TYPES = {
   cloudrun: ['image'],
   static: ['files'],
   vercel: ['files'],
-} as const;
+  'cloudflare-pages': ['files'],
+} as const satisfies Record<TargetAdapter, readonly ArtifactType[]>;
 
 /** One Target, capable of everything except what a test says otherwise. */
 function target(

@@ -164,6 +164,13 @@ function editStart(
   );
   // The address is the vessel's, not the surface's — which is exactly why an
   // edit may state it where a proposal may not.
+  if (location.kind === 'cluster') {
+    return {
+      kind: 'cluster',
+      apiServer: location.apiServer,
+      proposal: connectionProposal([target], 'cluster'),
+    };
+  }
   if (location.kind === 'vercel-team') {
     return {
       kind: 'vercel-team',
@@ -171,29 +178,34 @@ function editStart(
       proposal: connectionProposal([target], 'vercel-team'),
     };
   }
-  return location.kind === 'cluster'
-    ? {
-        kind: 'cluster',
-        apiServer: location.apiServer,
-        proposal: connectionProposal([target], 'cluster'),
-      }
-    : {
-        kind: 'gcp-project',
-        project: location.project,
-        carried: carriedFacts(target.vessel, onVessel),
-        // This boundary's own surfaces first, the installation's others behind
-        // them: a region and two API endpoints are installation-wide facts a
-        // fresh connect already carries from any working cloud Target, so the
-        // vessel whose runtime surface is not registered *yet* is exactly the
-        // case where another project's are the right thing to offer.
-        proposal: connectionProposal(
-          [
-            ...onVessel,
-            ...allTargets.filter((row) => row.vessel.id !== target.vessel.id),
-          ],
-          'gcp-project',
-        ),
-      };
+  if (location.kind === 'cloudflare-account') {
+    // No `carried`: those four facts are a cloud project's — a runtime service
+    // account, a log reach, and the two endpoints its surfaces split between
+    // them. This boundary has one surface holding one endpoint, so the proposal
+    // already carries everything an edit has to hand back.
+    return {
+      kind: 'cloudflare-account',
+      account: location.account,
+      proposal: connectionProposal(onVessel, 'cloudflare-account'),
+    };
+  }
+  return {
+    kind: 'gcp-project',
+    project: location.project,
+    carried: carriedFacts(target.vessel, onVessel),
+    // This boundary's own surfaces first, the installation's others behind
+    // them: a region and two API endpoints are installation-wide facts a
+    // fresh connect already carries from any working cloud Target, so the
+    // vessel whose runtime surface is not registered *yet* is exactly the
+    // case where another project's are the right thing to offer.
+    proposal: connectionProposal(
+      [
+        ...onVessel,
+        ...allTargets.filter((row) => row.vessel.id !== target.vessel.id),
+      ],
+      'gcp-project',
+    ),
+  };
 }
 
 /**

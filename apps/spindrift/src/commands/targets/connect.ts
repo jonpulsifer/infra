@@ -202,6 +202,19 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       servedHosts: z.array(z.string().trim().min(1)).optional(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('cloudflare-account'),
+      /** The boundary being connected, by name. Its one surface is registered. */
+      vessel: targetNameSchema,
+      /** The account id every project on this boundary is created under. */
+      account: z.string().trim().min(1),
+      /** The platform's API root. Asked for rather than assumed (§20). */
+      pagesEndpoint: z.url(),
+      /** §33's static reachability input, on the same terms as above. */
+      servedHosts: z.array(z.string().trim().min(1)).optional(),
+    })
+    .strict(),
 ]);
 
 export type ConnectTargetInput = z.infer<typeof connectTargetInput>;
@@ -283,6 +296,12 @@ function connectionFor(
     }
     return { adapter, endpoint: input.endpoint };
   }
+  if (adapter === 'cloudflare-pages') {
+    if (input.kind !== 'cloudflare-account') {
+      throw new Error('only a Cloudflare account registers a Pages Target');
+    }
+    return { adapter, endpoint: input.pagesEndpoint };
+  }
   if (input.kind !== 'gcp-project') {
     throw new Error('a cluster does not register a cloud Target');
   }
@@ -321,8 +340,12 @@ function vesselFor(input: ConnectTargetInput): {
     location: locationOf(input),
     servedHosts:
       input.servedHosts === undefined ? null : [...input.servedHosts],
+    // Neither edge boundary states one: nothing on either pulls an image, so
+    // the field is absent from both arms rather than stated empty.
     reachableRegistries:
-      input.kind === 'vercel-team' || input.reachableRegistries === undefined
+      input.kind === 'vercel-team' ||
+      input.kind === 'cloudflare-account' ||
+      input.reachableRegistries === undefined
         ? null
         : [...input.reachableRegistries],
   };
@@ -337,6 +360,8 @@ function locationOf(input: ConnectTargetInput): VesselLocation {
       return { kind: 'gcp-project', project: input.project };
     case 'vercel-team':
       return { kind: 'vercel-team', team: input.team };
+    case 'cloudflare-account':
+      return { kind: 'cloudflare-account', account: input.account };
   }
 }
 

@@ -51,7 +51,12 @@ import type { Remediation } from './remediation.ts';
  * is vendor-shaped in the same way, naming one provider's tenancy container,
  * which is what makes them additive.
  */
-export const VESSEL_KINDS = ['cluster', 'gcp-project', 'vercel-team'] as const;
+export const VESSEL_KINDS = [
+  'cluster',
+  'gcp-project',
+  'vercel-team',
+  'cloudflare-account',
+] as const;
 
 export type VesselKind = (typeof VESSEL_KINDS)[number];
 
@@ -75,6 +80,10 @@ export const PROBED_SURFACES_BY_VESSEL_KIND = {
   // row here on the day a build route emits `.vercel/output` with functions in
   // it — which is what the deploy adapter is already shaped to hand over.
   'vercel-team': ['vercel'],
+  // The same shape one vendor over, and the same one-today: this account also
+  // runs containers, and that is a row here rather than a second vessel,
+  // because both are reached with the one account credential.
+  'cloudflare-account': ['cloudflare-pages'],
 } as const satisfies Record<VesselKind, readonly TargetAdapter[]>;
 
 /** What one connect act asks a vessel of this kind about. */
@@ -162,6 +171,8 @@ export const VESSEL_PREREQUISITES_BY_KIND_AND_ROLE = {
   // edge platform for them, so an installation cannot make this boundary its
   // home. Empty rather than four permanently-red rows: see the header above.
   'vercel-team': { home: [], controlPlane: [], app: [] },
+  // Empty for the identical reason, one vendor over.
+  'cloudflare-account': { home: [], controlPlane: [], app: [] },
 } as const satisfies Record<
   VesselKind,
   Record<VesselRole, readonly VesselPrerequisite[]>
@@ -283,7 +294,8 @@ export type SurfaceProbe =
 export type VesselLocation =
   | ClusterLocation
   | GcpProjectLocation
-  | VercelTeamLocation;
+  | VercelTeamLocation
+  | CloudflareAccountLocation;
 
 export interface ClusterLocation {
   kind: 'cluster';
@@ -308,6 +320,37 @@ export interface VercelTeamLocation {
    * on it the same noun.
    */
   team: string;
+}
+
+/**
+ * A Cloudflare account, the tenancy container its hosting products sit in.
+ *
+ * The peer of {@link VercelTeamLocation} one vendor over, and it carries the
+ * same one fact for the same reason: the account id is not a secret and is the
+ * only half of the credential pair that says *which* boundary this is, so it is
+ * the only half that lives on a row.
+ */
+export interface CloudflareAccountLocation {
+  kind: 'cloudflare-account';
+  /** The account every surface on this vessel deploys into. */
+  account: string;
+}
+
+/**
+ * An edge platform account, the tenancy container its hosting products sit in.
+ *
+ * **No credential here either** (§13) — but this is the boundary where §13's
+ * "native OIDC federation, nothing stored" stops being available rather than
+ * stops being wanted: this platform's API federates no workload identity, so
+ * what authorizes a call is an account token the installation is configured
+ * with, minted into the adapter exactly as a federated one is. The account id
+ * is not a secret and is the only half of that pair that identifies *which*
+ * boundary, so it is the only half that lives on a row.
+ */
+export interface CloudflareAccountLocation {
+  kind: 'cloudflare-account';
+  /** The account every surface on this vessel deploys into. */
+  account: string;
 }
 
 /**

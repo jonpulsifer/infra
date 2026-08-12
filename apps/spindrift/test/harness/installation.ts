@@ -38,7 +38,7 @@ import {
   deployTargetOf,
   type TargetConnection,
 } from '../../src/domain/target.ts';
-import type { VesselKind } from '../../src/domain/vessel.ts';
+import type { VesselKind, VesselLocation } from '../../src/domain/vessel.ts';
 import { defaultVesselId } from './db.ts';
 
 const FIXTURE = join(import.meta.dir, '../fixtures/installation.example.yaml');
@@ -200,6 +200,28 @@ export type VercelConnectInput = Extract<
   { kind: 'vercel-team' }
 >;
 
+/** The Cloudflare arm of `connectTargetInput`. */
+export type CloudflareConnectInput = Extract<
+  ConnectTargetInput,
+  { kind: 'cloudflare-account' }
+>;
+
+/** Where the fake Cloudflare API answers. See {@link CLOUD_ENDPOINTS}. */
+export const CLOUDFLARE_ENDPOINT = 'https://cloudflare.example.test';
+
+/** The connect input a Cloudflare account takes, with anything overridden. */
+export function cloudflareInput(
+  overrides: Partial<CloudflareConnectInput> = {},
+): CloudflareConnectInput {
+  return {
+    kind: 'cloudflare-account',
+    vessel: 'cloudflare',
+    account: 'example-account',
+    pagesEndpoint: CLOUDFLARE_ENDPOINT,
+    ...overrides,
+  };
+}
+
 /**
  * The **surface** half of a connection, as its adapter needs it.
  *
@@ -241,6 +263,8 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
     }
     case 'vercel':
       return { adapter, endpoint: vercelInput().endpoint };
+    case 'cloudflare-pages':
+      return { adapter, endpoint: cloudflareInput().pagesEndpoint };
   }
 }
 
@@ -258,6 +282,7 @@ const FIXTURE_VESSEL_KIND = {
   cloudrun: 'gcp-project',
   static: 'gcp-project',
   vercel: 'vercel-team',
+  'cloudflare-pages': 'cloudflare-account',
 } as const satisfies Record<TargetAdapter, VesselKind>;
 
 export function fixtureVesselKind(adapter: TargetAdapter): VesselKind {
@@ -270,13 +295,22 @@ export function vesselFor(adapter: TargetAdapter): NewVessel {
   return {
     name: `vessel-${crypto.randomUUID()}`,
     kind,
-    location:
-      kind === 'cluster'
-        ? { kind: 'cluster', apiServer: clusterInput().apiServer }
-        : kind === 'vercel-team'
-          ? { kind: 'vercel-team', team: vercelInput().team }
-          : { kind: 'gcp-project', project: cloudInput().project },
+    location: fixtureLocation(kind),
   };
+}
+
+/** Where a fixture boundary of this kind is, in its own kind's terms. */
+function fixtureLocation(kind: VesselKind): VesselLocation {
+  switch (kind) {
+    case 'cluster':
+      return { kind, apiServer: clusterInput().apiServer };
+    case 'gcp-project':
+      return { kind, project: cloudInput().project };
+    case 'vercel-team':
+      return { kind, team: vercelInput().team };
+    case 'cloudflare-account':
+      return { kind, account: cloudflareInput().account };
+  }
 }
 
 /**

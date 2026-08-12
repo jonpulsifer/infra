@@ -43,7 +43,11 @@ import {
   databaseUrl,
 } from '../../src/db/client.ts';
 import { vessels } from '../../src/db/schema.ts';
-import { VESSEL_KINDS, type VesselKind } from '../../src/domain/vessel.ts';
+import {
+  VESSEL_KINDS,
+  type VesselKind,
+  type VesselLocation,
+} from '../../src/domain/vessel.ts';
 
 const MIGRATIONS = join(import.meta.dir, '../../src/db/migrations');
 
@@ -208,6 +212,27 @@ export function defaultVesselName(kind: VesselKind): string {
 }
 
 /**
+ * Where the fixture boundary of each kind is.
+ *
+ * A switch so the compiler names the arm a new kind is missing. The seed loops
+ * over `VESSEL_KINDS`, so a kind added without one here would otherwise be
+ * inserted with another kind's address shape — a row `hasVesselLocation`
+ * accepts and every adapter then fails to read.
+ */
+function fixtureLocation(kind: VesselKind): VesselLocation {
+  switch (kind) {
+    case 'cluster':
+      return { kind, apiServer: 'https://cluster.example.test' };
+    case 'gcp-project':
+      return { kind, project: 'example-vessel' };
+    case 'vercel-team':
+      return { kind, team: 'example-team' };
+    case 'cloudflare-account':
+      return { kind, account: 'example-account' };
+  }
+}
+
+/**
  * Create, migrate, and hand back one private schema.
  *
  * Callers that want it around every test should use {@link withIsolatedDatabase};
@@ -237,13 +262,7 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
       VESSEL_KINDS.map((kind) => ({
         name: defaultVesselName(kind),
         kind,
-        location:
-          kind === 'cluster'
-            ? ({
-                kind: 'cluster',
-                apiServer: 'https://cluster.example.test',
-              } as const)
-            : ({ kind: 'gcp-project', project: 'example-vessel' } as const),
+        location: fixtureLocation(kind),
       })),
     )
     .returning({ id: vessels.id, kind: vessels.kind });

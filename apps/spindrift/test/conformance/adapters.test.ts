@@ -24,6 +24,7 @@ import { encodeBuildReport } from '../../src/adapters/build/report.ts';
 import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
+import { PagesDeployAdapter } from '../../src/adapters/deploy/pages/index.ts';
 import { StaticDeployAdapter } from '../../src/adapters/deploy/static/index.ts';
 import { VercelDeployAdapter } from '../../src/adapters/deploy/vercel/index.ts';
 import { SecretManagerStore } from '../../src/adapters/store/gcp-secret-manager.ts';
@@ -32,6 +33,7 @@ import { GitHubApp } from '../../src/integrations/github/app.ts';
 import { FakeBosunOutbox } from '../harness/fakes/bosun-outbox.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeCloudBuild } from '../harness/fakes/cloud-build-api.ts';
+import { FakeCloudflarePages } from '../harness/fakes/cloudflare-pages-api.ts';
 import { FakeCloudRun } from '../harness/fakes/cloudrun-api.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { FakeGitHub } from '../harness/fakes/github-api.ts';
@@ -175,6 +177,24 @@ deployAdapterSuite(
       pollIntervalMs: 1,
       sleep: async () => {},
     });
+  },
+  'image',
+);
+
+deployAdapterSuite(
+  'cloudflare-pages',
+  () => {
+    const api = new FakeCloudflarePages({
+      // The one file every website has, so the deployment has something to
+      // carry and the upload step actually runs.
+      bundle: {
+        origin: BUNDLE_DEPOT,
+        bytes: tarball([
+          { name: 'index.html', bytes: bytes('<!doctype html>hello') },
+        ]),
+      },
+    });
+    return new PagesDeployAdapter({ token: api.token, fetch: api.fetch });
   },
   'image',
 );

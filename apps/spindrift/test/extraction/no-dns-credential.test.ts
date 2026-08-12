@@ -25,11 +25,19 @@
  * is asserted where the records now live, in
  * `packages/charts/spindrift-app/tests/render.test.ts`.
  *
- * One exemption, and it is about naming rather than holding — see
- * {@link NAMES_A_BRAND}. Everything else under `src/` is scanned, prose
- * included: a comment explaining that this software holds no zone credential
- * is still a comment naming a zone provider, and that rule is easier to keep
- * than to argue with.
+ * **The line is a zone credential, not a vendor's name.** A deploy adapter for
+ * an edge platform's static hosting says that platform's name in its own
+ * identifiers, and an account API token scoped to a hosting product cannot edit
+ * a zone — so banning the bare brand would have refused a Target on the grounds
+ * that it is spelled like a DNS provider. What is banned is what actually holds
+ * a zone: a provider SDK, a zone API root written as a literal, and a
+ * credential-shaped name. The API root matters twice over — every adapter here
+ * reaches its far side through connection material (`StaticConnection.endpoint`
+ * and its siblings), so a hostname compiled into core is a bug on its own terms
+ * before it is a §9 question.
+ *
+ * One exemption survives, and it is about naming rather than holding — see
+ * {@link NAMES_A_BRAND}.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
@@ -51,12 +59,12 @@ const APP = join(import.meta.dir, '../..');
  */
 const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [
   {
-    pattern: /\bcloudflare\b/i,
-    why: '§9 writes DNS as CRs; core never talks to the zone provider',
+    pattern: /from\s+['"]cloudflare['"]|\bcloudflare-sdk\b|\bcloudflare4\b/i,
+    why: 'a provider SDK is the credential §9 removed',
   },
   {
-    pattern: /api\.cloudflare\.com|\bcloudflare-sdk\b|\bcloudflare4?\b/i,
-    why: 'a zone API client is the credential §9 removed',
+    pattern: /api\.cloudflare\.com/i,
+    why: 'an API root is connection material, never a literal in core',
   },
   {
     pattern: /\broute53\b|\bgoogle-?clouddns\b/i,

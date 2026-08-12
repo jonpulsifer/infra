@@ -54,6 +54,7 @@ const PLATFORM_NAMES_ITS_OWN: readonly TargetAdapter[] = [
   'cloudrun',
   'static',
   'vercel',
+  'cloudflare-pages',
 ];
 
 /** Whether core mints the canonical name for a Target of this adapter type. */

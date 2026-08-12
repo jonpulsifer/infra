@@ -153,6 +153,22 @@ function vercelProposal(
   return { carriedFrom: labelOf(from), vercelEndpoint: connection.endpoint };
 }
 
+/**
+ * The same one field for a Cloudflare account, with the same omission.
+ *
+ * The account id is not carried, for the reason every other boundary's address
+ * is not: it names *which* one, and a second account prefilled with the first
+ * one's would read as correct and deploy someone else's site.
+ */
+function pagesProposal(
+  rows: readonly OnboardingTargetRow[],
+): TargetConnectionProposal {
+  const from = donor(rows, 'cloudflare-pages');
+  const connection = from?.connection;
+  if (connection?.adapter !== 'cloudflare-pages') return { carriedFrom: null };
+  return { carriedFrom: labelOf(from), pagesEndpoint: connection.endpoint };
+}
+
 /** What a screen would propose for a fresh connect of this shape. */
 export function connectionProposal(
   rows: readonly OnboardingTargetRow[],
@@ -165,6 +181,8 @@ export function connectionProposal(
       return cloudProposal(rows);
     case 'vercel-team':
       return vercelProposal(rows);
+    case 'cloudflare-account':
+      return pagesProposal(rows);
   }
 }
 

@@ -14,6 +14,7 @@
   },
   "//dependencies": "What the *server* imports at runtime, and nothing else. The UI's libraries are build inputs: they are compiled into dist/ and the shipped image never resolves them, so they sit in devDependencies and `bun install --production` leaves them out. test/web/routes.test.ts asserts the server's module graph agrees.",
   "dependencies": {
+    "@noble/hashes": "2.3.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/api-logs": "^0.221.0",
     "@opentelemetry/exporter-logs-otlp-http": "^0.221.0",

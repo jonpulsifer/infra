@@ -78,6 +78,7 @@ export const targetAdapterSchema = z.enum([
   'cloudrun',
   'static',
   'vercel',
+  'cloudflare-pages',
 ]);
 
 /**
@@ -279,6 +280,19 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
         .optional(),
     })
     .strict(),
+  z
+    .object({
+      ...vesselFacts,
+      kind: z.literal('cloudflare-account'),
+      location: z
+        .object({
+          /** The account every surface on this vessel deploys into. */
+          account: nonEmptyString,
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
 ]);
 
 /**
@@ -361,6 +375,18 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
     .object({
       vessel: targetNameSchema,
       adapter: z.literal('vercel'),
+      connection: z
+        .object({
+          endpoint: z.url(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      vessel: targetNameSchema,
+      adapter: z.literal('cloudflare-pages'),
       connection: z
         .object({
           endpoint: z.url(),

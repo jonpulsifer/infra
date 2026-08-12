@@ -223,6 +223,7 @@ export const targetAdapter = pgEnum('target_adapter', [
   'cloudrun',
   'static',
   'vercel',
+  'cloudflare-pages',
 ]);
 
 /**

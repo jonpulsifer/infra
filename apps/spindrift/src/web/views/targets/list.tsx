@@ -76,6 +76,7 @@ const ADAPTER_LOGO: Record<string, LogoName> = {
   kubernetes: 'kubernetes',
   cloudrun: 'google-cloud',
   static: 'google-cloud',
+  'cloudflare-pages': 'cloudflare',
 };
 
 function kindIcon(kind: ComponentKind) {
@@ -760,6 +761,32 @@ function declaredRole(roles: readonly VesselRole[]): string | null {
   return named.length === 0 ? null : named.join(' and ');
 }
 
+/**
+ * The address fields an edit hands the connect form, per boundary kind.
+ *
+ * One function rather than a ternary at the call site, because the union it
+ * destructures has three arms carrying three differently-named addresses and a
+ * two-armed ternary could only ever get the third wrong silently — the address
+ * being the one field where "reads as correct, points elsewhere" is the whole
+ * failure. `carried` travels with the arm that has one for the same reason it
+ * exists: one act writes the whole connection, so what this boundary already
+ * states goes back with the edit or the act deletes it.
+ */
+function boundaryAddress(
+  edit: NonNullable<TargetListItem['edit']>,
+): Partial<Parameters<typeof ConnectTargetForm>[0]> {
+  switch (edit.kind) {
+    case 'cluster':
+      return { apiServer: edit.apiServer };
+    case 'gcp-project':
+      return { project: edit.project, carried: edit.carried };
+    case 'vercel-team':
+      return { team: edit.team };
+    case 'cloudflare-account':
+      return { account: edit.account };
+  }
+}
+
 function TargetCard({
   target,
   connecting,
@@ -922,11 +949,7 @@ function TargetCard({
             <ConnectTargetForm
               kind={target.edit.kind}
               vessel={target.vessel}
-              {...(target.edit.kind === 'cluster'
-                ? { apiServer: target.edit.apiServer }
-                : target.edit.kind === 'vercel-team'
-                  ? { team: target.edit.team }
-                  : { project: target.edit.project })}
+              {...boundaryAddress(target.edit)}
               // The whole act, not this card: one connect asks the boundary
               // about every surface its kind is probed for, and saying so is
               // what stops the confirmation from under-reporting what it
