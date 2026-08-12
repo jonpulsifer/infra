@@ -4,7 +4,7 @@ Connect a repo, press Deploy, get a URL.
 
 Spindrift is a deploy layer, not a platform: it owns the UI and the feel, and
 adapts to whatever builds and delivers underneath — a Kubernetes cluster, Cloud
-Run, static hosting, or Vercel. The design lives in
+Run, static hosting, or an edge platform. The design lives in
 `.agent/plans/spindrift/spec.md` (private) and is referenced from the source as
 `§N`.
 
@@ -27,19 +27,21 @@ Job — and every one of them runs the same BuildKit program over the same
 staged bundle, so which route ran is a property of a Build rather than a
 different pipeline.
 
-Four deploy backends exist too — a cluster through its GitOps operator, the
+Five deploy backends exist too — a cluster through its GitOps operator, the
 cloud runtime through its own API, static hosting through a release, and Vercel
-through an upload and a deployment — and one conformance suite runs over every
-one of them, which is what keeps "core describes, the adapter renders" a tested
-claim rather than a stated one.
+and Cloudflare Pages each through an upload and a deployment — and one
+conformance suite runs over every one of them, which is what keeps "core
+describes, the adapter renders" a tested claim rather than a stated one.
+`src/adapters/registry.ts` is the list.
 
-The Vercel backend is the one reached with a stored bearer rather than with
-federation: the platform federates outward only, so there is nothing to exchange
-a projected token for, and the credential is one installation-wide value
-(`SPINDRIFT_VERCEL_TOKEN`) rather than a column on a Target. It never hands the
-platform a repository to build — §4's separation holds here as everywhere, so
-the deployment carries a finished `files` tree with no framework and no build
-command, and a rollback re-deploys rather than rebuilding.
+The two edge backends are the ones reached with a stored bearer rather than
+with federation: neither platform offers inbound OIDC, so there is nothing to
+exchange a projected token for, and each credential is one installation-wide
+value (`SPINDRIFT_VERCEL_TOKEN`, `SPINDRIFT_CLOUDFLARE_TOKEN`) rather than a
+column on a Target. Neither hands the platform a repository to build — §4's
+separation holds here as everywhere, so the deployment carries a finished
+`files` tree with no framework and no build command, and a rollback re-deploys
+rather than rebuilding.
 
 Datastore provisioning has no command yet: the App workspace lists what the
 `datastores` table and each adapter already know (`src/adapters/datastore/`),
@@ -238,12 +240,23 @@ is a compile error, and so is a registry key that is not a command.
 
 A **Vessel** is a tenancy boundary: the thing that admits a call or refuses it,
 that owns the federation, and that can `404`. A cluster is one. A cloud project
-is one. A **Target** is one runtime surface on a vessel — `Target = Vessel ×
-surface` — and a Target is what an App's Component is placed on.
+is one. An edge platform account is one. A **Target** is one runtime surface on
+a vessel — `Target = Vessel × surface` — and a Target is what an App's Component
+is placed on. `VESSEL_KINDS` and `PROBED_SURFACES_BY_VESSEL_KIND` in
+`src/domain/vessel.ts` are the pair; neither is restated here.
 
 That is why connecting one cloud project asks about two surfaces, `cloudrun` and
 `static`: placement determines artifact shape, and a single "Cloud" Target would
 leave a website ambiguous between the Cloud Run rendering and the static one.
+
+**One vessel kind reaches its boundary without federating.** The edge account's
+API trades no tokens, so §13's "native OIDC federation, nothing stored" has no
+far side to work against: that Target is reached with an account credential the
+installation Secret carries, read per call and held nowhere else — not on a
+Target row, not in the manifest, not on the connect form. Its checklist has no
+`OIDC_FEDERATION` item, because there is no exchange to succeed or fail. One
+consequence is stated rather than hidden: a value read from the environment
+cannot vary by vessel, so an installation reaches one edge account.
 
 **Which surfaces a vessel carries is discovered, not derived from its kind.**
 Connect probes the boundary for each surface and registers a Target for each one
@@ -605,6 +618,17 @@ read per call so a rotated Secret takes effect without a restart. Hosted CI
 uses the GitHub authorization created in the Repositories UI and encrypted in
 Postgres by `SPINDRIFT_CREDENTIAL_KEYRING`; the in-cluster Job authorizes with
 the projected service account token.
+
+**An edge hosting Target needs `SPINDRIFT_CLOUDFLARE_TOKEN`**, and it is the one
+Target that does. That platform's API trades no tokens, so there is no
+projected identity to exchange and no far side to exchange it with — what is
+left is an account credential the installation Secret carries, read per call so
+a rotation lands on the next deploy rather than the next restart. Scope it to
+edit that platform's hosting product and nothing else; core reaches no zone
+with it, and the guard in `test/extraction/no-dns-credential.test.ts` is what
+keeps that true. A Target of this type with the variable unset says so on the
+attempt rather than at boot, because an installation with no edge account
+should not fail to start over a credential it does not need.
 
 **A cloud Target needs no variable at all**, and that is §13's one auth mode
 arriving where the spec wanted it: "native OIDC federation, nothing stored".

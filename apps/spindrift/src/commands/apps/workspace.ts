@@ -6,6 +6,7 @@ import type {
 } from '../../adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { artifactSummary } from '../../domain/artifact-name.ts';
+import { runsNothingOn } from '../../domain/capabilities.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import {
   deployTargetOf,
@@ -268,7 +269,12 @@ export const getAppWorkspace: Command<
     (selected?.kind === 'job' ? '' : (app.vanityDomain ?? ''));
 
   let runtime: Runtime;
-  if (selected?.kind === 'website' && latestTarget?.adapter === 'static') {
+  if (
+    selected?.kind === 'website' &&
+    latestTarget !== undefined &&
+    latestTarget !== null &&
+    runsNothingOn(latestTarget.adapter)
+  ) {
     runtime = {
       kind: 'none',
       because: 'Static files are served by the Target.',

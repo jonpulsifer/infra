@@ -373,7 +373,14 @@ export function storeAdapterSuite(
  * inferred from a directory listing that would silently agree with itself.
  */
 export const ADAPTERS = {
-  deploy: ['fake', 'kubernetes', 'cloudrun', 'static', 'vercel'],
+  deploy: [
+    'fake',
+    'kubernetes',
+    'cloudrun',
+    'static',
+    'vercel',
+    'cloudflare-pages',
+  ],
   build: ['fake', 'github-actions', 'cloud-build', 'in-cluster', 'bosun'],
   // The two fakes name the real store whose reference shape each one produces,
   // because a suite comparing two shapes no store can hold would prove §10's

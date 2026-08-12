@@ -104,6 +104,8 @@ export function ConnectTargetForm(props: {
   project?: string;
   /** And for an edge platform's boundary: the team this surface deploys into. */
   team?: string;
+  /** And for a Cloudflare account: the account its projects are created under. */
+  account?: string;
   /** What an edit of a cloud boundary restates so the act does not delete it. */
   carried?: CloudBoundaryFacts;
   /** The surfaces this one act probes that boundary for. */
@@ -116,13 +118,12 @@ export function ConnectTargetForm(props: {
   return (
     <div className="flex flex-col gap-4">
       <Heading {...props} />
-      {props.kind === 'cluster' ? (
-        <ConnectCluster {...props} />
-      ) : props.kind === 'vercel-team' ? (
-        <ConnectVercel {...props} />
-      ) : (
-        <ConnectCloud {...props} />
-      )}
+      {props.kind === 'cluster' ? <ConnectCluster {...props} /> : null}
+      {props.kind === 'gcp-project' ? <ConnectCloud {...props} /> : null}
+      {props.kind === 'vercel-team' ? <ConnectVercel {...props} /> : null}
+      {props.kind === 'cloudflare-account' ? (
+        <ConnectCloudflareAccount {...props} />
+      ) : null}
     </div>
   );
 }
@@ -132,6 +133,7 @@ const BOUNDARY_NOUN: Record<VesselKind, string> = {
   cluster: 'cluster',
   'gcp-project': 'cloud project',
   'vercel-team': 'Vercel team',
+  'cloudflare-account': 'Cloudflare account',
 };
 
 function Heading({
@@ -916,6 +918,81 @@ function ConnectVercel({
               vessel,
               team: team.trim(),
               endpoint: endpoint.trim(),
+            })
+          }
+        >
+          {connecting ? 'Connecting…' : 'Connect'}
+        </Button>
+        <Button variant="ghost" onClick={onCancel} disabled={connecting}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A Cloudflare account's one surface, in one act.
+ *
+ * The same two fields {@link ConnectVercel} takes, one vendor over and for the
+ * same reasons — an account has no discovery API to enumerate itself through
+ * before it is named, and it carries one surface, so there is neither a probe
+ * to read nor a second endpoint to keep in step with this one.
+ *
+ * **No field for the token here either**, and the same sentence applies: the
+ * bearer is the installation's, read from its Secret per request, so a form
+ * that took one would be storing a credential per Target. An account whose
+ * token is missing or unscoped connects anyway and reads `API_TOKEN` unmet.
+ */
+function ConnectCloudflareAccount({
+  vessel,
+  account: knownAccount = '',
+  proposal,
+  connecting,
+  onConnect,
+  onCancel,
+}: {
+  vessel: string;
+  account?: string;
+  proposal: TargetConnectionProposal;
+  connecting: boolean;
+  onConnect: (input: ConnectTargetInput) => void;
+  onCancel: () => void;
+}) {
+  const [account, setAccount] = useState(knownAccount);
+  const [endpoint, setEndpoint] = useState(proposal.pagesEndpoint ?? '');
+  const ready = account.trim() !== '' && endpoint.trim() !== '';
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field
+          name="account"
+          label="Account"
+          value={account}
+          onChange={(event) => setAccount(event.target.value)}
+          hint={
+            knownAccount === ''
+              ? "Not carried — a second account prefilled with the first one's id would read as correct."
+              : 'This boundary’s own account id.'
+          }
+        />
+        <Field
+          name="cloudflare-endpoint"
+          label="API"
+          value={endpoint}
+          onChange={(event) => setEndpoint(event.target.value)}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          disabled={!ready || connecting}
+          onClick={() =>
+            onConnect({
+              kind: 'cloudflare-account',
+              vessel,
+              account: account.trim(),
+              pagesEndpoint: endpoint.trim(),
             })
           }
         >

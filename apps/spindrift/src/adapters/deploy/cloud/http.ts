@@ -189,6 +189,55 @@ export class CloudHttp {
     }
   }
 
+  /**
+   * Send a multipart form and parse a JSON response.
+   *
+   * A third verb rather than a `body` overload on {@link json}, because the two
+   * differ in the one place a caller must not get wrong: the boundary. `Request`
+   * derives it from the `FormData` and writes the header itself, so a caller
+   * that set `Content-Type` — which {@link json} does unconditionally — sends a
+   * body the far side cannot parse and gets a refusal that says nothing about
+   * why. Keeping them apart is what makes that unreachable rather than
+   * documented.
+   */
+  async form<Result>(input: {
+    readonly path: string;
+    readonly body: FormData;
+  }): Promise<CloudResponse<Result>> {
+    try {
+      const request = new Request(`${this.endpoint.baseUrl}${input.path}`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${await this.endpoint.token()}`,
+        },
+        body: input.body,
+      });
+      const send = this.endpoint.fetch ?? ((sent: Request) => fetch(sent));
+      const response = await send(request);
+      const text = await response.text();
+      if (!response.ok) return failureOf(response, text);
+      if (text.trim() === '') return { ok: true, value: undefined as Result };
+      try {
+        return { ok: true, value: JSON.parse(text) as Result };
+      } catch (cause) {
+        return {
+          ok: false,
+          kind: 'transport',
+          message: `the API answered ${response.status} with a body that is not JSON: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        };
+      }
+    } catch (cause) {
+      return {
+        ok: false,
+        kind: 'transport',
+        message: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  }
+
   /** Fetch bytes from an address the artifact named. Never throws. */
   async bytes(url: string): Promise<CloudResponse<Uint8Array<ArrayBuffer>>> {
     try {

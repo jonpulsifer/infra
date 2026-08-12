@@ -1,0 +1,528 @@
+/**
+ * The edge static-hosting deploy adapter (§6, §9, §17).
+ *
+ * Every test drives the real adapter against a fake of the platform's HTTP API
+ * (§ Seam 2), with a **real gzipped tar** written by `test/harness/tar.ts`
+ * rather than by the reader under test.
+ *
+ * The claims worth stating up front:
+ *
+ * - **The asset key is the vendor's formula**, checked against a fixed vector
+ *   rather than against this implementation. It is the one thing here nothing
+ *   else can catch: a wrong hash offers keys the store has never seen, uploads
+ *   every file every time, and still deploys — so the site works and the
+ *   contract is silently broken.
+ * - **The two credentials are not interchangeable.** The account credential
+ *   does not authorize the asset store and the minted token does not authorize
+ *   anything else, so an adapter using one client for both fails here.
+ * - **A deployment may only name files the store holds.** This is what the
+ *   check-and-upload round exists to guarantee.
+ * - **`Public` only** (§9), for the same reason its cloud sibling is: no
+ *   non-public rendering here has a non-bypassable origin.
+ * - **The platform names its own** (§9), and the canonical is the project's
+ *   address rather than one deployment's.
+ */
+import { describe, expect, test } from 'bun:test';
+import type {
+  DeployEvent,
+  DeployTarget,
+  DeployVerdict,
+} from '../../src/adapters/deploy/contract.ts';
+import { blameFor } from '../../src/adapters/deploy/contract.ts';
+import { hashOf } from '../../src/adapters/deploy/pages/assets.ts';
+import {
+  PagesDeployAdapter,
+  projectName,
+} from '../../src/adapters/deploy/pages/index.ts';
+import { deriveHealth } from '../../src/domain/capabilities.ts';
+import type { DesiredState } from '../../src/domain/desired-state.ts';
+import type { CloudflarePagesAdapterConnection } from '../../src/domain/target.ts';
+import {
+  FakeCloudflarePages,
+  type FakeCloudflarePagesOptions,
+} from '../harness/fakes/cloudflare-pages-api.ts';
+import { CLOUDFLARE_ENDPOINT } from '../harness/installation.ts';
+import { bytes, tarball } from '../harness/tar.ts';
+
+const DEPOT = 'https://artifacts.example.test';
+
+const CONNECTION: CloudflarePagesAdapterConnection = {
+  adapter: 'cloudflare-pages',
+  account: 'example-account',
+  endpoint: CLOUDFLARE_ENDPOINT,
+};
+
+const TARGET: DeployTarget = {
+  vessel: 'edge',
+  adapter: 'cloudflare-pages',
+  connection: CONNECTION,
+};
+
+/** The project every test below deploys to. */
+const PROJECT = 'shop-site';
+
+function desired(overrides: Partial<DesiredState> = {}): DesiredState {
+  return {
+    deploy: 'deploy-1',
+    app: 'shop',
+    component: 'site',
+    target: 'edge',
+    kind: 'website',
+    artifact: {
+      type: 'files',
+      digest: 'sha256:bundle',
+      refs: [`${DEPOT}/bundles/sha256:bundle`],
+    },
+    reach: 'public',
+    auth: 'none',
+    config: [],
+    requirements: { platform: { os: 'linux', arch: 'amd64' }, resources: {} },
+    hostname: { canonical: '' },
+    ...overrides,
+  };
+}
+
+/** A site of two files, which is enough for order and dedup to be visible. */
+const SITE = tarball([
+  { name: 'index.html', bytes: bytes('<!doctype html>home') },
+  { name: 'assets/app.css', bytes: bytes('body{}') },
+]);
+
+function adapterFor(options: FakeCloudflarePagesOptions = {}): {
+  api: FakeCloudflarePages;
+  adapter: PagesDeployAdapter;
+} {
+  const api = new FakeCloudflarePages({
+    bundle: { origin: DEPOT, bytes: SITE },
+    ...options,
+  });
+  return {
+    api,
+    adapter: new PagesDeployAdapter({ token: api.token, fetch: api.fetch }),
+  };
+}
+
+async function drain(
+  stream: AsyncGenerator<DeployEvent, DeployVerdict, void>,
+): Promise<{ events: DeployEvent[]; verdict: DeployVerdict }> {
+  const events: DeployEvent[] = [];
+  let step = await stream.next();
+  while (!step.done) {
+    events.push(step.value);
+    step = await stream.next();
+  }
+  return { events, verdict: step.value };
+}
+
+describe('the asset key is the platform’s formula, not ours', () => {
+  /**
+   * A vector computed from the published algorithm — BLAKE3 over the base64
+   * text of the contents concatenated with the extension without its dot,
+   * hex, first 32 characters — rather than from this implementation. A round
+   * trip through the code under test would prove it self-consistent and
+   * nothing else, and self-consistent is exactly what a wrong hash is.
+   */
+  test('a known file hashes to a known key', () => {
+    expect(hashOf({ path: '/index.html', bytes: bytes('<h1>hi</h1>') })).toBe(
+      'e5e943f01929441dfbb0d4956a759fda',
+    );
+  });
+
+  test('the extension is part of the key, so two files differ by name alone', () => {
+    const content = bytes('same bytes');
+    expect(hashOf({ path: '/a.html', bytes: content })).not.toBe(
+      hashOf({ path: '/a.css', bytes: content }),
+    );
+  });
+
+  test('a file with no extension hashes with an empty one', () => {
+    // A dotfile is not an extension: `.nojekyll` is a name beginning with a
+    // dot, and reading `nojekyll` as its type is how a leading-dot name gets
+    // served as something it is not.
+    expect(hashOf({ path: '/LICENSE', bytes: bytes('x') })).toBe(
+      hashOf({ path: '/nested/LICENSE', bytes: bytes('x') }),
+    );
+    expect(hashOf({ path: '/.nojekyll', bytes: bytes('x') })).toBe(
+      hashOf({ path: '/LICENSE', bytes: bytes('x') }),
+    );
+  });
+});
+
+describe('§9: edge static hosting serves Public only', () => {
+  test('anything but a public reach is refused, as core’s bug', async () => {
+    for (const reach of ['none', 'private'] as const) {
+      const { api, adapter } = adapterFor();
+      const { verdict } = await drain(
+        adapter.apply(TARGET, desired({ reach, auth: 'none' })),
+      );
+      expect(verdict.phase).toBe('FAILED');
+      if (verdict.phase === 'FAILED') {
+        // Placement already excludes this Target for a non-public Component,
+        // so one arriving here is core's bug and not the developer's.
+        expect(verdict.reason).toBe('INTERNAL');
+        expect(blameFor(verdict.reason)).toBe('platform');
+        expect(verdict.detail).toContain('a public reach only');
+      }
+      expect(api.hasProject(PROJECT)).toBe(false);
+    }
+  });
+
+  test('an authenticated edge is refused: there is none to put there', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(TARGET, desired({ auth: 'proxy' })),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') expect(verdict.reason).toBe('INTERNAL');
+  });
+});
+
+describe('a deploy is check, upload, deploy', () => {
+  test('a project is created and every file is served', async () => {
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.hasProject(PROJECT)).toBe(true);
+    expect(api.servedPaths(PROJECT)).toEqual([
+      '/assets/app.css',
+      '/index.html',
+    ]);
+    // The deployment lands on the production branch, which is what makes it
+    // the live site rather than a preview nobody's name points at.
+    expect(api.serving(PROJECT)?.branch).toBe('production');
+  });
+
+  test('only the files the store lacks are uploaded, and all are served', async () => {
+    const held = hashOf({
+      path: '/index.html',
+      bytes: bytes('<!doctype html>home'),
+    });
+    const { api, adapter } = adapterFor({ held: [held] });
+
+    await drain(adapter.apply(TARGET, desired()));
+
+    // The held file was not offered again...
+    expect(api.uploads).not.toContain(held);
+    expect(api.uploads).toHaveLength(1);
+    // ...and the manifest still names it, because the manifest is what the
+    // site serves rather than a list of what changed.
+    expect(api.servedPaths(PROJECT)).toEqual([
+      '/assets/app.css',
+      '/index.html',
+    ]);
+  });
+
+  test('an existing project is revised rather than re-created', async () => {
+    const { api, adapter } = adapterFor({ projects: [PROJECT] });
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.pathsOf('POST')).not.toContain(
+      `/accounts/${api.account}/pages/projects`,
+    );
+  });
+
+  test('losing the create race is the desired state arriving elsewhere', async () => {
+    const { api, adapter } = adapterFor({ appearsBeforeCreate: PROJECT });
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.hasProject(PROJECT)).toBe(true);
+  });
+});
+
+describe('the digest travels where a deployment can carry it', () => {
+  test('observe reads back the digest apply deployed', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({
+          artifact: {
+            type: 'files',
+            digest: 'sha256:one',
+            refs: [`${DEPOT}/b`],
+          },
+        }),
+      ),
+    );
+    expect(verdict.phase).toBe('LIVE');
+    if (verdict.phase !== 'LIVE') return;
+
+    const observed = await adapter.observe(TARGET, verdict.ref);
+    expect(observed?.artifactDigest).toBe('sha256:one');
+    expect(observed?.phase).toBe('LIVE');
+  });
+
+  test('a deployment nobody here made reports no digest, which reads as drift', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(TARGET, desired()));
+    // Somebody deployed through the dashboard: a real deployment with a commit
+    // message that carries no marker.
+    const form = new FormData();
+    form.append('manifest', '{}');
+    form.append('branch', 'production');
+    form.append('commit_message', 'fix the header');
+    await api.fetch(
+      new Request(
+        `${CLOUDFLARE_ENDPOINT}/accounts/${api.account}/pages/projects/${PROJECT}/deployments`,
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${api.token()}` },
+          body: form,
+        },
+      ),
+    );
+
+    const observed = await adapter.observe(
+      TARGET,
+      `${api.account}/pages/${PROJECT}`,
+    );
+    expect(observed?.artifactDigest).toBe('');
+  });
+});
+
+describe('§9: the platform names its own', () => {
+  test('the canonical is the project’s address, not one deployment’s', async () => {
+    const { verdict } = await drain(
+      adapterFor().adapter.apply(TARGET, desired()),
+    );
+    expect(verdict.phase).toBe('LIVE');
+    if (verdict.phase === 'LIVE') {
+      // A deployment's own URL changes every release, so it cannot be what a
+      // name points at.
+      expect(verdict.url).toBe(`https://${PROJECT}.pages.example.test`);
+    }
+  });
+
+  test('the vanity name goes on the project that is already serving', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'shop.example.com' } }),
+      ),
+    );
+    expect(api.domainsOf(PROJECT)).toEqual(['shop.example.com']);
+  });
+
+  test('a name already on the project is the state being asked for', async () => {
+    const { adapter } = adapterFor({
+      domainAnswer: { status: 409, body: null },
+    });
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'shop.example.com' } }),
+      ),
+    );
+    expect(verdict.phase).toBe('LIVE');
+  });
+});
+
+describe('what this Target cannot fetch, it says so about', () => {
+  test('a registry reference is an address this credential cannot read', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({
+          artifact: {
+            type: 'files',
+            digest: 'sha256:bundle',
+            refs: ['ghcr.io/owner/site@sha256:abc'],
+          },
+        }),
+      ),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      // §6 blames the platform: the build is green and the bytes are not
+      // reachable in the form this Target serves.
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+      expect(blameFor(verdict.reason)).toBe('platform');
+      expect(verdict.detail).toContain('cannot read');
+    }
+  });
+
+  test('an artifact with no address at all is named as such', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({
+          artifact: { type: 'files', digest: 'sha256:bundle', refs: [] },
+        }),
+      ),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.detail).toContain('no address');
+    }
+  });
+
+  test('an image artifact is refused as core’s bug', async () => {
+    const { adapter } = adapterFor();
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({
+          artifact: {
+            type: 'image',
+            digest: 'sha256:img',
+            refs: [`${DEPOT}/i`],
+          },
+        }),
+      ),
+    );
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') expect(verdict.reason).toBe('INTERNAL');
+  });
+});
+
+describe('a refusal from the platform is a verdict, not a throw', () => {
+  test('a refused upload token fails the deploy without placing a version', async () => {
+    const { api, adapter } = adapterFor({
+      refuseToken: { status: 403, body: null },
+    });
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+    expect(verdict.phase).toBe('FAILED');
+    // The project was made; nothing was deployed onto it.
+    expect(api.hasProject(PROJECT)).toBe(true);
+    expect(api.serving(PROJECT)).toBeUndefined();
+  });
+
+  test('an unfetchable artifact indicts the platform', async () => {
+    const { adapter } = adapterFor({
+      bundle: { origin: 'https://elsewhere.example.test', bytes: SITE },
+    });
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') {
+      expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+    }
+  });
+});
+
+describe('§17: nothing here runs', () => {
+  test('the three runtime questions get one sentence', async () => {
+    const { adapter } = adapterFor();
+    const ref = `${CONNECTION.account}/pages/${PROJECT}`;
+    const tail = await adapter.tail(TARGET, { app: 'shop', component: 'site' });
+    const run = await adapter.run(TARGET, ref);
+    const runs = await adapter.executions(TARGET, ref);
+
+    expect(tail.kind).toBe('none');
+    expect(run.kind).toBe('none');
+    expect(runs.kind).toBe('none');
+    // One fact, one sentence — three different ones would read as three
+    // different limitations.
+    const because = [tail, run, runs].map((answer) =>
+      answer.kind === 'none' ? answer.because : '',
+    );
+    expect(new Set(because).size).toBe(1);
+  });
+});
+
+describe('destroy is idempotent, and never reports success it did not earn', () => {
+  test('a project that is gone stays gone', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(TARGET, desired()));
+    const ref = `${api.account}/pages/${PROJECT}`;
+
+    await adapter.destroy(TARGET, ref);
+    expect(api.hasProject(PROJECT)).toBe(false);
+    // Destroying what is already gone succeeds (§6).
+    await adapter.destroy(TARGET, ref);
+  });
+
+  test('a delete the platform refused is not reported as a destroy', async () => {
+    const { api, adapter } = adapterFor({
+      refuseDelete: { status: 200, body: null },
+    });
+    await drain(adapter.apply(TARGET, desired()));
+    expect(
+      adapter.destroy(TARGET, `${api.account}/pages/${PROJECT}`),
+    ).rejects.toThrow(/still exists/);
+  });
+});
+
+describe('§13: the standing checklist', () => {
+  test('an account that answers is healthy', async () => {
+    const { adapter } = adapterFor();
+    const inspection = await adapter.inspect(TARGET);
+    expect(deriveHealth(inspection.prerequisites, 'cloudflare-pages')).toBe(
+      'healthy',
+    );
+    expect(inspection.surface).toEqual({ kind: 'carried' });
+  });
+
+  test('a refused credential is API_TOKEN, and says the account is unchecked', async () => {
+    const { adapter } = adapterFor({ refuseList: { status: 403 } });
+    const inspection = await adapter.inspect(TARGET);
+
+    const byName = new Map(
+      inspection.prerequisites.map((item) => [item.name, item]),
+    );
+    // The API answered, so what is unmet is the bearer and not the platform —
+    // the split that keeps an operator off the wrong page.
+    expect(byName.get('PLATFORM_API')?.met).toBe(true);
+    expect(byName.get('API_TOKEN')?.met).toBe(false);
+    expect(byName.get('API_TOKEN')?.assessed).toBe(true);
+    // A boundary that refused to answer has not said it exists — reporting it
+    // met would be core deciding that what it failed to check was fine.
+    expect(byName.get('VESSEL')?.met).toBe(false);
+    expect(byName.get('VESSEL')?.assessed).toBe(false);
+  });
+
+  test('a missing account is VESSEL, and the API is met because it answered', async () => {
+    const { adapter } = adapterFor({ refuseList: { status: 404 } });
+    const byName = new Map(
+      (await adapter.inspect(TARGET)).prerequisites.map((item) => [
+        item.name,
+        item,
+      ]),
+    );
+    expect(byName.get('PLATFORM_API')?.met).toBe(true);
+    expect(byName.get('VESSEL')?.met).toBe(false);
+    expect(byName.get('VESSEL')?.assessed).toBe(true);
+  });
+
+  test('the surface is never reported absent, because nothing can establish it', async () => {
+    // This product is not a per-account switch, so no refusal means "this
+    // account does not do static hosting" — reading one that way would delete
+    // a Target over an expired credential.
+    const { adapter } = adapterFor({ refuseList: { status: 403 } });
+    expect((await adapter.inspect(TARGET)).surface.kind).toBe('undetermined');
+  });
+
+  test('API_TOKEN stands where OIDC_FEDERATION would, because there is none', async () => {
+    const { adapter } = adapterFor();
+    const names = (await adapter.inspect(TARGET)).prerequisites.map(
+      (item) => item.name,
+    );
+    // A federation row here could never fail, and would send an operator to
+    // configure a trust relationship that exists on neither side.
+    expect(names).not.toContain('OIDC_FEDERATION');
+    // In this adapter's own declared order, which is what the screen shows.
+    expect(names).toEqual(['PLATFORM_API', 'API_TOKEN', 'VESSEL']);
+  });
+});
+
+describe('a project is named once, deterministically', () => {
+  test('the name is the App and Component, lowercased', () => {
+    expect(projectName(desired())).toBe(PROJECT);
+  });
+
+  test('a long name keeps a recognisable head and a digest tail', () => {
+    const long = projectName(
+      desired({ app: 'a'.repeat(60), component: 'site' }),
+    );
+    expect(long.length).toBeLessThanOrEqual(58);
+    // Deterministic: a second deploy that computed a different name would
+    // create a second project rather than revise the first.
+    expect(long).toBe(
+      projectName(desired({ app: 'a'.repeat(60), component: 'site' })),
+    );
+  });
+});

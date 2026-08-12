@@ -46,7 +46,8 @@ export type TargetConnection =
   | KubernetesConnection
   | CloudRunConnection
   | StaticConnection
-  | VercelConnection;
+  | VercelConnection
+  | CloudflarePagesConnection;
 
 /** A stored Target after its operator has supplied adapter connection facts. */
 export type TargetWithConnection<
@@ -138,6 +139,28 @@ export interface StaticConnection {
  */
 export interface VercelConnection {
   adapter: 'vercel';
+  /** The platform's API root, without a trailing slash. */
+  endpoint: string;
+}
+
+/**
+ * How a Cloudflare Pages Target is reached (§13, §14).
+ *
+ * The same one field its two siblings carry, for the same reasons: no region,
+ * because the product serves one site from its own network; and no log history,
+ * because §17 gives static hosting an honest empty state rather than a duration.
+ *
+ * **No credential here either**, and the same exception {@link VercelConnection}
+ * documents applies for the same reason — this platform has no inbound OIDC to
+ * exchange a projected token for, so the bearer is an installation-Secret value
+ * read per request (`SPINDRIFT_CLOUDFLARE_TOKEN` in `adapters/registry.ts`).
+ *
+ * **The production branch is not here.** A project has one, and the adapter
+ * reads it back off the project it ensures rather than being told — an operator
+ * who states it can state it wrong, and the API already knows the answer.
+ */
+export interface CloudflarePagesConnection {
+  adapter: 'cloudflare-pages';
   /** The platform's API root, without a trailing slash. */
   endpoint: string;
 }
@@ -246,7 +269,8 @@ export type AdapterConnection =
   | (KubernetesConnection & VesselFacts & { apiServer: string })
   | (CloudRunConnection & VesselFacts & { project: string })
   | (StaticConnection & VesselFacts & { project: string })
-  | (VercelConnection & VesselFacts & { team: string });
+  | (VercelConnection & VesselFacts & { team: string })
+  | (CloudflarePagesConnection & VesselFacts & { account: string });
 
 /** The boundary's half of the flat view, identical for every surface on it. */
 interface VesselFacts {
@@ -277,6 +301,10 @@ export type StaticAdapterConnection = Extract<
 export type VercelAdapterConnection = Extract<
   AdapterConnection,
   { adapter: 'vercel' }
+>;
+export type CloudflarePagesAdapterConnection = Extract<
+  AdapterConnection,
+  { adapter: 'cloudflare-pages' }
 >;
 
 /** The Vessel columns {@link deployTargetOf} reads, without importing the row. */
@@ -350,6 +378,8 @@ function addressOf(location: VesselLocation): Record<string, string> {
       return { project: location.project };
     case 'vercel-team':
       return { team: location.team };
+    case 'cloudflare-account':
+      return { account: location.account };
   }
 }
 
@@ -365,6 +395,7 @@ const ADDRESS_BY_ADAPTER = {
   cloudrun: 'project',
   static: 'project',
   vercel: 'team',
+  'cloudflare-pages': 'account',
 } as const satisfies Record<TargetAdapter, string>;
 
 /**
@@ -388,10 +419,10 @@ const ADDRESS_BY_ADAPTER = {
  */
 export function unstatedAddress(target: DeployTargetRef): string | null {
   const { connection } = target;
+  const address = ADDRESS_BY_ADAPTER[target.adapter];
   // `in` rather than a property read: the arm the compiler picked is the one
   // the cast asserted, so the key is only actually there when the boundary's
   // location was the matching shape.
-  const address = ADDRESS_BY_ADAPTER[target.adapter];
   const stated =
     address in connection &&
     (connection as unknown as Record<string, unknown>)[address] !== '';

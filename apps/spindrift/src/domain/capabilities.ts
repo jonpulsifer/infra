@@ -136,6 +136,10 @@ export const PREREQUISITES_BY_ADAPTER = {
   // a federation: is the platform answering, may this credential act here, and
   // does the team exist.
   vercel: ['PLATFORM_API', 'API_TOKEN', 'VESSEL'],
+  // The identical three, one vendor over and for the identical reason: this
+  // platform federates no workload identity either, so `OIDC_FEDERATION` would
+  // be a row nothing performs and `API_TOKEN` is what actually gets checked.
+  'cloudflare-pages': ['PLATFORM_API', 'API_TOKEN', 'VESSEL'],
 } as const satisfies Record<TargetAdapter, readonly Prerequisite[]>;
 
 /** What a Target of this adapter type is asked, in the order it is shown. */
@@ -362,9 +366,8 @@ export const KINDS_BY_ADAPTER = {
   kubernetes: ['service', 'website', 'job'],
   cloudrun: ['service', 'website', 'job'],
   static: ['website'],
-  // A `files` artifact is what this backend takes, so a website and nothing
-  // else — the same reasoning the row above it carries.
   vercel: ['website'],
+  'cloudflare-pages': ['website'],
 } as const satisfies Record<TargetAdapter, readonly ComponentKind[]>;
 
 /**
@@ -400,6 +403,7 @@ export const FIRES_SCHEDULES_BY_ADAPTER = {
   cloudrun: true,
   static: false,
   vercel: false,
+  'cloudflare-pages': false,
 } as const satisfies Record<TargetAdapter, boolean>;
 
 /**
@@ -426,6 +430,10 @@ export const ASSERTED_REACHES_BY_ADAPTER = {
   // An edge network is public by construction and has no address on the
   // operator's own network for a `private` record to point at.
   vercel: ['public'],
+  // §9's disqualification, reached by the same road: a site's own edge address
+  // answers whatever else is put in front of it, so no non-public rendering
+  // here has an origin that is not bypassable.
+  'cloudflare-pages': ['public'],
 } as const satisfies Record<TargetAdapter, readonly Reach[]>;
 
 /**
@@ -448,7 +456,38 @@ export const ASSERTED_AUTH_REACHES_BY_ADAPTER = {
   // Vercel Authentication is a paid plan's edge check rather than something on
   // by construction, so it is an operator's assertion like a cluster's proxy.
   vercel: [],
+  // Cloudflare Access is the same shape of thing: bought and configured, not
+  // on by construction, so it is asserted rather than claimed here.
+  'cloudflare-pages': [],
 } as const satisfies Record<TargetAdapter, readonly Reach[]>;
+
+/**
+ * Which adapters serve a Component without running anything (§17).
+ *
+ * A property of the code driving the Target, like the four tables above, and it
+ * decides one thing: whether the workspace offers a runtime pipe or §17's
+ * honest empty state. Both static backends serve files that no process
+ * executes, so there is no stdout for a tail to be empty *of* — and a screen
+ * that offered a stream anyway would show a live-looking pane that can only
+ * ever have nothing in it.
+ *
+ * A table and not two equality checks at the call site, for the reason
+ * {@link KINDS_BY_ADAPTER} is one: `satisfies` makes the fifth adapter a
+ * compile error until somebody answers the question, and the alternative is a
+ * screen that quietly regresses to the wrong pane the day one is added.
+ */
+export const RUNS_NOTHING_BY_ADAPTER = {
+  kubernetes: false,
+  cloudrun: false,
+  static: true,
+  vercel: true,
+  'cloudflare-pages': true,
+} as const satisfies Record<TargetAdapter, boolean>;
+
+/** Whether a Target of this adapter type executes anything it serves. */
+export function runsNothingOn(adapter: TargetAdapter): boolean {
+  return RUNS_NOTHING_BY_ADAPTER[adapter];
+}
 
 /**
  * `verifiedDeploy`, decided in core (§32).

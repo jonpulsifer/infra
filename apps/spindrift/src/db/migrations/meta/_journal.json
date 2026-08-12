@@ -239,6 +239,13 @@
       "when": 1786363272472,
       "tag": "0033_vercel_surface",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786363272473,
+      "tag": "0034_edge_hosting_target",
+      "breakpoints": true
     }
   ]
 }
