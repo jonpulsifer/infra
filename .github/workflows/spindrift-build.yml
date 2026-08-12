@@ -316,11 +316,64 @@ jobs:
             --entrypoint /railpack "$FRONTEND" \
             prepare /scope --plan-out /out/railpack-plan.json
 
+          # `plan` names the same file as `file`, and is the only arm that sets
+          # it. The step below reads the plan as JSON, which is true of this
+          # arm's `file` and of neither other arm's Dockerfile, so it asks for
+          # the output that only exists when there is a plan rather than
+          # inferring the arm from one that happens to be empty elsewhere.
           {
             printf 'context=%s\n' "$scope"
             printf 'file=%s\n' "${plan}/railpack-plan.json"
+            printf 'plan=%s\n' "${plan}/railpack-plan.json"
             printf 'buildArgs=BUILDKIT_SYNTAX=%s\n' "$FRONTEND"
           } >> "$GITHUB_OUTPUT"
+
+      # The zero-config arm's silent failure: a Build that goes green having
+      # pushed an image nothing can start.
+      #
+      # railpack's Go provider emits `go build -ldflags="…" -o out` with **no
+      # package argument** whenever the module root holds any `.go` file, and
+      # pairs it with `startCommand: ./out`. When that root package is a library
+      # rather than `main` — the Functions Framework layout, where the root
+      # exports the handler and the only `package main` sits under `cmd/` — the
+      # command does not fail. `go build -o` against a non-main package writes
+      # the compiled *package archive* (ar, magic `!<arch>`) to `out` at mode
+      # 0644 and exits 0. Nothing downstream disagrees: the build, the push, the
+      # signature and the attestation all report success on an artifact whose
+      # declared start command cannot be executed by anyone, root included,
+      # because no execute bit is set. The first component to notice is the
+      # container, which dies `./out: Permission denied` — a CrashLoopBackOff
+      # whose Build says SUCCEEDED.
+      #
+      # Refused here for the reason the signing step below is ordered before the
+      # report: a green Build whose Deploy cannot run is the shape this sequence
+      # exists to avoid. The check is railpack's own postcondition, the one it
+      # states and never verifies — it chose the output name, it chose `./out`
+      # as the start command, so `out` has to be executable when the build step
+      # ends. Asserting it *inside the plan* keeps this free. `test -x` runs in
+      # a builder layer that is already running, so no image is pulled and no
+      # time is added to a build that was going to succeed; a build that was
+      # going to ship a broken image stops at the step that broke it.
+      #
+      # Only a bare `./path` start command is testable this way. Anything
+      # carrying arguments or naming an interpreter (`node server.js`, `npm
+      # start`) is not a file, and those shapes fail loudly at exec in any case.
+      # Silence belongs to the compiled one, which is the only one where a
+      # toolchain writes a non-executable and calls it a success.
+      - name: Make the plan check its own start command
+        if: steps.frontend.outputs.plan != ''
+        env:
+          PLAN: ${{ steps.frontend.outputs.plan }}
+        run: |
+          set -euo pipefail
+          jq '
+            (.deploy.startCommand // "") as $start
+            | if ($start | test("^\\./\\S+$"))
+              then (.steps[] | select(.name == "build") | .commands)
+                     += [{cmd: "test -x \($start)"}]
+              else . end
+          ' "$PLAN" > "${PLAN}.checked"
+          mv "${PLAN}.checked" "$PLAN"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4

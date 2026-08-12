@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "steps": {
+    "build": {
+      "commands": ["go build -buildvcs=false -o out ./cmd"]
+    }
+  }
+}

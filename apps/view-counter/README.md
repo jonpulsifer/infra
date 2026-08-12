@@ -12,6 +12,11 @@ SVG image, so it can be embedded directly in a README or web page with an
   Framework as the `ViewCounter` HTTP entrypoint.
 - `cmd/` — a local entrypoint for running the function outside GCP.
 - `view_counter_test.go` — unit tests.
+- `railpack.json` — the build command Spindrift's zero-config route uses. The
+  module root is a library, and railpack's Go provider builds the root when it
+  finds `.go` files there, which compiles a package archive rather than a
+  program. This names `./cmd` so the build produces the binary its start
+  command expects.
 
 ## Deploy
 
